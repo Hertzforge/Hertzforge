@@ -1,0 +1,206 @@
+/*
+ * Design tokens: the one source of color, type, spacing and motion for the shell.
+ *
+ * Dark is the default and follows the OS; `data-theme="light"` or `"dark"` on <html> forces one.
+ * Meaning never rests on hue alone. The palette is a blue / amber / gray family, and every
+ * status or series also carries a word, a symbol or a line style.
+ */
+
+:root {
+	/* Type */
+	--font-ui: 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
+	--font-mono: 'Atkinson Hyperlegible Mono Variable', ui-monospace, monospace;
+	--text-2xs: 10.5px;
+	--text-xs: 11.5px;
+	--text-sm: 12.5px;
+	--text-md: 13.5px;
+	--text-lg: 15px;
+	--text-xl: 18px;
+	--text-2xl: 22px;
+	--weight-regular: 400;
+	--weight-medium: 520;
+	--weight-strong: 640;
+
+	/* Space: a 4 px grid */
+	--sp-1: 4px;
+	--sp-2: 8px;
+	--sp-3: 12px;
+	--sp-4: 16px;
+	--sp-5: 20px;
+	--sp-6: 24px;
+	--sp-8: 32px;
+
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 9px;
+
+	--rail-width: 84px;
+	--topbar-height: 48px;
+	--control-height: 30px;
+
+	--ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+	--dur-fast: 90ms;
+	--dur-med: 160ms;
+
+	color-scheme: dark;
+
+	/* Surfaces, darkest to lightest */
+	--bg-0: #0a0e13;
+	--bg-1: #0f151c;
+	--bg-2: #141c25;
+	--bg-3: #1a242f;
+	--bg-4: #223040;
+	--bg-plot: #0c1218;
+	--line-1: #1d2833;
+	--line-2: #2a3846;
+	--line-3: #3a4b5d;
+
+	--text-1: #e4ebf2;
+	--text-2: #a6b3c0;
+	--text-3: #74828f;
+	--text-4: #56636f;
+	--text-on-accent: #04121f;
+
+	/* Blue: the active, interactive and measured hue */
+	--blue-1: #8ac6f2;
+	--blue-2: #5aa9e6;
+	--blue-3: #2f7fbf;
+	--blue-weak: rgba(90, 169, 230, 0.13);
+	--blue-line: rgba(90, 169, 230, 0.45);
+
+	/* Amber: the attention hue (tolerance, warn, fail, SIM) */
+	--amber-1: #ffd27a;
+	--amber-2: #f0b44c;
+	--amber-3: #c8892a;
+	--amber-weak: rgba(240, 180, 76, 0.13);
+	--amber-line: rgba(240, 180, 76, 0.5);
+
+	--focus: #8ac6f2;
+	--accent: var(--blue-2);
+	--accent-weak: var(--blue-weak);
+
+	/* Status: hue plus fill. Pass and info are calm; warn is an amber outline; fail is solid amber. */
+	--status-pass: var(--blue-1);
+	--status-info: var(--text-2);
+	--status-warn: var(--amber-2);
+	--status-fail: var(--amber-1);
+	--status-fail-fill: #f0b44c;
+	--status-fail-text: #1a1204;
+
+	/* Series: color is the second cue; the role's dash pattern is the first */
+	--series-measured: #5aa9e6;
+	--series-measured-2: #a9d4f5;
+	--series-measured-3: #9aa8b6;
+	--series-reference: #dfe6ee;
+	--series-tolerance: #d39a3c;
+	--series-abort: #ffc65c;
+	--series-drive: #7f93a8;
+	--series-other: #8ac6f2;
+	--plot-grid: rgba(166, 179, 192, 0.09);
+	--plot-axis: #74828f;
+	--plot-cursor: rgba(228, 235, 242, 0.55);
+
+	--shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+	--scrim: rgba(3, 6, 10, 0.62);
+	--sim-hatch: rgba(26, 18, 4, 0.22);
+}
+
+@media (prefers-color-scheme: light) {
+	:root:not([data-theme='dark']) {
+		color-scheme: light;
+		--bg-0: #e9edf1;
+		--bg-1: #f6f8fa;
+		--bg-2: #ffffff;
+		--bg-3: #eef2f6;
+		--bg-4: #e1e8ef;
+		--bg-plot: #ffffff;
+		--line-1: #dce3ea;
+		--line-2: #c9d3dd;
+		--line-3: #aab8c6;
+		--text-1: #0f1820;
+		--text-2: #44525f;
+		--text-3: #66737f;
+		--text-4: #8a96a1;
+		--text-on-accent: #ffffff;
+		--blue-1: #1d5f99;
+		--blue-2: #1f6fb2;
+		--blue-3: #2b86d1;
+		--blue-weak: rgba(31, 111, 178, 0.1);
+		--blue-line: rgba(31, 111, 178, 0.4);
+		--amber-1: #8a5200;
+		--amber-2: #a86400;
+		--amber-3: #c57d14;
+		--amber-weak: rgba(197, 125, 20, 0.12);
+		--amber-line: rgba(168, 100, 0, 0.5);
+		--focus: #1f6fb2;
+		--status-pass: var(--blue-2);
+		--status-info: var(--text-2);
+		--status-warn: var(--amber-2);
+		--status-fail: var(--amber-1);
+		--status-fail-fill: #c57d14;
+		--status-fail-text: #ffffff;
+		--series-measured: #1f6fb2;
+		--series-measured-2: #5aa0d8;
+		--series-measured-3: #6b7a88;
+		--series-reference: #1f2a35;
+		--series-tolerance: #b5730f;
+		--series-abort: #8a4f00;
+		--series-drive: #6b7f93;
+		--series-other: #3d8bd0;
+		--plot-grid: rgba(15, 24, 32, 0.08);
+		--plot-axis: #66737f;
+		--plot-cursor: rgba(15, 24, 32, 0.5);
+		--shadow-pop: 0 18px 48px rgba(15, 24, 32, 0.18), 0 2px 8px rgba(15, 24, 32, 0.1);
+		--scrim: rgba(30, 40, 52, 0.28);
+		--sim-hatch: rgba(255, 255, 255, 0.2);
+	}
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+	--bg-0: #e9edf1;
+	--bg-1: #f6f8fa;
+	--bg-2: #ffffff;
+	--bg-3: #eef2f6;
+	--bg-4: #e1e8ef;
+	--bg-plot: #ffffff;
+	--line-1: #dce3ea;
+	--line-2: #c9d3dd;
+	--line-3: #aab8c6;
+	--text-1: #0f1820;
+	--text-2: #44525f;
+	--text-3: #66737f;
+	--text-4: #8a96a1;
+	--text-on-accent: #ffffff;
+	--blue-1: #1d5f99;
+	--blue-2: #1f6fb2;
+	--blue-3: #2b86d1;
+	--blue-weak: rgba(31, 111, 178, 0.1);
+	--blue-line: rgba(31, 111, 178, 0.4);
+	--amber-1: #8a5200;
+	--amber-2: #a86400;
+	--amber-3: #c57d14;
+	--amber-weak: rgba(197, 125, 20, 0.12);
+	--amber-line: rgba(168, 100, 0, 0.5);
+	--focus: #1f6fb2;
+	--status-pass: var(--blue-2);
+	--status-info: var(--text-2);
+	--status-warn: var(--amber-2);
+	--status-fail: var(--amber-1);
+	--status-fail-fill: #c57d14;
+	--status-fail-text: #ffffff;
+	--series-measured: #1f6fb2;
+	--series-measured-2: #5aa0d8;
+	--series-measured-3: #6b7a88;
+	--series-reference: #1f2a35;
+	--series-tolerance: #b5730f;
+	--series-abort: #8a4f00;
+	--series-drive: #6b7f93;
+	--series-other: #3d8bd0;
+	--plot-grid: rgba(15, 24, 32, 0.08);
+	--plot-axis: #66737f;
+	--plot-cursor: rgba(15, 24, 32, 0.5);
+	--shadow-pop: 0 18px 48px rgba(15, 24, 32, 0.18), 0 2px 8px rgba(15, 24, 32, 0.1);
+	--scrim: rgba(30, 40, 52, 0.28);
+	--sim-hatch: rgba(255, 255, 255, 0.2);
+}
