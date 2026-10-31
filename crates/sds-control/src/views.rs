@@ -268,14 +268,24 @@ mod tests {
     #[test]
     fn a_stepped_series_carries_its_shape_and_edges() {
         let mut arrays = Arrays::default();
-        let s = Series::new("Control", Role::Measured, vec![10.0, 20.0, 30.0], vec![1.0, 2.0, 3.0])
-            .stepped();
+        let s = Series::new(
+            "Control",
+            Role::Measured,
+            vec![10.0, 20.0, 30.0],
+            vec![1.0, 2.0, 3.0],
+        )
+        .stepped();
         let axis = Axis::new("Frequency", Some("Hz"), Scale::Log);
         let v = spectrum(&mut arrays, "t", &axis, &axis, vec![s], None);
         let series = &v["series"][0];
         assert_eq!(series["shape"], "steps");
         assert!(series["edges"]["$array"].is_string());
-        let keys: Vec<&str> = series.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let keys: Vec<&str> = series
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         assert_eq!(keys, ["name", "role", "x", "y", "shape", "edges"]);
     }
 }
