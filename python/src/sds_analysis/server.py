@@ -14,8 +14,11 @@ connection that opened it and ends with it.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import itertools
 import logging
+import pkgutil
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +41,58 @@ OPERATIONS: tuple[Operation, ...] = RANDOM_OPERATIONS + MODAL_OPERATIONS
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
+
+#: What the operations reach, imported before the server listens. Loading a
+#: compiled extension holds the interpreter lock until it is done, so a first
+#: import inside a worker thread stalls the event loop with it: 5.1 s once,
+#: opening the first dataset with nothing on disk cached yet. Imported here,
+#: the cost is paid at startup, before anyone is waiting on the loop.
+#: tests/test_server.py fails if a session still imports one of these
+#: packages for the first time, and names it.
+PRELOAD = (
+    'visualdynamics',
+    'visualdynamics.plot',
+    'visualdynamics.viz.geometry',
+    'visualdynamics.deform',
+    'visualdynamics.demo.drone',
+    'visualdynamics.demo.plate',
+    'visualdynamics.demo.frame_wing',
+    # imported inside the readers and solvers, at first use
+    'netCDF4',
+    'h5py',
+    'scipy.constants',
+    'scipy.integrate',
+    'scipy.interpolate',
+    'scipy.linalg',
+    'scipy.ndimage',
+    'scipy.optimize',
+    'scipy.signal',
+    'scipy.sparse',
+    'scipy.sparse.linalg',
+    'scipy.spatial',
+    'scipy.special',
+    'scipy.stats',
+)
+
+#: Packages imported whole: their modules import each other at first use.
+PRELOAD_PACKAGES = ('visualdynamics.core', 'visualdynamics.io')
+
+
+def preload() -> None:
+    """Import everything in `PRELOAD`, and every module of `PRELOAD_PACKAGES`.
+    A module whose optional dependency is not installed is skipped, as the
+    package itself skips it."""
+    for name in PRELOAD:
+        importlib.import_module(name)
+    for package in PRELOAD_PACKAGES:
+        for module in pkgutil.walk_packages(importlib.import_module(package).__path__,
+                                            f'{package}.'):
+            try:
+                importlib.import_module(module.name)
+            except ImportError as error:
+                if (error.name or '').startswith('visualdynamics'):
+                    raise
+                log.debug('preload: %s needs %s, not installed', module.name, error.name)
 
 
 @dataclass
@@ -234,7 +289,14 @@ def _reason(text: str) -> str:
 async def start(service: Service, host: str = '127.0.0.1',
                 port: int = 8791) -> Server:
     """A listening server (port 0 picks a free one; `server.sockets` says
-    which)."""
+    which). The heavy imports are done first (`preload`)."""
+    preload()
+    # The interpreter hands its lock between threads every 5 ms by default;
+    # a worker doing pure-Python work (building a demonstration model) then
+    # costs the event loop tens of milliseconds per wait. At 1 ms the loop
+    # gets the lock back sooner, for a small cost in the worker's speed.
+    sys.setswitchinterval(0.001)
+
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
         await Connection(service, socket).serve()

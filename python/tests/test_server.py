@@ -37,10 +37,24 @@ def wire(message):
     return frames.to_wire(message)[0]
 
 
-async def _session(check):
+#: packages whose first import, if it happened while serving, would hold the
+#: interpreter lock against the event loop
+HEAVY = ('visualdynamics', 'vtkmodules', 'pyvista', 'PySide6', 'pyqtgraph',
+         'netCDF4', 'h5py', 'scipy', 'pint')
+
+
+def _heavy(modules):
+    # a None entry is a module refused, not loaded (Visual Dynamics blocks
+    # the Qt modules that are not LGPL that way)
+    return {name for name, module in modules.items()
+            if module is not None and name.split('.')[0] in HEAVY}
+
+
+async def _session(check, imported=None):
     service = Service()
     server = await start(service, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
+    before = _heavy(dict(sys.modules))
     lag = {'max': 0.0, 'run': True}
 
     async def ticker():
@@ -62,6 +76,8 @@ async def _session(check):
         server.close()
         await server.wait_closed()
         service.close()
+    if imported is not None:
+        imported.update(_heavy(dict(sys.modules)) - before)
     return lag['max']
 
 
@@ -105,8 +121,12 @@ def test_smoke(validate):
         assert view['nodes'].dtype.name == 'float32'
         seen['modal.modes'] = view
 
-    lag = asyncio.run(_session(check))
+    imported = set()
+    lag = asyncio.run(_session(check, imported))
     assert seen['random.psd_vs_spec'][0]['series'][0]['name'].startswith('104Z+')
+    # Nothing heavy was first imported while serving: that is what stalls the
+    # loop on a cold machine (server.PRELOAD), however fast this one is.
+    assert not imported, f'imported while serving: {sorted(imported)}'
     # heavy work ran off the loop: the ticker was never held up for long
     print(f'longest event-loop stall {lag * 1000:.1f} ms')
     assert lag < 0.1, f'event loop held for {lag:.3f} s'

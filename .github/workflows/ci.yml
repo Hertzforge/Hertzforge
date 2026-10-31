@@ -83,6 +83,10 @@ jobs:
       - name: Fetch the plate test data at its pinned commit
         run: bash python/scripts/fetch_data.sh
       - name: Test
+        # compiled at install, as an installed app ships it: a module compiled
+        # on first import holds the interpreter lock while it compiles
+        env:
+          UV_COMPILE_BYTECODE: '1'
         run: |
           RUN=""
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
