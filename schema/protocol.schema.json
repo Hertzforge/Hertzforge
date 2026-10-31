@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sds/1",
+  "title": "Suite protocol sds/1 (decoded messages; arrays shown as {\"$array\": id} before decoding)",
+  "oneOf": [
+    {"$ref": "#/$defs/hello"},
+    {"$ref": "#/$defs/request"},
+    {"$ref": "#/$defs/response"},
+    {"$ref": "#/$defs/event"}
+  ],
+  "$defs": {
+    "arrayRef": {
+      "type": "object", "required": ["$array"], "additionalProperties": false,
+      "properties": {"$array": {"type": "string"}}
+    },
+    "arrayEntry": {
+      "type": "object", "required": ["id", "dtype", "shape", "offset", "nbytes"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "dtype": {"enum": ["f32", "f64", "i32", "u32", "u8"]},
+        "shape": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "offset": {"type": "integer", "minimum": 0, "multipleOf": 8},
+        "nbytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "arrays": {"type": "array", "items": {"$ref": "#/$defs/arrayEntry"}},
+    "hello": {
+      "type": "object", "required": ["type", "protocol", "service", "version"],
+      "properties": {
+        "type": {"const": "hello"},
+        "protocol": {"const": "sds/1"},
+        "service": {"enum": ["analysis", "control"]},
+        "version": {"type": "string"}
+      }
+    },
+    "request": {
+      "type": "object", "required": ["type", "id", "method", "params"],
+      "properties": {
+        "type": {"const": "request"},
+        "id": {"type": "integer"},
+        "method": {"type": "string"},
+        "params": {"type": "object"},
+        "arrays": {"$ref": "#/$defs/arrays"}
+      }
+    },
+    "response": {
+      "type": "object", "required": ["type", "id"],
+      "properties": {
+        "type": {"const": "response"},
+        "id": {"type": "integer"},
+        "result": {"type": "object"},
+        "error": {
+          "type": "object", "required": ["code", "message"],
+          "properties": {
+            "code": {"enum": ["bad_request", "unknown_method", "not_found", "refused", "internal"]},
+            "message": {"type": "string", "minLength": 1}
+          }
+        },
+        "arrays": {"$ref": "#/$defs/arrays"}
+      },
+      "oneOf": [{"required": ["result"]}, {"required": ["error"]}]
+    },
+    "event": {
+      "type": "object", "required": ["type", "topic", "seq", "data"],
+      "properties": {
+        "type": {"const": "event"},
+        "topic": {"type": "string"},
+        "seq": {"type": "integer", "minimum": 0},
+        "data": {"type": "object"},
+        "arrays": {"$ref": "#/$defs/arrays"}
+      }
+    },
+    "axis": {
+      "type": "object", "required": ["label", "unit", "scale"],
+      "properties": {
+        "label": {"type": "string"},
+        "unit": {"type": ["string", "null"]},
+        "scale": {"enum": ["log", "linear"]}
+      }
+    },
+    "series": {
+      "type": "object", "required": ["name", "role", "x", "y"],
+      "properties": {
+        "name": {"type": "string"},
+        "role": {"enum": ["measured", "reference", "tolerance", "abort", "drive", "other"]},
+        "x": {"$ref": "#/$defs/arrayRef"},
+        "y": {"$ref": "#/$defs/arrayRef"},
+        "shape": {"enum": ["line", "steps", "law"]},
+        "edges": {"$ref": "#/$defs/arrayRef"}
+      },
+      "if": {"required": ["shape"], "properties": {"shape": {"const": "steps"}}},
+      "then": {"required": ["edges"]}
+    },
+    "spectrumView": {
+      "type": "object", "required": ["view", "title", "x", "y", "series"],
+      "properties": {
+        "view": {"const": "spectrum"},
+        "title": {"type": "string"},
+        "x": {"$ref": "#/$defs/axis"},
+        "y": {"$ref": "#/$defs/axis"},
+        "series": {"type": "array", "items": {"$ref": "#/$defs/series"}},
+        "link": {"type": "string"}
+      }
+    },
+    "readingView": {
+      "type": "object", "required": ["view", "title", "rows"],
+      "properties": {
+        "view": {"const": "reading"},
+        "title": {"type": "string"},
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["label", "value", "status"],
+            "properties": {
+              "label": {"type": "string"},
+              "value": {"type": ["number", "string"]},
+              "unit": {"type": ["string", "null"]},
+              "status": {"enum": ["pass", "warn", "fail", "info"]}
+            }
+          }
+        }
+      }
+    },
+    "shape3dView": {
+      "type": "object", "required": ["view", "title", "unit", "nodes", "modes"],
+      "properties": {
+        "view": {"const": "shape3d"},
+        "title": {"type": "string"},
+        "unit": {"type": "string"},
+        "nodes": {"$ref": "#/$defs/arrayRef"},
+        "lines": {"$ref": "#/$defs/arrayRef"},
+        "triangles": {"$ref": "#/$defs/arrayRef"},
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["index", "frequency_hz", "shape"],
+            "properties": {
+              "index": {"type": "integer"},
+              "frequency_hz": {"type": "number"},
+              "damping": {"type": ["number", "null"]},
+              "shape": {"$ref": "#/$defs/arrayRef"}
+            }
+          }
+        }
+      }
+    },
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}]},
+    "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},
+    "param": {
+      "type": "object", "required": ["name", "label", "type"],
+      "properties": {
+        "name": {"type": "string"},
+        "label": {"type": "string"},
+        "type": {"enum": ["number", "integer", "enum", "boolean", "string"]},
+        "unit": {"type": ["string", "null"]},
+        "default": {},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "step": {"type": "number"},
+        "options": {
+          "type": "array",
+          "items": {"type": "object", "required": ["value", "label"],
+                    "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
+        },
+        "options_from": {"enum": ["channels"]}
+      }
+    },
+    "operation": {
+      "type": "object", "required": ["id", "title", "workspace", "accepts", "params", "outputs"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
+        "title": {"type": "string"},
+        "workspace": {"enum": ["acquire", "analyze", "modal", "model", "specify", "simulate", "report"]},
+        "accepts": {"enum": ["random_run", "modal_model"]},
+        "summary": {"type": "string"},
+        "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
+        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d"]}}
+      }
+    },
+    "dataset": {
+      "type": "object", "required": ["id", "kind", "title"],
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"enum": ["random_run", "modal_model"]},
+        "title": {"type": "string"},
+        "description": {"type": "string"}
+      }
+    },
+    "catalog": {
+      "type": "object", "required": ["operations", "datasets"],
+      "properties": {
+        "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+        "datasets": {"type": "array", "items": {"$ref": "#/$defs/dataset"}}
+      }
+    },
+    "displayEvent": {
+      "type": "object", "required": ["run_id", "source", "state", "elapsed_s", "level_db", "views"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "source": {"enum": ["SIM", "HARDWARE"]},
+        "state": {"enum": ["idle", "running", "stopped"]},
+        "elapsed_s": {"type": "number"},
+        "level_db": {"type": "number"},
+        "views": {"$ref": "#/$defs/views"},
+        "phase": {"type": "string"},
+        "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", null]},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

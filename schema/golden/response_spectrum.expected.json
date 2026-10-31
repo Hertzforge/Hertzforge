@@ -1,0 +1,112 @@
+{
+ "type": "response",
+ "id": 7,
+ "result": {
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "PSD Against Specification",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "g²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Control",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        20.0,
+        80.0,
+        350.0,
+        1000.0,
+        2000.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        0.0101,
+        0.0398,
+        0.0403,
+        0.0396,
+        0.0099
+       ]
+      }
+     },
+     {
+      "name": "Specification",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        20.0,
+        80.0,
+        1000.0,
+        2000.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.01,
+        0.04,
+        0.04,
+        0.01
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "reading",
+    "title": "Overall",
+    "rows": [
+     {
+      "label": "Control rms",
+      "value": 6.06,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Lines in tolerance",
+      "value": "all",
+      "unit": null,
+      "status": "info"
+     }
+    ]
+   }
+  ],
+  "counts": {
+   "dtype": "u32",
+   "shape": [
+    3
+   ],
+   "values": [
+    3,
+    1,
+    4
+   ]
+  }
+ }
+}

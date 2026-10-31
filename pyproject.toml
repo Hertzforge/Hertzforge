@@ -24,3 +24,8 @@ Source = "https://github.com/hertzforge/hertzforge"
 
 [project.scripts]
 hertzforge = "hertzforge.__main__:main"
+
+[tool.pytest.ini_options]
+# The package's own tests. The analysis service under python/ has its own
+# environment and test suite (uv run --project python pytest python).
+testpaths = ["tests"]

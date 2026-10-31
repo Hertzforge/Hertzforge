@@ -1,0 +1,29 @@
+[package]
+name = "sds-control"
+description = "Control service for the structural dynamics suite: runs the random control engine against its Sim backend and serves the sds/1 WebSocket protocol."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sds-control"
+path = "src/main.rs"
+
+[dependencies]
+eigen-breakpoints.workspace = true
+eigen-channel-table.workspace = true
+eigen-hal.workspace = true
+eigen-hal-sim.workspace = true
+eigen-module-abi.workspace = true
+eigen-random.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake", "connect"] }
