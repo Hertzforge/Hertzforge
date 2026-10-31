@@ -1,10 +1,13 @@
 // The hertzforge.com placeholder: static files in public/, served by a
 // Cloudflare Worker. `npx wrangler deploy` from this folder publishes it and
 // attaches both hostnames, creating their DNS records and certificates.
+// Videos go through src/index.js first, which answers byte-range requests;
+// every other file is served by the assets directly.
 {
   "name": "hertzforge",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "./public" },
+  "main": "src/index.js",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/*.mp4"] },
   "routes": [
     { "pattern": "hertzforge.com", "custom_domain": true },
     { "pattern": "www.hertzforge.com", "custom_domain": true }
