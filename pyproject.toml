@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hertzforge"
+version = "0.0.1"
+description = "Data acquisition and structural dynamics in one toolset. Early release; the merged code is on its way."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://hertzforge.com"
+Source = "https://github.com/hertzforge/hertzforge"
+
+[project.scripts]
+hertzforge = "hertzforge.__main__:main"
