@@ -1,0 +1,78 @@
+{
+ "type": "event",
+ "topic": "demo.shape",
+ "seq": 42,
+ "data": {
+  "views": [
+   {
+    "view": "shape3d",
+    "title": "Two Triangles",
+    "unit": "m",
+    "nodes": {
+     "dtype": "f32",
+     "shape": [
+      4,
+      3
+     ],
+     "values": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "triangles": {
+     "dtype": "u32",
+     "shape": [
+      2,
+      3
+     ],
+     "values": [
+      0,
+      1,
+      2,
+      0,
+      2,
+      3
+     ]
+    },
+    "modes": [
+     {
+      "index": 1,
+      "frequency_hz": 12.5,
+      "damping": null,
+      "shape": {
+       "dtype": "f32",
+       "shape": [
+        4,
+        3
+       ],
+       "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.25
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

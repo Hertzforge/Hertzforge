@@ -1,0 +1,9 @@
+target/
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.data/
+ui/build/
+ui/.svelte-kit/
+.DS_Store

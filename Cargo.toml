@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Shared dependency versions. The controller crates are path dependencies on a
+# sibling checkout of the controller workspace (`../eigen`); only its open,
+# hardware-neutral crates are listed here. The private backend crates are never
+# depended on (crates/sds-control/tests/forbidden_deps.rs enforces it).
+[workspace.dependencies]
+eigen-breakpoints = { path = "../eigen/crates/eigen-breakpoints" }
+eigen-channel-table = { path = "../eigen/crates/eigen-channel-table" }
+eigen-hal = { path = "../eigen/crates/eigen-hal" }
+eigen-hal-sim = { path = "../eigen/crates/eigen-hal-sim" }
+eigen-module-abi = { path = "../eigen/crates/eigen-module-abi" }
+eigen-random = { path = "../eigen/crates/eigen-random" }
+# `preserve_order`: protocol headers keep the key order they were written in, which
+# the golden frames pin byte for byte.
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
