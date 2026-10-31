@@ -1,0 +1,29 @@
+# Publishes to PyPI by trusted publishing when a release tagged vX.Y.Z is
+# published on GitHub. The PyPI publisher is tied to this file name and to
+# the `pypi` environment, so renaming either breaks publishing.
+name: release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  pypi:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: '3.14'}
+      - name: Test
+        run: |
+          pip install -q . pytest
+          pytest -q
+      - name: Build
+        run: |
+          pip install -q build
+          python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

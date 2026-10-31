@@ -1,9 +1,11 @@
-target/
-node_modules/
-.venv/
 __pycache__/
 *.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+target/
+node_modules/
 .data/
-ui/build/
 ui/.svelte-kit/
 .DS_Store
