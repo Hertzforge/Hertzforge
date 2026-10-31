@@ -35,7 +35,7 @@ def _golden_input(name):
     (length,) = struct.unpack_from('<I', data, 4)
     header = json.loads(data[8:8 + length])
     entries = header.pop('arrays')
-    expected = json.loads((GOLDEN / f'{name}.expected.json').read_text())
+    expected = json.loads((GOLDEN / f'{name}.expected.json').read_text(encoding='utf-8'))
     found = {}
 
     def walk(ref, value):
@@ -67,7 +67,7 @@ def test_encode_reproduces_golden_bytes(name):
 @pytest.mark.parametrize('name', BINARY)
 def test_decode_matches_expected(name):
     decoded = frames.decode((GOLDEN / f'{name}.bin').read_bytes())
-    expected = json.loads((GOLDEN / f'{name}.expected.json').read_text())
+    expected = json.loads((GOLDEN / f'{name}.expected.json').read_text(encoding='utf-8'))
     assert _as_expected(decoded) == expected
     assert 'arrays' not in decoded
 
@@ -81,7 +81,7 @@ def test_pack_names_arrays_in_traversal_order():
 
 @pytest.mark.parametrize('name', ('hello', 'response_error'))
 def test_text_golden_round_trip(name):
-    text = (GOLDEN / f'{name}.json').read_text()
+    text = (GOLDEN / f'{name}.json').read_text(encoding='utf-8')
     message = frames.decode(text)
     assert message == json.loads(text)
     again = frames.pack(message)
