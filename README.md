@@ -32,6 +32,7 @@ layout is a mechanical change that comes next.
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
 | `scripts/` | shell | Developer entry points |
+| `site/` | HTML | The hertzforge.com page, deployed by `.github/workflows/site.yml` when it changes on `main` |
 
 The control service builds against the controller's crates, which are not
 in this repository yet. Until they are imported, it builds only beside a

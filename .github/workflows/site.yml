@@ -1,0 +1,33 @@
+# Deploys site/ to hertzforge.com as the Cloudflare Worker `hertzforge`
+# whenever it changes on main. CLOUDFLARE_API_TOKEN is a repository secret
+# (an "Edit Cloudflare Workers" token limited to this account and the
+# hertzforge.com zone); the account ID is not secret.
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/site.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: da6c04f7c67225001160e934ce844de7
+        run: npx --yes wrangler deploy

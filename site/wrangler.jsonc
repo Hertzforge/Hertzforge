@@ -1,0 +1,12 @@
+// The hertzforge.com placeholder: static files in public/, served by a
+// Cloudflare Worker. `npx wrangler deploy` from this folder publishes it and
+// attaches both hostnames, creating their DNS records and certificates.
+{
+  "name": "hertzforge",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public" },
+  "routes": [
+    { "pattern": "hertzforge.com", "custom_domain": true },
+    { "pattern": "www.hertzforge.com", "custom_domain": true }
+  ]
+}
