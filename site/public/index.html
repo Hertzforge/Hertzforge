@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hertzforge</title>
-<meta name="description" content="Hertzforge: data acquisition and structural dynamics in one toolset. Coming soon.">
+<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset. Coming soon.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b1626'/%3E%3Cpath d='M4 16h4l3-8 4 16 4-12 3 6 2-2h4' fill='none' stroke='%23168fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -32,6 +32,16 @@
   }
   p { margin: 0.4em 0; color: var(--muted); font-size: 1.1rem; }
   .tagline { color: var(--fg); font-size: clamp(1.05rem, 2.6vw, 1.3rem); margin-top: 0.2em; }
+  .scope { margin-top: 1.1em; }
+  .scope ul {
+    list-style: none; padding: 0; margin: 0.5em 0 0;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5em;
+  }
+  .scope li {
+    white-space: nowrap; color: var(--fg); font-size: 0.9rem; letter-spacing: 0.02em;
+    padding: 0.35em 0.85em; border: 1px solid rgba(22, 143, 255, 0.4); border-radius: 999px;
+    background: rgba(22, 143, 255, 0.07);
+  }
   .demo { margin: 2.2em auto 0; }
   .demo video {
     display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #070b12;
@@ -47,7 +57,19 @@
 <body>
 <main>
   <h1><img class="logo" src="hertzforge-logo.webp" width="1536" height="968" alt="Hertzforge"></h1>
-  <p class="tagline">Data acquisition and structural dynamics in one toolset.</p>
+  <p class="tagline">The whole structural dynamics workflow, in one toolset.</p>
+  <div class="scope">
+    <ul>
+      <li>Vibration &amp; Shock Control</li>
+      <li>Test Simulation</li>
+      <li>Environmental Specification</li>
+    </ul>
+    <ul>
+      <li>Data Acquisition</li>
+      <li>Data Analysis</li>
+      <li>Finite Element Modeling</li>
+    </ul>
+  </div>
   <figure class="demo">
     <video id="demo" autoplay muted loop playsinline poster="hertzforge-demo-poster.jpg" width="1920" height="1080"
            aria-label="A walkthrough of the Hertzforge prototype: analysis, modal and simulation workspaces">
