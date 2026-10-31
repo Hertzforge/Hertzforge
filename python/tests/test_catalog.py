@@ -4,7 +4,6 @@ descriptor checks the params a request sends."""
 from __future__ import annotations
 
 import pytest
-
 from sds_analysis.protocol import ProtocolError
 from sds_analysis.server import OPERATIONS, Service
 

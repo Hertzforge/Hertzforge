@@ -17,7 +17,6 @@ import asyncio
 import itertools
 import logging
 import time
-import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -31,7 +30,7 @@ from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
-from .protocol import (ProtocolError, bad_request, hello, not_found, refused)
+from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('sds_analysis')
 
@@ -210,8 +209,7 @@ class Connection:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            log.error('request %s %s failed\n%s', ident, method,
-                      traceback.format_exc())
+            log.exception('request %s %s failed', ident, method)
             frame = _error(ident, 'internal',
                            f'{method} failed inside the service: '
                            f'{type(error).__name__}: {error}')

@@ -7,7 +7,6 @@ import struct
 
 import numpy as np
 import pytest
-
 from sds_analysis import frames
 
 from .conftest import GOLDEN

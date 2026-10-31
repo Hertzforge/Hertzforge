@@ -11,10 +11,10 @@ import sys
 import time
 
 import pytest
-from websockets.asyncio.client import connect
-
 from sds_analysis import frames
 from sds_analysis.server import Service, start
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 
 class Client:
@@ -120,8 +120,8 @@ def test_errors_name_the_cause(validate):
             (('catalog.list', {'x': 1}), 'bad_request', "no 'x'"),
             (('dataset.open', {}), 'bad_request', 'needs "id"'),
             (('dataset.open', {'id': 'plate-x'}), 'not_found',
-             'No dataset named "plate-x"; catalog.list names the ones that '
-             'exist.'),
+             ('No dataset named "plate-x"; catalog.list names the ones that '
+              'exist.')),
             (('op.run', {'op': 'random.nope', 'handle': 'h1'}), 'not_found',
              "No operation named 'random.nope'"),
             (('op.run', {'op': 'modal.modes', 'handle': 'h999'}), 'not_found',
@@ -146,7 +146,7 @@ def test_errors_name_the_cause(validate):
 
         # not a request: the connection is closed with the reason
         await socket.send(frames.encode_text({'type': 'hello'}))
-        with pytest.raises(Exception):
+        with pytest.raises(ConnectionClosed):
             await socket.recv()
         assert socket.close_code == 1008
         assert 'integer "id"' in socket.close_reason

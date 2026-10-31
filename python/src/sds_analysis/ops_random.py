@@ -48,7 +48,9 @@ def _unit_text(dimension: str) -> str | None:
 
     try:
         return vd.SI.label_text(dimension) or None
-    except Exception:
+    # a dimension VD cannot label is drawn without a unit, not refused: the
+    # numbers are unchanged and the axis says what it can
+    except Exception:  # noqa: BLE001
         return None
 
 
