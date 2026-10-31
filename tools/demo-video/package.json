@@ -1,0 +1,8 @@
+{
+  "name": "sds-demo-video",
+  "private": true,
+  "type": "module",
+  "description": "Scripted walkthrough of the shell, recorded to video. Also the seed of the visual-regression runner.",
+  "scripts": { "record": "node record.mjs" },
+  "devDependencies": { "playwright-core": "1.64.1" }
+}
