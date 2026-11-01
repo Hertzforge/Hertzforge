@@ -48,6 +48,8 @@ const SETUP_KEY = 'hertzforge.acquire.setup.v1';
 /** Most log entries kept on screen; the service keeps the full log with the run. */
 const LOG_LIMIT = 500;
 
+export type AcquireTab = 'station' | 'test' | 'control' | 'live';
+
 export interface Note {
 	tone: 'info' | 'pass' | 'warn';
 	text: string;
@@ -162,6 +164,10 @@ export class AcquireState {
 	run = $state.raw<RandomState | null>(null);
 	live = $state.raw<RandomLive | null>(null);
 	log = $state.raw<LogEntry[]>([]);
+
+	// ---- view -------------------------------------------------------------------------------
+	/** The workspace's open section; kept here so it survives moving between workspaces. */
+	tab = $state<AcquireTab>('station');
 
 	// ---- feedback ---------------------------------------------------------------------------
 	busy = $state<string | null>(null);
@@ -676,6 +682,9 @@ export class AcquireState {
 		this.run = s;
 		// A new run starts with an empty display; a finished run keeps its last frame.
 		if (prev && prev.run_id !== s.run_id) this.live = null;
+		// When a run starts driving, the live view comes forward once.
+		const driving = (x: RandomState | null) => !!x && (x.state === 'running' || x.state === 'review' || x.state === 'stopping');
+		if (driving(s) && (!driving(prev) || prev?.run_id !== s.run_id)) this.tab = 'live';
 	}
 
 	private onLive(l: RandomLive) {
