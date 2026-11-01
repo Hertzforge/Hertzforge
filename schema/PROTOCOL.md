@@ -476,6 +476,14 @@ and last levels, until stopped; `full_level_s` applies if the ladder is handed b
 | `level_ramp_s` | 3 | Ramp time of every level change: the drive moves smoothly, output block by output block, while the control loop keeps its own cadence |
 | `shutdown_ramp_s` | 3 | Ramp time of a controlled stop: 40 dB down from the level the stop began at, smoothly, block by block |
 
+**The control estimate.** The loop controls to, and the envelope judges, an estimate of the
+control spectrum accumulated over loops to `control_dof` degrees of freedom (each loop adds
+`2 × n_avg`). A level change keeps it, scaled to the new level; a loop measured while the level
+moves is folded in at the level it reached, and is not judged. The new level is also judged for
+the envelope abort on its own estimate, from its first loop at rest, so an excursion at a new
+level aborts as soon as that estimate holds 16 degrees of freedom (the first loop at `n_avg` 8
+or more). No envelope alarm or abort is judged on fewer than 16 degrees of freedom.
+
 **System identification.** It excites relative to the reference. It starts at `start_vrms` and
 steps its drive until the control response's rms over the band is `level_db` (-60 to 0) relative
 to the reference's rms over the band, within 1 dB, then measures the system over `averages`

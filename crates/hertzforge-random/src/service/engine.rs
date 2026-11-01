@@ -462,6 +462,10 @@ struct PlaybackStep {
     /// at: each output block is scaled by the ramp's walk from that level
     /// (`super::ramp`). `None`: the record plays as synthesized.
     ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64, f64)>,
+    /// Sum over the emitted samples of the ramp's power gain (gain squared)
+    /// relative to the synthesis level, for [`SegmentResult::drive_power_gain`].
+    gain2_sum: f64,
+    gain2_n: usize,
     pos: usize,
     n_ch: usize,
     /// Interleaved recorded response: `n_ch` samples per frame.
@@ -481,6 +485,8 @@ impl PlaybackStep {
         PlaybackStep {
             drive,
             ramp: None,
+            gain2_sum: 0.0,
+            gain2_n: 0,
             pos: 0,
             n_ch: n_ch.max(1),
             interleaved: Vec::new(),
@@ -493,6 +499,14 @@ impl PlaybackStep {
     fn with_observer(mut self, o: Option<BlockObserver>) -> Self {
         self.observer = o;
         self
+    }
+
+    fn power_gain(&self) -> f64 {
+        if self.gain2_n == 0 {
+            1.0
+        } else {
+            self.gain2_sum / self.gain2_n as f64
+        }
     }
 
     fn with_ramp(
@@ -532,8 +546,12 @@ impl ProcessStep for PlaybackStep {
         }
         // The level ramp, per output block (bench finding 2, 2026-11-01).
         if let Some((ramp, base_db, fs_hz)) = &self.ramp {
-            super::ramp::scale_block(ramp, *base_db, *fs_hz, drive_out);
+            let (_end, g2) = super::ramp::scale_block(ramp, *base_db, *fs_hz, drive_out);
+            self.gain2_sum += g2;
+        } else {
+            self.gain2_sum += n_frames as f64;
         }
+        self.gain2_n += n_frames;
         for d in drive_out.iter() {
             let a = f64::from(d.abs());
             if a > self.drive_peak {
@@ -623,6 +641,11 @@ pub struct SegmentResult {
     /// underruns, late samples, rate coercions). Empty on a clean segment and
     /// on backends that report none.
     pub driver_warnings: Vec<String>,
+    /// The mean power gain the drive level ramp applied over this segment's
+    /// samples, relative to the level its drive was synthesized at (1 when the
+    /// level stood still). A segment measured while the level moved is brought
+    /// to the level the ramp reached with it.
+    pub drive_power_gain: f64,
 }
 
 impl SegmentResult {
@@ -1173,6 +1196,7 @@ impl PlantLoop {
                 if scheduling_fault_retry_allowed(self.station, report.frames_in, attempt) {
                     continue;
                 }
+                let drive_power_gain = step.power_gain();
                 return SegmentResult {
                     interleaved: step.interleaved,
                     n_ch: self.n_ch,
@@ -1186,6 +1210,7 @@ impl PlantLoop {
                     )),
                     zero_filled: step.zero_filled,
                     driver_warnings: self.backend.take_warnings(),
+                    drive_power_gain,
                 };
             }
 
@@ -1213,6 +1238,7 @@ impl PlantLoop {
             // The DRIVER's own diagnostics for this segment (underruns,
             // late samples, coercions). Previously collected and unreachable.
             let driver_warnings = self.backend.take_warnings();
+            let drive_power_gain = step.power_gain();
             return SegmentResult {
                 interleaved: step.interleaved,
                 n_ch: self.n_ch,
@@ -1221,6 +1247,7 @@ impl PlantLoop {
                 faulted,
                 zero_filled: step.zero_filled,
                 driver_warnings,
+                drive_power_gain,
             };
         }
     }

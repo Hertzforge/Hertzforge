@@ -624,6 +624,38 @@ async fn a_table_with_the_drive_row_first_controls_the_control_row() {
     c.ok("random.abort", json!({})).await;
 }
 
+/// Two averages per loop through the soft start and the ladder (2026-11-01,
+/// finding 5): the accumulated control estimate is kept across every level
+/// change, so the 10-line envelope abort does not trip on one loop's scatter.
+/// Red before the fix: it tripped at the end of the 3 s soft start every time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_averages_run_the_ladder_without_an_envelope_trip() {
+    for seed_run in 0..3 {
+        let svc = Service::with_options(options(
+            no_driver(),
+            0.0,
+            Duration::from_secs(30),
+            Duration::from_secs(5),
+        ));
+        let addr = serve(svc).await;
+        let mut c = Client::connect(addr).await;
+        let mut config = sim_config(
+            "auto",
+            json!([{"db": -12, "dwell_s": 3}, {"db": -6, "dwell_s": 3}, {"db": 0}]),
+            4.0,
+        );
+        config["acquisition"]["n_avg"] = json!(2);
+        configured(&mut c, config).await;
+        c.ok("random.start", json!({})).await;
+        let end = c.wait_state("finished", LONG).await;
+        assert_eq!(
+            end["end"]["outcome"], "completed",
+            "run {seed_run}: {}",
+            end["end"]
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended() {
     let svc = Service::with_options(options(

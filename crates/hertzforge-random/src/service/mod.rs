@@ -195,6 +195,15 @@ const DEFAULT_SOFT_START_S: f64 = 5.0;
 /// How far the controlled stop ramps the level down before the run stops, dB.
 pub const STOP_RAMP_DEPTH_DB: f64 = 40.0;
 
+/// The fewest statistical degrees of freedom an envelope judgment rests on.
+///
+/// A Welch line at `DOF` degrees of freedom is a chi-squared variate: at 4 (two
+/// averages) one line in eleven reads below a -6 dB abort floor by chance, at 16
+/// (eight averages) about one in nine hundred. Judging the envelope on fewer than
+/// 16 turns estimator scatter into aborts (2026-11-01, finding 5); at eight or
+/// more averages per loop every loop qualifies and nothing waits.
+pub const MIN_ENVELOPE_DOF: f64 = 16.0;
+
 /// The host-side Random run service (Path B). Owns the control law + the plant
 /// loop + the protection engines + capture + the event log.
 pub struct RandomService {
@@ -275,6 +284,16 @@ pub struct RandomService {
     /// quadruples the effective DOF within a second. Scaled in place on level
     /// change (the estimate is level-proportional power), cleared at engage.
     control_est: Option<Vec<f64>>,
+    /// Loops folded into `control_est` since it last started (its warm-up count:
+    /// the accumulator is a plain mean until it reaches its configured depth).
+    est_loops: u32,
+    /// The estimate of the level the run is at since the last level change, from
+    /// loops measured at rest, with its loop count (2026-11-01, finding 5). The
+    /// carried `control_est` keeps its depth across a change; this one sees a
+    /// real excursion at the new level in full, and is judged for the abort once
+    /// it holds [`MIN_ENVELOPE_DOF`], until it reaches the carried estimate's
+    /// depth.
+    fresh_est: Option<(Vec<f64>, u32)>,
     /// The level the operator COMMANDED (the ramp walks toward it; equal to
     /// `schedule_level_db` when no ramp is in flight).
     level_target_db: f64,
@@ -508,6 +527,8 @@ impl RandomService {
             loop_count: 0,
             engage_settle_loops: 0,
             control_est: None,
+            est_loops: 0,
+            fresh_est: None,
             level_target_db: 0.0,
             ramp: Arc::new(DriveRamp::new(STOP_RAMP_DEPTH_DB, shutdown_ramp_s)),
             soft_start_floor_db: None,
@@ -1532,6 +1553,8 @@ impl RandomService {
         // the second may straddle it (the estimator's overlap reaches back).
         self.engage_settle_loops = 2;
         self.control_est = None;
+        self.est_loops = 0;
+        self.fresh_est = None;
         // The control loop's own kinematic monitor, with its own settle window:
         // the identification's monitor saw the identification's turn-on, and the
         // engage is a task restart.
@@ -1658,6 +1681,10 @@ impl RandomService {
                 for p in est.iter_mut() {
                     *p *= pow_ratio;
                 }
+            }
+            // The new level gets its own estimate, from its first loop at rest.
+            if self.control_est.is_some() {
+                self.fresh_est = Some((Vec::new(), 0));
             }
         }
         let full_rms = self.full_target_grms();
@@ -2052,9 +2079,11 @@ impl RandomService {
                 synth.scale_carry(10f64.powf((end_db - base_db) / 20.0));
             }
             self.apply_level_now(end_db);
-            // A moving level re-arms a short judgment settle: this segment
-            // measured a level in motion and the envelope must not chase it.
-            self.engage_settle_loops = self.engage_settle_loops.max(1);
+            // A segment measured while the level moved is not judged and does not
+            // steer the law (below); it is folded into the estimate at the level
+            // the ramp reached. It no longer CLEARS the estimate: that left the
+            // first loop judged after every ramp with one loop's scatter, which at
+            // two averages tripped the envelope abort (2026-11-01, finding 5).
         } else if self.soft_start_floor_db.is_some()
             && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
         {
@@ -2142,8 +2171,20 @@ impl RandomService {
 
         // 8. Measure per-channel PSDs + composite, then iterate the law.
         let per_channel = self.measure_per_channel(&seg);
-        let raw_composite = self.composite_of(&per_channel)?;
+        let mut raw_composite = self.composite_of(&per_channel)?;
         self.last_per_channel_psds = per_channel;
+        // A segment measured while the level moved holds a mixture of levels:
+        // bring it to the level the ramp reached, by the drive power the ramp
+        // actually applied over it (the response lags the drive by the pipeline,
+        // a fraction of a segment, so this is close rather than exact).
+        if moved {
+            let g_end2 = 10f64.powf((end_db - base_db) / 10.0);
+            let mean_g2 = seg.drive_power_gain.max(1e-12);
+            let k = g_end2 / mean_g2;
+            for p in raw_composite.iter_mut() {
+                *p *= k;
+            }
+        }
         // Fold this loop's raw estimate into the ACCUMULATOR; everything
         // downstream (law, envelope, display, gRMS) consumes the accumulated
         // estimate. See the `control_est` field doc for why raw was wrong.
@@ -2154,15 +2195,24 @@ impl RandomService {
         // raw loop, nor so deep that the loop stops adapting.
         let per_loop_dof = (2 * self.loop_cfg.blocks_per_window).max(1) as f64;
         let windows = (self.cfg.control_dof / per_loop_dof).clamp(1.0, 64.0);
-        let est_alpha = 2.0 / (windows + 1.0);
+        // WARM-UP (2026-11-01): until the accumulator holds its configured depth
+        // it is a plain mean of the loops it has seen, so a young estimate's
+        // degrees of freedom grow with every loop instead of staying dominated by
+        // its first one (an EMA started from one raw loop keeps most of that
+        // loop's scatter for many loops at a small alpha).
+        let est_alpha = (2.0 / (windows + 1.0)).max(1.0 / f64::from(self.est_loops + 1));
         let composite: Vec<f64> = match self.control_est.take() {
             Some(mut est) if est.len() == raw_composite.len() => {
                 for (e, &m) in est.iter_mut().zip(raw_composite.iter()) {
                     *e += est_alpha * (m - *e);
                 }
+                self.est_loops = self.est_loops.saturating_add(1);
                 est
             }
-            _ => raw_composite.clone(),
+            _ => {
+                self.est_loops = 1;
+                raw_composite.clone()
+            }
         };
         self.control_est = Some(composite.clone());
         self.last_composite_psd = Some(composite.clone());
@@ -2188,9 +2238,44 @@ impl RandomService {
             // estimate still mostly made of the transient. The accumulator
             // starts from the first clean window instead.
             self.control_est = None;
+            self.est_loops = 0;
+            self.fresh_est = None;
             self.advance_capture_clocks();
             return Ok(true);
         }
+
+        // A segment measured while the level moved: folded into the estimate
+        // above, but not judged and not steering the law (as before 2026-11-01;
+        // only the clearing went).
+        if moved {
+            self.alarm_active = false;
+            self.advance_capture_clocks();
+            return Ok(true);
+        }
+
+        // The new level's own estimate, from its loops at rest (see `fresh_est`).
+        // Retired once it holds as much as the carried estimate.
+        let fresh_judged: Option<Vec<f64>> = match self.fresh_est.take() {
+            Some((mut f, n)) => {
+                if f.len() == raw_composite.len() {
+                    let w = 1.0 / f64::from(n + 1);
+                    for (e, &m) in f.iter_mut().zip(raw_composite.iter()) {
+                        *e += w * (m - *e);
+                    }
+                } else {
+                    f = raw_composite.clone();
+                }
+                let n = n + 1;
+                let dof = per_loop_dof * f64::from(n);
+                let judged = (dof >= MIN_ENVELOPE_DOF).then(|| f.clone());
+                if dof < self.cfg.control_dof {
+                    self.fresh_est = Some((f, n));
+                }
+                judged
+            }
+            None => None,
+        };
+        let est_dof = per_loop_dof * f64::from(self.est_loops);
 
         // The operator's FRF pairs, measured from the SAME segment the
         // control loop just consumed - so what the pane shows and what the
@@ -2265,7 +2350,7 @@ impl RandomService {
 
         // 10. Envelope alarm/abort: check the composite measured PSD
         //     against the frequency-domain envelope.
-        if !self.check_envelope(&composite) {
+        if !self.check_envelope(&composite, est_dof, fresh_judged.as_deref()) {
             return Ok(false); // aborted inside check_envelope
         }
 
@@ -2364,11 +2449,69 @@ impl RandomService {
     /// track the scheduled level, which is the standard random-controller behavior (a
     /// -12 dB engage does not spuriously breach the -3 dB abort floor of the full
     /// envelope). At full level the scale is 1 and this is a no-op.
-    fn check_envelope(&mut self, composite: &[f64]) -> bool {
-        let Some(env) = self.envelope.as_ref() else {
+    ///
+    /// `composite` is the carried estimate, judged (alarm and abort) once it rests
+    /// on [`MIN_ENVELOPE_DOF`] (`est_dof`). `fresh`, when given, is the new level's
+    /// own estimate (already at the floor); it is judged for the ABORT only, so a
+    /// real excursion at a new level aborts as soon as it did when every level
+    /// change restarted the estimate (2026-11-01, finding 5).
+    fn check_envelope(&mut self, composite: &[f64], est_dof: f64, fresh: Option<&[f64]>) -> bool {
+        if self.envelope.is_none() {
             self.alarm_active = false;
             return true;
-        };
+        }
+        if est_dof >= MIN_ENVELOPE_DOF {
+            let Some(report) = self.envelope_report(composite) else {
+                return true;
+            };
+            self.last_alarm_lines = report.alarm_bins.len();
+            self.last_abort_lines = report.abort_bins.len();
+            // The abort fires at the operator's line budget (`max_lines_out`),
+            // not on the first breached bin: per-line Welch scatter at small nAvg
+            // statistically breaches a -6 dB floor on a perfect plant (see the
+            // config field's doc for the 2026-08-03 measurement). Below the
+            // budget, breaches ride the ALARM indicator instead.
+            if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
+                let worst = report.worst_abort_db.unwrap_or(0.0);
+                self.abort(TripKind::Envelope {
+                    abort_lines: report.abort_bins.len(),
+                    worst_db: worst,
+                });
+                return false;
+            }
+            self.alarm_active = report.alarmed();
+            if report.alarmed() {
+                self.log.push(EventKind::EnvelopeAlarm {
+                    lines: report.alarm_bins.len(),
+                    worst_db: report.worst_alarm_db.unwrap_or(0.0),
+                });
+            }
+        } else {
+            // Too few degrees of freedom to tell a line out of band from scatter.
+            self.alarm_active = false;
+            self.last_alarm_lines = 0;
+            self.last_abort_lines = 0;
+        }
+        if let Some(f) = fresh {
+            if let Some(report) = self.envelope_report(f) {
+                if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
+                    let worst = report.worst_abort_db.unwrap_or(0.0);
+                    self.last_abort_lines = report.abort_bins.len();
+                    self.abort(TripKind::Envelope {
+                        abort_lines: report.abort_bins.len(),
+                        worst_db: worst,
+                    });
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// The envelope's judgment of `composite` at the scheduled level, with the
+    /// soft-start relaxation in force (see [`Self::check_envelope`]).
+    fn envelope_report(&self, composite: &[f64]) -> Option<hertzforge_breakpoints::EnvelopeReport> {
+        let env = self.envelope.as_ref()?;
         let level_scale2 = 10f64.powf(self.schedule_level_db / 10.0);
         let inv = if level_scale2 > 0.0 {
             1.0 / level_scale2
@@ -2384,7 +2527,7 @@ impl RandomService {
         // Soft-start relaxation: widen the authored bands while the run is
         // still climbing to the start level (see `envelope_relax_db`).
         let relax = self.envelope_relax_db();
-        let report = if relax > 0.0 {
+        Some(if relax > 0.0 {
             let scale = 10f64.powf(relax / 10.0);
             let widened: Vec<f64> = measured.psd.iter().map(|&p| p / scale).collect();
             let lo = LineSpectrum {
@@ -2409,30 +2552,7 @@ impl RandomService {
             r
         } else {
             env.check(&measured)
-        };
-        self.last_alarm_lines = report.alarm_bins.len();
-        self.last_abort_lines = report.abort_bins.len();
-        // The abort fires at the operator's line budget (`max_lines_out`),
-        // not on the first breached bin: per-line Welch scatter at small nAvg
-        // statistically breaches a -6 dB floor on a perfect plant (see the
-        // config field's doc for the 2026-08-03 measurement). Below the
-        // budget, breaches ride the ALARM indicator instead.
-        if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
-            let worst = report.worst_abort_db.unwrap_or(0.0);
-            self.abort(TripKind::Envelope {
-                abort_lines: report.abort_bins.len(),
-                worst_db: worst,
-            });
-            return false;
-        }
-        self.alarm_active = report.alarmed();
-        if report.alarmed() {
-            self.log.push(EventKind::EnvelopeAlarm {
-                lines: report.alarm_bins.len(),
-                worst_db: report.worst_alarm_db.unwrap_or(0.0),
-            });
-        }
-        true
+        })
     }
 
     /// Overload proxy per channel: if any raw sample on a channel reaches

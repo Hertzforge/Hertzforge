@@ -170,28 +170,38 @@ fn walk(level: f64, target: f64, rate: f64, seconds: f64) -> f64 {
 /// Scale one output block by the ramp's walk over it, relative to `base_db` (the
 /// level the block's drive was synthesized at): the gain moves linearly in dB from
 /// the level at the block's start to the level at its end, so no block carries a
-/// step. Returns the level at the block's end.
-pub(crate) fn scale_block(ramp: &DriveRamp, base_db: f64, fs_hz: f64, block: &mut [f32]) -> f64 {
+/// step. Returns the level at the block's end and the sum of the power gains
+/// (gain squared) applied over the block's samples.
+pub(crate) fn scale_block(
+    ramp: &DriveRamp,
+    base_db: f64,
+    fs_hz: f64,
+    block: &mut [f32],
+) -> (f64, f64) {
     let n = block.len();
     if n == 0 || fs_hz <= 0.0 {
-        return ramp.level_db();
+        return (ramp.level_db(), 0.0);
     }
     let (l0, l1) = ramp.advance(n as f64 / fs_hz);
     if (l0 - base_db).abs() <= 1e-12 && (l1 - base_db).abs() <= 1e-12 {
-        return l1;
+        return (l1, n as f64);
     }
     if (l1 - l0).abs() <= 1e-12 {
-        let g = 10f64.powf((l0 - base_db) / 20.0) as f32;
+        let g = 10f64.powf((l0 - base_db) / 20.0);
+        let gf = g as f32;
         for x in block.iter_mut() {
-            *x *= g;
+            *x *= gf;
         }
-        return l1;
+        return (l1, g * g * n as f64);
     }
+    let mut g2 = 0.0;
     for (i, x) in block.iter_mut().enumerate() {
         let l = l0 + (l1 - l0) * (i + 1) as f64 / n as f64;
-        *x = (f64::from(*x) * 10f64.powf((l - base_db) / 20.0)) as f32;
+        let g = 10f64.powf((l - base_db) / 20.0);
+        g2 += g * g;
+        *x = (f64::from(*x) * g) as f32;
     }
-    l1
+    (l1, g2)
 }
 
 #[cfg(test)]
@@ -235,8 +245,15 @@ mod tests {
         r.set(0.0);
         r.ramp_to(-20.0, 20.0); // 20 dB per second
         let mut block = vec![1.0f32; 1000];
-        let end = scale_block(&r, 0.0, 1000.0, &mut block); // one second
+        let (end, g2) = scale_block(&r, 0.0, 1000.0, &mut block); // one second
         assert!((end + 20.0).abs() < 1e-9);
+        // The mean power gain of a 20 dB linear-in-dB fall: (1 - 0.01) / ln(100).
+        let want = 0.99 / 100f64.ln();
+        assert!(
+            (g2 / 1000.0 - want).abs() < 2e-3,
+            "{} vs {want}",
+            g2 / 1000.0
+        );
         assert!((f64::from(block[999]) - 0.1).abs() < 1e-6, "{}", block[999]);
         for w in block.windows(2) {
             assert!(w[1] <= w[0], "monotonic");
