@@ -288,8 +288,9 @@
       "properties": {"role": {"const": "observer"}, "orphan_s": {"type": ["number", "null"], "minimum": 0}}
     },
     "sessionChanged": {
-      "type": "object", "required": ["controller", "orphan_s"], "additionalProperties": false,
+      "type": "object", "required": ["role", "controller", "orphan_s"], "additionalProperties": false,
       "properties": {
+        "role": {"enum": ["controller", "observer"]},
         "controller": {"$ref": "#/$defs/controllerSeat"},
         "orphan_s": {"type": ["number", "null"], "minimum": 0}
       }
@@ -610,11 +611,24 @@
       }
     },
     "randomDryRunResult": {
-      "type": "object", "required": ["errors", "warnings", "derived"], "additionalProperties": false,
+      "type": "object", "required": ["errors", "warnings", "derived", "views"], "additionalProperties": false,
       "properties": {
         "errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
         "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
-        "derived": {"oneOf": [{"$ref": "#/$defs/derived"}, {"type": "null"}]}
+        "derived": {"oneOf": [{"$ref": "#/$defs/derived"}, {"type": "null"}]},
+        "views": {"$ref": "#/$defs/referenceViews"}
+      }
+    },
+    "referenceViews": {
+      "type": "array", "items": {"$ref": "#/$defs/spectrumView"}
+    },
+    "randomConfigResult": {
+      "type": "object", "required": ["run_id", "config", "derived", "views"], "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": ["string", "null"]},
+        "config": {"oneOf": [{"$ref": "#/$defs/randomConfig"}, {"type": "null"}]},
+        "derived": {"oneOf": [{"$ref": "#/$defs/derived"}, {"type": "null"}]},
+        "views": {"$ref": "#/$defs/referenceViews"}
       }
     },
     "randomArmParams": {
@@ -816,8 +830,11 @@
       }
     },
     "randomLogEvent": {
-      "type": "object", "required": ["entries"], "additionalProperties": false,
-      "properties": {"entries": {"type": "array", "items": {"$ref": "#/$defs/logEntry"}}}
+      "type": "object", "required": ["run_id", "entries"], "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/logEntry"}}
+      }
     }
   }
 }

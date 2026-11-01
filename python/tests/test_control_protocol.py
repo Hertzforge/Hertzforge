@@ -23,6 +23,7 @@ PAYLOADS = {
     'response_channels_get': ('result', 'channelTable'),
     'event_random_state': ('data', 'randomState'),
     'event_session_changed': ('data', 'sessionChanged'),
+    'event_random_log': ('data', 'randomLogEvent'),
     'response_error_controller_held': ('error', None),
     'response_error_table_invalid': ('error.detail', 'report'),
 }

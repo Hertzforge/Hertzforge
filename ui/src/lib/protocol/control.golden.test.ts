@@ -19,6 +19,7 @@ import type {
 	ResponseOk,
 	StationList,
 	ChannelTable,
+	RandomLogEvent,
 	SessionChanged
 } from './types';
 
@@ -46,6 +47,7 @@ const TEXT = [
 	'response_channels_get',
 	'event_random_state',
 	'event_session_changed',
+	'event_random_log',
 	'response_error_controller_held',
 	'response_error_table_invalid'
 ];
@@ -191,7 +193,13 @@ describe('control text goldens', () => {
 		expect(table.channels.every((c) => c.interface === 'single_ended')).toBe(true);
 		expect(table.report.warnings.map((w) => w.reason)).toEqual(['drive_channel_present']);
 
-		const session: SessionChanged = { controller: { name: 'Shell on bench-pc', present: false }, orphan_s: 21.5 };
+		const session: SessionChanged = { role: 'observer', controller: { name: 'Shell on bench-pc', present: false }, orphan_s: 21.5 };
 		expect(readJson('event_session_changed.json').data).toEqual(session);
+
+		const log: RandomLogEvent = {
+			run_id: 'r-0007',
+			entries: [{ seq: 41, at_unix: 1793577731.2, kind: 'trip', text: 'Envelope abort: 14 lines outside the abort band, worst +7.2 dB, at 0.0 dB.' }]
+		};
+		expect(readJson('event_random_log.json').data).toEqual(log);
 	});
 });

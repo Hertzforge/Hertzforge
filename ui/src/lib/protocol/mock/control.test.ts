@@ -10,6 +10,7 @@ import type {
 	ChannelsSetResult,
 	LogEntry,
 	RandomConfig,
+	RandomConfigResult,
 	RandomConfigureResult,
 	RandomDryRunResult,
 	RandomLive,
@@ -74,7 +75,11 @@ async function setup(options: ControlServerOptions = {}) {
 	const logs: LogEntry[] = [];
 	c.on('random.state', (d) => states.push(d as unknown as RandomState));
 	c.on('random.live', (d) => lives.push(d as unknown as RandomLive));
-	c.on('random.log', (d) => logs.push(...(d as unknown as { entries: LogEntry[] }).entries));
+	c.on('random.log', (d) => {
+		const event = d as unknown as { run_id: string; entries: LogEntry[] };
+		expect(event.run_id).toMatch(/^r-/);
+		logs.push(...event.entries);
+	});
 	await c.whenOpen();
 	const claim = await c.request<SessionClaimResult>('session.claim', { name: 'Shell on bench-pc' });
 	return { server, c, states, lives, logs, claim };
@@ -98,6 +103,9 @@ describe('controller and observers', () => {
 		await c.request('session.release');
 		await until(() => changes.some((s) => s.controller === null));
 		expect((await other.request<SessionClaimResult>('session.claim')).role).toBe('controller');
+		// each connection's copy says whether it holds control
+		await until(() => changes.some((s) => s.role === 'controller'));
+		expect(changes.filter((s) => s.controller === null).every((s) => s.role === 'observer')).toBe(true);
 		c.close();
 		other.close();
 	});
@@ -247,13 +255,28 @@ describe('Random configuration', () => {
 			'out_of_range'
 		]);
 		const dry = await c.request<RandomDryRunResult>('random.configure', { config: bad, dry_run: true });
-		expect([dry.errors.length, dry.derived]).toEqual([4, null]);
+		expect([dry.errors.length, dry.derived, dry.views]).toEqual([4, null, []]);
+
+		// A clean dry run carries the profile on the grid, stepped, for the screen to draw.
+		const clean = await c.request<RandomDryRunResult>('random.configure', { config: config(), dry_run: true });
+		const [reference] = clean.views;
+		expect(reference.series.map((x) => x.role)).toEqual(['reference', 'tolerance', 'tolerance', 'abort', 'abort']);
+		expect(reference.series.every((x) => x.shape === 'steps' && x.edges?.length === x.x.length + 1)).toBe(true);
+		expect(reference.series[0].x.length).toBe(clean.derived?.grid.lines);
+		expect((await c.request<RandomConfigResult>('random.config')).run_id).toBe(null);
 
 		const ok = await c.request<RandomConfigureResult>('random.configure', { config: config() });
 		expect(ok.state).toMatchObject({ state: 'configured', phase: 'idle', source: 'SIM', station: { kind: 'sim', class: 'sim' }, level_db: null, end: null });
 		expect(ok.derived.grms_g).toBeCloseTo(6.06, 1);
 		expect(ok.derived.grid).toEqual({ fs_hz: 8192, n_pts: 1024, df_hz: 8, lines: 248, loop_s: 0.25, actual: false });
 		expect(ok.derived.control_channels).toEqual([1]);
+
+		// A second screen reads back what the run was configured with.
+		const back = await c.request<RandomConfigResult>('random.config');
+		expect(back.run_id).toBe(ok.state.run_id);
+		expect(back.config?.title).toBe('Qualification Random');
+		expect(back.derived).toEqual(ok.derived);
+		expect(back.views[0].title).toBe('Reference');
 		c.close();
 	});
 });

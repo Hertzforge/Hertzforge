@@ -2,10 +2,12 @@
 //! (schema/PROTOCOL.md, "Run State" and "Live Display"), built from a [`RunView`]
 //! the run publishes after every step. Keys are written in the contract's order.
 
-use super::config::Grid;
+use super::config::{Grid, WireConfig};
 use crate::codec::Arrays;
 use crate::protocol::{num, opt_num};
 use crate::views::{self, Axis, Role, Row, Scale, Series, Status};
+use hertzforge_breakpoints::Envelope;
+use hertzforge_random::LoopConfig;
 use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -120,6 +122,64 @@ pub struct Lines {
     pub alarm_lo: Vec<f64>,
     pub abort_hi: Vec<f64>,
     pub abort_lo: Vec<f64>,
+}
+
+/// The lines of `loop_cfg`'s control band and, at 0 dB, the reference and each
+/// row's own bands on them: the controller's own envelope construction. On the grid a
+/// run arms on, these are the live display's lines; on the requested grid, the
+/// reference view's.
+pub fn lines_on(loop_cfg: &LoopConfig, cfg: &WireConfig) -> Lines {
+    let (lo, hi) = loop_cfg.band_bins();
+    let df = loop_cfg.df();
+    let freqs: Vec<f64> = (lo..hi).map(|k| k as f64 * df).collect();
+    let f_max = df * (loop_cfg.nbins() as f64 - 1.0);
+    let zeros = || vec![0.0; freqs.len()];
+    match Envelope::from_table_on_grid(&cfg.breakpoints(), df, f_max, cfg.alarm_db, cfg.abort_db) {
+        Ok(env) => {
+            let take = |v: &[f64]| -> Vec<f64> {
+                (lo..hi)
+                    .map(|k| v.get(k).copied().filter(|x| x.is_finite()).unwrap_or(0.0))
+                    .collect()
+            };
+            Lines {
+                reference: take(&env.reference.psd),
+                alarm_hi: take(&env.alarm_hi),
+                alarm_lo: take(&env.alarm_lo),
+                abort_hi: take(&env.abort_hi),
+                abort_lo: take(&env.abort_lo),
+                freqs,
+            }
+        }
+        Err(_) => Lines {
+            reference: zeros(),
+            alarm_hi: zeros(),
+            alarm_lo: zeros(),
+            abort_hi: zeros(),
+            abort_lo: zeros(),
+            freqs,
+        },
+    }
+}
+
+/// The reference view (schema/PROTOCOL.md, "Random Test Configuration"): the profile
+/// and its bands at 0 dB on `lines`, every series stepped.
+pub fn reference_view(lines: &Lines, arrays: &mut Arrays) -> Value {
+    let f = || lines.freqs.clone();
+    let series = vec![
+        Series::new("Reference", Role::Reference, f(), lines.reference.clone()).stepped(),
+        Series::new("Alarm high", Role::Tolerance, f(), lines.alarm_hi.clone()).stepped(),
+        Series::new("Alarm low", Role::Tolerance, f(), lines.alarm_lo.clone()).stepped(),
+        Series::new("Abort high", Role::Abort, f(), lines.abort_hi.clone()).stepped(),
+        Series::new("Abort low", Role::Abort, f(), lines.abort_lo.clone()).stepped(),
+    ];
+    views::spectrum(
+        arrays,
+        "Reference",
+        &Axis::new("Frequency", Some("Hz"), Scale::Log),
+        &Axis::new("PSD", Some("g²/Hz"), Scale::Log),
+        series,
+        Some("frequency"),
+    )
 }
 
 /// Everything the run shows, as of its last step.

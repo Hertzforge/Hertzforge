@@ -484,6 +484,48 @@ function checkConfig(config: RandomConfig, rows: ChannelRow[]): Checked {
 	};
 }
 
+/** The profile on the requested grid at 0 dB, each row's own bands applied, stepped. */
+function referenceViews(config: RandomConfig, derived: Derived): SpectrumView[] {
+	const resolved = resolveProfile(config);
+	const [lo, hi] = derived.band_hz;
+	const { fs_hz, n_pts } = derived.grid;
+	const df = fs_hz / n_pts;
+	const freqs: number[] = [];
+	for (let k = 1; k * df <= fs_hz / 2; k++) if (k * df >= lo && k * df <= hi) freqs.push(k * df);
+	const f = Float64Array.from(freqs);
+	const edges = binEdges(f);
+	const ref = Float64Array.from(freqs, (x) => specAt(resolved.anchors, x));
+	const band = (bands: BandDb[], high: boolean) =>
+		Float64Array.from(freqs, (x, i) => {
+			const b = bandAt(resolved, bands, x);
+			return ref[i] * 10 ** ((high ? b[1] : -b[0]) / 10);
+		});
+	const stepped = (name: string, role: SpectrumView['series'][number]['role'], y: Float64Array) => ({
+		name,
+		role,
+		x: f.slice(),
+		y,
+		shape: 'steps' as const,
+		edges: edges.slice()
+	});
+	return [
+		{
+			view: 'spectrum',
+			title: 'Reference',
+			x: { label: 'Frequency', unit: 'Hz', scale: 'log' },
+			y: { label: 'PSD', unit: 'g²/Hz', scale: 'log' },
+			series: [
+				stepped('Reference', 'reference', ref),
+				stepped('Alarm high', 'tolerance', band(resolved.alarm, true)),
+				stepped('Alarm low', 'tolerance', band(resolved.alarm, false)),
+				stepped('Abort high', 'abort', band(resolved.abort, true)),
+				stepped('Abort low', 'abort', band(resolved.abort, false))
+			],
+			link: 'frequency'
+		}
+	];
+}
+
 // ---------------------------------------------------------------------------------------------
 // One Random run
 
@@ -678,8 +720,11 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	const orphanS = () => (seatDeadline !== null && isLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
+	/** Every connection gets its own copy, with its own role. */
 	function sessionChanged() {
-		broadcast('session.changed', { controller: seatView(), orphan_s: orphanS() });
+		const controller = seatView();
+		const orphan_s = orphanS();
+		for (const c of connections) c.emit('session.changed', { role: seat?.conn === c ? 'controller' : 'observer', controller, orphan_s });
 	}
 
 	function armSeatClock() {
@@ -773,7 +818,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	function addLog(kind: LogKind, text: string) {
 		const entry: LogEntry = { seq: log.length, at_unix: round(Date.now() / 1000, 3), kind, text };
 		log.push(entry);
-		broadcast('random.log', { entries: [entry] });
+		if (random) broadcast('random.log', { run_id: random.id, entries: [entry] });
 	}
 
 	function timingOf(r: RandomRun): { at: number | null; remaining: number | null } {
@@ -1429,10 +1474,12 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const table = tableReport();
 				const checked = checkConfig(config, rows);
 				if (params.dry_run === true) {
+					const derived = table.errors.length > 0 ? null : checked.derived;
 					return {
 						errors: [...table.errors, ...checked.errors],
 						warnings: [...table.warnings, ...checked.warnings],
-						derived: table.errors.length > 0 ? null : checked.derived
+						derived,
+						views: derived ? referenceViews(config, derived) : []
 					};
 				}
 				own(conn);
@@ -1565,6 +1612,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				return stateOf(null);
 			},
 			'random.state': () => stateOf(random),
+			'random.config': () =>
+				random
+					? { run_id: random.id, config: random.config, derived: random.derived, views: referenceViews(random.config, random.derived) }
+					: { run_id: null, config: null, derived: null, views: [] },
 			'random.log': (params) => {
 				const since = typeof params.since === 'number' ? Math.max(0, Math.floor(params.since)) : 0;
 				return { entries: log.slice(since), next: log.length };

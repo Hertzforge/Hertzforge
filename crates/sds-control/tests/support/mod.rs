@@ -71,6 +71,8 @@ pub async fn serve(service: Arc<Service>) -> SocketAddr {
 pub struct Client {
     pub ws: Ws,
     next_id: i64,
+    /// The id of the last request sent.
+    pub last_id: i64,
     pub events: Vec<Event>,
 }
 
@@ -89,6 +91,7 @@ impl Client {
         Client {
             ws,
             next_id: 1,
+            last_id: 0,
             events: Vec::new(),
         }
     }
@@ -108,6 +111,7 @@ impl Client {
                 Some(v)
             }
             Message::Binary(b) => {
+                // Binary responses are kept too, for their arrays.
                 let decoded = codec::decode(&b).expect("binary frames decode");
                 let v = decoded.message.clone();
                 self.events.push(Event {
@@ -122,6 +126,7 @@ impl Client {
 
     pub async fn call(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
+        self.last_id = id;
         self.next_id += 1;
         let req = json!({"type": "request", "id": id, "method": method, "params": params});
         self.ws.send(Message::Text(req.to_string())).await.unwrap();
@@ -205,6 +210,16 @@ impl Client {
             let left = deadline.saturating_duration_since(Instant::now());
             let _ = self.read(left).await;
         }
+    }
+
+    /// The decoded arrays of the response to request `id`, when it came as a binary
+    /// frame.
+    pub fn decoded_response(&self, id: &Value) -> Option<&Decoded> {
+        self.events
+            .iter()
+            .rev()
+            .find(|e| e.msg["type"] == "response" && &e.msg["id"] == id)
+            .and_then(|e| e.decoded.as_ref())
     }
 
     pub fn of_topic(&self, topic: &str) -> Vec<&Event> {

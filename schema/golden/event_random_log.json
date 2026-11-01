@@ -1,0 +1,16 @@
+{
+ "type": "event",
+ "topic": "random.log",
+ "seq": 413,
+ "data": {
+  "run_id": "r-0007",
+  "entries": [
+   {
+    "seq": 41,
+    "at_unix": 1793577731.2,
+    "kind": "trip",
+    "text": "Envelope abort: 14 lines outside the abort band, worst +7.2 dB, at 0.0 dB."
+   }
+  ]
+ }
+}

@@ -205,13 +205,14 @@ fn event_random_live() -> (Value, Arrays) {
 }
 
 /// The text goldens of the hardware and Random control messages.
-const CONTROL_TEXT: [&str; 8] = [
+const CONTROL_TEXT: [&str; 9] = [
     "request_random_configure",
     "response_random_configure",
     "response_station_list",
     "response_channels_get",
     "event_random_state",
     "event_session_changed",
+    "event_random_log",
     "response_error_controller_held",
     "response_error_table_invalid",
 ];

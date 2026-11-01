@@ -48,7 +48,7 @@ const ARM_WAIT: Duration = Duration::from_secs(120);
 const METHODS: &str = "session.state, session.claim, session.release, station.list, \
     station.select, channels.get, channels.set, random.configure, random.arm, random.start, \
     random.proceed, random.level, random.mode, random.stop, random.abort, random.reset, \
-    random.clear, random.state, random.log, sim.profiles, sim.start, sim.stop and sim.state";
+    random.clear, random.state, random.config, random.log, sim.profiles, sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -105,6 +105,36 @@ impl Default for ServiceOptions {
 pub enum Out {
     Text(String),
     Binary(Vec<u8>),
+    /// `session.changed`, written for each connection with its own role.
+    Session {
+        seq: u64,
+        holder: Option<ConnId>,
+        controller: Value,
+        orphan_s: Value,
+    },
+}
+
+impl Out {
+    /// The frame as connection `conn` receives it.
+    fn to_message(&self, conn: ConnId) -> Message {
+        match self {
+            Out::Text(t) => Message::Text(t.clone()),
+            Out::Binary(b) => Message::Binary(b.clone()),
+            Out::Session {
+                seq,
+                holder,
+                controller,
+                orphan_s,
+            } => Message::Text(
+                protocol::event(
+                    "session.changed",
+                    *seq,
+                    Session::changed_for(conn, *holder, controller, orphan_s),
+                )
+                .to_string(),
+            ),
+        }
+    }
 }
 
 /// A connection, as the service sees it.
@@ -263,10 +293,13 @@ impl Service {
 
     fn session_changed(&self, inner: &Inner) {
         let live = inner.random_live();
-        self.emit(
-            "session.changed",
-            inner.session.changed(Instant::now(), live),
-        );
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        let _ = self.events.send(Arc::new(Out::Session {
+            seq,
+            holder: inner.session.holder_conn(),
+            controller: inner.session.controller_view(),
+            orphan_s: protocol::opt_num(inner.session.orphan_s(Instant::now(), live)),
+        }));
     }
 
     fn station_changed(&self, inner: &Inner) {
@@ -324,7 +357,10 @@ impl Service {
         if !entries.is_empty() {
             self.emit(
                 "random.log",
-                json!({"entries": entries.iter().map(|e| e.to_json()).collect::<Vec<_>>()}),
+                json!({
+                    "run_id": run.id,
+                    "entries": entries.iter().map(|e| e.to_json()).collect::<Vec<_>>(),
+                }),
             );
         }
     }
@@ -374,8 +410,26 @@ impl Service {
         view::state_json(v.as_deref())
     }
 
-    /// Answer one request from `conn`.
+    /// Answer one request from `conn`: the result, and the arrays it references (a
+    /// result with arrays travels as a binary frame).
     pub async fn call(
+        self: &Arc<Self>,
+        conn: &Conn,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<(Value, Arrays), MethodError> {
+        match method {
+            "random.configure" => self.random_configure(conn, params).await,
+            "random.config" => Ok(self.random_config().await),
+            _ => self
+                .call_plain(conn, method, params)
+                .await
+                .map(|v| (v, Arrays::new())),
+        }
+    }
+
+    /// The methods whose results carry no arrays.
+    async fn call_plain(
         self: &Arc<Self>,
         conn: &Conn,
         method: &str,
@@ -414,7 +468,6 @@ impl Service {
             }
             "channels.set" => self.channels_set(conn, params).await,
 
-            "random.configure" => self.random_configure(conn, params).await,
             "random.arm" => self.random_arm(conn, params, false).await,
             "random.start" => self.random_arm(conn, params, true).await,
             "random.proceed" => self.random_proceed(conn).await,
@@ -598,7 +651,7 @@ impl Service {
         &self,
         conn: &Conn,
         params: &Map<String, Value>,
-    ) -> Result<Value, MethodError> {
+    ) -> Result<(Value, Arrays), MethodError> {
         let config = params
             .get("config")
             .filter(|c| c.is_object())
@@ -614,11 +667,23 @@ impl Service {
             let mut all = table_report.clone();
             all.extend(report.clone());
             let derived = if all.errors.is_empty() { derived } else { None };
-            return Ok(json!({
-                "errors": all.errors.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
-                "warnings": all.warnings.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
-                "derived": derived.map_or(Value::Null, |d| d.to_json()),
-            }));
+            let mut arrays = Arrays::new();
+            let views = match &derived {
+                Some(_) => vec![view::reference_view(
+                    &view::lines_on(&cfg.loop_config(), &cfg),
+                    &mut arrays,
+                )],
+                None => Vec::new(),
+            };
+            return Ok((
+                json!({
+                    "errors": all.errors.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
+                    "warnings": all.warnings.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
+                    "derived": derived.map_or(Value::Null, |d| d.to_json()),
+                    "views": views,
+                }),
+                arrays,
+            ));
         }
         inner.session.require_controller(conn.id)?;
         inner.run_active()?;
@@ -630,11 +695,30 @@ impl Service {
         };
         let run = self.new_run(&mut inner, cfg, &derived)?;
         let v = run.view();
-        Ok(json!({
-            "state": view::state_json(Some(&v)),
-            "derived": derived.to_json(),
-            "warnings": report.warnings.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
-        }))
+        Ok((
+            json!({
+                "state": view::state_json(Some(&v)),
+                "derived": derived.to_json(),
+                "warnings": report.warnings.iter().map(|i| i.to_json()).collect::<Vec<_>>(),
+            }),
+            Arrays::new(),
+        ))
+    }
+
+    /// `random.config`: what the present run was configured with.
+    async fn random_config(&self) -> (Value, Arrays) {
+        let inner = self.inner.lock().await;
+        let mut arrays = Arrays::new();
+        let result = match &inner.random {
+            None => json!({"run_id": null, "config": null, "derived": null, "views": []}),
+            Some(run) => json!({
+                "run_id": run.id,
+                "config": run.config,
+                "derived": run.derived,
+                "views": [view::reference_view(&run.reference, &mut arrays)],
+            }),
+        };
+        (result, arrays)
     }
 
     /// Create a run (replacing the one before) and start its thread.
@@ -713,6 +797,7 @@ impl Service {
             notify: self.notify.clone(),
         });
         let raw = cfg.raw.clone();
+        let reference = Arc::new(view::lines_on(&cfg.loop_config(), &cfg));
         let title = cfg.title.clone();
         let plan = RunPlan {
             run_id: run_id.clone(),
@@ -724,7 +809,14 @@ impl Service {
         let (tx, rx) = std::sync::mpsc::channel();
         rrun::spawn(plan, initial.clone(), shared.clone(), rx)
             .map_err(|e| MethodError::internal(format!("could not start the run thread: {e}")))?;
-        let run = Arc::new(RandomRun::new(run_id, shared.clone(), tx, raw));
+        let run = Arc::new(RandomRun::new(
+            run_id,
+            shared.clone(),
+            tx,
+            raw,
+            derived.to_json(),
+            reference,
+        ));
         inner.random = Some(run.clone());
         // The log starts at configure.
         shared.add_log(
@@ -1248,6 +1340,7 @@ async fn connection(
     // `events`.
     let (out_tx, mut out_rx) = mpsc::channel::<Message>(64);
     let mut events = service.subscribe();
+    let me = conn.id;
     let writer = tokio::spawn(async move {
         loop {
             let msg = tokio::select! {
@@ -1256,10 +1349,7 @@ async fn connection(
                     None => break,
                 },
                 e = events.recv() => match e {
-                    Ok(frame) => match frame.as_ref() {
-                        Out::Text(t) => Message::Text(t.clone()),
-                        Out::Binary(b) => Message::Binary(b.clone()),
-                    },
+                    Ok(frame) => frame.to_message(me),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
@@ -1306,22 +1396,25 @@ async fn connection(
         let out = out_tx.clone();
         let conn = conn.clone();
         tokio::spawn(async move {
-            let reply = match message {
-                Err(e) => protocol::error_response(
-                    protocol::UNREADABLE_ID,
-                    &MethodError::bad_request(format!("the frame could not be decoded: {e}")),
+            let (reply, arrays) = match message {
+                Err(e) => (
+                    protocol::error_response(
+                        protocol::UNREADABLE_ID,
+                        &MethodError::bad_request(format!("the frame could not be decoded: {e}")),
+                    ),
+                    Arrays::new(),
                 ),
                 Ok(message) => match protocol::parse_request(&message) {
-                    Err((id, e)) => protocol::error_response(id, &e),
+                    Err((id, e)) => (protocol::error_response(id, &e), Arrays::new()),
                     Ok(Request { id, method, params }) => {
                         match service.call(&conn, &method, &params).await {
-                            Ok(result) => protocol::response(id, result),
-                            Err(e) => protocol::error_response(id, &e),
+                            Ok((result, arrays)) => (protocol::response(id, result), arrays),
+                            Err(e) => (protocol::error_response(id, &e), Arrays::new()),
                         }
                     }
                 },
             };
-            let frame = match codec::encode_frame(&reply, &Arrays::new()) {
+            let frame = match codec::encode_frame(&reply, &arrays) {
                 Ok(Frame::Text(t)) => Message::Text(t),
                 Ok(Frame::Binary(b)) => Message::Binary(b),
                 Err(e) => Message::Text(

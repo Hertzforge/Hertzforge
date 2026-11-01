@@ -3,6 +3,7 @@
  "topic": "session.changed",
  "seq": 7,
  "data": {
+  "role": "observer",
   "controller": {
    "name": "Shell on bench-pc",
    "present": false

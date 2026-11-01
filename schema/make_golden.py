@@ -271,8 +271,16 @@ TEXT_GOLDENS = {
     },
     'event_session_changed': {
         'type': 'event', 'topic': 'session.changed', 'seq': 7,
-        'data': {'controller': {'name': 'Shell on bench-pc', 'present': False},
+        'data': {'role': 'observer',
+                 'controller': {'name': 'Shell on bench-pc', 'present': False},
                  'orphan_s': 21.5},
+    },
+    'event_random_log': {
+        'type': 'event', 'topic': 'random.log', 'seq': 413,
+        'data': {'run_id': 'r-0007', 'entries': [
+            {'seq': 41, 'at_unix': 1793577731.2, 'kind': 'trip',
+             'text': 'Envelope abort: 14 lines outside the abort band, worst +7.2 dB, at 0.0 dB.'},
+        ]},
     },
     'response_error_controller_held': {
         'type': 'response', 'id': 2,

@@ -388,7 +388,9 @@ export interface SessionReleaseResult {
 	orphan_s: number | null;
 }
 
+/** Each connection receives its own copy: `role` is the receiving connection's. */
 export interface SessionChanged {
+	role: SessionRole;
 	controller: ControllerSeat | null;
 	orphan_s: number | null;
 }
@@ -637,6 +639,16 @@ export interface RandomDryRunResult {
 	errors: ReportItem[];
 	warnings: ReportItem[];
 	derived: Derived | null;
+	/** `[reference]`: the profile on the requested grid at 0 dB, stepped; empty with errors. */
+	views: SpectrumView[];
+}
+
+/** `random.config`: what the present run was configured with; all null when unconfigured. */
+export interface RandomConfigResult {
+	run_id: string | null;
+	config: RandomConfig | null;
+	derived: Derived | null;
+	views: SpectrumView[];
 }
 
 // --- running -------------------------------------------------------------------------------
@@ -775,5 +787,6 @@ export interface RandomLogResult {
 }
 
 export interface RandomLogEvent {
+	run_id: string;
 	entries: LogEntry[];
 }

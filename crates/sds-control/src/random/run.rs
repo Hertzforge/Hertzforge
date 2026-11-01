@@ -19,11 +19,10 @@
 
 use super::backend::{Interruptible, ABORT, STOP};
 use super::config::{check_grid, Grid, WireConfig};
-use super::view::{Alarm, End, Lines, LiveChannel, RunView, State, StationRef};
+use super::view::{Alarm, End, LiveChannel, RunView, State, StationRef};
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name, Report};
-use hertzforge_breakpoints::Envelope;
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_random::service::engine::BlockObserver;
 use hertzforge_random::service::report::EventKind;
@@ -543,7 +542,7 @@ impl Actor {
         if let Some(item) = r.errors.first() {
             return Err(arm_refused(&item.message));
         }
-        self.view.lines = Some(Arc::new(lines_of(&svc, cfg)));
+        self.view.lines = Some(Arc::new(super::view::lines_on(svc.loop_config(), cfg)));
         self.view.grid = grid.clone();
         self.view.clock = Some("shared");
         self.view.station = StationRef {
@@ -1262,41 +1261,6 @@ fn trip_facts(t: &hertzforge_random::TripRecord) -> (Value, String) {
         m.insert("at_loop".into(), Value::from(t.at_loop));
     }
     (facts, message)
-}
-
-/// The run's lines (the controller's control band on the grid it runs) and the
-/// reference and bands on them at 0 dB, each row's own bands applied: the
-/// controller's own envelope construction.
-fn lines_of(svc: &RandomService, cfg: &WireConfig) -> Lines {
-    let (lo, hi) = svc.loop_config().band_bins();
-    let df = svc.realized_df_hz();
-    let freqs: Vec<f64> = (lo..hi).map(|k| k as f64 * df).collect();
-    let f_max = df * (svc.loop_config().nbins() as f64 - 1.0);
-    match Envelope::from_table_on_grid(&cfg.breakpoints(), df, f_max, cfg.alarm_db, cfg.abort_db) {
-        Ok(env) => {
-            let take = |v: &[f64]| -> Vec<f64> {
-                (lo..hi)
-                    .map(|k| v.get(k).copied().filter(|x| x.is_finite()).unwrap_or(0.0))
-                    .collect()
-            };
-            Lines {
-                reference: take(&env.reference.psd),
-                alarm_hi: take(&env.alarm_hi),
-                alarm_lo: take(&env.alarm_lo),
-                abort_hi: take(&env.abort_hi),
-                abort_lo: take(&env.abort_lo),
-                freqs,
-            }
-        }
-        Err(_) => Lines {
-            reference: vec![0.0; freqs.len()],
-            alarm_hi: vec![0.0; freqs.len()],
-            alarm_lo: vec![0.0; freqs.len()],
-            abort_hi: vec![0.0; freqs.len()],
-            abort_lo: vec![0.0; freqs.len()],
-            freqs,
-        },
-    }
 }
 
 /// The enabled inputs, in table order.

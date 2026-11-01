@@ -161,6 +161,33 @@ async fn random_on_the_simulator_runs_end_to_end_through_the_protocol() {
         .await;
     schema.assert_valid(&dry, Some("randomDryRunResult"));
     assert!(dry["errors"].as_array().unwrap().is_empty(), "{dry}");
+    // The dry run carries the profile on the requested grid, stepped, to draw.
+    let d = c
+        .decoded_response(&json!(c.last_id))
+        .expect("a binary dry-run result");
+    let reference = &dry["views"][0];
+    assert_eq!(reference["title"], "Reference");
+    let lines = d.array(&reference["series"][0]["x"]).unwrap().to_f64();
+    assert_eq!(
+        lines.len() as u64,
+        dry["derived"]["grid"]["lines"].as_u64().unwrap()
+    );
+    for s in reference["series"].as_array().unwrap() {
+        assert_eq!(s["shape"], "steps");
+        assert_eq!(
+            d.array(&s["edges"]).unwrap().to_f64(),
+            views::bin_edges(&lines)
+        );
+    }
+    let r = d.array(&reference["series"][0]["y"]).unwrap().to_f64();
+    let hi = d.array(&reference["series"][1]["y"]).unwrap().to_f64();
+    assert!(
+        (hi[60] / r[60] - 10f64.powf(0.3)).abs() < 1e-9,
+        "the alarm band is +3 dB"
+    );
+    let none = c.ok("random.config", json!({})).await;
+    schema.assert_valid(&none, Some("randomConfigResult"));
+    assert_eq!(none["run_id"], Value::Null);
     let configured = c.ok("random.configure", json!({ "config": config })).await;
     schema.assert_valid(&configured, Some("randomConfigureResult"));
     let state = &configured["state"];
@@ -170,6 +197,16 @@ async fn random_on_the_simulator_runs_end_to_end_through_the_protocol() {
     assert_eq!(configured["derived"]["grid"]["df_hz"], 16);
     assert_eq!(configured["derived"]["control_channels"], json!([1]));
     let run_id = state["run_id"].as_str().unwrap().to_owned();
+
+    // A second screen reads back what the run was configured with.
+    let mut second = Client::connect(addr).await;
+    let back = second.ok("random.config", json!({})).await;
+    schema.assert_valid(&back, Some("randomConfigResult"));
+    assert_eq!(back["run_id"], run_id.as_str());
+    assert_eq!(back["config"], config);
+    assert_eq!(back["derived"], configured["derived"]);
+    assert_eq!(back["views"][0]["series"].as_array().unwrap().len(), 5);
+    drop(second);
 
     // Start answers at once: running, system identification.
     let started = c.ok("random.start", json!({})).await;
@@ -311,6 +348,7 @@ async fn random_on_the_simulator_runs_end_to_end_through_the_protocol() {
     assert!(tail["entries"].as_array().unwrap().is_empty());
     for e in c.of_topic("random.log") {
         schema.assert_valid(e.data(), Some("randomLogEvent"));
+        assert_eq!(e.data()["run_id"], run_id.as_str());
     }
 
     // Finished: arming again is refused by name; reset makes a new run.
@@ -576,6 +614,7 @@ async fn a_dropped_controller_resumes_with_its_lease_and_the_run_goes_on() {
     let changed = o.events[i].data().clone();
     schema.assert_valid(&changed, Some("sessionChanged"));
     assert_eq!(changed["controller"]["name"], "Shell");
+    assert_eq!(changed["role"], "observer", "the observer's own copy");
     let orphan = changed["orphan_s"].as_f64().unwrap();
     assert!(orphan > 25.0 && orphan <= 30.0, "{orphan}");
 
@@ -583,6 +622,20 @@ async fn a_dropped_controller_resumes_with_its_lease_and_the_run_goes_on() {
     let mut back = Client::connect(addr).await;
     let r = back.ok("session.claim", json!({"lease": lease})).await;
     assert_eq!(r["resumed"], true);
+    let i = back
+        .wait_for("the holder's own copy", LONG, |e| {
+            e.topic() == "session.changed" && e.data()["role"] == "controller"
+        })
+        .await;
+    assert_eq!(back.events[i].data()["controller"]["present"], true);
+    let i = o
+        .wait_for("the observer's copy of the resume", LONG, |e| {
+            e.topic() == "session.changed"
+                && e.data()["controller"]["present"] == true
+                && e.data()["role"] == "observer"
+        })
+        .await;
+    assert_eq!(o.events[i].data()["controller"]["name"], "Shell");
     assert_eq!(r["lease"], lease.as_str());
     let state = back.ok("random.state", json!({})).await;
     assert_eq!(state["state"], "running");

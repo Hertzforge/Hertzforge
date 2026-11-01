@@ -128,9 +128,24 @@ impl Session {
         })
     }
 
-    /// The `session.changed` event data.
-    pub fn changed(&self, now: Instant, live: bool) -> Value {
-        json!({"controller": self.controller_view(), "orphan_s": self.orphan_s(now, live)})
+    /// The connection holding control, while it is present.
+    pub fn holder_conn(&self) -> Option<ConnId> {
+        self.seat.as_ref().and_then(|s| s.conn)
+    }
+
+    /// The `session.changed` event data as connection `conn` receives it: with its own
+    /// role.
+    pub fn changed_for(
+        conn: ConnId,
+        holder: Option<ConnId>,
+        controller: &Value,
+        orphan_s: &Value,
+    ) -> Value {
+        json!({
+            "role": if holder == Some(conn) { "controller" } else { "observer" },
+            "controller": controller,
+            "orphan_s": orphan_s,
+        })
     }
 
     /// `session.claim`. A claim while another CONNECTED client holds control is
@@ -381,6 +396,24 @@ mod tests {
         s.release(1, t, false);
         assert!(s.deadline().is_none());
         assert!(!s.expire(t + TIMEOUT, false).safe_stop);
+    }
+
+    #[test]
+    fn each_connection_reads_its_own_role_in_a_change() {
+        let mut s = session();
+        let t = Instant::now();
+        s.claim(1, Some("Shell"), None, "peer", t).unwrap();
+        let (holder, seat) = (s.holder_conn(), s.controller_view());
+        assert_eq!(
+            Session::changed_for(1, holder, &seat, &Value::Null)["role"],
+            "controller"
+        );
+        assert_eq!(
+            Session::changed_for(2, holder, &seat, &Value::Null)["role"],
+            "observer"
+        );
+        s.dropped(1, t);
+        assert_eq!(s.holder_conn(), None, "an absent holder holds nothing");
     }
 
     #[test]

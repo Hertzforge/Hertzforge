@@ -21,8 +21,12 @@ use view::RunView;
 pub struct RandomRun {
     pub id: String,
     pub shared: Arc<RunShared>,
-    /// The configuration as accepted, for `random.reset`.
+    /// The configuration as accepted, for `random.reset` and `random.config`.
     pub config: serde_json::Value,
+    /// Its derived values, as configure returned them.
+    pub derived: serde_json::Value,
+    /// Its reference and bands on the requested grid, for the reference view.
+    pub reference: Arc<view::Lines>,
     tx: Mutex<mpsc::Sender<Cmd>>,
 }
 
@@ -32,11 +36,15 @@ impl RandomRun {
         shared: Arc<RunShared>,
         tx: mpsc::Sender<Cmd>,
         config: serde_json::Value,
+        derived: serde_json::Value,
+        reference: Arc<view::Lines>,
     ) -> RandomRun {
         RandomRun {
             id,
             shared,
             config,
+            derived,
+            reference,
             tx: Mutex::new(tx),
         }
     }

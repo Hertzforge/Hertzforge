@@ -203,7 +203,8 @@ driver-simulated devices as such. Nothing simulated is ever presented as a measu
 ### Refusals
 
 Every error from a method in this section carries `reason`, a stable name a client branches on.
-`message` is the words a person can act on and is shown verbatim; a client never parses it.
+`message` is the words a person can act on and is shown verbatim; a client never parses it. It is
+plain words: it never names a protocol method.
 `detail`, when present, carries the facts named below.
 
 ```
@@ -258,8 +259,8 @@ A refusal not listed here is a defect in the service.
 
 One connection at a time holds control; any number observe. Every connection starts as an
 observer. Observers receive every event and may call every method that only reads
-(`session.state`, `station.list`, `channels.get`, `random.state`, `random.log`, and the
-`dry_run` checks).
+(`session.state`, `station.list`, `channels.get`, `random.state`, `random.config`, `random.log`,
+and the `dry_run` checks).
 
 **Stopping is open to everyone.** `random.stop` and `random.abort` are accepted from any
 connection, controller or observer. They only ever end a run, so a second client using them
@@ -300,7 +301,9 @@ for it. After three heartbeats with nothing inbound, the connection is treated a
   `safe_stop`.
 
 `session.changed` (text event, to every connection on every change):
-`{"controller","orphan_s"}`.
+`{"role","controller","orphan_s"}`. `role` is the receiving connection's own (`controller` or
+`observer`), so each connection learns from the event whether it holds control; every connection
+receives its own copy.
 
 ### Stations
 
@@ -333,7 +336,9 @@ by name instead.
   chassis is one family (named by the chassis), and a standalone device is its own family. All
   of a run's channels must be in one family.
 - The scan does not read a module's sample-rate ladder, IEPE capability or output range, so none
-  is reported. The rate the hardware actually runs at is reported when the run arms.
+  is reported. The rate the hardware actually runs at is reported when the run arms. A known
+  limit: a client cannot tell from the scan whether a module supports IEPE; a row set to `iepe`
+  on a module without it is refused by the driver when the run arms (`arm_refused`).
 
 `selected`:
 
@@ -414,6 +419,7 @@ after a write or a station change) carries the `channels.get` result.
 | Method | Params | Result |
 |---|---|---|
 | `random.configure` | `{"config","dry_run"}` (`dry_run` optional) | `{"state","derived","warnings"}` |
+| `random.config` | `{}` | `{"run_id","config","derived","views"}` |
 
 ```
 {"title":"Qualification Random",
@@ -493,8 +499,20 @@ band; `loop_s` is the time one control loop takes. A configuration replaces the 
 it is refused `run_active` while a run is live, and
 `config_invalid` or `table_invalid` with the items when it has errors. Configuring checks the
 table against the selected station and opens nothing. `dry_run: true` checks without
-replacing anything and needs no control; its result is `{"errors","warnings","derived"}`
-(`derived` null when there are errors).
+replacing anything and needs no control; its result is `{"errors","warnings","derived","views"}`
+(`derived` null and `views` empty when there are errors).
+
+`views` is `[reference]`, the profile on the grid, so a screen draws it without computing it:
+**Reference** (`spectrum`, x `Frequency` Hz log, y `PSD` g²/Hz log, `link` `frequency`), series
+in this order: `Reference` (`reference`), `Alarm high` and `Alarm low` (`tolerance`), `Abort high`
+and `Abort low` (`abort`), at 0 dB with each row's own bands applied, on the band's lines of the
+requested grid, each `shape: "steps"` with its `edges`. A result carrying it is a binary frame.
+
+`random.config` returns what the present run was configured with: its `run_id`, the `config` as
+accepted, its `derived` values and the same `views`, so a screen that reloads, or a second
+screen, shows the profile and the numbers the run uses. All four are null (`views` empty) when
+nothing is configured. Like `random.state` it only reads. `derived.grid` stays the requested
+grid; the run state's `grid` is the one the run uses once it arms.
 
 ### Running a Random Test
 
@@ -656,7 +674,7 @@ The views are the viz kit's, in this order:
 ### Run Log
 
 `random.log` returns `{"entries":[entry...],"next"}` from `since`, and the `random.log` text
-event carries `{"entries":[...]}` as entries are written. An entry is
+event carries `{"run_id","entries":[...]}` as entries are written. An entry is
 `{"seq","at_unix","kind","text"}`, `kind` one of `state`, `feasibility`, `override`, `station`,
 `gate`, `level`, `alarm`, `overload`, `trip`, `note`. The log starts at configure and is the
 run's level history and alarm record.
