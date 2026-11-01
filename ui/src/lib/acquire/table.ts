@@ -108,8 +108,11 @@ const CELL: Partial<Record<ReportItem['reason'], RowCell>> = {
 	control_group_gap: 'control_group'
 };
 
+/** Findings that only inform: nothing to fix (a drive row's sensitivity and range are advisory). */
+const ADVISORY = new Set<ReportItem['reason']>(['drive_channel_present']);
+
 export interface RowFinding {
-	level: 'error' | 'warning';
+	level: 'error' | 'warning' | 'note';
 	cell: RowCell;
 	message: string;
 	reason: ReportItem['reason'];
@@ -123,7 +126,8 @@ export function rowFindings(report: ValidationReport | null): { rows: Map<number
 	const rows = new Map<number, RowFinding[]>();
 	const table: RowFinding[] = [];
 	if (!report) return { rows, table };
-	const push = (it: ReportItem, level: 'error' | 'warning') => {
+	const push = (it: ReportItem, given: 'error' | 'warning') => {
+		const level = given === 'warning' && ADVISORY.has(it.reason) ? 'note' : given;
 		const f: RowFinding = { level, cell: CELL[it.reason] ?? 'row', message: it.message, reason: it.reason };
 		if (it.channel === undefined || it.channel === null) table.push(f);
 		else {
