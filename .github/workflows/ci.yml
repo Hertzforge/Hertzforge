@@ -18,10 +18,15 @@ on:
     - cron: '0 13 * * 1'          # Mondays, 07:00 Mountain
   workflow_dispatch:
 
-# A superseded run on a pull request is cancelled; a push to main waits.
+# A newer run on a pull request (or on any branch but main) cancels the one
+# it supersedes. Nothing on main is ever cancelled: each run there gets a
+# group of its own, its run id. In one shared group a manual or scheduled
+# run would cancel a push run still going, and even with cancel-in-progress
+# off a newer run replaces one still waiting (a group holds one pending run),
+# so a merged commit could end up with no result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # The hertzforge package on PyPI: its own tests and the repository's lint.
