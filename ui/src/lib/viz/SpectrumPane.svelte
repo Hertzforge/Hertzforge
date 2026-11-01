@@ -16,7 +16,7 @@
 	import { alignSeries, valueAt } from './align';
 	import { cursors } from './cursor';
 	import { formatFixed, formatTick } from './format';
-	import { logRange, logTicks, mantissasFor } from './logTicks';
+	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
 	import { ROLE_STYLES, dashArray, roleColorVar } from './roles';
 	import { stepsPath } from './steps';
 
@@ -115,11 +115,17 @@
 		return `${Math.round(size)}px ${mono ? cssVar('--font-mono') : cssVar('--font-ui')}`;
 	}
 
-	/** Pick tick density from the pixels each decade gets on this axis. */
-	function logMantissas(u: uPlot, axis: 0 | 1, min: number, max: number): number[] {
+	/** Pixels each decade gets on this axis. */
+	function pxPerDecade(u: uPlot, axis: 0 | 1, min: number, max: number): number {
 		const px = (axis === 0 ? u.bbox.width : u.bbox.height) / devicePixelRatio;
 		const decades = Math.max(0.3, Math.log10(Math.max(max, 1e-300) / Math.max(min, 1e-300)));
-		return mantissasFor(px / decades);
+		return px / decades;
+	}
+
+	/** Ticks for a log axis, as dense as its pixels allow and never denser. */
+	function logSplits(u: uPlot, axis: 0 | 1, min: number, max: number): number[] {
+		const ppd = pxPerDecade(u, axis, min, max);
+		return logTicks(min, max, mantissasFor(ppd), decadeStride(ppd));
 	}
 
 	let measureCtx: CanvasRenderingContext2D | null = null;
@@ -194,7 +200,7 @@
 					space: logX ? 36 : 56,
 					grid: { stroke: grid, width: 1 },
 					ticks: { stroke: grid, width: 1, size: 4 },
-					splits: logX ? (u, _i, min, max) => logTicks(min, max, logMantissas(u, 0, min, max)) : undefined,
+					splits: logX ? (u, _i, min, max) => logSplits(u, 0, min, max) : undefined,
 					filter: logX ? (_u, splits) => splits : undefined,
 					values: (_u, splits) => splits.map((v) => (v == null ? '' : formatTick(v)))
 				},
@@ -210,7 +216,7 @@
 					space: 28,
 					grid: { stroke: grid, width: 1 },
 					ticks: { stroke: grid, width: 1, size: 4 },
-					splits: logY ? (u, _i, min, max) => logTicks(min, max, logMantissas(u, 1, min, max)) : undefined,
+					splits: logY ? (u, _i, min, max) => logSplits(u, 1, min, max) : undefined,
 					filter: logY ? (_u, splits) => splits : undefined,
 					values: (_u, splits) => splits.map((v) => (v == null ? '' : formatTick(v))),
 					size: (_u, values) => {
