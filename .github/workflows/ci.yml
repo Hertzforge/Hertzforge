@@ -138,8 +138,14 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Two passes. The timing tests, whose verdict rests on the wall clock,
+      # fail beside the other test threads on a shared runner, so they run
+      # after the rest, one at a time. scripts/rust_timing_tests.txt lists them
+      # and says what belongs there; each pass checks its count against it.
       - name: Test
-        run: cargo test --workspace --locked
+        run: bash scripts/rust_tests.sh parallel
+      - name: Test the timing tests, one at a time
+        run: bash scripts/rust_tests.sh timing
 
   # Rust crate licenses, bans, sources and advisories (deny.toml). The
   # lockfile holds every platform's packages and the check reads all of them,

@@ -15,7 +15,8 @@ Each command as run, its exit code, and its pass / fail / skip counts:
 ```
 uv run --project python pytest python -q -n 4 --dist loadgroup    exit 0    N passed
 npm --prefix ui test                              exit 0    N passed
-cargo test --workspace                            exit 0    N passed
+scripts/rust_tests.sh parallel                    exit 0    N passed
+scripts/rust_tests.sh timing                      exit 0    N passed
 cargo deny check                                  exit 0    advisories ok, bans ok, licenses ok, sources ok
 python tools/check_tree.py                        exit 0    0 findings
 ```
