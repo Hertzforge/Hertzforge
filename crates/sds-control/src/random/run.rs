@@ -192,7 +192,7 @@ struct Actor {
     svc: Option<RandomService>,
     lock: Option<hertzforge_station::lock::LockGuard>,
     view: RunView,
-    /// The table the run armed with, drive rows last (see [`controller_table`]).
+    /// The table the run armed with.
     table: ChannelTable,
     started: Option<Instant>,
     ended_at: Option<f64>,
@@ -232,19 +232,6 @@ fn arm_refused(words: impl std::fmt::Display) -> MethodError {
         "arm_refused",
         format!("The station refused to arm: {words}"),
     )
-}
-
-/// The table the controller is given: the same rows, drive rows after every input.
-///
-/// The controller finds an input's place in each acquired frame by counting table
-/// rows, and it counts a drive row as a place although no drive is acquired, so an
-/// input listed after a drive row would read its neighbour's samples. Moving drive
-/// rows last keeps every input's and every output's order and puts each input in its
-/// own place.
-pub fn controller_table(table: &ChannelTable) -> ChannelTable {
-    let mut t = table.clone();
-    t.channels.sort_by_key(|c| c.role == ChannelRole::Drive);
-    t
 }
 
 /// The pacer for the simulator: counts plant frames and, when paced, sleeps whenever
@@ -471,7 +458,9 @@ impl Actor {
             return Err(config_invalid(&report));
         }
         let built = cfg.build(&ctx.table)?;
-        let table = controller_table(&ctx.table);
+        // The controller is given the operator's table as it stands: it finds each
+        // input's place in the acquired frame without counting drive rows.
+        let table = ctx.table.clone();
         let station = station::build(&ctx.station, &*ctx.scanner)?;
         let hardware = station.station.is_hardware();
         let lock = if hardware {
@@ -1394,29 +1383,4 @@ pub fn live_channels(table: &ChannelTable) -> Vec<LiveChannel> {
             overload: false,
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use hertzforge_channel_table::Channel;
-
-    #[test]
-    fn drive_rows_go_last_and_every_other_order_is_kept() {
-        let mut t = ChannelTable::new();
-        let mut d = Channel::new(1);
-        d.role = ChannelRole::Drive;
-        let mut c = Channel::new(2);
-        c.role = ChannelRole::Control;
-        let m = Channel::new(3);
-        let mut d2 = Channel::new(4);
-        d2.role = ChannelRole::Drive;
-        t.channels = vec![d, c, m, d2];
-        let order: Vec<u32> = controller_table(&t)
-            .channels
-            .iter()
-            .map(|c| c.index)
-            .collect();
-        assert_eq!(order, [2, 3, 1, 4]);
-    }
 }

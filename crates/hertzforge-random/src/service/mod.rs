@@ -2826,14 +2826,16 @@ impl RandomService {
 
     /// The control interleave slot for a channel index (position among enabled non-drive
     /// channels). `None` if the channel is not an enabled input.
+    ///
+    /// A drive row is an OUTPUT and has no place in the acquired frame. This used
+    /// to count an enabled drive row as a slot, so an input listed after a drive
+    /// row read its neighbour's samples (found by the control service, which
+    /// worked around it by handing the controller its table with drive rows
+    /// last; the engine's watchdog had the same defect and was fixed 2026-07-16).
     fn slot_of(&self, channel_index: u32) -> Option<usize> {
         let mut slot = 0usize;
         for ch in &self.table.channels {
-            if !ch.enabled {
-                continue;
-            }
-            if ch.role == ChannelRole::Drive {
-                slot += 1;
+            if !ch.enabled || ch.role == ChannelRole::Drive {
                 continue;
             }
             if ch.index == channel_index {

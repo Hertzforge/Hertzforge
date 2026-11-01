@@ -555,6 +555,75 @@ async fn the_end_gives_the_level_where_the_stop_began() {
     }
 }
 
+/// A table whose drive row comes FIRST is handed to the controller as it stands,
+/// and every input reads its own samples. On the Sim a control and a monitor row
+/// read the response and a reference row reads the drive, so if the control row
+/// read the reference row's place the loop would put the drive, not the response,
+/// on the reference, and the monitor (whose rms the service computes from its own
+/// place) would sit several dB off. Red with the service's drive-rows-last
+/// workaround removed and the controller still counting drive rows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_table_with_the_drive_row_first_controls_the_control_row() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Shell"})).await;
+    c.ok("station.select", json!({"kind": "sim"})).await;
+    let t = c.ok("channels.get", json!({})).await;
+    let rows = t["channels"].as_array().unwrap().clone();
+    let drive = rows.iter().find(|r| r["role"] == "drive").unwrap().clone();
+    let control = rows
+        .iter()
+        .find(|r| r["role"] == "control")
+        .unwrap()
+        .clone();
+    let table = json!([
+        drive,
+        control,
+        row(3, "reference", "g", Value::Null),
+        row(4, "monitor", "g", Value::Null)
+    ]);
+    c.ok(
+        "channels.set",
+        json!({"revision": t["revision"], "channels": table}),
+    )
+    .await;
+    let mut config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+    config["control"]["soft_start_db"] = json!(0);
+    c.ok("random.configure", json!({ "config": config })).await;
+    c.ok("random.start", json!({})).await;
+    c.wait_for("twelve control loops", LONG, |e| {
+        e.topic() == "random.live" && e.data()["loop"].as_u64().is_some_and(|n| n >= 12)
+    })
+    .await;
+    let live = c.of_topic("random.live").last().unwrap().data().clone();
+    let reference = live["reference_rms_g"].as_f64().unwrap();
+    let rms = |index: u64| {
+        live["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ch| ch["index"] == index)
+            .and_then(|ch| ch["rms"].as_f64())
+            .unwrap()
+    };
+    let monitor_db = 20.0 * (rms(4) / reference).log10();
+    let control_db = 20.0 * (rms(1) / reference).log10();
+    println!("against the reference: control {control_db:+.2} dB, monitor {monitor_db:+.2} dB");
+    assert!(control_db.abs() < 1.0, "control row {control_db:+.2} dB");
+    assert!(
+        monitor_db.abs() < 1.0,
+        "the monitor, which reads the response as the control row does, is {monitor_db:+.2} dB \
+         off the reference: the loop controlled another row"
+    );
+    c.ok("random.abort", json!({})).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended() {
     let svc = Service::with_options(options(

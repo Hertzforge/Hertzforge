@@ -1378,14 +1378,16 @@ impl KinematicMonitor {
         let mut slots = Vec::new();
         let mut slot = 0usize;
         for ch in &table.channels {
-            if !ch.enabled {
+            // A drive row is an OUTPUT: it has no place in the acquired frame, so it
+            // takes no slot and does not widen the frame. This loop used to count
+            // it, which read every input after a drive row one slot too high and
+            // walked the interleave with the wrong stride (the defect the engine's
+            // watchdog had until 2026-07-16).
+            if !ch.enabled || ch.role == ChannelRole::Drive {
                 continue;
             }
             let this_slot = slot;
             slot += 1;
-            if ch.role == ChannelRole::Drive {
-                continue; // outputs are not limit-monitored inputs
-            }
             if !ChannelLimiter::has_limit(&ch.abort) {
                 continue;
             }
@@ -1433,7 +1435,8 @@ impl KinematicMonitor {
         self.trip
     }
 
-    /// Feed one interleaved telemetry chunk (`n_enabled` samples per frame) through the
+    /// Feed one interleaved telemetry chunk (one sample per enabled INPUT per frame,
+    /// the acquired frame; drive rows take no place in it) through the
     /// tri-field check. Latches + returns the FIRST trip. During the settle window,
     /// velocity/displacement trips are suppressed; the accel axis is always live.
     pub fn feed(&mut self, interleaved: &[f64]) -> Option<AbortTrip> {
