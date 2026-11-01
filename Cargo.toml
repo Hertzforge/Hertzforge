@@ -1,26 +1,40 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "modules/*"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
-# Shared dependency versions. The controller crates are path dependencies on a
-# sibling checkout of the controller workspace (`../eigen`); only its open,
-# hardware-neutral crates are listed here. The private backend crates are never
-# depended on (crates/sds-control/tests/forbidden_deps.rs enforces it).
+# Shared dependency versions. The controller crates live in this repository under
+# `crates/eigen-*` (modules under `modules/`); nothing outside the repository is
+# referenced. The control service reaches only the controller crates on its reviewed
+# list (crates/sds-control/tests/forbidden_deps.rs enforces it).
 [workspace.dependencies]
-eigen-breakpoints = { path = "../eigen/crates/eigen-breakpoints" }
-eigen-channel-table = { path = "../eigen/crates/eigen-channel-table" }
-eigen-hal = { path = "../eigen/crates/eigen-hal" }
-eigen-hal-sim = { path = "../eigen/crates/eigen-hal-sim" }
-eigen-module-abi = { path = "../eigen/crates/eigen-module-abi" }
-eigen-random = { path = "../eigen/crates/eigen-random" }
+eigen-breakpoints = { path = "crates/eigen-breakpoints" }
+eigen-channel-table = { path = "crates/eigen-channel-table" }
+eigen-hal = { path = "crates/eigen-hal" }
+eigen-hal-sim = { path = "crates/eigen-hal-sim" }
+eigen-module-abi = { path = "crates/eigen-module-abi" }
+eigen-random = { path = "crates/eigen-random" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+# Profiles are the defaults. One setting must not be added without replacing what it
+# would break:
+#
+# `panic = "abort"` MUST NOT BE ENABLED while drive safety depends on unwinding.
+# Two module pumps put their whole tick batch under `catch_unwind` and issue
+# `Backend::emergency_stop` from the caught arm: `eigen-explorer-host/src/service.rs`
+# and `eigen-sine/src/service/mod.rs` (`run_one_batch`). `panic = "abort"` deletes the
+# unwind those handlers run on, so a panic anywhere under `run_ticks` would end the
+# process with the output task still clocked and the output module holding its last
+# sample: the one failure a stopped host cannot correct, and the reason the handlers
+# exist. Enabling it requires replacing that mechanism first (a signal or exit path
+# that can reach the device, or moving the drive off a process whose death is
+# survivable), not merely re-testing.
