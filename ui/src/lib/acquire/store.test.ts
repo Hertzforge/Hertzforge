@@ -312,3 +312,29 @@ describe('running', () => {
 		client.close();
 	});
 });
+
+describe('reconnecting', () => {
+	it('keeps unsent table edits across a drop and shows a table that moved meanwhile', async () => {
+		const server = createControlServer({ speed: 10 });
+		const storage = memoryStorage();
+		const a = await screen(server, 'A', storage);
+		await a.acq.claim();
+		a.acq.rows[0].description = 'Table top, unsent';
+		const b = await screen(server, 'B');
+		// The drop: A's connection goes; B takes the free seat and writes revision 2.
+		a.client.close();
+		await until(() => b.acq.session?.controller?.present === false);
+		await b.acq.claim();
+		b.acq.rows[0].range_max = 50;
+		expect(await b.acq.applyTable()).toBe(true);
+		await b.acq.release();
+		// A comes back on the same store: its edit is still there, and the change is shown.
+		a.client.connect();
+		await a.client.whenOpen();
+		await a.acq.sync();
+		expect(a.acq.rows[0].description).toBe('Table top, unsent');
+		expect(a.acq.tableChange?.changes).toEqual(['Channel 1: range changed.']);
+		a.client.close();
+		b.client.close();
+	});
+});

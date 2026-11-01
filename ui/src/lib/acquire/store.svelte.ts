@@ -172,7 +172,19 @@ export class AcquireState {
 	// ---- feedback ---------------------------------------------------------------------------
 	busy = $state<string | null>(null);
 	refusal = $state.raw<Refusal | null>(null);
-	note = $state.raw<Note | null>(null);
+	#note = $state.raw<Note | null>(null);
+	private noteTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** A short note about what just happened. Good news fades after a few seconds; a warning stays. */
+	get note(): Note | null {
+		return this.#note;
+	}
+
+	set note(n: Note | null) {
+		this.#note = n;
+		if (this.noteTimer) clearTimeout(this.noteTimer);
+		this.noteTimer = n && n.tone !== 'warn' ? setTimeout(() => (this.#note = null), 6000) : null;
+	}
 	/** The service does not offer these methods, or the first read failed. */
 	syncError = $state<string | null>(null);
 
@@ -366,8 +378,11 @@ export class AcquireState {
 			]);
 			this.syncError = null;
 			this.setSession(session);
-			this.onStations(stations, true);
-			this.adoptTable(table);
+			// After a reconnect, the operator's unsent station choice and table edits are kept;
+			// a table that moved meanwhile is shown as a change, never merged.
+			this.onStations(stations);
+			if (!this.server || !this.tableDirty) this.adoptTable(table);
+			else this.onTable(table);
 			this.onState(run);
 			this.log = log.entries.slice(-LOG_LIMIT);
 			this.logNext = log.next;
@@ -397,7 +412,7 @@ export class AcquireState {
 			.then((s) => {
 				const was = this.role;
 				this.setSession(s);
-				if (was === 'controller' && s.role !== 'controller') {
+				if (was === 'controller' && s.role !== 'controller' && this.lease !== null) {
 					this.setLease(null);
 					this.note = { tone: 'warn', text: 'This screen no longer holds control.' };
 				}
@@ -437,9 +452,15 @@ export class AcquireState {
 	}
 
 	async release(): Promise<void> {
-		const res = await this.act<SessionReleaseResult>('Release Control', 'session.release');
-		if (!res) return;
+		// Drop the lease first: the seat's change event can arrive before this answer, and a
+		// screen without a lease let go of control on purpose.
+		const lease = this.lease;
 		this.setLease(null);
+		const res = await this.act<SessionReleaseResult>('Release Control', 'session.release');
+		if (!res) {
+			this.setLease(lease);
+			return;
+		}
 		this.note = null;
 		await this.refreshSession();
 	}
