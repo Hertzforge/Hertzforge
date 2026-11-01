@@ -83,8 +83,8 @@ fn decimated_config_is_internally_consistent() {
     assert!((cfg.source_rate_hz() - RAW_CAPTURE_RATE_HZ).abs() < 1e-6);
 }
 
-/// Env override + per-OS default for the data root, in ONE test function: the three
-/// cases mutate the same process-wide env var, and separate `#[test]`s run on parallel
+/// Env override + per-OS default for the data root, in ONE test function: the
+/// cases mutate process-wide env vars, and separate `#[test]`s run on parallel
 /// threads, so they must be sequenced here to avoid racing.
 #[test]
 fn data_root_env_override_and_default() {
@@ -116,6 +116,23 @@ fn data_root_env_override_and_default() {
     std::env::set_var(DATA_ROOT_ENV, "");
     assert_eq!(default_data_root(), root);
     std::env::remove_var(DATA_ROOT_ENV);
+
+    // 4. Unix: `<home>` is `$HOME` when it is set, so a session with a moved home
+    //    finds its data root there. (No other test in this crate reads HOME.)
+    #[cfg(unix)]
+    {
+        let saved = std::env::var_os("HOME");
+        std::env::set_var("HOME", "/hertzforge-capture-home");
+        let moved = default_data_root();
+        match saved {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        assert_eq!(
+            moved,
+            PathBuf::from("/hertzforge-capture-home").join(DATA_ROOT_DIR_NAME)
+        );
+    }
 }
 
 #[test]
