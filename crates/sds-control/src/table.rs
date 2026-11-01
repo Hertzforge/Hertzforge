@@ -473,7 +473,7 @@ pub fn ni_binding_errors(
                 Some(c.index),
                 format!(
                     "channel {} is not bound to a physical channel; on NI hardware every \
-                     enabled channel is",
+                     enabled channel must be bound to one",
                     c.index
                 ),
             ));

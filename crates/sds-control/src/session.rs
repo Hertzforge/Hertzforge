@@ -90,12 +90,8 @@ impl Session {
         }
         let holder = self.holder().map(str::to_owned);
         let message = match &holder {
-            Some(h) => format!(
-                "{h} controls this service; claim control (session.claim) once it is released."
-            ),
-            None => {
-                "This client does not hold control; claim it with session.claim first.".to_owned()
-            }
+            Some(h) => format!("{h} controls this service; take control once it is released."),
+            None => "This screen does not hold control; take control first.".to_owned(),
         };
         Err(
             MethodError::named(ErrorCode::Refused, "not_controller", message)

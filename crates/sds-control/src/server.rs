@@ -170,7 +170,7 @@ impl Inner {
             MethodError::named(
                 ErrorCode::Refused,
                 "not_configured",
-                "Random is not configured; send random.configure first.",
+                "Random is not configured; configure a test first.",
             )
         })
     }
@@ -520,8 +520,7 @@ impl Service {
                     _ => {
                         return Err(MethodError::bad_params(
                             "devices",
-                            "Selecting NI hardware names its devices: \
-                             {\"kind\":\"ni\",\"devices\":[...]}.",
+                            "Selecting NI hardware needs at least one device.",
                         ))
                     }
                 };
@@ -557,12 +556,12 @@ impl Service {
             .ok_or_else(|| {
                 MethodError::bad_params(
                     "revision",
-                    "channels.set quotes the \"revision\" it edited, a whole number",
+                    "A table edit names the revision it was made from.",
                 )
             })?;
-        let channels = params.get("channels").ok_or_else(|| {
-            MethodError::bad_params("channels", "channels.set takes {\"revision\",\"channels\"}")
-        })?;
+        let channels = params
+            .get("channels")
+            .ok_or_else(|| MethodError::bad_params("channels", "A table edit carries its rows."))?;
         let table = table::parse_rows(channels)?;
         let dry_run = protocol::param_bool(params, "dry_run")?.unwrap_or(false);
         let mut inner = self.inner.lock().await;
@@ -604,7 +603,7 @@ impl Service {
             .get("config")
             .filter(|c| c.is_object())
             .ok_or_else(|| {
-                MethodError::bad_params("config", "random.configure takes {\"config\":{...}}")
+                MethodError::bad_params("config", "Configuring needs a test configuration.")
             })?;
         let cfg = rconfig::parse(config)?;
         let dry_run = protocol::param_bool(params, "dry_run")?.unwrap_or(false);
@@ -809,7 +808,7 @@ impl Service {
                     ErrorCode::Refused,
                     "run_active",
                     format!(
-                        "Simulation {} is running; stop it with sim.stop first.",
+                        "Simulation {} is running; stop it first.",
                         id.as_deref().unwrap_or("")
                     ),
                 )
@@ -871,7 +870,7 @@ impl Service {
         let run = self.controlled_run(conn).await?;
         let v = run.view();
         if v.state != State::Review {
-            return Err(wrong_state(&v, "random.proceed"));
+            return Err(wrong_state(&v, "Proceeding"));
         }
         run.ask(|reply| Cmd::Proceed { reply }, wait_for(&run))
             .await?;
@@ -891,7 +890,7 @@ impl Service {
             _ => {
                 return Err(MethodError::bad_params(
                     "delta_db",
-                    "random.level takes one of \"delta_db\" and \"to_db\".",
+                    "A level change gives either a step in dB or a level of the schedule.",
                 ))
             }
         };
@@ -901,12 +900,12 @@ impl Service {
             return Err(MethodError::named(
                 ErrorCode::Refused,
                 "manual_mode_required",
-                "Level changes need the manual ladder; switch with random.mode first.",
+                "Level changes need the manual ladder; switch the ladder to manual first.",
             )
             .with_detail(json!({"mode": view::mode_name(v.mode)})));
         }
         if !(v.state == State::Running && matches!(v.phase, "engaged" | "full_level")) {
-            return Err(wrong_state(&v, "random.level"));
+            return Err(wrong_state(&v, "A level change"));
         }
         let level = run
             .ask(|reply| Cmd::Level { target, reply }, wait_for(&run))
@@ -932,7 +931,7 @@ impl Service {
         let run = self.controlled_run(conn).await?;
         let v = run.view();
         if v.state == State::Finished {
-            return Err(wrong_state(&v, "random.mode"));
+            return Err(wrong_state(&v, "Changing the ladder mode"));
         }
         if v.mode != mode {
             run.ask(|reply| Cmd::Mode { mode, reply }, wait_for(&run))
@@ -1064,7 +1063,7 @@ impl Service {
                 return Err(MethodError::named(
                     ErrorCode::Refused,
                     "run_active",
-                    format!("run {} is still running; send sim.stop first", run.run_id()),
+                    format!("run {} is still running; stop it first", run.run_id()),
                 )
                 .with_detail(json!({"run_id": run.run_id()})));
             }

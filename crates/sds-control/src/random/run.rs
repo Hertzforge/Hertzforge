@@ -862,12 +862,12 @@ impl Actor {
 
     fn proceed_cmd(&mut self) -> Result<(), MethodError> {
         if self.view.state != State::Review {
-            return Err(wrong_state(&self.view, "random.proceed"));
+            return Err(wrong_state(&self.view, "Proceeding"));
         }
         let svc = self
             .svc
             .as_mut()
-            .ok_or_else(|| wrong_state(&self.view, "random.proceed"))?;
+            .ok_or_else(|| wrong_state(&self.view, "Proceeding"))?;
         svc.proceed_after_review()
             .map_err(|e| refuse("wrong_state", e.to_string()))?;
         self.shared.add_log(
@@ -885,18 +885,18 @@ impl Actor {
         if self.view.mode != RunMode::Manual {
             return Err(refuse(
                 "manual_mode_required",
-                "Level changes need the manual ladder; switch with random.mode first.",
+                "Level changes need the manual ladder; switch the ladder to manual first.",
             )
             .with_detail(json!({"mode": "auto"})));
         }
         if !driving {
-            return Err(wrong_state(&self.view, "random.level"));
+            return Err(wrong_state(&self.view, "A level change"));
         }
         let levels = self.view.levels_db.clone();
         let svc = self
             .svc
             .as_mut()
-            .ok_or_else(|| wrong_state(&self.view, "random.level"))?;
+            .ok_or_else(|| wrong_state(&self.view, "A level change"))?;
         let r =
             match target {
                 LevelTarget::Delta(d) => svc.step_level(d),
@@ -928,7 +928,7 @@ impl Actor {
 
     fn mode_cmd(&mut self, mode: RunMode) -> Result<(), MethodError> {
         match self.view.state {
-            State::Finished => Err(wrong_state(&self.view, "random.mode")),
+            State::Finished => Err(wrong_state(&self.view, "Changing the ladder mode")),
             State::Configured | State::Blocked => {
                 self.plan.config.mode = mode;
                 self.view.mode = mode;
@@ -938,7 +938,7 @@ impl Actor {
                 let svc = self
                     .svc
                     .as_mut()
-                    .ok_or_else(|| wrong_state(&self.view, "random.mode"))?;
+                    .ok_or_else(|| wrong_state(&self.view, "Changing the ladder mode"))?;
                 svc.set_run_mode(mode)
                     .map_err(|e| refuse("wrong_state", e.to_string()))?;
                 self.view.mode = mode;

@@ -334,7 +334,7 @@ function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[
 		for (const r of rows.filter((x) => x.enabled)) {
 			const where = { channel: r.index };
 			if (!r.physical) {
-				errors.push(item('channel_unbound', `channel ${r.index} is not bound to a physical channel; on NI hardware every enabled channel is`, where));
+				errors.push(item('channel_unbound', `channel ${r.index} is not bound to a physical channel; on NI hardware every enabled channel must be bound to one`, where));
 				continue;
 			}
 			const key = `${r.physical.device}/${r.physical.channel}`;
@@ -708,7 +708,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		refuse(
 			'refused',
 			'not_controller',
-			holder ? `${holder} controls this service; claim control (session.claim) once it is released.` : 'This client does not hold control; claim it with session.claim first.',
+			holder ? `${holder} controls this service; take control once it is released.` : 'This screen does not hold control; take control first.',
 			{ holder }
 		);
 	}
@@ -1272,7 +1272,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function needRun(): RandomRun {
-		if (!random) refuse('refused', 'not_configured', 'Random is not configured; send random.configure first.');
+		if (!random) refuse('refused', 'not_configured', 'Random is not configured; configure a test first.');
 		return random;
 	}
 
@@ -1281,7 +1281,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileSim() {
-		if (simRun) refuse('refused', 'run_active', `Simulation ${simRun.id} is running; stop it with sim.stop first.`, { run_id: simRun.id });
+		if (simRun) refuse('refused', 'run_active', `Simulation ${simRun.id} is running; stop it first.`, { run_id: simRun.id });
 	}
 
 	function wrongState(r: RandomRun, verb: string): never {
@@ -1376,7 +1376,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				} else if (kind === 'ni') {
 					const devices = params.devices;
 					if (!Array.isArray(devices) || devices.length === 0 || !devices.every((d) => typeof d === 'string')) {
-						refuse('bad_request', 'bad_params', 'Selecting NI hardware names its devices: {"kind":"ni","devices":[...]}.', { param: 'devices' });
+						refuse('bad_request', 'bad_params', 'Selecting NI hardware needs at least one device.', { param: 'devices' });
 					}
 					if (!niInstalled) refuse('refused', 'ni_driver_unavailable', niStation().unavailable?.message ?? 'NI-DAQmx is not installed.');
 					const found = scan.map((d) => d.id);
@@ -1398,7 +1398,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			'channels.set': (params, conn) => {
 				const p = params as unknown as ChannelsSetParams;
 				if (!Array.isArray(p.channels) || typeof p.revision !== 'number') {
-					refuse('bad_request', 'bad_params', 'channels.set takes {"revision","channels"}.', { param: Array.isArray(p.channels) ? 'revision' : 'channels' });
+					refuse('bad_request', 'bad_params', 'A table edit names the revision it was made from and carries its rows.', { param: Array.isArray(p.channels) ? 'revision' : 'channels' });
 				}
 				const report = validateTable(p.channels, selection, scan);
 				if (p.dry_run) return { revision, report };
@@ -1421,7 +1421,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 			// ---- Random -------------------------------------------------------------------------
 			'random.configure': (params, conn) => {
-				if (!isObject(params.config)) refuse('bad_request', 'bad_params', 'random.configure takes {"config":{...}}.', { param: 'config' });
+				if (!isObject(params.config)) refuse('bad_request', 'bad_params', 'Configuring needs a test configuration.', { param: 'config' });
 				const config = params.config as unknown as RandomConfig;
 				for (const key of ['profile', 'acquisition', 'schedule'] as const) {
 					if (!isObject(config[key])) refuse('bad_request', 'bad_params', `the configuration has no "${key}".`, { param: `config.${key}` });
@@ -1476,7 +1476,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			'random.proceed': (_params, conn) => {
 				own(conn);
 				const r = needRun();
-				if (r.state !== 'review') wrongState(r, 'random.proceed');
+				if (r.state !== 'review') wrongState(r, 'Proceeding');
 				addLog('note', 'the operator reviewed system identification and proceeded');
 				engage(r);
 				stateChanged();
@@ -1487,9 +1487,9 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const r = needRun();
 				const hasDelta = typeof params.delta_db === 'number' && Number.isFinite(params.delta_db);
 				const hasTo = typeof params.to_db === 'number' && Number.isFinite(params.to_db);
-				if (hasDelta === hasTo) refuse('bad_request', 'bad_params', 'random.level takes one of "delta_db" and "to_db".', { param: 'delta_db' });
-				if (r.mode !== 'manual') refuse('refused', 'manual_mode_required', 'Level changes need the manual ladder; switch with random.mode first.', { mode: r.mode });
-				if (!DRIVING.includes(r.phase)) wrongState(r, 'random.level');
+				if (hasDelta === hasTo) refuse('bad_request', 'bad_params', 'A level change gives either a step in dB or a level of the schedule.', { param: 'delta_db' });
+				if (r.mode !== 'manual') refuse('refused', 'manual_mode_required', 'Level changes need the manual ladder; switch the ladder to manual first.', { mode: r.mode });
+				if (!DRIVING.includes(r.phase)) wrongState(r, 'A level change');
 				const levels = r.config.schedule.levels.map((l) => l.db);
 				let target: number;
 				if (hasTo) {

@@ -951,7 +951,7 @@ impl WireConfig {
             r.errors.push(Item::field(
                 "n_pts_not_power_of_two",
                 "acquisition.n_pts",
-                format!("n_pts {} is not a power of two", self.n_pts),
+                format!("the FFT length {} is not a power of two", self.n_pts),
             ));
         }
         range(
@@ -1109,9 +1109,48 @@ fn range(r: &mut Report, field: &str, value: Option<f64>, ok: impl Fn(f64) -> bo
             r.errors.push(Item::field(
                 "out_of_range",
                 field,
-                format!("{field} is {v}; {text}"),
+                format!("{} is {}; {text}", field_words(field), num(v)),
             ));
         }
+    }
+}
+
+/// A configuration field in words, for a message a person reads.
+pub fn field_words(field: &str) -> String {
+    let last = field.rsplit('.').next().unwrap_or(field);
+    let words = match last {
+        "fs_hz" => "The sample rate",
+        "n_pts" => "The FFT length",
+        "n_avg" => "The averages per loop",
+        "full_level_s" => "The time at full level",
+        "dwell_s" => "The dwell",
+        "db" => "The level",
+        "damping" => "Damping",
+        "coherence_floor" => "The coherence floor",
+        "drive_ceiling_vrms" => "The drive ceiling",
+        "drive_abort_vrms" => "The drive abort",
+        "max_loops_out" => "The diverging loops before an abort",
+        "max_lines_out" => "The lines out before an abort",
+        "control_dof" => "The control degrees of freedom",
+        "sysid_level_db" => "The identification level",
+        "max_sigma" => "The drive clip",
+        "averages" => "The identification averages",
+        "max_vrms" => "The identification drive ceiling",
+        "min_vrms" => "The identification drive floor",
+        "soft_start_db" => "The soft start depth",
+        "soft_start_relax_db" => "The soft start band widening",
+        "level_ramp_s" => "The level ramp",
+        "shutdown_ramp_s" => "The shutdown ramp",
+        "freq_hz" => "The frequency",
+        "ceiling" => "The ceiling",
+        other => return other.replace('_', " "),
+    };
+    let level = field
+        .strip_prefix("schedule.levels.")
+        .and_then(|rest| rest.split('.').next());
+    match level {
+        Some(n) => format!("{words} of level {n}"),
+        None => words.to_owned(),
     }
 }
 
@@ -1347,6 +1386,7 @@ mod tests {
             damping.at,
             crate::table::At::Field("control.damping".into())
         );
+        assert_eq!(damping.message, "Damping is 11; it runs from 0 to 10");
 
         let mut t = table_with_monitor();
         t.channels[0].role = ChannelRole::Monitor;
