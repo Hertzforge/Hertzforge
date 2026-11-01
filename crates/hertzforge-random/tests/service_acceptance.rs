@@ -1318,3 +1318,59 @@ fn acceptance_n_soft_start_walks_up_with_relaxed_enforcement() {
         "soft start never reached the start level (at {prev})"
     );
 }
+
+/// `commanded_level_db` is the level last commanded, not the level the ramp has
+/// walked to: after a ramped manual step the walking level lags the command until
+/// the ramp arrives, and then the two agree.
+///
+/// RED-MUTATION: return `schedule_level_db` from `commanded_level_db` and the
+/// first assertion after the step reds.
+#[test]
+fn the_commanded_level_leads_the_walking_level_through_a_ramp() {
+    let plant = demo_plant();
+    let table = siso_table(500.0);
+    let mut cfg = RandomTestConfig::siso(demo_profile(), 1);
+    cfg.schedule = LevelSchedule {
+        mode: RunMode::Manual,
+        start_db: -12.0,
+        table_db: vec![-12.0, -6.0, 0.0],
+        dwell_s: vec![1.0],
+    };
+    cfg.drive_ceiling_vrms = 1_000.0;
+    cfg.abort_db = (24.0, 24.0);
+    cfg.soft_start_db = 0.0;
+    // A ramp several segments long, so the walk is observable between ticks.
+    cfg.level_ramp_s = 4.0 * plant.cfg.segment_seconds();
+
+    let mut svc = build_service(
+        cfg,
+        table,
+        plant,
+        Some(std::env::temp_dir().join("hertzforge-commanded-level")),
+    )
+    .expect("service builds");
+    svc.assess_feasibility().expect("feasibility");
+    svc.arm().expect("arm");
+    svc.run_sysid(3).expect("sysid");
+    assert!(svc.coherence_gate().expect("gate"));
+    svc.loop_tick().expect("tick");
+    assert!((svc.commanded_level_db() - (-12.0)).abs() < 1e-9);
+
+    svc.step_level(6.0).expect("step to -6");
+    assert!(
+        (svc.commanded_level_db() - (-6.0)).abs() < 1e-9,
+        "the command is -6 dB at once, got {}",
+        svc.commanded_level_db()
+    );
+    svc.loop_tick().expect("tick");
+    assert!(
+        svc.schedule_level_db() < -6.0 + 1e-6,
+        "the walk has not arrived after one tick: {}",
+        svc.schedule_level_db()
+    );
+    for _ in 0..12 {
+        svc.loop_tick().expect("tick");
+    }
+    assert!((svc.schedule_level_db() - (-6.0)).abs() < 1e-9);
+    assert!((svc.commanded_level_db() - (-6.0)).abs() < 1e-9);
+}

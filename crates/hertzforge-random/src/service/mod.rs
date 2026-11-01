@@ -545,6 +545,12 @@ impl RandomService {
     pub fn schedule_level_db(&self) -> f64 {
         self.schedule_level_db
     }
+    /// The level the operator or the ladder last COMMANDED, dB. While a level ramp
+    /// is in flight [`Self::schedule_level_db`] walks toward this; once it arrives
+    /// the two are equal. A controlled stop's ramp-down target is reported here too.
+    pub fn commanded_level_db(&self) -> f64 {
+        self.level_target_db
+    }
     /// The in-band gRMS of the FULL (0 dB) shaped target.
     pub fn full_target_grms(&self) -> f64 {
         Self::inband_rms(&self.full_target, self.band, self.df_hz)
