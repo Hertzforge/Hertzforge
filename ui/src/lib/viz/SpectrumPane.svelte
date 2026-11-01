@@ -273,11 +273,12 @@
 		const [xs, ...cols] = alignSeries(view.series, logX, logY);
 		const next = nextYRange(cols);
 		const plotData = [xs, ...drawOrder.map((o) => cols[o.index])] as uPlot.AlignedData;
+		// Without its scale reset, setData only swaps the data and draws nothing; setting the y range
+		// (held for live data, or moved) is what draws it. `redraw()` is not used: before the first
+		// draw it would set the x range from a scale not yet computed.
 		plot.setData(plotData, false);
-		if (!yRange || next[0] !== yRange[0] || next[1] !== yRange[1]) {
-			yRange = next;
-			plot.setScale('y', { min: next[0], max: next[1] });
-		}
+		yRange = next;
+		plot.setScale('y', { min: next[0], max: next[1] });
 	}
 
 	function destroyPlot() {
