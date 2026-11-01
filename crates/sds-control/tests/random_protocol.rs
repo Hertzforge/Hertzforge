@@ -1225,3 +1225,249 @@ fn the_service_refuses_a_non_loopback_host_at_startup() {
         assert!(sds_control::server::check_loopback(host).is_ok(), "{host}");
     }
 }
+
+/// The ids of a `random.data` frame's plots.
+fn plot_ids(e: &support::Event) -> Vec<String> {
+    e.data()["plots"].as_array().map_or_else(Vec::new, |p| {
+        p.iter()
+            .map(|x| x["id"].as_str().unwrap_or("").to_owned())
+            .collect()
+    })
+}
+
+/// Frames per second of `frames` while the run was running.
+fn rate_of(frames: &[&support::Event]) -> f64 {
+    let running: Vec<&&support::Event> = frames
+        .iter()
+        .filter(|e| e.data()["state"] == "running")
+        .collect();
+    assert!(running.len() >= 4, "{} running frames", running.len());
+    let span = running
+        .last()
+        .unwrap()
+        .at
+        .duration_since(running[0].at)
+        .as_secs_f64();
+    (running.len() - 1) as f64 / span
+}
+
+/// Live data subscriptions (schema/PROTOCOL.md, "Live Data Subscriptions"): a
+/// controller and an observer each subscribe to their own plots and receive only
+/// those, at their own rates, and no `random.live`; a third screen that never
+/// subscribed still receives `random.live`, with the level fields; a plot is added
+/// and removed mid-run without disturbing the run; a screen that subscribes after
+/// the run ended gets its data at once; and `{"default": true}` returns a screen to
+/// `random.live`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_screen_receives_only_the_plots_it_subscribed_to() {
+    let schema = Schema::load();
+    let svc = Service::with_options(options(
+        no_driver(),
+        2.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let mut o = Client::connect(addr).await;
+    let mut d = Client::connect(addr).await;
+
+    // Subscribing only reads: an observer may, before anything is configured.
+    let sub = o
+        .ok(
+            "random.subscribe",
+            json!({"rate_hz": 10, "plots": [
+                {"id": "o-time", "quantity": "time", "channels": [3, 99], "points": 256}
+            ]}),
+        )
+        .await;
+    schema.assert_valid(&sub, Some("randomSubscribeResult"));
+    assert_eq!(sub["default"], false);
+    assert_eq!(sub["plots"][0]["channels"], json!([3, 99]));
+    assert_eq!(sub["quantities"].as_array().unwrap().len(), 6);
+    // Refusals name the field; a refused call leaves the subscription in place.
+    let e = o
+        .refused(
+            "random.subscribe",
+            json!({"plots": [{"id": "x", "quantity": "drive", "channels": [1]}]}),
+        )
+        .await;
+    assert_eq!(e["reason"], "bad_params");
+    assert_eq!(e["detail"]["param"], "plots[0].channels");
+    let e = o
+        .refused("random.subscribe", json!({"rate_hz": 20, "plots": []}))
+        .await;
+    assert_eq!(e["detail"]["param"], "rate_hz");
+
+    // The controller: a monitor row, limited, and three plots of its own.
+    c.ok("session.claim", json!({"name": "Shell"})).await;
+    c.ok("station.select", json!({"kind": "sim"})).await;
+    let t = c.ok("channels.get", json!({})).await;
+    let mut rows = t["channels"].as_array().unwrap().clone();
+    rows.push(row(3, "monitor", "g", Value::Null));
+    c.ok(
+        "channels.set",
+        json!({"revision": t["revision"], "channels": rows}),
+    )
+    .await;
+    let mut config = sim_config("auto", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 2.0);
+    config["limits"] = json!([{"channel": 3, "kind": "response",
+        "rows": [{"freq_hz": 100, "ceiling": 10}, {"freq_hz": 1000, "ceiling": 10}]}]);
+    c.ok("random.configure", json!({ "config": config })).await;
+    let sub = c
+        .ok(
+            "random.subscribe",
+            json!({"plots": [
+                {"id": "c-ctl", "quantity": "control"},
+                {"id": "c-lim", "quantity": "response", "channels": "limited"},
+                {"id": "c-coh", "quantity": "coherence"}
+            ]}),
+        )
+        .await;
+    assert_eq!(sub["rate_hz"], 5, "the default rate");
+    c.ok("random.start", json!({})).await;
+    let finished =
+        |e: &support::Event, topic: &str| e.topic() == topic && e.data()["state"] == "finished";
+    tokio::join!(
+        c.wait_for("the controller's final data", LONG, |e| finished(
+            e,
+            "random.data"
+        )),
+        o.wait_for("the observer's final data", LONG, |e| finished(
+            e,
+            "random.data"
+        )),
+        d.wait_for("the final live frame", LONG, |e| finished(e, "random.live")),
+    );
+
+    // The controller: its own three plots, never `random.live`.
+    assert!(
+        c.of_topic("random.live").is_empty(),
+        "a subscribed screen gets no random.live"
+    );
+    let frames = c.of_topic("random.data");
+    assert!(frames.len() >= 4, "{} frames", frames.len());
+    let mut limited = 0;
+    let mut coherent = 0;
+    for e in &frames {
+        schema.assert_valid(&e.msg, None);
+        schema.assert_valid(e.data(), Some("randomData"));
+        assert_eq!(plot_ids(e), ["c-ctl", "c-lim", "c-coh"]);
+        let plots = e.data()["plots"].as_array().unwrap();
+        assert_eq!(plots[0]["views"][0]["title"], "Control");
+        assert_eq!(plots[1]["channels"], json!([3]), "the limited row only");
+        let dec = e.decoded.as_ref().unwrap();
+        let series = plots[1]["views"][0]["series"].as_array().unwrap();
+        if e.data()["loop"].as_u64().unwrap() > 0 {
+            let roles: Vec<&str> = series.iter().map(|s| s["role"].as_str().unwrap()).collect();
+            assert_eq!(roles, ["measured", "limit"], "{roles:?}");
+            let x = dec.array(&series[1]["x"]).unwrap().to_f64();
+            assert!(!x.is_empty() && x[0] >= 100.0 && *x.last().unwrap() <= 1000.0);
+            assert_eq!(
+                dec.array(&series[1]["edges"]).unwrap().to_f64().len(),
+                x.len() + 1
+            );
+            assert!(dec
+                .array(&series[1]["y"])
+                .unwrap()
+                .to_f64()
+                .iter()
+                .all(|y| (y - 10.0).abs() < 1e-9));
+            limited += 1;
+        }
+        if let Some(s) = plots[2]["views"][0]["series"].as_array().unwrap().first() {
+            let y = dec.array(&s["y"]).unwrap().to_f64();
+            assert_eq!(
+                y.len() as u64,
+                e.data()["lines"]["in_band"].as_u64().unwrap()
+            );
+            assert!(y.iter().all(|v| (0.0..=1.0 + 1e-9).contains(v)));
+            coherent += 1;
+        }
+    }
+    assert!(limited >= 2, "{limited} frames carried the limit");
+    assert!(coherent >= 2, "{coherent} frames carried the coherence");
+
+    // The observer: its own plot, its channel 3 only (99 is not in the run).
+    assert!(o.of_topic("random.live").is_empty());
+    let oframes = o.of_topic("random.data");
+    for e in &oframes {
+        schema.assert_valid(e.data(), Some("randomData"));
+        assert_eq!(plot_ids(e), ["o-time"]);
+        let plot = &e.data()["plots"][0];
+        assert_eq!(plot["channels"], json!([3]));
+        if let Some(s) = plot["views"][0]["series"].as_array().unwrap().first() {
+            let t = e.decoded.as_ref().unwrap().array(&s["x"]).unwrap().to_f64();
+            assert!(t.len() <= 256 && t.len() >= 2, "{} points", t.len());
+            // From the start of the loop's segment: the first interval's peak.
+            assert!((0.0..0.004).contains(&t[0]), "starts at {}", t[0]);
+            assert!(t.windows(2).all(|w| w[1] > w[0]));
+        }
+    }
+    // Each at its own rate: about 10 and about 5 frames a second.
+    let (ro, rc) = (rate_of(&oframes), rate_of(&frames));
+    assert!((5.0..=12.0).contains(&ro), "observer at {ro:.1} frames/s");
+    assert!((2.5..=6.5).contains(&rc), "controller at {rc:.1} frames/s");
+    assert!(ro / rc > 1.4, "10 Hz against 5 Hz: {ro:.1} against {rc:.1}");
+
+    // The screen that never subscribed: `random.live`, with the level fields.
+    assert!(d.of_topic("random.data").is_empty());
+    let golden = golden_live();
+    let live = d.of_topic("random.live");
+    for e in &live {
+        schema.assert_valid(e.data(), Some("randomLive"));
+        assert_eq!(keys(e.data()), keys(&golden["data"]));
+    }
+    assert!(live.iter().any(|e| e.data()["level_s"].is_number()
+        && e.data()["commanded_db"].is_number()
+        && e.data()["control_error_db"].is_number()));
+    assert!(
+        (3.0..=6.5).contains(&rate_of(&live)),
+        "random.live at {:.1}/s",
+        rate_of(&live)
+    );
+
+    // A screen that subscribes after the run ended gets its data at once.
+    let mut late = Client::connect(addr).await;
+    late.ok(
+        "random.subscribe",
+        json!({"plots": [{"id": "late", "quantity": "readings"}]}),
+    )
+    .await;
+    late.wait_for("the data at once", Duration::from_secs(2), |e| {
+        e.topic() == "random.data" && e.data()["state"] == "finished"
+    })
+    .await;
+    assert_eq!(
+        late.of_topic("random.data")[0].data()["plots"][0]["views"][0]["view"],
+        "reading"
+    );
+
+    // Back to the default: from the answer on, `random.live` and no `random.data`.
+    let back = o.ok("random.subscribe", json!({"default": true})).await;
+    schema.assert_valid(&back, Some("randomSubscribeResult"));
+    assert_eq!(back["plots"], Value::Null);
+    let from = o.events.len();
+    c.ok("random.reset", json!({})).await;
+    c.ok("random.start", json!({})).await;
+    o.wait_for("random.live again", LONG, |e| e.topic() == "random.live")
+        .await;
+    // Mid-run, the controller drops two plots and adds the drive; the run goes on.
+    c.wait_phase("engaged", LONG).await;
+    c.ok(
+        "random.subscribe",
+        json!({"plots": [{"id": "c-ctl", "quantity": "control"}, {"id": "c-drive", "quantity": "drive"}]}),
+    )
+    .await;
+    c.wait_for("the new plots", LONG, |e| {
+        e.topic() == "random.data" && plot_ids(e) == ["c-ctl", "c-drive"]
+    })
+    .await;
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    o.wait_state("finished", LONG).await;
+    assert!(
+        o.events[from..].iter().all(|e| e.topic() != "random.data"),
+        "no random.data after returning to the default"
+    );
+}

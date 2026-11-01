@@ -12,11 +12,12 @@ from sds_analysis import frames
 
 from .conftest import GOLDEN
 
-BINARY = ('response_spectrum', 'event_shape', 'event_random_live')
+BINARY = ('response_spectrum', 'event_shape', 'event_random_live', 'event_random_data')
 #: Binary goldens whose arrays are named a0, a1, ... in traversal order
-TRAVERSAL_NAMED = ('response_spectrum', 'event_random_live')
+TRAVERSAL_NAMED = ('response_spectrum', 'event_random_live', 'event_random_data')
 #: Text goldens of the hardware and Random control messages
 CONTROL_TEXT = ('request_random_configure', 'response_random_configure',
+                'request_random_subscribe', 'response_random_subscribe',
                 'response_station_list', 'response_channels_get', 'event_random_state',
                 'event_session_changed', 'response_error_controller_held',
                 'response_error_table_invalid')
@@ -121,6 +122,23 @@ def test_random_live_decodes_to_stepped_series_on_shared_lines():
         assert np.array_equal(series['x'], lines)
         assert series['edges'].shape == (len(lines) + 1,)
         assert series['x'].dtype == np.float64
+
+
+def test_random_data_carries_each_plot_with_its_own_views():
+    message = frames.decode((GOLDEN / 'event_random_data.bin').read_bytes())
+    data = message['data']
+    assert 'views' not in data
+    assert [p['id'] for p in data['plots']] == ['ctl', 'lim', 't1']
+    ctl, lim, t1 = data['plots']
+    assert ctl['channels'] is None and len(ctl['views']) == 1
+    assert lim['channels'] == [1, 2] and len(lim['views']) == 2
+    measured, limit = lim['views'][1]['series']
+    assert limit['role'] == 'limit' and limit['shape'] == 'steps'
+    assert limit['edges'].shape == (len(limit['x']) + 1,)
+    # the limit spans its own lines' bins, the same edges the measured line has there
+    assert np.array_equal(limit['edges'], measured['edges'][1:4])
+    series = t1['views'][0]['series'][0]
+    assert t1['views'][0]['x']['scale'] == 'linear' and 'shape' not in series
 
 
 def test_header_padding_and_alignment():

@@ -154,6 +154,27 @@ impl Schema {
                         }
                     }
                 }
+                "maxItems" => {
+                    if let Value::Array(a) = inst {
+                        if (a.len() as u64) > v.as_u64().unwrap() {
+                            errs.push(format!("{path}: more than {v} items"));
+                        }
+                    }
+                }
+                "maxLength" => {
+                    if let Value::String(t) = inst {
+                        if (t.chars().count() as u64) > v.as_u64().unwrap() {
+                            errs.push(format!("{path}: longer than {v}"));
+                        }
+                    }
+                }
+                "maximum" => {
+                    if let Some(x) = inst.as_f64() {
+                        if x > v.as_f64().unwrap() {
+                            errs.push(format!("{path}: {x} above {v}"));
+                        }
+                    }
+                }
                 "minLength" => {
                     if let Value::String(t) = inst {
                         if (t.chars().count() as u64) < v.as_u64().unwrap() {

@@ -19,7 +19,7 @@
 
 use super::backend::{Interruptible, ABORT, STOP};
 use super::config::{check_grid, Grid, WireConfig};
-use super::view::{Alarm, End, LiveChannel, RunView, State, StationRef};
+use super::view::{Alarm, End, Inputs, LimitLines, LiveChannel, RunView, State, StationRef};
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name, Report};
@@ -542,6 +542,7 @@ impl Actor {
             return Err(arm_refused(&item.message));
         }
         self.view.lines = Some(Arc::new(super::view::lines_on(svc.loop_config(), cfg)));
+        self.view.limits = Arc::new(limit_lines(svc.loop_config(), cfg));
         self.view.grid = grid.clone();
         self.view.clock = Some("shared");
         self.view.station = StationRef {
@@ -645,6 +646,12 @@ impl Actor {
             // aborts as a control loop): end on the trip, as a loop would.
             self.finish_from_controller();
             return;
+        }
+        if let Some(svc) = self.svc.as_ref() {
+            let (lo, hi) = svc.loop_config().band_bins();
+            let curve = svc.coherence_curve();
+            self.view.coherence =
+                (curve.len() >= hi && lo < hi).then(|| Arc::new(curve[lo..hi].to_vec()));
         }
         self.set(State::Running, "coherence_gate");
         self.publish();
@@ -825,6 +832,18 @@ impl Actor {
         } else {
             None
         };
+        // The time the schedule holds this level: what is left plus what is done
+        // (the dwell, or the full level time), in auto only.
+        self.view.level_s = match (driving, st.remaining_at_level_s) {
+            (true, Some(left)) if st.state == RunState::FullLevel => Some(
+                self.plan
+                    .config
+                    .full_level_s
+                    .max(left + st.elapsed_at_level_s),
+            ),
+            (true, Some(left)) => Some(left + st.elapsed_at_level_s),
+            _ => None,
+        };
         self.view.reference_rms_g = Some(st.target_grms);
         self.view.control_rms_g = st.measured_grms;
         if self.view.state == State::Running {
@@ -880,22 +899,36 @@ impl Actor {
             .filter(|c| c.enabled && c.role != ChannelRole::Drive)
             .map(|c| c.index)
             .collect();
+        // Every input's PSD on the band's lines and its samples, kept for the
+        // screens that plot them (schema/PROTOCOL.md, "Live Data Subscriptions").
+        let mut data = Inputs {
+            psd: Vec::with_capacity(self.view.channels.len()),
+            time: Vec::with_capacity(self.view.channels.len()),
+            fs_hz: segment.map_or(svc.loop_fs_hz(), |(_, _, fs)| fs),
+        };
         for ch in self.view.channels.iter_mut() {
             ch.overload = st
                 .overload_latches
                 .iter()
                 .any(|(i, latched)| *i == ch.index && *latched);
+            let samples: Option<Vec<f32>> =
+                match (segment, inputs.iter().position(|i| *i == ch.index)) {
+                    (Some((samples, n_ch, _)), Some(slot)) => Some(
+                        samples
+                            .iter()
+                            .skip(slot)
+                            .step_by(n_ch.max(1))
+                            .copied()
+                            .collect(),
+                    ),
+                    _ => None,
+                };
+            let mut psd_band = None;
             if let Some(pos) = controls.iter().position(|i| *i == ch.index) {
                 ch.rms = rep.final_per_channel_psds.get(pos).map(|l| rms_of(&l.psd));
-            } else if let (Some((samples, n_ch, fs)), Some(slot)) =
-                (segment, inputs.iter().position(|i| *i == ch.index))
-            {
-                let signal: Vec<f64> = samples
-                    .iter()
-                    .skip(slot)
-                    .step_by(n_ch.max(1))
-                    .map(|x| f64::from(*x))
-                    .collect();
+                psd_band = rep.final_per_channel_psds.get(pos).map(|l| band(&l.psd));
+            } else if let (Some(signal), Some((_, _, fs))) = (samples.as_ref(), segment) {
+                let signal: Vec<f64> = signal.iter().map(|x| f64::from(*x)).collect();
                 let (_, psd) = hertzforge_dsp::spectrum::psd_welch(
                     &signal,
                     fs,
@@ -903,8 +936,12 @@ impl Actor {
                     loop_cfg.overlap,
                 );
                 ch.rms = (!psd.is_empty()).then(|| rms_of(&psd));
+                psd_band = (!psd.is_empty()).then(|| band(&psd));
             }
+            data.psd.push(psd_band);
+            data.time.push(samples.unwrap_or_default());
         }
+        self.view.inputs = Some(Arc::new(data));
         let mut alarms = Vec::new();
         if st.alarm_active && rep.final_alarm_lines > 0 {
             let worst = svc.log().events().iter().rev().find_map(|e| match e.kind {
@@ -1365,6 +1402,28 @@ fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, 
         m.insert("at_loop".into(), Value::from(t.at_loop));
     }
     (facts, message)
+}
+
+/// Each limited channel's ceiling on the band's lines of `loop_cfg`, on the lines
+/// its rows cover: the controller's own construction (`ceiling_on_grid`).
+pub fn limit_lines(loop_cfg: &hertzforge_random::LoopConfig, cfg: &WireConfig) -> Vec<LimitLines> {
+    let (lo, hi) = loop_cfg.band_bins();
+    let df = loop_cfg.df();
+    cfg.limits
+        .iter()
+        .map(|l| {
+            let ceiling = super::config::ceiling_on_grid(&l.rows, loop_cfg.nbins(), df);
+            let (freqs, ceiling): (Vec<f64>, Vec<f64>) = (lo..hi.min(ceiling.len()))
+                .filter(|k| ceiling[*k].is_finite())
+                .map(|k| (k as f64 * df, ceiling[k]))
+                .unzip();
+            LimitLines {
+                channel: l.channel,
+                freqs,
+                ceiling,
+            }
+        })
+        .collect()
 }
 
 /// The enabled inputs, in table order.

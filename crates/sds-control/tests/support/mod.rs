@@ -22,6 +22,8 @@ pub type Ws =
 pub struct Event {
     pub msg: Value,
     pub decoded: Option<Decoded>,
+    /// When it was read.
+    pub at: Instant,
 }
 
 impl Event {
@@ -106,6 +108,7 @@ impl Client {
                     self.events.push(Event {
                         msg: v.clone(),
                         decoded: None,
+                        at: Instant::now(),
                     });
                 }
                 Some(v)
@@ -117,6 +120,7 @@ impl Client {
                 self.events.push(Event {
                     msg: v.clone(),
                     decoded: Some(decoded),
+                    at: Instant::now(),
                 });
                 Some(v)
             }

@@ -18,6 +18,8 @@ from .conftest import GOLDEN
 #: golden -> (path to its payload, the schema definition the payload follows)
 PAYLOADS = {
     'request_random_configure': ('params', 'randomConfigureParams'),
+    'request_random_subscribe': ('params', 'randomSubscribeParams'),
+    'response_random_subscribe': ('result', 'randomSubscribeResult'),
     'response_random_configure': ('result', 'randomConfigureResult'),
     'response_station_list': ('result', 'stationList'),
     'response_channels_get': ('result', 'channelTable'),
@@ -63,6 +65,47 @@ def test_random_live_validates(validate):
     validate(wire)
     validate(wire['data'], 'randomLive')
     validate(wire['data']['views'], 'views')
+
+
+def _data():
+    wire, _ = frames.to_wire(frames.decode((GOLDEN / 'event_random_data.bin').read_bytes()))
+    return wire
+
+
+def test_random_data_validates(validate):
+    wire = _data()
+    validate(wire)
+    validate(wire['data'], 'randomData')
+    for plot in wire['data']['plots']:
+        validate(plot, 'dataPlot')
+
+
+def test_live_and_data_frames_share_every_field_but_views_and_plots(validate):
+    live = _live_data()['data']
+    data = _data()['data']
+    assert [k for k in live if k != 'views'] == [k for k in data if k != 'plots']
+    _refused(validate, {**data, 'views': live['views']}, 'randomData')
+    level = {k: live[k] for k in ('level_db', 'commanded_db', 'level_s', 'control_error_db')}
+    assert level == {'level_db': 0, 'commanded_db': 0, 'level_s': 300, 'control_error_db': -0.06}
+
+
+def test_a_subscription_is_the_default_or_a_list_of_plots(validate):
+    validate({'default': True}, 'randomSubscribeParams')
+    validate({'plots': []}, 'randomSubscribeParams')
+    _refused(validate, {}, 'randomSubscribeParams')
+    _refused(validate, {'default': True, 'plots': []}, 'randomSubscribeParams')
+    _refused(validate, {'plots': [], 'rate_hz': 11}, 'randomSubscribeParams')
+    _refused(validate, {'plots': [{'id': 'a', 'quantity': 'control', 'channels': [1]}]},
+             'randomSubscribeParams')
+    _refused(validate, {'plots': [{'id': 'a', 'quantity': 'response', 'points': 100}]},
+             'randomSubscribeParams')
+    _refused(validate, {'plots': [{'id': 'a', 'quantity': 'time', 'points': 10}]},
+             'randomSubscribeParams')
+    _refused(validate, {'plots': [{'id': 'a', 'quantity': 'nonsense'}]}, 'randomSubscribeParams')
+    validate({'default': True, 'rate_hz': 5, 'plots': None,
+              'quantities': ['control']}, 'randomSubscribeResult')
+    _refused(validate, {'default': True, 'rate_hz': 5, 'plots': [],
+                        'quantities': ['control']}, 'randomSubscribeResult')
 
 
 def test_every_refusal_carries_a_listed_reason(validate):

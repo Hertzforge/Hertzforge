@@ -112,9 +112,10 @@ def _random_live_build() -> tuple[dict, dict]:
         'data': {
             'run_id': 'r-0007', 'source': 'HARDWARE', 'class': 'ni_real',
             'state': 'running', 'phase': 'full_level', 'mode': 'auto',
-            'elapsed_s': 63.5, 'level_db': 0, 'at_level_s': 12.5,
-            'remaining_at_level_s': 287.5, 'loop': 118,
-            'control_rms_g': 6.02, 'reference_rms_g': 6.06, 'drive_rms_v': 0.412,
+            'elapsed_s': 63.5, 'level_db': 0, 'commanded_db': 0, 'at_level_s': 12.5,
+            'remaining_at_level_s': 287.5, 'level_s': 300, 'loop': 118,
+            'control_rms_g': 6.02, 'reference_rms_g': 6.06, 'control_error_db': -0.06,
+            'drive_rms_v': 0.412,
             'lines': {'in_band': 317, 'alarm': 2, 'abort': 0},
             'channels': [
                 {'index': 1, 'description': 'Control', 'role': 'control', 'rms': 6.02,
@@ -131,6 +132,89 @@ def _random_live_build() -> tuple[dict, dict]:
 
 def random_live() -> dict:
     return _random_live_build()[0]
+
+
+#: Two channels' PSDs on the four lines; channel 2 is limited on the middle two
+DATA_CH1 = [0.0398, 0.0402, 0.0411, 0.0389]
+DATA_CH2 = [0.051, 0.062, 0.0705, 0.048]
+DATA_LIMIT_LINES = [106.25, 112.5]
+DATA_LIMIT_EDGES = [103.125, 109.375, 115.625]
+DATA_LIMIT = [0.06, 0.06]
+#: The last loop's samples of channel 1 at 8192 Hz (every value exact in binary)
+DATA_TIME_X = [0.0, 0.0001220703125, 0.000244140625, 0.0003662109375]
+DATA_TIME_Y = [0.5, -1.25, 2.0, -0.75]
+
+
+def _series(arrays: dict, name: str, role: str, x: list, y: list, edges=None) -> dict:
+    """A series, its arrays named in traversal order; stepped when given edges."""
+    refs = []
+    for data in (x, y) + ((edges,) if edges is not None else ()):
+        ident = f'a{len(arrays)}'
+        arrays[ident] = ('f64', [len(data)], data)
+        refs.append({'$array': ident})
+    series = {'name': name, 'role': role, 'x': refs[0], 'y': refs[1]}
+    if edges is not None:
+        series.update({'shape': 'steps', 'edges': refs[2]})
+    return series
+
+
+def _random_data_build() -> tuple[dict, dict]:
+    """`random.data` for a subscription of a control plot, a response plot over
+    channels 1 and 2 (channel 2 limited) and a time plot of channel 1: what the
+    service's own builder gives for that run (the Rust golden test builds it so)."""
+    arrays: dict = {}
+    freq = {'label': 'Frequency', 'unit': 'Hz', 'scale': 'log'}
+    psd = {'label': 'PSD', 'unit': 'g²/Hz', 'scale': 'log'}
+    control = {'view': 'spectrum', 'title': 'Control', 'x': freq, 'y': psd,
+               'series': [_stepped_series(arrays, *s) for s in LIVE_SERIES],
+               'link': 'frequency'}
+    ch1 = {'view': 'spectrum', 'title': 'Channel 1: Control', 'x': freq, 'y': psd,
+           'series': [_series(arrays, 'Channel 1', 'measured', LIVE_LINES, DATA_CH1,
+                              LIVE_EDGES)],
+           'link': 'frequency'}
+    ch2 = {'view': 'spectrum', 'title': 'Channel 2: Fixture corner', 'x': freq, 'y': psd,
+           'series': [_series(arrays, 'Channel 2', 'measured', LIVE_LINES, DATA_CH2,
+                              LIVE_EDGES),
+                      _series(arrays, 'Limit', 'limit', DATA_LIMIT_LINES, DATA_LIMIT,
+                              DATA_LIMIT_EDGES)],
+           'link': 'frequency'}
+    time = {'view': 'spectrum', 'title': 'Channel 1: Control',
+            'x': {'label': 'Time', 'unit': 's', 'scale': 'linear'},
+            'y': {'label': 'Amplitude', 'unit': 'g', 'scale': 'linear'},
+            'series': [_series(arrays, 'Channel 1', 'measured', DATA_TIME_X, DATA_TIME_Y)]}
+    message = {
+        'type': 'event', 'topic': 'random.data', 'seq': 319,
+        'data': {
+            'run_id': 'r-0007', 'source': 'HARDWARE', 'class': 'ni_real',
+            'state': 'running', 'phase': 'full_level', 'mode': 'auto',
+            'elapsed_s': 63.5, 'level_db': 0, 'commanded_db': 0, 'at_level_s': 12.5,
+            'remaining_at_level_s': 287.5, 'level_s': 300, 'loop': 118,
+            'control_rms_g': 6.02, 'reference_rms_g': 6.06, 'control_error_db': -0.06,
+            'drive_rms_v': 0.412,
+            'lines': {'in_band': 4, 'alarm': 1, 'abort': 0},
+            'channels': [
+                {'index': 1, 'description': 'Control', 'role': 'control', 'rms': 6.02,
+                 'unit': 'g', 'overload': False},
+                {'index': 2, 'description': 'Fixture corner', 'role': 'monitor', 'rms': 7.35,
+                 'unit': 'g', 'overload': False},
+            ],
+            'alarms': [{'kind': 'envelope', 'lines': 1, 'worst_db': 3.4}],
+            'plots': [
+                {'id': 'ctl', 'quantity': 'control', 'channels': None, 'views': [control]},
+                {'id': 'lim', 'quantity': 'response', 'channels': [1, 2], 'views': [ch1, ch2]},
+                {'id': 't1', 'quantity': 'time', 'channels': [1], 'views': [time]},
+            ],
+        },
+    }
+    return message, arrays
+
+
+def random_data() -> dict:
+    return _random_data_build()[0]
+
+
+def random_data_arrays() -> dict:
+    return _random_data_build()[1]
 
 
 def random_live_arrays() -> dict:
@@ -205,7 +289,27 @@ ABORTED_STATE = {
                      'at_level_db': 0, 'at_loop': 212}},
 }
 
+SUBSCRIBE_PLOTS = [
+    {'id': 'ctl', 'quantity': 'control'},
+    {'id': 'lim', 'quantity': 'response', 'channels': 'limited'},
+    {'id': 't2', 'quantity': 'time', 'channels': [2, 3], 'points': 1024},
+]
+
 TEXT_GOLDENS = {
+    'request_random_subscribe': {
+        'type': 'request', 'id': 21, 'method': 'random.subscribe',
+        'params': {'rate_hz': 5, 'plots': [
+            {'id': 'ctl', 'quantity': 'control'},
+            {'id': 'lim', 'quantity': 'response', 'channels': 'limited'},
+            {'id': 't2', 'quantity': 'time', 'channels': [2, 3]},
+        ]},
+    },
+    'response_random_subscribe': {
+        'type': 'response', 'id': 21,
+        'result': {'default': False, 'rate_hz': 5, 'plots': SUBSCRIBE_PLOTS,
+                   'quantities': ['control', 'drive', 'response', 'time', 'coherence',
+                                  'readings']},
+    },
     'request_random_configure': {
         'type': 'request', 'id': 21, 'method': 'random.configure',
         'params': {'config': RANDOM_CONFIG},
@@ -351,6 +455,9 @@ def main() -> None:
 
     # the Random live display: three views, every series stepped on the run's lines
     write('event_random_live', random_live(), random_live_arrays())
+
+    # one connection's subscribed data: a control, a response and a time plot
+    write('event_random_data', random_data(), random_data_arrays())
 
     # text frames: a hello and an error response, no arrays
     (HERE / 'hello.json').write_text(json.dumps(

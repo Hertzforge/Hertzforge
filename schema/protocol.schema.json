@@ -84,7 +84,7 @@
       "type": "object", "required": ["name", "role", "x", "y"],
       "properties": {
         "name": {"type": "string"},
-        "role": {"enum": ["measured", "reference", "tolerance", "abort", "drive", "other"]},
+        "role": {"enum": ["measured", "reference", "tolerance", "abort", "limit", "drive", "other"]},
         "x": {"$ref": "#/$defs/arrayRef"},
         "y": {"$ref": "#/$defs/arrayRef"},
         "shape": {"enum": ["line", "steps", "law"]},
@@ -775,8 +775,9 @@
     "randomLive": {
       "type": "object",
       "required": ["run_id", "source", "class", "state", "phase", "mode", "elapsed_s", "level_db",
-                   "at_level_s", "remaining_at_level_s", "loop", "control_rms_g", "reference_rms_g",
-                   "drive_rms_v", "lines", "channels", "alarms", "views"],
+                   "commanded_db", "at_level_s", "remaining_at_level_s", "level_s", "loop",
+                   "control_rms_g", "reference_rms_g", "control_error_db", "drive_rms_v", "lines",
+                   "channels", "alarms", "views"],
       "additionalProperties": false,
       "properties": {
         "run_id": {"type": "string", "minLength": 1},
@@ -787,11 +788,14 @@
         "mode": {"enum": ["auto", "manual"]},
         "elapsed_s": {"type": "number", "minimum": 0},
         "level_db": {"type": ["number", "null"]},
+        "commanded_db": {"type": ["number", "null"]},
         "at_level_s": {"type": ["number", "null"], "minimum": 0},
         "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "level_s": {"type": ["number", "null"], "minimum": 0},
         "loop": {"type": "integer", "minimum": 0},
         "control_rms_g": {"type": ["number", "null"], "minimum": 0},
         "reference_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "control_error_db": {"type": ["number", "null"]},
         "drive_rms_v": {"type": ["number", "null"], "minimum": 0},
         "lines": {
           "type": "object", "required": ["in_band", "alarm", "abort"], "additionalProperties": false,
@@ -809,6 +813,103 @@
                           {"$ref": "#/$defs/readingView"}],
           "items": false
         }
+      },
+      "allOf": [{"$ref": "#/$defs/sourceFollowsClass"}]
+    },
+    "quantity": {"enum": ["control", "drive", "response", "time", "coherence", "readings"]},
+    "channelSelector": {
+      "oneOf": [{"enum": ["all", "control", "limited"]},
+                {"type": "array", "items": {"type": "integer", "minimum": 0}}]
+    },
+    "subscribePlot": {
+      "type": "object", "required": ["id", "quantity"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/quantity"},
+        "channels": {"oneOf": [{"$ref": "#/$defs/channelSelector"}, {"type": "null"}]},
+        "points": {"type": ["integer", "null"], "minimum": 64, "maximum": 8192}
+      },
+      "allOf": [
+        {"if": {"properties": {"quantity": {"enum": ["control", "drive", "coherence", "readings"]}}},
+         "then": {"properties": {"channels": {"type": "null"}, "points": {"type": "null"}}}},
+        {"if": {"properties": {"quantity": {"const": "response"}}},
+         "then": {"properties": {"points": {"type": "null"}}}}
+      ]
+    },
+    "randomSubscribeParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "default": {"type": ["boolean", "null"]},
+        "rate_hz": {"type": ["number", "null"], "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/subscribePlot"}},
+                            {"type": "null"}]}
+      },
+      "oneOf": [
+        {"required": ["default"], "properties": {"default": {"const": true}, "plots": {"type": "null"}}},
+        {"required": ["plots"], "properties": {"default": {"enum": [false, null]}, "plots": {"type": "array"}}}
+      ]
+    },
+    "randomSubscribeResult": {
+      "type": "object", "required": ["default", "rate_hz", "plots", "quantities"],
+      "additionalProperties": false,
+      "properties": {
+        "default": {"type": "boolean"},
+        "rate_hz": {"type": "number", "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "items": {"$ref": "#/$defs/subscribePlot"}}, {"type": "null"}]},
+        "quantities": {"type": "array", "items": {"$ref": "#/$defs/quantity"}}
+      },
+      "if": {"properties": {"default": {"const": true}}},
+      "then": {"properties": {"plots": {"type": "null"}}},
+      "else": {"properties": {"plots": {"type": "array"}}}
+    },
+    "dataPlot": {
+      "type": "object", "required": ["id", "quantity", "channels", "views"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/quantity"},
+        "channels": {"oneOf": [{"type": "array", "items": {"type": "integer", "minimum": 0}}, {"type": "null"}]},
+        "views": {"type": "array", "items": {"$ref": "#/$defs/view"}}
+      },
+      "if": {"properties": {"quantity": {"enum": ["response", "time"]}}},
+      "then": {"properties": {"channels": {"type": "array"}}},
+      "else": {"properties": {"channels": {"type": "null"}, "views": {"minItems": 1, "maxItems": 1}}}
+    },
+    "randomData": {
+      "type": "object",
+      "required": ["run_id", "source", "class", "state", "phase", "mode", "elapsed_s", "level_db",
+                   "commanded_db", "at_level_s", "remaining_at_level_s", "level_s", "loop",
+                   "control_rms_g", "reference_rms_g", "control_error_db", "drive_rms_v", "lines",
+                   "channels", "alarms", "plots"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "class": {"$ref": "#/$defs/stationClass"},
+        "state": {"enum": ["running", "review", "stopping", "finished"]},
+        "phase": {"$ref": "#/$defs/runPhase"},
+        "mode": {"enum": ["auto", "manual"]},
+        "elapsed_s": {"type": "number", "minimum": 0},
+        "level_db": {"type": ["number", "null"]},
+        "commanded_db": {"type": ["number", "null"]},
+        "at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "level_s": {"type": ["number", "null"], "minimum": 0},
+        "loop": {"type": "integer", "minimum": 0},
+        "control_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "reference_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "control_error_db": {"type": ["number", "null"]},
+        "drive_rms_v": {"type": ["number", "null"], "minimum": 0},
+        "lines": {
+          "type": "object", "required": ["in_band", "alarm", "abort"], "additionalProperties": false,
+          "properties": {
+            "in_band": {"type": "integer", "minimum": 0},
+            "alarm": {"type": "integer", "minimum": 0},
+            "abort": {"type": "integer", "minimum": 0}
+          }
+        },
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/liveChannel"}},
+        "alarms": {"type": "array", "items": {"$ref": "#/$defs/alarm"}},
+        "plots": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/dataPlot"}}
       },
       "allOf": [{"$ref": "#/$defs/sourceFollowsClass"}]
     },

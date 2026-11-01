@@ -73,14 +73,15 @@ kit. Services never send pixels and the shell never computes the numbers.
 {"view":"spectrum","title":"...",
  "x":{"label":"Frequency","unit":"Hz","scale":"log"|"linear"},
  "y":{"label":"PSD","unit":"g²/Hz","scale":"log"|"linear"},
- "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"drive"|"other",
+ "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
             "shape":"line"|"steps"|"law", "edges":{"$array":..}}],
  "link":"frequency"}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
-dashed, tolerance dotted, abort dash-dot, drive thin solid. `link` (optional) names the cursor
+dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
+ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
 
 `shape` (optional, default `line`) says how the points mean to be drawn, and the service that
@@ -260,7 +261,7 @@ A refusal not listed here is a defect in the service.
 One connection at a time holds control; any number observe. Every connection starts as an
 observer. Observers receive every event and may call every method that only reads
 (`session.state`, `station.list`, `channels.get`, `random.state`, `random.config`, `random.log`,
-and the `dry_run` checks).
+`random.subscribe`, and the `dry_run` checks).
 
 **Stopping is open to everyone.** `random.stop` and `random.abort` are accepted from any
 connection, controller or observer. They only ever end a run, so a second client using them
@@ -659,9 +660,9 @@ Event topic `random.live`, a binary frame 5 times a second from the start of sys
 identification until the run finishes, and once more with the final state:
 
 ```
-{"run_id","source","class","state","phase","mode","elapsed_s","level_db","at_level_s",
- "remaining_at_level_s","loop",
- "control_rms_g","reference_rms_g","drive_rms_v",
+{"run_id","source","class","state","phase","mode","elapsed_s","level_db","commanded_db",
+ "at_level_s","remaining_at_level_s","level_s","loop",
+ "control_rms_g","reference_rms_g","control_error_db","drive_rms_v",
  "lines":{"in_band","alarm","abort"},
  "channels":[{"index":1,"description":"Control","role":"control","rms":6.02,"unit":"g","overload":false}],
  "alarms":[{"kind":"envelope","lines":2,"worst_db":3.4}],
@@ -671,10 +672,18 @@ identification until the run finishes, and once more with the final state:
 - `level_db` is the level the drive is at now, read for every frame; after a level change it
   walks to the commanded level over `level_ramp_s`, and in a controlled stop it walks down over
   `shutdown_ramp_s`. Null when nothing drives.
+- `commanded_db` is the level the run is headed for, the same value as the run state's
+  `level_db` (`pretest.level_db` during system identification). While `level_db` and
+  `commanded_db` differ, the drive is ramping. `phase` turns `full_level` only once the drive
+  has reached full level, so a level change toward full level reads `engaged` while it ramps.
+- `level_s` is the time the schedule holds the present level: its `dwell_s`, or `full_level_s`
+  at full level. Null in `manual` and while nothing drives. With `at_level_s` and
+  `remaining_at_level_s` it is a level's progress.
 - `loop` counts control loops since the start. `control_rms_g` is the composite control rms
   over the band (null before the first loop), `reference_rms_g` the reference rms at the
-  last control loop's level, `drive_rms_v` the drive rms: the last loop's drive spectrum at the
-  level the drive is at now. The Control view's reference and bands are drawn at the last
+  last control loop's level (the target), `control_error_db` the difference
+  `20 log10(control_rms_g / reference_rms_g)` (null until both are known), and `drive_rms_v` the
+  drive rms: the last loop's drive spectrum at the level the drive is at now. The Control view's reference and bands are drawn at the last
   control loop's level, the level its measured series belongs to.
 - `lines` counts the band's lines, and how many lie outside the alarm and the abort bands in
   the last loop.
@@ -699,6 +708,79 @@ The views are the viz kit's, in this order:
 2. **Drive** (`spectrum`, y `PSD` V²/Hz log, same `link`): `Drive` (`drive`), stepped on the same
    lines.
 3. **Run** (`reading`): the numbers above as rows, for a pane that shows readings.
+
+`random.live` is the **default subscription**: what every connection receives until it asks for
+something else (below).
+
+### Live Data Subscriptions
+
+A screen asks for the quantities and channels its plots show, at the rate it wants, and the
+service sends that connection only those. On a large channel count this is what keeps a display
+feed a display feed: a channel nobody plots is not computed into a frame or sent. A subscription
+narrows the display and nothing else; the control loop reads every channel at the station's
+rate whatever any screen asks for.
+
+| Method | Params | Result |
+|---|---|---|
+| `random.subscribe` | `{"rate_hz","plots":[plot...]}`, or `{"default":true}` | `{"default","rate_hz","plots","quantities"}` |
+
+```
+{"rate_hz":5,"plots":[{"id":"ctl","quantity":"control"},
+                      {"id":"lim","quantity":"response","channels":"limited"},
+                      {"id":"t2","quantity":"time","channels":[2,3],"points":1024}]}
+```
+
+- Every connection starts on the default subscription and receives `random.live`. A
+  `random.subscribe` with `plots` replaces it: from then on the connection receives `random.data`
+  (below) at `rate_hz` and no `random.live`. `{"default":true}` returns it to `random.live`.
+- Each call replaces the connection's subscription as a whole; a client sends its full list
+  whenever a plot is added, removed or changed. The subscription belongs to the connection, lasts
+  until it closes, and carries over from run to run, so a screen subscribes once and again only
+  when its plots change.
+- It only reads, so it is open to every connection, controller or observer (a window on another
+  monitor is an observer with a subscription of its own), in any run state, configured or not.
+- `rate_hz` is 0.5 to 10, default 5: the most frames per second the connection is sent.
+- `plots` holds up to 64 entries, and may be empty (the run's numbers only, for a window that
+  shows no plot). Each is `{"id","quantity","channels","points"}`. `id` is the client's own name
+  for the plot, 1 to 64 characters and unique in the list; the service returns it with the
+  plot's data. `quantity` is one of the table below. `channels` applies to `response` and `time`
+  only: a list of channel indexes, or `"all"` (every enabled input, the default), `"control"`
+  (the control rows) or `"limited"` (the rows the configuration limits). The service resolves it
+  against the run's table on every frame, in table order; an index the run does not have is left
+  out, never refused, so a plot kept across a table edit shows fewer channels rather than
+  failing. `points` applies to `time` only: the most points sent per channel, 64 to 8192,
+  default 1024.
+- Refusals: `bad_params` with `param` naming the field (for example `plots[2].quantity`): an
+  unknown quantity, `channels` or `points` on a quantity they do not apply to, a duplicate `id`,
+  a value out of range.
+- The result echoes the subscription with every default filled in (`default` false, `plots` as
+  given), or `{"default":true,"rate_hz":5,"plots":null}`, and `quantities`, the list of quantities
+  this service offers, so a screen offers only what the service can send.
+- When the run has already streamed, the service also sends the connection one `random.data`
+  frame at once, so a plot added mid-run, or a window opened after the run ended, fills without
+  waiting.
+
+| `quantity` | Views, in order | What they show |
+|---|---|---|
+| `control` | one `spectrum` | The **Control** view of `random.live`: control against the reference, with the alarm and abort lines |
+| `drive` | one `spectrum` | The **Drive** view of `random.live` |
+| `response` | one `spectrum` per resolved channel | That channel's PSD over the band, titled `Channel <index>: <description>` (the role when there is no description), y `PSD` in the channel's unit squared per Hz: a series `Channel <index>` (`measured`, stepped on the run's lines; absent until the first loop), and when the configuration limits the channel, a series `Limit` (`limit`, stepped) on the lines its rows cover, each across the same bin as the measured line |
+| `time` | one `spectrum` per resolved channel | The last control loop's acquired samples of that channel, same title, x `Time` s linear, counted from the start of the loop's segment, y `Amplitude` in the channel's unit, linear: a series `Channel <index>` (`measured`, shape `line`; absent until the first loop). Decimated to `points` as a minimum and a maximum per interval, in time order, so no peak is lost |
+| `coherence` | one `spectrum` | The system identification's ordinary coherence between drive and control on the band's lines, x `Frequency` Hz log, y `Coherence` linear (0 to 1), `measured`, shape `line`. No series until identification has measured it |
+| `readings` | one `reading` | The **Run** view of `random.live` |
+
+Event topic `random.data`, a binary frame to one connection, at most `rate_hz` times a second
+from the start of system identification until the run finishes, and once more with the final
+state. It carries every field of `random.live` except `views`, then `plots`, in the
+subscription's order:
+
+```
+{..., "plots":[{"id":"lim","quantity":"response","channels":[2,3],"views":[spectrum, spectrum]}]}
+```
+
+`channels` is the resolved list (null for the quantities without channels), and for `response`
+and `time` the views are in that order, one per channel. A plot whose channels resolve to none
+has `channels: []` and no views.
 
 ### Run Log
 

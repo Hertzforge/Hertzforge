@@ -5,6 +5,7 @@
 pub mod backend;
 pub mod config;
 pub mod run;
+pub mod subscribe;
 pub mod view;
 
 use crate::protocol::{ErrorCode, MethodError};

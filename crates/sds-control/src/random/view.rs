@@ -161,6 +161,29 @@ pub fn lines_on(loop_cfg: &LoopConfig, cfg: &WireConfig) -> Lines {
     }
 }
 
+/// Every enabled input's data after a control loop, in the order of
+/// [`RunView::channels`]: what the `response` and `time` quantities show
+/// (schema/PROTOCOL.md, "Live Data Subscriptions").
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Inputs {
+    /// Each input's PSD on the band's lines, in its own unit squared per Hz; `None`
+    /// when it was not measured.
+    pub psd: Vec<Option<Vec<f64>>>,
+    /// The last control loop's acquired samples of each input, in its own unit.
+    pub time: Vec<Vec<f32>>,
+    /// The rate of `time`.
+    pub fs_hz: f64,
+}
+
+/// One limited channel's ceiling on the band's lines where its limit applies
+/// (the lines its rows cover).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitLines {
+    pub channel: u32,
+    pub freqs: Vec<f64>,
+    pub ceiling: Vec<f64>,
+}
+
 /// The reference view (schema/PROTOCOL.md, "Random Test Configuration"): the profile
 /// and its bands at 0 dB on `lines`, every series stepped.
 pub fn reference_view(lines: &Lines, arrays: &mut Arrays) -> Value {
@@ -221,6 +244,15 @@ pub struct RunView {
     pub lines: Option<Arc<Lines>>,
     pub control_psd: Option<Arc<Vec<f64>>>,
     pub drive_psd: Option<Arc<Vec<f64>>>,
+    /// Every enabled input's PSD and samples from the last control loop.
+    pub inputs: Option<Arc<Inputs>>,
+    /// The system identification's ordinary coherence on the band's lines.
+    pub coherence: Option<Arc<Vec<f64>>>,
+    /// Each limited channel's ceiling, fixed when the run arms.
+    pub limits: Arc<Vec<LimitLines>>,
+    /// The time the schedule holds the present level (its dwell, or the full
+    /// level time), while driving in `auto`.
+    pub level_s: Option<f64>,
     /// `random.live` frames are due: from the start of system identification.
     pub streaming: bool,
 }
@@ -312,16 +344,26 @@ fn db_text(x: f64) -> String {
     format!("{}{:.1} dB", if x >= 0.0 { "+" } else { "" }, x)
 }
 
-/// The `random.live` data; series attach to `arrays`.
-pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
-    let empty = Lines {
+fn no_lines() -> Lines {
+    Lines {
         freqs: Vec::new(),
         reference: Vec::new(),
         alarm_hi: Vec::new(),
         alarm_lo: Vec::new(),
         abort_hi: Vec::new(),
         abort_lo: Vec::new(),
-    };
+    }
+}
+
+/// The frequency axis every live spectrum shares.
+pub fn frequency_axis() -> Axis {
+    Axis::new("Frequency", Some("Hz"), Scale::Log)
+}
+
+/// The **Control** view: control against the reference and its bands, at the last
+/// control loop's level, stepped on the run's lines.
+pub fn control_view(v: &RunView, arrays: &mut Arrays) -> Value {
+    let empty = no_lines();
     let lines = v.lines.as_deref().unwrap_or(&empty);
     let level = v.live_level_db.unwrap_or(0.0);
     let k = 10f64.powf(level / 10.0);
@@ -336,35 +378,50 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
     control.push(Series::new("Alarm low", Role::Tolerance, f(), at(&lines.alarm_lo)).stepped());
     control.push(Series::new("Abort high", Role::Abort, f(), at(&lines.abort_hi)).stepped());
     control.push(Series::new("Abort low", Role::Abort, f(), at(&lines.abort_lo)).stepped());
-    let freq = Axis::new("Frequency", Some("Hz"), Scale::Log);
-    let control_view = views::spectrum(
+    views::spectrum(
         arrays,
         "Control",
-        &freq,
+        &frequency_axis(),
         &Axis::new("PSD", Some("g²/Hz"), Scale::Log),
         control,
         Some("frequency"),
-    );
+    )
+}
+
+/// The **Drive** view, stepped on the run's lines.
+pub fn drive_view(v: &RunView, arrays: &mut Arrays) -> Value {
+    let freqs = v
+        .lines
+        .as_deref()
+        .map_or_else(Vec::new, |l| l.freqs.clone());
     let drive_series = v
         .drive_psd
         .as_ref()
-        .map(|d| vec![Series::new("Drive", Role::Drive, f(), d.to_vec()).stepped()])
+        .map(|d| vec![Series::new("Drive", Role::Drive, freqs, d.to_vec()).stepped()])
         .unwrap_or_default();
-    let drive_view = views::spectrum(
+    views::spectrum(
         arrays,
         "Drive",
-        &freq,
+        &frequency_axis(),
         &Axis::new("PSD", Some("V²/Hz"), Scale::Log),
         drive_series,
         Some("frequency"),
-    );
-    let in_band = lines.freqs.len();
-    let control_err_db = match (v.control_rms_g, v.reference_rms_g) {
+    )
+}
+
+/// Control against the reference in dB, from the same control loop.
+pub fn control_error_db(v: &RunView) -> Option<f64> {
+    match (v.control_rms_g, v.reference_rms_g) {
         (Some(c), Some(rf)) if c > 0.0 && rf > 0.0 => Some(20.0 * (c / rf).log10()),
         _ => None,
-    };
+    }
+}
+
+/// The **Run** reading view: the run's numbers as rows.
+pub fn run_reading(v: &RunView) -> Value {
+    let in_band = v.lines.as_deref().map_or(0, |l| l.freqs.len());
     let rows = vec![
-        match (v.control_rms_g, control_err_db) {
+        match (v.control_rms_g, control_error_db(v)) {
             (Some(c), Some(e)) => Row::number(
                 "Control rms",
                 r(c, 3),
@@ -409,8 +466,13 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
             Status::Info,
         ),
     ];
-    let reading = views::reading("Run", rows);
+    views::reading("Run", rows)
+}
 
+/// Every field of a live frame but its views (`random.live`) or plots
+/// (`random.data`), in the contract's order.
+pub fn live_head(v: &RunView) -> Map<String, Value> {
+    let in_band = v.lines.as_deref().map_or(0, |l| l.freqs.len());
     let state = match v.state {
         State::Running | State::Review | State::Stopping | State::Finished => v.state.name(),
         // A live frame is only sent from the start of system identification; an
@@ -434,14 +496,31 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
             Value::Null
         },
     );
+    m.insert(
+        "commanded_db".into(),
+        if driving {
+            opt_r(v.level_db, 2)
+        } else {
+            Value::Null
+        },
+    );
     m.insert("at_level_s".into(), opt_r(v.at_level_s, 2));
     m.insert(
         "remaining_at_level_s".into(),
         opt_r(v.remaining_at_level_s, 2),
     );
+    m.insert(
+        "level_s".into(),
+        if driving {
+            opt_r(v.level_s, 2)
+        } else {
+            Value::Null
+        },
+    );
     m.insert("loop".into(), Value::from(v.loops));
     m.insert("control_rms_g".into(), opt_r(v.control_rms_g, 3));
     m.insert("reference_rms_g".into(), opt_r(v.reference_rms_g, 3));
+    m.insert("control_error_db".into(), opt_r(control_error_db(v), 2));
     m.insert("drive_rms_v".into(), opt_r(v.drive_rms_v, 4));
     m.insert(
         "lines".into(),
@@ -473,9 +552,17 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
                 .collect(),
         ),
     );
+    m
+}
+
+/// The `random.live` data; series attach to `arrays`.
+pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
+    let mut m = live_head(v);
+    let control = control_view(v, arrays);
+    let drive = drive_view(v, arrays);
     m.insert(
         "views".into(),
-        Value::Array(vec![control_view, drive_view, reading]),
+        Value::Array(vec![control, drive, run_reading(v)]),
     );
     Value::Object(m)
 }

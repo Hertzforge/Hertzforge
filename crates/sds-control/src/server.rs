@@ -15,6 +15,7 @@ use crate::protocol::{self, ErrorCode, MethodError, Request};
 use crate::random::backend::{ABORT, STOP};
 use crate::random::config as rconfig;
 use crate::random::run::{self as rrun, ArmContext, Cmd, LevelTarget, RunPlan, RunShared};
+use crate::random::subscribe::{self, Subscription};
 use crate::random::view::{self, RunView, State, StationRef};
 use crate::random::RandomRun;
 use crate::session::{self, ConnId, Session};
@@ -24,6 +25,7 @@ use crate::table::{self, StationContext, Table};
 use futures_util::{SinkExt, StreamExt};
 use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -37,6 +39,12 @@ use tokio_tungstenite::tungstenite::Message;
 pub const DISPLAY_TOPIC: &str = "random.display";
 /// Display event period (5 per second), for `random.display` and `random.live`.
 pub const DISPLAY_PERIOD: Duration = Duration::from_millis(200);
+/// How often the live task looks for frames due: `random.data` runs up to 10 per
+/// second, and `random.live` keeps every second look (5 per second).
+const LIVE_TICK: Duration = Duration::from_millis(100);
+/// How early a `random.data` frame may go against its period, so a 10 Hz
+/// subscription is served on every look despite timer jitter.
+const DATA_SLACK: Duration = Duration::from_millis(30);
 /// How long `sim.stop` waits for the run to wind down.
 const STOP_WAIT: Duration = Duration::from_secs(15);
 /// Events buffered per connection before a slow client starts losing them.
@@ -48,7 +56,8 @@ const ARM_WAIT: Duration = Duration::from_secs(120);
 const METHODS: &str = "session.state, session.claim, session.release, station.list, \
     station.select, channels.get, channels.set, random.configure, random.arm, random.start, \
     random.proceed, random.level, random.mode, random.stop, random.abort, random.reset, \
-    random.clear, random.state, random.config, random.log, sim.profiles, sim.start, sim.stop and sim.state";
+    random.clear, random.state, random.config, random.log, random.subscribe, sim.profiles, sim.start, \
+    sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -105,6 +114,10 @@ impl Default for ServiceOptions {
 pub enum Out {
     Text(String),
     Binary(Vec<u8>),
+    /// A `random.live` frame: for the connections on the default subscription.
+    Live(Vec<u8>),
+    /// A `random.data` frame for one connection only.
+    To(ConnId, Vec<u8>),
     /// `session.changed`, written for each connection with its own role.
     Session {
         seq: u64,
@@ -115,11 +128,18 @@ pub enum Out {
 }
 
 impl Out {
-    /// The frame as connection `conn` receives it.
-    fn to_message(&self, conn: ConnId) -> Message {
-        match self {
+    /// The frame as connection `conn` receives it, or `None` when it is not for
+    /// `conn`. `subscribed` says whether `conn` has a subscription of its own now,
+    /// checked as the frame goes out: once a connection has its answer to
+    /// `random.subscribe`, it receives only the frames of its new choice.
+    fn to_message(&self, conn: ConnId, subscribed: impl Fn() -> bool) -> Option<Message> {
+        Some(match self {
             Out::Text(t) => Message::Text(t.clone()),
             Out::Binary(b) => Message::Binary(b.clone()),
+            Out::Live(b) if !subscribed() => Message::Binary(b.clone()),
+            Out::Live(_) => return None,
+            Out::To(to, b) if *to == conn && subscribed() => Message::Binary(b.clone()),
+            Out::To(..) => return None,
             Out::Session {
                 seq,
                 holder,
@@ -133,7 +153,7 @@ impl Out {
                 )
                 .to_string(),
             ),
-        }
+        })
     }
 }
 
@@ -142,6 +162,13 @@ impl Out {
 pub struct Conn {
     pub id: ConnId,
     pub peer: String,
+}
+
+/// One connection's own subscription (schema/PROTOCOL.md, "Live Data
+/// Subscriptions") and when it was last sent a frame.
+struct Display {
+    sub: Arc<Subscription>,
+    last: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -216,6 +243,9 @@ pub struct Service {
     notify: mpsc::UnboundedSender<rrun::Notice>,
     notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<rrun::Notice>>>,
     background: AtomicBool,
+    /// The connections with a subscription of their own; every other connection is
+    /// on the default subscription (`random.live`).
+    displays: std::sync::Mutex<HashMap<ConnId, Display>>,
 }
 
 fn unix_s() -> u64 {
@@ -258,6 +288,7 @@ impl Service {
             notify,
             notices: std::sync::Mutex::new(Some(notices)),
             background: AtomicBool::new(false),
+            displays: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -280,6 +311,17 @@ impl Service {
         let _ = self.events.send(Arc::new(Out::Text(msg.to_string())));
     }
 
+    /// A `random.live` frame, for the connections on the default subscription.
+    fn emit_live(&self, data: Value, arrays: &Arrays) {
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        match codec::encode(&protocol::event("random.live", seq, data), arrays) {
+            Ok(frame) => {
+                let _ = self.events.send(Arc::new(Out::Live(frame)));
+            }
+            Err(e) => eprintln!("sds-control: random.live frame not encoded: {e}"),
+        }
+    }
+
     fn emit_binary(&self, topic: &str, data: Value, arrays: &Arrays) {
         let seq = self.seq.fetch_add(1, Ordering::Relaxed);
         match codec::encode(&protocol::event(topic, seq, data), arrays) {
@@ -289,6 +331,68 @@ impl Service {
             }
             Err(e) => eprintln!("sds-control: {topic} frame not encoded: {e}"),
         }
+    }
+
+    fn displays(&self) -> std::sync::MutexGuard<'_, HashMap<ConnId, Display>> {
+        match self.displays.lock() {
+            Ok(d) => d,
+            Err(p) => p.into_inner(),
+        }
+    }
+
+    /// Whether connection `conn` has a subscription of its own.
+    pub fn subscribed(&self, conn: ConnId) -> bool {
+        self.displays().contains_key(&conn)
+    }
+
+    /// One `random.data` frame of `v` for connection `conn`.
+    fn emit_data(&self, conn: ConnId, v: &RunView, sub: &Subscription) {
+        let mut arrays = Arrays::new();
+        let data = subscribe::data_json(v, sub, &mut arrays);
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        match codec::encode(&protocol::event("random.data", seq, data), &arrays) {
+            Ok(frame) => {
+                let _ = self.events.send(Arc::new(Out::To(conn, frame)));
+            }
+            Err(e) => eprintln!("sds-control: random.data frame not encoded: {e}"),
+        }
+    }
+
+    /// `random.subscribe`: replace `conn`'s subscription, and send it the run's
+    /// latest data at once when the run has streamed.
+    async fn random_subscribe(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        let sub = subscribe::parse(params)?.map(Arc::new);
+        let result = subscribe::result_json(sub.as_deref());
+        match &sub {
+            None => {
+                self.displays().remove(&conn.id);
+            }
+            Some(sub) => {
+                self.displays().insert(
+                    conn.id,
+                    Display {
+                        sub: sub.clone(),
+                        last: None,
+                    },
+                );
+                let run = self.inner.lock().await.random.clone();
+                if let Some(run) = run {
+                    let v = run.view();
+                    if v.streaming {
+                        let v = run.live_view(v);
+                        self.emit_data(conn.id, &v, sub);
+                        if let Some(d) = self.displays().get_mut(&conn.id) {
+                            d.last = Some(Instant::now());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn session_changed(&self, inner: &Inner) {
@@ -390,6 +494,7 @@ impl Service {
     /// The connection went: with a goodbye (a clean close) control is free at once;
     /// without one, the seat is kept for the timeout.
     pub async fn disconnected(&self, conn: &Conn, goodbye: bool) {
+        self.displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         let now = Instant::now();
         let live = inner.random_live();
@@ -479,6 +584,7 @@ impl Service {
             "random.clear" => self.random_clear(conn).await,
             "random.state" => Ok(self.state_now().await),
             "random.log" => self.random_log(params).await,
+            "random.subscribe" => self.random_subscribe(conn, params).await,
             other => Err(MethodError::new(
                 ErrorCode::UnknownMethod,
                 format!("the control service has no method \"{other}\"; it serves {METHODS}"),
@@ -789,6 +895,10 @@ impl Service {
             lines: None,
             control_psd: None,
             drive_psd: None,
+            inputs: None,
+            coherence: None,
+            limits: Arc::new(Vec::new()),
+            level_s: None,
             streaming: false,
         };
         let shared = Arc::new(RunShared {
@@ -924,13 +1034,16 @@ impl Service {
         Ok(view::state_json(Some(&run.view())))
     }
 
-    /// Publish `random.live` for `run` five times a second until it has finished,
-    /// then once more with the final state.
+    /// Publish `run`'s live data until it has finished, then once more with the
+    /// final state: `random.live` five times a second for the connections on the
+    /// default subscription, and `random.data` at each subscribed connection's own
+    /// rate (schema/PROTOCOL.md, "Live Display" and "Live Data Subscriptions").
     fn spawn_live(self: &Arc<Self>, run: Arc<RandomRun>) {
         let svc = self.clone();
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(DISPLAY_PERIOD);
+            let mut tick = tokio::time::interval(LIVE_TICK);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut last_live: Option<Instant> = None;
             loop {
                 tick.tick().await;
                 let current = svc
@@ -948,10 +1061,33 @@ impl Service {
                     continue;
                 }
                 let v = run.live_view(v);
-                let mut arrays = Arrays::new();
-                let data = view::live_json(&v, &mut arrays);
-                svc.emit_binary("random.live", data, &arrays);
-                if v.state == State::Finished || !current {
+                let last = v.state == State::Finished || !current;
+                let now = Instant::now();
+                if last || last_live.is_none_or(|t| now >= t + DISPLAY_PERIOD - DATA_SLACK) {
+                    last_live = Some(now);
+                    let mut arrays = Arrays::new();
+                    let data = view::live_json(&v, &mut arrays);
+                    svc.emit_live(data, &arrays);
+                }
+                let due: Vec<(ConnId, Arc<Subscription>)> = {
+                    let mut displays = svc.displays();
+                    displays
+                        .iter_mut()
+                        .filter(|(_, d)| {
+                            last || d
+                                .last
+                                .is_none_or(|t| now + DATA_SLACK >= t + d.sub.period())
+                        })
+                        .map(|(id, d)| {
+                            d.last = Some(now);
+                            (*id, d.sub.clone())
+                        })
+                        .collect()
+                };
+                for (conn, sub) in due {
+                    svc.emit_data(conn, &v, &sub);
+                }
+                if last {
                     break;
                 }
             }
@@ -1353,6 +1489,7 @@ async fn connection(
     let (out_tx, mut out_rx) = mpsc::channel::<Message>(64);
     let mut events = service.subscribe();
     let me = conn.id;
+    let mine = service.clone();
     let writer = tokio::spawn(async move {
         loop {
             let msg = tokio::select! {
@@ -1361,7 +1498,10 @@ async fn connection(
                     None => break,
                 },
                 e = events.recv() => match e {
-                    Ok(frame) => frame.to_message(me),
+                    Ok(frame) => match frame.to_message(me, || mine.subscribed(me)) {
+                        Some(m) => m,
+                        None => continue,
+                    },
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
@@ -1444,4 +1584,33 @@ async fn connection(
     drop(out_tx);
     let _ = writer.await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Who receives which live frame: `random.live` only a connection on the
+    /// default subscription, `random.data` only its own connection while that
+    /// connection is subscribed (so nothing built for a subscription it has just
+    /// given up reaches it after the answer).
+    #[test]
+    fn live_frames_reach_only_the_connections_they_are_for() {
+        let live = Out::Live(vec![1]);
+        assert!(live.to_message(7, || false).is_some());
+        assert!(live.to_message(7, || true).is_none());
+        let data = Out::To(7, vec![2]);
+        assert!(data.to_message(7, || true).is_some());
+        assert!(
+            data.to_message(8, || true).is_none(),
+            "another connection's data"
+        );
+        assert!(
+            data.to_message(7, || false).is_none(),
+            "data for a connection back on the default"
+        );
+        let text = Out::Text("x".into());
+        assert!(text.to_message(7, || true).is_some());
+        assert!(text.to_message(7, || false).is_some());
+    }
 }
