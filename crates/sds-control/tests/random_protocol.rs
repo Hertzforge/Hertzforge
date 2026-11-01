@@ -1471,3 +1471,58 @@ async fn each_screen_receives_only_the_plots_it_subscribed_to() {
         "no random.data after returning to the default"
     );
 }
+
+/// A level change toward full level reads `engaged` while it ramps, and
+/// `full_level` only once the drive has reached it (2026-11-01, fix verification
+/// observation 1): "Go to 0 dB" during the soft start read `full_level` from
+/// -12.5 dB on, about 3 s before the level got there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn full_level_waits_for_the_level_to_arrive() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        2.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let config = sim_config(
+        "manual",
+        json!([{"db": -9, "dwell_s": 1}, {"db": -6, "dwell_s": 1}, {"db": 0}]),
+        60.0,
+    );
+    configured(&mut c, config).await;
+    c.ok("random.start", json!({})).await;
+    c.wait_phase("engaged", LONG).await;
+    // At once, during the soft start: go to full level.
+    let r = c.ok("random.level", json!({"to_db": 0})).await;
+    assert_eq!(r["level_db"], 0);
+    c.wait_for("a live frame at full level", LONG, |e| {
+        e.topic() == "random.live" && e.data()["phase"] == "full_level"
+    })
+    .await;
+    c.pump(Duration::from_millis(600)).await;
+    c.ok("random.abort", json!({})).await;
+    let early: Vec<f64> = c
+        .of_topic("random.live")
+        .iter()
+        .filter(|e| e.data()["phase"] == "full_level")
+        .filter_map(|e| e.data()["level_db"].as_f64())
+        .filter(|l| *l < -0.05)
+        .collect();
+    assert!(
+        early.is_empty(),
+        "full_level read while the level was still at {early:?} dB"
+    );
+    // While it ramped, the frames said engaged, and the drive was on its way.
+    let ramping = c
+        .of_topic("random.live")
+        .iter()
+        .filter(|e| {
+            e.data()["phase"] == "engaged"
+                && e.data()["commanded_db"] == 0
+                && e.data()["level_db"].as_f64().is_some_and(|l| l < -1.0)
+        })
+        .count();
+    assert!(ramping >= 1, "no frame caught the ramp to full level");
+}

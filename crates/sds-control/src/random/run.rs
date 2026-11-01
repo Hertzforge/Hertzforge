@@ -735,10 +735,7 @@ impl Actor {
     }
 
     fn engaged(&mut self) {
-        let phase = match self.svc.as_ref().map(|s| s.state()) {
-            Some(RunState::FullLevel) => "full_level",
-            _ => "engaged",
-        };
+        let phase = self.svc.as_ref().map_or("engaged", driving_phase);
         self.set(State::Running, phase);
         self.refresh_status();
         self.publish();
@@ -847,10 +844,7 @@ impl Actor {
         self.view.reference_rms_g = Some(st.target_grms);
         self.view.control_rms_g = st.measured_grms;
         if self.view.state == State::Running {
-            self.view.phase = match st.state {
-                RunState::FullLevel => "full_level",
-                _ => "engaged",
-            };
+            self.view.phase = driving_phase(svc);
         }
     }
 
@@ -1270,6 +1264,17 @@ impl Actor {
         }
         self.forwarded = events.len();
         self.alarm_was = svc.status().alarm_active;
+    }
+}
+
+/// The phase of a driving run: `full_level` once the loop runs at full level, and
+/// `engaged` before, including while a level change toward full level ramps (the
+/// controller's own state turns full level when the change is commanded).
+fn driving_phase(svc: &RandomService) -> &'static str {
+    let arrived = (svc.schedule_level_db() - svc.commanded_level_db()).abs() < 0.05;
+    match svc.state() {
+        RunState::FullLevel if arrived => "full_level",
+        _ => "engaged",
     }
 }
 

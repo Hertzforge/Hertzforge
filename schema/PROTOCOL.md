@@ -616,7 +616,8 @@ object to every connection on every change of `state`, `phase`, `mode`, `level_d
 | `finished` | `stopped`, `aborted`, `coherence_hold` | Ended; `end` says how |
 
 `phase` is the controller's own phase in snake case, with `armed` (armed, before the first
-drive) and `ramping_down` added. `run_id` is null when unconfigured, and new at every
+drive) and `ramping_down` added; `full_level` begins once the drive has reached full level (a
+level change toward it reads `engaged` while it ramps). `run_id` is null when unconfigured, and new at every
 configure and reset. `source`, `station`, `grid` and `clock` describe the run's station
 (`clock`, `shared`, `independent` or `unknown`, is null until the run arms). `level_db` is the
 commanded level (`pretest.level_db` during system identification, and the level the
