@@ -4,6 +4,7 @@
 	import { getApp } from '$lib/app/state.svelte';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
+	import Acquire from '$lib/workspaces/Acquire.svelte';
 	import Analyze from '$lib/workspaces/Analyze.svelte';
 	import Modal from '$lib/workspaces/Modal.svelte';
 	import Simulate from '$lib/workspaces/Simulate.svelte';
@@ -20,6 +21,14 @@
 	});
 
 	function onKey(e: KeyboardEvent) {
+		// Abort a live run from anywhere in the shell, whatever has focus (Cmd or Ctrl and period).
+		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === '.' || e.code === 'Period')) {
+			if (app.acquire.actions.abort.enabled) {
+				e.preventDefault();
+				void app.acquire.abort();
+			}
+			return;
+		}
 		if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
 			e.preventDefault();
 			app.paletteOpen = !app.paletteOpen;
@@ -42,7 +51,9 @@
 	<div class="body">
 		<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />
 		<div class="workspace">
-			{#if app.workspace === 'analyze'}
+			{#if app.workspace === 'acquire'}
+				<Acquire {app} />
+			{:else if app.workspace === 'analyze'}
 				<Analyze {app} />
 			{:else if app.workspace === 'modal'}
 				<Modal {app} />

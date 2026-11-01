@@ -4,6 +4,7 @@
  * is lost on the way back.
  */
 
+import { AcquireState } from '$lib/acquire/store.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
@@ -385,21 +386,30 @@ export class AppState {
 	readonly analyze: AnalyzeState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
+	readonly acquire: AcquireState;
 
 	constructor(config: ShellConfig) {
 		this.config = config;
 		const analysisFactory = config.mock ? mockSocketFactory(createAnalysisServer(), 80) : undefined;
-		const controlFactory = config.mock ? mockSocketFactory(createControlServer(), 110) : undefined;
+		const controlFactory = config.mock ? mockSocketFactory(createControlServer(config.mockControl), 110) : undefined;
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
 		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: controlFactory });
 		this.analyze = new AnalyzeState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
+		this.acquire = new AcquireState(this.control);
 	}
 
 	/** The SIM badge rule: simulated control data is on screen. */
 	get simOnScreen(): boolean {
 		return this.workspace === 'simulate' && this.sim.display?.source === 'SIM';
+	}
+
+	/** Where the control data on screen comes from, for the top bar's badge, or null. */
+	get provenance(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
+		if (this.workspace === 'simulate') return this.simOnScreen ? { source: 'SIM', cls: 'sim' } : null;
+		if (this.workspace === 'acquire') return this.acquire.source;
+		return null;
 	}
 
 	start(): void {
@@ -419,11 +429,15 @@ export class AppState {
 				if (this.control.status === 'open') void this.sim.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.acquire.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
 		});
 
+		this.acquire.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}
