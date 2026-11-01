@@ -20,6 +20,7 @@
 pub mod codec;
 pub mod profiles;
 pub mod protocol;
+pub mod random;
 pub mod server;
 pub mod session;
 pub mod sim;
