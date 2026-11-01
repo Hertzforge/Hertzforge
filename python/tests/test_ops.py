@@ -7,6 +7,7 @@ import dataclasses
 
 import numpy as np
 import pytest
+
 from sds_analysis import frames
 from sds_analysis.protocol import ProtocolError
 from sds_analysis.server import OPERATIONS

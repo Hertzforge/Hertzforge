@@ -8,6 +8,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+
 import sds_analysis  # noqa: F401  (headless before visualdynamics loads)
 from sds_analysis import datasets
 

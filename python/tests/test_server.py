@@ -13,11 +13,12 @@ import sys
 import time
 
 import pytest
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
+
 from sds_analysis import __main__ as entry
 from sds_analysis import frames
 from sds_analysis.server import SWITCH_INTERVAL, Service, preload, start
-from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
 
 
 class Client:
