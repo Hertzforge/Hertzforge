@@ -1,0 +1,8 @@
+{
+  "name": "sds-e2e-sim",
+  "private": true,
+  "type": "module",
+  "description": "Closed-loop Random on the simulator, end to end: the real control service and the shell, driven in the installed Chrome. Not part of the unit tests; it starts both services itself.",
+  "scripts": { "check": "node random_sim.mjs" },
+  "devDependencies": { "playwright-core": "1.64.1" }
+}

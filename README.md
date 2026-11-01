@@ -32,6 +32,7 @@ layout is a mechanical change that comes next.
 | `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
+| `tools/e2e-sim/` | JavaScript | Closed-loop Random on the simulator, end to end through the real control service and the shell |
 | `scripts/` | shell | Developer entry points |
 | `site/` | HTML | The hertzforge.com page, deployed by `.github/workflows/site.yml` when it changes on `main` |
 
@@ -64,6 +65,15 @@ scripts/dev.sh
 
 Starts the analysis service on 8791, the control service on 8792 and the shell on
 http://127.0.0.1:5191/. `?mock=1` runs the shell alone on synthetic data.
+
+The end-to-end check drives Random on the simulator through the real control service, in the
+installed Chrome. It starts both services itself on free ports, takes about three minutes, and is not
+part of `npm --prefix ui test`:
+
+```bash
+npm --prefix tools/e2e-sim ci
+node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
+```
 
 ## License
 
