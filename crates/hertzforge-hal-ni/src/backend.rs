@@ -154,6 +154,8 @@ pub struct NiBackend {
     actual_rate_hz: f64,
     clock: ClockDomain,
     clock_evidence: String,
+    /// The task set's identity for the clock rule, once the tasks are built.
+    clock_key: Option<ClockKey>,
     /// The provisional `[H]` abort-latency bound for the CURRENT actual rate and
     /// block size, recomputed with the tasks. `None` before the tasks are built
     /// (nothing is known yet) and on any set whose formula inputs are missing.
@@ -295,6 +297,7 @@ impl NiBackend {
             state: State::Closed,
             clock: ClockDomain::Unknown,
             clock_evidence: "not determined: the backend has not been opened".into(),
+            clock_key: None,
             abort_latency: None,
             ao_routing: String::new(),
             devices: Vec::new(),
@@ -354,6 +357,13 @@ impl NiBackend {
     /// closed-loop refusal reaches an operator.
     pub fn clock_evidence(&self) -> &str {
         &self.clock_evidence
+    }
+
+    /// The task set's identity as the clock rule looks it up (chassis, modules,
+    /// name-normalized routing); `None` before [`Backend::open`]. The selftest
+    /// checks [`Caps::clock`] against the proven set with it.
+    pub fn clock_key(&self) -> Option<&ClockKey> {
+        self.clock_key.as_ref()
     }
 
     /// The AO sample-clock routing string actually used (`""` = the AO task's
@@ -856,6 +866,7 @@ impl NiBackend {
         let (clock, evidence) = resolve_clock(self.all_simulated, &key);
         self.clock = clock;
         self.clock_evidence = evidence;
+        self.clock_key = Some(key);
 
         // --- provisional [H] abort-latency bound -----------------------------
         // Derived from the ACTUAL rate (the delta-sigma delay is fixed in
