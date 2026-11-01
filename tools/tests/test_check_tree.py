@@ -82,25 +82,6 @@ def test_the_finding_never_repeats_the_name(tmp_path):
     assert 'quokka' not in finding.lower()
 
 
-@pytest.mark.parametrize('source,module', [
-    ('import sdynpy\n', 'sdynpy'),
-    ('from rattlesnake.components import x\n', 'rattlesnake.components'),
-    ('import importlib\nimportlib.import_module("forcefinder")\n', 'forcefinder'),
-    ('__import__("sdynpy.core")\n', 'sdynpy.core'),
-])
-def test_a_copyleft_import_is_found(tmp_path, source, module):
-    path = tmp_path / 'reader.py'
-    path.write_text(source, encoding='utf-8')
-    assert check_tree.check_copyleft([path], tmp_path) == [
-        f'reader.py: imports {module}, which is copyleft']
-
-
-def test_a_relative_import_of_the_same_name_is_ours(tmp_path):
-    path = tmp_path / 'reader.py'
-    path.write_text('from .sdynpy import names\n', encoding='utf-8')
-    assert check_tree.check_copyleft([path], tmp_path) == []
-
-
 @pytest.mark.parametrize('expression,allowed', [
     ('MIT', True), ('(MIT OR GPL-3.0)', True), ('MIT AND OFL-1.1', True),
     ('GPL-3.0', False), ('MIT AND GPL-3.0', False), ('LGPL-3.0', False),
@@ -124,8 +105,16 @@ def test_a_relative_import_of_the_same_name_is_ours(tmp_path):
     ('AND MIT', False), ('MIT WITH', False), ('()', False),
     ('MIT or Apache-2.0', False), ('SEE LICENSE IN LICENSE.md', False),
 ])
-def test_license_expressions(expression, allowed):
-    assert check_tree.license_allowed(expression) is allowed
+def test_npm_license_expressions(expression, allowed):
+    verdict = check_tree.check_licenses.judge_text(expression, check_tree.ALLOWED_LICENSES)
+    assert (verdict == check_tree.check_licenses.ALLOWED) is allowed
+
+
+def test_a_python_file_in_no_scope_is_found(tmp_path):
+    inside = tmp_path / 'src' / 'module.py'
+    outside = tmp_path / 'stray' / 'module.py'
+    assert check_tree.check_licenses.check_scopes([inside, outside], tmp_path) == [
+        'stray/module.py: in no scope of check_licenses.SCOPES, so its imports are never checked']
 
 
 def test_a_disallowed_or_missing_npm_license_is_found(tmp_path):
