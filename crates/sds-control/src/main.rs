@@ -4,8 +4,8 @@ use sds_control::{protocol, server, DEFAULT_HOST, DEFAULT_PORT};
 
 const USAGE: &str = "usage: sds-control [--host <addr>] [--port <port>]\n\
 \n\
-Serves the sds/1 control protocol over WebSocket (default ws://127.0.0.1:8792/).\n\
-Runs the random control engine against its Sim backend only; every run is SIM.";
+Serves the sds/1 control protocol over WebSocket (default ws://127.0.0.1:8792/), on\n\
+loopback only. Runs closed-loop Random on the simulator or on NI-DAQmx hardware.";
 
 fn parse_args() -> Result<(String, u16), String> {
     let mut host = DEFAULT_HOST.to_owned();
@@ -49,6 +49,10 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    if let Err(e) = server::check_loopback(&host) {
+        eprintln!("sds-control: {e}");
+        std::process::exit(2);
+    }
     let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -56,16 +60,31 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let addr = listener
-        .local_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| format!("{host}:{port}"));
+    // Bound: check what the name resolved to as well as the name.
+    let local = match listener.local_addr() {
+        Ok(a) if a.ip().is_loopback() => a,
+        Ok(a) => {
+            eprintln!(
+                "sds-control: {host} resolved to {a}, which is not a loopback address; refusing \
+                 to serve"
+            );
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("sds-control: cannot read the bound address: {e}");
+            std::process::exit(1);
+        }
+    };
     eprintln!(
-        "sds-control {} listening on ws://{addr}/ (protocol {}, Sim backend only)",
+        "sds-control {} listening on ws://{local}/ (protocol {})",
         protocol::VERSION,
         protocol::PROTOCOL
     );
-    if let Err(e) = server::serve(listener, server::Service::new()).await {
+    let options = server::ServiceOptions {
+        bind: format!("ws://{local}/"),
+        ..server::ServiceOptions::default()
+    };
+    if let Err(e) = server::serve(listener, server::Service::with_options(options)).await {
         eprintln!("sds-control: listener failed: {e}");
         std::process::exit(1);
     }
