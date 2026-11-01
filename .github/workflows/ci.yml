@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its test tools
-        run: pip install -e . pytest pytest-xdist ruff
+        run: pip install -e . pytest pytest-xdist jsonschema ruff
       - name: Lint every Python file in the repository
         run: ruff check .
       - name: No GPL package installed, every import accounted for
