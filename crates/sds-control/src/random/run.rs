@@ -1214,7 +1214,10 @@ impl Actor {
                 }
                 EventKind::OverloadLatch { channel_index } => Some((
                     "overload",
-                    format!("channel {channel_index} reached 90 % of its range"),
+                    format!(
+                        "channel {channel_index} reached the top of its range (90 % of its range \
+                         in the run, or 98 % at the station)"
+                    ),
                 )),
                 // The service logs the trip with its end message.
                 EventKind::Trip { .. } => None,

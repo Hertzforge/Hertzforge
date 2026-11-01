@@ -124,7 +124,7 @@ export function tripFacts(trip: Trip): { label: string; value: string }[] {
 
 export function alarmText(a: Alarm, channelName?: (index: number) => string): string {
 	if (a.kind === 'envelope') return `${a.lines} ${a.lines === 1 ? 'line' : 'lines'} outside the alarm band, worst ${db(a.worst_db)}`;
-	if (a.kind === 'overload') return `${channelName?.(a.channel) ?? `Channel ${a.channel}`} reached 90 % of its range`;
+	if (a.kind === 'overload') return `${channelName?.(a.channel) ?? `Channel ${a.channel}`} reached the top of its range`;
 	return 'Alarm';
 }
 

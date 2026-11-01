@@ -745,7 +745,7 @@ export interface LiveChannel {
 	/** rms over the band in the row's own unit. */
 	rms: number | null;
 	unit: string;
-	/** Latched once the row reached 90 % of its range this run. */
+	/** Latched once the row reached 90 % of its range this run, or the station saw 98 % of it. */
 	overload: boolean;
 }
 

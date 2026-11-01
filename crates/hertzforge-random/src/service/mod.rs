@@ -2557,7 +2557,25 @@ impl RandomService {
 
     /// Overload proxy per channel: if any raw sample on a channel reaches
     /// `fraction * range_max` in EU, latch that channel's indicator. NOT an abort.
+    ///
+    /// The station's own report feeds the same indicator: every backend checks
+    /// its inputs in software against each channel's configured range
+    /// (`Backend::input_overloads`, 98 %), which on the NI 9234 is the only
+    /// overload check there is (the driver's flag is unsupported there).
     fn check_overloads(&mut self, seg: &engine::SegmentResult) {
+        let station = self
+            .plant_loop
+            .as_mut()
+            .map(|p| p.input_overloads())
+            .unwrap_or_default();
+        for (slot, latch) in self.overloads.iter_mut().enumerate() {
+            if !latch.latched && station.get(slot).copied().unwrap_or(false) {
+                latch.latched = true;
+                self.log.push(EventKind::OverloadLatch {
+                    channel_index: latch.channel_index,
+                });
+            }
+        }
         let frac = self.cfg.overload_fraction;
         // The interleave order matches the enabled-non-drive channel order the latches
         // were built in.

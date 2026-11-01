@@ -731,6 +731,9 @@ mod twr_rig {
         fn take_warnings(&mut self) -> Vec<String> {
             self.inner.take_warnings()
         }
+        fn input_overloads(&mut self) -> Vec<bool> {
+            self.inner.input_overloads()
+        }
         fn configure(
             &mut self,
             table: &hertzforge_channel_table::ChannelTable,

@@ -1008,6 +1008,13 @@ impl PlantLoop {
         self.n_ch
     }
 
+    /// The station's per-input overload flags, in frame order
+    /// (`Backend::input_overloads`: a sample reached 98 % of the input's configured
+    /// range); empty when the station does not report them.
+    pub fn input_overloads(&mut self) -> Vec<bool> {
+        self.backend.input_overloads()
+    }
+
     /// The engine ticks one segment spans, at the configured block cadence. The
     /// segment is `window_len` SAMPLES; at a block of N frames that is
     /// `ceil(window_len / N)` ticks. (At the HERTZFORGE-SIM natural block of 1 the two

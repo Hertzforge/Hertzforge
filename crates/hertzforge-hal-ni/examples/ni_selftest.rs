@@ -847,18 +847,32 @@ fn stream(args: &Args, devices: &[DiscoveredDevice], c: &mut Checks) {
         );
     }
 
-    if !b.overload_pollable() {
-        c.skip(
-            "ADC overload polling",
-            "this DAQmx runtime does not expose the overload attribute",
+    // Overload is checked in software on every read (98 % of each channel's
+    // configured range), and by the driver's own flag where the device has one
+    // (the NI 9234 does not: -200452).
+    let driver_flag = if b.overload_pollable() {
+        "the driver's flag also polled"
+    } else {
+        "the driver's flag is unsupported on this device"
+    };
+    let overloaded = b.overloaded_channels();
+    if !overloaded.is_empty() {
+        c.fail(
+            "input overload",
+            format!(
+                "a sample reached 98 % of the configured range on {} ({driver_flag})",
+                overloaded.join(", ")
+            ),
         );
     } else if b.overload_latched() {
         c.fail(
             "ADC overload",
-            "at least one input channel reported overload during the run",
+            "the driver reported overload on at least one input channel during the run",
         );
     } else {
-        c.pass("no ADC overload reported");
+        c.pass(format!(
+            "no input overload (software check at 98 % of each range; {driver_flag})"
+        ));
     }
 
     // --- warnings, verbatim (this is where the rate-coercion text lands) ---

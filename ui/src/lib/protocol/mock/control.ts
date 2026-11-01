@@ -1158,7 +1158,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			r.channelRms.set(row.index, value);
 			if (!r.overload.has(row.index) && value * 3 >= 0.9 * row.range_max) {
 				r.overload.add(row.index);
-				addLog('overload', `channel ${row.index} reached 90 % of its range`);
+				addLog('overload', `channel ${row.index} reached the top of its range (90 % of its range in the run, or 98 % at the station)`);
 			}
 			if (driving && row.abort.accel_g !== null && value * 3 > row.abort.accel_g) {
 				finish(r, 'aborted', 'aborted', { kind: 'kinematic', channel: row.index, axis: 'accel', value: round(value * 3, 2), limit: row.abort.accel_g, at_level_db: round(r.level, 2), at_loop: r.loops });

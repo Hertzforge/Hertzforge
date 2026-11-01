@@ -150,7 +150,7 @@
 							{/each}
 						</tbody>
 					</table>
-					<p class="aq-small aq-muted foot">Overload: the input reached 90 % of its range during this run.</p>
+					<p class="aq-small aq-muted foot">Overload: the input reached the top of its range during this run (90 % of it in the run, or 98 % at the station).</p>
 				</section>
 
 				<section class="card" aria-label="Run log" data-testid="live-log">

@@ -679,7 +679,10 @@ identification until the run finishes, and once more with the final state:
 - `lines` counts the band's lines, and how many lie outside the alarm and the abort bands in
   the last loop.
 - `channels` lists every enabled input row in table order, with its rms over the band in its
-  own unit and `overload` true once the row has reached 90 % of `range_max` this run.
+  own unit and `overload` true once the row has reached 90 % of `range_max` this run, or the
+  station has seen a sample at 98 % of the row's configured range. Every station makes that
+  check in software, so it does not depend on the driver reporting overload (the NI 9234's
+  driver does not).
 - `alarms` lists the conditions holding now: `{"kind":"envelope","lines","worst_db"}` (lines
   outside the alarm band) and `{"kind":"overload","channel"}`. An alarm warns; it does not stop
   the run.

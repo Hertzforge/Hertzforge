@@ -8,7 +8,7 @@
 //! the drive down with the STATION's own stop (`emergency_stop` for an abort, the
 //! controlled `stop` otherwise) and fails, which ends the controller's call within
 //! one engine block. Nothing else changes: every other call passes straight
-//! through, including the two the HAL warns must be forwarded explicitly.
+//! through, including the defaulted ones the HAL warns must be forwarded explicitly.
 
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_hal::{
@@ -120,6 +120,9 @@ impl Backend for Interruptible {
     fn output_space(&mut self) -> Option<usize> {
         self.inner.output_space()
     }
+    fn input_overloads(&mut self) -> Vec<bool> {
+        self.inner.input_overloads()
+    }
     fn poll_status(&mut self) -> BackendStatus {
         self.inner.poll_status()
     }
@@ -183,6 +186,9 @@ mod tests {
         fn output_space(&mut self) -> Option<usize> {
             Some(512)
         }
+        fn input_overloads(&mut self) -> Vec<bool> {
+            vec![false, true]
+        }
         fn poll_status(&mut self) -> BackendStatus {
             BackendStatus::default()
         }
@@ -213,6 +219,7 @@ mod tests {
         assert!(matches!(b.read_input(&mut buf), Ok(InputRead::Frames(1))));
         assert_eq!(b.take_warnings(), vec!["underrun".to_owned()]);
         assert_eq!(b.output_space(), Some(512));
+        assert_eq!(b.input_overloads(), vec![false, true]);
         assert_eq!(*calls.lock().unwrap(), ["read"]);
     }
 

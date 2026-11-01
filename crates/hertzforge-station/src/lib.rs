@@ -611,6 +611,9 @@ impl Backend for TrackedBackend {
     fn output_space(&mut self) -> Option<usize> {
         self.inner.output_space()
     }
+    fn input_overloads(&mut self) -> Vec<bool> {
+        self.inner.input_overloads()
+    }
     fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
         self.inner.poll_status()
     }
@@ -1065,6 +1068,9 @@ mod tests {
             fn output_space(&mut self) -> Option<usize> {
                 Some(4096)
             }
+            fn input_overloads(&mut self) -> Vec<bool> {
+                vec![true]
+            }
             fn poll_status(&mut self) -> BackendStatus {
                 BackendStatus::default()
             }
@@ -1074,6 +1080,11 @@ mod tests {
         }
 
         let mut wrapped = TrackedBackend::wrap(Box::new(Reporting));
+        assert_eq!(
+            wrapped.input_overloads(),
+            vec![true],
+            "the station wrapper swallowed the backend's overload flags"
+        );
         assert_eq!(
             wrapped.take_warnings(),
             vec!["onboard AO buffer underflowed".to_string()],

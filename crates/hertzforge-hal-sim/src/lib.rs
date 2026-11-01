@@ -442,6 +442,9 @@ struct ChannelMap {
     /// ALLOCATION-FREE (it used to collect a fresh `Vec<ChannelRole>` on every
     /// single call, which at 400 channels is an allocation per acquired block).
     roles: Vec<ChannelRole>,
+    /// Each input's full scale (the row's `range_max`), in the order above, for the
+    /// overload check.
+    full_scale: Vec<f64>,
     /// Number of drive (output) channels.
     n_drive: usize,
 }
@@ -482,6 +485,9 @@ pub struct SimBackend {
     /// `g` decays toward 0 each sample (a safe ramp-down that never issues firmware ops).
     ramp: Option<f64>,
     faulted: bool,
+    /// Per input: a sample reached `hertzforge_hal::INPUT_OVERLOAD_FRACTION` of the
+    /// row's full scale since the last configure ([`Backend::input_overloads`]).
+    overloaded: Vec<bool>,
 }
 
 impl Default for SimBackend {
@@ -516,6 +522,7 @@ impl SimBackend {
             epoch: 0,
             ramp: None,
             faulted: false,
+            overloaded: Vec::new(),
         }
     }
 
@@ -652,6 +659,7 @@ impl Backend for SimBackend {
 
         // Map roles: Control/Monitor/Reference are measurement inputs; Drive is an output.
         let mut input_channels = Vec::new();
+        let mut full_scale = Vec::new();
         let mut n_drive = 0usize;
         for ch in table.channels.iter().filter(|c| c.enabled) {
             match ch.role {
@@ -661,6 +669,7 @@ impl Backend for SimBackend {
                         table_index: ch.index,
                         role: ch.role,
                     });
+                    full_scale.push(ch.range_max);
                 }
             }
         }
@@ -695,9 +704,11 @@ impl Backend for SimBackend {
         // Preallocate the whole FIFO so nothing allocates on the hot path.
         self.out_fifo = VecDeque::with_capacity(self.cfg.output_buffer_frames.max(1) * n_drive);
         let roles = input_channels.iter().map(|c| c.role).collect();
+        self.overloaded = vec![false; input_channels.len()];
         self.map = Some(ChannelMap {
             input_channels,
             roles,
+            full_scale,
             n_drive,
         });
         self.state = State::Configured;
@@ -805,6 +816,13 @@ impl Backend for SimBackend {
             &mut roles,
         );
         self.sample_counter += frames as u64;
+        if let Some(map) = self.map.as_ref() {
+            hertzforge_hal::mark_overloads(
+                &out[..frames * n_ch],
+                &map.full_scale,
+                &mut self.overloaded,
+            );
+        }
         // The Sim plant synthesizes on demand: every poll fills the whole buffer, so
         // `NoDataYet`/`Ended` never occur on a live configured stream.
         Ok(InputRead::Frames(frames))
@@ -840,6 +858,10 @@ impl Backend for SimBackend {
     /// Real remaining headroom in the output FIFO, in frames. `Some`, never `None`:
     /// this backend HAS an independent output buffer now, so the engine takes its
     /// top-up path against the Sim in CI (that is the point of the model).
+    fn input_overloads(&mut self) -> Vec<bool> {
+        self.overloaded.clone()
+    }
+
     fn output_space(&mut self) -> Option<usize> {
         let n = self.map.as_ref().map_or(0, |m| m.n_drive);
         if n == 0 {
@@ -992,6 +1014,47 @@ mod tests {
         b.arm().unwrap();
         b.close().unwrap();
         assert!(!b.poll_status().connected);
+    }
+
+    /// The Sim reports an input whose samples reach 98 % of its row's range, like
+    /// every backend (`Backend::input_overloads`), and only that input.
+    #[test]
+    fn an_input_driven_to_its_range_is_reported_overloaded() {
+        let mut b = SimBackend::from_config(
+            SimConfig::default()
+                .shared_clock(true)
+                .max_input_channels(2),
+        );
+        let mut t = ChannelTable::new();
+        let mut c = Channel::new(1);
+        c.role = ChannelRole::Control;
+        c.range_max = 1e-3; // the plant's response passes this at once
+        let mut m = Channel::new(2);
+        m.role = ChannelRole::Monitor;
+        m.range_max = 1e9; // never reached
+        let mut d = Channel::new(3);
+        d.role = ChannelRole::Drive;
+        t.channels = vec![c, m, d];
+        b.open().unwrap();
+        b.configure(&t, &AcquisitionConfig::new(8192.0, 64))
+            .unwrap();
+        assert_eq!(b.input_overloads(), vec![false, false]);
+        b.arm().unwrap();
+        b.start().unwrap();
+        let drive = vec![1.0f32; 64];
+        let mut buf = vec![0.0f32; 128];
+        for _ in 0..8 {
+            b.write_drive(&drive).unwrap();
+            b.read_input(&mut buf).unwrap();
+        }
+        assert_eq!(b.input_overloads(), vec![true, false]);
+        b.configure(&t, &AcquisitionConfig::new(8192.0, 64))
+            .unwrap();
+        assert_eq!(
+            b.input_overloads(),
+            vec![false, false],
+            "a configure starts over"
+        );
     }
 
     #[test]
