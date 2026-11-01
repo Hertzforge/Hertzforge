@@ -456,6 +456,42 @@ pub fn scan_ni() -> Result<Vec<DiscoveredDevice>, StationBuildError> {
     }
 }
 
+/// The DAQmx timing family of every device in a scan, as `(device id, family id)` in
+/// the scan's own order.
+///
+/// A front end that lists devices or checks a selection before anything is built
+/// needs the same grouping the factory refuses on, and may not name the NI backend
+/// crate. This is that grouping, passed through from the backend's own
+/// `TimingFamilyMap`: every module in a chassis the scan contains is the chassis'
+/// family; anything else is its own.
+pub fn timing_families(devices: &[DiscoveredDevice]) -> Vec<(String, String)> {
+    let map = TimingFamilyMap::from_devices(devices);
+    devices
+        .iter()
+        .map(|d| {
+            let family = map
+                .family_of_device(&d.id)
+                .map(|f| f.id.clone())
+                .unwrap_or_else(|| d.id.clone());
+            (d.id.clone(), family)
+        })
+        .collect()
+}
+
+/// The NI station from a scan the caller already holds.
+///
+/// The same classification [`try_build_station_backend`] performs after its own
+/// scan (driver-simulated or physical, the operator's device set, channel counts,
+/// timing families), for a front end that scanned once and must decide against
+/// that scan, and for tests on a host with no NI runtime. Nothing is opened.
+pub fn ni_station_from_scan(
+    scan: Vec<DiscoveredDevice>,
+    sel: &NiSelection,
+    block_frames: usize,
+) -> Result<StationBackend, StationBuildError> {
+    build_ni(Ok(scan), sel, block_frames)
+}
+
 // =====================================================================================
 // The factory
 // =====================================================================================
@@ -1240,6 +1276,58 @@ mod tests {
              family (the chassis row is retained as evidence): {:?}",
             ok.err()
         );
+    }
+
+    /// `timing_families` is the backend's grouping, passed through: modules of a
+    /// scanned chassis share the chassis' family, a standalone card is its own, and a
+    /// module whose chassis the scan does not contain is not folded into a phantom.
+    ///
+    /// RED-MUTATION: return each device's own id as its family and the chassis
+    /// assertions red.
+    #[test]
+    fn timing_families_group_modules_under_their_scanned_chassis() {
+        let chassis = dev("cDAQ1", "0A", false, 0, 0);
+        let mut ai = dev("cDAQ1Mod1", "0B", false, 4, 0);
+        ai.parent = Some("cDAQ1".into());
+        let mut ao = dev("cDAQ1Mod2", "0C", false, 0, 4);
+        ao.parent = Some("cDAQ1".into());
+        let card = dev("PCIe6363", "0D", false, 16, 2);
+        let mut orphan = dev("cDAQ9Mod1", "0E", false, 4, 0);
+        orphan.parent = Some("cDAQ9".into());
+        let fam = timing_families(&[chassis, ai, ao, card, orphan]);
+        let of = |id: &str| fam.iter().find(|(d, _)| d == id).map(|(_, f)| f.as_str());
+        assert_eq!(of("cDAQ1"), Some("cDAQ1"));
+        assert_eq!(of("cDAQ1Mod1"), Some("cDAQ1"));
+        assert_eq!(of("cDAQ1Mod2"), Some("cDAQ1"));
+        assert_eq!(of("PCIe6363"), Some("PCIe6363"));
+        assert_eq!(of("cDAQ9Mod1"), Some("cDAQ9Mod1"), "no phantom chassis");
+    }
+
+    /// `ni_station_from_scan` is the factory's own classification on a held scan:
+    /// the driver's flag decides the class and the operator's device set is a hard
+    /// filter.
+    #[test]
+    fn a_held_scan_classifies_exactly_as_the_factory_does() {
+        let real = ni_station_from_scan(
+            vec![dev("Dev1", "01", false, 4, 2)],
+            &NiSelection::default(),
+            1024,
+        )
+        .expect("a physical device builds");
+        assert_eq!(real.station, StationClass::NiReal);
+        let err = ni_station_from_scan(
+            vec![dev("Dev1", "01", false, 4, 2)],
+            &NiSelection {
+                restrict_devices: vec!["Dev2".into()],
+                ..NiSelection::default()
+            },
+            1024,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            StationBuildError::SelectedDevicesAbsent { .. }
+        ));
     }
 
     // -------------------------------------------------------------------------
