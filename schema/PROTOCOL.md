@@ -50,12 +50,16 @@ plus shape) and drops the `arrays` list. Every listed array is referenced exactl
 hello     {"type":"hello","protocol":"sds/1","service":"analysis"|"control","version":"0.1.0"}
 request   {"type":"request","id":<int>,"method":"<name>","params":{...}}
 response  {"type":"response","id":<int>,"result":{...}}
-          {"type":"response","id":<int>,"error":{"code":"<code>","message":"<text>"}}
+          {"type":"response","id":<int>,"error":{"code":"<code>","message":"<text>",
+                                                  "reason":"<name>","detail":{...}}}
 event     {"type":"event","topic":"<name>","seq":<int>,"data":{...}}
 ```
 
 Error codes: `bad_request`, `unknown_method`, `not_found`, `refused`, `internal`. The message
 names the cause in words a user can act on; an error never comes back as an empty result.
+`reason` (optional) names the cause for a program: a stable snake_case name a client branches
+on, so no client ever parses `message`. `detail` (optional) carries the facts behind it. Every
+error from the hardware and Random methods carries a `reason` (see "Refusals" below).
 
 ## Views: The Viz Kit's Input
 
@@ -149,6 +153,11 @@ the selected dataset is of that kind ("tools follow the data").
 
 **Control service**
 
+The hardware and Random methods are in "Hardware and Random Control" below. The `sim.*` methods
+came first and are superseded for running tests: `random.*` on the `sim` station runs the same
+closed loop with the full configuration, controller ownership and the safe stop. They stay,
+unchanged, for the Simulate workspace's demonstrations (they alone run faster than real time).
+
 | Method | Params | Result |
 |---|---|---|
 | `sim.profiles` | `{}` | `{"profiles":[{"id","title","summary"}]}` |
@@ -158,6 +167,11 @@ the selected dataset is of that kind ("tools follow the data").
 
 `speed` is a multiple of real time from 0 to 1000; 0 means as fast as the engine runs.
 
+The service runs one test at a time. `sim.start` is refused with reason `run_active` while a
+`random.*` run is live (armed, running, holding for review or stopping), and `random.arm` and
+`random.start` are refused the same way while a `sim.start` run is running. `sim.stop` and `sim.state` see only runs that
+`sim.start` started.
+
 Event topic `random.display`, about 4 to 10 per second while running:
 `{"run_id","source":"SIM","state","elapsed_s","level_db","views":[spectrum, reading],
 "phase","outcome","reason"}`. `phase` is the controller's own phase name. Once `state` is
@@ -166,3 +180,478 @@ Event topic `random.display`, about 4 to 10 per second while running:
 `operator_stop` as an abort with that reason.
 `source` is always present on control data; the shell shows it as a badge. A simulated run is
 never presented as a hardware result.
+
+## Hardware and Random Control
+
+The control service runs one test at a time on one station. The methods below select the
+station (the simulator or NI-DAQmx hardware), edit the channel table, configure a closed-loop
+Random test, run it, and show it live. The control loop runs on the service's own thread beside
+the hardware. The socket carries the operator's intent down and display data back, and never a
+sample of the loop.
+
+A stop or an abort sent over the socket is a request. The controller's own protection (the
+envelope, kinematic, drive and divergence aborts, and the station's watchdog) and the
+amplifier's emergency stop are the abort authority, and the shell labels its Stop and Abort
+accordingly.
+
+Every value from a run carries `source`: `SIM` or `HARDWARE`. Only physical NI devices give
+`HARDWARE`. The simulator and NI's driver-simulated devices both give `SIM`, and `class` says
+which. The shell shows `HARDWARE` as its live badge and `SIM` as the simulated badge, and names
+driver-simulated devices as such. Nothing simulated is ever presented as a measurement.
+
+### Refusals
+
+Every error from a method in this section carries `reason`, a stable name a client branches on.
+`message` is the words a person can act on and is shown verbatim; a client never parses it.
+`detail`, when present, carries the facts named below.
+
+```
+{"type":"response","id":12,"error":{"code":"refused","reason":"controller_held",
+ "message":"Another client controls this service (Shell on bench-pc). Close that client, or wait for it to release control.",
+ "detail":{"holder":"Shell on bench-pc"}}}
+```
+
+| `reason` | `code` | Cause | `detail` |
+|---|---|---|---|
+| `bad_params` | `bad_request` | A parameter is missing, of the wrong type, or not one of its stated values | `param` |
+| `not_controller` | `refused` | A method that changes the station, the table or the run, from a connection that does not hold control | `holder` (null when nobody does) |
+| `controller_held` | `refused` | `session.claim` while another connected client holds control | `holder` |
+| `run_active` | `refused` | The call would change what a live run (armed, running, holding for review or stopping) depends on, or start a second run | `run_id` |
+| `not_configured` | `refused` | `random.arm` or `random.start` with no configuration | |
+| `run_finished` | `refused` | `random.arm` or `random.start` on a finished run; reset or configure first | `outcome` |
+| `wrong_state` | `refused` | The verb does not apply in the run's present state | `state`, `phase` |
+| `manual_mode_required` | `refused` | `random.level` while the ladder is automatic | `mode` |
+| `not_a_rung` | `bad_request` | `random.level` `to_db` is not a level of the schedule | `levels_db` |
+| `feasibility_exceeded` | `refused` | The profile exceeds the shaker's ratings; the run is blocked until armed with an acknowledgement | `feasibility` |
+| `override_not_needed` | `refused` | `override_ack` sent while the run is not blocked | |
+| `arm_refused` | `refused` | The station refused to arm: the rate it programmed, the analysis grid at that rate, its sample clock, or the driver. The message is the controller's own | |
+| `ni_driver_unavailable` | `refused` | The NI-DAQmx runtime is not installed on this computer | |
+| `no_ni_devices` | `refused` | The scan found no NI devices | |
+| `scan_failed` | `refused` | The driver refused the scan | |
+| `devices_absent` | `refused` | Selected devices are not in the latest scan | `missing`, `found` |
+| `mixed_simulated_and_real` | `refused` | The selection mixes driver-simulated and physical devices | `simulated`, `real` |
+| `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
+| `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
+| `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
+| `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
+| `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
+| `config_invalid` | `bad_request` | The Random configuration has errors | `errors`, `warnings` |
+| `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
+
+`errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
+(a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
+path such as `control.damping`) locates the problem. Item reasons:
+
+| Where | Errors | Warnings |
+|---|---|---|
+| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `reference_count_mismatch`, `drive_channel_present` |
+| Profile | `profile_empty`, `first_row_not_anchor`, `row_level_ambiguous`, `frequency_not_positive`, `frequency_not_ascending`, `psd_negative` | `alarm_wider_than_abort` |
+| Acquisition | `n_pts_not_power_of_two`, `band_above_grid`, `too_few_lines` | |
+| Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
+| Control and limits | `no_control_channel`, `weight_unknown_channel`, `weights_sum_not_positive`, `limit_unknown_channel`, `limit_rows_not_ascending` | |
+| Any number | `out_of_range` (`field` names it, `message` states the range) | |
+
+A refusal not listed here is a defect in the service.
+
+### Controller and Observers
+
+One connection at a time holds control; any number observe. Every connection starts as an
+observer. Observers receive every event and may call every method that only reads
+(`session.state`, `station.list`, `channels.get`, `random.state`, `random.log`, and the
+`dry_run` checks). Every other method in this section is refused `not_controller`. Abort is
+no exception: a person without control stops the machine with its emergency stop, not with a
+second authority on the socket.
+
+| Method | Params | Result |
+|---|---|---|
+| `session.state` | `{}` | `{"role","controller","orphan_s","heartbeat_s","timeout_s"}` |
+| `session.claim` | `{"name","lease"}` (both optional) | `{"role":"controller","lease","resumed","heartbeat_s","timeout_s"}` |
+| `session.release` | `{}` | `{"role":"observer","orphan_s"}` |
+
+`role` is `controller` or `observer`. `controller` is `{"name","present"}`, or null when nobody
+holds control. `name` is how other clients see the holder; it defaults to the peer address.
+`orphan_s` is null, or the seconds left before an unattended run is stopped (below). A claim
+while another connected client holds control is refused `controller_held`; there is no forced
+takeover.
+
+**Heartbeat.** The service sends a WebSocket ping every `heartbeat_s` (5 s). Any inbound frame
+shows a connection is alive, and browsers answer pings on their own, so a client sends nothing
+for it. After three heartbeats with nothing inbound, the connection is treated as gone.
+
+**When the controlling client goes.**
+
+- **Without a goodbye** (the network drops, the computer sleeps): the run continues, and the
+  seat is kept for `timeout_s` (30 s) with `controller.present` false and `orphan_s` counting
+  down. A `session.claim` that presents the same `lease` in that time resumes control
+  (`resumed: true`); a claim without it takes control from the absent holder.
+- **With a goodbye** (a clean close, or `session.release`): control is free at once, and a live
+  run is kept for `timeout_s` for a client to claim.
+- **Nobody claims in time:** if a run is live when `orphan_s` reaches 0, the service ends it
+  with the controlled stop, the same path as `random.stop` (while driving, the level ramps down
+  over the configured `shutdown_ramp_s`), never with an abort. The run's outcome is
+  `safe_stop`.
+
+`session.changed` (text event, to every connection on every change):
+`{"controller","orphan_s"}`.
+
+### Stations
+
+| Method | Params | Result |
+|---|---|---|
+| `station.list` | `{"rescan"}` (optional, default false) | `{"stations":[sim, ni],"selected"}` |
+| `station.select` | `{"kind":"sim"}` or `{"kind":"ni","devices":[id...]}` | `{"selected"}` |
+
+The service starts with the simulator selected. It never selects hardware on its own, and never
+falls back to the simulator when hardware is missing, busy or refused: the selection is refused
+by name instead.
+
+```
+{"kind":"sim","title":"Simulator","available":true,"class":"sim","inputs":8,"outputs":1,"clock":"shared"}
+{"kind":"ni","title":"NI-DAQmx","available":true,"unavailable":null,"scanned_unix":1793577600,
+ "devices":[{"id":"cDAQ1Mod1","product":"NI 9234","serial":"01A2B3C4","simulated":false,
+             "parent":"cDAQ1","slot":1,"timing_family":"cDAQ1",
+             "inputs":[{"id":"ai0","label":"ai0"}],"outputs":[]}]}
+```
+
+- The simulator is a fixed plant with two resonances (near 200 and 550 Hz) on one shared sample
+  clock, paced in real time at the configured rate.
+- `available` false on `ni` comes with `unavailable: {"reason","message"}`, using the station
+  reasons above (`ni_driver_unavailable`, `no_ni_devices`, `scan_failed`).
+- `simulated` is the driver's own statement that no physical device is behind the id. It is
+  never inferred from a name.
+- A chassis is listed as a device without channels; its modules name it as `parent` with their
+  `slot`.
+- `timing_family` groups the devices that can share one sample clock: every module in one
+  chassis is one family (named by the chassis), and a standalone device is its own family. All
+  of a run's channels must be in one family.
+- The scan does not read a module's sample-rate ladder, IEPE capability or output range, so none
+  is reported. The rate the hardware actually runs at is reported when the run arms.
+
+`selected`:
+
+```
+{"kind":"ni","devices":["cDAQ1Mod1","cDAQ1Mod2"],"class":"ni_real","source":"HARDWARE",
+ "inputs":4,"outputs":4,"timing_family":"cDAQ1"}
+```
+
+`class` is `sim` (the simulator's plant), `ni_simulated` (driver-simulated NI devices: the real
+driver and tasks, no physical signal) or `ni_real` (physical NI devices). `source` follows from
+it. `devices` is empty and `timing_family` null for the simulator.
+
+`station.select` checks the selection against a fresh scan. Refusals: `bad_params` (an unknown
+kind, or `ni` with no devices), `not_controller`, `run_active`, `ni_driver_unavailable`,
+`no_ni_devices`, `scan_failed`, `devices_absent`, `mixed_simulated_and_real`,
+`mixed_timing_families`, `hardware_busy`. Selecting opens nothing: devices are opened when a run
+arms. `station.changed` (text event, to every connection when the selection or the scan
+changes) carries the `station.list` result.
+
+### Channel Table
+
+One table, held by the control service, used by every run.
+
+| Method | Params | Result |
+|---|---|---|
+| `channels.get` | `{}` | `{"revision","channels":[row...],"report"}` |
+| `channels.set` | `{"revision","channels":[row...],"dry_run"}` (`dry_run` optional) | `{"revision","report"}` |
+
+```
+{"index":1,"enabled":true,"description":"Control","role":"control",
+ "physical":{"device":"cDAQ1Mod1","channel":"ai0"},"interface":"single_ended","iepe_bias_v":null,
+ "units":"g","sensitivity_mv_per_eu":100,"range_max":50,"polarity":"positive",
+ "control_group":null,"abort":{"accel_g":null,"velocity_ips":null,"displacement_mil":null}}
+```
+
+| Field | Values | New row |
+|---|---|---|
+| `index` | integer, unique in the table; the channel's number everywhere else | |
+| `enabled` | boolean | true |
+| `description` | text | empty |
+| `role` | `control` (closes the loop), `monitor`, `drive` (an output), `reference` | `monitor` |
+| `physical` | `{"device","channel"}` from the scan, or null (unbound) | null |
+| `interface` | `single_ended` or `iepe` | `single_ended` |
+| `iepe_bias_v` | number, or null | null |
+| `units` | `g`, `in/s`, `mil`, `lbf`, `V`, or another unit's name | `g` |
+| `sensitivity_mv_per_eu` | number, mV per engineering unit; not zero on an enabled input | 100 |
+| `range_max` | number above 0, full scale in the row's unit | 100 |
+| `polarity` | `positive` or `negative` | `positive` |
+| `control_group` | integer from 0 with no gaps, or null | null |
+| `abort` | `{"accel_g","velocity_ips","displacement_mil"}`, each a limit or null | all null |
+
+Every row carries every field. A row's `abort` limits are absolute: a run aborts when that
+channel passes one, at any level.
+
+**IEPE is off unless a client turns it on for a row.** The service's starting table (one
+control input, one drive output, both unbound) and every row it creates are `single_ended`, and
+the service never turns IEPE on by itself. IEPE drives a constant current into the input: an
+input wired to a voltage source, such as a loopback from an output or a signal generator, stays
+`single_ended`.
+
+**Validation.** `report` is `{"errors":[item...],"warnings":[item...]}` with the item reasons
+listed under Refusals. On the simulator, `physical` is kept but not used or checked. On an NI
+station, every enabled row must be bound to a channel of the selected devices in the right
+direction (an input row to an input, a drive row to an output), no two rows to one channel, and
+all in one timing family. Selecting another station checks the table again: `channels.get`
+reports the errors until the table is fixed, and `random.configure` is refused `table_invalid`.
+
+**Revisions.** Every write increments `revision`. A `channels.set` that quotes an older revision
+is refused `stale_revision`; the client reads the table again and shows the operator what
+changed before sending, and never retries on its own, because the table carries the abort
+limits. A table with errors is refused `table_invalid` and not written; warnings never block.
+`dry_run: true` checks the table and returns the report without writing; it needs no control and
+is never refused for the table's content. `channels.changed` (text event, to every connection
+after a write or a station change) carries the `channels.get` result.
+
+### Random Test Configuration
+
+| Method | Params | Result |
+|---|---|---|
+| `random.configure` | `{"config","dry_run"}` (`dry_run` optional) | `{"state","derived","warnings"}` |
+
+```
+{"title":"Qualification Random",
+ "profile":{"breakpoints":[{"freq_hz":20,"psd_g2_hz":0.01},{"freq_hz":80,"slope_db_oct":3},
+                           {"freq_hz":350,"psd_g2_hz":0.04,"alarm_db":[2,2]},
+                           {"freq_hz":2000,"slope_db_oct":-3}],
+            "alarm_db":[3,3],"abort_db":[6,6]},
+ "acquisition":{"fs_hz":8192,"n_pts":2048,"n_avg":4},
+ "schedule":{"mode":"auto","levels":[{"db":-12,"dwell_s":30},{"db":-6,"dwell_s":30},{"db":0}],
+             "full_level_s":300},
+ "control":{"review_after_sysid":true,"shutdown_ramp_s":3},
+ "limits":[],"feasibility":null}
+```
+
+**Profile.** The reference, in g²/Hz. Each breakpoint row is either a PSD anchor
+(`psd_g2_hz`) or a slope from the row before (`slope_db_oct`), never both; the first row is an
+anchor and frequencies rise strictly. The test band runs from the first row to the last.
+`alarm_db` and `abort_db` are `[below, above]` in positive dB: the band runs from the reference
+times 10^(-below/10) to the reference times 10^(above/10). A row's own bands hold from that row
+to the next; elsewhere the profile's bands hold (defaults `[3,3]` and `[6,6]`). An alarm band
+wider than its abort band is a warning.
+
+**Acquisition.** `fs_hz` is the rate requested of the station; hardware may run at a nearby
+rate, and the run reports the rate it actually ran at. `n_pts` is the FFT length (a power of
+two) and `n_avg` the averages per control loop. The lines are `fs_hz / n_pts` apart. A profile
+whose top breakpoint the grid cannot reach is refused `band_above_grid`, and fewer than 8 lines
+in the band is refused `too_few_lines`; both are checked again at arm against the rate the
+hardware programmed.
+
+**Schedule.** `levels` are dB relative to the reference, in non-decreasing order; the last is
+full level. Every level but the last has a `dwell_s`. In `auto`, the run starts at the first
+level, holds each for its dwell, holds full level for `full_level_s`, and ends `completed`. In
+`manual`, the run starts at the first level and moves only on `random.level`, between the first
+and last levels, until stopped; `full_level_s` applies if the ladder is handed back to `auto`.
+
+**Control.** Every field is optional:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `composite` | `weighted_avg` | How the control channels (the table's enabled `control` rows) combine: `weighted_avg`, `min` or `max` |
+| `weights` | 1 each | `[{"channel","weight"}]` for control rows |
+| `control_dof` | 120 | Statistical degrees of freedom of the control estimate; higher is steadier and slower to adapt |
+| `damping` | 4 | Correction damping, 0 (correct fully every loop) to 10 |
+| `max_lines_out` | 10 | Lines outside the abort band in one loop that trip the envelope abort |
+| `max_loops_out` | 5 | Consecutive diverging loops that trip the divergence abort |
+| `max_sigma` | 5 | Drive clip, in standard deviations; null for no clip |
+| `drive_ceiling_vrms` | 10 | The drive is held at or below this rms |
+| `drive_abort_vrms` | null | A drive rms at or above this aborts; null for none |
+| `sysid_level_db` | -20 | Level of the system identification, dB relative to full |
+| `coherence_floor` | 0.5 | Band coherence the system identification must reach |
+| `review_after_sysid` | true | Hold after system identification for the operator to proceed |
+| `pretest` | `{"averages":4,"max_vrms":1,"min_vrms":0.01,"shaped":false}` | System identification drive; `shaped` follows the reference's shape instead of a flat band |
+| `soft_start_db` | 9 | The run engages this far below the first level and ramps up to it |
+| `soft_start_relax_db` | 6 | The bands widen by this much until the first level is reached |
+| `level_ramp_s` | 3 | Ramp time of every level change |
+| `shutdown_ramp_s` | 3 | Ramp time of a controlled stop |
+
+**Limits.** `[{"channel","kind","rows":[{"freq_hz","ceiling"}...]}]`, `kind` `response` or
+`force`, `ceiling` a PSD in the channel's unit squared per Hz. The controller lowers the drive
+where the channel would pass its ceiling. A limit never aborts.
+
+**Feasibility.** Optional `{"shaker","moving_mass_lb","crest_factor"}`: `shaker` is a shaker
+record in the controller's shaker-database form, `moving_mass_lb` is `{"armature","slip_table",
+"drive_adapter","fixturing","test_article"}`, `crest_factor` defaults to 3. Checked at arm.
+Without it, feasibility is not evaluated and the run says so.
+
+**Result.** `state` is the `random.state` object (`configured`). `derived`:
+
+```
+{"grms_g":6.06,"velocity_rms_ips":2.31,"displacement_rms_mil":21.4,"band_hz":[20,2000],
+ "grid":{"fs_hz":8192,"n_pts":2048,"df_hz":4,"lines":496,"loop_s":1,"actual":false},
+ "control_channels":[1]}
+```
+
+`grid` is the requested grid until the run arms (`actual` false); `lines` counts lines in the
+band; `loop_s` is the time one control loop takes. A configuration replaces the one before;
+it is refused `run_active` while a run is live, and
+`config_invalid` or `table_invalid` with the items when it has errors. Configuring checks the
+table against the selected station and opens nothing. `dry_run: true` checks without
+replacing anything and needs no control; its result is `{"errors","warnings","derived"}`
+(`derived` null when there are errors).
+
+### Running a Random Test
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `random.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
+| `random.start` | `{}` | `configured`, `armed` | state |
+| `random.proceed` | `{}` | `review` | state |
+| `random.level` | `{"delta_db"}` or `{"to_db"}` | `running`, in `manual` | `{"level_db"}` |
+| `random.mode` | `{"mode":"auto"|"manual"}` | any configured state | `{"mode"}` |
+| `random.stop` | `{}` | any | state |
+| `random.abort` | `{}` | any | state |
+| `random.reset` | `{}` | any but `running`, `review`, `stopping` | state |
+| `random.clear` | `{}` | any but `running`, `review`, `stopping` | state |
+| `random.state` | `{}` | any | state |
+| `random.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+
+A run is live while it is armed, running, holding for review or stopping. "state" in the
+Result column is the `random.state` object below.
+
+- **`random.arm`** checks feasibility (when given), opens the station, programs the rate, builds
+  the analysis grid at the rate the hardware actually runs at, and passes the controller's arm
+  gate (shared sample clock, rate, grid). Nothing is driven. The state becomes `armed`, with
+  `grid.actual` true and `clock`. When the profile exceeds the shaker's ratings it is refused
+  `feasibility_exceeded` and the state becomes `blocked`; `random.arm` with a non-empty
+  `override_ack` then arms past it, and the text is logged verbatim and kept with the run.
+  Refusals: `not_controller`, `not_configured`, `run_active`, `run_finished`,
+  `feasibility_exceeded`, `override_not_needed`, `bad_params` (an empty acknowledgement),
+  `arm_refused`, `hardware_busy`, `devices_absent`, `table_invalid`.
+- **`random.start`** from `configured` arms first, with the same refusals. It then runs the
+  system identification at `sysid_level_db` and the coherence gate, and either holds for review
+  (`review`) or engages: the soft start, then the schedule. It answers at once (`running`).
+- **`random.proceed`** releases the review hold and engages.
+- **`random.level`**, in `manual` only: `delta_db` steps from the present level (the shell's
+  plus and minus 1 dB), held between the first and last levels; `to_db` goes to a level of the
+  schedule (`not_a_rung` otherwise). Every change ramps over `level_ramp_s`. Refusals:
+  `manual_mode_required`, `not_a_rung`, `wrong_state`, `not_controller`.
+- **`random.mode`** hands the ladder over live. `auto` to `manual` holds the present level;
+  `manual` to `auto` resumes from the present level with its dwell restarted, and from a level
+  between two of the schedule's, it moves to the one above when the dwell ends.
+- **`random.stop`** is the controlled stop: while driving, the level ramps down over
+  `shutdown_ramp_s` (state `stopping`) and the run ends `operator_stop`; from `armed` or
+  `review` it ends at once. It answers at once.
+- **`random.abort`** ends the run within one control loop (`grid.loop_s`), without the shutdown
+  ramp; the station takes the drive down with its own stop. The outcome is `operator_abort`. It
+  answers when the loop has ended.
+- `random.stop` and `random.abort` on a run that is not live answer with the state, unchanged.
+- **`random.reset`** builds a new run from the same configuration (`configured`, a new
+  `run_id`). It and `random.configure` are the ways out of `finished`.
+- **`random.clear`** drops the configuration and releases the station (`unconfigured`).
+
+### Run State
+
+`random.state` answers with the state object, and the `random.state` text event carries the same
+object to every connection on every change of `state`, `phase`, `mode`, `level_db`, `alarm` or
+`end`.
+
+```
+{"run_id":"r-0007","state":"finished","phase":"aborted","title":"Qualification Random",
+ "source":"HARDWARE",
+ "station":{"kind":"ni","class":"ni_real","devices":[{"id":"cDAQ1Mod1","serial":"01A2B3C4"}]},
+ "grid":{"fs_hz":51200,"n_pts":8192,"df_hz":6.25,"lines":317,"loop_s":0.64,"actual":true},
+ "clock":"shared","mode":"auto","levels_db":[-12,-6,0],"level_db":null,"full_level_s":300,
+ "elapsed_s":131.2,"at_level_s":42.5,"remaining_at_level_s":null,"alarm":false,
+ "feasibility":{"verdict":"not_evaluated","message":"No shaker was given, so the profile was not checked against shaker ratings."},
+ "end":{"outcome":"aborted","message":"Envelope abort: 14 lines outside the abort band, worst +7.2 dB, at 0.0 dB.",
+        "at_s":131.2,"level_db":0,
+        "trip":{"kind":"envelope","abort_lines":14,"worst_db":7.2,"at_level_db":0,"at_loop":212}}}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured` | `idle` | No configuration |
+| `configured` | `idle` | Configured; nothing open |
+| `blocked` | `feasibility_blocked` | Feasibility exceeded; arming needs an acknowledgement |
+| `armed` | `armed` | Station open and gated; nothing driven yet |
+| `running` | `sysid`, `coherence_gate`, `engaged`, `full_level` | Driving: system identification, its gate, the ladder, full level |
+| `review` | `awaiting_review` | System identification passed; nothing drives until `random.proceed` |
+| `stopping` | `ramping_down` | A controlled stop or a safe stop is ramping the level down |
+| `finished` | `stopped`, `aborted`, `coherence_hold` | Ended; `end` says how |
+
+`phase` is the controller's own phase in snake case, with `armed` (armed, before the first
+drive) and `ramping_down` added. `run_id` is null when unconfigured, and new at every
+configure and reset. `source`, `station`, `grid` and `clock` describe the run's station
+(`clock`, `shared`, `independent` or `unknown`, is null until the run arms). `level_db` is the
+commanded level, null when nothing drives. `elapsed_s` counts from `random.start` (null
+before). `at_level_s` and `remaining_at_level_s` are the time at the present level and the
+time left on it (null in `manual`). `alarm` is true while an alarm condition holds (see
+`random.live`). `feasibility` is null until arm, then `{"verdict","message"}` with `verdict`
+`pass`, `advisory`, `exceeded` or `not_evaluated`.
+
+`end` is null until the run finishes, then `{"outcome","message","at_s","level_db","trip"}`:
+
+| `outcome` | How the run ended |
+|---|---|
+| `completed` | The schedule finished |
+| `operator_stop` | `random.stop` |
+| `operator_abort` | `random.abort` |
+| `safe_stop` | Nobody held control for `timeout_s`; the service stopped the run (see Controller and Observers) |
+| `aborted` | A protection abort tripped; `trip` says which |
+| `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
+| `fault` | The loop or the station failed; `message` is the controller's words |
+
+The shell shows every outcome but `completed` and `operator_stop` as an abort with `message`.
+`trip` is null unless `outcome` is `aborted`, and then has `at_level_db`, `at_loop` and its
+`kind`'s facts:
+
+| `kind` | Facts |
+|---|---|
+| `envelope` | `abort_lines`, `worst_db` |
+| `kinematic` | `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
+| `drive_vrms` | `realized_vrms`, `limit_vrms` |
+| `divergence` | `consecutive_loops`, `divergent_bins` |
+
+### Live Display
+
+Event topic `random.live`, a binary frame 5 times a second from the start of system
+identification until the run finishes, and once more with the final state:
+
+```
+{"run_id","source","class","state","phase","mode","elapsed_s","level_db","at_level_s",
+ "remaining_at_level_s","loop",
+ "control_rms_g","reference_rms_g","drive_rms_v",
+ "lines":{"in_band","alarm","abort"},
+ "channels":[{"index":1,"description":"Control","role":"control","rms":6.02,"unit":"g","overload":false}],
+ "alarms":[{"kind":"envelope","lines":2,"worst_db":3.4}],
+ "views":[control spectrum, drive spectrum, run readings]}
+```
+
+- `loop` counts control loops since the start. `control_rms_g` is the composite control rms
+  over the band (null before the first loop), `reference_rms_g` the reference rms at the
+  present level, `drive_rms_v` the drive rms.
+- `lines` counts the band's lines, and how many lie outside the alarm and the abort bands in
+  the last loop.
+- `channels` lists every enabled input row in table order, with its rms over the band in its
+  own unit and `overload` true once the row has reached 90 % of `range_max` this run.
+- `alarms` lists the conditions holding now: `{"kind":"envelope","lines","worst_db"}` (lines
+  outside the alarm band) and `{"kind":"overload","channel"}`. An alarm warns; it does not stop
+  the run.
+
+The views are the viz kit's, in this order:
+
+1. **Control** (`spectrum`, x `Frequency` Hz log, y `PSD` g²/Hz log, `link` `frequency`), series
+   in this order: `Control` (`measured`; absent until the first loop), `Reference`
+   (`reference`), `Alarm high` and `Alarm low` (`tolerance`), `Abort high` and `Abort low`
+   (`abort`). Every series is on the band's lines of the grid the run actually uses, with
+   `shape: "steps"` and its `edges`, so each line is drawn flat across its own bin (the
+   stairstep). The reference and the bands are drawn at the present level, with each row's own
+   bands applied.
+2. **Drive** (`spectrum`, y `PSD` V²/Hz log, same `link`): `Drive` (`drive`), stepped on the same
+   lines.
+3. **Run** (`reading`): the numbers above as rows, for a pane that shows readings.
+
+### Run Log
+
+`random.log` returns `{"entries":[entry...],"next"}` from `since`, and the `random.log` text
+event carries `{"entries":[...]}` as entries are written. An entry is
+`{"seq","at_unix","kind","text"}`, `kind` one of `state`, `feasibility`, `override`, `station`,
+`gate`, `level`, `alarm`, `overload`, `trip`, `note`. The log starts at configure and is the
+run's level history and alarm record.
+
+### Run Files (Later)
+
+A run already carries what its `.hforge` file will record: `run_id`, `source` and `station`,
+the configuration as accepted, the actual grid, the log, and `end`. When run files are added,
+the control service writes the recording under its local data directory while the run goes and
+converts it to `.hforge` when the run finishes, and `end` names the file. That layout is
+specified with the run-file format, not here.
