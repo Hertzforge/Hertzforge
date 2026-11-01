@@ -1,0 +1,423 @@
+{
+ "type": "event",
+ "topic": "random.live",
+ "seq": 318,
+ "data": {
+  "run_id": "r-0007",
+  "source": "HARDWARE",
+  "class": "ni_real",
+  "state": "running",
+  "phase": "full_level",
+  "mode": "auto",
+  "elapsed_s": 63.5,
+  "level_db": 0,
+  "at_level_s": 12.5,
+  "remaining_at_level_s": 287.5,
+  "loop": 118,
+  "control_rms_g": 6.02,
+  "reference_rms_g": 6.06,
+  "drive_rms_v": 0.412,
+  "lines": {
+   "in_band": 317,
+   "alarm": 2,
+   "abort": 0
+  },
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "rms": 6.02,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 2,
+    "description": "Fixture corner",
+    "role": "monitor",
+    "rms": 7.35,
+    "unit": "g",
+    "overload": false
+   }
+  ],
+  "alarms": [
+   {
+    "kind": "envelope",
+    "lines": 2,
+    "worst_db": 3.4
+   }
+  ],
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Control",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "g²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Control",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0398,
+        0.0402,
+        0.0411,
+        0.0389
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.04,
+        0.04,
+        0.04,
+        0.04
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0798,
+        0.0798,
+        0.0798,
+        0.0798
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.02005,
+        0.02005,
+        0.02005,
+        0.02005
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.1592,
+        0.1592,
+        0.1592,
+        0.1592
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.01005,
+        0.01005,
+        0.01005,
+        0.01005
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Drive",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "V²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Drive",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.00021,
+        0.00025,
+        0.00031,
+        0.00028
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "reading",
+    "title": "Run",
+    "rows": [
+     {
+      "label": "Control rms",
+      "value": 6.02,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Reference rms",
+      "value": 6.06,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Drive rms",
+      "value": 0.412,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Level",
+      "value": "full level",
+      "unit": null,
+      "status": "info"
+     },
+     {
+      "label": "Lines in alarm",
+      "value": "2 of 317",
+      "unit": null,
+      "status": "warn"
+     },
+     {
+      "label": "Elapsed",
+      "value": 63.5,
+      "unit": "s",
+      "status": "info"
+     }
+    ]
+   }
+  ]
+ }
+}

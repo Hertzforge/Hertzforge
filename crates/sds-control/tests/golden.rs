@@ -128,11 +128,100 @@ fn event_shape() -> (Value, Arrays) {
     (message, arrays)
 }
 
+/// `event_random_live`, built with this crate's view builders: every series
+/// stepped on the run's lines, ids `a0`.. in traversal order. Whole numbers in
+/// the data are integers, as the golden writes them.
+fn event_random_live() -> (Value, Arrays) {
+    let lines = vec![100.0, 106.25, 112.5, 118.75];
+    let flat = |v: f64| vec![v; 4];
+    let mut arrays = Arrays::new();
+    let freq = Axis::new("Frequency", Some("Hz"), Scale::Log);
+    let control = views::spectrum(
+        &mut arrays,
+        "Control",
+        &freq,
+        &Axis::new("PSD", Some("g²/Hz"), Scale::Log),
+        vec![
+            Series::new(
+                "Control",
+                Role::Measured,
+                lines.clone(),
+                vec![0.0398, 0.0402, 0.0411, 0.0389],
+            )
+            .stepped(),
+            Series::new("Reference", Role::Reference, lines.clone(), flat(0.04)).stepped(),
+            Series::new("Alarm high", Role::Tolerance, lines.clone(), flat(0.0798)).stepped(),
+            Series::new("Alarm low", Role::Tolerance, lines.clone(), flat(0.02005)).stepped(),
+            Series::new("Abort high", Role::Abort, lines.clone(), flat(0.1592)).stepped(),
+            Series::new("Abort low", Role::Abort, lines.clone(), flat(0.01005)).stepped(),
+        ],
+        Some("frequency"),
+    );
+    let drive = views::spectrum(
+        &mut arrays,
+        "Drive",
+        &freq,
+        &Axis::new("PSD", Some("V²/Hz"), Scale::Log),
+        vec![Series::new(
+            "Drive",
+            Role::Drive,
+            lines.clone(),
+            vec![0.00021, 0.00025, 0.00031, 0.00028],
+        )
+        .stepped()],
+        Some("frequency"),
+    );
+    let reading = views::reading(
+        "Run",
+        vec![
+            Row::number("Control rms", 6.02, Some("g"), Status::Pass),
+            Row::number("Reference rms", 6.06, Some("g"), Status::Info),
+            Row::number("Drive rms", 0.412, Some("V"), Status::Info),
+            Row::text("Level", "full level", Status::Info),
+            Row::text("Lines in alarm", "2 of 317", Status::Warn),
+            Row::number("Elapsed", 63.5, Some("s"), Status::Info),
+        ],
+    );
+    let message = json!({
+        "type": "event", "topic": "random.live", "seq": 318,
+        "data": {
+            "run_id": "r-0007", "source": "HARDWARE", "class": "ni_real",
+            "state": "running", "phase": "full_level", "mode": "auto",
+            "elapsed_s": 63.5, "level_db": 0, "at_level_s": 12.5,
+            "remaining_at_level_s": 287.5, "loop": 118,
+            "control_rms_g": 6.02, "reference_rms_g": 6.06, "drive_rms_v": 0.412,
+            "lines": {"in_band": 317, "alarm": 2, "abort": 0},
+            "channels": [
+                {"index": 1, "description": "Control", "role": "control", "rms": 6.02,
+                 "unit": "g", "overload": false},
+                {"index": 2, "description": "Fixture corner", "role": "monitor", "rms": 7.35,
+                 "unit": "g", "overload": false},
+            ],
+            "alarms": [{"kind": "envelope", "lines": 2, "worst_db": 3.4}],
+            "views": [control, drive, reading],
+        },
+    });
+    (message, arrays)
+}
+
+/// The text goldens of the hardware and Random control messages.
+const CONTROL_TEXT: [&str; 8] = [
+    "request_random_configure",
+    "response_random_configure",
+    "response_station_list",
+    "response_channels_get",
+    "event_random_state",
+    "event_session_changed",
+    "response_error_controller_held",
+    "response_error_table_invalid",
+];
+
 #[test]
 fn encoding_reproduces_the_golden_bytes() {
     for (name, (message, arrays)) in [
         ("response_spectrum", response_spectrum()),
         ("event_shape", event_shape()),
+        ("event_random_live", event_random_live()),
     ] {
         let want = read_bin(&format!("{name}.bin"));
         let got = codec::encode(&message, &arrays).unwrap();
@@ -151,7 +240,7 @@ fn encoding_reproduces_the_golden_bytes() {
 
 #[test]
 fn decoding_matches_the_expected_json() {
-    for name in ["response_spectrum", "event_shape"] {
+    for name in ["response_spectrum", "event_shape", "event_random_live"] {
         let decoded = codec::decode(&read_bin(&format!("{name}.bin"))).unwrap();
         assert!(
             decoded.message.get("arrays").is_none(),
@@ -179,7 +268,7 @@ fn decoding_matches_the_expected_json() {
 
 #[test]
 fn decode_then_encode_round_trips_byte_for_byte() {
-    for name in ["response_spectrum", "event_shape"] {
+    for name in ["response_spectrum", "event_shape", "event_random_live"] {
         let bytes = read_bin(&format!("{name}.bin"));
         let order = codec::header_array_order(&bytes).unwrap();
         let order: Vec<&str> = order.iter().map(String::as_str).collect();
@@ -205,4 +294,86 @@ fn the_golden_text_frames_parse_and_re_serialize() {
     assert_eq!(keys(&ours), keys(&hello), "hello keys in contract order");
     assert_eq!(ours["service"], "control");
     assert_eq!(ours["protocol"], hello["protocol"]);
+}
+
+#[test]
+fn the_random_live_frame_carries_stepped_series_on_shared_lines() {
+    let d = codec::decode(&read_bin("event_random_live.bin")).unwrap();
+    let views = d.message["data"]["views"].as_array().unwrap();
+    assert_eq!(views.len(), 3);
+    let roles: Vec<&str> = views[0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            "measured",
+            "reference",
+            "tolerance",
+            "tolerance",
+            "abort",
+            "abort"
+        ]
+    );
+    let lines = d.array(&views[0]["series"][0]["x"]).unwrap().to_f64();
+    for view in &views[..2] {
+        for s in view["series"].as_array().unwrap() {
+            assert_eq!(s["shape"], "steps");
+            assert_eq!(d.array(&s["x"]).unwrap().to_f64(), lines);
+            let edges = d.array(&s["edges"]).unwrap().to_f64();
+            assert_eq!(
+                edges,
+                views::bin_edges(&lines),
+                "edges are the lines' own bins"
+            );
+        }
+    }
+    assert_eq!(d.message["data"]["source"], "HARDWARE");
+    assert_eq!(d.message["data"]["class"], "ni_real");
+}
+
+#[test]
+fn the_control_text_goldens_parse_and_re_serialize_compactly() {
+    for name in CONTROL_TEXT {
+        let text = std::fs::read_to_string(golden(&format!("{name}.json"))).unwrap();
+        let message = codec::decode_text(&text).unwrap();
+        match codec::encode_frame(&message, &Arrays::new()).unwrap() {
+            Frame::Text(t) => {
+                assert_eq!(
+                    t,
+                    serde_json::to_string(&message).unwrap(),
+                    "{name}: compact"
+                );
+                same(&serde_json::from_str(&t).unwrap(), &message, name);
+            }
+            Frame::Binary(_) => panic!("{name}: a message without arrays must be a text frame"),
+        }
+    }
+}
+
+#[test]
+fn the_configure_request_parses_and_refusals_carry_a_reason() {
+    let request = read_json("request_random_configure.json");
+    let parsed = sds_control::protocol::parse_request(&request).unwrap();
+    assert_eq!(parsed.method, "random.configure");
+    assert_eq!(
+        parsed.params["config"]["acquisition"]["n_pts"],
+        json!(2048),
+        "params arrive whole"
+    );
+    for name in [
+        "response_error_controller_held",
+        "response_error_table_invalid",
+    ] {
+        let error = &read_json(&format!("{name}.json"))["error"];
+        let reason = error["reason"].as_str().unwrap();
+        assert!(
+            !reason.is_empty() && reason.bytes().all(|b| b == b'_' || b.is_ascii_lowercase()),
+            "{name}: reason {reason:?} is a snake_case name"
+        );
+        assert!(error["detail"].is_object(), "{name}: detail");
+    }
 }
