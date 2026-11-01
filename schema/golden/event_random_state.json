@@ -1,0 +1,64 @@
+{
+ "type": "event",
+ "topic": "random.state",
+ "seq": 412,
+ "data": {
+  "run_id": "r-0007",
+  "state": "finished",
+  "phase": "aborted",
+  "title": "Qualification Random",
+  "source": "HARDWARE",
+  "station": {
+   "kind": "ni",
+   "class": "ni_real",
+   "devices": [
+    {
+     "id": "cDAQ1Mod1",
+     "serial": "01A2B3C4"
+    },
+    {
+     "id": "cDAQ1Mod2",
+     "serial": "01A2B3C5"
+    }
+   ]
+  },
+  "grid": {
+   "fs_hz": 51200,
+   "n_pts": 8192,
+   "df_hz": 6.25,
+   "lines": 317,
+   "loop_s": 0.64,
+   "actual": true
+  },
+  "clock": "shared",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -6,
+   0
+  ],
+  "level_db": null,
+  "full_level_s": 300,
+  "elapsed_s": 131.2,
+  "at_level_s": 42.5,
+  "remaining_at_level_s": null,
+  "alarm": false,
+  "feasibility": {
+   "verdict": "not_evaluated",
+   "message": "No shaker was given, so the profile was not checked against shaker ratings."
+  },
+  "end": {
+   "outcome": "aborted",
+   "message": "Envelope abort: 14 lines outside the abort band, worst +7.2 dB, at 0.0 dB.",
+   "at_s": 131.2,
+   "level_db": 0,
+   "trip": {
+    "kind": "envelope",
+    "abort_lines": 14,
+    "worst_db": 7.2,
+    "at_level_db": 0,
+    "at_loop": 212
+   }
+  }
+ }
+}

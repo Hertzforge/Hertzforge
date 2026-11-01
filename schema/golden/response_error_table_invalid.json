@@ -1,0 +1,24 @@
+{
+ "type": "response",
+ "id": 9,
+ "error": {
+  "code": "bad_request",
+  "reason": "table_invalid",
+  "message": "The channel table has 2 errors, so it was not written.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "zero_sensitivity",
+     "channel": 2,
+     "message": "channel 2 has zero sensitivity"
+    },
+    {
+     "reason": "physical_channel_shared",
+     "channel": 3,
+     "message": "channel 3 is bound to cDAQ1Mod1/ai0, which channel 1 already uses; channels are never shared"
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

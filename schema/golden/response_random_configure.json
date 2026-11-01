@@ -1,0 +1,62 @@
+{
+ "type": "response",
+ "id": 21,
+ "result": {
+  "state": {
+   "run_id": "r-0007",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Qualification Random",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 2048,
+    "df_hz": 4,
+    "lines": 496,
+    "loop_s": 1,
+    "actual": false
+   },
+   "clock": null,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -6,
+    0
+   ],
+   "level_db": null,
+   "full_level_s": 300,
+   "elapsed_s": null,
+   "at_level_s": null,
+   "remaining_at_level_s": null,
+   "alarm": false,
+   "feasibility": null,
+   "end": null
+  },
+  "derived": {
+   "grms_g": 6.06,
+   "velocity_rms_ips": 2.31,
+   "displacement_rms_mil": 21.4,
+   "band_hz": [
+    20,
+    2000
+   ],
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 2048,
+    "df_hz": 4,
+    "lines": 496,
+    "loop_s": 1,
+    "actual": false
+   },
+   "control_channels": [
+    1
+   ]
+  },
+  "warnings": []
+ }
+}

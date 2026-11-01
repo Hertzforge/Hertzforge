@@ -1,0 +1,12 @@
+{
+ "type": "event",
+ "topic": "session.changed",
+ "seq": 7,
+ "data": {
+  "controller": {
+   "name": "Shell on bench-pc",
+   "present": false
+  },
+  "orphan_s": 21.5
+ }
+}
