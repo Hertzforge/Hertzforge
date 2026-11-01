@@ -7,10 +7,10 @@
    run of every line is hashed and looked up.
 2. **No copyleft code.** No tracked Python file imports a copyleft package,
    by statement or by name.
-3. **Permissive npm licenses.** Every package in the shell's lockfile
-   carries a license on the allowlist. The SPDX expression is parsed with
-   its parentheses and precedence: an `OR` needs one allowed side, an `AND`
-   needs all of them.
+3. **Permissive npm licenses.** Every package in every tracked npm
+   lockfile (the shell's, and any tool's) carries a license on the
+   allowlist. The SPDX expression is parsed with its parentheses and
+   precedence: an `OR` needs one allowed side, an `AND` needs all of them.
 
     python tools/check_tree.py                # exit 0 clean, 1 with findings
     python tools/check_tree.py --hash "a name"  # the line to add to NAMES
@@ -207,7 +207,7 @@ def license_allowed(expression: str | None) -> bool:
     return allowed and position == len(tokens)
 
 
-def check_npm_licenses(lockfile: pathlib.Path) -> list[str]:
+def check_npm_licenses(lockfile: pathlib.Path, root: pathlib.Path = ROOT) -> list[str]:
     """Every package in an npm lockfile whose license is missing or not allowed."""
     packages = json.loads(lockfile.read_text(encoding='utf-8')).get('packages', {})
     found = []
@@ -217,22 +217,26 @@ def check_npm_licenses(lockfile: pathlib.Path) -> list[str]:
         name = key.split('node_modules/')[-1]
         license_ = package.get('license')
         if not license_allowed(license_):
-            found.append(f'{lockfile.name}: {name} is licensed '
+            found.append(f'{lockfile.relative_to(root)}: {name} is licensed '
                          f'{license_ or "with no license stated"}, which is not '
                          'on the allowlist')
     return found
 
 
-def main(argv: Sequence[str] = ()) -> int:
+def main(argv: Sequence[str] = (), root: pathlib.Path = ROOT) -> int:
     if len(argv) == 2 and argv[0] == '--hash':
         print(f"    '{phrase_hash(argv[1])}',")
         return 0
-    files = tracked_files()
-    findings = (check_names(files) + check_copyleft(files)
-                + check_npm_licenses(ROOT / 'ui' / 'package-lock.json'))
+    files = tracked_files(root)
+    # every npm lockfile in the tree, the shell's and any tool's
+    lockfiles = [path for path in files if path.name == 'package-lock.json']
+    findings = check_names(files, root) + check_copyleft(files, root)
+    for lockfile in lockfiles:
+        findings += check_npm_licenses(lockfile, root)
     for finding in findings:
         print(finding)
-    print(f'check_tree: {len(files)} tracked files, {len(findings)} findings')
+    print(f'check_tree: {len(files)} tracked files, {len(lockfiles)} npm lockfiles, '
+          f'{len(findings)} findings')
     return 1 if findings else 0
 
 

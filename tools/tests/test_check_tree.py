@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -15,6 +16,24 @@ import check_tree
 
 # a phrase no real tree contains, listed only for these tests
 PLANTED = frozenset({check_tree.phrase_hash('quokka foundry')})
+
+
+def _repo(root: pathlib.Path, files: dict[str, str]) -> None:
+    """A git repository at `root` with `files` ({path: text}) added to its
+    index, which is what `git ls-files` lists."""
+    for name, text in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding='utf-8')
+    subprocess.run(['git', 'init', '-q'], cwd=root, check=True, capture_output=True)
+    subprocess.run(['git', 'add', '.'], cwd=root, check=True, capture_output=True)
+
+
+def _lockfile(licenses: dict[str, str]) -> str:
+    return json.dumps({'packages': {
+        '': {'name': 'tool'},
+        **{f'node_modules/{name}': {'license': license_}
+           for name, license_ in licenses.items()}}})
 
 
 def test_the_tree_is_clean(capsys):
@@ -108,11 +127,23 @@ def test_a_disallowed_or_missing_npm_license_is_found(tmp_path):
         'node_modules/viral': {'license': 'GPL-3.0'},
         'node_modules/@scope/quiet': {},
     }}), encoding='utf-8')
-    assert check_tree.check_npm_licenses(lockfile) == [
+    assert check_tree.check_npm_licenses(lockfile, tmp_path) == [
         'package-lock.json: viral is licensed GPL-3.0, which is not on the allowlist',
         ('package-lock.json: @scope/quiet is licensed with no license stated, which is '
          'not on the allowlist'),
     ]
+
+
+def test_every_tracked_npm_lockfile_is_checked(tmp_path, capsys):
+    _repo(tmp_path, {
+        'ui/package-lock.json': _lockfile({'fine': 'MIT'}),
+        'tools/recorder/package-lock.json': _lockfile({'viral': 'GPL-3.0'}),
+    })
+    assert check_tree.main([], root=tmp_path) == 1
+    out = capsys.readouterr().out
+    where = pathlib.Path('tools', 'recorder', 'package-lock.json')
+    assert f'{where}: viral is licensed GPL-3.0, which is not on the allowlist' in out
+    assert '2 npm lockfiles, 1 findings' in out
 
 
 def test_every_offending_line_is_reported(tmp_path):
