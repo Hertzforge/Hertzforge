@@ -21,13 +21,14 @@ export interface ActionState {
 }
 
 /**
+ * The editor against what the service holds (`random.config`), whichever screen applied it:
  * - `none`: the service holds no configuration.
- * - `applied`: the service holds exactly this screen's setup.
- * - `changed`: this screen applied its setup and has changed it since.
- * - `foreign`: the service holds a configuration this screen did not send (another screen, or
- *   before a reload). Arm and Start run what the service holds.
+ * - `applied`: the editor holds exactly the service's setup.
+ * - `changed`: the editor holds changes of this screen's own that the service does not have.
+ * - `unread`: the service holds a configuration this screen has not read back yet (the read is
+ *   on its way, or the connection failed it). Arm and Start run what the service holds.
  */
-export type SetupStatus = 'none' | 'applied' | 'changed' | 'foreign';
+export type SetupStatus = 'none' | 'applied' | 'changed' | 'unread';
 
 export interface RunContext {
 	connected: boolean;

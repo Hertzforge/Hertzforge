@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { ServiceClient } from '$lib/protocol/client.svelte';
 import { createControlServer, type ControlServerOptions } from '$lib/protocol/mock/control';
-import { mockSocketFactory, type MockServer } from '$lib/protocol/mock/socket';
+import { mockSocketFactory, type MockConnection, type MockServer } from '$lib/protocol/mock/socket';
 import { defaultSetup, type SetupDraft } from './setup';
 import { AcquireState } from './store.svelte';
 
@@ -46,13 +46,35 @@ function quick(d: SetupDraft = defaultSetup()): SetupDraft {
 	return d;
 }
 
-async function screen(server: MockServer, name = 'Shell on bench-pc', session: Storage | null = null) {
+async function screen(server: MockServer, name = 'Shell on bench-pc', session: Storage | null = null, local: Storage | null = null) {
 	const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
-	const acq = new AcquireState(client, { name, session, local: null, checkDelayMs: 0 });
+	const acq = new AcquireState(client, { name, session, local, checkDelayMs: 0 });
 	client.connect();
 	await client.whenOpen();
 	await acq.sync();
 	return { client, acq };
+}
+
+/** Every method a client sends, in order, from the moment this is called. */
+function methodsSent(client: ServiceClient): string[] {
+	const sent: string[] = [];
+	const request = client.request.bind(client);
+	client.request = ((method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number }) => {
+		sent.push(method);
+		return request(method, params, options);
+	}) as typeof client.request;
+	return sent;
+}
+
+/** The server side of each connection, as the mock attaches it. */
+function connections(server: MockServer): MockConnection[] {
+	const conns: MockConnection[] = [];
+	const attach = server.attach?.bind(server);
+	server.attach = (c) => {
+		conns.push(c);
+		attach?.(c);
+	};
+	return conns;
 }
 
 async function controller(options: ControlServerOptions = {}) {
@@ -91,6 +113,29 @@ describe('control of the service', () => {
 		expect(a.acq.role).toBe('observer');
 		expect(a.acq.lease).toBeNull();
 		expect(await b.acq.claim()).toBe(true);
+		a.client.close();
+		b.client.close();
+	});
+
+	it('learns its own role from the seat event, without asking again', async () => {
+		const server = createControlServer({ speed: 10 });
+		const a = await screen(server, 'Shell on bench-pc');
+		const b = await screen(server, 'Shell on laptop');
+		const sentA = methodsSent(a.client);
+		const sentB = methodsSent(b.client);
+		expect(await a.acq.claim()).toBe(true);
+		await until(() => b.acq.session?.controller?.name === 'Shell on bench-pc');
+		expect(b.acq.role).toBe('observer');
+
+		await a.acq.release();
+		await until(() => b.acq.session?.controller === null);
+		expect(await b.acq.claim()).toBe(true);
+		await until(() => a.acq.session?.controller?.name === 'Shell on laptop');
+		expect(a.acq.role).toBe('observer');
+		expect(b.acq.role).toBe('controller');
+		expect(a.acq.actions.apply.reason).toBe('Take control to apply the setup.');
+		expect(sentA.filter((m) => m === 'session.state')).toEqual([]);
+		expect(sentB.filter((m) => m === 'session.state')).toEqual([]);
 		a.client.close();
 		b.client.close();
 	});
@@ -201,6 +246,75 @@ describe('setup', () => {
 		client.close();
 	});
 
+	it('draws the profile from the dry run before anything is armed', async () => {
+		const { acq, client } = await controller();
+		expect(acq.reference).toBeNull();
+		await acq.checkSetup();
+		expect(acq.run?.state).toBe('unconfigured');
+		const ref = acq.reference!;
+		expect(ref.title).toBe('Reference');
+		expect(ref.series.map((s) => s.name)).toEqual(['Reference', 'Alarm high', 'Alarm low', 'Abort high', 'Abort low']);
+		expect(ref.series.every((s) => s.shape === 'steps' && !!s.edges)).toBe(true);
+		// The lines are the requested grid's, inside the band: 8192 / 1024 = 8 Hz apart.
+		const x = ref.series[0].x;
+		expect(x[1] - x[0]).toBeCloseTo(8, 6);
+		expect(x[0]).toBeGreaterThanOrEqual(20);
+		expect(x[x.length - 1]).toBeLessThanOrEqual(2000);
+
+		// A setup with errors has no profile to draw.
+		acq.setup.acquisition.fs_hz = 2048;
+		await acq.checkSetup();
+		expect(acq.reference).toBeNull();
+		client.close();
+	});
+
+	it('shows a second screen, and a reloaded one, the setup the service holds', async () => {
+		const server = createControlServer({ speed: 10 });
+		const localA = memoryStorage();
+		const a = await screen(server, 'Shell on bench-pc', memoryStorage(), localA);
+		// As the app runs it: the draft is kept in the browser's storage as it changes.
+		const unwatch = a.acq.watch();
+		await a.acq.claim();
+		a.acq.setup = quick();
+		a.acq.setup.title = 'Bench loopback';
+		a.acq.setup.acquisition.n_avg = 8;
+		await a.acq.checkSetup();
+		expect(await a.acq.apply()).toBe(true);
+		const grms = a.acq.derived?.grms_g;
+		expect(grms).toBeGreaterThan(0);
+
+		// A second screen with nothing of its own takes the service's setup into its editor.
+		const b = await screen(server, 'Shell on laptop', null, memoryStorage());
+		expect(b.acq.setupStatus).toBe('applied');
+		expect(b.acq.setup.title).toBe('Bench loopback');
+		expect(b.acq.setup.acquisition.n_avg).toBe(8);
+		expect(b.acq.derived?.grms_g).toBe(grms);
+		expect(b.acq.reference?.series[0].name).toBe('Reference');
+		expect(b.acq.held?.runId).toBe(a.acq.run?.run_id);
+
+		// The controller applies again: the second screen follows, since it changed nothing.
+		a.acq.setup.title = 'Bench loopback, second';
+		expect(await a.acq.apply()).toBe(true);
+		await until(() => b.acq.setup.title === 'Bench loopback, second');
+		expect(b.acq.setupStatus).toBe('applied');
+
+		// Changes on a screen are its own: a reload keeps them, and Put Back restores the service's.
+		a.acq.setup.schedule.full_level_s = 9;
+		expect(a.acq.setupStatus).toBe('changed');
+		await new Promise((r) => setTimeout(r, 10));
+		unwatch();
+		a.client.close();
+		const again = await screen(server, 'Shell on bench-pc', null, localA);
+		expect(again.acq.setup.schedule.full_level_s).toBe(9);
+		expect(again.acq.setupStatus).toBe('changed');
+		expect(again.acq.held?.config.title).toBe('Bench loopback, second');
+		again.acq.revertSetup();
+		expect(again.acq.setupStatus).toBe('applied');
+		expect(again.acq.setup.schedule.full_level_s).toBe(2);
+		again.client.close();
+		b.client.close();
+	});
+
 	it('names a field that holds no number before anything is sent', async () => {
 		const { acq, client } = await controller();
 		acq.setup.breakpoints[1].slope_db_oct = NaN;
@@ -287,6 +401,36 @@ describe('running', () => {
 		expect(a.acq.run?.end?.message).toMatch(/observer/);
 		a.client.close();
 		b.client.close();
+	});
+
+	it('keeps one log per run, by its run id, and never repeats an entry', async () => {
+		const server = createControlServer({ speed: 10 });
+		const conns = connections(server);
+		const s = await screen(server);
+		await s.acq.claim();
+		s.acq.setup = quick();
+		s.acq.setup.control.review_after_sysid = false;
+		await s.acq.apply();
+		const first = s.acq.run!.run_id!;
+		await s.acq.start();
+		await until(() => s.acq.log.length >= 3);
+		// An entry this screen already has, sent again: shown once, and nothing is lost.
+		const n = s.acq.log.length;
+		conns[0].emit('random.log', { run_id: first, entries: [s.acq.log[0]] });
+		await new Promise((r) => setTimeout(r, 20));
+		expect(s.acq.log.length).toBeGreaterThanOrEqual(n);
+		expect(new Set(s.acq.log.map((e) => e.seq)).size).toBe(s.acq.log.length);
+
+		await s.acq.abort();
+		await until(() => s.acq.run?.state === 'finished');
+		await s.acq.reset();
+		const second = s.acq.run!.run_id!;
+		expect(second).not.toBe(first);
+		await until(() => s.acq.log.length > 0 && s.acq.log[0].seq === 0 && !s.acq.log.some((e) => /abort/i.test(e.text)));
+		// A new run's log starts again, even when its first entry is not number 0.
+		conns[0].emit('random.log', { run_id: 'r-9999', entries: [{ seq: 7, at_unix: 1, kind: 'note', text: 'another run' }] });
+		await until(() => s.acq.log.length === 1 && s.acq.log[0].text === 'another run');
+		s.client.close();
 	});
 
 	it('shows a protection trip with its facts', async () => {

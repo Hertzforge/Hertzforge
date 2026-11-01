@@ -2,8 +2,10 @@
 	/**
 	 * What the setup asks of the shaker before anything is armed: rms acceleration, velocity and
 	 * displacement of the reference at full level, the band, and the analysis grid. Every number
-	 * is the service's (its dry run of the draft); the shell only shows them. Once a run arms, the
-	 * grid the station actually runs at replaces the requested one.
+	 * is the service's: the ones it holds with its setup while the editor matches it (so a
+	 * reloaded or second screen shows what the run uses), else its dry run of the draft. The shell
+	 * only shows them. Once a run arms, the grid the station actually runs at replaces the
+	 * requested one.
 	 */
 	import { formatFixed, formatNumber } from '$lib/viz/format';
 	import NumberField from './NumberField.svelte';
@@ -109,10 +111,10 @@
 			{:else if status === 'applied'}
 				Applied{run?.run_id ? ` to run ${run.run_id}` : ''}: {run ? STATE_WORDS[run.state].toLowerCase() : ''}.
 			{:else if status === 'changed'}
-				Changed on this screen since it was applied. Apply it again to run it, or put it back.
-				<button class="btn sm ghost" onclick={() => acq.revertSetup()} disabled={acq.locked}>Put Back</button>
+				Changed on this screen since the service took it{acq.held?.config.title ? ` ("${acq.held.config.title}")` : ''}. Apply it again to run it, or put the service's setup back.
+				<button class="btn sm ghost" onclick={() => acq.revertSetup()} disabled={acq.locked} data-testid="setup-put-back">Put Back</button>
 			{:else}
-				The service holds a setup this screen did not send{run?.title ? ` ("${run.title}")` : ''}. Arm and Start run that one; Apply Setup replaces it with this screen's.
+				The service holds a setup{run?.title ? ` ("${run.title}")` : ''} this screen has not read back yet. Arm and Start run that one.
 			{/if}
 		</p>
 		{#if feas}

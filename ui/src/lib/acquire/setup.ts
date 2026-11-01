@@ -208,6 +208,29 @@ export function toConfig(d: SetupDraft): RandomConfig {
 	};
 }
 
+/** JSON with every object's keys in order, so the same value always gives the same text. */
+function canonical(v: unknown): string {
+	if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+	if (v !== null && typeof v === 'object') {
+		const o = v as Record<string, unknown>;
+		const keys = Object.keys(o)
+			.filter((k) => o[k] !== undefined)
+			.sort();
+		return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+	}
+	return JSON.stringify(v) ?? 'null';
+}
+
+/**
+ * The identity of a configuration, for telling whether the editor holds what the service holds.
+ * The service hands a configuration back with its keys in its own order, so keys are sorted. A
+ * configuration read back goes through `fromConfig` and `toConfig` first, so anything it left to
+ * the defaults is filled in the way the editor fills it.
+ */
+export function configKey(config: RandomConfig): string {
+	return canonical(config);
+}
+
 /** A draft from a configuration, for loading one back into the editor. */
 export function fromConfig(config: RandomConfig): SetupDraft {
 	const base = defaultSetup();

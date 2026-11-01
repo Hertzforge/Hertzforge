@@ -22,10 +22,13 @@ import type {
 	LadderMode,
 	LogEntry,
 	NiDevice,
+	RandomConfig,
+	RandomConfigResult,
 	RandomConfigureResult,
 	RandomDryRunResult,
 	RandomLevelResult,
 	RandomLive,
+	RandomLogEvent,
 	RandomLogResult,
 	RandomState,
 	ReportItem,
@@ -33,18 +36,21 @@ import type {
 	SessionClaimResult,
 	SessionReleaseResult,
 	SessionState,
+	SpectrumView,
 	StationList,
 	StationSelected,
 	ValidationReport
 } from '$lib/protocol/types';
 import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { isLive, runActions, primaryAction, type ActionId, type ActionState, type RunContext, type SetupStatus } from './actions';
-import { byField, defaultSetup, errorCount, localErrors, mergeErrors, toConfig, type FieldErrors, type SetupDraft } from './setup';
+import { byField, configKey, defaultSetup, errorCount, fromConfig, localErrors, mergeErrors, toConfig, type FieldErrors, type SetupDraft } from './setup';
 import { bindUnbound, nextIndex, newRow, rowFindings, sameRows, tableChanges } from './table';
 import { toRefusal, type Refusal } from './words';
 
 const LEASE_KEY = 'hertzforge.acquire.lease';
 const SETUP_KEY = 'hertzforge.acquire.setup.v1';
+/** The key of the service setup the editor's draft started from (applied here, or read back). */
+const BASE_KEY = 'hertzforge.acquire.setup.base.v1';
 /** Most log entries kept on screen; the service keeps the full log with the run. */
 const LOG_LIMIT = 500;
 
@@ -60,6 +66,18 @@ export interface TableChange {
 	revision: number;
 	changes: string[];
 	server: ChannelRow[];
+}
+
+/** What the service holds for the present run, read back with `random.config`. */
+export interface HeldSetup {
+	runId: string;
+	config: RandomConfig;
+	derived: Derived;
+	/** `[reference]`: the profile and its bands on the requested grid, as the service drew them. */
+	views: SpectrumView[];
+	/** The configuration as the editor would hold it, and its key. */
+	draft: SetupDraft;
+	key: string;
 }
 
 export interface AcquireOptions {
@@ -157,8 +175,14 @@ export class AcquireState {
 	setup = $state<SetupDraft>(defaultSetup());
 	setupCheck = $state.raw<RandomDryRunResult | null>(null);
 	checking = $state(false);
-	/** What this screen last applied, and to which run. */
-	applied = $state.raw<{ key: string; runId: string | null; derived: Derived; warnings: ReportItem[]; draft: SetupDraft } | null>(null);
+	/** The setup the service holds for the present run, whichever screen applied it. */
+	held = $state.raw<HeldSetup | null>(null);
+	/**
+	 * The key of the service setup the draft started from. While the draft still equals it, the
+	 * operator has changed nothing here, and a setup the service takes from another screen is
+	 * loaded into the editor; once they differ, the operator's changes are kept.
+	 */
+	baseKey = $state('');
 
 	// ---- run --------------------------------------------------------------------------------
 	run = $state.raw<RandomState | null>(null);
@@ -193,6 +217,12 @@ export class AcquireState {
 	private tableTimer: ReturnType<typeof setTimeout> | null = null;
 	private setupTimer: ReturnType<typeof setTimeout> | null = null;
 	private logNext = 0;
+	/** The run the log on screen belongs to. */
+	private logRun: string | null = null;
+	/** The run whose setup is being read back, so one read is in flight per run. */
+	private heldReading: string | null = null;
+	/** The key of the setup the last dry run checked. */
+	private checkedKey: string | null = null;
 
 	constructor(control: ServiceClient, options: AcquireOptions = {}) {
 		this.control = control;
@@ -202,13 +232,14 @@ export class AcquireState {
 		this.checkDelayMs = options.checkDelayMs ?? 250;
 		this.lease = read(this.sessionStore, LEASE_KEY);
 		this.setup = loadSetup(this.localStore);
+		this.baseKey = read(this.localStore, BASE_KEY) ?? configKey(toConfig(defaultSetup()));
 
 		control.on(T.session, (d) => this.onSession(d as unknown as SessionChanged));
 		control.on(T.station, (d) => this.onStations(d as unknown as StationList));
 		control.on(T.channels, (d) => this.onTable(d as unknown as ChannelTable));
 		control.on(T.state, (d) => this.onState(d as unknown as RandomState));
 		control.on(T.live, (d) => this.onLive(d as unknown as RandomLive));
-		control.on(T.log, (d) => this.onLog((d as unknown as { entries: LogEntry[] }).entries));
+		control.on(T.log, (d) => this.onLog(d as unknown as RandomLogEvent));
 	}
 
 	// =========================================================================================
@@ -254,7 +285,7 @@ export class AcquireState {
 	readonly findings = $derived(rowFindings(this.tableCheck ?? this.server?.report ?? null));
 
 	readonly config = $derived(toConfig(this.setup));
-	readonly setupKey = $derived(JSON.stringify(this.config));
+	readonly setupKey = $derived(configKey(this.config));
 	readonly local = $derived(localErrors(this.setup));
 
 	/** Setup findings by field: the editor's own and the service's dry run. */
@@ -275,16 +306,31 @@ export class AcquireState {
 		return this.tableReport?.errors.length ?? 0;
 	}
 
-	/** The derived numbers for the draft, from the service; the applied ones while it checks. */
+	/**
+	 * The derived numbers, from the service: while the editor holds the service's setup, the ones
+	 * the service holds with it; otherwise its dry run of the draft.
+	 */
 	get derived(): Derived | null {
-		return this.setupCheck?.derived ?? (this.setupStatus === 'applied' ? (this.applied?.derived ?? null) : null);
+		if (this.setupStatus === 'applied' && this.held) return this.held.derived;
+		return this.setupCheck?.derived ?? null;
+	}
+
+	/**
+	 * The profile and its bands on the analysis lines, as the service draws them (never computed
+	 * here): the service's own while the editor holds its setup, otherwise the dry run's of the
+	 * draft. Null while the draft has errors.
+	 */
+	get reference(): SpectrumView | null {
+		if (this.setupStatus === 'applied' && this.held?.views[0]) return this.held.views[0];
+		return this.setupCheck?.views?.[0] ?? null;
 	}
 
 	get setupStatus(): SetupStatus {
 		const run = this.run;
 		if (!run || run.state === 'unconfigured') return 'none';
-		if (this.applied && this.applied.runId === run.run_id) return this.applied.key === this.setupKey ? 'applied' : 'changed';
-		return 'foreign';
+		const held = this.held;
+		if (!held || held.runId !== run.run_id) return 'unread';
+		return held.key === this.setupKey ? 'applied' : 'changed';
 	}
 
 	get isLive(): boolean {
@@ -369,11 +415,12 @@ export class AcquireState {
 	async sync(): Promise<void> {
 		const c = this.control;
 		try {
-			const [session, stations, table, run, log] = await Promise.all([
+			const [session, stations, table, run, held, log] = await Promise.all([
 				c.request<SessionState>('session.state'),
 				c.request<StationList>('station.list'),
 				c.request<ChannelTable>('channels.get'),
 				c.request<RandomState>('random.state'),
+				c.request<RandomConfigResult>('random.config'),
 				c.request<RandomLogResult>('random.log', { since: 0 })
 			]);
 			this.syncError = null;
@@ -383,9 +430,11 @@ export class AcquireState {
 			this.onStations(stations);
 			if (!this.server || !this.tableDirty) this.adoptTable(table);
 			else this.onTable(table);
+			this.onHeld(held, run);
 			this.onState(run);
 			this.log = log.entries.slice(-LOG_LIMIT);
 			this.logNext = log.next;
+			this.logRun = run.run_id;
 		} catch (err) {
 			this.syncError = toRefusal('Read the control service', err).message;
 			return;
@@ -403,21 +452,16 @@ export class AcquireState {
 		this.orphanDeadline = s.orphan_s === null ? null : Date.now() + s.orphan_s * 1000;
 	}
 
+	/** Each screen gets its own copy of the event, with its own role in it. */
 	private onSession(d: SessionChanged) {
-		if (this.session) this.session = { ...this.session, controller: d.controller, orphan_s: d.orphan_s };
+		const was = this.role;
+		if (this.session) this.session = { ...this.session, role: d.role, controller: d.controller, orphan_s: d.orphan_s };
 		this.orphanDeadline = d.orphan_s === null ? null : Date.now() + d.orphan_s * 1000;
-		// The event says who holds the seat, not whether it is this screen: ask.
-		void this.control
-			.request<SessionState>('session.state')
-			.then((s) => {
-				const was = this.role;
-				this.setSession(s);
-				if (was === 'controller' && s.role !== 'controller' && this.lease !== null) {
-					this.setLease(null);
-					this.note = { tone: 'warn', text: 'This screen no longer holds control.' };
-				}
-			})
-			.catch(() => {});
+		// A screen that let go on purpose dropped its lease first; any other loss is news.
+		if (was === 'controller' && d.role !== 'controller' && this.lease !== null) {
+			this.setLease(null);
+			this.note = { tone: 'warn', text: 'This screen no longer holds control.' };
+		}
 	}
 
 	private setLease(lease: string | null) {
@@ -429,10 +473,14 @@ export class AcquireState {
 		const res = await this.act<SessionClaimResult>('Take Control', 'session.claim', { name: this.name, ...(this.lease ? { lease: this.lease } : {}) });
 		if (!res) return false;
 		this.setLease(res.lease);
-		this.session = { ...(this.session ?? { controller: null, orphan_s: null, heartbeat_s: res.heartbeat_s, timeout_s: res.timeout_s }), role: 'controller' };
+		this.holdSeat(res);
 		this.note = res.resumed ? { tone: 'pass', text: 'Control resumed.' } : null;
-		await this.refreshSession();
 		return true;
+	}
+
+	/** This screen holds the seat; who holds it and the orphan clock come with `session.changed`. */
+	private holdSeat(res: SessionClaimResult) {
+		this.session = { ...(this.session ?? { controller: null, orphan_s: null }), heartbeat_s: res.heartbeat_s, timeout_s: res.timeout_s, role: 'controller' };
 	}
 
 	/** After a drop: present the lease. The seat comes back if it was kept for this screen. */
@@ -440,6 +488,7 @@ export class AcquireState {
 		try {
 			const res = await this.control.request<SessionClaimResult>('session.claim', { name: this.name, lease: this.lease });
 			this.setLease(res.lease);
+			this.holdSeat(res);
 			this.note = res.resumed
 				? { tone: 'pass', text: 'The connection dropped and came back. This screen still holds control.' }
 				: { tone: 'warn', text: 'The connection dropped for longer than the service keeps a seat. This screen has taken control again.' };
@@ -448,7 +497,6 @@ export class AcquireState {
 			const r = toRefusal('Resume Control', err);
 			this.note = { tone: 'warn', text: `The connection dropped and control was not resumed. ${r.message}` };
 		}
-		await this.refreshSession();
 	}
 
 	async release(): Promise<void> {
@@ -461,10 +509,11 @@ export class AcquireState {
 			this.setLease(lease);
 			return;
 		}
+		if (this.session) this.session = { ...this.session, role: res.role, orphan_s: res.orphan_s };
 		this.note = null;
-		await this.refreshSession();
 	}
 
+	/** After a refusal for want of control: the screen's view of the seat was out of date. */
 	private async refreshSession() {
 		try {
 			this.setSession(await this.control.request<SessionState>('session.state'));
@@ -654,9 +703,13 @@ export class AcquireState {
 			return null;
 		}
 		this.checking = true;
+		const key = this.setupKey;
 		try {
 			const res = await this.control.request<RandomDryRunResult>('random.configure', { config: this.config, dry_run: true });
-			if (seq === this.setupSeq) this.setupCheck = res;
+			if (seq === this.setupSeq) {
+				this.setupCheck = res;
+				this.checkedKey = key;
+			}
 			return res;
 		} catch {
 			return null;
@@ -669,9 +722,17 @@ export class AcquireState {
 		this.setup = defaultSetup();
 	}
 
-	/** Put the setup back to what this screen last applied. */
+	/** Put the editor back to the setup the service holds. */
 	revertSetup() {
-		if (this.applied) this.setup = structuredClone(this.applied.draft);
+		const held = this.held;
+		if (!held) return;
+		this.setup = structuredClone(held.draft);
+		this.setBase(held.key);
+	}
+
+	private setBase(key: string) {
+		this.baseKey = key;
+		write(this.localStore, BASE_KEY, key);
 	}
 
 	/** Send the setup (`random.configure`). It replaces what the service held. */
@@ -679,20 +740,62 @@ export class AcquireState {
 		const config = this.config;
 		const key = this.setupKey;
 		const draft = $state.snapshot(this.setup) as SetupDraft;
+		const views = this.checkedKey === key ? (this.setupCheck?.views ?? []) : [];
 		const res = await this.act<RandomConfigureResult>('Apply Setup', 'random.configure', { config });
 		if (!res) {
 			const r = this.refusal;
 			if (r?.reason === 'config_invalid' && r.detail) {
-				this.setupCheck = { errors: (r.detail.errors as ReportItem[]) ?? [], warnings: (r.detail.warnings as ReportItem[]) ?? [], derived: null };
+				this.setupCheck = { errors: (r.detail.errors as ReportItem[]) ?? [], warnings: (r.detail.warnings as ReportItem[]) ?? [], derived: null, views: [] };
+				this.checkedKey = key;
 			}
 			if (r?.reason === 'table_invalid' && r.detail) {
 				this.tableCheck = { errors: (r.detail.errors as ReportItem[]) ?? [], warnings: (r.detail.warnings as ReportItem[]) ?? [] };
 			}
 			return false;
 		}
-		this.applied = { key, runId: res.state.run_id, derived: res.derived, warnings: res.warnings, draft };
+		const runId = res.state.run_id;
+		this.setBase(key);
+		// What was sent is what the service holds; its own copy is read back to replace this one.
+		if (runId) this.held = { runId, config, derived: res.derived, views, draft, key };
 		this.onState(res.state);
+		if (runId) void this.readHeld(runId, true);
 		return true;
+	}
+
+	/** Read back what the service holds for a run (`random.config`). One read per run at a time. */
+	private async readHeld(runId: string, again = false): Promise<void> {
+		if (this.heldReading === runId || (!again && this.held?.runId === runId)) return;
+		this.heldReading = runId;
+		try {
+			this.onHeld(await this.control.request<RandomConfigResult>('random.config'), this.run);
+		} catch {
+			/* the status stays unread; the next state event or sync reads it again */
+		} finally {
+			if (this.heldReading === runId) this.heldReading = null;
+		}
+	}
+
+	/**
+	 * The service's setup for the present run. The editor takes it when the operator has changed
+	 * nothing here since the setup it last started from (so a second screen, or a screen that was
+	 * reloaded, shows what the run uses); an operator's own changes are never replaced.
+	 */
+	private onHeld(r: RandomConfigResult, run: RandomState | null) {
+		if (!r.run_id || !r.config || !r.derived) {
+			this.held = null;
+			return;
+		}
+		// An answer about a run that has since been replaced: that run's own read follows.
+		if (run && run.run_id !== r.run_id) return;
+		const draft = fromConfig(r.config);
+		const key = configKey(toConfig(draft));
+		this.held = { runId: r.run_id, config: r.config, derived: r.derived, views: r.views, draft, key };
+		if (key === this.setupKey) {
+			this.setBase(key);
+		} else if (this.setupKey === this.baseKey) {
+			this.setup = structuredClone(draft);
+			this.setBase(key);
+		}
 	}
 
 	// =========================================================================================
@@ -701,6 +804,8 @@ export class AcquireState {
 	private onState(s: RandomState) {
 		const prev = this.run;
 		this.run = s;
+		if (!s.run_id || s.state === 'unconfigured') this.held = null;
+		else if (this.held?.runId !== s.run_id) void this.readHeld(s.run_id);
 		// A new run starts with an empty display; a finished run keeps its last frame.
 		if (prev && prev.run_id !== s.run_id) this.live = null;
 		// When a run starts driving, the live view comes forward once.
@@ -713,13 +818,19 @@ export class AcquireState {
 		this.live = l;
 	}
 
-	private onLog(entries: LogEntry[]) {
-		if (!entries.length) return;
-		// The log starts again at every configure and reset: its sequence goes back to 0.
-		const restart = entries[0].seq < this.logNext;
-		const kept = restart ? [] : this.log;
-		this.log = [...kept, ...entries].slice(-LOG_LIMIT);
-		this.logNext = entries[entries.length - 1].seq + 1;
+	/** Each run has its own log, started at configure and at every new run. */
+	private onLog(e: RandomLogEvent) {
+		const restart = e.run_id !== this.logRun;
+		this.logRun = e.run_id;
+		// An entry the first read already brought is not shown twice.
+		const fresh = restart ? e.entries : e.entries.filter((x) => x.seq >= this.logNext);
+		if (restart) {
+			this.log = [];
+			this.logNext = 0;
+		}
+		if (!fresh.length) return;
+		this.log = [...this.log, ...fresh].slice(-LOG_LIMIT);
+		this.logNext = fresh[fresh.length - 1].seq + 1;
 	}
 
 	async arm(overrideAck?: string): Promise<boolean> {
@@ -770,11 +881,11 @@ export class AcquireState {
 	}
 
 	async reset(): Promise<boolean> {
-		// The new run's state event can arrive before this answer: compare with the run before.
-		const before = this.run?.run_id ?? null;
+		// A new run from the same setup: what the service held carries over to it.
+		const held = this.held;
 		const res = await this.act<RandomState>('New Run', 'random.reset');
 		if (!res) return false;
-		if (this.applied && this.applied.runId === before) this.applied = { ...this.applied, runId: res.run_id };
+		if (held && res.run_id && this.held === held) this.held = { ...held, runId: res.run_id };
 		this.onState(res);
 		return true;
 	}
@@ -782,7 +893,6 @@ export class AcquireState {
 	async clear(): Promise<boolean> {
 		const res = await this.act<RandomState>('Clear', 'random.clear');
 		if (!res) return false;
-		this.applied = null;
 		this.onState(res);
 		return true;
 	}

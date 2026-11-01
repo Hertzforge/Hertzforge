@@ -13,6 +13,7 @@
 	import Notices from '$lib/acquire/Notices.svelte';
 	import OverrideDialog from '$lib/acquire/OverrideDialog.svelte';
 	import ProfileEditor from '$lib/acquire/ProfileEditor.svelte';
+	import ReferencePreview from '$lib/acquire/ReferencePreview.svelte';
 	import RunBar from '$lib/acquire/RunBar.svelte';
 	import ScheduleEditor from '$lib/acquire/ScheduleEditor.svelte';
 	import SetupSummary from '$lib/acquire/SetupSummary.svelte';
@@ -136,7 +137,10 @@
 			</div>
 		{:else if acq.tab === 'test'}
 			<div class="two">
-				<ProfileEditor {acq} />
+				<div class="stack">
+					<ProfileEditor {acq} />
+					<ReferencePreview {acq} />
+				</div>
 				<div class="stack">
 					<SetupSummary {acq} />
 					<ScheduleEditor {acq} />
