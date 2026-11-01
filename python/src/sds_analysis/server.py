@@ -17,7 +17,6 @@ import asyncio
 import importlib
 import itertools
 import logging
-import pkgutil
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -42,13 +41,21 @@ OPERATIONS: tuple[Operation, ...] = RANDOM_OPERATIONS + MODAL_OPERATIONS
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
 
-#: What the operations reach, imported before the server listens. Loading a
-#: compiled extension holds the interpreter lock until it is done, so a first
-#: import inside a worker thread stalls the event loop with it: 5.1 s once,
-#: opening the first dataset with nothing on disk cached yet. Imported here,
-#: the cost is paid at startup, before anyone is waiting on the loop.
-#: tests/test_server.py fails if a session still imports one of these
-#: packages for the first time, and names it.
+#: What the datasets and operations reach, imported before the server
+#: listens. Loading a compiled extension holds the interpreter lock until it
+#: is done, so a first import inside a worker thread stalls the event loop
+#: with it: 5.1 s once, opening the first dataset with nothing on disk cached
+#: yet. Imported here, the cost is paid at startup, before anyone is waiting
+#: on the loop. tests/test_server.py fails if a session still imports one of
+#: these packages for the first time, and names it.
+#:
+#: Listed module by module, as the datasets and operations reach them, not
+#: by walking whole packages, which imports every module whether anything
+#: uses it or not. One path is left out on purpose: the frame-wing model's
+#: first build, which loads the CAD kernel (OCP, about 0.6 s) and four
+#: modules of its own to combine its solids. That build runs once (about
+#: 30 s) and is read from the cache after, so it is not worth paying for on
+#: every start.
 PRELOAD = (
     'visualdynamics',
     'visualdynamics.plot',
@@ -57,9 +64,18 @@ PRELOAD = (
     'visualdynamics.demo.drone',
     'visualdynamics.demo.plate',
     'visualdynamics.demo.frame_wing',
-    # imported inside the readers and solvers, at first use
+    # imported inside visualdynamics at first use: reading a random run and
+    # forming its octave and coherence products
+    'visualdynamics.core.detect',
+    'visualdynamics.core.octave',
+    'visualdynamics.core.partial_coherence',
+    # solving a model's modes
+    'visualdynamics.core.sparse_solve',
+    # imported inside the readers and solvers, at first use (pandas by the
+    # channel table a random run carries)
     'netCDF4',
     'h5py',
+    'pandas',
     'scipy.constants',
     'scipy.integrate',
     'scipy.interpolate',
@@ -74,25 +90,11 @@ PRELOAD = (
     'scipy.stats',
 )
 
-#: Packages imported whole: their modules import each other at first use.
-PRELOAD_PACKAGES = ('visualdynamics.core', 'visualdynamics.io')
-
 
 def preload() -> None:
-    """Import everything in `PRELOAD`, and every module of `PRELOAD_PACKAGES`.
-    A module whose optional dependency is not installed is skipped, as the
-    package itself skips it."""
+    """Import everything in `PRELOAD`."""
     for name in PRELOAD:
         importlib.import_module(name)
-    for package in PRELOAD_PACKAGES:
-        for module in pkgutil.walk_packages(importlib.import_module(package).__path__,
-                                            f'{package}.'):
-            try:
-                importlib.import_module(module.name)
-            except ImportError as error:
-                if (error.name or '').startswith('visualdynamics'):
-                    raise
-                log.debug('preload: %s needs %s, not installed', module.name, error.name)
 
 
 @dataclass
