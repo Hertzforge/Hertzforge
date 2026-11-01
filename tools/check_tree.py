@@ -69,10 +69,13 @@ def phrase_hash(text: str) -> str:
 
 
 def tracked_files(root: pathlib.Path = ROOT) -> list[pathlib.Path]:
-    """Every file git tracks, as paths under `root`."""
+    """Every file git tracks that is still on disk, as paths under `root`.
+    A file deleted but not yet committed is still in git's index; it is
+    skipped, since the check reads the tree as it stands."""
     out = subprocess.run(['git', 'ls-files', '-z'], cwd=root, check=True,
                          capture_output=True).stdout
-    return [root / name for name in out.decode('utf-8').split('\0') if name]
+    paths = (root / name for name in out.decode('utf-8').split('\0') if name)
+    return [path for path in paths if path.exists()]
 
 
 def _text(path: pathlib.Path) -> str | None:

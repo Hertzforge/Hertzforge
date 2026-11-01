@@ -41,6 +41,15 @@ def test_the_tree_is_clean(capsys):
     assert ', 0 findings' in capsys.readouterr().out
 
 
+def test_a_file_deleted_but_not_committed_is_skipped(tmp_path, capsys):
+    # git ls-files still lists it; the check reads the tree as it stands
+    _repo(tmp_path, {'kept.md': 'clean\n', 'gone.md': 'clean\n'})
+    (tmp_path / 'gone.md').unlink()
+    assert check_tree.tracked_files(tmp_path) == [tmp_path / 'kept.md']
+    assert check_tree.main([], root=tmp_path) == 0
+    assert '1 tracked files, 0 npm lockfiles, 0 findings' in capsys.readouterr().out
+
+
 @pytest.mark.parametrize('text', [
     'Built with the Quokka Foundry team.',
     'see quokka-foundry/notes for the rest',
