@@ -346,6 +346,11 @@ try {
 	const b = await ctxB.newPage();
 	await b.goto(URL_);
 	await until(b, 'the observer to connect', async (p) => (await roleOf(p)) === 'observer');
+	// The observer line reads as one phrase: no gap before the comma (the role badge lays its
+	// parts out with a gap, so the word and the holder must be one part of it).
+	await until(b, 'the observer line to name the holder', async (p) => /has control/.test(await tid(p, 'session-role').innerText()));
+	const seatLine = (await tid(b, 'session-role').innerText()).trim();
+	check('observer: the seat line reads "Observing, <holder> has control"', /^Observing, \S.* has control$/.test(seatLine), JSON.stringify(seatLine));
 	await tab(b, 'test');
 	await until(b, 'the observer to read the setup back', async (p) => (await tid(p, 'setup-status').getAttribute('data-status')) === 'applied');
 	check('second screen: shows the setup the service holds', (await b.locator('[data-testid="setup-title"]').inputValue()) === TITLE, await b.locator('[data-testid="setup-title"]').inputValue());

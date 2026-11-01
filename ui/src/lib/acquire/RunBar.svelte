@@ -119,7 +119,7 @@
 			{:else}
 				<span class="role" data-testid="session-role" data-role="observer">
 					<svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><path d="M1 7s2.3-4 6-4 6 4 6 4-2.3 4-6 4-6-4-6-4z" fill="none" stroke="currentColor" stroke-width="1.3" /><circle cx="7" cy="7" r="1.8" fill="currentColor" /></svg>
-					Observing{#if seat}<span class="holder">, {seat.name} {seat.present ? 'has control' : 'held control and is disconnected'}</span>{/if}
+					<span>Observing{#if seat}<span class="holder">, {seat.name} {seat.present ? 'has control' : 'held control and is disconnected'}</span>{/if}</span>
 				</span>
 				<button class="btn sm primary" data-testid="claim" onclick={() => acq.claim()} disabled={!canClaim || busy('Take Control')} title={canClaim ? 'Take control of the station and the run.' : seat?.present ? `${seat.name} has control. Control passes when it is released.` : 'The control service is not connected.'}>
 					Take Control
