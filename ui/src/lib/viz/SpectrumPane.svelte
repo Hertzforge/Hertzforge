@@ -28,9 +28,11 @@
 		minHeight?: number;
 		/** Show the view's title above the legend. */
 		showTitle?: boolean;
+		/** A y range the operator fixed; null lets the pane range itself. */
+		yFixed?: [number, number] | null;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -102,6 +104,7 @@
 
 	/** y range for data, snapped; with `live`, only moves when the data leaves it or shrinks far inside. */
 	function nextYRange(cols: ArrayLike<number | null>[]): [number, number] {
+		if (yFixed) return yFixed;
 		const ext = finiteExtent(cols, logY) ?? (logY ? [1e-4, 1] : [0, 1]);
 		const target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
 		if (!live || !yRange) return target;
@@ -155,6 +158,7 @@
 			height: Math.max(minHeight, plotEl.clientHeight),
 			pxAlign: false,
 			legend: { show: false },
+			focus: { alpha: 0.25 },
 			padding: [10, 24, 0, 0],
 			cursor: {
 				y: false,
@@ -317,6 +321,7 @@
 		// Track the view and the theme; rebuild or update in place.
 		void view;
 		void theme.version;
+		void yFixed;
 		if (plot) update();
 		bindCursor(view.link);
 	});
@@ -332,6 +337,13 @@
 	}
 
 	const xReadout = $derived(cursorX === null ? null : formatFixed(cursorX, 4));
+
+	/** Pointing at a legend entry brings its line forward and dims the others: a cue besides color. */
+	function focusSeries(index: number | null) {
+		if (!plot) return;
+		const at = index === null ? null : drawOrder.findIndex((o) => o.index === index) + 1;
+		plot.setSeries(at && at > 0 ? at : null, { focus: true });
+	}
 
 	function legendLabel(s: Series, styleName: string) {
 		return `${s.name}, ${s.role} line, ${styleName}`;
@@ -356,7 +368,7 @@
 	</div>
 	<ul class="legend" aria-label="Legend">
 		{#each styled as { series, style, colorVar }, i (i)}
-			<li title={legendLabel(series, style.styleName)}>
+			<li title={legendLabel(series, style.styleName)} onmouseenter={() => focusSeries(i)} onmouseleave={() => focusSeries(null)}>
 				<svg class="swatch" viewBox="0 0 26 8" width="26" height="8" aria-hidden="true">
 					<line
 						x1="1"

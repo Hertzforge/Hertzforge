@@ -94,6 +94,7 @@
 	--series-reference: #dfe6ee;
 	--series-tolerance: #d39a3c;
 	--series-abort: #ffc65c;
+	--series-limit: #e0a8f0;
 	--series-drive: #7f93a8;
 	--series-other: #8ac6f2;
 	--plot-grid: rgba(166, 179, 192, 0.09);
@@ -145,6 +146,7 @@
 		--series-reference: #1f2a35;
 		--series-tolerance: #b5730f;
 		--series-abort: #8a4f00;
+		--series-limit: #7a3d8f;
 		--series-drive: #6b7f93;
 		--series-other: #3d8bd0;
 		--plot-grid: rgba(15, 24, 32, 0.08);
@@ -195,6 +197,7 @@
 	--series-reference: #1f2a35;
 	--series-tolerance: #b5730f;
 	--series-abort: #8a4f00;
+	--series-limit: #7a3d8f;
 	--series-drive: #6b7f93;
 	--series-other: #3d8bd0;
 	--plot-grid: rgba(15, 24, 32, 0.08);

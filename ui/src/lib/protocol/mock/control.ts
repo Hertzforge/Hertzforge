@@ -11,7 +11,8 @@
  *   channel table with revisions and named validation, and a believable closed-loop Random run
  *   (system identification, the coherence gate, the review hold, a soft start, the level ladder,
  *   full level, controlled stop, abort and protection trips) streaming `random.state`,
- *   `random.live` and `random.log`.
+ *   `random.live` and `random.log`, and to a screen that subscribes (`random.subscribe`), its own
+ *   `random.data` with only the plots it asked for.
  *
  * Every value it produces is simulated. Its NI devices are driver-simulated unless a test asks
  * otherwise, so in the shell everything it sends is tagged `SIM`.
@@ -24,6 +25,7 @@ import type {
 	ChannelsSetParams,
 	ClockDomain,
 	ControlParams,
+	DataPlot,
 	DataSource,
 	Derived,
 	FeasibilityVerdict,
@@ -35,11 +37,14 @@ import type {
 	NiDevice,
 	NiStation,
 	RandomConfig,
+	RandomData,
 	RandomLive,
+	RandomLiveHead,
 	RandomOutcome,
 	RandomPhase,
 	RandomRunState,
 	RandomState,
+	RandomSubscribeResult,
 	ReadingRow,
 	RefusalReason,
 	ReportItem,
@@ -52,8 +57,10 @@ import type {
 	StationList,
 	StationRef,
 	StationSelected,
+	SubscribePlot,
 	Trip,
-	ValidationReport
+	ValidationReport,
+	View
 } from '../types';
 import { MockConnection, MockError, type MockServer } from './socket';
 import { binEdges } from './bins';
@@ -142,6 +149,9 @@ const MIN_LINES = 8;
 const MAX_LOOPS_PER_FRAME = 20;
 const GATE_S = 0.5;
 const SOFT_START_DEFAULT_S = 5;
+/** What `random.subscribe` offers (PROTOCOL.md, "Live Data Subscriptions"). */
+const QUANTITIES = ['control', 'drive', 'response', 'time', 'coherence', 'readings'] as const;
+const WITH_CHANNELS = new Set<string>(['response', 'time']);
 
 /** The protocol's control defaults (PROTOCOL.md, "Random Test Configuration"). */
 const CONTROL_DEFAULTS = {
@@ -230,6 +240,47 @@ interface Resolved {
 	/** Each row's alarm and abort bands, the profile's where a row has none. */
 	alarm: BandDb[];
 	abort: BandDb[];
+}
+
+/** Check and normalize `random.subscribe` params, as the service does (PROTOCOL.md, "Live Data Subscriptions"). */
+function subscribe(params: Record<string, unknown>): RandomSubscribeResult {
+	const bad = (param: string, message: string): never => refuse('bad_request', 'bad_params', message, { param });
+	const quantities = [...QUANTITIES];
+	if (params.default !== undefined) {
+		if (params.default !== true) bad('default', '"default" can only be true.');
+		if (params.plots !== undefined || params.rate_hz !== undefined) bad('default', '"default" takes no other parameter.');
+		return { default: true, rate_hz: 5, plots: null, quantities };
+	}
+	const rate = params.rate_hz === undefined ? 5 : params.rate_hz;
+	if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0.5 || rate > 10) bad('rate_hz', '"rate_hz" is a number from 0.5 to 10.');
+	if (!Array.isArray(params.plots)) bad('plots', '"plots" is a list of plots.');
+	const list = params.plots as unknown[];
+	if (list.length > 64) bad('plots', 'At most 64 plots.');
+	const seen = new Set<string>();
+	const plots = list.map((raw, i): SubscribePlot => {
+		const at = `plots[${i}]`;
+		if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) bad(at, `${at} is an object.`);
+		const p = raw as Record<string, unknown>;
+		if (typeof p.id !== 'string' || p.id.length < 1 || p.id.length > 64) bad(`${at}.id`, 'A plot id is 1 to 64 characters.');
+		if (seen.has(p.id as string)) bad(`${at}.id`, `The plot id "${p.id}" is used twice.`);
+		seen.add(p.id as string);
+		if (!quantities.includes(p.quantity as (typeof QUANTITIES)[number])) bad(`${at}.quantity`, `"quantity" is one of ${quantities.join(', ')}.`);
+		const quantity = p.quantity as SubscribePlot['quantity'];
+		const out: SubscribePlot = { id: p.id as string, quantity };
+		if (WITH_CHANNELS.has(quantity)) {
+			const ch = p.channels ?? 'all';
+			const ok = ch === 'all' || ch === 'control' || ch === 'limited' || (Array.isArray(ch) && ch.every((x) => Number.isInteger(x) && x >= 0) && new Set(ch).size === ch.length);
+			if (!ok) bad(`${at}.channels`, '"channels" is a list of channel indexes, or "all", "control" or "limited".');
+			out.channels = ch as SubscribePlot['channels'];
+		} else if (p.channels !== undefined && p.channels !== null) bad(`${at}.channels`, `"channels" does not apply to ${quantity}.`);
+		if (quantity === 'time') {
+			const pts = p.points ?? 1024;
+			if (typeof pts !== 'number' || !Number.isInteger(pts) || pts < 64 || pts > 8192) bad(`${at}.points`, '"points" is a whole number from 64 to 8192.');
+			out.points = pts as number;
+		} else if (p.points !== undefined && p.points !== null) bad(`${at}.points`, `"points" does not apply to ${quantity}.`);
+		return out;
+	});
+	return { default: false, rate_hz: rate as number, plots, quantities };
 }
 
 function resolveProfile(config: RandomConfig): Resolved {
@@ -596,6 +647,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	const niInstalled = options.niInstalled ?? true;
 	const connections = new Set<MockConnection>();
 	const names = new Map<MockConnection, string>();
+	/** Each subscribed connection's plots, rate and when it was last sent a frame (ms). */
+	const subs = new Map<MockConnection, { rate: number; plots: SubscribePlot[]; last: number }>();
 	let clients = 0;
 
 	// ---- sim.* --------------------------------------------------------------------------------
@@ -830,8 +883,26 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		const at = round(r.atLevelT, 2);
 		if (r.mode === 'manual') return { at, remaining: null };
 		const levels = r.config.schedule.levels;
-		const hold = r.phase === 'full_level' ? r.config.schedule.full_level_s : (levels[r.levelIndex].dwell_s ?? 0);
+		const hold = headedFull(r) ? r.config.schedule.full_level_s : (levels[r.levelIndex].dwell_s ?? 0);
 		return { at, remaining: round(Math.max(0, hold - r.atLevelT), 2) };
+	}
+
+	/** The time the schedule holds the present level, while driving in auto; else null. */
+	function levelTime(r: RandomRun): number | null {
+		if (!DRIVING.includes(r.phase) || r.mode === 'manual') return null;
+		return headedFull(r) ? r.config.schedule.full_level_s : (r.config.schedule.levels[r.levelIndex].dwell_s ?? null);
+	}
+
+	/** The run is headed for full level (it may still be ramping there). */
+	function headedFull(r: RandomRun): boolean {
+		const levels = r.config.schedule.levels;
+		return r.target >= levels[levels.length - 1].db - 1e-9;
+	}
+
+	/** `full_level` only once the drive has reached full level; `engaged` while it ramps there. */
+	function settle(r: RandomRun) {
+		if (!DRIVING.includes(r.phase)) return;
+		setPhase(r, 'running', headedFull(r) && r.level === r.target ? 'full_level' : 'engaged');
 	}
 
 	function stateOf(r: RandomRun | null): RandomState {
@@ -1026,7 +1097,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		r.level = levels[0].db - r.ctl.soft_start_db;
 		r.levelIndex = 0;
 		r.engagedT = 0;
-		setPhase(r, 'running', levels.length === 1 ? 'full_level' : 'engaged');
+		setPhase(r, 'running', 'engaged');
 		command(r, levels[0].db);
 		if (r.ctl.soft_start_db > 0) r.rate = r.ctl.soft_start_db / (r.ctl.level_ramp_s > 0 ? r.ctl.level_ramp_s : SOFT_START_DEFAULT_S);
 	}
@@ -1093,7 +1164,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		addLog('note', r.end.message);
 		if (r.timer) clearInterval(r.timer);
 		r.timer = null;
-		if (streaming && r.lines) broadcast('random.live', live(r) as unknown as Record<string, unknown>);
+		if (streaming && r.lines) publish(r, true);
 		if (seat?.conn) disarmSeatClock();
 		stateChanged();
 	}
@@ -1161,7 +1232,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				addLog('overload', `channel ${row.index} reached the top of its range (90 % of its range in the run, or 98 % at the station)`);
 			}
 			if (driving && row.abort.accel_g !== null && value * 3 > row.abort.accel_g) {
-				finish(r, 'aborted', 'aborted', { kind: 'kinematic', channel: row.index, axis: 'accel', value: round(value * 3, 2), limit: row.abort.accel_g, at_level_db: round(r.level, 2), at_loop: r.loops });
+				finish(r, 'aborted', 'aborted', { kind: 'kinematic', channel: row.index, axis: 'accel', value: Number((value * 3).toPrecision(3)), limit: row.abort.accel_g, at_level_db: round(r.level, 2), at_loop: r.loops });
 				return;
 			}
 		}
@@ -1211,12 +1282,13 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				r.engagedT += dt;
 				r.atLevelT += dt;
 				walk(r, dt);
+				settle(r);
 				const last = levels.length - 1;
 				if (r.mode === 'auto') {
 					if (r.phase === 'engaged' && r.levelIndex < last && r.atLevelT >= (levels[r.levelIndex].dwell_s ?? 0)) {
 						r.levelIndex += 1;
 						command(r, levels[r.levelIndex].db);
-						if (r.levelIndex === last) setPhase(r, 'running', 'full_level');
+						settle(r);
 					} else if (r.phase === 'full_level' && r.level === r.target && r.atLevelT >= r.config.schedule.full_level_s) {
 						finish(r, 'completed', 'stopped');
 					}
@@ -1242,8 +1314,167 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			}
 			if (loops === MAX_LOOPS_PER_FRAME) r.loopAcc = 0;
 		}
-		broadcast('random.live', live(r) as unknown as Record<string, unknown>);
+		publish(r, false);
 		stateChanged();
+	}
+
+	/**
+	 * Send the frame each connection asked for: `random.live` to every connection on the default
+	 * subscription, and `random.data` to each subscribed one at its own rate (always on the final
+	 * frame).
+	 */
+	function publish(r: RandomRun, final: boolean) {
+		let frame: RandomLive | null = null;
+		const now = Date.now();
+		for (const c of connections) {
+			const sub = subs.get(c);
+			if (!sub) {
+				frame ??= live(r);
+				c.emit('random.live', frame as unknown as Record<string, unknown>);
+				continue;
+			}
+			if (!final && now - sub.last < 1000 / sub.rate - FRAME_MS / 2) continue;
+			sub.last = now;
+			frame ??= live(r);
+			c.emit('random.data', data(r, frame, sub.plots) as unknown as Record<string, unknown>);
+		}
+	}
+
+	/** One subscribed connection's frame: the live head, then each plot it asked for. */
+	function data(r: RandomRun, frame: RandomLive, plots: SubscribePlot[]): RandomData {
+		const { views, ...head } = frame;
+		return { ...head, plots: plots.map((p) => plotData(r, head, views, p)) };
+	}
+
+	/** The rows a channel selector names, in table order; unknown indexes are left out. */
+	function resolveChannels(r: RandomRun, sel: SubscribePlot['channels']): ChannelRow[] {
+		const inputs = rows.filter((x) => x.enabled && x.role !== 'drive');
+		if (Array.isArray(sel)) return inputs.filter((x) => sel.includes(x.index));
+		if (sel === 'control') return inputs.filter((x) => x.role === 'control');
+		if (sel === 'limited') return inputs.filter((x) => (r.config.limits ?? []).some((l) => l.channel === x.index));
+		return inputs;
+	}
+
+	function plotData(r: RandomRun, head: RandomLiveHead, views: RandomLive['views'], p: SubscribePlot): DataPlot {
+		const base = { id: p.id, quantity: p.quantity };
+		switch (p.quantity) {
+			case 'control':
+				return { ...base, channels: null, views: [views[0]] };
+			case 'drive':
+				return { ...base, channels: null, views: [views[1]] };
+			case 'readings':
+				return { ...base, channels: null, views: [views[2]] };
+			case 'coherence':
+				return { ...base, channels: null, views: [coherenceView(r)] };
+			case 'response':
+			case 'time': {
+				const chosen = resolveChannels(r, p.channels ?? 'all');
+				const out: View[] = chosen.map((row) => (p.quantity === 'response' ? responseView(r, row) : timeView(r, row, p.points ?? 1024)));
+				void head;
+				return { ...base, channels: chosen.map((x) => x.index), views: out };
+			}
+		}
+	}
+
+	const channelTitle = (row: ChannelRow) => `Channel ${row.index}: ${row.description || row.role}`;
+	const freqAxis = { label: 'Frequency', unit: 'Hz', scale: 'log' as const };
+
+	/** A channel's PSD on the run's lines (a monitor sits on the fixture's resonance), and its limit. */
+	function responseView(r: RandomRun, row: ChannelRow): SpectrumView {
+		const L = r.lines as Lines;
+		const series: SpectrumView['series'] = [];
+		if (r.controlPsd) {
+			const control = r.controlPsd;
+			const y = Float64Array.from(L.f, (f, i) => {
+				if (row.role === 'control') return control[i];
+				const bump = 1 + 2.2 * Math.exp(-(((Math.log(f) - Math.log(320 + 40 * row.index)) / 0.18) ** 2));
+				return control[i] * 1.21 ** 2 * bump;
+			});
+			series.push({ name: `Channel ${row.index}`, role: 'measured', x: L.f.slice(), y, shape: 'steps', edges: L.edges.slice() });
+		}
+		const limit = (r.config.limits ?? []).find((l) => l.channel === row.index);
+		if (limit && limit.rows.length) {
+			const lo = limit.rows[0].freq_hz;
+			const hi = limit.rows[limit.rows.length - 1].freq_hz;
+			const idx: number[] = [];
+			L.f.forEach((f, i) => {
+				if (f >= lo && f <= hi) idx.push(i);
+			});
+			if (idx.length) {
+				const ceilingAt = (f: number) => {
+					const rs = limit.rows;
+					let k = 0;
+					while (k < rs.length - 2 && f > rs[k + 1].freq_hz) k++;
+					const a = rs[k];
+					const b = rs[Math.min(k + 1, rs.length - 1)];
+					if (b.freq_hz === a.freq_hz || a.ceiling <= 0 || b.ceiling <= 0) return a.ceiling;
+					const t = Math.log(f / a.freq_hz) / Math.log(b.freq_hz / a.freq_hz);
+					return a.ceiling * (b.ceiling / a.ceiling) ** t;
+				};
+				series.push({
+					name: 'Limit',
+					role: 'limit',
+					x: Float64Array.from(idx, (i) => L.f[i]),
+					y: Float64Array.from(idx, (i) => ceilingAt(L.f[i])),
+					shape: 'steps',
+					edges: Float64Array.from([...idx.map((i) => L.edges[i]), L.edges[idx[idx.length - 1] + 1]])
+				});
+			}
+		}
+		return { view: 'spectrum', title: channelTitle(row), x: freqAxis, y: { label: 'PSD', unit: `${row.units}²/Hz`, scale: 'log' }, series, link: 'frequency' };
+	}
+
+	/** The last loop's samples of a channel, decimated to `points` as a minimum and a maximum per interval. */
+	function timeView(r: RandomRun, row: ChannelRow, points: number): SpectrumView {
+		const fs = r.grid.fs_hz;
+		const n = r.grid.n_pts;
+		const series: SpectrumView['series'] = [];
+		const value = r.channelRms.get(row.index);
+		if (value !== undefined) {
+			const next = rng(hashSeed(`${r.id}:${row.index}`, r.loops));
+			const raw = Float64Array.from({ length: n }, () => value * gauss(next));
+			const xs: number[] = [];
+			const ys: number[] = [];
+			if (n <= points) {
+				raw.forEach((v, i) => {
+					xs.push(i / fs);
+					ys.push(v);
+				});
+			} else {
+				const per = Math.ceil(n / Math.max(1, Math.floor(points / 2)));
+				for (let a = 0; a < n; a += per) {
+					let lo = a;
+					let hi = a;
+					for (let i = a; i < Math.min(n, a + per); i++) {
+						if (raw[i] < raw[lo]) lo = i;
+						if (raw[i] > raw[hi]) hi = i;
+					}
+					for (const i of lo <= hi ? [lo, hi] : [hi, lo]) {
+						xs.push(i / fs);
+						ys.push(raw[i]);
+					}
+				}
+			}
+			series.push({ name: `Channel ${row.index}`, role: 'measured', x: Float64Array.from(xs), y: Float64Array.from(ys) });
+		}
+		return { view: 'spectrum', title: channelTitle(row), x: { label: 'Time', unit: 's', scale: 'linear' }, y: { label: 'Amplitude', unit: row.units, scale: 'linear' }, series };
+	}
+
+	/** The system identification's coherence on the band's lines, once it has been measured. */
+	function coherenceView(r: RandomRun): SpectrumView {
+		const L = r.lines as Lines;
+		const measured = r.phase !== 'sysid' && r.t !== null;
+		const series: SpectrumView['series'] = measured
+			? [
+					{
+						name: 'Coherence',
+						role: 'measured',
+						x: L.f.slice(),
+						y: Float64Array.from(L.f, (f) => Math.min(0.999, Math.max(0, r.coherence + 0.04 * Math.sin(Math.log(f) * 5) - 0.25 * Math.exp(-(((Math.log(f) - Math.log(550)) / 0.04) ** 2)))))
+					}
+				]
+			: [];
+		return { view: 'spectrum', title: 'Coherence', x: freqAxis, y: { label: 'Coherence', unit: null, scale: 'linear' }, series };
 	}
 
 	/** The `random.live` payload: three views, every series stepped on the run's lines. */
@@ -1306,11 +1537,14 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			mode: r.mode,
 			elapsed_s: round(r.t ?? 0, 2),
 			level_db: driving ? round(level, 2) : null,
+			commanded_db: driving ? round(r.phase === 'sysid' || r.phase === 'coherence_gate' ? r.ctl.pretest.level_db : r.target, 2) : null,
 			at_level_s: timing.at,
 			remaining_at_level_s: timing.remaining,
+			level_s: levelTime(r),
 			loop: r.loops,
 			control_rms_g: r.controlRms === null ? null : round(r.controlRms, 3),
 			reference_rms_g: round(referenceRms, 3),
+			control_error_db: controlErrDb === null ? null : round(controlErrDb, 2),
 			drive_rms_v: r.driveRms === null ? null : round(r.driveRms, 4),
 			lines: { in_band: L.f.length, alarm: r.alarmLines, abort: r.abortLines },
 			channels,
@@ -1359,6 +1593,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		},
 		detach: (c) => {
 			connections.delete(c);
+			subs.delete(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1562,7 +1797,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 					target = Math.min(levels[levels.length - 1], Math.max(levels[0], r.target + (params.delta_db as number)));
 				}
 				command(r, target);
-				setPhase(r, 'running', target >= levels[levels.length - 1] - 1e-9 ? 'full_level' : 'engaged');
+				settle(r);
 				stateChanged();
 				return { level_db: round(target, 2) };
 			},
@@ -1582,7 +1817,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 					const above = levels.findIndex((l) => l > r.target + 1e-9);
 					r.levelIndex = on >= 0 ? on : above > 0 ? above - 1 : above === 0 ? 0 : levels.length - 1;
 					r.atLevelT = 0;
-					setPhase(r, 'running', on === levels.length - 1 || above < 0 ? 'full_level' : 'engaged');
+					settle(r);
 				}
 				stateChanged(true);
 				return { mode };
@@ -1626,6 +1861,22 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				return stateOf(null);
 			},
 			'random.state': () => stateOf(random),
+			'random.subscribe': (params, conn) => {
+				const result = subscribe(params);
+				if (result.default) subs.delete(conn);
+				else subs.set(conn, { rate: result.rate_hz, plots: result.plots ?? [], last: 0 });
+				// A plot added mid-run, or a window opened after the run, fills at once.
+				const r = random;
+				if (!result.default && r && r.lines && r.t !== null) {
+					setTimeout(() => {
+						const sub = subs.get(conn);
+						if (!sub || random !== r) return;
+						sub.last = Date.now();
+						conn.emit('random.data', data(r, live(r), sub.plots) as unknown as Record<string, unknown>);
+					}, 30);
+				}
+				return result;
+			},
 			'random.config': () =>
 				random
 					? { run_id: random.id, config: random.config, derived: random.derived, views: referenceViews(random.config, random.derived) }

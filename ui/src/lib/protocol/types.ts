@@ -88,7 +88,7 @@ export interface Axis {
 	scale: Scale;
 }
 
-export type Role = 'measured' | 'reference' | 'tolerance' | 'abort' | 'drive' | 'other';
+export type Role = 'measured' | 'reference' | 'tolerance' | 'abort' | 'limit' | 'drive' | 'other';
 
 export interface Series {
 	name: string;
@@ -262,6 +262,7 @@ export const CONTROL_TOPICS = {
 	channels: 'channels.changed',
 	state: 'random.state',
 	live: 'random.live',
+	data: 'random.data',
 	log: 'random.log'
 } as const;
 
@@ -751,8 +752,8 @@ export interface LiveChannel {
 
 export type Alarm = { kind: 'envelope'; lines: number; worst_db: number } | { kind: 'overload'; channel: number };
 
-/** The `random.live` event: control, drive and run views plus the numbers behind them. */
-export interface RandomLive {
+/** The numbers every live frame carries, `random.live` and `random.data` alike. */
+export interface RandomLiveHead {
 	run_id: string;
 	source: DataSource;
 	class: StationClass;
@@ -760,18 +761,66 @@ export interface RandomLive {
 	phase: RandomPhase;
 	mode: LadderMode;
 	elapsed_s: number;
+	/** The level the drive is at now; null when nothing drives. */
 	level_db: number | null;
+	/** The level the run is headed for (the run state's `level_db`); differs from `level_db` while ramping. */
+	commanded_db: number | null;
 	at_level_s: number | null;
 	remaining_at_level_s: number | null;
+	/** The time the schedule holds the present level; null in manual and while nothing drives. */
+	level_s: number | null;
 	loop: number;
 	control_rms_g: number | null;
+	/** The target: the reference rms at the last control loop's level. */
 	reference_rms_g: number | null;
+	/** 20 log10(control / reference), from the same loop. */
+	control_error_db: number | null;
 	drive_rms_v: number | null;
 	lines: { in_band: number; alarm: number; abort: number };
 	channels: LiveChannel[];
 	alarms: Alarm[];
+}
+
+/** The `random.live` event: control, drive and run views plus the numbers behind them. */
+export interface RandomLive extends RandomLiveHead {
 	/** Control spectrum, drive spectrum, run readings, in that order. */
 	views: [SpectrumView, SpectrumView, ReadingView];
+}
+
+/** What a live plot can show (PROTOCOL.md, "Live Data Subscriptions"). */
+export type LiveQuantity = 'control' | 'drive' | 'response' | 'time' | 'coherence' | 'readings';
+
+/** Which channels a `response` or `time` plot shows: indexes, or a set the service resolves. */
+export type ChannelSelector = number[] | 'all' | 'control' | 'limited';
+
+export interface SubscribePlot {
+	id: string;
+	quantity: LiveQuantity;
+	channels?: ChannelSelector;
+	points?: number;
+}
+
+export type RandomSubscribeParams = { rate_hz?: number; plots: SubscribePlot[] } | { default: true };
+
+export interface RandomSubscribeResult {
+	default: boolean;
+	rate_hz: number;
+	plots: SubscribePlot[] | null;
+	quantities: LiveQuantity[];
+}
+
+/** One plot's data in a `random.data` frame. */
+export interface DataPlot {
+	id: string;
+	quantity: LiveQuantity;
+	/** The resolved channels, in table order; null for the quantities without channels. */
+	channels: number[] | null;
+	views: View[];
+}
+
+/** The `random.data` event: a subscribed connection's own frame. */
+export interface RandomData extends RandomLiveHead {
+	plots: DataPlot[];
 }
 
 export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note';

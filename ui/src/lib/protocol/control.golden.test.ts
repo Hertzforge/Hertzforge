@@ -13,8 +13,12 @@ import type {
 	Dtype,
 	Event,
 	RandomConfig,
+	RandomData,
 	RandomLive,
+	RandomLiveHead,
 	RandomState,
+	RandomSubscribeResult,
+	SpectrumView,
 	ResponseErr,
 	ResponseOk,
 	StationList,
@@ -48,6 +52,8 @@ const TEXT = [
 	'event_random_state',
 	'event_session_changed',
 	'event_random_log',
+	'request_random_subscribe',
+	'response_random_subscribe',
 	'response_error_controller_held',
 	'response_error_table_invalid'
 ];
@@ -77,6 +83,78 @@ describe('random.live golden', () => {
 		}
 		expect(live.alarms).toEqual([{ kind: 'envelope', lines: 2, worst_db: 3.4 }]);
 		expect(live.lines).toEqual({ in_band: 317, alarm: 2, abort: 0 });
+	});
+});
+
+describe('the live fields every frame carries', () => {
+	it('random.live carries the commanded level, the level time and the control error', () => {
+		const live = (decodeFrame(readBin('event_random_live.bin')) as unknown as Event<RandomLive>).data;
+		const head: Partial<RandomLiveHead> = {
+			level_db: 0,
+			commanded_db: 0,
+			at_level_s: 12.5,
+			remaining_at_level_s: 287.5,
+			level_s: 300,
+			control_rms_g: 6.02,
+			reference_rms_g: 6.06,
+			control_error_db: -0.06
+		};
+		expect(live).toMatchObject(head);
+		// In the contract's order: each new field right after the one it belongs beside.
+		const keys = Object.keys(live);
+		expect(keys.indexOf('commanded_db')).toBe(keys.indexOf('level_db') + 1);
+		expect(keys.indexOf('level_s')).toBe(keys.indexOf('remaining_at_level_s') + 1);
+		expect(keys.indexOf('control_error_db')).toBe(keys.indexOf('reference_rms_g') + 1);
+	});
+});
+
+describe('random.data golden', () => {
+	it('encodes byte for byte from its expected form', () => {
+		const message = toTyped(readJson('event_random_data.expected.json')) as Record<string, unknown>;
+		const bytes = encodeFrame(message) as Uint8Array;
+		expect(Array.from(bytes)).toEqual(Array.from(readBin('event_random_data.bin')));
+	});
+
+	it('carries the live head and each subscribed plot by its id, one view per resolved channel', () => {
+		const event = decodeFrame(readBin('event_random_data.bin')) as unknown as Event<RandomData>;
+		const data: RandomData = event.data;
+		expect(event.topic).toBe('random.data');
+		expect('views' in data).toBe(false);
+		expect([data.run_id, data.commanded_db, data.level_s, data.control_error_db]).toEqual(['r-0007', 0, 300, -0.06]);
+		expect(data.plots.map((p) => [p.id, p.quantity, p.channels, p.views.length])).toEqual([
+			['ctl', 'control', null, 1],
+			['lim', 'response', [1, 2], 2],
+			['t1', 'time', [1], 1]
+		]);
+		const [ch1, ch2] = data.plots[1].views as SpectrumView[];
+		expect([ch1.title, ch2.title]).toEqual(['Channel 1: Control', 'Channel 2: Fixture corner']);
+		expect(ch1.series.map((s) => s.role)).toEqual(['measured']);
+		expect(ch2.series.map((s) => [s.name, s.role, s.shape])).toEqual([
+			['Channel 2', 'measured', 'steps'],
+			['Limit', 'limit', 'steps']
+		]);
+		// The limit covers only the lines its rows cover.
+		expect(Array.from(ch2.series[1].x)).toEqual([106.25, 112.5]);
+		expect(ch2.series[1].edges?.length).toBe(3);
+		const time = data.plots[2].views[0] as SpectrumView;
+		expect([time.x.label, time.x.unit, time.x.scale, time.y.unit, time.y.scale]).toEqual(['Time', 's', 'linear', 'g', 'linear']);
+		expect(time.series[0].shape).toBeUndefined();
+		expect(time.link).toBeUndefined();
+	});
+
+	it('the subscribe answer fills every default and names the quantities offered', () => {
+		const res = (decodeFrame(readFileSync(golden('response_random_subscribe.json'), 'utf-8')) as unknown as ResponseOk<RandomSubscribeResult>).result;
+		const expected: RandomSubscribeResult = {
+			default: false,
+			rate_hz: 5,
+			plots: [
+				{ id: 'ctl', quantity: 'control' },
+				{ id: 'lim', quantity: 'response', channels: 'limited' },
+				{ id: 't2', quantity: 'time', channels: [2, 3], points: 1024 }
+			],
+			quantities: ['control', 'drive', 'response', 'time', 'coherence', 'readings']
+		};
+		expect(res).toEqual(expected);
 	});
 });
 
