@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from sds_analysis.protocol import ProtocolError
-from sds_analysis.server import OPERATIONS, Service
+from hertzforge.service.protocol import ProtocolError
+from hertzforge.service.server import OPERATIONS, Service
 
 
 @pytest.fixture(scope='module')

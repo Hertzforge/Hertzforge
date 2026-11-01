@@ -16,9 +16,9 @@ import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from sds_analysis import __main__ as entry
-from sds_analysis import frames
-from sds_analysis.server import SWITCH_INTERVAL, Service, preload, start
+from hertzforge.service import __main__ as entry
+from hertzforge.service import frames
+from hertzforge.service.server import SWITCH_INTERVAL, Service, preload, start
 
 
 class Client:
@@ -43,13 +43,11 @@ def wire(message):
 
 #: packages whose first import, if it happened while serving, would hold the
 #: interpreter lock against the event loop
-HEAVY = ('visualdynamics', 'vtkmodules', 'pyvista', 'PySide6', 'pyqtgraph',
-         'netCDF4', 'h5py', 'pandas', 'scipy', 'pint')
+HEAVY = ('hertzforge', 'netCDF4', 'h5py', 'pandas', 'scipy', 'pint')
 
 
 def _heavy(modules):
-    # a None entry is a module refused, not loaded (Visual Dynamics blocks
-    # the Qt modules that are not LGPL that way)
+    # a None entry is a module refused, not loaded
     return {name for name, module in modules.items()
             if module is not None and name.split('.')[0] in HEAVY}
 
@@ -157,7 +155,7 @@ def test_smoke(validate):
 #: preload.
 _FIRST_IMPORTS = '''
 import asyncio, json, sys
-from sds_analysis import frames, server
+from hertzforge.service import frames, server
 
 heavy_packages, datasets = (json.loads(arg) for arg in sys.argv[1:])
 
@@ -199,7 +197,7 @@ def test_the_preload_leaves_nothing_heavy_to_import_while_serving(tmp_path):
     The frame-wing model is left out, as `PRELOAD` leaves out its first
     build (about 30 s)."""
     datasets = ['plate-random', 'drone-fem', 'plate-fem']
-    env = {**os.environ, 'SDS_CACHE_DIR': str(tmp_path / 'cache')}
+    env = {**os.environ, 'HERTZFORGE_CACHE_DIR': str(tmp_path / 'cache')}
     for cache in ('empty', 'full'):
         done = subprocess.run(
             [sys.executable, '-c', _FIRST_IMPORTS, json.dumps(HEAVY), json.dumps(datasets)],
@@ -284,7 +282,7 @@ def test_start_changes_nothing_beyond_the_server(monkeypatch):
     # a plain constructor: no imports, no interpreter-wide setting, so a
     # caller (these tests among them) keeps its own
     calls = []
-    monkeypatch.setattr('sds_analysis.server.preload', lambda: calls.append('preload'))
+    monkeypatch.setattr('hertzforge.service.server.preload', lambda: calls.append('preload'))
     interval = sys.getswitchinterval()
     service = Service()
 
@@ -304,7 +302,7 @@ def test_start_changes_nothing_beyond_the_server(monkeypatch):
 
 def test_the_entry_point_preloads_and_sets_the_switch_interval(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr('sds_analysis.server.preload', lambda: calls.append('preload'))
+    monkeypatch.setattr('hertzforge.service.server.preload', lambda: calls.append('preload'))
     interval = sys.getswitchinterval()
 
     async def serve_until_listening():
@@ -331,7 +329,7 @@ def test_the_entry_point_preloads_and_sets_the_switch_interval(monkeypatch, caps
 
 def test_console_entry_point_starts_headless_and_answers():
     process = subprocess.Popen(
-        [sys.executable, '-m', 'sds_analysis', '--port', '0'],
+        [sys.executable, '-m', 'hertzforge.service', '--port', '0'],
         stderr=subprocess.PIPE, text=True)
     try:
         deadline = time.monotonic() + 60

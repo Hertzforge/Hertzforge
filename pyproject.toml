@@ -32,6 +32,8 @@ dependencies = [
     # STEP and IGES import. The build without VTK: cadquery-ocp requires
     # vtk (about 600 MB) and nothing here draws with it.
     "cadquery-ocp-novtk",
+    # BSD-3-Clause: the analysis service's WebSocket server
+    "websockets",
 ]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [
@@ -55,19 +57,20 @@ hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specificati
 # The same settings as Visual Dynamics: ruff's own rule set, 100 columns.
 # One configuration for every Python file in the repository.
 line-length = 100
-# Where this repository's own packages live, so import sorting files them
-# as first party: hertzforge under src/, the analysis service under
-# python/src/.
-src = ["src", "python/src"]
+# Where this repository's own package lives, so import sorting files it as
+# first party.
+src = ["src"]
 
 [tool.pytest.ini_options]
-# The package's own tests. The analysis service under python/ has its own
-# environment and test suite (uv run --project python pytest python).
+# The package's tests, the analysis service's under tests/service.
 testpaths = ["tests"]
 addopts = '-m "not slow"'
 markers = [
     "slow: the demonstration models, built for the website and the docs; run on demand rather than on every edit",
     "guide: the guide's mesh table, minutes of meshing a shape; checked on main and weekly, not on every pull request",
+    # CI runs these alone, after the rest (`-m timing`, without xdist): a test
+    # that asserts a wall-clock bound fails when other workers share its cores.
+    "timing: asserts a wall-clock bound, such as event-loop latency; run serially",
 ]
 filterwarnings = [
     # netCDF4's published wheel is built against an older numpy C API; the

@@ -13,8 +13,8 @@ None | protocol | operation descriptors | view types | run files | units
 Each command as run, its exit code, and its pass / fail / skip counts:
 
 ```
-uv run --project python pytest python -q -n 4 --dist loadgroup -m "not timing"    exit 0    N passed, N deselected
-uv run --project python pytest python -q -m timing    exit 0    N passed, N deselected
+python -m pytest tests -q -n auto --dist loadgroup -m "not slow and not timing"    exit 0    N passed, N skipped
+python -m pytest tests -q -m timing               exit 0    N passed, N deselected
 npm --prefix ui test                              exit 0    N passed
 scripts/rust_tests.sh parallel                    exit 0    N passed
 scripts/rust_tests.sh timing                      exit 0    N passed
