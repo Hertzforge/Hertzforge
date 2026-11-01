@@ -42,8 +42,10 @@
 
 	// The orphan countdown ticks on this screen between the service's events.
 	let now = $state(Date.now());
-	$effect(() => {
+	// Before the countdown is drawn: `now` is otherwise the last tick's, which may be long ago.
+	$effect.pre(() => {
 		if (acq.orphanDeadline === null || !acq.isLive) return;
+		now = Date.now();
 		const t = setInterval(() => (now = Date.now()), 250);
 		return () => clearInterval(t);
 	});
