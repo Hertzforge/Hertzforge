@@ -45,6 +45,11 @@
 //! owning thread rather than calling into a handle from elsewhere. Enumeration
 //! ([`crate::enumerate`]) opens its own short-lived driver handle and touches no
 //! task, so a scan can run while a backend exists.
+//!
+//! On Windows the thread that READS a running task is the run's control thread,
+//! and it is registered with the multimedia scheduler ("Pro Audio") for the run;
+//! that registration belongs to the thread, not to the backend
+//! (`crate::control_thread`).
 
 use crate::clock::{provisional_abort_latency, resolve_clock, ClockKey, ProvisionalAbortLatency};
 use crate::config::{AiInterface, NiConfig};
@@ -213,6 +218,14 @@ pub struct NiBackend {
     /// successful `timeBeginPeriod`, on every path including `Drop`.
     #[cfg(windows)]
     host_loop_timer: Option<crate::timer_resolution::SystemTimerHold>,
+    /// WINDOWS ONLY (compiled in this crate's tests, which prove the wiring): the
+    /// run's MMCSS "Pro Audio" registration of the thread that READS it. Taken at
+    /// the run's first running read, ended by stop, the abort, a rebuild, close or
+    /// Drop. The registration itself lives on the reading thread, never in the
+    /// backend, because only that thread may revert it (why, and the measurement:
+    /// `crate::control_thread`). A refusal is a warning, never a refused run.
+    #[cfg(any(windows, test))]
+    control_thread: crate::control_thread::RunPriority,
 }
 
 impl std::fmt::Debug for NiBackend {
@@ -298,6 +311,8 @@ impl NiBackend {
             warnings: WarningLog::new(),
             #[cfg(windows)]
             host_loop_timer: None,
+            #[cfg(any(windows, test))]
+            control_thread: crate::control_thread::RunPriority::system(),
         }
     }
 
@@ -450,6 +465,10 @@ impl NiBackend {
         {
             self.host_loop_timer = None;
         }
+        // ...and end the run's control-thread registration: reverted now when this
+        // is the reading thread, at that thread's exit otherwise.
+        #[cfg(any(windows, test))]
+        self.control_thread.end_run();
     }
 
     /// WINDOWS ONLY: hold the 1 ms system timer for the armed/running life of the
@@ -1589,6 +1608,10 @@ impl Backend for NiBackend {
         {
             self.host_loop_timer = None;
         }
+        // The run is over: revert the reading thread's registration (now, when
+        // this is that thread; at its exit, when the stop came from elsewhere).
+        #[cfg(any(windows, test))]
+        self.control_thread.end_run();
         self.absorb_driver_warnings();
         Ok(())
     }
@@ -1601,6 +1624,16 @@ impl Backend for NiBackend {
         let ai = self.require_ai().map_err(HalError::from)?;
         if !matches!(self.state, State::Running | State::Stopped) {
             return Err(HalError::NotConnected);
+        }
+        // The thread reading a RUNNING task is the run's control thread: register
+        // it on the run's first read (one attempt per run per thread; a refusal
+        // is one warning and the read proceeds). A drain read after stop() does
+        // not. Why and how it pairs: `crate::control_thread`.
+        #[cfg(any(windows, test))]
+        if self.state == State::Running {
+            if let Some(w) = self.control_thread.on_running_read() {
+                self.warnings.push(w);
+            }
         }
         // Fixed-N. Never "read all available": a nondeterministic frame count
         // trips the engine's scratch guard.
@@ -2208,6 +2241,139 @@ mod tests {
         // ...and it satisfies the object-safe trait the engine holds.
         let b: Box<dyn Backend> = Box::new(backend(1, 0));
         assert_eq!(b.caps().max_input_channels, 1);
+    }
+
+    // --- the reading thread's MMCSS registration (`crate::control_thread`) -----
+
+    /// A backend whose AI task looks RUNNING to the read path, with a counting
+    /// MMCSS API installed. There is no driver, so each read fails NotConnected,
+    /// AFTER the point where the run's control thread is registered.
+    fn running_with(api: &'static crate::control_thread::fake::Counting) -> NiBackend {
+        let mut b = backend(1, 1);
+        b.control_thread = crate::control_thread::RunPriority::with_api(api);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        b.state = State::Running;
+        b
+    }
+
+    /// One registration per run, on the first RUNNING read, and one revert, at
+    /// stop. Nothing before the tasks run, nothing for a drain read after stop,
+    /// nothing again at Drop.
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete the registration block in
+    /// `read_input` and the first count is (0, 0); delete `end_run` from `stop()`
+    /// and the count after stop is (1, 0).
+    #[test]
+    fn a_run_registers_its_reading_thread_once_and_stop_reverts_it() {
+        let api = crate::control_thread::fake::Counting::leak(0);
+        let mut b = running_with(api);
+        let mut out = vec![0.0f32; 2048];
+
+        b.state = State::Armed;
+        assert!(matches!(
+            b.read_input(&mut out),
+            Err(HalError::NotConnected)
+        ));
+        assert_eq!(api.counts(), (0, 0), "nothing before the tasks run");
+
+        b.state = State::Running;
+        for _ in 0..10 {
+            assert!(matches!(
+                b.read_input(&mut out),
+                Err(HalError::NotConnected)
+            ));
+        }
+        assert_eq!(api.counts(), (1, 0));
+        b.stop().unwrap();
+        assert_eq!(api.counts(), (1, 1));
+
+        assert_eq!(b.state, State::Stopped);
+        let _ = b.read_input(&mut out);
+        drop(b);
+        assert_eq!(api.counts(), (1, 1), "a drain read and Drop add nothing");
+    }
+
+    /// The other ends of a run revert on the reading thread too: the abort, close
+    /// and Drop (all through `clear_tasks`).
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete `end_run` from `clear_tasks` and
+    /// every row's count after its end is (1, 0).
+    #[test]
+    fn an_abort_close_or_drop_on_the_reading_thread_reverts_it() {
+        type End = fn(&mut Option<NiBackend>);
+        let ends: [(&str, End); 3] = [
+            ("emergency_stop", |b| {
+                b.as_mut().unwrap().emergency_stop().unwrap();
+            }),
+            ("close", |b| {
+                b.as_mut().unwrap().close().unwrap();
+            }),
+            ("drop", |b| {
+                *b = None;
+            }),
+        ];
+        let mut out = vec![0.0f32; 2048];
+        for (name, end) in ends {
+            let api = crate::control_thread::fake::Counting::leak(0);
+            let mut b = Some(running_with(api));
+            let _ = b.as_mut().unwrap().read_input(&mut out);
+            assert_eq!(api.counts(), (1, 0), "{name}");
+            end(&mut b);
+            assert_eq!(api.counts(), (1, 1), "{name}");
+        }
+    }
+
+    /// A refused registration is ONE warning for the run and never stops the read:
+    /// each read still goes on to the driver (absent here, hence NotConnected).
+    ///
+    /// RED-MUTATION (run 2026-11-01): make `ThreadSlot::enter` retry a run it
+    /// already refused and the warning count is 5.
+    #[test]
+    fn a_refused_registration_is_one_warning_and_the_reads_go_on() {
+        let api = crate::control_thread::fake::Counting::leak(1552);
+        let mut b = running_with(api);
+        let mut out = vec![0.0f32; 2048];
+        for _ in 0..5 {
+            assert!(matches!(
+                b.read_input(&mut out),
+                Err(HalError::NotConnected)
+            ));
+        }
+        let w = b.drain_warnings();
+        assert_eq!(
+            w.iter().filter(|w| w.contains("\"Pro Audio\"")).count(),
+            1,
+            "{w:?}"
+        );
+        b.stop().unwrap();
+        assert_eq!(api.counts(), (1, 0), "a refusal is never reverted");
+    }
+
+    /// The backend is `Send` and a stop may come from a command thread. The revert
+    /// is only valid on the reading thread, so a stop and Drop elsewhere revert
+    /// nothing there, and the reading thread reverts on its way out.
+    #[test]
+    fn a_stop_from_another_thread_leaves_the_revert_to_the_reading_thread() {
+        let api = crate::control_thread::fake::Counting::leak(0);
+        let (backend_tx, backend_rx) = std::sync::mpsc::channel();
+        let (exit_tx, exit_rx) = std::sync::mpsc::channel::<()>();
+        let reader = std::thread::spawn(move || {
+            let mut b = running_with(api);
+            let mut out = vec![0.0f32; 2048];
+            let _ = b.read_input(&mut out);
+            backend_tx.send(b).unwrap();
+            exit_rx.recv().unwrap();
+            std::thread::current().id()
+        });
+        let mut b = backend_rx.recv().unwrap();
+        assert_eq!(api.counts(), (1, 0));
+        b.stop().unwrap();
+        drop(b);
+        assert_eq!(api.counts(), (1, 0), "no revert off the reading thread");
+        exit_tx.send(()).unwrap();
+        let reader_id = reader.join().unwrap();
+        assert_eq!(api.counts(), (1, 1));
+        assert_eq!(*api.reverted_on.lock().unwrap(), vec![reader_id]);
     }
 
     #[test]
