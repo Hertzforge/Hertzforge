@@ -66,7 +66,8 @@
 <style>
 	.topbar {
 		display: grid;
-		grid-template-columns: minmax(24px, 1fr) minmax(36px, 400px) auto;
+		/* The right side keeps its full width; the brand and the search give way to it. */
+		grid-template-columns: minmax(24px, 1fr) minmax(36px, 400px) max-content;
 		align-items: center;
 		gap: var(--sp-4);
 		height: var(--topbar-height);
@@ -215,7 +216,8 @@
 		.keys,
 		.sep,
 		.ws,
-		.name {
+		.name,
+		.runpill .lv {
 			display: none;
 		}
 
@@ -228,6 +230,14 @@
 	@media (max-width: 1180px) {
 		.themebtn span,
 		.mock {
+			display: none;
+		}
+	}
+
+	/* Narrower still, the data-source badge keeps its SIM or LIVE stamp and drops the words beside it. */
+	@media (max-width: 860px) {
+		.right :global(.sim .text),
+		.right :global(.live .text) {
 			display: none;
 		}
 	}
