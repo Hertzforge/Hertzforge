@@ -24,6 +24,7 @@ pub mod server;
 pub mod session;
 pub mod sim;
 pub mod station;
+pub mod table;
 pub mod views;
 
 /// Default bind address.
