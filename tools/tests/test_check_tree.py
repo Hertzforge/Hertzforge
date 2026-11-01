@@ -82,6 +82,25 @@ def test_the_finding_never_repeats_the_name(tmp_path):
     assert 'quokka' not in finding.lower()
 
 
+def test_a_listed_notice_is_not_read_and_the_same_text_elsewhere_is(tmp_path):
+    notice = tmp_path / 'vendor' / 'specs' / 'LICENSE'
+    elsewhere = tmp_path / 'docs' / 'LICENSE'
+    for path in (notice, elsewhere):
+        path.parent.mkdir(parents=True)
+        path.write_text('Copyright (c) 2026, Quokka Foundry\n', encoding='utf-8')
+    found = check_tree.check_names([notice, elsewhere], tmp_path, names=PLANTED,
+                                   notices=frozenset({'vendor/specs/LICENSE'}))
+    assert found == ['docs/LICENSE: line 1 names a listed organization']
+
+
+def test_every_listed_notice_is_in_the_tree():
+    # a notice left listed after its file goes would exempt whatever
+    # later lands at that path
+    tracked = {path.relative_to(check_tree.ROOT).as_posix()
+               for path in check_tree.tracked_files()}
+    assert check_tree.NOTICES <= tracked
+
+
 @pytest.mark.parametrize('source,module', [
     ('import sdynpy\n', 'sdynpy'),
     ('from rattlesnake.components import x\n', 'rattlesnake.components'),
