@@ -68,7 +68,16 @@ use std::path::{Path, PathBuf};
 ///   and it became a crate precisely so that adding the `eigen-backendd` daemon did
 ///   NOT add a second one. This list is what makes "one construction point" a
 ///   checkable claim rather than an intention.
-const SIM_CRATES: &[&str] = &["eigen-hal-sim", "eigen-demo", "eigen-station"];
+/// * `sds-control` - the control service's simulated Random run. It runs only on the
+///   Sim plant (`src/sim.rs`, every frame marked `source: "SIM"`) and has no hardware
+///   path; when it gains one, its backend comes from the station factory and this
+///   entry goes.
+const SIM_CRATES: &[&str] = &[
+    "eigen-hal-sim",
+    "eigen-demo",
+    "eigen-station",
+    "sds-control",
+];
 
 /// Files in `ui/src-tauri/src` allowed to construct a Sim.
 ///
