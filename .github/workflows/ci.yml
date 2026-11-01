@@ -91,7 +91,19 @@ jobs:
           RUN=""
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
           $RUN uv run --upgrade --project python --python "${{ matrix.python-version }}" \
-            pytest python -q -n 4 --dist loadgroup
+            pytest python -q -n 4 --dist loadgroup -m "not timing"
+      - name: Test the timing tests, one at a time
+        # Tests marked `timing` assert a wall-clock bound (event-loop latency),
+        # which other xdist workers break by sharing the runner's cores. They run
+        # here alone, without xdist. The marker is registered in
+        # python/pyproject.toml.
+        env:
+          UV_COMPILE_BYTECODE: '1'
+        run: |
+          RUN=""
+          if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
+          $RUN uv run --upgrade --project python --python "${{ matrix.python-version }}" \
+            pytest python -q -m timing
 
   # The shell: types, unit tests and a production build, on every platform
   # a desktop build targets.

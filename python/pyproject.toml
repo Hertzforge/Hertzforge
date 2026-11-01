@@ -36,3 +36,8 @@ python-preference = "managed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    # CI runs these alone, after the rest (`-m timing`, without xdist): a test
+    # that asserts a wall-clock bound fails when other workers share its cores.
+    "timing: asserts a wall-clock bound, such as event-loop latency; run serially",
+]
