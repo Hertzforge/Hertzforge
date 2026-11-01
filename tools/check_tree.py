@@ -8,8 +8,9 @@
 2. **No copyleft code.** No tracked Python file imports a copyleft package,
    by statement or by name.
 3. **Permissive npm licenses.** Every package in the shell's lockfile
-   carries a license on the allowlist (an `OR` expression needs one
-   allowed choice, an `AND` expression needs all of them).
+   carries a license on the allowlist. The SPDX expression is parsed with
+   its parentheses and precedence: an `OR` needs one allowed side, an `AND`
+   needs all of them.
 
     python tools/check_tree.py                # exit 0 clean, 1 with findings
     python tools/check_tree.py --hash "a name"  # the line to add to NAMES
@@ -137,16 +138,73 @@ def check_copyleft(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT) -> 
     return found
 
 
+_SPDX_TOKEN = re.compile(r'[()]|[^\s()]+')
+_SPDX_OPERATORS = frozenset({'AND', 'OR', 'WITH', '(', ')'})
+
+
+class _NotAnExpression(ValueError):
+    pass
+
+
 def license_allowed(expression: str | None) -> bool:
-    """Whether an SPDX expression is on the allowlist."""
+    """Whether an SPDX license expression is on the allowlist.
+
+    Parsed as SPDX defines it: parentheses first, then `WITH`, then `AND`,
+    then `OR`, so `MIT OR Apache-2.0 AND GPL-3.0` is `MIT OR (Apache-2.0 AND
+    GPL-3.0)`. An `OR` needs one allowed side, an `AND` needs every side.
+    `X WITH exception` counts as `X`: an exception only adds permissions.
+    Operators are upper case, as SPDX writes them. Anything that does not
+    parse is refused."""
     if not expression:
         return False
-    expression = expression.strip().strip('()')
-    if ' OR ' in expression:
-        return any(license_allowed(part) for part in expression.split(' OR '))
-    if ' AND ' in expression:
-        return all(license_allowed(part) for part in expression.split(' AND '))
-    return expression.strip('() ') in ALLOWED_LICENSES
+    tokens = _SPDX_TOKEN.findall(expression)
+    position = 0
+
+    def peek() -> str | None:
+        return tokens[position] if position < len(tokens) else None
+
+    def take() -> str:
+        nonlocal position
+        token = peek()
+        if token is None:
+            raise _NotAnExpression(expression)
+        position += 1
+        return token
+
+    def either() -> bool:                    # a OR b OR ...
+        sides = [every()]
+        while peek() == 'OR':
+            take()
+            sides.append(every())
+        return any(sides)
+
+    def every() -> bool:                     # a AND b AND ...
+        sides = [one()]
+        while peek() == 'AND':
+            take()
+            sides.append(one())
+        return all(sides)
+
+    def one() -> bool:                       # (expression), or a license
+        token = take()
+        if token == '(':
+            allowed = either()
+            if take() != ')':
+                raise _NotAnExpression(expression)
+            return allowed
+        if token in _SPDX_OPERATORS:
+            raise _NotAnExpression(expression)
+        if peek() == 'WITH':
+            take()
+            if take() in _SPDX_OPERATORS:
+                raise _NotAnExpression(expression)
+        return token in ALLOWED_LICENSES
+
+    try:
+        allowed = either()
+    except _NotAnExpression:
+        return False
+    return allowed and position == len(tokens)
 
 
 def check_npm_licenses(lockfile: pathlib.Path) -> list[str]:

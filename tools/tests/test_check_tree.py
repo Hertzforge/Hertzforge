@@ -77,6 +77,24 @@ def test_a_relative_import_of_the_same_name_is_ours(tmp_path):
     ('MIT', True), ('(MIT OR GPL-3.0)', True), ('MIT AND OFL-1.1', True),
     ('GPL-3.0', False), ('MIT AND GPL-3.0', False), ('LGPL-3.0', False),
     (None, False), ('', False),
+    # a parenthesized choice joined to a copyleft license by AND, either side
+    ('(MIT OR Apache-2.0) AND GPL-3.0', False),
+    ('GPL-3.0 AND (MIT OR Apache-2.0)', False),
+    ('(MIT OR Apache-2.0) AND (ISC OR GPL-3.0)', True),
+    ('((MIT OR GPL-3.0) AND (Apache-2.0 OR LGPL-3.0))', True),
+    ('MIT AND (GPL-3.0 OR (LGPL-3.0 AND ISC))', False),
+    # AND binds tighter than OR: MIT OR (Apache-2.0 AND GPL-3.0), allowed by MIT
+    ('MIT OR Apache-2.0 AND GPL-3.0', True),
+    ('GPL-3.0 AND MIT OR Apache-2.0', True),
+    ('GPL-3.0 OR LGPL-3.0 AND MIT', False),
+    # an exception only adds permissions: the license before WITH decides
+    ('Apache-2.0 WITH LLVM-exception', True),
+    ('GPL-2.0-only WITH Classpath-exception-2.0', False),
+    ('(Apache-2.0 WITH LLVM-exception) AND GPL-3.0', False),
+    # not an expression: refused, never guessed at
+    ('MIT OR', False), ('(MIT', False), ('MIT)', False), ('MIT ISC', False),
+    ('AND MIT', False), ('MIT WITH', False), ('()', False),
+    ('MIT or Apache-2.0', False), ('SEE LICENSE IN LICENSE.md', False),
 ])
 def test_license_expressions(expression, allowed):
     assert check_tree.license_allowed(expression) is allowed
