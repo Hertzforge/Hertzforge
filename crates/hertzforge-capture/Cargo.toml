@@ -19,9 +19,8 @@ hertzforge-channel-table = { path = "../hertzforge-channel-table" }
 # serde/serde_json versions match the rest of the workspace.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Per-OS home-directory resolution for the default data root (`default_data_root`).
-# MIT/Apache-2.0; version matches the `dirs 6.0.0` already in the tree.
-dirs = "6"
+# The default data root's home directory comes from `std::env::home_dir` (not
+# deprecated on the pinned toolchain), so no crate is needed for it.
 
 # statvfs(2) for the REAL free-space preflight (durability quartet rule 1), replacing the 256 GiB
 # placeholder in ui/src-tauri/src/recorder.rs. MIT - passes deny.toml's allow list.

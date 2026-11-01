@@ -72,12 +72,13 @@ pub const DATA_ROOT_DIR_NAME: &str = "Hertzforge_Data";
 /// under). Resolution order:
 ///
 /// 1. The [`DATA_ROOT_ENV`] (`HERTZFORGE_DATA_ROOT`) environment variable, verbatim.
-/// 2. `<home>/Hertzforge_Data`, with `<home>` resolved per-OS by [`dirs::home_dir`]:
-///    `/Users/<user>` on macOS, `/home/<user>` on Linux, `C:\Users\<user>` on
-///    Windows.
+/// 2. `<home>/Hertzforge_Data`, with `<home>` resolved per-OS by [`std::env::home_dir`]:
+///    `$HOME` (else the password database) on macOS and Linux, so `/Users/<user>` and
+///    `/home/<user>`; `%USERPROFILE%` (else the profile directory) on Windows, so
+///    `C:\Users\<user>`.
 /// 3. `./Hertzforge_Data` relative to the process working directory, only if no home
-///    directory can be determined (degenerate environments; never on a normal
-///    desktop session).
+///    directory can be determined, or it resolves empty (degenerate environments;
+///    never on a normal desktop session).
 ///
 /// History: this was a hard-coded macOS constant (`/Users/<user>/Hertzforge_Data`), which
 /// cannot exist on Linux or Windows and blocked boot there. Rule 2 resolves to that SAME
@@ -96,7 +97,7 @@ pub fn default_data_root() -> PathBuf {
             return PathBuf::from(root);
         }
     }
-    match dirs::home_dir() {
+    match std::env::home_dir().filter(|home| !home.as_os_str().is_empty()) {
         Some(home) => home.join(DATA_ROOT_DIR_NAME),
         None => PathBuf::from(DATA_ROOT_DIR_NAME),
     }

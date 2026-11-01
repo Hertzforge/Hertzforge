@@ -547,6 +547,12 @@ pub fn open_station_count() -> usize {
 /// counting wrapper answers it automatically and cannot drift, because the
 /// answer is a consequence of the value's lifetime rather than a flag someone
 /// remembers to clear.
+///
+/// "Pure delegation" includes every DEFAULTED trait method: a default this impl
+/// does not override wins over the inner backend's real one (the rule stated on
+/// `hertzforge_hal`'s `impl Backend for Box<T>`). `take_warnings` was missing here,
+/// so every station the factory built answered "no warnings" while the NI backend
+/// inside it was collecting the driver's underruns and coercions.
 struct TrackedBackend {
     inner: Box<dyn Backend>,
 }
@@ -573,6 +579,9 @@ impl Backend for TrackedBackend {
     }
     fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
         self.inner.close()
+    }
+    fn take_warnings(&mut self) -> Vec<String> {
+        self.inner.take_warnings()
     }
     fn configure(
         &mut self,
@@ -990,6 +999,91 @@ mod tests {
         assert_eq!(caps.max_output_channels, 2);
         assert_eq!(caps.sample_rate_hz, 51_200.0);
         assert_eq!(caps.clock, hertzforge_hal::ClockDomain::Shared);
+    }
+
+    /// The counting wrapper every station is handed out in forwards the trait's
+    /// DEFAULTED methods, so a service holding the station's `Box<dyn Backend>`
+    /// sees what the backend inside it reports.
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete `take_warnings` from
+    /// `impl Backend for TrackedBackend` and the first assertion reds (an empty
+    /// list against one warning). The wrapper shipped that way, so no NI driver
+    /// warning reached a module through a station the factory built.
+    #[test]
+    fn the_station_wrapper_forwards_the_defaulted_backend_methods() {
+        use hertzforge_hal::{
+            AcquisitionConfig, BackendStatus, Caps, ClockDomain, ConfiguredActual, HalError,
+            InputRead, LoopOwner,
+        };
+        struct Reporting;
+        impl Backend for Reporting {
+            fn caps(&self) -> Caps {
+                Caps {
+                    loop_owner: LoopOwner::HostClosesLoop,
+                    native_modes: vec![],
+                    clock: ClockDomain::Unknown,
+                    max_input_channels: 1,
+                    max_output_channels: 1,
+                    abort_latency_bound: None,
+                    output_buffer: None,
+                    sample_rate_hz: 1000.0,
+                    delegated_response_observable: false,
+                    clock_groups: vec![],
+                }
+            }
+            fn open(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn take_warnings(&mut self) -> Vec<String> {
+                vec!["onboard AO buffer underflowed".into()]
+            }
+            fn configure(
+                &mut self,
+                _t: &hertzforge_channel_table::ChannelTable,
+                _a: &AcquisitionConfig,
+            ) -> Result<ConfiguredActual, HalError> {
+                Err(HalError::NotConnected)
+            }
+            fn arm(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn start(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn stop(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn read_input(&mut self, _o: &mut [f32]) -> Result<InputRead, HalError> {
+                Ok(InputRead::NoDataYet)
+            }
+            fn write_drive(&mut self, _d: &[f32]) -> Result<usize, HalError> {
+                Ok(0)
+            }
+            fn output_space(&mut self) -> Option<usize> {
+                Some(4096)
+            }
+            fn poll_status(&mut self) -> BackendStatus {
+                BackendStatus::default()
+            }
+            fn emergency_stop(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+        }
+
+        let mut wrapped = TrackedBackend::wrap(Box::new(Reporting));
+        assert_eq!(
+            wrapped.take_warnings(),
+            vec!["onboard AO buffer underflowed".to_string()],
+            "the station wrapper swallowed the backend's warnings"
+        );
+        assert_eq!(
+            wrapped.output_space(),
+            Some(4096),
+            "the station wrapper swallowed the backend's output space"
+        );
     }
 
     /// `SimPlantSpec::default()` is field-for-field `SimConfig::default()`, INCLUDING
