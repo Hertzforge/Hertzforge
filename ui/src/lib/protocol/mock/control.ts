@@ -523,6 +523,8 @@ interface RandomRun {
 	levelIndex: number;
 	atLevelT: number;
 	stopOutcome: RandomOutcome;
+	/** The client that stopped or aborted the run, named in the log and the end message. */
+	endedBy: string | null;
 	loops: number;
 	loopAcc: number;
 	coherence: number;
@@ -711,6 +713,11 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		);
 	}
 
+	/** How the log names a connection: the controller by its claimed name, others by the peer. */
+	function clientName(conn: MockConnection): string {
+		return seat?.conn === conn ? `${seat.name} (controller)` : `${names.get(conn) ?? 'a client'} (observer)`;
+	}
+
 	// ---- stations and the channel table -------------------------------------------------------
 	let selection: Selection = { kind: 'sim', devices: [] };
 	const scan = niInstalled ? scanDevices(niReal) : [];
@@ -887,6 +894,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			levelIndex: 0,
 			atLevelT: 0,
 			stopOutcome: 'operator_stop',
+			endedBy: null,
 			loops: 0,
 			loopAcc: 0,
 			coherence: options.coherence ?? 0.94,
@@ -992,9 +1000,9 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			case 'completed':
 				return `Test complete: ${r.config.schedule.full_level_s} s held at full level.`;
 			case 'operator_stop':
-				return `Stopped by the operator at ${at}.`;
+				return `Stopped by ${r.endedBy ?? 'the operator'} at ${at}.`;
 			case 'operator_abort':
-				return `Aborted by the operator at ${at}.`;
+				return `Aborted by ${r.endedBy ?? 'the operator'} at ${at}.`;
 			case 'safe_stop':
 				return `Nobody held control for ${timeoutS} s, so the run was stopped with its shutdown ramp, from ${at}.`;
 			case 'held':
@@ -1518,14 +1526,23 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				stateChanged(true);
 				return { mode };
 			},
+			// Stop and abort are open to every connection, controller or observer: they only ever
+			// end a run, and the service listens on loopback only (PROTOCOL.md, "Controller and
+			// Observers"). The log and the end message name who sent them.
 			'random.stop': (_params, conn) => {
-				own(conn);
-				if (random && isLive()) requestStop(random, 'operator_stop');
+				if (random && isLive()) {
+					random.endedBy = clientName(conn);
+					addLog('note', `stop requested by ${random.endedBy}`);
+					requestStop(random, 'operator_stop');
+				}
 				return stateOf(random);
 			},
 			'random.abort': (_params, conn) => {
-				own(conn);
-				if (random && isLive()) finish(random, 'operator_abort', 'stopped');
+				if (random && isLive()) {
+					random.endedBy = clientName(conn);
+					addLog('note', `abort requested by ${random.endedBy}`);
+					finish(random, 'operator_abort', 'stopped');
+				}
 				return stateOf(random);
 			},
 			'random.reset': (_params, conn) => {

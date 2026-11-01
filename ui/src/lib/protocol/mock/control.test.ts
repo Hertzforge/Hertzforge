@@ -91,13 +91,8 @@ describe('controller and observers', () => {
 		expect(await other.request<SessionState>('session.state')).toMatchObject({ role: 'observer', controller: { name: 'Shell on bench-pc', present: true } });
 		const held = await refusal(other.request('session.claim'));
 		expect([held.code, held.reason, held.detail]).toEqual(['refused', 'controller_held', { holder: 'Shell on bench-pc' }]);
-		for (const [method, params] of [
-			['station.select', { kind: 'sim' }],
-			['random.abort', {}]
-		] as const) {
-			const e = await refusal(other.request(method, params));
-			expect([e.reason, e.detail?.holder]).toEqual(['not_controller', 'Shell on bench-pc']);
-		}
+		const e = await refusal(other.request('station.select', { kind: 'sim' }));
+		expect([e.reason, e.detail?.holder]).toEqual(['not_controller', 'Shell on bench-pc']);
 		// reading needs no control
 		expect((await other.request<ChannelTable>('channels.get')).revision).toBe(1);
 		await c.request('session.release');
@@ -105,6 +100,51 @@ describe('controller and observers', () => {
 		expect((await other.request<SessionClaimResult>('session.claim')).role).toBe('controller');
 		c.close();
 		other.close();
+	});
+
+	it('observers may stop and abort, nothing else', async () => {
+		const { server, c, states, logs } = await setup();
+		const long = config({ schedule: { mode: 'auto', levels: [{ db: 0 }], full_level_s: 600 }, control: { review_after_sysid: false } });
+		await c.request('random.configure', { config: long });
+		await c.request('random.start');
+		await until(() => states.at(-1)?.phase === 'full_level');
+		const observer = connect(server);
+		await observer.whenOpen();
+		const table = await observer.request<ChannelTable>('channels.get');
+		for (const [method, params] of [
+			['station.select', { kind: 'sim' }],
+			['channels.set', { revision: table.revision, channels: table.channels }],
+			['random.configure', { config: long }],
+			['random.arm', {}],
+			['random.start', {}],
+			['random.proceed', {}],
+			['random.level', { delta_db: 1 }],
+			['random.mode', { mode: 'manual' }],
+			['random.reset', {}],
+			['random.clear', {}]
+		] as const) {
+			const e = await refusal(observer.request(method, params));
+			expect([method, e.reason, e.detail?.holder]).toEqual([method, 'not_controller', 'Shell on bench-pc']);
+		}
+		expect(states.at(-1)?.phase).toBe('full_level');
+
+		// the gentler way out: the controlled stop, named in the end message
+		const stopping = await observer.request<RandomState>('random.stop');
+		expect([stopping.state, stopping.phase]).toEqual(['stopping', 'ramping_down']);
+		await until(() => states.at(-1)?.state === 'finished');
+		expect(states.at(-1)?.end?.outcome).toBe('operator_stop');
+		expect(states.at(-1)?.end?.message).toMatch(/\(observer\)/);
+
+		// and the abort, at once
+		await c.request('random.reset');
+		await c.request('random.start');
+		await until(() => states.at(-1)?.phase === 'full_level');
+		const aborted = await observer.request<RandomState>('random.abort');
+		expect([aborted.state, aborted.end?.outcome]).toEqual(['finished', 'operator_abort']);
+		expect(logs.some((x) => x.text.startsWith('abort requested by') && x.text.endsWith('(observer)'))).toBe(true);
+		expect((await observer.request<RandomState>('random.abort')).end?.outcome).toBe('operator_abort');
+		c.close();
+		observer.close();
 	});
 });
 

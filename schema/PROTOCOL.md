@@ -9,7 +9,8 @@ the shared test data every language's codec must reproduce.
 
 ## Transport
 
-WebSocket, one connection per service, loopback by default.
+WebSocket, one connection per service, loopback by default. The control service listens on
+loopback only (see "Controller and Observers").
 
 | Service  | Default address           | Started by                              |
 |----------|---------------------------|-----------------------------------------|
@@ -214,7 +215,7 @@ Every error from a method in this section carries `reason`, a stable name a clie
 | `reason` | `code` | Cause | `detail` |
 |---|---|---|---|
 | `bad_params` | `bad_request` | A parameter is missing, of the wrong type, or not one of its stated values | `param` |
-| `not_controller` | `refused` | A method that changes the station, the table or the run, from a connection that does not hold control | `holder` (null when nobody does) |
+| `not_controller` | `refused` | A method that changes the station, the table or the run (other than `random.stop` and `random.abort`), from a connection that does not hold control | `holder` (null when nobody does) |
 | `controller_held` | `refused` | `session.claim` while another connected client holds control | `holder` |
 | `run_active` | `refused` | The call would change what a live run (armed, running, holding for review or stopping) depends on, or start a second run | `run_id` |
 | `not_configured` | `refused` | `random.arm` or `random.start` with no configuration | |
@@ -258,9 +259,16 @@ A refusal not listed here is a defect in the service.
 One connection at a time holds control; any number observe. Every connection starts as an
 observer. Observers receive every event and may call every method that only reads
 (`session.state`, `station.list`, `channels.get`, `random.state`, `random.log`, and the
-`dry_run` checks). Every other method in this section is refused `not_controller`. Abort is
-no exception: a person without control stops the machine with its emergency stop, not with a
-second authority on the socket.
+`dry_run` checks).
+
+**Stopping is open to everyone.** `random.stop` and `random.abort` are accepted from any
+connection, controller or observer. They only ever end a run, so a second client using them
+cannot leave the run in a state nobody asked for, and whoever is watching a test that goes wrong
+can end it from the screen in front of them. `random.stop` is the gentler of the two, so whoever
+may abort may also stop. The control service listens on loopback only, so every client is on
+the computer that runs the test. Every other method in this section changes what runs or how,
+and is refused `not_controller` from an observer: one client at a time decides what the test
+does. The run log and `end.message` name the client that stopped or aborted the run.
 
 | Method | Params | Result |
 |---|---|---|
@@ -533,6 +541,8 @@ Result column is the `random.state` object below.
 - **`random.abort`** ends the run within one control loop (`grid.loop_s`), without the shutdown
   ramp; the station takes the drive down with its own stop. The outcome is `operator_abort`. It
   answers when the loop has ended.
+- `random.stop` and `random.abort` are accepted from any connection (see "Controller and
+  Observers"); every other verb in this table needs control.
 - `random.stop` and `random.abort` on a run that is not live answer with the state, unchanged.
 - **`random.reset`** builds a new run from the same configuration (`configured`, a new
   `run_id`). It and `random.configure` are the ways out of `finished`.
