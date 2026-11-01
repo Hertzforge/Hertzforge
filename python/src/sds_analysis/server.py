@@ -14,10 +14,10 @@ connection that opened it and ends with it.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import itertools
 import logging
 import time
-import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -31,7 +31,7 @@ from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
-from .protocol import (ProtocolError, bad_request, hello, not_found, refused)
+from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('sds_analysis')
 
@@ -39,6 +39,70 @@ OPERATIONS: tuple[Operation, ...] = RANDOM_OPERATIONS + MODAL_OPERATIONS
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
+
+#: What the datasets and operations reach, imported before the server
+#: listens. Loading a compiled extension holds the interpreter lock until it
+#: is done, so a first import inside a worker thread stalls the event loop
+#: with it: 5.1 s once, opening the first dataset with nothing on disk cached
+#: yet. Imported here, the cost is paid at startup, before anyone is waiting
+#: on the loop. tests/test_server.py fails if a session still imports one of
+#: these packages for the first time, and names it.
+#:
+#: Listed module by module, as the datasets and operations reach them, not
+#: by walking whole packages, which imports every module whether anything
+#: uses it or not. One path is left out on purpose: the frame-wing model's
+#: first build, which loads the CAD kernel (OCP, about 0.6 s) and four
+#: modules of its own to combine its solids. That build runs once (about
+#: 30 s) and is read from the cache after, so it is not worth paying for on
+#: every start.
+PRELOAD = (
+    'visualdynamics',
+    'visualdynamics.plot',
+    'visualdynamics.viz.geometry',
+    'visualdynamics.deform',
+    'visualdynamics.demo.drone',
+    'visualdynamics.demo.plate',
+    'visualdynamics.demo.frame_wing',
+    # imported inside visualdynamics at first use: reading a random run and
+    # forming its octave and coherence products
+    'visualdynamics.core.detect',
+    'visualdynamics.core.octave',
+    'visualdynamics.core.partial_coherence',
+    # solving a model's modes
+    'visualdynamics.core.sparse_solve',
+    # imported inside the readers and solvers, at first use (pandas by the
+    # channel table a random run carries)
+    'netCDF4',
+    'h5py',
+    'pandas',
+    'scipy.constants',
+    'scipy.integrate',
+    'scipy.interpolate',
+    'scipy.linalg',
+    'scipy.ndimage',
+    'scipy.optimize',
+    'scipy.signal',
+    'scipy.sparse',
+    'scipy.sparse.linalg',
+    'scipy.spatial',
+    'scipy.special',
+    'scipy.stats',
+)
+
+
+def preload() -> None:
+    """Import everything in `PRELOAD`."""
+    for name in PRELOAD:
+        importlib.import_module(name)
+
+
+#: The interpreter's switch interval while serving, in seconds. It hands its
+#: lock between threads every 5 ms by default; a worker doing pure-Python
+#: work (building a demonstration model) then costs the event loop tens of
+#: milliseconds per wait. At 1 ms the loop gets the lock back sooner, for a
+#: small cost in the worker's speed. Process-wide, so the entry point sets
+#: it, never `start`.
+SWITCH_INTERVAL = 0.001
 
 
 @dataclass
@@ -210,8 +274,7 @@ class Connection:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            log.error('request %s %s failed\n%s', ident, method,
-                      traceback.format_exc())
+            log.exception('request %s %s failed', ident, method)
             frame = _error(ident, 'internal',
                            f'{method} failed inside the service: '
                            f'{type(error).__name__}: {error}')
@@ -236,7 +299,9 @@ def _reason(text: str) -> str:
 async def start(service: Service, host: str = '127.0.0.1',
                 port: int = 8791) -> Server:
     """A listening server (port 0 picks a free one; `server.sockets` says
-    which)."""
+    which). It changes nothing beyond the server: the process that serves
+    calls `preload` and sets `SWITCH_INTERVAL` first (`__main__._serve`)."""
+
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
         await Connection(service, socket).serve()

@@ -19,7 +19,7 @@ GOLDEN = SCHEMA_DIR / 'golden'
 
 @pytest.fixture(scope='session')
 def schema() -> dict:
-    return json.loads((SCHEMA_DIR / 'protocol.schema.json').read_text())
+    return json.loads((SCHEMA_DIR / 'protocol.schema.json').read_text(encoding='utf-8'))
 
 
 @pytest.fixture(scope='session')

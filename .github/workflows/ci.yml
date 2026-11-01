@@ -1,0 +1,166 @@
+name: tests
+
+# On every pull request, every push to main, in the merge queue, weekly and
+# on demand. The weekly run matters because dependencies are declared by name
+# with no pin (Visual Dynamics' principle 12): a new release upstream is
+# something new to test even when nothing here changed.
+#
+# The control service is not built here yet. It builds against the
+# controller's crates, which arrive in the repository with the controller
+# import (milestone M2); its build, clippy, tests and cargo-deny join this
+# workflow then. Its formatting is checked now (the `tree` job).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '0 13 * * 1'          # Mondays, 07:00 Mountain
+  workflow_dispatch:
+
+# A newer run on a pull request (or on any branch but main) cancels the one
+# it supersedes. Nothing on main is ever cancelled: each run there gets a
+# group of its own, its run id. In one shared group a manual or scheduled
+# run would cancel a push run still going, and even with cancel-in-progress
+# off a newer run replaces one still waiting (a group holds one pending run),
+# so a merged commit could end up with no result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The hertzforge package on PyPI: its own tests and the repository's lint.
+  package:
+    runs-on: ubuntu-latest
+    # The core suite takes about eight minutes on four workers on a recent
+    # Mac; Visual Dynamics measured hosted runners at several times that.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist ruff
+      - name: Lint every Python file in the repository
+        run: ruff check .
+      - name: Fetch the plate test data at the release the core came from
+        run: bash scripts/fetch_testdata.sh
+      - name: Test
+        run: python -m pytest tests -q -n auto --durations=20
+
+  # The analysis service over the visualdynamics core, at the latest release
+  # of everything it declares (`--upgrade` reads past the local lockfile).
+  analysis:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python-version: '3.12'}
+          - {os: ubuntu-latest, python-version: '3.13'}
+          - {os: ubuntu-latest, python-version: '3.14'}
+          - {os: macos-latest, python-version: '3.13'}
+          - {os: windows-latest, python-version: '3.13'}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Qt and VTK need a graphics stack even off screen; the same set
+      # Visual Dynamics' CI installs.
+      - name: Install the graphics libraries Qt and VTK link against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libegl1 libgl1 libopengl0 libglx-mesa0 libxkbcommon-x11-0 \
+            libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xfixes0 libxcb-xinerama0 libnss3 \
+            libxdamage1 libxrandr2 libasound2t64
+      - name: Install uv
+        run: pip install uv
+      - name: Fetch the plate test data at its pinned commit
+        run: bash python/scripts/fetch_data.sh
+      - name: Test
+        # compiled at install, as an installed app ships it: a module compiled
+        # on first import holds the interpreter lock while it compiles
+        env:
+          UV_COMPILE_BYTECODE: '1'
+        run: |
+          RUN=""
+          if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
+          $RUN uv run --upgrade --project python --python "${{ matrix.python-version }}" \
+            pytest python -q -n 4 --dist loadgroup
+
+  # The shell: types, unit tests and a production build, on every platform
+  # a desktop build targets.
+  shell:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: Install
+        run: npm ci --prefix ui
+      - name: Type check
+        run: npm --prefix ui run check
+      - name: Test
+        run: npm --prefix ui test
+      - name: Build
+        run: npm --prefix ui run build
+
+  # The tree's own rules: no names, no copyleft imports, permissive npm
+  # licenses (tools/check_tree.py, with tests that plant each case), and the
+  # control service's formatting.
+  tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Names, copyleft imports and npm licenses
+        run: python tools/check_tree.py
+      - name: The checks catch what they claim to
+        run: |
+          pip install pytest
+          python -m pytest tools -q
+      - name: Rust formatting
+        run: rustfmt --edition 2021 --check $(git ls-files 'crates/*.rs')
+
+  # The head branch of a pull request is named for what it carries, the
+  # scheme Visual Dynamics uses. Skipped outside pull requests, where there
+  # is no head branch to name.
+  branch:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: The head branch is named by the scheme
+        env:
+          HEAD: ${{ github.head_ref }}
+        run: |
+          pattern='^(fix|feature|docs|tooling)/[a-z0-9][a-z0-9.-]*$|^sync/[0-9]{8}-[0-9]{4}$'
+          if [[ $HEAD =~ $pattern ]]; then
+            echo "$HEAD"
+          else
+            echo "::error::The branch '$HEAD' is not named by the scheme: fix/, feature/, docs/ or tooling/, then a short lower-case slug of letters, digits and hyphens, such as fix/decade-axis-ticks. Rename the branch in your fork (the pull request follows the rename) and push again."
+            exit 1
+          fi

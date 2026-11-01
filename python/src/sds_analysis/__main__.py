@@ -10,10 +10,10 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('PYVISTA_OFF_SCREEN', 'true')
 
-import argparse  # noqa: E402
-import asyncio  # noqa: E402
-import logging  # noqa: E402
-import sys  # noqa: E402
+import argparse
+import asyncio
+import logging
+import sys
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,12 +38,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _serve(host: str, port: int) -> None:
-    from .server import Service, start
+    from .server import SWITCH_INTERVAL, Service, preload, start
 
-    # visualdynamics (and its Qt and VTK) load before the port opens, so a
-    # launcher that waits for the line below gets a service whose first
-    # dataset.open does not pay for the import
-    import visualdynamics  # noqa: F401
+    # Process-wide setup, done here and not in start(), so a caller that
+    # starts a server in its own process keeps its own settings. The heavy
+    # imports (visualdynamics, its Qt and VTK, what the operations reach)
+    # load before the port opens: a launcher that waits for the line below
+    # gets a service whose first dataset.open does not pay for them.
+    preload()
+    sys.setswitchinterval(SWITCH_INTERVAL)
 
     service = Service()
     server = await start(service, host, port)

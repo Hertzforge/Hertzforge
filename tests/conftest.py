@@ -18,9 +18,12 @@ FETCH = 'scripts/fetch_testdata.sh'
 
 
 def fixture_path(*parts):
-    """A path into testdata/. Not named test* — pytest would collect it."""
+    """A path into testdata/. Not named test* — pytest would collect it.
+    Called from a test it skips that test; called at a module's top level
+    it skips the module."""
     if parts and parts[0] == 'plate' and not os.path.isdir(PLATE):
-        pytest.skip(f'the plate test data is not fetched; run {FETCH}')
+        pytest.skip(f'the plate test data is not fetched; run {FETCH}',
+                    allow_module_level=True)
     return os.path.join(TESTDATA, *parts)
 
 

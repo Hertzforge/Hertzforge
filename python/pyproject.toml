@@ -3,15 +3,17 @@ name = "sds-analysis"
 version = "0.1.0"
 description = "Analysis service of the structural dynamics suite: wraps visualdynamics behind the sds/1 WebSocket protocol."
 license = "MIT"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.12"
 dependencies = [
-    # MIT. Pinned to upstream main 38cc476 (0.1.0a81, 2026-10-31); the
-    # service wraps its public API unchanged.
-    "visualdynamics==0.1.0a81",
+    # MIT. The service wraps its public API unchanged. Declared by name with
+    # no pin, as Visual Dynamics declares its own (its principle 12): CI
+    # tests against the latest release, so a change upstream is seen here
+    # the week it ships.
+    "visualdynamics",
     # BSD-3-Clause
-    "websockets>=15",
+    "websockets",
     # BSD-3-Clause
-    "numpy>=2",
+    "numpy",
 ]
 
 [project.scripts]
@@ -19,8 +21,10 @@ sds-analysis = "sds_analysis.__main__:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=8",
-    "jsonschema>=4",
+    "pytest",
+    "pytest-xdist",
+    "jsonschema",
+    "ruff",
 ]
 
 [build-system]

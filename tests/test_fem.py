@@ -1260,8 +1260,8 @@ def _every_family():
     for k in range(2):
         model.add_solid([base[0, 0, k], base[0.1, 0, k], base[0.1, 0.07, k], base[0, 0.07, k],
                          base[0, 0, k + 1], base[0.1, 0, k + 1], base[0.1, 0.07, k + 1], base[0, 0.07, k + 1]], al)
-    apex = model.add_node(nid, 0.05, 0.035, -0.2); nid += 1
-    model.add_solid([base[0, 0, 2], base[0.1, 0, 2], base[0.1, 0.07, 2], apex], al)
+    tip = model.add_node(nid, 0.05, 0.035, -0.2); nid += 1
+    model.add_solid([base[0, 0, 2], base[0.1, 0, 2], base[0.1, 0.07, 2], tip], al)
     w = [model.add_node(nid + q, *p) for q, p in enumerate([(0.3, 0, -0.1), (0.4, 0, -0.1), (0.3, 0.07, -0.1),
                                                              (0.3, 0, -0.2), (0.4, 0, -0.2), (0.3, 0.07, -0.2)])]
     model.add_solid(w, al)

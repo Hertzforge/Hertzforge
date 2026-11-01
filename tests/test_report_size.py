@@ -33,9 +33,7 @@ def _history(channels, seconds=2.0, rate=16384.0, seed=1):
 def test_the_random_report_draws_its_time_histories_flat():
     from hertzforge.core.report import random_template
 
-    project = hertzforge.random_vibration_run(
-        hertzforge.__file__.replace('src/hertzforge/__init__.py',
-                                        'testdata/plate/random.nc4'))
+    project = hertzforge.random_vibration_run(_fixture('plate', 'random.nc4'))
     blocks = random_template(project, object_groups=project.object_groups).blocks
     time = [b for b in blocks if b.get('source') == '@basis:TimeHistory'
             and b.get('kind') == 'plot' and 'time histor' in b.get('caption', '')]

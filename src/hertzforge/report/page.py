@@ -1687,8 +1687,8 @@ function sceneBlock(block) {
       g.beginPath(); g.moveTo(base[0], base[1]);
       g.lineTo(neck[0], neck[1]); g.stroke();
       // the head: the cone's exact silhouette — the base ellipse plus
-      // the triangle from the apex to the rim's two tangency points
-      // (the rim points at extreme angles about the apex). Looking
+      // the triangle from the tip to the rim's two tangency points
+      // (the rim points at extreme angles about the tip). Looking
       // down the axis the triangle degenerates and the disc alone
       // remains, which is what a cone looks like end-on.
       let left = rim[0], right = rim[0], lc = 0, rc = 0;

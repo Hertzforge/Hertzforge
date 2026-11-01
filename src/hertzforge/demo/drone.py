@@ -103,7 +103,7 @@ TOTAL_MASS = 1.100      #: kg, shared over the nodes by the members they carry
 # ---- how big it is ---------------------------------------------------------
 
 BODY_R = 0.058          #: the body's widest radius
-BODY_TOP = 0.034        #: canopy apex above the datum
+BODY_TOP = 0.034        #: canopy peak above the datum
 BODY_FLOOR = -0.030     #: belly pan below it
 WAIST = 0.026           #: the open truss band between canopy and belly
 ARM_R = 0.235           #: motor centers from the middle
@@ -582,11 +582,11 @@ def _body(shape, sides, rings_up, rows):
                                 radius * math.sin(2 * math.pi * i / sides),
                                 height), 'canopy')
                     for i in range(sides)])
-    apex = shape.node((0.0, 0.0, WAIST / 2 + BODY_TOP), 'canopy')
+    peak = shape.node((0.0, 0.0, WAIST / 2 + BODY_TOP), 'canopy')
     for lower, upper in pairwise(top):
         bridge(shape, lower, upper, BODY_COLOR)
     for i in range(sides):
-        shape.face([apex, top[-1][(i + 1) % sides], top[-1][i]], BODY_COLOR)
+        shape.face([peak, top[-1][(i + 1) % sides], top[-1][i]], BODY_COLOR)
 
     # and a belly pan under the other side of it
     bottom = [[waist[i][0] for i in range(sides)]]
@@ -606,7 +606,7 @@ def _body(shape, sides, rings_up, rows):
     for i in range(sides):
         shape.face([floor, bottom[-1][i], bottom[-1][(i + 1) % sides]],
                    BODY_COLOR)
-    return waist, apex, floor, bottom
+    return waist, peak, floor, bottom
 
 
 def _skin_waist(shape, waist, sides, rows, taken):
@@ -1132,7 +1132,7 @@ def draw(sides: int = 12, arm_stations: int = 9, leg_stations: int = 5,
     structure. `build` turns it into a model."""
     shape = Shape()
     rows = 5
-    waist, _apex, floor, belly = _body(shape, sides, body_rings, rows)
+    waist, _peak, floor, belly = _body(shape, sides, body_rings, rows)
     # each arm takes one panel of the waist band as its root, so the panel
     # itself is not skinned over -- the arm is what closes it
     taken = {round(sides * angle / 360.0) % sides for _n, angle, _r in ARMS}
@@ -1200,7 +1200,7 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
         if leg:
             found['feet'].append(min(leg, key=lambda n: model.position(n)[2]))
 
-    # The shell, not the canopy element group: the canopy is the apex cap alone —
+    # The shell, not the canopy element group: the canopy is the peak cap alone —
     # eight triangles — and the ring at 0.9 of the body radius is the
     # waist below it. Asking one element group for both put all four body sensors
     # and the center one on the same node.

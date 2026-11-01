@@ -184,7 +184,7 @@ def test_the_workflow_needs_no_application_shell(tmp_path):
         'import os, sys\n'
         'os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")\n'
         'import hertzforge\n'
-        f'hertzforge.random_vibration_report({str(root / "testdata" / "plate" / RUN)!r},'
+        f'hertzforge.random_vibration_report({fixture_path("plate", RUN)!r},'
         f' {str(tmp_path / "probe.html")!r})\n'
         'print("app imported:", "hertzforge.gui" in sys.modules)\n'
     )

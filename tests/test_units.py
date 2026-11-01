@@ -84,12 +84,11 @@ def test_g_is_an_acceleration():
 
 
 def test_g_survives_being_declared_on_data():
-    import os
+    from conftest import fixture_path
 
     import hertzforge
 
-    path = os.path.join(os.path.dirname(__file__), '..', 'testdata',
-                        'plate', 'time.npz')
+    path = fixture_path('plate', 'time.npz')
     data = hertzforge.import_file(path, ordinate_unit='g')
     assert data.ordinate_dim[0] == 'acceleration'
     assert np.allclose(data.ordinate,

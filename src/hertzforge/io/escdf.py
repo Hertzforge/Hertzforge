@@ -1,7 +1,7 @@
 """Read and write the Engineering Sciences Common Data Format (ESCDF)
 by its specification files.
 
-ESCDF (github.com/sandialabs/Engineering-Sciences-Common-Data-Format,
+ESCDF (its reference implementation is on GitHub,
 BSD-3-Clause) is one HDF5 file. Metadata groups are at the root (a
 geometry, a channel table, a parameter set), and an `activities` group
 holds one group per test or analysis, with the results it produced and

@@ -49,6 +49,15 @@ hertzforge = "hertzforge.__main__:main"
 [tool.setuptools.package-data]
 hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE"]
 
+[tool.ruff]
+# The same settings as Visual Dynamics: ruff's own rule set, 100 columns.
+# One configuration for every Python file in the repository.
+line-length = 100
+# Where this repository's own packages live, so import sorting files them
+# as first party: hertzforge under src/, the analysis service under
+# python/src/.
+src = ["src", "python/src"]
+
 [tool.pytest.ini_options]
 # The package's own tests. The analysis service under python/ has its own
 # environment and test suite (uv run --project python pytest python).
