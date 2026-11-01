@@ -4,11 +4,6 @@ name: tests
 # on demand. The weekly run matters because dependencies are declared by name
 # with no pin (Visual Dynamics' principle 12): a new release upstream is
 # something new to test even when nothing here changed.
-#
-# The control service is not built here yet. It builds against the
-# controller's crates, which arrive in the repository with the controller
-# import (milestone M2); its build, clippy, tests and cargo-deny join this
-# workflow then. Its formatting is checked now (the `tree` job).
 on:
   push:
     branches: [main]
@@ -121,9 +116,48 @@ jobs:
       - name: Build
         run: npm --prefix ui run build
 
+  # The control service and the controller crates, one Cargo workspace:
+  # formatting, lint and tests, on every platform a desktop build targets.
+  # The NI backend loads the NI-DAQmx driver at run time, so the runners need
+  # no NI software; the tests run on the Sim backend and the driverless paths.
+  control:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  # Rust crate licenses, bans, sources and advisories (deny.toml). The
+  # lockfile holds every platform's packages and the check reads all of them,
+  # so one runner covers the three.
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Licenses, bans, sources and advisories
+        run: cargo deny check
+
   # The tree's own rules: no names, no copyleft imports, permissive npm
-  # licenses (tools/check_tree.py, with tests that plant each case), and the
-  # control service's formatting.
+  # licenses (tools/check_tree.py, with tests that plant each case).
   tree:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -138,8 +172,6 @@ jobs:
         run: |
           pip install pytest
           python -m pytest tools -q
-      - name: Rust formatting
-        run: rustfmt --edition 2021 --check $(git ls-files 'crates/*.rs')
 
   # The head branch of a pull request is named for what it carries, the
   # scheme Visual Dynamics uses. Skipped outside pull requests, where there
