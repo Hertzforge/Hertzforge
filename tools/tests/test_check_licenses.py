@@ -23,6 +23,13 @@ PYTHON = cl.ALLOWED_PYTHON
     ('GPL-2.0+', cl.REFUSED),
     ('AGPL-3.0-or-later', cl.REFUSED),
     ('SSPL-1.0', cl.REFUSED),
+    # a free-text License field's spelling, read as the family it names
+    ('GPLv3', cl.REFUSED),
+    ('GPLv2+', cl.REFUSED),
+    ('AGPLv3', cl.REFUSED),
+    ('GPL', cl.REFUSED),
+    ('LGPLv3', cl.UNKNOWN),
+    ('GPLish-1.0', cl.UNKNOWN),
     ('LGPL-3.0-only', cl.ALLOWED),
     ('MPL-2.0', cl.ALLOWED),
     ('LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only', cl.ALLOWED),
@@ -117,8 +124,9 @@ importlib.import_module("forcefinder.core")
 __import__("sdynpy")
 """)
     helpers = _write(tmp_path / 'src' / 'pkg' / 'helpers.py', 'import pkg\n')
-    files = [reader, helpers]
-    found = cl.check_imports(files, cl.first_party(files, tmp_path),
+    init = _write(tmp_path / 'src' / 'pkg' / '__init__.py', '')
+    files = [reader, helpers, init]
+    found = cl.check_imports(files, cl.first_party(files),
                              provided={'numpy': ['numpy']}, root=tmp_path)
     tail = ('which no installed package provides; declare the package that does, so its '
             'license is checked')
@@ -128,6 +136,27 @@ __import__("sdynpy")
         f'src/pkg/reader.py:8: imports forcefinder, {tail}',
         f'src/pkg/reader.py:9: imports sdynpy, {tail}',
     ]
+
+
+def test_a_module_inside_a_package_is_not_a_top_level_name(tmp_path):
+    reader = _write(tmp_path / 'src' / 'pkg' / 'io' / 'rattlesnake.py', 'x = 1\n')
+    init = _write(tmp_path / 'src' / 'pkg' / '__init__.py', '')
+    io_init = _write(tmp_path / 'src' / 'pkg' / 'io' / '__init__.py', '')
+    user = _write(tmp_path / 'src' / 'pkg' / 'io' / 'reads.py', 'import rattlesnake\n')
+    own = cl.first_party([reader, init, io_init, user])
+    assert 'pkg' in own[user]
+    assert 'rattlesnake' not in own[user]
+    (finding,) = cl.check_imports([user], own, provided={}, root=tmp_path)
+    assert finding.startswith('src/pkg/io/reads.py:1: imports rattlesnake, ')
+
+
+def test_a_loose_module_is_ours_beside_it_and_below_it_only(tmp_path):
+    tool = _write(tmp_path / 'tools' / 'helper.py', 'x = 1\n')
+    test = _write(tmp_path / 'tools' / 'tests' / 'test_helper.py', 'import helper\n')
+    elsewhere = _write(tmp_path / 'src' / 'reader.py', 'import helper\n')
+    own = cl.first_party([tool, test, elsewhere])
+    assert 'helper' in own[test]
+    assert 'helper' not in own[elsewhere]
 
 
 def test_an_installed_package_is_found_by_the_name_it_is_imported_as():

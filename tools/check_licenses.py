@@ -165,12 +165,16 @@ def _base(license_id: str) -> str:
     return re.sub(r'(-only|-or-later|\+)$', '', license_id)
 
 
+#: an id in a blocked family: the family, then a version (`GPL-3.0`, and the
+#: `GPLv3` a free-text License field writes), a `+`, or nothing
+_BLOCKED_ID = re.compile(rf'(?:{"|".join(BLOCKED)})(?:-|\+|v?\d|$)', re.IGNORECASE)
+
+
 def judge_id(license_id: str, allowed: frozenset[str]) -> str:
     """One license id: refused when its family is in `BLOCKED`, allowed when
     it is on `allowed`, unknown otherwise."""
     base = _base(license_id)
-    family = re.match(r'[A-Za-z]+', base)
-    if family and family.group(0).upper() in BLOCKED:
+    if _BLOCKED_ID.match(base):
         return REFUSED
     return ALLOWED if base in allowed else UNKNOWN
 
@@ -274,14 +278,24 @@ def in_scope(path: pathlib.Path, scope: str, root: pathlib.Path = ROOT) -> bool:
     return path.relative_to(root).parts[0] in SCOPES[scope]
 
 
-def first_party(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT) -> set[str]:
-    """The top-level names this repository's own files can be imported as:
-    every module's file name, and every package directory's name."""
-    names = set()
+def first_party(files: Iterable[pathlib.Path]) -> dict[pathlib.Path, frozenset[str]]:
+    """For each file, the top-level names of this repository's own code it
+    can import: every top-level package (the outermost directory holding an
+    `__init__.py`), and each module outside a package that sits in the
+    file's directory or one above it, as a test reaches its conftest or a
+    tool beside its tests. A module inside a package is not a top-level
+    name, so a reader at `io/rattlesnake.py` does not make `import
+    rattlesnake` this repository's."""
+    files = list(files)
+    package_dirs = {path.parent for path in files if path.name == '__init__.py'}
+    packages = {d.name for d in package_dirs if d.parent not in package_dirs}
+    loose: dict[pathlib.Path, set[str]] = {}
     for path in files:
-        names.add(path.stem)
-        names.update(part for part in path.relative_to(root).parts[:-1])
-    return names
+        if path.parent not in package_dirs:
+            loose.setdefault(path.parent, set()).add(path.stem)
+    return {path: frozenset(packages.union(*(loose.get(d, ()) for d in
+                                             (path.parent, *path.parent.parents))))
+            for path in files}
 
 
 def imports(source: str) -> list[tuple[int, str]]:
@@ -302,16 +316,18 @@ def imports(source: str) -> list[tuple[int, str]]:
     return [(line, module.split('.')[0]) for line, module in out]
 
 
-def check_imports(files: Iterable[pathlib.Path], own: set[str],
+def check_imports(files: Iterable[pathlib.Path], own: Mapping[pathlib.Path, frozenset[str]],
                   provided: Mapping[str, Sequence[str]] | None = None,
                   root: pathlib.Path = ROOT) -> list[str]:
-    """Every import that is not the standard library, not `own`, and not
-    provided by an installed distribution."""
+    """Every import that is not the standard library, not one of the file's
+    own names (`first_party`), and not provided by an installed
+    distribution."""
     provided = metadata.packages_distributions() if provided is None else provided
     found = []
     for path in files:
         for line, module in imports(path.read_text(encoding='utf-8')):
-            if module in sys.stdlib_module_names or module in own or module in provided:
+            if (module in sys.stdlib_module_names or module in own[path]
+                    or module in provided):
                 continue
             found.append(f'{path.relative_to(root)}:{line}: imports {module}, which no '
                          'installed package provides; declare the package that does, '
