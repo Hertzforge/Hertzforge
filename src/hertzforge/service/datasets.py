@@ -4,12 +4,12 @@ makes a second open fast.
 Two kinds (`schema/PROTOCOL.md`, "Operations"):
 
 - `random_run`: a random vibration controller run read by
-  `visualdynamics.random_vibration_run`, with its PSDs and its
+  `hertzforge.random_vibration_run`, with its PSDs and its
   specification.
-- `modal_model`: a finite element model from `visualdynamics.demo`, its
+- `modal_model`: a finite element model from `hertzforge.demo`, its
   normal modes solved by `fem.Model.eigensolution`.
 
-Every number comes from visualdynamics. What this module adds is glue:
+Every number comes from the core. What this module adds is glue:
 where the files are, the cache, the channel list the shell shows, and the
 mesh in the form the viz kit draws (`element_cells`, triangulated).
 """
@@ -27,49 +27,50 @@ import numpy as np
 
 from .protocol import not_found, refused
 
-#: the `python/` directory (src/sds_analysis/datasets.py -> python/)
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-FETCH_COMMAND = 'python/scripts/fetch_data.sh'
+#: the repository root (src/hertzforge/service/datasets.py -> the root),
+#: where `testdata/` and the cache are in a checkout
+ROOT = Path(__file__).resolve().parents[3]
+FETCH_COMMAND = 'scripts/fetch_testdata.sh'
 
 #: how many of the lowest modes a model is solved for, rigid ones included
 MODES_SOLVED = 30
 
 
 def testdata_root() -> Path:
-    """Where the visualdynamics test data is: `SDS_VD_TESTDATA`, else the
-    copy `scripts/fetch_data.sh` extracts. The directory holds `plate/`."""
-    given = os.environ.get('SDS_VD_TESTDATA')
+    """Where the test data is: `HERTZFORGE_TESTDATA`, else the checkout's
+    `testdata/`, where `scripts/fetch_testdata.sh` puts `plate/`."""
+    given = os.environ.get('HERTZFORGE_TESTDATA')
     if given:
         return Path(given).expanduser()
-    return PROJECT_DIR / '.data' / 'vd' / 'testdata'
+    return ROOT / 'testdata'
 
 
 def cache_root() -> Path:
     """Where solved and imported results are kept between runs:
-    `SDS_CACHE_DIR`, else `python/.data/cache`."""
-    given = os.environ.get('SDS_CACHE_DIR')
+    `HERTZFORGE_CACHE_DIR`, else `.data/cache` in the checkout."""
+    given = os.environ.get('HERTZFORGE_CACHE_DIR')
     if given:
         return Path(given).expanduser()
-    return PROJECT_DIR / '.data' / 'cache'
+    return ROOT / '.data' / 'cache'
 
 
-def vd_version() -> str:
-    import visualdynamics
-    return visualdynamics.__version__
+def core_version() -> str:
+    import hertzforge
+    return hertzforge.__version__
 
 
 def _cached(name: str, build: Callable[[], Any],
             notes: list[str]) -> tuple[Any, bool]:
     """(object, came from cache): `build()`'s result, saved with
     its own `save` under `name` and read back with
-    `visualdynamics.load` next time. A cache that cannot be read is rebuilt;
+    `hertzforge.load` next time. A cache that cannot be read is rebuilt;
     one that cannot be written is noted and skipped, never an error."""
-    import visualdynamics as vd
+    import hertzforge as hz
 
     path = cache_root() / name
     if path.exists():
         try:
-            return vd.load(path), True
+            return hz.load(path), True
         # any failure to read a cache is a reason to rebuild it, and the
         # reason is reported in the notes rather than swallowed
         except Exception as error:  # noqa: BLE001
@@ -257,20 +258,20 @@ def _channels(psds: Any, pairs: list[tuple[str, int, int]]) -> list[Channel]:
 
 
 def open_random_run(path: Path, title: str, cache_name: str) -> RandomRun:
-    import visualdynamics as vd
-    from visualdynamics.core import compliance
+    import hertzforge as hz
+    from hertzforge.core import compliance
 
     started = time.perf_counter()
     if not path.is_file():
         raise not_found(
             f'The test data for "{title}" is missing: {path} does not exist. '
             f'Run {FETCH_COMMAND} from the repository root, or set '
-            'SDS_VD_TESTDATA to a directory that holds plate/random.nc4.')
+            'HERTZFORGE_TESTDATA to a directory that holds plate/random.nc4.')
     notes: list[str] = []
     stat = path.stat()
-    name = (f'{cache_name}-vd{vd_version()}-{stat.st_size}-'
+    name = (f'{cache_name}-hz{core_version()}-{stat.st_size}-'
             f'{stat.st_mtime_ns}.vdyn')
-    project, hit = _cached(name, lambda: vd.random_vibration_run(path), notes)
+    project, hit = _cached(name, lambda: hz.random_vibration_run(path), notes)
     psds, _octave = project.psds
     spec = project.specification
     if spec is None:
@@ -319,7 +320,7 @@ def _mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     its skin, a line by its two ends). Only nodes a triangle or a line uses
     are sent, so a brick model's interior nodes do not travel; a geometry
     with no faces or lines sends every node."""
-    from visualdynamics.viz.geometry import element_cells
+    from hertzforge.drawing.viz.geometry import element_cells
 
     faces, lines, _points = element_cells(geometry)
     triangles = _triangulate([face for group in faces.values()
@@ -336,7 +337,7 @@ def _mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def open_fem_model(cache_name: str, title: str,
                    build: Callable[[], Any]) -> ModalModel:
-    """A `visualdynamics.demo` model and its lowest `MODES_SOLVED` modes.
+    """A `hertzforge.demo` model and its lowest `MODES_SOLVED` modes.
 
     No damping is stated: a finite element model has none of its own, so
     every mode's damping is sent as null."""
@@ -349,13 +350,13 @@ def open_fem_model(cache_name: str, title: str,
             model.append(build())
         return model[0]
 
-    stem = f'{cache_name}-vd{vd_version()}-{MODES_SOLVED}modes'
+    stem = f'{cache_name}-hz{core_version()}-{MODES_SOLVED}modes'
     geometry, hit_g = _cached(f'{stem}-geometry.vdyn',
                               lambda: fem_model().geometry(), notes)
     shapes, hit_s = _cached(
         f'{stem}-shapes.vdyn',
         lambda: fem_model().eigensolution(num_modes=MODES_SOLVED), notes)
-    from visualdynamics.deform import dof_directions
+    from hertzforge.deform import dof_directions
 
     if shapes.is_complex:
         raise refused(f'{title}: its shapes are complex, and the viz kit draws '
@@ -382,17 +383,17 @@ def _plate_random() -> RandomRun:
 
 
 def _drone() -> ModalModel:
-    from visualdynamics.demo import drone
+    from hertzforge.demo import drone
     return open_fem_model('drone', 'Quadcopter FE Model', drone.build)
 
 
 def _plate_fem() -> ModalModel:
-    from visualdynamics.demo import plate
+    from hertzforge.demo import plate
     return open_fem_model('plate-fem', 'Free Plate FE Model', plate.build)
 
 
 def _frame_wing() -> ModalModel:
-    from visualdynamics.demo import frame_wing
+    from hertzforge.demo import frame_wing
     return open_fem_model('frame-wing', 'Frame With Thick Wing FE Model',
                           lambda: frame_wing.build('thick wing'))
 

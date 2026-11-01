@@ -1,7 +1,7 @@
 """Operations on a random vibration run: a channel's PSD against its
 specification, and its error in dB.
 
-The judgment is `visualdynamics.core.compliance`'s, called as the
+The judgment is `hertzforge.core.compliance`'s, called as the
 application calls it: `compare` for the channel's numbers, `judge` for its
 cells, `readouts` and `verdict` for the states. Nothing here recomputes a
 level; the per-cell dB is the ratio of the two powers `judge` returns for
@@ -44,10 +44,10 @@ def _sig(value: float, digits: int = 4) -> float:
 def _unit_text(dimension: str) -> str | None:
     """The SI unit of a dimension as the application writes it ('m/s²');
     None when the units are undefined."""
-    import visualdynamics as vd
+    import hertzforge as hz
 
     try:
-        return vd.SI.label_text(dimension) or None
+        return hz.SI.label_text(dimension) or None
     # a dimension VD cannot label is drawn without a unit, not refused: the
     # numbers are unchanged and the axis says what it can
     except Exception:  # noqa: BLE001
@@ -101,7 +101,7 @@ def _judged(run: RandomRun, channel: Channel,
 
 
 def _compare(run: RandomRun, spec: Any, channel: Channel) -> dict[str, Any]:
-    from visualdynamics.core import compliance
+    from hertzforge.core import compliance
 
     result = compliance.compare(spec, run.psds, channel.spec_record,
                                 channel.record, scale_db=run.scale_db)
@@ -117,7 +117,7 @@ def _compare(run: RandomRun, spec: Any, channel: Channel) -> dict[str, Any]:
 def _cells(run: RandomRun, spec: Any, channel: Channel) -> dict[str, Any]:
     """Per cell of the comparison: its midpoint, the error in dB, each
     limit in dB about the target, and whether it is out of each pair."""
-    from visualdynamics.core import compliance
+    from hertzforge.core import compliance
 
     r, m, scale = channel.spec_record, channel.record, run.scale_db
     target = compliance.judge(spec, run.psds, r, m, None, True, scale)
@@ -166,7 +166,7 @@ def _spec_line(spec: Any, record: int, values: np.ndarray
 # ---- the operations -----------------------------------------------------------
 
 def psd_vs_spec(run: RandomRun, params: dict[str, Any]) -> list[dict]:
-    from visualdynamics.core import compliance
+    from hertzforge.core import compliance
 
     channel = run.channel(params['channel'])
     spec, limits_text, from_param = _judged(run, channel,
@@ -268,7 +268,7 @@ def error_db(run: RandomRun, params: dict[str, Any]) -> list[dict]:
                                              params['tolerance_db'])
     _compare(run, spec, channel)          # refuses what cannot be judged
     cells = _cells(run, spec, channel)
-    from visualdynamics.plot import bin_edges
+    from hertzforge.drawing.plot import bin_edges
 
     # one number per judged line, so every curve here is stepped across
     # the line's bin, as VD draws a per-line error

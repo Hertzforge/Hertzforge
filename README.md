@@ -6,10 +6,10 @@ existing projects: Kevin Cross's data acquisition software, and Visual
 Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
-The `hertzforge` package on PyPI (0.0.1) does not contain that code yet.
-It installs a `hertzforge` command that prints its version and a short
-help message, and nothing else. Later releases will bring the acquisition
-and analysis features across.
+Visual Dynamics' analysis core is in this repository now, under
+`src/hertzforge/`. The `hertzforge` package on PyPI (0.0.1) predates it and
+installs only a command that prints its version; the next release carries
+the core.
 
 ```
 pip install hertzforge
@@ -25,9 +25,9 @@ layout is a mechanical change that comes next.
 
 | Path | Language | Owns |
 |---|---|---|
-| `src/hertzforge/` | Python | The `hertzforge` command and package published to PyPI |
+| `src/hertzforge/` | Python | The `hertzforge` package: the analysis core from Visual Dynamics, its readers and writers, reports, and the `hertzforge` command |
+| `src/hertzforge/service/` | Python | The analysis service: the core behind the protocol, started by `hertzforge serve` |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
-| `python/` | Python 3.13 | The analysis service. Wraps the `visualdynamics` package unchanged |
 | `crates/sds-control/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
 | `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
@@ -59,10 +59,14 @@ time, so building and testing need no NI software installed.
 ### Run
 
 ```bash
+pip install -e .
+scripts/fetch_testdata.sh
 scripts/dev.sh
 ```
 
-Starts the analysis service on 8791, the control service on 8792 and the shell on
+The first line installs the package with the analysis service into the active
+environment, the second fetches the plate data its demonstration datasets read.
+`scripts/dev.sh` then starts the analysis service on 8791, the control service on 8792 and the shell on
 http://127.0.0.1:5191/. `?mock=1` runs the shell alone on synthetic data.
 
 ## License

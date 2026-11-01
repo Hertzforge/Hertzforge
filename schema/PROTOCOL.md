@@ -13,7 +13,7 @@ WebSocket, one connection per service, loopback by default.
 
 | Service  | Default address           | Started by                              |
 |----------|---------------------------|-----------------------------------------|
-| analysis | `ws://127.0.0.1:8791/`    | `uv run --project python sds-analysis --port 8791` |
+| analysis | `ws://127.0.0.1:8791/`    | `hertzforge serve --port 8791` |
 | control  | `ws://127.0.0.1:8792/`    | `cargo run -p sds-control -- --port 8792` |
 | shell    | `http://127.0.0.1:5191/`  | `npm --prefix ui run dev -- --port 5191` |
 

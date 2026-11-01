@@ -33,7 +33,7 @@ from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
-log = logging.getLogger('sds_analysis')
+log = logging.getLogger('hertzforge.service')
 
 OPERATIONS: tuple[Operation, ...] = RANDOM_OPERATIONS + MODAL_OPERATIONS
 
@@ -56,20 +56,20 @@ MAX_INCOMING = 16 * 2**20
 #: 30 s) and is read from the cache after, so it is not worth paying for on
 #: every start.
 PRELOAD = (
-    'visualdynamics',
-    'visualdynamics.plot',
-    'visualdynamics.viz.geometry',
-    'visualdynamics.deform',
-    'visualdynamics.demo.drone',
-    'visualdynamics.demo.plate',
-    'visualdynamics.demo.frame_wing',
-    # imported inside visualdynamics at first use: reading a random run and
+    'hertzforge',
+    'hertzforge.drawing.plot',
+    'hertzforge.drawing.viz.geometry',
+    'hertzforge.deform',
+    'hertzforge.demo.drone',
+    'hertzforge.demo.plate',
+    'hertzforge.demo.frame_wing',
+    # imported inside hertzforge at first use: reading a random run and
     # forming its octave and coherence products
-    'visualdynamics.core.detect',
-    'visualdynamics.core.octave',
-    'visualdynamics.core.partial_coherence',
+    'hertzforge.core.detect',
+    'hertzforge.core.octave',
+    'hertzforge.core.partial_coherence',
     # solving a model's modes
-    'visualdynamics.core.sparse_solve',
+    'hertzforge.core.sparse_solve',
     # imported inside the readers and solvers, at first use (pandas by the
     # channel table a random run carries)
     'netCDF4',
@@ -119,10 +119,10 @@ class Service:
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
                  catalog: Sequence[Entry] = CATALOG,
                  workers: int = 2) -> None:
-        self.operations = {op.id: op for op in operations}
-        self.catalog = tuple(catalog)
-        self.executor = ThreadPoolExecutor(workers,
-                                           thread_name_prefix='sds-analysis')
+        self.operations: dict[str, Operation] = {op.id: op for op in operations}
+        self.catalog: tuple[Entry, ...] = tuple(catalog)
+        self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            workers, thread_name_prefix='hertzforge-service')
         self._opening: dict[str, asyncio.Future] = {}
         self._handles = itertools.count(1)
 
@@ -209,11 +209,11 @@ class Connection:
     keeps its frames whole."""
 
     def __init__(self, service: Service, socket: ServerConnection) -> None:
-        self.service = service
-        self.socket = socket
+        self.service: Service = service
+        self.socket: ServerConnection = socket
         self.handles: dict[str, Handle] = {}
         self.tasks: set[asyncio.Task] = set()
-        self.sending = asyncio.Lock()
+        self.sending: asyncio.Lock = asyncio.Lock()
 
     async def send(self, frame: str | bytes) -> None:
         async with self.sending:

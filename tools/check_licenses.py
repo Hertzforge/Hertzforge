@@ -4,7 +4,6 @@ not accounted for.
 Run inside an installed environment, once per scope:
 
     python tools/check_licenses.py --scope package     # exit 0 clean, 1 with findings
-    uv run --project python python tools/check_licenses.py --scope analysis
 
 1. **Every installed package's license.** Every distribution in the
    environment, direct or pulled in by another, is read from its own
@@ -42,7 +41,6 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: the directories whose Python files each environment imports from
 SCOPES = {
     'package': ('src', 'tests', 'tools', 'schema', 'testdata'),
-    'analysis': ('python',),
 }
 
 #: license families refused outright

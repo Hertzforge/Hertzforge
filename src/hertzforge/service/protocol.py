@@ -9,7 +9,7 @@ PROTOCOL = 'sds/1'
 SERVICE = 'analysis'
 
 try:
-    VERSION = _version('sds-analysis')
+    VERSION = _version('hertzforge')
 except PackageNotFoundError:            # pragma: no cover - source tree only
     VERSION = '0.0.0'
 
@@ -28,8 +28,8 @@ class ProtocolError(Exception):
         if not message:
             raise ValueError('an error must say what went wrong')
         super().__init__(message)
-        self.code = code
-        self.message = message
+        self.code: str = code
+        self.message: str = message
 
 
 def bad_request(message: str) -> ProtocolError:

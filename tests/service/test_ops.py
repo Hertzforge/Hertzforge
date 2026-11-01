@@ -1,5 +1,5 @@
 """Each operation's result against the schema's views, and its numbers
-against visualdynamics called directly."""
+against hertzforge called directly."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import dataclasses
 import numpy as np
 import pytest
 
-from sds_analysis import frames
-from sds_analysis.protocol import ProtocolError
-from sds_analysis.server import OPERATIONS
+from hertzforge.service import frames
+from hertzforge.service.protocol import ProtocolError
+from hertzforge.service.server import OPERATIONS
 
 OPS = {op.id: op for op in OPERATIONS}
 
@@ -41,7 +41,7 @@ def test_psd_vs_spec_validates(random_run, validate):
 
 
 def test_psd_vs_spec_reads_what_compliance_compare_reads(random_run):
-    from visualdynamics.core import compliance
+    from hertzforge.core import compliance
 
     channel = random_run.channels[0]
     expected = compliance.compare(random_run.specification, random_run.psds,
@@ -91,7 +91,7 @@ def test_psd_vs_spec_series_carry_the_spec_and_its_limits(random_run):
 def test_spectra_are_drawn_as_vd_draws_them(random_run):
     """The PSD is stepped across bins of the line spacing, with VD's edges,
     and the specification takes VD's own shape for it."""
-    from visualdynamics.plot import bin_edges, drawing_shape
+    from hertzforge.drawing.plot import bin_edges, drawing_shape
 
     spectrum = run('random.psd_vs_spec', random_run)[0]
     measured = spectrum['series'][0]
@@ -166,7 +166,7 @@ def test_error_db_validates_and_is_linear_in_db(random_run, validate):
 
 
 def test_error_db_cells_against_judge(random_run):
-    from visualdynamics.core import compliance
+    from hertzforge.core import compliance
 
     channel = random_run.channels[2]
     judged = compliance.judge(random_run.specification, random_run.psds,
@@ -210,7 +210,7 @@ def test_drone_draws_beams_as_lines(drone):
 
 
 def test_translations_equal_node_displacements(drone):
-    from visualdynamics.deform import node_displacements
+    from hertzforge.deform import node_displacements
 
     for k in (0, 7, 29):
         expected = node_displacements(drone.geometry, drone.shapes.coordinate,
