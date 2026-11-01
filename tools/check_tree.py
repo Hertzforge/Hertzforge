@@ -15,8 +15,8 @@
     python tools/check_tree.py                # exit 0 clean, 1 with findings
     python tools/check_tree.py --hash "a name"  # the line to add to NAMES
 
-Rust crate licenses are checked by cargo-deny once the controller crates
-are in the tree; until then the control service does not build here.
+Rust crate licenses, bans and sources are checked by cargo-deny
+(`cargo deny check`, configured in deny.toml).
 """
 
 from __future__ import annotations

@@ -1,0 +1,101 @@
+# cargo-deny: the Rust half of the repository's dependency rules (`cargo deny check`).
+# The npm and Python halves are in tools/check_tree.py.
+
+[graph]
+all-features = true
+# Nothing is excluded from the graph. An excluded crate takes its unique dependency
+# subtree out of every check, licenses included, so an exclude here would hide crates
+# from the license check without saying so.
+exclude = []
+
+[licenses]
+version = 2
+# This repository's own crates are checked too: each carries `license = "MIT"`.
+private = { ignore = false }
+# The policy: permissive licenses, plus the weak copyleft licenses MPL-2.0 and LGPL,
+# as Visual Dynamics allows them. GPL, AGPL and SSPL are refused by omission; an expression passes only if it can be satisfied from this list, so
+# `MIT OR GPL-3.0-only` passes on its MIT side and `MIT AND GPL-3.0-only` fails. A
+# crate with no license it states is refused.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "MPL-2.0",
+  "LGPL-2.1-only",
+  "LGPL-2.1-or-later",
+  "LGPL-3.0-only",
+  "LGPL-3.0-or-later",
+]
+confidence-threshold = 0.9
+# The list is the policy, not an inventory: a license no crate uses today stays on it.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own crates are private (`publish = false`) and name each other by
+# version-less path dependencies. Registry `*` requirements are still refused.
+allow-wildcard-paths = true
+
+deny = [
+  # Copyleft crates that are the likely accidental picks in their niches, refused by
+  # name so a `cargo add` fails at once whatever their license field says.
+  { crate = "wav" },              # LGPL-3.0 and unmaintained; `hound` (Apache-2.0) is used
+  { crate = "nastran" },          # GPL-3.0
+  { crate = "nastran-pch2csv" },  # LGPL-3.0
+  { crate = "gmsh-sys" },         # wraps GPL Gmsh
+  { crate = "sys-gmsh" },         # GPL-2.0-or-later
+  { crate = "gmsh_ffi" },         # LGPL-2.1 and wraps GPL Gmsh
+  { crate = "rgmsh" },            # wraps GPL Gmsh
+
+  # Hardware firewall. Control laws, modules and services depend on the abstract
+  # `eigen-hal` only, never on a concrete backend. A backend may be named only by the
+  # crates on its wrapper list; any other crate that reaches for one fails here.
+  #
+  # NI-DAQmx backend: built in exactly one place, the station factory.
+  { crate = "eigen-hal-ni", wrappers = ["eigen-station"] },
+  # The Sim plant. Banned like a hardware backend for one more reason: a crate that can
+  # build a Sim can manufacture data that looks like a measurement.
+  #
+  # cargo-deny's ban graph includes dev-dependencies, so this list names every crate
+  # that holds the Sim in any section, and on its own cannot tell a production holder
+  # from a test fixture. That line is drawn by
+  # `crates/eigen-hal-sim/tests/no_sim_leak.rs`, which fails on the Sim in a
+  # `[dependencies]` section outside its own short allowlist. This ban is the coarse
+  # firewall (a new crate reaching for the Sim fails); the lint is the fine one (an
+  # existing crate promoting it into production fails).
+  { crate = "eigen-hal-sim", wrappers = [
+    # Production holders, each also on the Sim-leak lint's allowlist.
+    "eigen-station",   # the station factory, the one construction point
+    "eigen-demo",      # a demo binary whose subject is the Sim plant
+    "sds-control",     # the control service's simulated run; no hardware path yet
+    # Test fixtures only (dev-dependencies).
+    "eigen-engine",
+    "eigen-explorer-host",
+    "eigen-random",
+    "eigen-recorder",
+    "eigen-shock-host",
+    "eigen-sine",
+    "eigen-srs",
+    "eigen-twr",
+  ] },
+]
+# Not listed: `eigen-backendd`, the headless daemon. It reaches hardware only through
+# `eigen-station`, so it names no backend and needs no wrapper entry. If it ever names
+# one directly, `cargo deny check bans` fails and the entry has to be added in the same
+# change.
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
