@@ -38,12 +38,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _serve(host: str, port: int) -> None:
-    # visualdynamics (and its Qt and VTK) load before the port opens, so a
-    # launcher that waits for the line below gets a service whose first
-    # dataset.open does not pay for the import
-    import visualdynamics  # noqa: F401
+    from .server import SWITCH_INTERVAL, Service, preload, start
 
-    from .server import Service, start
+    # Process-wide setup, done here and not in start(), so a caller that
+    # starts a server in its own process keeps its own settings. The heavy
+    # imports (visualdynamics, its Qt and VTK, what the operations reach)
+    # load before the port opens: a launcher that waits for the line below
+    # gets a service whose first dataset.open does not pay for them.
+    preload()
+    sys.setswitchinterval(SWITCH_INTERVAL)
 
     service = Service()
     server = await start(service, host, port)

@@ -4,6 +4,7 @@ and an event loop that stays free while the work runs."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -12,8 +13,9 @@ import sys
 import time
 
 import pytest
+from sds_analysis import __main__ as entry
 from sds_analysis import frames
-from sds_analysis.server import Service, start
+from sds_analysis.server import SWITCH_INTERVAL, Service, preload, start
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
@@ -52,6 +54,10 @@ def _heavy(modules):
 
 
 async def _session(check, imported=None):
+    # the process prepared as the entry point prepares it (__main__._serve);
+    # the switch interval is put back after
+    preload()
+    interval = sys.getswitchinterval()
     service = Service()
     server = await start(service, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
@@ -67,11 +73,13 @@ async def _session(check, imported=None):
             last = now
 
     tick = asyncio.create_task(ticker())
+    sys.setswitchinterval(SWITCH_INTERVAL)
     try:
         async with connect(f'ws://127.0.0.1:{port}/', max_size=None,
                            compression=None) as socket:
             await check(Client(socket), socket)
     finally:
+        sys.setswitchinterval(interval)
         lag['run'] = False
         await tick
         server.close()
@@ -260,6 +268,55 @@ def test_a_handle_belongs_to_its_connection():
             service.close()
 
     asyncio.run(both())
+
+
+def test_start_changes_nothing_beyond_the_server(monkeypatch):
+    # a plain constructor: no imports, no interpreter-wide setting, so a
+    # caller (these tests among them) keeps its own
+    calls = []
+    monkeypatch.setattr('sds_analysis.server.preload', lambda: calls.append('preload'))
+    interval = sys.getswitchinterval()
+    service = Service()
+
+    async def listen_and_close():
+        listening = await start(service, '127.0.0.1', 0)
+        listening.close()
+        await listening.wait_closed()
+
+    try:
+        asyncio.run(listen_and_close())
+        assert calls == [], 'start() ran the preload'
+        assert sys.getswitchinterval() == interval, 'start() set the switch interval'
+    finally:
+        service.close()
+        sys.setswitchinterval(interval)
+
+
+def test_the_entry_point_preloads_and_sets_the_switch_interval(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr('sds_analysis.server.preload', lambda: calls.append('preload'))
+    interval = sys.getswitchinterval()
+
+    async def serve_until_listening():
+        serving = asyncio.create_task(entry._serve('127.0.0.1', 0))
+        said = ''
+        while 'listening on' not in said:
+            await asyncio.sleep(0.01)
+            said += capsys.readouterr().err
+            if serving.done():
+                serving.result()                # raises what stopped it
+        observed = sys.getswitchinterval()
+        serving.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await serving
+        return observed
+
+    try:
+        observed = asyncio.run(asyncio.wait_for(serve_until_listening(), 60))
+    finally:
+        sys.setswitchinterval(interval)
+    assert calls == ['preload']
+    assert observed == SWITCH_INTERVAL
 
 
 def test_console_entry_point_starts_headless_and_answers():

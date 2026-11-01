@@ -17,7 +17,6 @@ import asyncio
 import importlib
 import itertools
 import logging
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -95,6 +94,15 @@ def preload() -> None:
     """Import everything in `PRELOAD`."""
     for name in PRELOAD:
         importlib.import_module(name)
+
+
+#: The interpreter's switch interval while serving, in seconds. It hands its
+#: lock between threads every 5 ms by default; a worker doing pure-Python
+#: work (building a demonstration model) then costs the event loop tens of
+#: milliseconds per wait. At 1 ms the loop gets the lock back sooner, for a
+#: small cost in the worker's speed. Process-wide, so the entry point sets
+#: it, never `start`.
+SWITCH_INTERVAL = 0.001
 
 
 @dataclass
@@ -291,13 +299,8 @@ def _reason(text: str) -> str:
 async def start(service: Service, host: str = '127.0.0.1',
                 port: int = 8791) -> Server:
     """A listening server (port 0 picks a free one; `server.sockets` says
-    which). The heavy imports are done first (`preload`)."""
-    preload()
-    # The interpreter hands its lock between threads every 5 ms by default;
-    # a worker doing pure-Python work (building a demonstration model) then
-    # costs the event loop tens of milliseconds per wait. At 1 ms the loop
-    # gets the lock back sooner, for a small cost in the worker's speed.
-    sys.setswitchinterval(0.001)
+    which). It changes nothing beyond the server: the process that serves
+    calls `preload` and sets `SWITCH_INTERVAL` first (`__main__._serve`)."""
 
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
