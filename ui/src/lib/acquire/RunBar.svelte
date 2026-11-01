@@ -43,11 +43,12 @@
 	// The orphan countdown ticks on this screen between the service's events.
 	let now = $state(Date.now());
 	$effect(() => {
-		if (acq.orphanDeadline === null) return;
+		if (acq.orphanDeadline === null || !acq.isLive) return;
 		const t = setInterval(() => (now = Date.now()), 250);
 		return () => clearInterval(t);
 	});
-	const orphanLeft = $derived(acq.orphanDeadline === null ? null : Math.max(0, Math.ceil((acq.orphanDeadline - now) / 1000)));
+	// The countdown only means something while a run is live.
+	const orphanLeft = $derived(acq.orphanDeadline === null || !acq.isLive ? null : Math.max(0, Math.ceil((acq.orphanDeadline - now) / 1000)));
 
 	const seat = $derived(acq.session?.controller ?? null);
 	const canClaim = $derived(acq.connected && !acq.isController && (!seat || !seat.present));
