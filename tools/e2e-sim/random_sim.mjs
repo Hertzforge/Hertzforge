@@ -9,8 +9,9 @@
 // (a free port), runs three Random runs on the simulator, and stops both. It takes about three
 // minutes, because the simulator runs in real time. It is not part of `npm --prefix ui test`.
 //
-// 0. Acquire opens on the test-type chooser, with Random the only test type offered; each screen
-//    picks Random there.
+// 0. Acquire opens on the test-type chooser, in three sections (Single Output, MIMO, Data
+//    Acquisition), with Random the only test type offered and the keyboard moving across the
+//    sections; each screen picks Random there.
 // 1. One screen takes control, selects the simulator, sets the channel table and the bench
 //    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review
 //    (identification at the reference -20 dB, read from the run log), proceeds, steps the level
@@ -204,16 +205,44 @@ try {
 	await a.goto(URL_);
 	await chooser(a, 'the test-type chooser');
 	const cards = await a.locator('[data-testid="test-type-chooser"] [data-type]').evaluateAll((els) =>
-		els.map((e) => ({ id: e.dataset.type, offered: e.getAttribute('aria-disabled') === 'false', text: e.innerText.replace(/\s+/g, ' ') }))
+		els.map((e) => ({
+			id: e.dataset.type,
+			group: e.closest('[data-testid^="test-group-"]')?.dataset.testid.replace('test-group-', ''),
+			offered: e.getAttribute('aria-disabled') === 'false',
+			text: e.innerText.replace(/\s+/g, ' ')
+		}))
 	);
+	const sections = await a.locator('[data-testid^="test-group-"] h2').allInnerTexts();
 	// A test type still to come cannot be opened (forced past the browser's own refusal to click it).
 	await tid(a, 'test-type-sine').click({ force: true });
+	await tid(a, 'test-type-mimo_random').click({ force: true });
 	const stayed = await tid(a, 'test-type-chooser').isVisible();
+	const inGroup = (g) => cards.filter((c) => c.group === g).map((c) => c.id).join();
 	check(
-		'Acquire opens on the test-type chooser: seven test types, Random the only one offered, the rest "Coming"',
-		cards.length === 7 && cards.filter((c) => c.offered).map((c) => c.id).join() === 'random' && cards.filter((c) => !c.offered).every((c) => /\bcoming\b/i.test(c.text)) && stayed,
-		cards.map((c) => `${c.id} ${c.offered ? 'offered' : 'coming'}`).join(', ')
+		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random the only type offered, the rest "Coming"',
+		sections.map((t) => t.toLowerCase()).join('|') === 'single output|mimo|data acquisition' &&
+			inGroup('single') === 'random,sine,shock,srs,twr,explorer' &&
+			inGroup('mimo') === 'mimo_random,mimo_shock,mimo_sine,mimo_mixed,mimo_twr' &&
+			inGroup('acquisition') === 'recorder' &&
+			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random' &&
+			cards.filter((c) => !c.offered).every((c) => /\bcoming\b/i.test(c.text)) &&
+			stayed,
+		`${sections.join(' | ')}: ${cards.map((c) => `${c.id} ${c.offered ? 'offered' : 'coming'}`).join(', ')}`
 	);
+	// The keyboard moves across the sections: End to the last card, Home to the first, and the arrow
+	// from the last Single Output card to the first MIMO card.
+	await tid(a, 'test-type-random').focus();
+	const focused = () => a.evaluate(() => document.activeElement?.getAttribute('data-type'));
+	await a.keyboard.press('End');
+	const atEnd = await focused();
+	await a.keyboard.press('Home');
+	const atHome = await focused();
+	await tid(a, 'test-type-explorer').focus();
+	await a.keyboard.press('ArrowRight');
+	const across = await focused();
+	await a.keyboard.press('ArrowLeft');
+	const back = await focused();
+	check('chooser keyboard: End, Home and the arrows move across the sections', atEnd === 'recorder' && atHome === 'random' && across === 'mimo_random' && back === 'explorer', `End ${atEnd}, Home ${atHome}, right of Explorer ${across}, back ${back}`);
 	await shot(a, '00-test-type-chooser');
 	await tid(a, 'test-type-random').click();
 	await until(a, 'the shell to connect', async (p) => (await roleOf(p)) === 'observer');

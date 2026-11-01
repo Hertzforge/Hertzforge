@@ -1,11 +1,11 @@
 <script lang="ts">
 	/**
 	 * The test-type chooser, where Acquire & Control opens: one card per test type, with what the
-	 * test is in a line. A type still to come says so in words, keeps its place in the keyboard
+	 * test is in a line, under three sections: Single Output, MIMO and Data Acquisition. A type still to come says so in words, keeps its place in the keyboard
 	 * order, and cannot be opened. While a run is live, its card says so and returns to it.
 	 */
 	import { onMount } from 'svelte';
-	import type { TestTypeId, TestTypeView } from './testTypes.svelte';
+	import { TEST_GROUPS, typesIn, type TestTypeId, type TestTypeView } from './testTypes.svelte';
 
 	interface Props {
 		tests: TestTypeView;
@@ -23,7 +23,7 @@
 		list.querySelector<HTMLButtonElement>(`[data-type="${id}"]`)?.focus();
 	});
 
-	/** Arrow keys, Home and End move between the cards, as on the workspace rail. */
+	/** Arrow keys, Home and End move between the cards, across every section, as on the workspace rail. */
 	function onKey(e: KeyboardEvent) {
 		const step: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 		if (!(e.key in step) && e.key !== 'Home' && e.key !== 'End') return;
@@ -43,71 +43,97 @@
 <section class="chooser" data-testid="test-type-chooser" aria-labelledby="tt-title">
 	<h1 id="tt-title">Choose a Test Type</h1>
 
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<ul class="cards" bind:this={list} onkeydown={onKey}>
-		{#each tests.types as t (t.id)}
-			{@const live = tests.live === t.id}
-			{@const why = tests.whyNot(t.id)}
-			{@const state = live ? 'live' : !t.ready ? 'coming' : why ? 'waiting' : 'ready'}
-			<li>
-				<button
-					class="card {state}"
-					data-type={t.id}
-					data-testid="test-type-{t.id}"
-					data-state={state}
-					aria-disabled={why ? 'true' : 'false'}
-					aria-labelledby="tt-{t.id}-name tt-{t.id}-tag"
-					aria-describedby="tt-{t.id}-sum"
-					onclick={() => pick(t.id)}
-				>
-					<span class="glyph" aria-hidden="true">
-						<svg viewBox="0 0 44 28" width="44" height="28">
-							{#if t.id === 'random'}
-								<path d="M2 14l2.5-5 2.5 9 2.5-12 2.5 14 2.5-9 2.5 5 2.5-12 2.5 18 2.5-13 2.5 8 2.5-9 2.5 7 2.5-4 2.5 6 2.5-5 2.5 2" />
-							{:else if t.id === 'sine'}
-								<path d="M2 14c2.7-10.7 5.3-10.7 8 0s5.3 10.7 8 0 5.3-10.7 8 0 5.3 10.7 8 0 5.3-10.7 8 0" />
-							{:else if t.id === 'shock'}
-								<path d="M2 22h12c2.5 0 3.5-17 8-17s5.5 17 8 17h12" />
-							{:else if t.id === 'srs'}
-								<path d="M3 24L17 9h24" />
-								<circle cx="17" cy="9" r="2" class="fill" />
-								<circle cx="3" cy="24" r="2" class="fill" />
-								<circle cx="41" cy="9" r="2" class="fill" />
-							{:else if t.id === 'twr'}
-								<path d="M2 14q2-3 4 0t4 0q2-8 4 0t4 0q2-11 4 0t4 0q2-6 4 0t4 0q2-4 4 0t4 0" />
-							{:else if t.id === 'recorder'}
-								<circle cx="8" cy="14" r="5" class="fill" />
-								<path d="M17 14l2.5-3 2.5 5 2.5-4 2.5 3 2.5-2 2.5 1h7" />
-							{:else}
-								<path d="M2 14c2.7-10.7 5.3-10.7 8 0s5.3 10.7 8 0 5.3-10.7 8 0 5.3 10.7 8 0 5.3-10.7 8 0" class="faint" />
-								<path d="M30 2v24" />
-								<circle cx="30" cy="14" r="3.2" class="fill" />
-							{/if}
-						</svg>
-					</span>
-					<span class="head">
-						<span class="name" id="tt-{t.id}-name">{t.title}</span>
-						<span class="tag" id="tt-{t.id}-tag">
-							{#if live}
-								<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
-								{liveWord ?? 'Live'}
-							{:else if state === 'coming'}
-								Coming
-							{:else if state === 'ready' && tests.last === t.id}
-								Last used
-							{/if}
-						</span>
-						{#if state === 'ready' || state === 'live'}
-							<svg class="go" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-						{/if}
-					</span>
-					<span class="sum" id="tt-{t.id}-sum">
-						{t.summary}{#if live}{' '}<span class="foot">Return to the run.</span>{:else if state === 'waiting'}{' '}<span class="foot">{why}</span>{/if}
-					</span>
-				</button>
-			</li>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="groups" bind:this={list} onkeydown={onKey}>
+		{#each TEST_GROUPS as g (g.id)}
+			{@const types = typesIn(g.id, tests.types)}
+			{#if types.length}
+				<section class="group" data-testid="test-group-{g.id}" aria-labelledby="tg-{g.id}">
+					<h2 id="tg-{g.id}">{g.title}</h2>
+					<ul class="cards">
+						{#each types as t (t.id)}
+							{@const live = tests.live === t.id}
+							{@const why = tests.whyNot(t.id)}
+							{@const state = live ? 'live' : !t.ready ? 'coming' : why ? 'waiting' : 'ready'}
+							<li>
+								<button
+									class="card {state}"
+									data-type={t.id}
+									data-testid="test-type-{t.id}"
+									data-state={state}
+									aria-disabled={why ? 'true' : 'false'}
+									aria-labelledby="tt-{t.id}-name tt-{t.id}-tag"
+									aria-describedby="tt-{t.id}-sum"
+									onclick={() => pick(t.id)}
+								>
+									<span class="glyph" aria-hidden="true">
+										<svg viewBox="0 0 44 28" width="44" height="28">
+											{#if t.id === 'random'}
+												<path d="M2 14l2.5-5 2.5 9 2.5-12 2.5 14 2.5-9 2.5 5 2.5-12 2.5 18 2.5-13 2.5 8 2.5-9 2.5 7 2.5-4 2.5 6 2.5-5 2.5 2" />
+											{:else if t.id === 'sine'}
+												<path d="M2 14c2.7-10.7 5.3-10.7 8 0s5.3 10.7 8 0 5.3-10.7 8 0 5.3 10.7 8 0 5.3-10.7 8 0" />
+											{:else if t.id === 'shock'}
+												<path d="M2 22h12c2.5 0 3.5-17 8-17s5.5 17 8 17h12" />
+											{:else if t.id === 'srs'}
+												<path d="M3 24L17 9h24" />
+												<circle cx="17" cy="9" r="2" class="fill" />
+												<circle cx="3" cy="24" r="2" class="fill" />
+												<circle cx="41" cy="9" r="2" class="fill" />
+											{:else if t.id === 'twr'}
+												<path d="M2 14q2-3 4 0t4 0q2-8 4 0t4 0q2-11 4 0t4 0q2-6 4 0t4 0q2-4 4 0t4 0" />
+											{:else if t.id === 'recorder'}
+												<circle cx="8" cy="14" r="5" class="fill" />
+												<path d="M17 14l2.5-3 2.5 5 2.5-4 2.5 3 2.5-2 2.5 1h7" />
+											{:else if t.id === 'mimo_random'}
+												<path d="M2 8l2.5-3 2.5 5 2.5-6 2.5 7 2.5-5 2.5 3 2.5-6 2.5 8 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" />
+												<path d="M2 21l2.5-4 2.5 6 2.5-7 2.5 8 2.5-5 2.5 3 2.5-7 2.5 9 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" class="faint" />
+											{:else if t.id === 'mimo_sine'}
+												<path d="M2 8c2.7-6 5.3-6 8 0s5.3 6 8 0 5.3-6 8 0 5.3 6 8 0 5.3-6 8 0" />
+												<path d="M2 20c2.7 6 5.3 6 8 0s5.3-6 8 0 5.3 6 8 0 5.3-6 8 0 5.3 6 8 0" class="faint" />
+											{:else if t.id === 'mimo_shock'}
+												<path d="M2 11h12c2.5 0 3.5-9 8-9s5.5 9 8 9h12" />
+												<path d="M2 25h12c2.5 0 3.5-9 8-9s5.5 9 8 9h12" class="faint" />
+											{:else if t.id === 'mimo_twr'}
+												<path d="M2 8q2-2 4 0t4 0q2-5 4 0t4 0q2-6 4 0t4 0q2-4 4 0t4 0q2-2 4 0t4 0" />
+												<path d="M2 20q2-3 4 0t4 0q2-4 4 0t4 0q2-7 4 0t4 0q2-3 4 0t4 0q2-2 4 0t4 0" class="faint" />
+											{:else if t.id === 'mimo_mixed'}
+												<path d="M2 8c2.2-5 4.4-5 6.6 0s4.4 5 6.6 0" />
+												<path d="M17 8l2-3 2 5 2-6 2 7 2-5 2 3" />
+												<path d="M2 22h14c2 0 3-8 6-8s4 8 6 8h14" class="faint" />
+											{:else}
+												<path d="M2 14c2.7-10.7 5.3-10.7 8 0s5.3 10.7 8 0 5.3-10.7 8 0 5.3 10.7 8 0 5.3-10.7 8 0" class="faint" />
+												<path d="M30 2v24" />
+												<circle cx="30" cy="14" r="3.2" class="fill" />
+											{/if}
+										</svg>
+									</span>
+									<span class="head">
+										<span class="name" id="tt-{t.id}-name">{t.title}</span>
+										<span class="tag" id="tt-{t.id}-tag">
+											{#if live}
+												<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
+												{liveWord ?? 'Live'}
+											{:else if state === 'coming'}
+												Coming
+											{:else if state === 'ready' && tests.last === t.id}
+												Last used
+											{/if}
+										</span>
+										{#if state === 'ready' || state === 'live'}
+											<svg class="go" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+										{/if}
+									</span>
+									<span class="sum" id="tt-{t.id}-sum">
+										{t.summary}{#if live}{' '}<span class="foot">Return to the run.</span>{:else if state === 'waiting'}{' '}<span class="foot">{why}</span>{/if}
+									</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
 		{/each}
-	</ul>
+	</div>
 </section>
 
 <style>
@@ -118,10 +144,25 @@
 	}
 
 	h1 {
-		margin-bottom: var(--sp-4);
+		margin-bottom: var(--sp-3);
 		font-size: var(--text-xl);
 		font-weight: var(--weight-strong);
 		letter-spacing: -0.01em;
+	}
+
+	.groups {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-5);
+	}
+
+	.group h2 {
+		margin-bottom: var(--sp-2);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-strong);
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-2);
 	}
 
 	.cards {

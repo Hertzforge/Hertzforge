@@ -8,7 +8,7 @@ import { createControlServer } from '$lib/protocol/mock/control';
 import { mockSocketFactory, type MockServer } from '$lib/protocol/mock/socket';
 import { defaultSetup } from './setup';
 import { AcquireState } from './store.svelte';
-import { liveTestOf, TEST_TYPES, TestTypeView, type LiveTest, type TestType } from './testTypes.svelte';
+import { liveTestOf, TEST_GROUPS, TEST_TYPES, TestTypeView, typesIn, type LiveTest, type TestType } from './testTypes.svelte';
 
 const until = async (cond: () => boolean, ms = 8000) => {
 	const t0 = Date.now();
@@ -26,8 +26,19 @@ function viewOf(initial: LiveTest = undefined, types?: readonly TestType[]) {
 }
 
 describe('the test types', () => {
-	it('lists the seven test types in order, each with one plain line, and only Random can be chosen', () => {
-		expect(TEST_TYPES.map((t) => t.title)).toEqual(['Random', 'Sine', 'Classical Shock', 'SRS', 'TWR', 'Recorder', 'Explorer']);
+	it('lists Single Output, MIMO and Data Acquisition, in that order, with their test types in order', () => {
+		expect(TEST_GROUPS.map((g) => g.title)).toEqual(['Single Output', 'MIMO', 'Data Acquisition']);
+		expect(typesIn('single').map((t) => t.title)).toEqual(['Random', 'Sine', 'Classical Shock', 'SRS', 'TWR', 'Explorer']);
+		expect(typesIn('mimo').map((t) => t.title)).toEqual(['MIMO Random', 'MIMO Shock', 'MIMO Sine', 'MIMO Mixed Mode', 'MIMO TWR']);
+		expect(typesIn('acquisition').map((t) => t.title)).toEqual(['Recorder']);
+		// Every test type is in exactly one section, and the keyboard order is the sections' order.
+		expect(TEST_GROUPS.flatMap((g) => typesIn(g.id))).toEqual([...TEST_TYPES]);
+		expect(typesIn('mimo').every((t) => !t.ready)).toBe(true);
+		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
+	});
+
+	it('gives each of the twelve test types one plain line, and only Random can be chosen', () => {
+		expect(TEST_TYPES).toHaveLength(12);
 		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);

@@ -2,8 +2,10 @@
  * The test types Acquire & Control offers, and which screen the workspace shows: the chooser, or
  * one test type's own screen.
  *
- * - The workspace opens on the chooser. Only a test type that is ready can be chosen; the others
- *   are shown as coming.
+ * - The workspace opens on the chooser, in three sections: Single Output (one drive), MIMO
+ *   (multiple-input multiple-output: several shakers or drives controlled together), and Data
+ *   Acquisition (inputs recorded with no drive). Only a test type that is ready can be chosen;
+ *   the others are shown as coming.
  * - The choice is kept for the session: moving to another workspace and back returns to it.
  * - While a run is live, its screen has no way back to the chooser, and opening the workspace goes
  *   straight to the run. A chooser already on screen when a run goes live (started from another
@@ -15,7 +17,33 @@ import type { ConnectionStatus } from '$lib/protocol/client.svelte';
 import type { RandomState } from '$lib/protocol/types';
 import { isLive } from './actions';
 
-export type TestTypeId = 'random' | 'sine' | 'shock' | 'srs' | 'twr' | 'recorder' | 'explorer';
+export type TestTypeId =
+	| 'random'
+	| 'sine'
+	| 'shock'
+	| 'srs'
+	| 'twr'
+	| 'recorder'
+	| 'explorer'
+	| 'mimo_random'
+	| 'mimo_shock'
+	| 'mimo_sine'
+	| 'mimo_mixed'
+	| 'mimo_twr';
+
+/** The chooser's sections: one drive output, several driven together, or no drive at all. */
+export type TestGroupId = 'single' | 'mimo' | 'acquisition';
+
+export interface TestGroup {
+	id: TestGroupId;
+	title: string;
+}
+
+export const TEST_GROUPS: readonly TestGroup[] = [
+	{ id: 'single', title: 'Single Output' },
+	{ id: 'mimo', title: 'MIMO' },
+	{ id: 'acquisition', title: 'Data Acquisition' }
+];
 
 export interface TestType {
 	id: TestTypeId;
@@ -24,17 +52,29 @@ export interface TestType {
 	summary: string;
 	/** It can be chosen; the others are shown as coming. */
 	ready: boolean;
+	/** The chooser section it is listed under. */
+	group: TestGroupId;
 }
 
 export const TEST_TYPES: readonly TestType[] = [
-	{ id: 'random', title: 'Random', summary: 'Broadband random vibration shaped to a target spectrum and held for a set time.', ready: true },
-	{ id: 'sine', title: 'Sine', summary: 'One frequency at a time, swept across a range or held, at a controlled amplitude.', ready: false },
-	{ id: 'shock', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: false },
-	{ id: 'srs', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: false },
-	{ id: 'twr', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: false },
-	{ id: 'recorder', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: false },
-	{ id: 'explorer', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: false }
+	{ id: 'random', group: 'single', title: 'Random', summary: 'Broadband random vibration shaped to a target spectrum and held for a set time.', ready: true },
+	{ id: 'sine', group: 'single', title: 'Sine', summary: 'One frequency at a time, swept across a range or held, at a controlled amplitude.', ready: false },
+	{ id: 'shock', group: 'single', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: false },
+	{ id: 'srs', group: 'single', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: false },
+	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: false },
+	{ id: 'explorer', group: 'single', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: false },
+	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: false },
+	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: false },
+	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: false },
+	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
+	{ id: 'mimo_twr', group: 'mimo', title: 'MIMO TWR', summary: 'Recorded signals reproduced at several control points at once, from several shakers.', ready: false },
+	{ id: 'recorder', group: 'acquisition', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: false }
 ];
+
+/** The test types under each section of the chooser, in order. */
+export function typesIn(group: TestGroupId, types: readonly TestType[] = TEST_TYPES): TestType[] {
+	return types.filter((t) => t.group === group);
+}
 
 /** What the workspace shows. */
 export type AcquireView = 'chooser' | TestTypeId;
