@@ -70,7 +70,9 @@ def _cached(name: str, build: Callable[[], Any],
     if path.exists():
         try:
             return vd.load(path), True
-        except Exception as error:          # a stale or torn file: rebuild
+        # any failure to read a cache is a reason to rebuild it, and the
+        # reason is reported in the notes rather than swallowed
+        except Exception as error:  # noqa: BLE001
             notes.append(f'cache {path.name} could not be read ({error}); '
                          'rebuilt')
     built = build()
@@ -195,9 +197,9 @@ class ModalModel:
         out: dict[str, Any] = {
             'nodes': int(self.geometry.num_nodes),
             'nodes_drawn': int(self.node_rows.size),
-            'elements': int(len(self.geometry.elem_conn)),
-            'triangles': int(len(self.triangles)),
-            'lines': int(len(self.lines)),
+            'elements': len(self.geometry.elem_conn),
+            'triangles': len(self.triangles),
+            'lines': len(self.lines),
             'dofs': int(self.shapes.num_dofs),
             'modes_solved': int(self.shapes.num_shapes),
             'rigid_modes': int(np.sum(frequency == 0.0)),

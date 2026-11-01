@@ -186,7 +186,7 @@ def test_error_db_cells_against_judge(random_run):
 def test_modes_validate(model, request, validate):
     data = request.getfixturevalue(model)
     views = run('modal.modes', data)
-    wire, arrays = wire_views(views, validate)
+    _wire, arrays = wire_views(views, validate)
     (view,) = views
     assert view['normalization'] == 'mass'
     assert 'Mass-Normalized' in view['title']

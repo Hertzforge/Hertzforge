@@ -85,7 +85,7 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
     return out
 
 
-def row(label: str, value: float | int | str, unit: str | None,
+def row(label: str, value: float | str, unit: str | None,
         status: Status) -> dict[str, Any]:
     if isinstance(value, float) and not np.isfinite(value):
         raise ValueError(f'reading {label!r} is {value}; a value that was not '
