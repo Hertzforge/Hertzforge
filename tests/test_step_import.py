@@ -125,5 +125,5 @@ def test_without_the_kernel_the_refusal_says_how_to_reinstall_it(
 
     monkeypatch.setattr(builtins, '__import__', no_ocp)
     with pytest.raises(ValueError, match=r'No module named OCP.*pip install '
-                                         '--force-reinstall cadquery-ocp'):
+                                         '--force-reinstall cadquery-ocp-novtk'):
         import_file(path)

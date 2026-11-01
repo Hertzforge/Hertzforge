@@ -397,5 +397,5 @@ def test_without_the_kernel_the_volume_says_how_to_install_it(monkeypatch):
     block = solids.add_block(geometry, (0, 0, 0), (1, 1, 1))
     monkeypatch.setitem(sys.modules, 'OCP', None)
     with pytest.raises(ValueError,
-                       match='pip install --force-reinstall cadquery-ocp'):
+                       match='pip install --force-reinstall cadquery-ocp-novtk'):
         solids.volume(geometry, block)

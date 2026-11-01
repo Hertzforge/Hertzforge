@@ -39,8 +39,8 @@ DISTRIBUTION = {'PySide6': 'pyside6', 'netCDF4': 'netcdf4',
                 'dateutil': 'python-dateutil',
                 # the `vtk` wheel is what puts `vtkmodules` on the path
                 'vtkmodules': 'vtk',
-                # the STEP kernel's bindings ride the cadquery-ocp wheel
-                'OCP': 'cadquery-ocp',
+                # the STEP kernel's bindings ride the cadquery-ocp-novtk wheel
+                'OCP': 'cadquery-ocp-novtk',
                 # the Objective-C bridge the macOS updater speaks through
                 'objc': 'pyobjc-core'}
 
@@ -123,10 +123,10 @@ def test_the_cad_kernel_is_a_dependency_not_an_extra(monkeypatch):
 
     with open(ROOT / 'pyproject.toml', 'rb') as handle:
         project = tomllib.load(handle)['project']
-    assert 'cadquery-ocp' in project['dependencies']
+    assert 'cadquery-ocp-novtk' in project['dependencies']
     assert 'step' not in project.get('optional-dependencies', {})
     monkeypatch.setitem(sys.modules, 'OCP', None)
     with pytest.raises(ValueError, match='pip install --force-reinstall '
-                                         'cadquery-ocp') as refused:
+                                         'cadquery-ocp-novtk') as refused:
         solids.require_kernel()
     assert '[step]' not in str(refused.value)

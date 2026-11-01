@@ -1169,7 +1169,7 @@ def require_kernel():
         raise ValueError(
             'solids and STEP/IGES need the OpenCASCADE kernel, which did '
             f'not import ({failure}) — reinstall it with pip install '
-            '--force-reinstall cadquery-ocp') from None
+            '--force-reinstall cadquery-ocp-novtk') from None
     return OCP
 
 

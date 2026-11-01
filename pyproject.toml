@@ -28,8 +28,10 @@ dependencies = [
     # BSD-3-Clause
     "threadpoolctl",
     # Apache-2.0 bindings over the OpenCASCADE kernel (LGPL-2.1 with an
-    # exception), for STEP and IGES import
-    "cadquery-ocp",
+    # exception): the solids' booleans, areas, volumes and surfaces, and
+    # STEP and IGES import. The build without VTK: cadquery-ocp requires
+    # vtk (about 600 MB) and nothing here draws with it.
+    "cadquery-ocp-novtk",
 ]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [
