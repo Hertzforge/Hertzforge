@@ -4,6 +4,12 @@
 # only: no checkout, no fetch), otherwise from GitHub's archive of that
 # commit, which is how CI gets it.
 #
+# The data stays at this commit (0.1.0a81) while visualdynamics itself is
+# unpinned, on purpose: the fixtures are the fixed input, so a change in a
+# new release shows up as a change in the test results, never hidden by a
+# change in the files at the same time. Move COMMIT on purpose, in its own
+# pull request, when a fixture itself changes upstream.
+#
 #   python/scripts/fetch_data.sh            # from anywhere
 #   VD_REPO=/path/to/visualdynamics python/scripts/fetch_data.sh
 set -euo pipefail
