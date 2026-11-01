@@ -1,0 +1,72 @@
+# hertzforge-shock-host - the HOST-SIDE (Path B) classical-shock module, extracted
+# out of the Path-A classical-shock crate.
+#
+# WHY THIS CRATE EXISTS
+#
+# The Path-A crate depends on a private delegated backend (its delegated fire
+# path), and the dependency firewall whitelists it for exactly that reason. But
+# the daemon hosts (ShockHost / SrsHost in hertzforge-backendd) need the SERVICE -
+# the ladder, the tolerance pipeline, the report types - and hertzforge-backendd is
+# deliberately NOT on any backend's wrapper list: "a second front end did NOT
+# widen the firewall" is the whole point of lifting the service out. Linking the daemon
+# against the Path-A crate would have dragged a USB backend into the daemon's
+# graph and forced a new wrapper entry.
+#
+# So the hal-neutral 90% moved here and the Path-A crate re-exports it. The
+# split is BEHAVIORAL NO-OP - files were moved, not rewritten - and the proof is
+# that both crates' existing suites still pass unchanged.
+#
+# WHAT IS HERE
+#
+#   spec        the classical pulse library (shape/amplitude/duration + Path-B
+#               host-compensation synthesis via hertzforge_dsp::shock)
+#   tolerance   the three tolerance checks (amplitude envelope, dV, substitution)
+#   service     ClassicalShockService: config, the PulseFirer seam + the Path-B
+#               BackendPulseFirer, the train pacer, the report/event types
+#
+# WHAT IS NOT, and must never be added
+#
+# Anything naming a concrete backend. `hertzforge-hal` (the trait crate) is the
+# boundary; every concrete backend crate (`hertzforge-hal-ni`, `hertzforge-hal-sim`, the
+# private delegated backend) is banned here in production by deny.toml, and
+# adding one is what the planted-dep control on the extraction checks for. The
+# Path-A firer (`DelegatedPulseFirer`) stays in the Path-A crate for that reason.
+[package]
+name = "hertzforge-shock-host"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# Pulse generation, host compensation, SRS analysis, the kinematics the
+# tolerance checks integrate.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The shared shock run infrastructure (ladder, pulse store, train scheduler,
+# feasibility, the path seams) - consumed read-only.
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# The ABSTRACT backend trait the Path-B host firer drives, and HalError. This is
+# the boundary: a concrete backend below it is a firewall violation.
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The shared ARM GATE (`hertzforge_module_abi::arm_gate`) + StationClass: every
+# module's arm path runs the loop resolver, the abort-latency rule and the rate
+# policy through ONE function.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# ChannelTable for the fire path's configure step (validated before bus traffic).
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# Feasibility inputs for the service's pre-arm gate: ShakerRecord +
+# MovingMass; the report types pulse_feasibility reuses.
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
+# Per-pulse capture sink + the Snapshot envelope for the service.
+hertzforge-capture = { path = "../hertzforge-capture" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# TEST FIXTURE ONLY - `tests/service_sim.rs` closes the Path-B loop on the Sim
+# plant through the `BackendPulseFirer` seam. The service itself takes a finished
+# backend and names no concrete one anywhere in `src/`, which is what
+# `hertzforge-hal-sim/tests/no_sim_leak.rs` enforces (it reads `[dependencies]` only).
+# cargo-deny's ban graph does NOT make that distinction, so this crate also has to
+# appear on the hertzforge-hal-sim wrapper list in deny.toml.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

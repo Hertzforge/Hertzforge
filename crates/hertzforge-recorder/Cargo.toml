@@ -1,0 +1,37 @@
+[package]
+name = "hertzforge-recorder"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The Data Recorder module: acquisition config (acq.rs), trigger engine +
+# pre-trigger ring (trigger.rs), the recording writer bridge onto the testkit
+# CaptureSink plus the reader for the `telemetry.f32` / `capture.json` /
+# `recorder.json` run format (recording.rs), the analysis pipeline (analysis.rs:
+# decimation -> block assembly -> spectra / FRF / stats / integration, live +
+# offline region modes) on top of hertzforge-dsp, and the RecorderService (service/): the
+# monitor-only engine loop (SilentDrive + the synthetic-drive workaround), trigger
+# flow, recording lifecycle, and the status/report surfaces. The service adds the
+# hertzforge-engine / hertzforge-hal deps for the segment-run monitor loop. hertzforge-hal-sim is
+# DEV-ONLY: the service takes a `Box<dyn Backend>` from the station factory and
+# builds no plant of its own.
+[dependencies]
+hertzforge-capture = { path = "../hertzforge-capture" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-engine = { path = "../hertzforge-engine" }
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The shared ARM GATE (`hertzforge_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The service tests drive the recorder against an HERTZFORGE-SIM plant and
+# against scripted `hertzforge_hal::Backend` doubles. This was demoted out of
+# `[dependencies]`: production code names no concrete backend any more.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

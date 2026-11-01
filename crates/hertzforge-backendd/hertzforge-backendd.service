@@ -1,0 +1,36 @@
+# hertzforge-backendd - systemd unit (template).
+#
+# Install (as the operating user, no root needed for a user service):
+#   mkdir -p ~/.config/systemd/user
+#   cp hertzforge-backendd.service ~/.config/systemd/user/
+#   # edit ExecStart's binary + config paths below first
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hertzforge-backendd
+#   loginctl enable-linger $USER     # so it runs without a login session
+#
+# Stop = SIGTERM, which the daemon treats as --stop (controlled shutdown: the
+# advisory lock is released and any live run is safe-stopped through the same
+# path the controller-timeout uses). journalctl --user -u hertzforge-backendd for
+# the log the /tmp file used to carry.
+
+[Unit]
+Description=Hertzforge backend daemon (hertzforge-protocol over WebSocket; NI/Sim station host)
+Documentation=file://%h/dev/hertzforge/crates/hertzforge-backendd/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EDIT: the release binary + the config you copied from hertzforge-backendd.example.toml
+ExecStart=%h/.hertzforge-build/target-ni/release/hertzforge-backendd --config %h/.config/hertzforge/backendd.toml
+Restart=on-failure
+RestartSec=3
+# The daemon refuses a wildcard bind and a blank token at start; a config error
+# exits nonzero and lands here rather than looping:
+StartLimitBurst=4
+# DAQmx tasks are process-owned; nothing to clean beyond the process group.
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

@@ -24,7 +24,7 @@ pytestmark = pytest.mark.slow
 
 @pytest.fixture(scope='module')
 def builders():
-    return importlib.import_module('generate_plate_projects')
+    return importlib.import_module('testdata.generate_plate_projects')
 
 
 @pytest.mark.parametrize('name,project_type', [

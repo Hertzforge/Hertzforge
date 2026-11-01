@@ -14,12 +14,12 @@ name = "sds-control"
 path = "src/main.rs"
 
 [dependencies]
-eigen-breakpoints.workspace = true
-eigen-channel-table.workspace = true
-eigen-hal.workspace = true
-eigen-hal-sim.workspace = true
-eigen-module-abi.workspace = true
-eigen-random.workspace = true
+hertzforge-breakpoints.workspace = true
+hertzforge-channel-table.workspace = true
+hertzforge-hal.workspace = true
+hertzforge-hal-sim.workspace = true
+hertzforge-module-abi.workspace = true
+hertzforge-random.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true

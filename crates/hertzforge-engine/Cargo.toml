@@ -1,0 +1,22 @@
+[package]
+name = "hertzforge-engine"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-capture = { path = "../hertzforge-capture" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+
+[dev-dependencies]
+# The 400-channel SCALE gate drives the engine against
+# the REAL Sim plant, because the point of that gate is to prove the engine holds
+# up against a backend that genuinely synthesizes 400 channels per block - a
+# scripted mock would only prove the script could be allocated. DEV-only, and
+# deliberately NOT used by the engine's SAFETY tests: those keep the in-crate
+# `test_backend` mock so a safety behavior is never co-confirmed against the
+# Sim's own physics.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

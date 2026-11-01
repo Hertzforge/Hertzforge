@@ -2,8 +2,8 @@
 
 Hertzforge will be one toolset for structural dynamics testing, from
 acquiring the data to analyzing it. It is being built by merging two
-existing projects: Eigen, Kevin Cross's data acquisition software, and
-Visual Dynamics, Brandon Zwink's structural dynamics toolset
+existing projects: Kevin Cross's data acquisition software, and Visual
+Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
 The `hertzforge` package on PyPI (0.0.1) does not contain that code yet.
@@ -28,15 +28,16 @@ layout is a mechanical change that comes next.
 | `src/hertzforge/` | Python | The `hertzforge` command and package published to PyPI |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
 | `python/` | Python 3.13 | The analysis service. Wraps the `visualdynamics` package unchanged |
-| `crates/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
+| `crates/sds-control/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
+| `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
 | `scripts/` | shell | Developer entry points |
 | `site/` | HTML | The hertzforge.com page, deployed by `.github/workflows/site.yml` when it changes on `main` |
 
-The control service builds against the controller's crates, which are not
-in this repository yet. Until they are imported, it builds only beside a
-checkout of the controller workspace at `../eigen`.
+The control service and the controller crates are one Cargo workspace
+(`cargo test --workspace`). The NI backend loads the NI-DAQmx driver at run
+time, so building and testing need no NI software installed.
 
 ### Layer Rules
 

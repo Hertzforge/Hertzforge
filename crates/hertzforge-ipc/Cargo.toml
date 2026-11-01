@@ -1,0 +1,8 @@
+[package]
+name = "hertzforge-ipc"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
