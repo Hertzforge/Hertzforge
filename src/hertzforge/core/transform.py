@@ -83,7 +83,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .data import DataArray
     from .shapes import ShapeSet
 
-# The design is PLAN.md, "The virtual point arc", phase 2. No cross
+# The design is Visual Dynamics' PLAN.md, "The virtual point arc", phase 2. No cross
 # terms are ever assumed (Brandon, 2026-09-04: no assumptions about
 # cross terms; the user defines or computes them when they are needed).
 

@@ -416,7 +416,7 @@ def test_a_project_file_brings_its_index(tmp_path):
         'run2.vdyn', 'run1.vdyn', 'first.vdyn']
     # the clash renamed the imported time history, and its entry follows
     assert second.data_index[1].objects == ('Time History (2)',)
-    assert second.data_index[2].holds == 'Visual Dynamics project: 1 objects'
+    assert second.data_index[2].holds == 'Hertzforge project: 1 objects'
     assert data_path == second.data_index[1].path
 
 
@@ -576,7 +576,7 @@ def test_on_the_index_closes_the_report(run):
     assert check['html'].endswith('1 of 1 file matches the checksum '
                                   'indexed.</p>')
     assert analysis['html'] == (
-        f'<p class="index-analysis">Analysis: Visual Dynamics '
+        f'<p class="index-analysis">Analysis: Hertzforge '
         f'{hertzforge.__version__}. The project has not been saved to '
         'a file, so the analysis is not yet part of the record.</p>')
     assert recipe['rows'][0] == ['Time History PSDs', 'compute_psds',

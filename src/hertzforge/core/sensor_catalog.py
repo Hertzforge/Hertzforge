@@ -1,4 +1,4 @@
-"""The sensors Visual Dynamics can draw by model: simplified bodies built
+"""The sensors Hertzforge can draw by model: simplified bodies built
 from each outline drawing's dimensions.
 
 A body is described in its own frame. For a triaxial accelerometer the

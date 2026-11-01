@@ -1,6 +1,6 @@
 """The exporter registry.
 
-Most formats Visual Dynamics can read, it can also write (the
+Most formats Hertzforge can read, it can also write (the
 exceptions are listed in docs/export.md), so that data read here can be
 passed on to the next tool in the same format. Exporters are registered
 the same way importers are, and each says which objects it can write.
@@ -40,7 +40,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Exporter:
-    """One format Visual Dynamics can write.
+    """One format Hertzforge can write.
 
     `handles(obj)` says whether this exporter can write that object,
     which is how the Export menu lists only the formats that apply,

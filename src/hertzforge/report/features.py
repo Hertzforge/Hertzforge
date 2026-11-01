@@ -265,8 +265,8 @@ class Preset:
 #: that are not built yet: applying one enables what is available and
 #: says what it skipped.
 PRESETS: dict[str, Preset] = {preset.key: preset for preset in (
-    Preset('default', 'Visual Dynamics default',
-           'No features: the report as Visual Dynamics writes it.', ()),
+    Preset('default', 'Hertzforge default',
+           'No features: the report as Hertzforge writes it.', ()),
     Preset('test_report', 'Test report',
            'What a report for a quality signer and a customer needs.',
            ('skeleton_sections', 'test_requirement', 'findings',
@@ -346,7 +346,7 @@ def enabled(report: Any) -> tuple[str, ...]:
 
 def defaults() -> tuple[str, ...]:
     """The features a new report starts with: those whose `default` is
-    True. None are, so a new report starts as Visual Dynamics writes it."""
+    True. None are, so a new report starts as Hertzforge writes it."""
     return tuple(key for key, feature in FEATURES.items()
                  if feature.default and feature.available)
 

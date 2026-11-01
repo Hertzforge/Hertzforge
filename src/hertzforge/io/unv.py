@@ -16,7 +16,7 @@ Datasets read:
   drawing). Each traceline becomes one element group of two-node line
   elements, with one run for each stretch between pen-ups.
 - 2412, elements. The FE descriptor codes are the element type codes
-  Visual Dynamics uses; beam descriptors have an extra orientation
+  Hertzforge uses; beam descriptors have an extra orientation
   record before the nodes.
 - 55, mode shapes: normal modes (analysis type 2) or complex modes
   (type 3), not both in one file.

@@ -26,7 +26,7 @@ is mounted on. A wrong sign in the table shows in the drawing: a
 triax's lettered face, or a uniaxial's arrow, points the wrong way.
 """
 
-# Brandon, 2026-10-26 and 2026-10-27 (PLAN.md, "Sensors drawn on the
+# Brandon, 2026-10-26 and 2026-10-27 (Visual Dynamics' PLAN.md, "Sensors drawn on the
 # geometry"): the table decides the orientation; the node is the body's
 # center (the lines through the centers of a triax's X, Y and Z faces
 # cross at it, and a uniaxial's axis runs through it), not the base at

@@ -115,7 +115,7 @@ def test_one_renderer_draws_every_figure(tmp_path):
     assert a == (tmp_path / 'b.js').read_text(encoding='utf-8')
     assert b'\r\n' not in (tmp_path / 'a.js').read_bytes(), \
         'the same bytes on every platform'
-    assert 'window.VisualDynamicsFigure' in a
+    assert 'window.HertzforgeFigure' in a
     assert f'const FORMAT = {page.FIGURE_FORMAT};' in a
     assert hertzforge.__version__ in a
     assert "getElementById('data')" not in a and 'document.body' not in a

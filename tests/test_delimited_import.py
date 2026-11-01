@@ -363,7 +363,7 @@ def test_a_header_unit_that_cannot_be_declared_is_noted_and_left_raw(tmp_path):
     assert ("run.csv: Accel: the unit 'Gs' in the header reads as a time, which "
             "no channel of a time history measures; left undeclared, holding "
             "the file's numbers") in notes
-    assert any("'bananas' in the header is not a unit Visual Dynamics reads" in n
+    assert any("'bananas' in the header is not a unit Hertzforge reads" in n
                for n in notes)
 
 

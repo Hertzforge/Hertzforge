@@ -1,4 +1,4 @@
-"""The demonstration airframe: a quadcopter, built with Visual Dynamics.
+"""The demonstration airframe: a quadcopter, built with Hertzforge.
 
 Every drone fixture is made from this model: the truth shape set, the
 reduced test geometry, and the system the Rattlesnake controller runs

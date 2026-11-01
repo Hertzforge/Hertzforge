@@ -7,7 +7,7 @@ they cannot tell "nothing happened" from "nobody wrote it down". With
 the feature on, the report is laid out on the twelve sections of
 `SECTIONS` and closed with the end mark, whatever the project holds.
 
-What Visual Dynamics generates falls under the sections it answers
+What Hertzforge generates falls under the sections it answers
 (`place`): the pass/fail box and the opening description under the
 Summary, the geometry, the photographs and the channel table under
 Instrumentation, the closing reading guide under the Conclusion, and

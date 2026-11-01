@@ -49,7 +49,7 @@ def unit_problem(unit: str, quantity: str | None = None) -> str | None:
     """
     dimension = dimension_of(unit)
     if dimension is None:
-        return 'is not a unit Visual Dynamics reads'
+        return 'is not a unit Hertzforge reads'
     if dimension not in CHANNEL_QUANTITIES:
         return (f'reads as {_a(shown_dimension(dimension))}, which no '
                 'channel of a time history measures')

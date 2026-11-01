@@ -50,7 +50,7 @@ import numpy as np
 # accelerometers placed first, no sensor on a block's interior, and an
 # experimental geometry whose local systems have +Z along the surface
 # normal (the standard convention) and +X in the plane of a system axis
-# where possible. PLAN.md, "Plan Instrumentation".
+# where possible. Visual Dynamics' PLAN.md, "Plan Instrumentation".
 
 #: neighboring faces whose outward normals differ by more than this, in
 #: degrees, are on separate surfaces: a block's edge is 90, a

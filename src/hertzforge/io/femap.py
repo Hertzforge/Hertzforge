@@ -51,7 +51,7 @@ import numpy as np
 
 from .sniffing import text_head
 
-# Phase 3 of the FEM interchange work (PLAN.md). The layouts were checked
+# Phase 3 of the FEM interchange work (Visual Dynamics' PLAN.md). The layouts were checked
 # against the two real files on 2026-08-21, written from those files and
 # no other tool's source. Writing waits until someone needs it.
 

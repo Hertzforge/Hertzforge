@@ -26,7 +26,7 @@ each channel of its own channel table, which for an accelerometer is
 usually g, so the file holds what the plot shows. Reading takes the unit
 as a parameter.
 
-The file also has `dof`, the channel names as Visual Dynamics writes
+The file also has `dof`, the channel names as Hertzforge writes
 them, which the controller ignores and this reader prefers.
 `coordinate` is written only when every channel is a node and a
 direction, since a modal coordinate (`M3`) has neither; the names are
@@ -50,7 +50,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # out as something Rattlesnake can read; and most random tests are run on
 # autospectra alone, which is why `held` exists.
 
-#: the band arrays the controller reads, by the name Visual Dynamics
+#: the band arrays the controller reads, by the name Hertzforge
 #: keeps them under
 BANDS = ('warning_lower', 'warning_upper', 'abort_lower', 'abort_upper')
 
@@ -155,7 +155,7 @@ def load(path: str | os.PathLike,
     controller itself writes, is matched to its channel table by order
     alone, so its channels are named in that order, '1', '2' and so on,
     as the sine specification reader names them and as a run through a
-    response transformation records them. A file with `held` was written by Visual Dynamics, and
+    response transformation records them. A file with `held` was written by Hertzforge or Visual Dynamics, and
     the mask says which cross terms were held: those come back, zeros
     included, and the rest are left out. In a file without `held`, the
     cross terms are kept only when at least one off-diagonal value is

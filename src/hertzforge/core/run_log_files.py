@@ -77,7 +77,7 @@ from .progress import Cancelled
 from .run_log import SUFFIX, Entry, FileRef, RunLog
 
 # One module for watching, describing, accepting and indexing, all on
-# plain values: the front end's worker (gui/run_log_watch.py) only runs
+# plain values: the front end's worker only runs
 # `ControllerWatch` on its thread and carries the proposals back.
 
 #: what the data index records as having added the log's entries

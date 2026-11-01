@@ -169,7 +169,7 @@ def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), newer)
     with h5py.File(newer, 'r+') as f:
         f.attrs['visualdynamics_schema'] = native.SCHEMA_VERSION + 1
-    with pytest.raises(ValueError, match='newer Visual Dynamics'):
+    with pytest.raises(ValueError, match='newer Hertzforge'):
         native.load(newer)
 
 

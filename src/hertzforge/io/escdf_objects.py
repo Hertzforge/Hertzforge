@@ -1,5 +1,5 @@
 """Write a project to an ESCDF file and read one back, with each object
-written both as the standard's own type and whole, as Visual Dynamics
+written both as the standard's own type and whole, as Hertzforge
 keeps it.
 
 The standard has types for what a test produces: `geometry`,
@@ -401,8 +401,8 @@ def _attach(dataset: escdf.Dataset, named: list[tuple[str, np.ndarray]],
 def _note(kind: str) -> str:
     from .. import __version__
 
-    return (f'Written by Visual Dynamics {__version__}. The attachment '
-            f'{WHOLE} holds this {kind} as Visual Dynamics keeps it, '
+    return (f'Written by Hertzforge {__version__}. The attachment '
+            f'{WHOLE} holds this {kind} as Hertzforge keeps it, '
             'every field included; the properties beside it are the same '
             'object as the standard defines it.')
 
@@ -495,7 +495,7 @@ def to_file(project: Project, created_by: str | None = None,
     # the project's own record: what the standard has no field for
     record = escdf.Dataset(PROJECT_RECORD, 'parameter_set', project.name)
     record.values['notes'] = np.array([(
-        'Visual Dynamics project record: attachments hold the object groups, '
+        'Hertzforge project record: attachments hold the object groups, '
         'the provenance of derived objects and the project settings, as JSON.')],
         dtype=object)
     settings = {'name': project.name, 'project_type': project.project_type,

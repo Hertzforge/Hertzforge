@@ -526,7 +526,7 @@ def test_a_build_reading_only_schema_1_refuses_a_file_with_predictions(
     native.save(held, path)
     assert len(native.load(path)) == 1
     monkeypatch.setattr(native, 'SCHEMA_VERSION', 1)
-    with pytest.raises(ValueError, match='newer Visual Dynamics.*schema 2.*'
+    with pytest.raises(ValueError, match='newer Hertzforge.*schema 2.*'
                        'Update to open it'):
         native.load(path)
     # and a report reading predictions, saved alone, is stamped 2 too

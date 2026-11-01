@@ -18,7 +18,7 @@ read is skipped and named the same way, and the rest is read.
 **Versions.** `FORMAT_VERSION` is the newest version this build reads,
 and the one it writes. Each version has its own reader, so a later
 build reads every earlier version, and a file from a newer version is
-refused with a message to update. While Visual Dynamics is an alpha
+refused with a message to update. While Hertzforge is an alpha
 the format may still change; from the first release that is not an
 alpha, an older file always opens.
 
@@ -1216,7 +1216,7 @@ class RunLog:
             raise RunLogError(f'{path}: its header has no format version')
         if version > FORMAT_VERSION:
             raise RunLogError(
-                f'{path} was written by a newer Visual Dynamics (run log '
+                f'{path} was written by a newer Hertzforge (run log '
                 f'format {version}; this build reads up to {FORMAT_VERSION}). '
                 'Update to open it.')
         if version not in _READERS:

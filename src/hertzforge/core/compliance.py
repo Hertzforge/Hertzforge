@@ -500,7 +500,7 @@ def cells(specification: Specification, measured: DataArray,
         'span' (the whole bin it came from, judged or not).
     """
     # one rule at the ends and in the middle alike (Brandon,
-    # 2026-09-19; PLAN.md "A comparison is an area against an area")
+    # 2026-09-19; Visual Dynamics' PLAN.md "A comparison is an area against an area")
     if comparable(specification, measured) is not None:
         return []
     asked = coverage(specification, spec_record)

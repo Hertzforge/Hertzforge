@@ -56,7 +56,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .geometry import Geometry
     from .shapes import ShapeSet
 
-# The virtual point workflow these shapes start is described in PLAN.md,
+# The virtual point workflow these shapes start is described in Visual Dynamics' PLAN.md,
 # "The virtual point arc".
 
 #: the order the six inertia terms are stated in, and the tensor

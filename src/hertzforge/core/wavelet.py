@@ -17,7 +17,7 @@ to a band around a frequency that follows from `s`, so a scalogram has
 three quantities in it (time, frequency and magnitude), and scale is
 another name for the frequency axis. This module works in Hz throughout
 and converts to scale internally, because every other frequency axis in
-Visual Dynamics is in Hz and a scale means nothing without the
+Hertzforge is in Hz and a scale means nothing without the
 wavelet's center frequency beside it.
 
 The wavelet is the Morlet, the standard choice for vibration work: a

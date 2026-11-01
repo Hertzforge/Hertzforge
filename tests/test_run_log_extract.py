@@ -591,7 +591,7 @@ def test_a_build_reading_schema_2_refuses_a_file_with_an_extract(
     project.save(tmp_path / 'held.vdyn')
     monkeypatch.setattr(native, 'SCHEMA_VERSION', 2)
     with pytest.raises(ValueError, match=(
-            r'held\.vdyn was written by a newer Visual Dynamics \(schema 3; '
+            r'held\.vdyn was written by a newer Hertzforge \(schema 3; '
             r'this build reads up to 2\)\. Update to open it\.')):
         Project.open(tmp_path / 'held.vdyn')
 

@@ -51,7 +51,7 @@ import numpy as np
 from .data import NAMED_CLASSES, Bounded, Spectrum, _even_steps
 from .progress import Ticker
 
-# Phase B of the sine sweep arc (PLAN.md). The sweep law above was pinned
+# Phase B of the sine sweep arc (Visual Dynamics' PLAN.md). The sweep law above was pinned
 # against the Phase A fixture's records rather than assumed from
 # documentation, the log rate's unit included, which only the measurement
 # settled. The controller reports a rate of the wrong sign as a negative

@@ -652,7 +652,7 @@ def test_a_log_from_a_newer_version_is_refused_with_a_message_to_update(
     lines = lines_of(path)
     lines[0] = lines[0].replace(b'"version": 1', b'"version": 2')
     write_lines(path, lines)
-    with pytest.raises(RunLogError, match='newer Visual Dynamics.*format 2; '
+    with pytest.raises(RunLogError, match='newer Hertzforge.*format 2; '
                        'this build reads up to 1.*Update'):
         RunLog.read(path)
     lines[0] = lines[0].replace(b'"version": 2', b'"version": 0')

@@ -190,7 +190,7 @@ _DIMENSIONALITY = {
     'strain': '',
     'dimensionless': '',
     # Rotations about a point, for the virtual point transformation
-    # (PLAN.md "The virtual point arc"): a unit rigid-body rotation
+    # (Visual Dynamics' PLAN.md "The virtual point arc"): a unit rigid-body rotation
     # shape is length per radian, so a response carried through it
     # comes out per radian. pint holds the radian dimensionless, which
     # is why an angle looks like a strain and an angular velocity like

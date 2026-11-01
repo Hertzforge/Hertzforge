@@ -40,7 +40,7 @@ The pass/fail box reads from a requirement bound to the same
 specification and run: MET, NOT MET or NOT JUDGED, how many criteria
 were met against which document, the criteria not met and not judged,
 and the decision rule. A box with no requirement bound to its pair
-keeps its reading and is labeled a screening by the Visual Dynamics
+keeps its reading and is labeled a screening by the Hertzforge
 default rule, so it is never read as a statement of conformity. Both
 only while the feature is on; with it off a requirement block is not
 drawn and the box is the box it was.
@@ -81,7 +81,7 @@ ROLES_OFF = ('not judged: read with the report feature Cross-axis and limit '
 UNCERTAINTY = 'Control-channel uncertainty against one third of the tolerance'
 
 #: what a box with no requirement bound is labeled
-SCREENING = 'Screening (Visual Dynamics default rule)'
+SCREENING = 'Screening (Hertzforge default rule)'
 
 #: the Finding cell of a row whose offered fact no finding holds yet
 UNENTERED = 'none entered'

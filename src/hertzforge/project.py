@@ -704,8 +704,7 @@ class Project(dict):
 
         `options` are passed to the format's reader, for example an
         Exodus file's `steps='time'` and `nodes=[...]` or a geometry's
-        `length_unit='m'`, so a script can give what the app asks for in
-        a dialog.
+        `length_unit='m'`, so a script can give what the app asks for.
 
         Parameters
         ----------
@@ -783,12 +782,12 @@ class Project(dict):
         from .io import format_of
 
         if isinstance(result, Project):
-            said = f'Visual Dynamics project: {len(result)} objects'
+            said = f'Hertzforge project: {len(result)} objects'
         else:
             said = holds(result if isinstance(result, dict)
                          else {'': result})
         return self.data_index.add(
-            path, said or 'nothing Visual Dynamics reads',
+            path, said or 'nothing Hertzforge reads',
             format=format_of(path), objects=added, checksum=checksum)
 
     def remove(self, *names: str) -> None:
@@ -5701,7 +5700,7 @@ class Project(dict):
 
         A report feature is an addition to the generated report, off
         until it is enabled; with none enabled the report is exactly
-        what Visual Dynamics writes otherwise. The features, their
+        what Hertzforge writes otherwise. The features, their
         groups and what each one needs are listed in
         `hertzforge.report.features.FEATURES`, and the presets in
         `PRESETS`. The choice is saved with the report and in a
@@ -9539,7 +9538,9 @@ def system_id_run(run: str | os.PathLike, *,
 
 
 class _Ask:
-    """The value that means "open a dialog and ask me".
+    """The value that meant "open a dialog and ask me" in Visual Dynamics'
+    app. Kept so a script written for it reads a clear refusal rather
+    than a type error; the Python API opens no dialog.
 
     A sentinel rather than None, because None already means something
     on every one of these keywords: no geometry, no photographs, the
@@ -9553,7 +9554,7 @@ class _Ask:
         return False
 
 
-#: pass this where a path goes to be asked for it instead
+#: a path left to be asked for, which the Python API refuses
 ASK = _Ask()
 
 #: what `ASK` answers: it opened a file dialog in Visual Dynamics' Qt app,
@@ -9610,18 +9611,14 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
                       work_up: Any, marking: str | None = None) -> Any:
     """What every one-call report function does around its workup.
 
-    The asking, the batch and the destination, in one place because
-    they are one rule (PRINCIPLES.md, 9): a run left out is asked for,
-    several may be chosen or given as a list, the geometry is asked
-    for only when the run was, and `path` may be a folder each report
-    lands in under its run's own name.
+    The run, the batch and the destination, in one place because they
+    are one rule (PRINCIPLES.md, 9): a run left out or `ASK` is refused,
+    several may be given as a list, and `path` may be a folder each
+    report lands in under its run's own name.
     """
     runs, many = _runs_of(run)
-    # the geometry is asked for only when the run was: a script that
-    # names its run and leaves the geometry out means "no geometry",
-    # and has meant it since these functions existed. `ASK` says so on
-    # purpose either way. Asked once, before the loop: a campaign is a
-    # folder of runs on one article (Brandon, 2026-09-22).
+    # a script that names its run and leaves the geometry out means "no
+    # geometry", and has meant it since these functions existed
     if geometry is ASK:
         raise ValueError(_NO_DIALOG.format(what='geometry'))
     if len(runs) > 1 and path is not None and not (
@@ -9770,11 +9767,10 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     """Read a Rattlesnake sine sweep run and write an HTML report.
 
         hertzforge.sine_report('sweep.nc4', 'report.html')
-        hertzforge.sine_report()                   # ask for both
         hertzforge.sine_report('sweep.nc4', 'reports/')
 
-    This is `random_vibration_report` for a sweep: a run left out is
-    asked for, the batch and folder rules are the same, the project is
+    This is `random_vibration_report` for a sweep: the batch and folder
+    rules are the same, the project is
     worked up by `sine_run`, and the Sine Sweep report is written as one
     self-contained HTML file. Returns the path written, or the list of
     them when several runs were chosen. `marking` is the banner across
@@ -9783,8 +9779,9 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `hertzforge.ASK`
-        The controller's `.nc4`, or a list of them for a batch. When
-        omitted, a file dialog asks for as many as wanted.
+        The controller's `.nc4`, or a list of them for a batch. Required:
+        left out, or `ASK`, it is refused with a message to name it, since
+        the Python API opens no file dialog.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
         in a separator) the report is written into under the run's own
@@ -9794,9 +9791,8 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
         Import only the last `last` seconds of the run; a shorter run is
         imported whole.
     geometry : str, os.PathLike, `hertzforge.ASK` or None, optional
-        A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, with Cancel meaning
-        none; `ASK` asks even when the run was given.
+        A geometry file to import and link to the run. None, the default,
+        means no geometry; `ASK` is refused, as for the run.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     unit_system : UnitSystem, optional
@@ -9881,7 +9877,6 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     """Read a Rattlesnake run and write the report its type calls for.
 
         hertzforge.run_report('run.nc4', 'report.html')
-        hertzforge.run_report()               # ask for the runs and the geometry
         hertzforge.run_report('run.nc4', 'reports/')
         hertzforge.run_report(['a.nc4', 'b.nc4'], 'reports/',
                                   geometry='article.stp')
@@ -9917,8 +9912,9 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `hertzforge.ASK`
-        The controller's `.nc4`, or a list of them for a batch. When
-        omitted, a file dialog asks for as many as wanted.
+        The controller's `.nc4`, or a list of them for a batch. Required:
+        left out, or `ASK`, it is refused with a message to name it, since
+        the Python API opens no file dialog.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
         in a separator) the report is written into under the run's own
@@ -9936,9 +9932,8 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
         ValueError. A run it leaves out gets the report its file
         records (`report_kind`).
     geometry : str, os.PathLike, `hertzforge.ASK` or None, optional
-        A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, with Cancel meaning
-        none; `ASK` asks even when the run was given.
+        A geometry file to import and link to the run. None, the default,
+        means no geometry; `ASK` is refused, as for the run.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     per_octave : int, optional
@@ -10035,7 +10030,6 @@ def system_id_report(run: Any = ASK,
     report.
 
         hertzforge.system_id_report('sysid.nc4', 'sysid.html')
-        hertzforge.system_id_report()            # ask for both
 
     This is `system_id_run` followed by the System ID report: the
     measured FRFs, the coherence map, and the signal-to-noise ratio of
@@ -10043,18 +10037,16 @@ def system_id_report(run: Any = ASK,
     falls to zero decibels, the measurement is of the ambient noise,
     not of the structure.
 
-    Asking, batches and folders work as in `random_vibration_report`.
-    When the run is left out it is asked for, and as many runs may be
-    chosen as there are reports wanted; the geometry is asked for once
-    for the whole batch when the run was asked for, with Cancel meaning
-    none; `hertzforge.ASK` forces either question; and `path` may
-    be the file to write or the folder to write into.
+    Batches and folders work as in `random_vibration_report`: a list
+    of runs writes one report each, and `path` may be the file to write
+    or the folder to write into.
 
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `hertzforge.ASK`
-        The controller's `.nc4`, or a list of them for a batch. When
-        omitted, a file dialog asks for as many as wanted.
+        The controller's `.nc4`, or a list of them for a batch. Required:
+        left out, or `ASK`, it is refused with a message to name it, since
+        the Python API opens no file dialog.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
         in a separator) the report is written into under the run's own
@@ -10064,9 +10056,8 @@ def system_id_report(run: Any = ASK,
         Import only the last `last` seconds of the run; a shorter run is
         imported whole.
     geometry : str, os.PathLike, `hertzforge.ASK` or None, optional
-        A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, with Cancel meaning
-        none; `ASK` asks even when the run was given.
+        A geometry file to import and link to the run. None, the default,
+        means no geometry; `ASK` is refused, as for the run.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     unit_system : UnitSystem, optional
@@ -10103,16 +10094,13 @@ def random_vibration_report(run: Any = ASK,
         hertzforge.random_vibration_report(
             'run.nc4', 'report.html', last=100.0,
             geometry='article.stp', photos='setup_photos/')
-        hertzforge.random_vibration_report()          # ask for both
         hertzforge.random_vibration_report('run.nc4', 'reports/')
 
-    Called with no run, it opens a file dialog and takes as many runs as
-    are chosen, writes one report for each and returns the list. A run
-    chosen that way is asked about its geometry too, with Cancel meaning
-    none. `hertzforge.ASK` in either place forces the question, so a
-    script with a run in hand can still be asked for the geometry. A
-    run given without a `geometry` argument means no geometry, and no
-    dialog opens.
+    Given a list of runs, it writes one report for each and returns the
+    list. A run given without a `geometry` argument means no geometry.
+    The Python API opens no file dialog, so a run left out, or `ASK` in
+    either place, is refused with a message to name the file; in the
+    app the shell asks.
 
     `path` may be the file to write, or a folder the report is written
     into under the run's own name with an `.html` extension. Without a
@@ -10135,8 +10123,9 @@ def random_vibration_report(run: Any = ASK,
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `hertzforge.ASK`
-        The controller's `.nc4`, or a list of them for a batch. When
-        omitted, a file dialog asks for as many as wanted.
+        The controller's `.nc4`, or a list of them for a batch. Required:
+        left out, or `ASK`, it is refused with a message to name it, since
+        the Python API opens no file dialog.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
         in a separator) the report is written into under the run's own
@@ -10146,9 +10135,8 @@ def random_vibration_report(run: Any = ASK,
         Import only the last `last` seconds of the run; a shorter run is
         imported whole.
     geometry : str, os.PathLike, `hertzforge.ASK` or None, optional
-        A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, with Cancel meaning
-        none; `ASK` asks even when the run was given.
+        A geometry file to import and link to the run. None, the default,
+        means no geometry; `ASK` is refused, as for the run.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     per_octave : int, optional

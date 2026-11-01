@@ -42,7 +42,7 @@ import numpy as np
 
 from .sniffing import text_head
 
-# Phase 2 of the FEM interchange work (PLAN.md). The complex layout is to be
+# Phase 2 of the FEM interchange work (Visual Dynamics' PLAN.md). The complex layout is to be
 # sampled and added when a real complex punch file arrives.
 
 _COMPONENTS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')

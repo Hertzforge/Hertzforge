@@ -742,7 +742,7 @@ def takes_shapes(block: Mapping[str, Any]) -> bool:
 # 2026-09-24). Until then a mixed run took the random type and carried
 # the sine half beside it. It made one combined report until
 # 2026-10-05, and makes two since: a random report and a sine report,
-# each read the way its own test is (PLAN.md, "Random and sine: two
+# each read the way its own test is (Visual Dynamics' PLAN.md, "Random and sine: two
 # reports").
 PROJECT_TYPES = ('Modal Test', 'Random Vibration', 'Transient', 'Shock',
                  'Sine Sweep', 'Random and Sine', 'System ID')

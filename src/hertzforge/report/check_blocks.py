@@ -1,4 +1,4 @@
-"""Check blocks: the checks Visual Dynamics reads, carried in the report
+"""Check blocks: the checks Hertzforge reads, carried in the report
 (report feature `check_blocks`).
 
 The app reads a record or a spectrum in ways a test report has to carry:

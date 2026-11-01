@@ -4087,11 +4087,11 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
 
         <div id="spec"></div>
         <script src="hertzforge-figure.js"></script>
-        <script src="page.js"></script>   // VisualDynamicsFigure.load(
+        <script src="page.js"></script>   // HertzforgeFigure.load(
                                           //   element, 'spec.json')
 
     So a page whose Content-Security-Policy allows no inline script and
-    no frames can still show the figure. `VisualDynamicsFigure.mount(
+    no frames can still show the figure. `HertzforgeFigure.mount(
     element, data, options)` draws data already fetched, and `load(
     element, url, options)` fetches it first; with ``{pageScroll:
     true}`` the figure leaves the wheel and a vertical swipe to the

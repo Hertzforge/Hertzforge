@@ -1140,7 +1140,7 @@ def save(history: Any, path: str | os.PathLike, unit_system: Any = None,
     except (ValueError, AttributeError):
         pass
     with open(path, 'w', newline='', encoding='utf-8') as f:
-        f.write(f'# Visual Dynamics time history: {history.num_records} records, '
+        f.write(f'# Hertzforge time history: {history.num_records} records, '
                 f'{len(history.abscissa)} samples{rate}\n')
         writer = csv.writer(f, lineterminator='\n')
         writer.writerow(header)

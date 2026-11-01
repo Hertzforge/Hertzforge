@@ -50,7 +50,7 @@ from .sep005 import from_sep005
 
 @dataclass(frozen=True)
 class Importer:
-    """One format Visual Dynamics can read.
+    """One format Hertzforge can read.
 
     `sniff(path)` says whether a file is in this format, from its
     content where the content identifies the format, and `load(path)`
@@ -99,7 +99,7 @@ def register_importer(name: str, description: str, sniff: Callable,
 
 
 def importers() -> list[Importer]:
-    """Every format Visual Dynamics can read, in the order they are
+    """Every format Hertzforge can read, in the order they are
     tried."""
     return list(_IMPORTERS)
 
@@ -145,7 +145,7 @@ _DOCUMENT_FORMATS = {
 
 
 def known_format(path: str | os.PathLike) -> str | None:
-    """The name of a file's format when Visual Dynamics knows it, or
+    """The name of a file's format when Hertzforge knows it, or
     None.
 
     Known are a Visual Dynamics file, a document the record carries
@@ -248,7 +248,7 @@ def identify_runs(path: str, result: Any) -> Any:
 
 def import_file(path: str | os.PathLike, format: str | None = None,
                 progress: Any | None = None, **kwargs: Any) -> Any:
-    """Import a file, returning the Visual Dynamics object it contains.
+    """Import a file, returning the Hertzforge object it contains.
 
     Units may be declared here (for example `length_unit='m'`) for
     sources that do not record them; without a declaration the object

@@ -1,6 +1,6 @@
 """Beams, plates and solids, and the eigensolution they give.
 
-Visual Dynamics is an analysis toolset, and this module is the smallest
+Hertzforge is an analysis toolset, and this module is the smallest
 modeling capability that produces something worth analyzing. It has
 three-dimensional two-node beams; flat-shell plates, as four-node
 rectangles (MITC4) and three-node triangles (MITC3); solids, as
@@ -44,7 +44,7 @@ order of mode density and the mode families a shape has, and it is not
 shell theory.
 
 Everything here is SI, because the mass and stiffness matrices are the
-one place in Visual Dynamics where several dimensions have to be
+one place in Hertzforge where several dimensions have to be
 consistent with each other at once. A length in millimeters beside a
 modulus in pascals is not wrong in any single entry; it is wrong only in
 the answer. The objects that come out (`Geometry`, `ShapeSet`) carry

@@ -3,7 +3,7 @@
 The format is a NumPy .npz with two entries:
 
 - 'function_type': a scalar int, the universal file dataset 58 function
-  type code, which is the vocabulary Visual Dynamics uses (1 time
+  type code, which is the vocabulary Hertzforge uses (1 time
   response, 4 FRF, 6 coherence, 9 PSD, 12 spectrum and so on).
 - 'data': a structured array of records with the fields 'abscissa'
   (n,), 'ordinate' (n,), 'comment1' to 'comment5', and 'coordinate',

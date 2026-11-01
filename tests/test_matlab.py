@@ -262,7 +262,7 @@ def test_a_newer_stamp_is_refused(tmp_path):
     path = str(tmp_path / 'future.mat')
     savemat(path, {'visualdynamics_schema': native.SCHEMA_VERSION + 1,
                    'data': {'abscissa': np.zeros((2, 1))}})
-    with pytest.raises(ValueError, match='newer Visual Dynamics'):
+    with pytest.raises(ValueError, match='newer Hertzforge'):
         import_file(path)
 
 

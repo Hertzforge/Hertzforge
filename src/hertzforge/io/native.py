@@ -1028,7 +1028,7 @@ def _visualdynamics_path(path: str | os.PathLike) -> str:
 
 
 def save(obj: Any, path: str | os.PathLike) -> None:
-    """Save one Visual Dynamics object to a .vdyn (HDF5) file.
+    """Save one Hertzforge object to a .vdyn (HDF5) file.
 
     Raises TypeError for an object of a kind the format does not hold.
 
@@ -1172,7 +1172,7 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
               path: str = '') -> Any:
     """`load` from an open HDF5 file (see `save_into`). `path` names the
     file in error messages."""
-    # A newer stamp means a newer Visual Dynamics wrote fields this
+    # A newer stamp means a newer Hertzforge wrote fields this
     # reader has no idea exist, and half-loading someone's project
     # quietly is worse than telling them to update. A missing stamp
     # means the file is not ours at all — every writer stamps.
@@ -1182,7 +1182,7 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
     written = int(f.attrs['visualdynamics_schema'])
     if written > SCHEMA_VERSION:
         raise ValueError(
-            f'{path} was written by a newer Visual Dynamics '
+            f'{path} was written by a newer Hertzforge '
             f'(schema {written}; this build reads up to '
             f'{SCHEMA_VERSION}). Update to open it.')
     if 'objects' in f:

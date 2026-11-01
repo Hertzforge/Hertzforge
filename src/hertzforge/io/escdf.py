@@ -53,7 +53,7 @@ import h5py
 import numpy as np
 
 # Checked against the reference's own files in both directions while it was
-# written (2026-09-30; PLAN.md "ESCDF: import and export first").
+# written (2026-09-30; Visual Dynamics' PLAN.md "ESCDF: import and export first").
 
 __all__ = [
     'Activity',

@@ -2659,7 +2659,7 @@ function load(host, url, options) {
     return response.json();
   }).then(data => mount(host, data, options));
 }
-window.VisualDynamicsFigure = Object.freeze(
+window.HertzforgeFigure = Object.freeze(
   {mount, load, format: FORMAT, version: VERSION});
 })();
 """

@@ -97,10 +97,10 @@ READ_SAMPLES = 1 << 19
 
 #: the share of the machine's memory a stream may take before the
 #: window asks how much of it to import (`stream_summary`; the import
-#: dialog in `gui/stream_window.py`): a quarter, because the import
+#: dialog): a quarter, because the import
 #: holds the stream once and the flat plot then holds a converted copy
 #: of every row it draws beside it, so a stream is twice its size on
-#: the way to the screen (PLAN.md "A long run costs its own size").
+#: the way to the screen (Visual Dynamics' PLAN.md "A long run costs its own size").
 LARGE_STREAM_SHARE = 0.25
 
 #: how many points a stream's preview envelope is thinned to — enough
@@ -806,7 +806,7 @@ def run_kind(path: str | os.PathLike) -> str | None:
 
 
 def project_type(path: str | os.PathLike) -> str | None:
-    """The Visual Dynamics project type this file is a run of, or None
+    """The Hertzforge project type this file is a run of, or None
     when there is no project type for that kind of run or the file does
     not say what kind it is.
 

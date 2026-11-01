@@ -158,7 +158,7 @@ def analysis(index: DataIndex, project_file_known: bool) -> str:
     or that the project is not in a file yet."""
     from .. import __version__
 
-    said = f'Analysis: Visual Dynamics {__version__}.'
+    said = f'Analysis: Hertzforge {__version__}.'
     found = index.project_file
     if found is not None:
         name, size, sha, _when_hashed = found

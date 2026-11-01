@@ -122,7 +122,7 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Report:
 def templates_folder() -> Path:
     """The folder saved templates are kept in.
 
-    It is `Visual Dynamics/Report Templates` in the user's application
+    It is `Hertzforge/Report Templates` in the user's application
     data folder for the platform (`~/Library/Application Support` on
     macOS, `APPDATA` on Windows, `XDG_DATA_HOME` or `~/.local/share`
     elsewhere), or the folder `VISUALDYNAMICS_TEMPLATES` names when that
@@ -138,7 +138,7 @@ def templates_folder() -> Path:
         base = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
     else:
         base = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share'))
-    return base / 'Visual Dynamics' / 'Report Templates'
+    return base / 'Hertzforge' / 'Report Templates'
 
 
 def saved_templates() -> list[tuple[str, Path]]:
