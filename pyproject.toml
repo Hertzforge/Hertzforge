@@ -10,6 +10,12 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+dependencies = [
+    # MIT. Its objects are what a .hforge file holds, read and written by its own code.
+    "visualdynamics",
+    # BSD-3-Clause
+    "h5py",
+]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [
     "Development Status :: 1 - Planning",

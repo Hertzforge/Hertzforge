@@ -25,7 +25,7 @@ layout is a mechanical change that comes next.
 
 | Path | Language | Owns |
 |---|---|---|
-| `src/hertzforge/` | Python | The `hertzforge` command and package published to PyPI |
+| `src/hertzforge/` | Python | The `hertzforge` command and package published to PyPI, and the `.hforge` file (`docs/hforge-format.md`) |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
 | `python/` | Python 3.13 | The analysis service. Wraps the `visualdynamics` package unchanged |
 | `crates/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
