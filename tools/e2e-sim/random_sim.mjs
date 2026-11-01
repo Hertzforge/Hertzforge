@@ -9,13 +9,18 @@
 // (a free port), runs three Random runs on the simulator, and stops both. It takes about three
 // minutes, because the simulator runs in real time. It is not part of `npm --prefix ui test`.
 //
+// 0. Acquire opens on the test-type chooser, with Random the only test type offered; each screen
+//    picks Random there.
 // 1. One screen takes control, selects the simulator, sets the channel table and the bench
 //    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review
 //    (identification at the reference -20 dB, read from the run log), proceeds, steps the level
 //    on the manual ladder and stops with the ramp, which starts at once and walks down smoothly
 //    (the run bar's live level, sampled ten times a second).
+//    After the run, "Test type" leads back to the chooser and Random comes back as it was left.
 // 2. A second browser (its own storage) observes: it shows the setup the service holds and its
-//    numbers; a new run starts and the observer aborts it with Ctrl and period.
+//    numbers; a new run starts and the observer aborts it with Ctrl and period. Meanwhile a third
+//    screen resting on the chooser sees the run go live and returns to it from the top bar, and a
+//    screen opened during the run goes straight to it.
 // 3. A new run starts, and the controlling screen is closed while it drives: the observer sees
 //    control free and the countdown, and the run ends in the safe stop after the orphan window.
 
@@ -155,6 +160,11 @@ async function verb(page, id, ms = 30_000) {
 	await b.click();
 }
 
+/** The test-type chooser, once the control service has answered. */
+async function chooser(page, what) {
+	await until(page, what, async (p) => (await tid(p, 'conn-control').getAttribute('data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
+}
+
 async function tab(page, id) {
 	await tid(page, `tab-${id}`).click();
 }
@@ -192,6 +202,20 @@ try {
 	// ============ Run 1: the controller =========================================================
 	const a = await ctxA.newPage();
 	await a.goto(URL_);
+	await chooser(a, 'the test-type chooser');
+	const cards = await a.locator('[data-testid="test-type-chooser"] [data-type]').evaluateAll((els) =>
+		els.map((e) => ({ id: e.dataset.type, offered: e.getAttribute('aria-disabled') === 'false', text: e.innerText.replace(/\s+/g, ' ') }))
+	);
+	// A test type still to come cannot be opened (forced past the browser's own refusal to click it).
+	await tid(a, 'test-type-sine').click({ force: true });
+	const stayed = await tid(a, 'test-type-chooser').isVisible();
+	check(
+		'Acquire opens on the test-type chooser: seven test types, Random the only one offered, the rest "Coming"',
+		cards.length === 7 && cards.filter((c) => c.offered).map((c) => c.id).join() === 'random' && cards.filter((c) => !c.offered).every((c) => /\bcoming\b/i.test(c.text)) && stayed,
+		cards.map((c) => `${c.id} ${c.offered ? 'offered' : 'coming'}`).join(', ')
+	);
+	await shot(a, '00-test-type-chooser');
+	await tid(a, 'test-type-random').click();
 	await until(a, 'the shell to connect', async (p) => (await roleOf(p)) === 'observer');
 	check('a new screen starts as an observer', (await roleOf(a)) === 'observer');
 	await tid(a, 'claim').click();
@@ -342,9 +366,23 @@ try {
 	check('the end is shown in words', /Stopped by the Operator/.test(await text(a, 'run-end')));
 	await shot(a, '07-stopped-ramped');
 
+	// The run has ended: "Test type" leads back to the chooser, and Random comes back as it was left.
+	await tid(a, 'test-type-back').click();
+	await chooser(a, 'the chooser after the run');
+	const lastUsed = /last used/i.test(await tid(a, 'test-type-random').innerText());
+	await tid(a, 'test-type-random').click();
+	await until(a, 'Random again', async (p) => (await stateOf(p)) === 'finished');
+	check(
+		'after the run, "Test type" returns to the chooser, and Random comes back as it was left',
+		lastUsed && (await outcomeOf(a)) === 'operator_stop' && (await tid(a, 'tab-live').getAttribute('aria-selected')) === 'true',
+		`marked last used ${lastUsed}, outcome ${await outcomeOf(a)}`
+	);
+
 	// ============ Run 2: a second browser observes, and aborts ==================================
 	const b = await ctxB.newPage();
 	await b.goto(URL_);
+	await chooser(b, 'the chooser on the second screen');
+	await tid(b, 'test-type-random').click();
 	await until(b, 'the observer to connect', async (p) => (await roleOf(p)) === 'observer');
 	// The observer line reads as one phrase: no gap before the comma (the role badge lays its
 	// parts out with a gap, so the word and the holder must be one part of it).
@@ -358,6 +396,11 @@ try {
 	check('second screen: the reference drawn by the service', (await tid(b, 'reference-preview').getAttribute('data-source')) === 'service');
 	await shot(b, '08-observer-reads-setup');
 
+	// A third screen rests on the test-type chooser while the next run goes live.
+	const c = await ctxB.newPage();
+	await c.goto(URL_);
+	await chooser(c, 'the chooser on the third screen');
+
 	await verb(a, 'act-reset');
 	await until(a, 'a new run', async (p) => (await stateOf(p)) === 'configured');
 	await verb(a, 'act-start');
@@ -367,6 +410,36 @@ try {
 	await tid(a, 'review-proceed').click();
 	await until(b, 'the observer to see the run drive', async (p) => (await stateOf(p)) === 'running' && (await tid(p, 'live-control').isVisible()), 60_000);
 	await simBadge(b, 'observer, driving');
+
+	// The chooser stays on the third screen, with the run in reach from its card and the top bar.
+	await until(c, 'the chooser to show the run', async (p) => (await tid(p, 'test-type-random').getAttribute('data-state')) === 'live' && (await tid(p, 'run-pill').isVisible()));
+	check('a chooser on screen when a run goes live: the Random card and the top bar offer the run', await tid(c, 'test-type-chooser').isVisible(), `${await text(c, 'test-type-random')} | ${await text(c, 'run-pill')}`);
+	await shot(c, '08b-chooser-during-live-run');
+	await c.setViewportSize({ width: 720, height: 900 });
+	await c.waitForTimeout(300); // the layout settles at the new size
+	await shot(c, '08c-chooser-during-live-run-narrow');
+	await tid(c, 'run-pill-go').click();
+	await until(c, 'the run on the third screen', async (p) => (await stateOf(p)) === 'running');
+	const count = (p, id) => p.locator(`[data-testid="${id}"]`).count();
+	check(
+		'the run pill returns to the live run, whose screen has no way back to the chooser',
+		(await count(c, 'test-type-back')) === 0 && (await count(c, 'test-type-chooser')) === 0 && (await count(c, 'run-pill')) === 0
+	);
+	await c.close();
+
+	// A screen opened during the live run goes straight to it: the chooser is never drawn.
+	const d = await ctxB.newPage();
+	await d.addInitScript(() => {
+		window.__chooserSeen = false;
+		new MutationObserver(() => {
+			if (document.querySelector('[data-testid="test-type-chooser"]')) window.__chooserSeen = true;
+		}).observe(document, { childList: true, subtree: true });
+	});
+	await d.goto(URL_);
+	await until(d, 'the run on a screen opened during it', async (p) => (await stateOf(p)) === 'running');
+	const seen = await d.evaluate(() => window.__chooserSeen);
+	check('a screen opened during a live run goes straight to the run, never drawing the chooser', !seen && (await count(d, 'test-type-back')) === 0, `chooser drawn ${seen}`);
+	await d.close();
 	check('observer: Abort is offered', (await tid(b, 'act-abort').getAttribute('aria-disabled')) === 'false');
 	await b.keyboard.press('Control+Period');
 	await until(b, 'the abort', async (p) => (await stateOf(p)) === 'finished', 5_000);

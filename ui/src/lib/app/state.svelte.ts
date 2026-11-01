@@ -5,6 +5,7 @@
  */
 
 import { AcquireState } from '$lib/acquire/store.svelte';
+import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
@@ -387,6 +388,8 @@ export class AppState {
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
+	/** Acquire & Control's test types and which screen it shows. */
+	readonly tests: TestTypeView;
 
 	constructor(config: ShellConfig) {
 		this.config = config;
@@ -398,6 +401,18 @@ export class AppState {
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		this.acquire = new AcquireState(this.control);
+		this.tests = new TestTypeView(() => this.liveTest);
+	}
+
+	/** The test type whose run is live; null when none is; undefined until the control service has said. */
+	get liveTest(): LiveTest {
+		return liveTestOf(this.acquire, this.control.status);
+	}
+
+	/** The live run is the screen on show, so the top bar need not offer it. */
+	get runOnScreen(): boolean {
+		const live = this.tests.live;
+		return live !== null && this.workspace === 'acquire' && this.tests.screen === live;
 	}
 
 	/** The SIM badge rule: simulated control data is on screen. */
@@ -409,16 +424,18 @@ export class AppState {
 	get provenance(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
 		if (this.workspace === 'simulate') return this.simOnScreen ? { source: 'SIM', cls: 'sim' } : null;
 		// A live run is shown from every workspace (the top bar's run pill), so its source is too.
-		if (this.workspace === 'acquire' || this.acquire.isLive) return this.acquire.source;
+		// The test-type chooser shows no control data of its own.
+		const onRandom = this.workspace === 'acquire' && this.tests.screen === 'random';
+		if (onRandom || this.acquire.isLive) return this.acquire.source;
 		return null;
 	}
 
 	start(): void {
 		const fromHash = location.hash.replace(/^#\/?/, '');
-		if (isWorkspace(fromHash)) this.workspace = fromHash;
+		if (isWorkspace(fromHash)) this.go(fromHash);
 		window.addEventListener('hashchange', () => {
 			const h = location.hash.replace(/^#\/?/, '');
-			if (isWorkspace(h)) this.workspace = h;
+			if (isWorkspace(h)) this.go(h);
 		});
 
 		$effect.root(() => {
@@ -439,12 +456,27 @@ export class AppState {
 		});
 
 		this.acquire.watch();
+		this.tests.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}
 
 	go(workspace: Workspace): void {
+		const entering = workspace === 'acquire' && this.workspace !== 'acquire';
 		this.workspace = workspace;
+		if (entering) this.tests.open();
+	}
+
+	/** A test type's screen in Acquire & Control, if it can be chosen now. */
+	openTest(id: TestTypeId): boolean {
+		this.go('acquire');
+		return this.tests.choose(id);
+	}
+
+	/** The live run's screen, from anywhere in the shell (the top bar's run pill). */
+	showRun(): void {
+		this.tests.showRun();
+		this.go('acquire');
 	}
 
 	async loadCatalog(): Promise<void> {

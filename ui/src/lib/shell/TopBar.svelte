@@ -16,8 +16,8 @@
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
 	const prov = $derived(app.provenance);
-	/** A live Random run stays in reach from every other workspace. */
-	const away = $derived(app.workspace !== 'acquire' && app.acquire.isLive ? app.acquire : null);
+	/** A live Random run stays in reach from wherever it is not on screen: another workspace, or the test-type chooser. */
+	const away = $derived(app.acquire.isLive && !app.runOnScreen ? app.acquire : null);
 </script>
 
 <header class="topbar">
@@ -46,7 +46,7 @@
 		{/if}
 		{#if away}
 			<span class="runpill" data-testid="run-pill">
-				<button class="go" onclick={() => app.go('acquire')} title="Go to Acquire & Control">
+				<button class="go" data-testid="run-pill-go" onclick={() => app.showRun()} title="Return to the run">
 					<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
 					Random {STATE_WORDS[away.run?.state ?? 'running'].toLowerCase()}{#if away.frame?.level_db !== null && away.frame?.level_db !== undefined}<span class="num lv">{db(away.frame.level_db)}</span>{/if}
 				</button>

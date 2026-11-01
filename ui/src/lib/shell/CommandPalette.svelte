@@ -62,7 +62,7 @@
 			verb('apply', 'Apply Random Setup', 'configure send profile', 'action', () => acq.apply()),
 			verb('arm', 'Arm Random Run', 'open station gate', 'action', () => acq.arm()),
 			verb('start', 'Start Random Run', 'run go begin', 'play', () => {
-				app.go('acquire');
+				app.openTest('random');
 				return acq.start();
 			}),
 			verb('proceed', 'Proceed After Review', 'continue engage system identification', 'play', () => acq.proceed()),
