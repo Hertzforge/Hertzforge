@@ -1,0 +1,26 @@
+# eigen-buildinfo - the CORE (Rust) build stamp, embedded at compile time.
+#
+# NO runtime dependencies beyond serde (already ubiquitous in this workspace and
+# required so `BuildInfo` can ride the `Hello` handshake and a Tauri command return).
+# The build script uses `std::process::Command` only - see build.rs.
+
+[package]
+name = "eigen-buildinfo"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[features]
+# Embed the build machine's hostname in `BUILD_HOST`. OFF by default, so an open build
+# never carries the name of the machine it was built on; the stamp then reports the
+# host as "unknown" and the commit stamp (sha + dirty) is unchanged. A build that wants
+# the host on its diagnostics line turns this on in its own manifest.
+build-host = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

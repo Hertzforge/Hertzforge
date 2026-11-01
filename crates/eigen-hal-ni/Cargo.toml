@@ -1,0 +1,37 @@
+[package]
+name = "eigen-hal-ni"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+eigen-hal = { path = "../eigen-hal" }
+eigen-channel-table = { path = "../eigen-channel-table" }
+# Runtime binding to NI-DAQmx: no link-time NI dependency, no
+# NI SDK at build time on any host, no import library for the Windows
+# cross-build. libloading is ISC-licensed - permissive, already in deny.toml's
+# allow list.
+libloading = "0.8"
+
+# WINDOWS ONLY: the per-process 1 ms timer request (winmm timeBeginPeriod /
+# timeEndPeriod) and the power-throttling opt-out (kernel32 SetProcessInformation)
+# that keep DAQmx's default Sleep read wait from rounding up to the 15.6 ms Windows
+# timer. See src/timer_resolution.rs for the measurement. Raw-dylib bindings with
+# no import library, so the cross-build still needs no SDK. MIT OR Apache-2.0;
+# the version already in Cargo.lock (tokio and mio pull it in on Windows).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Media", "Win32_System_Threading"] }
+
+[dev-dependencies]
+# TEST/EXAMPLE-ONLY: ni_engine_run (the engine-over-NiBackend proof).
+eigen-engine = { path = "../eigen-engine" }
+# TEST-ONLY. `eigen_dsp::eu::volts_to_eu` is the system's one EU conversion;
+# `AiAssign::to_eu` duplicates the formula rather than depending on Layer 2 from
+# a Layer 3 backend, and the bit-equality test is what keeps the two from
+# drifting apart. Not a production dependency.
+eigen-dsp = { path = "../eigen-dsp" }
+
+[[example]]
+name = "ni_selftest"
+path = "examples/ni_selftest.rs"

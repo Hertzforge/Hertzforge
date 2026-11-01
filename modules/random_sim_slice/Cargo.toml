@@ -1,0 +1,13 @@
+[package]
+name = "random_sim_slice"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eigen-module-abi = { path = "../../crates/eigen-module-abi" }
+eigen-dsp = { path = "../../crates/eigen-dsp" }

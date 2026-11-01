@@ -1,0 +1,44 @@
+[package]
+name = "eigen-sine"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# Profile grammar + feasibility, control core, schedulers - pure libs on eigen-dsp +
+# eigen-shaker-db.
+#
+# The closed-loop Sine RUN SERVICE (`service` module family) - `SineService`,
+# the persistent `SineProcessStep` engine loop, the level ladder with
+# sine semantics, sysID + feedforward trust mask, the scalar alarm/abort, the
+# analytic kinematic monitor, the drive Vpk guard, COLA on the aux drive
+# channel, the debounced servo fault, and the report + status surface.
+# Path B: the loop runs on the HOST against whatever station backend it is handed
+# (`SineService::new` takes a `Box<dyn Backend>`; it no longer builds a plant).
+[dependencies]
+eigen-shaker-db = { path = "../eigen-shaker-db" }
+eigen-dsp = { path = "../eigen-dsp" }
+# Service deps: engine (Engine/ProcessStep/CaptureSink + the tri-field
+# watchdog for the accel axis), hal (the `Backend` trait the service is handed),
+# channel-table (identity + the COLA width invariant), testkit (disk
+# capture/snapshot). NOT eigen-hal-sim: it is a dev-dependency only. Mirrors
+# eigen-random's service deps (shared infra in testkit).
+eigen-engine = { path = "../eigen-engine" }
+eigen-hal = { path = "../eigen-hal" }
+eigen-channel-table = { path = "../eigen-channel-table" }
+eigen-capture = { path = "../eigen-capture" }
+# The loop-owner resolver (`resolve_loop`), consulted at arm(): Sine is a
+# closed-loop HOST module and must hard-refuse a backend that closes its own loop.
+eigen-module-abi = { path = "../eigen-module-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The Sim e2e acceptance fixtures drive the service against the SimBackend
+# plant through the real engine (mirroring eigen-demo), plus a local
+# ScriptedBackend implementing eigen_hal::Backend to capture write_drive frames
+# for the COLA aux-channel test (SimBackend's read_input echoes ch0 only).
+eigen-hal-sim = { path = "../eigen-hal-sim" }
+eigen-hal = { path = "../eigen-hal" }
+eigen-engine = { path = "../eigen-engine" }
+eigen-channel-table = { path = "../eigen-channel-table" }

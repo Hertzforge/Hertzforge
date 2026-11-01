@@ -1,0 +1,37 @@
+[package]
+name = "eigen-recorder"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The Data Recorder module: acquisition config (acq.rs), trigger engine +
+# pre-trigger ring (trigger.rs), the recording writer bridge onto the testkit
+# CaptureSink plus the reader for the `telemetry.f32` / `capture.json` /
+# `recorder.json` run format (recording.rs), the analysis pipeline (analysis.rs:
+# decimation -> block assembly -> spectra / FRF / stats / integration, live +
+# offline region modes) on top of eigen-dsp, and the RecorderService (service/): the
+# monitor-only engine loop (SilentDrive + the synthetic-drive workaround), trigger
+# flow, recording lifecycle, and the status/report surfaces. The service adds the
+# eigen-engine / eigen-hal deps for the segment-run monitor loop. eigen-hal-sim is
+# DEV-ONLY: the service takes a `Box<dyn Backend>` from the station factory and
+# builds no plant of its own.
+[dependencies]
+eigen-capture = { path = "../eigen-capture" }
+eigen-channel-table = { path = "../eigen-channel-table" }
+eigen-dsp = { path = "../eigen-dsp" }
+eigen-engine = { path = "../eigen-engine" }
+eigen-hal = { path = "../eigen-hal" }
+# The shared ARM GATE (`eigen_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+eigen-module-abi = { path = "../eigen-module-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The service tests drive the recorder against an EIGEN-SIM plant and
+# against scripted `eigen_hal::Backend` doubles. This was demoted out of
+# `[dependencies]`: production code names no concrete backend any more.
+eigen-hal-sim = { path = "../eigen-hal-sim" }

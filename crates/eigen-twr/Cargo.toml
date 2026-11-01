@@ -1,0 +1,37 @@
+# eigen-twr - the Time Waveform Replication (TWR) test module engine
+# (MIL-STD-810 Method 525-shaped SESA replication).
+#
+# Host-side and hardware-agnostic: the iterative inverse-FRF control law runs
+# BETWEEN plays on the host; drive delivery goes through the `ReferencePlayer`
+# seam (`player.rs`), whose one production impl drives any `eigen_hal::Backend`
+# (the eigen-hal-sim plant today; direct-DAC / NI backends
+# later with zero TWR changes). The delegated (reference-download) player is a
+# documented seam, hardware-blocked on the shared mode-entry capture.
+[package]
+name = "eigen-twr"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# FRF estimation (Hv + coherence), Tikhonov inverse, FFT/IFFT, COLA excitation,
+# integrators for the kinematics preview, stats.
+eigen-dsp = { path = "../eigen-dsp" }
+# The Backend trait the host player drives + HalError.
+eigen-hal = { path = "../eigen-hal" }
+# The shared ARM GATE (`eigen_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+eigen-module-abi = { path = "../eigen-module-abi" }
+# ChannelTable for the player's configure step (validated before traffic).
+eigen-channel-table = { path = "../eigen-channel-table" }
+# Capture sink + snapshot envelope + marks (shared run infrastructure).
+eigen-capture = { path = "../eigen-capture" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The Sim plant the acceptance test converges against.
+eigen-hal-sim = { path = "../eigen-hal-sim" }

@@ -1,0 +1,3 @@
+idx,en,save,stream,iface,iepe_v,units,sens_mv_eu,range,pol,role,group,abort_g,abort_ips,abort_mil,desc
+1,1,1,0,IEPE,12.5,g,1000,5,+,control,0,9,,,Airbags
+2,1,1,1,SE,,psi,10.25,100,-,monitor,0,,70,2250,Trunions

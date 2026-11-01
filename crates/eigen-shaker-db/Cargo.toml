@@ -1,0 +1,11 @@
+[package]
+name = "eigen-shaker-db"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+eigen-breakpoints = { path = "../eigen-breakpoints" }

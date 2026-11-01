@@ -1,0 +1,22 @@
+[package]
+name = "eigen-engine"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+eigen-dsp = { path = "../eigen-dsp" }
+eigen-hal = { path = "../eigen-hal" }
+eigen-capture = { path = "../eigen-capture" }
+eigen-channel-table = { path = "../eigen-channel-table" }
+
+[dev-dependencies]
+# The 400-channel SCALE gate drives the engine against
+# the REAL Sim plant, because the point of that gate is to prove the engine holds
+# up against a backend that genuinely synthesizes 400 channels per block - a
+# scripted mock would only prove the script could be allocated. DEV-only, and
+# deliberately NOT used by the engine's SAFETY tests: those keep the in-crate
+# `test_backend` mock so a safety behavior is never co-confirmed against the
+# Sim's own physics.
+eigen-hal-sim = { path = "../eigen-hal-sim" }

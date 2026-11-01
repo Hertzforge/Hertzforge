@@ -1,0 +1,47 @@
+[package]
+name = "eigen-random"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The closed-loop Random CONTROL CORE (`control` module) - the reshaped
+# `ControlLaw` trait, the one shipped law `HinvLaw`,
+# the control composite (weighted avg/min/max), notch limiting with the safety
+# arbitration, and per-bin divergence accounting.
+#
+# The RANDOM RUN SERVICE (`service` module family) - `RandomService`, the
+# level ladder state machine, the alarm/abort envelope + reactive kinematic monitor +
+# drive-Vrms clamp/abort + divergence abort + overload proxy protection engines, the
+# capture rules + periodic save, and the report + status surface. Path B only: the
+# loop runs on the HOST against the Sim plant today; on the delegated path the
+# DEVICE closes the loop and none of this runs.
+[dependencies]
+eigen-dsp = { path = "../eigen-dsp" }
+eigen-breakpoints = { path = "../eigen-breakpoints" }
+# Service deps: shaker-db (feasibility), testkit (capture/snapshot), channel-table
+# (identity), engine (tri-field limits + the engine loop), hal (the `Backend` trait
+# the service is handed). NOT eigen-hal-sim: it is only a dev-dependency - the
+# service takes a `Box<dyn Backend>` from the station factory and no longer
+# manufactures a plant. NOT the Explorer service crate: the shared capture infra
+# lives in eigen-capture.
+eigen-shaker-db = { path = "../eigen-shaker-db" }
+eigen-capture = { path = "../eigen-capture" }
+eigen-channel-table = { path = "../eigen-channel-table" }
+eigen-engine = { path = "../eigen-engine" }
+eigen-hal = { path = "../eigen-hal" }
+# The shared ARM GATE (`eigen_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+eigen-module-abi = { path = "../eigen-module-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The adversarial fixtures + the service acceptance tests drive the service/law
+# against the SimBackend plant through the real engine, mirroring eigen-demo's setup.
+eigen-hal-sim = { path = "../eigen-hal-sim" }
+eigen-hal = { path = "../eigen-hal" }
+eigen-engine = { path = "../eigen-engine" }
+eigen-channel-table = { path = "../eigen-channel-table" }

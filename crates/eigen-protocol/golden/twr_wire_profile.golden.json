@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "reference_sha": "9f2c1b0a4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+  "prep": {
+    "auto_resample": true,
+    "detrend": true,
+    "highpass_hz": 20.0,
+    "scale": 1.25,
+    "taper_frac": 0.05
+  },
+  "section": {
+    "start": 1024,
+    "len": 40960
+  },
+  "pad_pre": 512,
+  "pad_post": 1024,
+  "sysid": {
+    "excitation": "log_chirp",
+    "drive_rms": 0.15,
+    "duration_s": 8.0,
+    "nfft": 2048,
+    "f_lo_hz": 25.0,
+    "f_hi_hz": 1500.0,
+    "min_mean_coherence": 0.8
+  },
+  "inverse": {
+    "tikhonov_beta_floor": 0.02,
+    "coherence_floor": 0.6
+  },
+  "law": {
+    "beta": 0.5,
+    "max_db_per_iter": 6.0,
+    "ref_floor_db": 50.0,
+    "f_lo_hz": 25.0,
+    "f_hi_hz": 1400.0,
+    "initial_drive_backoff_db": 6.0,
+    "min_masked_energy_frac": 0.98
+  },
+  "schedule": {
+    "mode": "manual",
+    "table_db": [
+      -12.0,
+      -9.0,
+      -6.0,
+      -3.0,
+      0.0
+    ],
+    "gate_rms_error_pct": 10.0,
+    "max_iterations_per_level": 10,
+    "on_gate_fail": "hold"
+  },
+  "run": {
+    "loop_n": 2
+  },
+  "adapt_during_playback": false,
+  "limits": {
+    "envelope_alarm_frac": 0.25,
+    "envelope_abort_frac": 0.5,
+    "envelope_debounce_samples": 8,
+    "response_rms_limit": 12.5,
+    "drive_clip": 4.5,
+    "drive_rms_limit": 1.75,
+    "max_drive_vpk": 5.0,
+    "divergence_n": 3,
+    "divergence_tol_frac": 0.1,
+    "feasibility": {
+      "peak_accel": 60.0,
+      "peak_velocity_ips": 70.0,
+      "disp_pkpk_in": 1.5
+    }
+  },
+  "kinematics_hp_hz": 5.0,
+  "review_after_sysid": true,
+  "metadata": [
+    {
+      "key": "run_number",
+      "label": "Run Number",
+      "value": "RUN-001"
+    }
+  ]
+}

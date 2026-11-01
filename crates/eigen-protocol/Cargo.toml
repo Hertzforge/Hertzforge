@@ -1,0 +1,22 @@
+# eigen-protocol - the versioned Layer4/Layer5 (UI <-> core) seam for split deployment.
+#
+# DEPENDENCY FLOOR IS LOAD-BEARING. This crate must stay transport-agnostic and
+# hardware-agnostic: NO tauri, NO eigen-hal / eigen-hal-* backends, NO module crates.
+# Hardware vocabulary (loop owner, clock domain, native modes, abort latency) is
+# MIRRORED into this crate's own serializable types, never imported, so the UI-side
+# peer of a split deployment never links a hardware crate and an in-flight change to
+# the HAL trait cannot ripple into the wire contract. See src/lib.rs "Dependency
+# discipline". Enforced here: serde is the only runtime dependency.
+
+[package]
+name = "eigen-protocol"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
