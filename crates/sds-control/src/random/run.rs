@@ -1347,6 +1347,34 @@ fn verdict(r: &hertzforge_shaker_db::FeasibilityReport, given: bool) -> (&'stati
     }
 }
 
+/// `x` rounded to three significant digits.
+fn sig3(x: f64) -> f64 {
+    if x == 0.0 || !x.is_finite() {
+        return x;
+    }
+    let e = x.abs().log10().floor() as i32;
+    if e > 2 {
+        let q = 10f64.powi(e - 2);
+        (x / q).round() * q
+    } else {
+        let p = 10f64.powi(2 - e);
+        (x * p).round() / p
+    }
+}
+
+/// `x` written with three significant digits, trailing zeros kept: a measured
+/// value beside a limit it passed by less than 1 % still reads as more than the
+/// limit ("0.0312 against a 0.03 limit", not "0.03 against a 0.03 limit").
+fn sig3_text(x: f64) -> String {
+    let r = sig3(x);
+    if r == 0.0 || !r.is_finite() {
+        return format!("{:.2}", if r.is_finite() { 0.0 } else { r });
+    }
+    let e = r.abs().log10().floor() as i32;
+    let d = (2 - e).max(0) as usize;
+    format!("{r:.d$}")
+}
+
 /// The trip's facts for `end.trip`, and the end message.
 fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, String) {
     let at = super::config::round(t.at_level_db, 2);
@@ -1378,9 +1406,10 @@ fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, 
             };
             (
                 json!({"kind": "kinematic", "channel": channel_index, "axis": axis,
-                       "value": num(super::config::round(*value, 3)), "limit": num(*limit)}),
+                       "value": num(sig3(*value)), "limit": num(*limit)}),
                 format!(
-                    "Kinematic abort on channel {channel_index}: {axis} {value:.2} against a {} limit, {}.",
+                    "Kinematic abort on channel {channel_index}: {axis} {} against a {} limit, {}.",
+                    sig3_text(*value),
                     num(*limit),
                     at_words(t.at_level_db)
                 ),
@@ -1389,7 +1418,8 @@ fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, 
         TripKind::DriveVrms { realized_vrms, limit_vrms } => (
             json!({"kind": "drive_vrms", "realized_vrms": num(super::config::round(*realized_vrms, 4)), "limit_vrms": num(*limit_vrms)}),
             format!(
-                "Drive abort: {realized_vrms:.3} V rms at or above the {} V limit, {}.",
+                "Drive abort: {} V rms at or above the {} V limit, {}.",
+                sig3_text(*realized_vrms),
                 num(*limit_vrms),
                 at_words(t.at_level_db)
             ),
@@ -1450,4 +1480,82 @@ pub fn live_channels(table: &ChannelTable) -> Vec<LiveChannel> {
             overload: false,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hertzforge_random::TripRecord;
+
+    fn kinematic(value: f64, limit: f64) -> TripRecord {
+        TripRecord {
+            kind: TripKind::Kinematic {
+                channel_index: 1,
+                axis: "Accel".into(),
+                value,
+                limit,
+                at_frame: 12,
+            },
+            at_level_db: -20.0,
+            at_loop: 0,
+        }
+    }
+
+    /// The bench's run 7: a 0.0312 g peak against a 0.03 g limit read "accel 0.03
+    /// against a 0.03 limit", which reads as no exceedance (2026-11-01, fix
+    /// verification observation 2). Three significant digits show it.
+    #[test]
+    fn a_kinematic_trip_shows_three_significant_digits() {
+        let (facts, message) = trip_facts(&kinematic(0.031_24, 0.03), true);
+        assert!(
+            message.contains("accel 0.0312 against a 0.03 limit"),
+            "{message}"
+        );
+        assert_eq!(facts["value"], json!(0.0312), "{facts}");
+        let (facts, message) = trip_facts(&kinematic(0.411_49, 0.4), false);
+        assert!(
+            message.contains("accel 0.411 against a 0.4 limit"),
+            "{message}"
+        );
+        assert_eq!(facts["value"], json!(0.411));
+        let (_, message) = trip_facts(&kinematic(12.04, 12.0), false);
+        assert!(
+            message.contains("accel 12.0 against a 12 limit"),
+            "{message}"
+        );
+        let (facts, message) = trip_facts(&kinematic(1234.5, 1000.0), false);
+        assert!(
+            message.contains("accel 1230 against a 1000 limit"),
+            "{message}"
+        );
+        assert_eq!(facts["value"], json!(1230));
+    }
+
+    #[test]
+    fn a_drive_trip_shows_three_significant_digits() {
+        let t = TripRecord {
+            kind: TripKind::DriveVrms {
+                realized_vrms: 0.012_34,
+                limit_vrms: 0.012,
+            },
+            at_level_db: -6.0,
+            at_loop: 3,
+        };
+        let (_, message) = trip_facts(&t, false);
+        assert!(
+            message.contains("Drive abort: 0.0123 V rms at or above the 0.012 V limit"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn three_significant_digits_keep_their_trailing_zeros() {
+        assert_eq!(sig3_text(0.03), "0.0300");
+        assert_eq!(sig3_text(0.099_96), "0.100");
+        assert_eq!(sig3_text(-2.5), "-2.50");
+        assert_eq!(sig3_text(999.6), "1000");
+        assert_eq!(sig3_text(0.0), "0.00");
+        assert_eq!(sig3(0.031_24), 0.0312);
+        assert_eq!(sig3(1234.5), 1230.0);
+    }
 }
