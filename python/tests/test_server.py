@@ -91,11 +91,13 @@ async def _session(check, imported=None):
     return lag['max']
 
 
-# The timing test and the fresh-interpreter preload test share one xdist group (CI runs
-# `--dist loadgroup`), so they never run at the same time: the second one starts a whole
-# interpreter and runs every dataset and operation, and on a four-core runner beside
-# three other workers that starves the first one's event loop. It held the loop 136 ms
-# on ubuntu-latest with Python 3.12, against a 25-41 ms worst case run alone.
+# A timing test: CI runs it alone, after the rest (`-m timing`, without xdist), because any
+# worker beside it can starve its event loop on a small runner. Beside the fresh-interpreter
+# preload test below the loop was held 136 ms on ubuntu-latest with Python 3.12, against a
+# 25-41 ms worst case run alone; the xdist group that kept those two apart still left 175 ms
+# on windows-latest with Python 3.13 beside the other workers. The group stays for a local
+# run of the whole suite under `--dist loadgroup`.
+@pytest.mark.timing
 @pytest.mark.xdist_group('serving')
 def test_smoke(validate):
     seen = {}

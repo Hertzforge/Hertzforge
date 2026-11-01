@@ -2,11 +2,11 @@
 //! plant it runs against.
 //!
 //! The plant is the controller's own simulated shaker and fixture
-//! (`eigen_hal_sim`): a small bank of single-degree-of-freedom resonators plus a
+//! (`hertzforge_hal_sim`): a small bank of single-degree-of-freedom resonators plus a
 //! direct feedthrough path and a Gaussian noise floor. Nothing here describes real
 //! hardware, and every run built from these profiles is reported as `source: "SIM"`.
 
-use eigen_breakpoints::{BreakpointRow, BreakpointTable};
+use hertzforge_breakpoints::{BreakpointRow, BreakpointTable};
 use serde_json::{json, Value};
 
 /// The Sim plant parameters a profile runs against.

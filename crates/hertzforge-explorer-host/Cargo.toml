@@ -1,0 +1,50 @@
+# hertzforge-explorer-host - the DEVICE-NEUTRAL half of the Explorer/SMART module.
+#
+# The pieces here were MOVED out of the delegated SMART service crate, which depends
+# on a private delegated backend and can therefore never be reached from a
+# host-closes-loop backend (NI today, anything else tomorrow). This crate is free of
+# that backend by construction, and the dependency firewall (`cargo deny check
+# bans`) enforces that: the delegated backend is banned workspace-wide except for an
+# explicit wrapper whitelist, and this crate is deliberately NOT on it. Adding that
+# dependency here fails `check bans` - that control was RUN with a planted
+# dependency when the crate was split out, not merely asserted.
+#
+# The delegated SMART service re-exports everything here at its old paths, so the
+# delegated path's public surface and behavior are unchanged by the move.
+
+[package]
+name = "hertzforge-explorer-host"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# The DSP primitives the analysis pipeline is built on (FFT, Hann window, the sine
+# tracking filter).
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The channel table the abort monitor derives its limiters and interleave slots from.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The shared tri-field limit checker + the acceleration integrator.
+hertzforge-engine = { path = "../hertzforge-engine" }
+# The mode-generic capture infrastructure the snapshot payload rides in.
+hertzforge-capture = { path = "../hertzforge-capture" }
+# The ABSTRACT hal trait crate (never a concrete backend). Carried so the control
+# core (arm gates, station caps, rate adoption) has it without a manifest change.
+hertzforge-hal = { path = "../hertzforge-hal" }
+# Loop resolution / arm-gate vocabulary, same rationale as hertzforge-hal.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# serde version matches the rest of the workspace (hertzforge-channel-table).
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The snapshot round-trip test reads the written JSON back.
+serde_json = "1"
+# DEV-ONLY, and it must stay that way. `tests/sim_end_to_end.rs` drives the whole
+# control core - arm at 0 V, ramp, retune, sweep, ramped stop - against the
+# HERTZFORGE-SIM plant configured as a WIRE (no resonance, unity feedthrough, no noise:
+# the software analogue of the jumpered AO->AI bench). The service itself takes a
+# finished `Box<dyn Backend>` and never names a concrete backend, which is the
+# property the sim-leak lint (`crates/hertzforge-hal-sim/tests/no_sim_leak.rs`) checks
+# and this dev-dependency deliberately does not weaken.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

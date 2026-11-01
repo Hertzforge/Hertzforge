@@ -1,0 +1,37 @@
+# hertzforge-twr - the Time Waveform Replication (TWR) test module engine
+# (MIL-STD-810 Method 525-shaped SESA replication).
+#
+# Host-side and hardware-agnostic: the iterative inverse-FRF control law runs
+# BETWEEN plays on the host; drive delivery goes through the `ReferencePlayer`
+# seam (`player.rs`), whose one production impl drives any `hertzforge_hal::Backend`
+# (the hertzforge-hal-sim plant today; direct-DAC / NI backends
+# later with zero TWR changes). The delegated (reference-download) player is a
+# documented seam, hardware-blocked on the shared mode-entry capture.
+[package]
+name = "hertzforge-twr"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# FRF estimation (Hv + coherence), Tikhonov inverse, FFT/IFFT, COLA excitation,
+# integrators for the kinematics preview, stats.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The Backend trait the host player drives + HalError.
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The shared ARM GATE (`hertzforge_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# ChannelTable for the player's configure step (validated before traffic).
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# Capture sink + snapshot envelope + marks (shared run infrastructure).
+hertzforge-capture = { path = "../hertzforge-capture" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The Sim plant the acceptance test converges against.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

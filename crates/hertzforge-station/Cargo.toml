@@ -1,0 +1,74 @@
+# hertzforge-station - the station BACKEND FACTORY, shared by every front end.
+#
+# WHY THIS IS A CRATE AND NOT A FILE IN `ui/src-tauri`.
+# The factory answers "what hardware is this run on", and it is the ONE place that
+# answers it. There is a second front end - the headless `hertzforge-backendd` daemon - and
+# a second copy of that answer would be exactly the defect the factory removed: two
+# construction points, drifting apart, each able to substitute a software plant for
+# absent hardware without the other knowing. So the buildable core moved HERE and both
+# front ends consume it; `ui/src-tauri/src/factory.rs` is now a thin wrapper that adds
+# the Tauri layer's live-selection reading and its `tracing` logging.
+#
+# DEPENDENCY NOTE: this crate names `hertzforge-hal-sim` and `hertzforge-hal-ni` deliberately -
+# it IS the construction point, and it is whitelisted for both in deny.toml and in
+# `crates/hertzforge-hal-sim/tests/no_sim_leak.rs`. NO `tracing`: the logging stays at the
+# call sites so the extraction added no new workspace dependency.
+
+[package]
+name = "hertzforge-station"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The HERTZFORGE-SIM plant and the NI-DAQmx backend: the two things this crate exists to
+# construct. Banned everywhere else (deny.toml + the sim-leak lint).
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+hertzforge-hal-ni = { path = "../hertzforge-hal-ni" }
+# `StationClass` - the class the factory hands each module's arm gate.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# The channel table's `physical` column is what binds NI rows.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-engine = { path = "../hertzforge-engine" }
+# The core build sha that stamps every run's provenance.
+hertzforge-buildinfo = { path = "../hertzforge-buildinfo" }
+serde = { version = "1", features = ["derive"] }
+# The advisory lockfile (`lock.rs`) is JSON, so BOTH readers - the daemon that writes
+# it and the Tauri app that reports its holder - parse one definition instead of two
+# that can drift.
+serde_json = "1"
+
+[dev-dependencies]
+hertzforge-breakpoints = { path = "../hertzforge-breakpoints" }
+# EXAMPLES ONLY, and it must stay that way. `examples/ni_random_arm_probe.rs` is the
+# on-chassis evidence tool for the 2026-07-30 rate divergence: it arms Random's real
+# `PlantLoop` on a real NI station, so it needs this crate's factory AND that crate's
+# loop, and nowhere else in the tree do the two meet outside a front end. Dev-only
+# leaves the production dependency direction untouched - `hertzforge-station` -> hal,
+# module crates -> hal, and neither names the other.
+hertzforge-random = { path = "../hertzforge-random" }
+# Same examples-only rule, for `examples/ni_module_sweep.rs` (every module runs on
+# the real chassis through the same factory the GUI uses).
+hertzforge-recorder = { path = "../hertzforge-recorder" }
+hertzforge-twr = { path = "../hertzforge-twr" }
+hertzforge-srs = { path = "../hertzforge-srs" }
+# The device-neutral shock service. The examples name it directly, not
+# through the Path-A crate's re-export shim, so no private crate enters this dev
+# graph.
+hertzforge-shock-host = { path = "../hertzforge-shock-host" }
+# Same examples-only rule, for `examples/shock_shot_probe.rs`: `TrainSpec` is a
+# shock-common type that `ClassicalShockService::fire_train_with` takes by value
+# and `hertzforge-shock-host` does not re-export, so a caller names it here - the
+# same way `ui/src-tauri` does (`ui/src-tauri/src/shock.rs:41`).
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+hertzforge-sine = { path = "../hertzforge-sine" }
+# Same examples-only rule again, for the `explorer` section of `ni_module_sweep.rs`
+# (the explorer chassis gate: the host-synthesized open-loop sine control core, driven
+# through the same factory the GUI uses). `hertzforge-explorer-host` names no concrete backend by
+# construction, so this does NOT bring a delegated USB backend into `hertzforge-station`'s
+# dev graph.
+hertzforge-explorer-host = { path = "../hertzforge-explorer-host" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
