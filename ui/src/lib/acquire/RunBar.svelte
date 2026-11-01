@@ -7,7 +7,7 @@
 	 */
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProvenanceBadge from '$lib/shell/ProvenanceBadge.svelte';
-	import type { ActionId, ActionState } from './actions';
+	import type { ActionId } from './actions';
 	import StateChip from './StateChip.svelte';
 	import type { AcquireState } from './store.svelte';
 	import { clock, db, phaseWord } from './words';
@@ -29,11 +29,13 @@
 	const atLevel = $derived(frame?.at_level_s ?? run?.at_level_s ?? null);
 	const remaining = $derived(frame?.remaining_at_level_s ?? run?.remaining_at_level_s ?? null);
 
-	let focusReason = $state<string | null>(null);
+	/** The verb under the pointer or the keyboard focus; its reason is read live from the state. */
+	let focusId = $state<ActionId | null>(null);
+	let pressedId = $state<ActionId | null>(null);
 	let stepDb = $state(1);
 
 	const hint = $derived.by(() => {
-		if (focusReason) return focusReason;
+		for (const id of [pressedId, focusId]) if (id && a[id].visible && !a[id].enabled) return a[id].reason;
 		if (primary && a[primary].visible && !a[primary].enabled) return a[primary].reason;
 		return null;
 	});
@@ -51,21 +53,20 @@
 	const canClaim = $derived(acq.connected && !acq.isController && (!seat || !seat.present));
 
 	function run_(id: ActionId, fn: () => unknown) {
-		const s = a[id];
-		if (!s.enabled) {
-			focusReason = s.reason;
+		if (!a[id].enabled) {
+			pressedId = id;
 			return;
 		}
+		pressedId = null;
 		void fn();
 	}
 
-	function tip(s: ActionState) {
-		return {
-			onfocus: () => (focusReason = s.enabled ? null : s.reason),
-			onblur: () => (focusReason = null),
-			onmouseenter: () => (focusReason = s.enabled ? null : s.reason),
-			onmouseleave: () => (focusReason = null)
+	function tip(id: ActionId) {
+		const leave = () => {
+			if (focusId === id) focusId = null;
+			if (pressedId === id) pressedId = null;
 		};
+		return { onfocus: () => (focusId = id), onblur: leave, onmouseenter: () => (focusId = id), onmouseleave: leave };
 	}
 
 	const busy = (verb: string) => acq.busy === verb;
@@ -73,7 +74,7 @@
 
 <section class="runbar" aria-label="Run control" data-testid="run-bar">
 	<div class="status">
-		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" />{/if}
+		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" measured={acq.frame !== null} />{/if}
 		<StateChip {run} />
 		{#if run && run.state !== 'unconfigured'}
 			<span class="phase" data-testid="run-phase">{phaseWord(run.phase)}</span>
@@ -87,7 +88,7 @@
 				<dt>Level</dt>
 				<dd class="num" data-testid="run-level">
 					{#if levelNow !== null}
-						{db(levelNow)}{#if levelCommanded !== null && Math.abs(levelCommanded - levelNow) > 0.05}<span class="to" title="Commanded level"> to {db(levelCommanded)}</span>{/if}
+						{db(levelNow)}{#if levelCommanded !== null && Math.abs(levelCommanded - levelNow) > 0.05}<span class="to" title="Commanded level">{' '}to {db(levelCommanded)}</span>{/if}
 					{:else}
 						{db(levelCommanded)}
 					{/if}
@@ -124,7 +125,7 @@
 			{#if orphanLeft !== null}
 				<span class="orphan" role="alert" data-testid="orphan">
 					<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M7 1.6l5.6 10H1.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><path d="M7 5.4v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
-					Nobody holds control. The run stops with its ramp in <span class="num">{orphanLeft} s</span>.
+					Nobody holds control. The run stops with its ramp in <span class="num">{orphanLeft}&nbsp;s</span>
 				</span>
 			{/if}
 		</div>
@@ -134,7 +135,7 @@
 		{#snippet verb(id: ActionId, label: string, icon: 'play' | 'stop' | 'reset' | 'action' | null, onclick: () => unknown, testid: string)}
 			{@const s = a[id]}
 			{#if s.visible}
-				<button class="btn" class:primary={primary === id} data-testid={testid} aria-disabled={!s.enabled} class:off={!s.enabled} onclick={() => run_(id, onclick)} {...tip(s)}>
+				<button class="btn" class:primary={primary === id} data-testid={testid} aria-disabled={!s.enabled} class:off={!s.enabled} onclick={() => run_(id, onclick)} {...tip(id)}>
 					{#if acq.busy === label}
 						<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
 					{:else if icon}
@@ -166,7 +167,7 @@
 							aria-checked={run?.mode === m}
 							aria-disabled={!a.mode.enabled}
 							onclick={() => run_('mode', () => run?.mode !== m && acq.setMode(m as 'auto' | 'manual'))}
-							{...tip(a.mode)}>{label}</button
+							{...tip('mode')}>{label}</button
 						>
 					{/each}
 				</div>
@@ -175,13 +176,13 @@
 
 		{#if a.level.visible}
 			<div class="level" role="group" aria-label="Level">
-				<button class="btn icon" data-testid="level-down" aria-label="Level down {stepDb} dB" aria-disabled={!a.level.enabled} class:off={!a.level.enabled} onclick={() => run_('level', () => acq.level(-stepDb))} {...tip(a.level)}>
+				<button class="btn icon" data-testid="level-down" aria-label="Level down {stepDb} dB" aria-disabled={!a.level.enabled} class:off={!a.level.enabled} onclick={() => run_('level', () => acq.level(-stepDb))} {...tip('level')}>
 					<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
 				</button>
 				<select class="field step num" aria-label="Level step" bind:value={stepDb} data-testid="level-step">
 					{#each [0.5, 1, 2, 3] as s (s)}<option value={s}>{s} dB</option>{/each}
 				</select>
-				<button class="btn icon" data-testid="level-up" aria-label="Level up {stepDb} dB" aria-disabled={!a.level.enabled} class:off={!a.level.enabled} onclick={() => run_('level', () => acq.level(stepDb))} {...tip(a.level)}>
+				<button class="btn icon" data-testid="level-up" aria-label="Level up {stepDb} dB" aria-disabled={!a.level.enabled} class:off={!a.level.enabled} onclick={() => run_('level', () => acq.level(stepDb))} {...tip('level')}>
 					<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6h8M6 2v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
 				</button>
 				<select
@@ -205,13 +206,13 @@
 
 		<div class="ends">
 			{#if a.stop.visible}
-				<button class="btn stop" data-testid="act-stop" aria-disabled={!a.stop.enabled} class:off={!a.stop.enabled} onclick={() => run_('stop', () => acq.stop())} {...tip(a.stop)}>
+				<button class="btn stop" data-testid="act-stop" aria-disabled={!a.stop.enabled} class:off={!a.stop.enabled} onclick={() => run_('stop', () => acq.stop())} {...tip('stop')}>
 					<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 4h4l8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
 					<span class="two"><span>Stop</span><small>Ramped</small></span>
 				</button>
 			{/if}
 			{#if a.abort.visible}
-				<button class="btn abort" data-testid="act-abort" aria-disabled={!a.abort.enabled} class:off={!a.abort.enabled} aria-keyshortcuts={abortKeys.replace('Cmd', 'Meta').replace('Ctrl', 'Control').replace(' ', '')} onclick={() => run_('abort', () => acq.abort())} {...tip(a.abort)}>
+				<button class="btn abort" data-testid="act-abort" aria-disabled={!a.abort.enabled} class:off={!a.abort.enabled} aria-keyshortcuts={abortKeys.replace('Cmd', 'Meta').replace('Ctrl', 'Control').replace(' ', '+')} onclick={() => run_('abort', () => acq.abort())} {...tip('abort')}>
 					<svg viewBox="0 0 14 14" width="16" height="16" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M4.8 7h4.4" stroke="var(--status-fail-fill)" stroke-width="1.8" stroke-linecap="round" /></svg>
 					<span class="two"><span>Abort</span><small>Immediate</small></span>
 					<kbd>{abortKeys}</kbd>

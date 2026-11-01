@@ -408,7 +408,8 @@ export class AppState {
 	/** Where the control data on screen comes from, for the top bar's badge, or null. */
 	get provenance(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
 		if (this.workspace === 'simulate') return this.simOnScreen ? { source: 'SIM', cls: 'sim' } : null;
-		if (this.workspace === 'acquire') return this.acquire.source;
+		// A live run is shown from every workspace (the top bar's run pill), so its source is too.
+		if (this.workspace === 'acquire' || this.acquire.isLive) return this.acquire.source;
 		return null;
 	}
 

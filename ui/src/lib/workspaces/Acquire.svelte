@@ -50,6 +50,13 @@
 	});
 
 	let tablist: HTMLElement;
+	let body = $state<HTMLElement | null>(null);
+
+	// Each section opens at its top.
+	$effect(() => {
+		void acq.tab;
+		body?.scrollTo({ top: 0 });
+	});
 
 	function onTabKey(e: KeyboardEvent) {
 		const ids = tabs.map((t) => t.id);
@@ -97,7 +104,7 @@
 				{t.label}
 				{#if t.errors > 0}
 					<span class="mark err" title="{t.errors} {t.errors === 1 ? 'error' : 'errors'}">
-						<svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /></svg>
+						<svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-fail-text)" stroke-width="1.7" stroke-linecap="round" /></svg>
 						<span class="num">{t.errors}</span><span class="visually-hidden">{t.errors === 1 ? 'error' : 'errors'}</span>
 					</span>
 				{:else if t.warnings > 0}
@@ -121,7 +128,7 @@
 		{/if}
 	</div>
 
-	<div class="body" class:fit={acq.tab === 'live'} id="aq-panel-{acq.tab}" role="tabpanel" aria-labelledby="aq-tab-{acq.tab}" tabindex="-1">
+	<div class="body" bind:this={body} class:fit={acq.tab === 'live'} id="aq-panel-{acq.tab}" role="tabpanel" aria-labelledby="aq-tab-{acq.tab}" tabindex="-1">
 		{#if acq.tab === 'station'}
 			<div class="stack">
 				<StationPanel {acq} />

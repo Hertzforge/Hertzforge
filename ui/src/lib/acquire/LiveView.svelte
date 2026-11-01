@@ -487,6 +487,9 @@
 			overflow-y: auto;
 			padding-right: 2px;
 		}
+		.side > .card {
+			flex: none;
+		}
 	}
 
 	@media (max-width: 1100px) {

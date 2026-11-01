@@ -48,7 +48,7 @@
 			<span class="runpill" data-testid="run-pill">
 				<button class="go" onclick={() => app.go('acquire')} title="Go to Acquire & Control">
 					<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
-					Random {STATE_WORDS[away.run?.state ?? 'running'].toLowerCase()}{#if away.frame?.level_db !== null && away.frame?.level_db !== undefined}<span class="num">, {db(away.frame.level_db)}</span>{/if}
+					Random {STATE_WORDS[away.run?.state ?? 'running'].toLowerCase()}{#if away.frame?.level_db !== null && away.frame?.level_db !== undefined}<span class="num lv">{db(away.frame.level_db)}</span>{/if}
 				</button>
 				<button class="abort" data-testid="run-pill-abort" disabled={!away.actions.abort.enabled} onclick={() => away.abort()} title="Abort the run now ({isMac ? 'Cmd' : 'Ctrl'} and period)">Abort</button>
 			</span>
@@ -179,6 +179,12 @@
 		background: var(--blue-weak);
 		border: 0;
 		white-space: nowrap;
+	}
+
+	.runpill .lv {
+		margin-left: 2px;
+		padding-left: 7px;
+		border-left: 1px solid var(--blue-line);
 	}
 
 	.runpill .go svg {

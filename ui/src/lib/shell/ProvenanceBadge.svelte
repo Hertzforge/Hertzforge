@@ -12,8 +12,10 @@
 		cls: StationClass;
 		size?: 'md' | 'lg';
 		compact?: boolean;
+		/** Data is on screen (a run streams), not only a station chosen. */
+		measured?: boolean;
 	}
-	let { source, cls, size = 'md', compact = false }: Props = $props();
+	let { source, cls, size = 'md', compact = false, measured = true }: Props = $props();
 
 	const live = $derived(source === 'HARDWARE' && cls === 'ni_real');
 	const simText = $derived(
@@ -27,7 +29,7 @@
 			<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
 			LIVE
 		</span>
-		<span class="text">{compact ? 'Hardware' : 'Measured on NI hardware'}</span>
+		<span class="text">{compact ? 'Hardware' : measured ? 'Measured on NI hardware' : 'NI hardware station'}</span>
 	</span>
 {:else}
 	<SimBadge {size} {compact} text={simText} />

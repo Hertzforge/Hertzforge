@@ -271,6 +271,10 @@
 		padding-top: 18px;
 	}
 
+	.aq-group > .tog {
+		padding-top: 0;
+	}
+
 	.help {
 		font-size: var(--text-2xs);
 		color: var(--text-3);

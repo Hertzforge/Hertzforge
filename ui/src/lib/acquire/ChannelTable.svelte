@@ -201,7 +201,7 @@
 							<div class="endcell">
 								{#if nErr}
 									<span class="count err" title="{nErr} {nErr === 1 ? 'error' : 'errors'}">
-										<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /></svg>
+										<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-fail-text)" stroke-width="1.7" stroke-linecap="round" /></svg>
 										<span class="num">{nErr}</span><span class="visually-hidden">errors</span>
 									</span>
 								{/if}

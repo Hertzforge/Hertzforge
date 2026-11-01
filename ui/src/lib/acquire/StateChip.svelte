@@ -46,7 +46,7 @@
 		{:else if shape === 'square'}
 			<rect x="2.5" y="2.5" width="9" height="9" rx="1.3" fill="currentColor" />
 		{:else}
-			<path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" />
+			<path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-fail-text)" stroke-width="1.7" stroke-linecap="round" />
 			<path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-fail-text)" stroke-width="1.6" stroke-linecap="round" />
 		{/if}
 	</svg>
