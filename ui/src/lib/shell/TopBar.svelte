@@ -22,6 +22,23 @@
 
 <header class="topbar">
 	<div class="brand">
+		<button
+			class="btn ghost icon sm railbtn"
+			data-testid="rail-toggle"
+			aria-expanded={!app.railCollapsed}
+			aria-label={app.railCollapsed ? 'Show the workspace rail' : 'Minimize the workspace rail'}
+			title={app.railCollapsed ? 'Show the workspace rail' : 'Minimize the workspace rail, to give the plots the screen'}
+			onclick={() => app.toggleRail()}
+		>
+			<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+				<rect x="1.5" y="2.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3" />
+				{#if app.railCollapsed}
+					<path d="M5 2.5v11" stroke="currentColor" stroke-width="1.3" /><path d="M8.5 6l2 2-2 2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+				{:else}
+					<rect x="1.5" y="2.5" width="4" height="11" rx="1.2" fill="currentColor" opacity="0.35" /><path d="M5.5 2.5v11" stroke="currentColor" stroke-width="1.3" /><path d="M10.5 6l-2 2 2 2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+				{/if}
+			</svg>
+		</button>
 		<svg class="mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
 			<rect x="0.75" y="0.75" width="22.5" height="22.5" rx="6" fill="var(--bg-3)" stroke="var(--line-2)" />
 			<path d="M4 13.5c2.2 0 2.2-6 4.4-6s2.2 10 4.4 10 2.2-7 4.4-7H20" fill="none" stroke="var(--blue-2)" stroke-width="1.8" stroke-linecap="round" />

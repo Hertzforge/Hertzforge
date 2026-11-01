@@ -12,16 +12,23 @@
 // 0. Acquire opens on the test-type chooser, in three sections (Single Output, MIMO, Data
 //    Acquisition), with Random the only test type offered and the keyboard moving across the
 //    sections; each screen picks Random there.
-// 1. One screen takes control, selects the simulator, sets the channel table and the bench
-//    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review
-//    (identification at the reference -20 dB, read from the run log), proceeds, steps the level
-//    on the manual ladder and stops with the ramp, which starts at once and walks down smoothly
-//    (the run bar's live level, sampled ten times a second).
+//    The workspace rail minimizes and stays minimized across a reload.
+// 1. One screen takes control, selects the simulator, sets the channel table (a control input, a
+//    drive and a monitored input with a response limit) and the bench loopback setup, sees the
+//    service draw the profile, applies, arms, proceeds to the Run step, starts, holds for review
+//    (identification at the reference -20 dB, read from the run log) and proceeds. During the run:
+//    the level card, the display pages (Control, Limits with the limit line, Responses), a plot
+//    added and removed and a page renamed, added and removed while the run goes on untouched, a
+//    connection of its own asking only for some plots and getting only those, and the rail
+//    minimized. Then it steps the level on the manual ladder and stops with the ramp, which starts
+//    at once and walks down smoothly (the run bar's live level, sampled ten times a second).
 //    After the run, "Test type" leads back to the chooser and Random comes back as it was left.
 // 2. A second browser (its own storage) observes: it shows the setup the service holds and its
 //    numbers; a new run starts and the observer aborts it with Ctrl and period. Meanwhile a third
 //    screen resting on the chooser sees the run go live and returns to it from the top bar, and a
-//    screen opened during the run goes straight to it.
+//    screen opened during the run goes straight to it. The controlling screen opens a page in a
+//    window of its own (for another monitor): an observer with its own page and subscription.
+// 2b. A new run, aborted from that second window.
 // 3. A new run starts, and the controlling screen is closed while it drives: the observer sees
 //    control free and the countdown, and the run ends in the safe stop after the orphan window.
 
@@ -120,6 +127,40 @@ function serviceCall(port, method, params = {}) {
 	});
 }
 
+/**
+ * A connection of its own that subscribes to `plots` at `rate` and records every event frame for
+ * `ms`: the topic and, for binary frames, the JSON header (arrays stay as references).
+ */
+function subscribeProbe(port, plots, rate, ms) {
+	return new Promise((resolve, reject) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+		ws.binaryType = 'arraybuffer';
+		const frames = [];
+		let answer = null;
+		let t0 = 0;
+		ws.onmessage = (m) => {
+			let v;
+			if (typeof m.data === 'string') v = JSON.parse(m.data);
+			else {
+				const bytes = new Uint8Array(m.data);
+				const len = new DataView(m.data).getUint32(4, true);
+				v = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + len)));
+			}
+			if (v.type === 'hello') ws.send(JSON.stringify({ type: 'request', id: 1, method: 'random.subscribe', params: { rate_hz: rate, plots } }));
+			else if (v.type === 'response' && v.id === 1) {
+				if (v.error) return reject(new Error(`random.subscribe: ${v.error.message}`));
+				answer = v.result;
+				t0 = Date.now();
+				setTimeout(() => {
+					ws.close();
+					resolve({ answer, frames, seconds: (Date.now() - t0) / 1000 });
+				}, ms);
+			} else if (v.type === 'event' && t0) frames.push({ topic: v.topic, data: v.data });
+		};
+		ws.onerror = () => reject(new Error('cannot reach the service for random.subscribe'));
+	});
+}
+
 // ---- checks -----------------------------------------------------------------------------------
 const results = [];
 function check(name, ok, detail = '') {
@@ -166,9 +207,20 @@ async function chooser(page, what) {
 	await until(page, what, async (p) => (await tid(p, 'conn-control').getAttribute('data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
 }
 
+/** A setup section; from the Run step, back to the setup first. */
 async function tab(page, id) {
+	if (await page.locator('[data-testid="back-to-setup"]').count()) await tid(page, 'back-to-setup').click();
 	await tid(page, `tab-${id}`).click();
 }
+
+/** The page shown in a window's display. */
+const pageName = async (page) => (await tid(page, 'page-select').locator('option:checked').innerText()).trim();
+async function choosePage(page, name) {
+	await tid(page, 'page-select').selectOption({ label: name });
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** The drawn panes of a plot, by its test id. */
+const panes = (page, plotId) => page.locator(`[data-testid="plot-${plotId}"] [data-testid="plot-pane"] canvas`).count();
 
 /** The run bar's level, settled (no ramp "to" part), in dB. */
 async function settledLevel(page) {
@@ -183,7 +235,8 @@ console.log('building the control service (release)');
 execFileSync('cargo', ['build', '--release', '-q', '-p', 'sds-control', '--locked'], { cwd: ROOT, stdio: 'inherit' });
 const servicePort = await freePort();
 const shellPort = await freePort();
-const exe = path.join(ROOT, 'target', 'release', process.platform === 'win32' ? 'sds-control.exe' : 'sds-control');
+const TARGET = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(ROOT, 'target');
+const exe = path.join(TARGET, 'release', process.platform === 'win32' ? 'sds-control.exe' : 'sds-control');
 const service = start('sds-control', exe, ['--port', String(servicePort)]);
 await waitFor('the control service', () => service.log.join('').includes('listening on ws://127.0.0.1:'), 30_000);
 start('shell', process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--prefix', 'ui', 'run', 'dev', '--', '--port', String(shellPort), '--strictPort'], {
@@ -244,6 +297,20 @@ try {
 	const back = await focused();
 	check('chooser keyboard: End, Home and the arrows move across the sections', atEnd === 'recorder' && atHome === 'random' && across === 'mimo_random' && back === 'explorer', `End ${atEnd}, Home ${atHome}, right of Explorer ${across}, back ${back}`);
 	await shot(a, '00-test-type-chooser');
+
+	// The workspace rail minimizes, giving the workspace the width, and stays so across a reload.
+	const railWidth = (p) => p.evaluate(() => document.querySelector('nav.rail')?.getBoundingClientRect().width ?? 0);
+	const wideBefore = await a.evaluate(() => document.querySelector('.workspace')?.getBoundingClientRect().width ?? 0);
+	const railBefore = await railWidth(a);
+	await tid(a, 'rail-toggle').click();
+	const railGone = await railWidth(a);
+	const wideAfter = await a.evaluate(() => document.querySelector('.workspace')?.getBoundingClientRect().width ?? 0);
+	await a.reload();
+	await chooser(a, 'the chooser after a reload');
+	const keptGone = (await railWidth(a)) === 0 && (await tid(a, 'rail-toggle').getAttribute('aria-expanded')) === 'false';
+	check('the rail minimizes, the workspace takes its width, and it stays minimized across a reload', railBefore > 0 && railGone === 0 && wideAfter > wideBefore && keptGone, `rail ${railBefore} to ${railGone} px, workspace ${wideBefore} to ${wideAfter} px, after reload ${keptGone ? 'still minimized' : 'shown'}`);
+	await tid(a, 'rail-toggle').click();
+	check('the rail comes back', (await railWidth(a)) === railBefore);
 	await tid(a, 'test-type-random').click();
 	await until(a, 'the shell to connect', async (p) => (await roleOf(p)) === 'observer');
 	check('a new screen starts as an observer', (await roleOf(a)) === 'observer');
@@ -269,6 +336,11 @@ try {
 	const abortOff = a.locator('.nf', { has: a.locator('#ch-0-ab-g') }).locator('input[type="checkbox"]');
 	if (await abortOff.isChecked()) await abortOff.uncheck();
 	await fill(a, '#ch-0-ab-g', 1.0);
+	// A monitored input, channel 3, for the response plots and a limit.
+	await tid(a, 'add-input').click();
+	await a.getByLabel('Channel 3 description').fill('Fixture');
+	await fill(a, '#ch-2-sens', 1000);
+	await fill(a, '#ch-2-range', 5);
 	await until(a, 'the table check', async (p) => (await tid(p, 'table-apply').isEnabled()));
 	await tid(a, 'table-apply').click();
 	await until(a, 'the table applied', async (p) => /applied \(revision \d+\)/.test(await text(p, 'note')));
@@ -305,6 +377,9 @@ try {
 	await fill(a, '#ctl-max_sigma', 3);
 	await fill(a, '#ctl-pre-avg', 4);
 	await fill(a, '#ctl-pre-max', 0.2);
+	// A response limit on the monitored input, well above anything this run reaches.
+	await tid(a, 'limit-add').click();
+	await a.locator('#lim-0-ch').selectOption('3');
 	await shot(a, '02-control-and-limits');
 
 	// The profile, drawn by the service from the dry run, before anything is armed.
@@ -323,6 +398,7 @@ try {
 	await until(a, 'applied', async (p) => (await tid(p, 'setup-status').getAttribute('data-status')) === 'applied');
 	check('Apply Setup: the service holds this screen\'s setup', true, await text(a, 'setup-status'));
 	check('after applying, the preview is the service\'s', (await tid(a, 'reference-preview').getAttribute('data-source')) === 'service');
+	check('Setup step: the footer says the service holds this setup', /service holds this setup/.test(await text(a, 'flow-check')), await text(a, 'flow-check'));
 
 	await verb(a, 'act-arm');
 	await until(a, 'armed', async (p) => (await stateOf(p)) === 'armed');
@@ -330,6 +406,17 @@ try {
 	check('Arm: armed, on the grid the station runs at', /Actual/.test(gridNote), gridNote);
 	await simBadge(a, 'armed');
 	await shot(a, '04-armed');
+
+	// Setup, then Run: armed, the setup is locked, and Proceed to Run shows the run.
+	check('Setup step: armed, the footer says the setup is locked', /setup is locked/.test(await text(a, 'flow-check')), await text(a, 'flow-check'));
+	await tid(a, 'proceed-to-run').click();
+	await until(a, 'the Run step', async (p) => (await tid(p, 'run-view').isVisible()) && (await tid(p, 'flow-run').getAttribute('aria-current')) === 'step');
+	check('Proceed to Run: the Run step, on the Control page with its two plots', (await pageName(a)) === 'Control' && (await tid(a, 'page-view').getAttribute('data-plots')) === '2', `${await pageName(a)}, ${await tid(a, 'page-view').getAttribute('data-plots')} plots`);
+	await tid(a, 'back-to-setup').click();
+	await until(a, 'back at the setup', async (p) => (await tid(p, 'tab-station').isVisible()) && (await p.locator('[data-testid="run-view"]').count()) === 0);
+	await tid(a, 'proceed-to-run').click();
+	await until(a, 'the Run step again', async (p) => tid(p, 'run-view').isVisible());
+	check('Back to Setup and Proceed to Run move between the steps', true);
 
 	await verb(a, 'act-start');
 	await until(a, 'the review hold', async (p) => (await stateOf(p)) === 'review', 90_000);
@@ -349,11 +436,116 @@ try {
 	await shot(a, '05-review-hold');
 	await tid(a, 'review-proceed').click();
 
-	// The manual ladder: step the level once the run drives at the schedule.
 	await until(a, 'running', async (p) => (await stateOf(p)) === 'running');
+
+	// The level card while the soft start ramps up to the first level, then holds it.
+	const statuses = new Set();
+	const t1 = Date.now();
+	while (Date.now() - t1 < 8000) {
+		statuses.add(await text(a, 'level-status'));
+		if ([...statuses].some((t) => /^Controlling at -12\.0 dB/.test(t))) break;
+		await a.waitForTimeout(150);
+	}
+	await until(a, 'the level card numbers', async (p) => /\d/.test(await text(p, 'level-target')) && /\d/.test(await text(p, 'level-control')) && /dB/.test(await text(p, 'level-error')));
+	check(
+		'level card: the soft start reads "Ramping to", then "Controlling at -12.0 dB"',
+		[...statuses].some((t) => /^Ramping to -12\.0 dB/.test(t)) && [...statuses].some((t) => /^Controlling at -12\.0 dB/.test(t)),
+		[...statuses].join(' | ')
+	);
+	check(
+		'level card: the level, the target and control rms with their difference, and the time at the level against its dwell',
+		/^-12\.0 dB$/.test(await text(a, 'level-now')) && (await tid(a, 'level-progress').isVisible()) && /of 10\.0 s at this level/.test(await text(a, 'level-progress')),
+		`${await text(a, 'level-now')}; target ${await text(a, 'level-target')}, control ${await text(a, 'level-control')}, difference ${await text(a, 'level-error')}; ${await text(a, 'level-progress')}`
+	);
+	await until(a, 'the control plot drawn', async (p) => (await panes(p, 'pl-1')) > 0 && (await panes(p, 'pl-2')) > 0);
+	await shot(a, '05a-run-control-page-and-level-card');
+
+	// The manual ladder holds the level while the display is worked on.
 	await tid(a, 'mode-manual').click();
 	await until(a, 'the manual ladder', async (p) => (await tid(p, 'level-up').getAttribute('aria-disabled')) === 'false', 90_000);
-	check('Manual ladder: the level steps are offered while driving', true);
+
+	// A connection of its own asks for two plots only, at 10 per second, and gets only those.
+	const probe = await subscribeProbe(servicePort, [{ id: 'lim', quantity: 'response', channels: 'limited' }, { id: 't1', quantity: 'time', channels: [1], points: 512 }], 10, 2000);
+	const topics = new Set(probe.frames.map((f) => f.topic));
+	const dataFrames = probe.frames.filter((f) => f.topic === 'random.data');
+	const last = dataFrames.at(-1)?.data;
+	const lim = last?.plots.find((x) => x.id === 'lim');
+	const t1plot = last?.plots.find((x) => x.id === 't1');
+	check(
+		'subscription: only random.data, at about the rate asked, with exactly the plots asked for',
+		!topics.has('random.live') && dataFrames.length >= 12 && dataFrames.length <= 26 && last?.plots.map((x) => x.id).join() === 'lim,t1',
+		`${dataFrames.length} frames in ${probe.seconds.toFixed(1)} s, topics ${[...topics].join(', ')}`
+	);
+	check(
+		'subscription: the limited channel with its limit line, and channel 1 as a time history',
+		JSON.stringify(lim?.channels) === '[3]' &&
+			lim.views[0].series.some((x) => x.role === 'limit' && x.name === 'Limit') &&
+			JSON.stringify(t1plot?.channels) === '[1]' &&
+			t1plot.views[0].x.label === 'Time',
+		`limited ${JSON.stringify(lim?.channels)} series ${lim?.views[0]?.series.map((x) => x.role).join('/')}; time ${JSON.stringify(t1plot?.channels)} ${t1plot?.views[0]?.x.label}`
+	);
+
+	// The pages: Limits shows the limited channel against its limit; Responses every input.
+	const runId = await serviceCall(servicePort, 'random.state').then((x) => x.run_id);
+	await choosePage(a, 'Limits');
+	await until(a, 'the limit plot', async (p) => (await panes(p, 'pl-3')) > 0 && /Limit/.test(await text(p, 'plot-pl-3')));
+	check('Limits page: the limited channel drawn against its limit line', /Channel 3: Fixture/.test(await text(a, 'plot-pl-3')), (await text(a, 'plot-pl-3')).slice(0, 80));
+	await shot(a, '05b-limits-page');
+	await choosePage(a, 'Responses');
+	await until(a, 'the response plots', async (p) => (await panes(p, 'pl-4')) === 2);
+	check('Responses page: one pane per input (channels 1 and 3)', true);
+
+	// A plot added during the run fills, and removed, goes; the run carries on untouched.
+	const loopOf = async (p) => Number((await text(p, 'live-lines')).match(/Loop\s*(\d+)/)?.[1] ?? NaN);
+	const loopBefore = await loopOf(a);
+	await tid(a, 'plot-add').click();
+	await tid(a, 'plot-quantity').selectOption('time');
+	await tid(a, 'plot-channels-pick').click();
+	await tid(a, 'plot-pick-1').uncheck().catch(() => {});
+	await tid(a, 'plot-pick-3').check();
+	await tid(a, 'plot-editor-done').click();
+	await until(a, 'the added time plot', async (p) => (await tid(p, 'page-view').getAttribute('data-plots')) === '2' && (await panes(p, 'pl-5')) === 1);
+	const midState = await serviceCall(servicePort, 'random.state');
+	const loopAfter = await loopOf(a);
+	check('a time-history plot of channel 3, added during the run, fills at once; the run carries on', midState.run_id === runId && midState.state === 'running' && loopAfter > loopBefore, `${midState.run_id} ${midState.state}, loop ${loopBefore} to ${loopAfter}`);
+	await shot(a, '05c-plot-added-during-run');
+	await a.locator('[data-testid="plot-pl-5"] [data-testid="plot-remove"]').click();
+	await until(a, 'the plot removed', async (p) => (await tid(p, 'page-view').getAttribute('data-plots')) === '1');
+	const after = await serviceCall(servicePort, 'random.state');
+	check('the plot removed during the run; the run carries on', after.run_id === runId && after.state === 'running', `${after.state}`);
+
+	// Pages renamed, added (with a plot of its own) and removed during the run.
+	await tid(a, 'page-rename').click();
+	await tid(a, 'page-name').fill('All Inputs');
+	await tid(a, 'page-name').press('Enter');
+	await until(a, 'the renamed page', async (p) => (await pageName(p)) === 'All Inputs');
+	await tid(a, 'page-add').click();
+	await tid(a, 'page-name').fill('Drive Detail');
+	await tid(a, 'page-name').press('Enter');
+	await until(a, 'the new page', async (p) => (await pageName(p)) === 'Drive Detail' && (await tid(p, 'page-empty').isVisible()));
+	await tid(a, 'plot-add').click();
+	await tid(a, 'plot-quantity').selectOption('drive');
+	await tid(a, 'plot-y-fixed').check();
+	await tid(a, 'plot-editor-done').click();
+	const newPlot = await a.locator('[data-testid="page-view"] [data-plot]').first().getAttribute('data-plot');
+	await until(a, 'the drive plot on the new page', async (p) => (await panes(p, newPlot)) === 1);
+	const pagesNow = await tid(a, 'page-select').locator('option').allInnerTexts();
+	check('pages: renamed, and a new one with a plot of its own, from the drop-down', pagesNow.join('|') === 'Control|Limits|All Inputs|Drive Detail', pagesNow.join(', '));
+	await shot(a, '05d-new-page-with-a-plot');
+	await tid(a, 'page-remove').click();
+	await tid(a, 'page-remove-yes').click();
+	await until(a, 'the page removed', async (p) => (await tid(p, 'page-select').locator('option').count()) === 3);
+	await choosePage(a, 'Control');
+	check('the page removed; the run carries on', (await stateOf(a)) === 'running' && (await serviceCall(servicePort, 'random.state')).run_id === runId);
+
+	// The rail minimized during the run gives the plots the screen.
+	await tid(a, 'rail-toggle').click();
+	await a.waitForTimeout(800);
+	await shot(a, '05e-rail-minimized-during-run');
+	await tid(a, 'rail-toggle').click();
+
+	// The manual ladder: step the level.
+	check('Manual ladder: the level steps are offered while driving', (await tid(a, 'level-up').getAttribute('aria-disabled')) === 'false');
 	// At full level: down 1 dB, up 1 dB, then down to the -6 dB rung; every change ramps.
 	await tid(a, 'level-goto').selectOption('0');
 	await waitFor('full level', async () => (await settledLevel(a)) === 0, 30_000);
@@ -403,7 +595,7 @@ try {
 	await until(a, 'Random again', async (p) => (await stateOf(p)) === 'finished');
 	check(
 		'after the run, "Test type" returns to the chooser, and Random comes back as it was left',
-		lastUsed && (await outcomeOf(a)) === 'operator_stop' && (await tid(a, 'tab-live').getAttribute('aria-selected')) === 'true',
+		lastUsed && (await outcomeOf(a)) === 'operator_stop' && (await tid(a, 'run-view').isVisible()),
 		`marked last used ${lastUsed}, outcome ${await outcomeOf(a)}`
 	);
 
@@ -437,8 +629,28 @@ try {
 	await until(b, 'the observer to see the review hold', async (p) => (await stateOf(p)) === 'review');
 	check('observer: Proceed is not offered to a screen without control', (await tid(b, 'review-proceed').isDisabled()));
 	await tid(a, 'review-proceed').click();
-	await until(b, 'the observer to see the run drive', async (p) => (await stateOf(p)) === 'running' && (await tid(p, 'live-control').isVisible()), 60_000);
+	await until(b, 'the observer to see the run drive', async (p) => (await stateOf(p)) === 'running' && (await panes(p, 'pl-1')) > 0, 60_000);
 	await simBadge(b, 'observer, driving');
+
+	// The controlling screen opens its Limits page in a window of its own, for another monitor.
+	await choosePage(a, 'Limits');
+	const [w] = await Promise.all([ctxA.waitForEvent('page'), tid(a, 'page-popout').click()]);
+	await w.setViewportSize({ width: 1280, height: 820 });
+	await until(w, 'the second window', async (p) => (await tid(p, 'display-window').isVisible()) && (await panes(p, 'pl-3')) > 0, 30_000);
+	check(
+		'second window: an observer showing the Limits page, with the run state, Stop and Abort',
+		(await text(w, 'display-window-page')) === 'Limits' && (await roleOf(w)) === 'observer' && (await stateOf(w)) === 'running' && (await tid(w, 'act-stop').isVisible()) && (await tid(w, 'act-abort').getAttribute('aria-disabled')) === 'false',
+		`${await text(w, 'display-window-page')}, ${await roleOf(w)}, ${await stateOf(w)}`
+	);
+	// Each window has its own page: the second goes to Control, the first stays on Limits.
+	await choosePage(w, 'Control');
+	await until(w, 'the control plot in the second window', async (p) => (await panes(p, 'pl-1')) > 0);
+	await choosePage(a, 'All Inputs');
+	await until(a, 'the first window on its own page', async (p) => (await panes(p, 'pl-4')) === 2);
+	check('each window keeps its own page and plots', (await pageName(w)) === 'Control' && (await pageName(a)) === 'All Inputs');
+	await shot(w, '08d-second-window-control-page');
+	await shot(a, '08e-first-window-own-page');
+	await choosePage(w, 'Limits');
 
 	// The chooser stays on the third screen, with the run in reach from its card and the top bar.
 	await until(c, 'the chooser to show the run', async (p) => (await tid(p, 'test-type-random').getAttribute('data-state')) === 'live' && (await tid(p, 'run-pill').isVisible()));
@@ -478,6 +690,24 @@ try {
 	check('controller: the end names the observer', (await outcomeOf(a)) === 'operator_abort' && /observer/i.test(endMsg), endMsg);
 	await shot(b, '09-observer-aborted');
 	await shot(a, '10-controller-sees-observer-abort');
+
+	// ============ Run 2b: the second window aborts ===============================================
+	await verb(a, 'act-reset');
+	await until(a, 'a new run', async (p) => (await stateOf(p)) === 'configured');
+	await verb(a, 'act-start');
+	await until(a, 'the review hold', async (p) => (await stateOf(p)) === 'review', 90_000);
+	await tid(a, 'review-proceed').click();
+	await until(w, 'the second window to see the run drive', async (p) => (await stateOf(p)) === 'running' && (await panes(p, 'pl-3')) > 0, 60_000);
+	await until(w, 'its level card', async (p) => /^Controlling at|^Ramping to/.test(await text(p, 'level-status')));
+	await shot(w, '09a-second-window-driving');
+	await w.bringToFront();
+	await w.keyboard.press('Control+Period');
+	await until(w, 'the abort from the second window', async (p) => (await stateOf(p)) === 'finished', 5_000);
+	await until(a, 'the first window to see it', async (p) => (await stateOf(p)) === 'finished');
+	const wEnd = await text(a, 'run-end-message');
+	check('second window: Ctrl and period aborts the run, and the end names it', (await outcomeOf(w)) === 'operator_abort' && /observer/i.test(wEnd), wEnd);
+	await shot(w, '09b-second-window-aborted');
+	await a.bringToFront();
 
 	// ============ Run 3: the controlling screen goes away mid-run ===============================
 	await verb(a, 'act-reset');

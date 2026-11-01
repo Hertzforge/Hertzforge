@@ -27,7 +27,7 @@ import type {
 	RandomConfigureResult,
 	RandomDryRunResult,
 	RandomLevelResult,
-	RandomLive,
+	RandomLiveHead,
 	RandomLogEvent,
 	RandomLogResult,
 	RandomState,
@@ -88,6 +88,8 @@ export interface AcquireOptions {
 	name?: string;
 	/** Debounce of the dry-run checks, ms. */
 	checkDelayMs?: number;
+	/** Keep and check setup drafts (false for a window that only watches the run). */
+	drafts?: boolean;
 }
 
 function storageOf(kind: 'sessionStorage' | 'localStorage'): Storage | null {
@@ -149,6 +151,7 @@ export class AcquireState {
 	private readonly sessionStore: Storage | null;
 	private readonly localStore: Storage | null;
 	private readonly checkDelayMs: number;
+	private readonly drafts: boolean;
 
 	// ---- session ----------------------------------------------------------------------------
 	session = $state.raw<SessionState | null>(null);
@@ -186,7 +189,8 @@ export class AcquireState {
 
 	// ---- run --------------------------------------------------------------------------------
 	run = $state.raw<RandomState | null>(null);
-	live = $state.raw<RandomLive | null>(null);
+	/** The run's numbers from the last live frame (`random.live`, or this screen's `random.data`). */
+	live = $state.raw<RandomLiveHead | null>(null);
 	log = $state.raw<LogEntry[]>([]);
 
 	// ---- view -------------------------------------------------------------------------------
@@ -230,6 +234,7 @@ export class AcquireState {
 		this.sessionStore = options.session === undefined ? storageOf('sessionStorage') : options.session;
 		this.localStore = options.local === undefined ? storageOf('localStorage') : options.local;
 		this.checkDelayMs = options.checkDelayMs ?? 250;
+		this.drafts = options.drafts ?? true;
 		this.lease = read(this.sessionStore, LEASE_KEY);
 		this.setup = loadSetup(this.localStore);
 		this.baseKey = read(this.localStore, BASE_KEY) ?? configKey(toConfig(defaultSetup()));
@@ -238,7 +243,8 @@ export class AcquireState {
 		control.on(T.station, (d) => this.onStations(d as unknown as StationList));
 		control.on(T.channels, (d) => this.onTable(d as unknown as ChannelTable));
 		control.on(T.state, (d) => this.onState(d as unknown as RandomState));
-		control.on(T.live, (d) => this.onLive(d as unknown as RandomLive));
+		control.on(T.live, (d) => this.onLive(d as unknown as RandomLiveHead));
+		control.on(T.data, (d) => this.onLive(d as unknown as RandomLiveHead));
 		control.on(T.log, (d) => this.onLog(d as unknown as RandomLogEvent));
 	}
 
@@ -369,8 +375,8 @@ export class AcquireState {
 		return primaryAction(this.context);
 	}
 
-	/** The live frame for the present run, or null. */
-	get frame(): RandomLive | null {
+	/** The live frame's numbers for the present run, or null. */
+	get frame(): RandomLiveHead | null {
 		const live = this.live;
 		return live && this.run && live.run_id === this.run.run_id ? live : null;
 	}
@@ -440,6 +446,7 @@ export class AcquireState {
 			return;
 		}
 		if (this.lease && this.role !== 'controller') await this.resume();
+		if (!this.drafts) return;
 		this.scheduleTableCheck(0);
 		this.scheduleSetupCheck(0);
 	}
@@ -813,9 +820,11 @@ export class AcquireState {
 		if (driving(s) && (!driving(prev) || prev?.run_id !== s.run_id)) this.tab = 'live';
 	}
 
-	private onLive(l: RandomLive) {
+	private onLive(l: RandomLiveHead) {
 		if (this.run && l.run_id !== this.run.run_id) return;
-		this.live = l;
+		// Only the numbers: a screen's plots read their own data from the display.
+		const { views: _v, plots: _p, ...head } = l as RandomLiveHead & { views?: unknown; plots?: unknown };
+		this.live = head;
 	}
 
 	/** Each run has its own log, started at configure and at every new run. */

@@ -17,8 +17,14 @@
 		/** Open the acknowledgement dialog for arming past a feasibility exceedance. */
 		onoverride: () => void;
 		abortKeys: string;
+		/**
+		 * A window that shows plots on another monitor: the run's state, the level, who holds
+		 * control, and Stop and Abort. The verbs that set up and steer the run stay with the main
+		 * window.
+		 */
+		compact?: boolean;
 	}
-	let { acq, onoverride, abortKeys }: Props = $props();
+	let { acq, onoverride, abortKeys, compact = false }: Props = $props();
 
 	const run = $derived(acq.run);
 	const frame = $derived(acq.frame);
@@ -75,7 +81,7 @@
 	const busy = (verb: string) => acq.busy === verb;
 </script>
 
-<section class="runbar" aria-label="Run control" data-testid="run-bar">
+<section class="runbar" class:compact aria-label="Run control" data-testid="run-bar">
 	<div class="status">
 		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" measured={acq.frame !== null} />{/if}
 		<StateChip {run} />
@@ -115,15 +121,15 @@
 					<svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><circle cx="5" cy="7" r="3.2" fill="currentColor" /><path d="M8 7h5M11 7v2.5M13 7v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
 					In Control
 				</span>
-				<button class="btn sm" data-testid="release" onclick={() => acq.release()} disabled={!acq.connected || acq.busy !== null} title={acq.isLive ? `Hand control to another screen. The run continues; if nobody takes control within ${acq.session?.timeout_s ?? 30} s, it stops with its ramp.` : 'Let another screen take control.'}>Release</button>
+				{#if !compact}<button class="btn sm" data-testid="release" onclick={() => acq.release()} disabled={!acq.connected || acq.busy !== null} title={acq.isLive ? `Hand control to another screen. The run continues; if nobody takes control within ${acq.session?.timeout_s ?? 30} s, it stops with its ramp.` : 'Let another screen take control.'}>Release</button>{/if}
 			{:else}
 				<span class="role" data-testid="session-role" data-role="observer">
 					<svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true"><path d="M1 7s2.3-4 6-4 6 4 6 4-2.3 4-6 4-6-4-6-4z" fill="none" stroke="currentColor" stroke-width="1.3" /><circle cx="7" cy="7" r="1.8" fill="currentColor" /></svg>
 					<span>Observing{#if seat}<span class="holder">, {seat.name} {seat.present ? 'has control' : 'held control and is disconnected'}</span>{/if}</span>
 				</span>
-				<button class="btn sm primary" data-testid="claim" onclick={() => acq.claim()} disabled={!canClaim || busy('Take Control')} title={canClaim ? 'Take control of the station and the run.' : seat?.present ? `${seat.name} has control. Control passes when it is released.` : 'The control service is not connected.'}>
+				{#if !compact}<button class="btn sm primary" data-testid="claim" onclick={() => acq.claim()} disabled={!canClaim || busy('Take Control')} title={canClaim ? 'Take control of the station and the run.' : seat?.present ? `${seat.name} has control. Control passes when it is released.` : 'The control service is not connected.'}>
 					Take Control
-				</button>
+				</button>{/if}
 			{/if}
 			{#if orphanLeft !== null}
 				<span class="orphan" role="alert" data-testid="orphan">
@@ -149,6 +155,7 @@
 			{/if}
 		{/snippet}
 
+		{#if !compact}
 		<div class="verbs">
 			{@render verb('apply', 'Apply Setup', 'action', () => acq.apply(), 'act-apply')}
 			{@render verb('arm', 'Arm', null, () => acq.arm(), 'act-arm')}
@@ -205,6 +212,8 @@
 					{#each run?.levels_db ?? [] as l (l)}<option value={l}>{db(l)}</option>{/each}
 				</select>
 			</div>
+		{/if}
+
 		{/if}
 
 		<div class="ends">

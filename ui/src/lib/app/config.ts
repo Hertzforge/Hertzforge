@@ -16,6 +16,12 @@ export interface ShellConfig {
 	/** `?theme=dark|light|system` forces a theme for this load (screenshots, tests). */
 	theme: ThemePref | null;
 	/**
+	 * `?popout=1&page=<id>`: a window that shows one display page of the run, opened from the main
+	 * window to place on another monitor. It observes the run with its own subscription.
+	 */
+	popout: boolean;
+	page: string | null;
+	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
 	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`.
@@ -48,6 +54,8 @@ export function readConfig(search: string): ShellConfig {
 		analysisUrl: wsUrl(q.get('analysis'), DEFAULT_ANALYSIS_URL),
 		controlUrl: wsUrl(q.get('control'), DEFAULT_CONTROL_URL),
 		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
+		popout: q.get('popout') === '1',
+		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
 		mockControl: {
 			speed: num(q.get('mock_speed')),
 			niReal: q.get('mock_ni') === 'real' ? true : undefined,

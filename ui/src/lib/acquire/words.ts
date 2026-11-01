@@ -9,9 +9,11 @@ import { RequestError } from '$lib/protocol/client.svelte';
 import type {
 	Alarm,
 	LogKind,
+	RandomLiveHead,
 	RandomOutcome,
 	RandomPhase,
 	RandomRunState,
+	RandomState,
 	RefusalReason,
 	Status,
 	Trip
@@ -126,6 +128,52 @@ export function alarmText(a: Alarm, channelName?: (index: number) => string): st
 	if (a.kind === 'envelope') return `${a.lines} ${a.lines === 1 ? 'line' : 'lines'} outside the alarm band, worst ${db(a.worst_db)}`;
 	if (a.kind === 'overload') return `${channelName?.(a.channel) ?? `Channel ${a.channel}`} reached the top of its range`;
 	return 'Alarm';
+}
+
+/** The level card's status line: what the run is doing now, in plain words. */
+export interface LevelStatus {
+	/** The shape beside the words: no meaning rests on the color alone. */
+	mark: 'idle' | 'armed' | 'identify' | 'hold' | 'control' | 'ramp' | 'stop' | 'done' | 'ended';
+	text: string;
+	tone: Status;
+}
+
+/** The run is moving to a new level: the drive is not yet where it was commanded. */
+export function ramping(frame: Pick<RandomLiveHead, 'level_db' | 'commanded_db'> | null): boolean {
+	return !!frame && frame.level_db !== null && frame.commanded_db !== null && Math.abs(frame.level_db - frame.commanded_db) > 0.05;
+}
+
+export function levelStatus(run: RandomState | null, frame: RandomLiveHead | null): LevelStatus {
+	const state = run?.state ?? 'unconfigured';
+	const f = frame && run && frame.run_id === run.run_id ? frame : null;
+	switch (state) {
+		case 'unconfigured':
+			return { mark: 'idle', text: 'Not set up', tone: 'info' };
+		case 'configured':
+			return { mark: 'idle', text: 'Set up, ready to arm', tone: 'info' };
+		case 'blocked':
+			return { mark: 'hold', text: "Blocked: the profile exceeds the shaker's ratings", tone: 'warn' };
+		case 'armed':
+			return { mark: 'armed', text: 'Armed, nothing driving', tone: 'info' };
+		case 'review':
+			return { mark: 'hold', text: 'Holding for review', tone: 'info' };
+		case 'stopping':
+			return { mark: 'stop', text: f?.level_db !== null && f?.level_db !== undefined ? `Stopping, ramping down from ${db(f.level_db)}` : 'Stopping', tone: 'info' };
+		case 'finished': {
+			const outcome = run?.end?.outcome;
+			if (!outcome) return { mark: 'ended', text: 'Finished', tone: 'info' };
+			const tone = outcomeTone(outcome);
+			return { mark: tone === 'pass' ? 'done' : 'ended', text: OUTCOME_WORDS[outcome], tone };
+		}
+		case 'running':
+			break;
+	}
+	if (run?.phase === 'sysid') return { mark: 'identify', text: `Identifying the system at ${db(run.level_db)} against the reference`, tone: 'info' };
+	if (run?.phase === 'coherence_gate') return { mark: 'identify', text: 'Checking the coherence', tone: 'info' };
+	if (ramping(f)) return { mark: 'ramp', text: `Ramping to ${db(f?.commanded_db)}`, tone: 'info' };
+	const level = f?.level_db ?? run?.level_db ?? null;
+	if (run?.phase === 'full_level') return { mark: 'control', text: `Controlling at full level, ${db(level)}`, tone: 'pass' };
+	return { mark: 'control', text: `Controlling at ${db(level)}`, tone: 'pass' };
 }
 
 export const LOG_WORDS: Record<LogKind, string> = {

@@ -1,22 +1,31 @@
 <script lang="ts">
 	/**
-	 * The run as it happens, from `random.live`: control against reference on the run's own
-	 * analysis lines, drawn as steps across each bin, with the alarm (dotted) and abort
-	 * (dash-dot) lines; the drive; the numbers; every input's rms with its overload mark; the
-	 * alarms holding now; and how the run ended, with the trip and its axis when a protection
-	 * stopped it. Nothing here computes a number.
+	 * The run as it happens (the Run view): the page bar, the page's plots, and beside them the
+	 * level card, the band's lines, every input's rms with its overload mark, and the run log. How
+	 * the run ended, with the trip and its axis when a protection stopped it, and the review hold
+	 * come first when they apply. Nothing here computes a number.
 	 */
+	import type { Snippet } from 'svelte';
 	import { formatFixed } from '$lib/viz/format';
 	import StatusMark from '$lib/viz/StatusMark.svelte';
-	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
-	import LevelLadder from './LevelLadder.svelte';
+	import type { DisplayState } from './display/display.svelte';
+	import LevelCard from './display/LevelCard.svelte';
+	import PageBar from './display/PageBar.svelte';
+	import PageView from './display/PageView.svelte';
 	import type { AcquireState } from './store.svelte';
-	import { alarmText, clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, TRIP_WORDS, tripFacts } from './words';
+	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {
 		acq: AcquireState;
+		display: DisplayState;
+		/** Open a page in a window of its own; false when the browser refused. */
+		onpopout?: (pageId: string) => boolean;
+		/** The page bar's right end (the way back to the setup). */
+		end?: Snippet;
+		/** A window on another monitor: the plots and the level, without the run's side cards. */
+		compact?: boolean;
 	}
-	let { acq }: Props = $props();
+	let { acq, display, onpopout, end: barEnd, compact = false }: Props = $props();
 
 	const run = $derived(acq.run);
 	const f = $derived(acq.frame);
@@ -29,9 +38,17 @@
 	};
 	const logTime = (u: number) => new Date(u * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 	const recent = $derived([...acq.log].reverse().slice(0, 200));
+	/** The run has streamed: its plots have data or will with the next loop. */
+	const streaming = $derived(!!run && (run.state === 'running' || run.state === 'review' || run.state === 'stopping' || (run.state === 'finished' && run.elapsed_s !== null)));
+	/** The enabled inputs of the service's channel table, for choosing a plot's channels. */
+	const inputs = $derived(
+		(acq.server?.channels ?? []).filter((c) => c.enabled && c.role !== 'drive').map((c) => ({ index: c.index, name: c.description || c.role }))
+	);
 </script>
 
-<div class="live" data-testid="live-view">
+<div class="live" class:compact data-testid="live-view">
+	<PageBar {display} {onpopout} end={barEnd} />
+
 	{#if end}
 		<section class="end {tone}" role={tone === 'fail' ? 'alert' : 'status'} data-testid="run-end" data-outcome={end.outcome}>
 			<div class="endmark" aria-hidden="true">
@@ -74,34 +91,12 @@
 		</section>
 	{/if}
 
-	{#if !f}
-		<div class="empty">
-			<p>
-				{#if run?.state === 'running'}
-					Waiting for the first frame from the control service.
-				{:else}
-					Nothing is running. Apply the setup, then Start: the control spectrum against its reference, the drive and the run's numbers appear here.
-				{/if}
-			</p>
-		</div>
-	{:else}
-		<div class="grid">
-			<div class="charts">
-				<section class="pane control" aria-label="Control against reference" data-testid="live-control">
-					<ViewRenderer view={f.views[0]} live minHeight={260} />
-				</section>
-				<section class="pane drive" aria-label="Drive" data-testid="live-drive">
-					{#if f.views[1].series.length}
-						<ViewRenderer view={f.views[1]} live minHeight={130} />
-					{:else}
-						<h3 class="ptitle">Drive</h3>
-						<p class="aq-muted">The drive appears with the first control loop.</p>
-					{/if}
-				</section>
-			</div>
-			<aside class="side" aria-label="Run numbers">
-				{#if run}<section class="card"><LevelLadder {run} frame={f} /></section>{/if}
+	<div class="grid">
+		<PageView {display} {streaming} {inputs} />
+		<aside class="side" aria-label="Run numbers">
+			<section class="card"><LevelCard {run} frame={f} {channelName} {compact} /></section>
 
+			{#if f && !compact}
 				<section class="card" aria-label="Lines">
 					<h3>Lines in the Band</h3>
 					<dl class="lines num" data-testid="live-lines">
@@ -110,23 +105,6 @@
 						<div class:warn={f.lines.abort > 0}><dt>Outside abort</dt><dd>{f.lines.abort}</dd></div>
 						<div><dt>Loop</dt><dd>{f.loop}</dd></div>
 					</dl>
-				</section>
-
-				<section class="card" aria-label="Alarms" data-testid="live-alarms">
-					<h3>Alarms</h3>
-					{#if f.alarms.length}
-						<ul class="alarms">
-							{#each f.alarms as a, i (i)}
-								<li><StatusMark status="warn" word={false} /> {alarmText(a, channelName)}</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="none"><StatusMark status="pass" word={false} /> None holding</p>
-					{/if}
-				</section>
-
-				<section class="card" aria-label="Run readings">
-					<ViewRenderer view={f.views[2]} layout="list" />
 				</section>
 
 				<section class="card" aria-label="Inputs" data-testid="live-channels">
@@ -152,7 +130,9 @@
 					</table>
 					<p class="aq-small aq-muted foot">Overload: the input reached the top of its range during this run (90 % of it in the run, or 98 % at the station).</p>
 				</section>
+			{/if}
 
+			{#if !compact && recent.length}
 				<section class="card" aria-label="Run log" data-testid="live-log">
 					<h3>Log</h3>
 					<ol class="log">
@@ -161,9 +141,9 @@
 						{/each}
 					</ol>
 				</section>
-			</aside>
-		</div>
-	{/if}
+			{/if}
+		</aside>
+	</div>
 </div>
 
 <style>
@@ -285,21 +265,7 @@
 		flex: 1;
 	}
 
-	.empty {
-		display: grid;
-		place-items: center;
-		min-height: 280px;
-		padding: var(--sp-6);
-		color: var(--text-3);
-		text-align: center;
-		background: var(--bg-plot);
-		border: 1px dashed var(--line-2);
-		border-radius: var(--radius-lg);
-	}
 
-	.empty p {
-		max-width: 52ch;
-	}
 
 	.grid {
 		display: grid;
@@ -308,14 +274,10 @@
 		min-height: 0;
 	}
 
-	.charts {
-		display: grid;
-		grid-template-rows: minmax(320px, 2fr) minmax(200px, 1fr);
-		gap: var(--sp-3);
-		min-height: 0;
+	.compact .grid {
+		grid-template-columns: minmax(0, 1fr) 300px;
 	}
 
-	.pane,
 	.card {
 		min-height: 0;
 		padding: var(--sp-3);
@@ -324,7 +286,6 @@
 		border-radius: var(--radius-lg);
 	}
 
-	.ptitle,
 	.card h3 {
 		margin-bottom: var(--sp-2);
 		font-size: var(--text-sm);
@@ -369,25 +330,8 @@
 		font-size: var(--text-md);
 	}
 
-	.alarms {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-		font-size: var(--text-sm);
-	}
 
-	.alarms li,
-	.none {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px 0;
-		font-size: var(--text-sm);
-	}
 
-	.none {
-		color: var(--text-2);
-	}
 
 	.chans {
 		width: 100%;
@@ -479,9 +423,6 @@
 		}
 		.grid {
 			flex: 1;
-		}
-		.charts {
-			grid-template-rows: minmax(240px, 2fr) minmax(150px, 1fr);
 		}
 		.side {
 			overflow-y: auto;

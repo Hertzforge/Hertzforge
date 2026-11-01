@@ -4,11 +4,13 @@
  * is lost on the way back.
  */
 
+import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
+import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type {
 	Catalog,
@@ -390,18 +392,74 @@ export class AppState {
 	readonly acquire: AcquireState;
 	/** Acquire & Control's test types and which screen it shows. */
 	readonly tests: TestTypeView;
+	/** The Random run's display: its pages and plots, and the data this window asks for. */
+	readonly display: DisplayState;
+	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
+	railCollapsed = $state(false);
+	private windows = 0;
 
 	constructor(config: ShellConfig) {
 		this.config = config;
 		const analysisFactory = config.mock ? mockSocketFactory(createAnalysisServer(), 80) : undefined;
-		const controlFactory = config.mock ? mockSocketFactory(createControlServer(config.mockControl), 110) : undefined;
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
-		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: controlFactory });
+		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
 		this.analyze = new AnalyzeState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
-		this.acquire = new AcquireState(this.control);
+		// A display window observes: it never takes the main window's lease or edits a setup.
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
+		this.display = new DisplayState(this.control, {
+			testType: 'random',
+			// The layout belongs to the setup the service holds, else to the one being edited here.
+			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),
+			showing: () => config.popout || (this.workspace === 'acquire' && this.tests.screen === 'random' && this.acquire.tab === 'live'),
+			page: config.page
+		});
+		this.railCollapsed = readSession(RAIL_KEY) === '1';
+	}
+
+	/** In mock mode, a display window shares the main window's mock service. */
+	private controlFactory(config: ShellConfig) {
+		if (!config.mock) return undefined;
+		if (config.popout) {
+			const shared = openerMock();
+			if (shared) return shared;
+		}
+		const server = createControlServer(config.mockControl);
+		shareMock(server, 110);
+		return mockSocketFactory(server, 110);
+	}
+
+	toggleRail(): void {
+		this.railCollapsed = !this.railCollapsed;
+		writeSession(RAIL_KEY, this.railCollapsed ? '1' : null);
+	}
+
+	/**
+	 * Open a display page in a window of its own, for another monitor: the same shell, showing that
+	 * page, observing the run with a subscription of its own. Every window shows the run's state and
+	 * keeps Stop and Abort. False when the browser refused to open it.
+	 */
+	openDisplayWindow(pageId: string): boolean {
+		const q = new URLSearchParams(location.search);
+		q.set('popout', '1');
+		q.set('page', pageId);
+		this.windows += 1;
+		const w = window.open(`${location.pathname}?${q.toString()}#acquire`, `hertzforge-display-${Date.now()}-${this.windows}`, 'popup,width=1280,height=820');
+		return w !== null;
+	}
+
+	/** A display window: the control service only, the run's state and one page. */
+	startDisplayWindow(): void {
+		this.workspace = 'acquire';
+		$effect.root(() => {
+			$effect(() => {
+				if (this.control.status === 'open') void this.acquire.sync();
+			});
+		});
+		this.display.watch();
+		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
@@ -457,6 +515,7 @@ export class AppState {
 
 		this.acquire.watch();
 		this.tests.watch();
+		this.display.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}
@@ -486,6 +545,26 @@ export class AppState {
 		} catch (err) {
 			this.catalogError = message(err);
 		}
+	}
+}
+
+const RAIL_KEY = 'hertzforge.rail.collapsed';
+
+function readSession(key: string): string | null {
+	try {
+		return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(key);
+	} catch {
+		return null;
+	}
+}
+
+function writeSession(key: string, value: string | null): void {
+	try {
+		if (typeof sessionStorage === 'undefined') return;
+		if (value === null) sessionStorage.removeItem(key);
+		else sessionStorage.setItem(key, value);
+	} catch {
+		/* storage refused; the rail just does not stay minimized across reloads */
 	}
 }
 

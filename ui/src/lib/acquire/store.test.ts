@@ -366,9 +366,11 @@ describe('running', () => {
 		expect(acq.refusal?.reason).toBe('not_a_rung');
 		expect(acq.refusal?.facts).toEqual(['Schedule levels: -6, 0 dB']);
 
-		await until(() => (acq.frame?.views[0].series ?? []).some((s) => s.name === 'Control'));
-		const control = acq.frame!.views[0];
-		expect(control.series.every((s) => s.shape === 'steps' && !!s.edges)).toBe(true);
+		// The store keeps the run's numbers; the plots read their own data from the display.
+		await until(() => acq.frame?.control_rms_g !== null && acq.frame?.control_rms_g !== undefined);
+		expect('views' in (acq.frame as object)).toBe(false);
+		expect(acq.frame?.commanded_db).not.toBeUndefined();
+		expect(acq.frame?.control_error_db).not.toBeNull();
 
 		expect(await acq.stop()).toBe(true);
 		expect(acq.run?.state).toBe('stopping');
