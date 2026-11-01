@@ -1293,7 +1293,9 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		detach: (c) => {
 			connections.delete(c);
 			if (seat?.conn === c) {
-				// gone without a goodbye: the run goes on, and the seat is kept for the timeout
+				// The mock cannot tell a clean close from a drop, so every close is treated as a
+				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
+				// without the lease still takes it, as it does from a vanished holder.
 				seat.conn = null;
 				armSeatClock();
 				sessionChanged();
