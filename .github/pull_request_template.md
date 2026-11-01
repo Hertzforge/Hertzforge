@@ -13,7 +13,7 @@ None | protocol | operation descriptors | view types | run files | units
 Each command as run, its exit code, and its pass / fail / skip counts:
 
 ```
-uv run --project python pytest python -q -n 4    exit 0    N passed
+uv run --project python pytest python -q -n 4 --dist loadgroup    exit 0    N passed
 npm --prefix ui test                              exit 0    N passed
 python tools/check_tree.py                        exit 0    0 findings
 ```

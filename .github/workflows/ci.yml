@@ -96,7 +96,7 @@ jobs:
           RUN=""
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
           $RUN uv run --upgrade --project python --python "${{ matrix.python-version }}" \
-            pytest python -q -n 4
+            pytest python -q -n 4 --dist loadgroup
 
   # The shell: types, unit tests and a production build, on every platform
   # a desktop build targets.

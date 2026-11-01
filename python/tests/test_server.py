@@ -91,6 +91,12 @@ async def _session(check, imported=None):
     return lag['max']
 
 
+# The timing test and the fresh-interpreter preload test share one xdist group (CI runs
+# `--dist loadgroup`), so they never run at the same time: the second one starts a whole
+# interpreter and runs every dataset and operation, and on a four-core runner beside
+# three other workers that starves the first one's event loop. It held the loop 136 ms
+# on ubuntu-latest with Python 3.12, against a 25-41 ms worst case run alone.
+@pytest.mark.xdist_group('serving')
 def test_smoke(validate):
     seen = {}
 
@@ -183,6 +189,7 @@ print(json.dumps(sorted(heavy() - before)))
 '''
 
 
+@pytest.mark.xdist_group('serving')
 def test_the_preload_leaves_nothing_heavy_to_import_while_serving(tmp_path):
     """`server.PRELOAD` covers every dataset open and operation, from an empty
     cache and from a full one. In a fresh interpreter: in this one, other
