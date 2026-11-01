@@ -768,8 +768,8 @@ mod twr_rig {
             let mut warnings = self.inner.take_warnings();
             if env_flag("HERTZFORGE_T2_FAKE_WARNING") {
                 warnings.push(
-                    "HERTZFORGE_T2_FAKE_WARNING: synthetic driver warning injected by the \
-                     red-mutation hook"
+                    "HERTZFORGE_T2_FAKE_WARNING: synthetic driver underrun warning injected by \
+                     the red-mutation hook"
                         .into(),
                 );
             }
@@ -1417,7 +1417,14 @@ mod twr_rig {
         // strictly less than it wrote) and only then that nothing complained.
         // A row over a record that fit in the buffer would be a green that
         // could not have gone red.
-        let warned: Vec<String> = played.iter().flat_map(|c| c.warnings.clone()).collect();
+        // Only UNDERRUN warnings answer this row's question; the driver also
+        // reports coercions and unsupported attributes, which are printed below as
+        // INFO and do not fail it (2026-11-01: an AI task's unsupported-attribute
+        // warning failed a clean streaming row).
+        let all_warned: Vec<String> = played.iter().flat_map(|c| c.warnings.clone()).collect();
+        let (warned, other_warned): (Vec<String>, Vec<String>) = all_warned
+            .into_iter()
+            .partition(|w| hertzforge_hal_ni::ffi::is_underrun_warning(w));
         let shortest = played.iter().map(|c| c.written_frames).min().unwrap_or(0);
         let all_streamed =
             !played.is_empty() && played.iter().all(|c| c.written_frames > c.committed_frames);
@@ -1433,7 +1440,10 @@ mod twr_rig {
             );
         }
         for w in warned.iter() {
-            println!("  WARN    driver said, verbatim: {w}");
+            println!("  WARN    driver underrun, verbatim: {w}");
+        }
+        for w in other_warned.iter() {
+            println!("  INFO    driver warning (not an underrun), verbatim: {w}");
         }
         rows.row(
             over_buffer && all_streamed && warned.is_empty(),
@@ -1443,8 +1453,9 @@ mod twr_rig {
                  buffer (lookahead {lookahead} + one block) = {:.1}x, floor \
                  {OVER_BUFFER_MULTIPLE}x [authority: the device's own OutputBufferContract]; \
                  every play committed strictly less than it wrote, so the streaming window is \
-                 real; {} driver warning(s) from Backend::take_warnings() drained after each \
-                 cycle [authority: the DAQmx driver]{}",
+                 real; {} driver underrun warning(s) ({} other driver warning(s), printed as \
+                 INFO) from Backend::take_warnings() drained after each cycle [authority: the \
+                 DAQmx driver]{}",
                 played.len(),
                 if ao_buffer > 0 {
                     shortest as f64 / ao_buffer as f64
@@ -1452,6 +1463,7 @@ mod twr_rig {
                     0.0
                 },
                 warned.len(),
+                other_warned.len(),
                 if warned.is_empty() {
                     String::new()
                 } else {
