@@ -2,7 +2,7 @@
 
 Hertzforge will be one toolset for structural dynamics testing, from
 acquiring the data to analyzing it. It is being built by merging two
-existing projects: Eigen, Kevin Cross's data acquisition software, and
+existing projects: Hertzforge, Kevin Cross's data acquisition software, and
 Visual Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
@@ -29,7 +29,7 @@ layout is a mechanical change that comes next.
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
 | `python/` | Python 3.13 | The analysis service. Wraps the `visualdynamics` package unchanged |
 | `crates/sds-control/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
-| `crates/eigen-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
+| `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
 | `scripts/` | shell | Developer entry points |

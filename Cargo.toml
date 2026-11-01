@@ -8,16 +8,16 @@ edition = "2021"
 license = "MIT"
 
 # Shared dependency versions. The controller crates live in this repository under
-# `crates/eigen-*` (modules under `modules/`); nothing outside the repository is
+# `crates/hertzforge-*` (modules under `modules/`); nothing outside the repository is
 # referenced. The control service reaches only the controller crates on its reviewed
 # list (crates/sds-control/tests/forbidden_deps.rs enforces it).
 [workspace.dependencies]
-eigen-breakpoints = { path = "crates/eigen-breakpoints" }
-eigen-channel-table = { path = "crates/eigen-channel-table" }
-eigen-hal = { path = "crates/eigen-hal" }
-eigen-hal-sim = { path = "crates/eigen-hal-sim" }
-eigen-module-abi = { path = "crates/eigen-module-abi" }
-eigen-random = { path = "crates/eigen-random" }
+hertzforge-breakpoints = { path = "crates/hertzforge-breakpoints" }
+hertzforge-channel-table = { path = "crates/hertzforge-channel-table" }
+hertzforge-hal = { path = "crates/hertzforge-hal" }
+hertzforge-hal-sim = { path = "crates/hertzforge-hal-sim" }
+hertzforge-module-abi = { path = "crates/hertzforge-module-abi" }
+hertzforge-random = { path = "crates/hertzforge-random" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -30,8 +30,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 #
 # `panic = "abort"` MUST NOT BE ENABLED while drive safety depends on unwinding.
 # Two module pumps put their whole tick batch under `catch_unwind` and issue
-# `Backend::emergency_stop` from the caught arm: `eigen-explorer-host/src/service.rs`
-# and `eigen-sine/src/service/mod.rs` (`run_one_batch`). `panic = "abort"` deletes the
+# `Backend::emergency_stop` from the caught arm: `hertzforge-explorer-host/src/service.rs`
+# and `hertzforge-sine/src/service/mod.rs` (`run_one_batch`). `panic = "abort"` deletes the
 # unwind those handlers run on, so a panic anywhere under `run_ticks` would end the
 # process with the output task still clocked and the output module holding its last
 # sample: the one failure a stopped host cannot correct, and the reason the handlers

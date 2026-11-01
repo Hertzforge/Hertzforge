@@ -1,7 +1,7 @@
 //! `sds-control`: the control service of the structural dynamics suite.
 //!
-//! It runs the controller's random control engine (`eigen-random`) closing its loop
-//! around the controller's Sim backend (`eigen-hal-sim`), and serves the `sds/1`
+//! It runs the controller's random control engine (`hertzforge-random`) closing its loop
+//! around the controller's Sim backend (`hertzforge-hal-sim`), and serves the `sds/1`
 //! WebSocket protocol (`schema/PROTOCOL.md`) on loopback:
 //!
 //! - [`codec`]: text and binary frame encoding and decoding, pinned to the golden

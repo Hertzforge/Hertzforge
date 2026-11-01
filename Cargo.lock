@@ -107,357 +107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eigen-automation"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-hal",
-]
-
-[[package]]
-name = "eigen-backendd"
-version = "0.1.0"
-dependencies = [
- "eigen-breakpoints",
- "eigen-buildinfo",
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-explorer-host",
- "eigen-hal",
- "eigen-module-abi",
- "eigen-protocol",
- "eigen-random",
- "eigen-recorder",
- "eigen-shaker-db",
- "eigen-shock-common",
- "eigen-shock-host",
- "eigen-sine",
- "eigen-srs",
- "eigen-station",
- "eigen-twr",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "eigen-breakpoints"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-buildinfo"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-capture"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "eigen-channel-table",
- "nix",
- "serde",
- "serde_json",
- "windows-sys",
-]
-
-[[package]]
-name = "eigen-channel-table"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-data"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-demo"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "eigen-hal-sim",
-]
-
-[[package]]
-name = "eigen-dsp"
-version = "0.1.0"
-
-[[package]]
-name = "eigen-engine"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
- "eigen-hal-sim",
-]
-
-[[package]]
-name = "eigen-explorer-host"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-formats"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-data",
- "hound",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-hal"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-hal-ni"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "libloading",
- "windows-sys",
-]
-
-[[package]]
-name = "eigen-hal-sim"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
-]
-
-[[package]]
-name = "eigen-host"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-engine",
- "eigen-hal",
- "eigen-ipc",
- "eigen-module-abi",
-]
-
-[[package]]
-name = "eigen-insight"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-data",
- "eigen-dsp",
- "eigen-formats",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-ipc"
-version = "0.1.0"
-
-[[package]]
-name = "eigen-module-abi"
-version = "0.1.0"
-dependencies = [
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
-]
-
-[[package]]
-name = "eigen-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-random"
-version = "0.1.0"
-dependencies = [
- "eigen-breakpoints",
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-shaker-db",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-recorder"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-shaker-db"
-version = "0.1.0"
-dependencies = [
- "eigen-breakpoints",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-shock-common"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-shaker-db",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-shock-host"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-shaker-db",
- "eigen-shock-common",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-sine"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-shaker-db",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-srs"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-shaker-db",
- "eigen-shock-common",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-station"
-version = "0.1.0"
-dependencies = [
- "eigen-breakpoints",
- "eigen-buildinfo",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-engine",
- "eigen-explorer-host",
- "eigen-hal",
- "eigen-hal-ni",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-random",
- "eigen-recorder",
- "eigen-shock-common",
- "eigen-shock-host",
- "eigen-sine",
- "eigen-srs",
- "eigen-twr",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "eigen-twr"
-version = "0.1.0"
-dependencies = [
- "eigen-capture",
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -536,6 +185,357 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hertzforge-automation"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+]
+
+[[package]]
+name = "hertzforge-backendd"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hertzforge-breakpoints",
+ "hertzforge-buildinfo",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-explorer-host",
+ "hertzforge-hal",
+ "hertzforge-module-abi",
+ "hertzforge-protocol",
+ "hertzforge-random",
+ "hertzforge-recorder",
+ "hertzforge-shaker-db",
+ "hertzforge-shock-common",
+ "hertzforge-shock-host",
+ "hertzforge-sine",
+ "hertzforge-srs",
+ "hertzforge-station",
+ "hertzforge-twr",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hertzforge-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-buildinfo"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-capture"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "hertzforge-channel-table",
+ "nix",
+ "serde",
+ "serde_json",
+ "windows-sys",
+]
+
+[[package]]
+name = "hertzforge-channel-table"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-data"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-demo"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+]
+
+[[package]]
+name = "hertzforge-dsp"
+version = "0.1.0"
+
+[[package]]
+name = "hertzforge-engine"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+]
+
+[[package]]
+name = "hertzforge-explorer-host"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-formats"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-data",
+ "hound",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-hal"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-hal-ni"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "libloading",
+ "windows-sys",
+]
+
+[[package]]
+name = "hertzforge-hal-sim"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+]
+
+[[package]]
+name = "hertzforge-host"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-ipc",
+ "hertzforge-module-abi",
+]
+
+[[package]]
+name = "hertzforge-insight"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-data",
+ "hertzforge-dsp",
+ "hertzforge-formats",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-ipc"
+version = "0.1.0"
+
+[[package]]
+name = "hertzforge-module-abi"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+]
+
+[[package]]
+name = "hertzforge-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-random"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-recorder"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-shaker-db"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-breakpoints",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-shock-common"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-shock-host"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-shaker-db",
+ "hertzforge-shock-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-sine"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-srs"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-shaker-db",
+ "hertzforge-shock-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-station"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-buildinfo",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-explorer-host",
+ "hertzforge-hal",
+ "hertzforge-hal-ni",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-recorder",
+ "hertzforge-shock-common",
+ "hertzforge-shock-host",
+ "hertzforge-sine",
+ "hertzforge-srs",
+ "hertzforge-twr",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-twr"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "hound"
@@ -631,7 +631,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "mimo_compile_probe"
 version = "0.1.0"
 dependencies = [
- "eigen-module-abi",
+ "hertzforge-module-abi",
 ]
 
 [[package]]
@@ -745,8 +745,8 @@ dependencies = [
 name = "random_sim_slice"
 version = "0.1.0"
 dependencies = [
- "eigen-dsp",
- "eigen-module-abi",
+ "hertzforge-dsp",
+ "hertzforge-module-abi",
 ]
 
 [[package]]
@@ -781,13 +781,13 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "sds-control"
 version = "0.1.0"
 dependencies = [
- "eigen-breakpoints",
- "eigen-channel-table",
- "eigen-hal",
- "eigen-hal-sim",
- "eigen-module-abi",
- "eigen-random",
  "futures-util",
+ "hertzforge-breakpoints",
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-random",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
@@ -893,9 +893,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 name = "smart"
 version = "0.1.0"
 dependencies = [
- "eigen-channel-table",
- "eigen-dsp",
- "eigen-module-abi",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-module-abi",
 ]
 
 [[package]]

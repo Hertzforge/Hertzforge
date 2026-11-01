@@ -1,3 +1,3 @@
-//! `random_sim_slice` - Eigen crate (placeholder stub, not yet implemented).
+//! `random_sim_slice` - Hertzforge crate (placeholder stub, not yet implemented).
 
 #![allow(dead_code)]

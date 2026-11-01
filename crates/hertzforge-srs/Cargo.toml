@@ -1,0 +1,46 @@
+# hertzforge-srs - SRS synthesis, predictive-notch limiting and the SRS-shock run service.
+#
+# The SRS SYNTHESIS engines: WAVSYN odd-half-cycle wavelets (zero net velocity +
+# displacement by construction) and SEDS sums of exponentially-decaying sinusoids
+# with Smallwood-Nord-style compensation (Smallwood & Nord 1974; Nelson &
+# Prasthofer 1974). Plus the component tables (import/JSON round-trip mirroring
+# hertzforge-breakpoints' hardened parser), the SRS-matching iteration outer loop (with
+# per-component limit caps), the predictive-notch response limiter
+# (Skousen/Coleman/Smallwood SAND2016-1335C: drive-spectrum-domain notch +
+# least-squares re-fit back to component gains), the
+# SrsSynthesisLaw run-time counterpart implementing the hertzforge-shock-common
+# ShockControlLaw seam with the predictive-limit cap wired in, and the
+# SrsShockService run orchestration (state machine, per-pulse pipeline, level
+# ladder, envelope/kinematic/drive protections, report + status surfaces).
+[package]
+name = "hertzforge-srs"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# Service deps: shaker-db (deterministic pulse feasibility),
+# testkit (per-pulse capture + shock Snapshot payload), channel-table (identity;
+# the capture sidecar + the HAL bring-up both take the table), hal (the Backend
+# seam the Path-B host fire path plays into). hertzforge-hal-sim is DEV-ONLY: the
+# service is generic over `hertzforge_hal::Backend`; only the end-to-end fixtures
+# instantiate the Sim plant.
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
+hertzforge-capture = { path = "../hertzforge-capture" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The shared ARM GATE (`hertzforge_module_abi::arm_gate`): every module's arm path
+# runs the two-axis loop resolver + the abort-latency rule + the rate policy
+# through ONE function, so a station that cannot honestly run this test
+# refuses in the same words everywhere. L4-to-L4; no new layer crossing.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The service acceptance tests drive SrsShockService end-to-end against the
+# SimBackend resonance plant (Path B host loop closes on Sim today).
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

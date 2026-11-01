@@ -11,12 +11,12 @@ binaries.
 | Crate | License | Use |
 |---|---|---|
 | serde / serde_json | MIT OR Apache-2.0 | serialization throughout |
-| dirs | MIT OR Apache-2.0 | data-root resolution (eigen-capture) |
+| dirs | MIT OR Apache-2.0 | data-root resolution (hertzforge-capture) |
 | option-ext | MPL-2.0 | reached only through `dirs`; used unmodified |
 | libloading | ISC | NI-DAQmx dynamic loading |
 | tracing family | MIT | logging |
-| tokio / tokio-tungstenite / futures-util | MIT | eigen-backendd daemon and the control service |
-| hound | Apache-2.0 | WAV read/write (eigen-formats, Insight). NOTICE: Apache-2.0 only, not dual |
+| tokio / tokio-tungstenite / futures-util | MIT | hertzforge-backendd daemon and the control service |
+| hound | Apache-2.0 | WAV read/write (hertzforge-formats, Insight). NOTICE: Apache-2.0 only, not dual |
 
 ## npm packages shipped in the shell
 
@@ -27,7 +27,7 @@ binaries.
 
 ## Format specifications and reference material (consulted, not linked)
 
-Parsers in `eigen-formats` are written from public format specifications: UFF/UNV (UC-SDRL
+Parsers in `hertzforge-formats` are written from public format specifications: UFF/UNV (UC-SDRL
 publications), MATLAB MAT-File Format (MathWorks, R2026a), MTS RPC-3 specification (MTS
 Systems), Abaqus `.fil` documentation (Dassault Systemes public documentation), ASAM ODS base
 model (highQSoft public publication), NI TDMS internal-structure documentation (National

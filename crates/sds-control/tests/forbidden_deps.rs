@@ -23,51 +23,51 @@ use std::process::Command;
 /// The only controller crates this crate may reach: open, hardware-neutral, reviewed.
 /// A new one is a change to review (license, hardware coupling) before this list grows.
 const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
-    "eigen-breakpoints",
-    "eigen-capture",
-    "eigen-channel-table",
-    "eigen-dsp",
-    "eigen-engine",
-    "eigen-hal",
-    "eigen-hal-sim",
-    "eigen-module-abi",
-    "eigen-random",
-    "eigen-shaker-db",
+    "hertzforge-breakpoints",
+    "hertzforge-capture",
+    "hertzforge-channel-table",
+    "hertzforge-dsp",
+    "hertzforge-engine",
+    "hertzforge-hal",
+    "hertzforge-hal-sim",
+    "hertzforge-module-abi",
+    "hertzforge-random",
+    "hertzforge-shaker-db",
 ];
 
-/// Every controller crate the repository holds (`crates/eigen-*`), each reviewed for
+/// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
 /// license and hardware coupling when it was imported. A controller crate not on this
 /// list fails the lockfile check; adding one is a review, then a line here.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
-    "eigen-automation",
-    "eigen-backendd",
-    "eigen-breakpoints",
-    "eigen-buildinfo",
-    "eigen-capture",
-    "eigen-channel-table",
-    "eigen-data",
-    "eigen-demo",
-    "eigen-dsp",
-    "eigen-engine",
-    "eigen-explorer-host",
-    "eigen-formats",
-    "eigen-hal",
-    "eigen-hal-ni",
-    "eigen-hal-sim",
-    "eigen-host",
-    "eigen-insight",
-    "eigen-ipc",
-    "eigen-module-abi",
-    "eigen-protocol",
-    "eigen-random",
-    "eigen-recorder",
-    "eigen-shaker-db",
-    "eigen-shock-common",
-    "eigen-shock-host",
-    "eigen-sine",
-    "eigen-srs",
-    "eigen-station",
-    "eigen-twr",
+    "hertzforge-automation",
+    "hertzforge-backendd",
+    "hertzforge-breakpoints",
+    "hertzforge-buildinfo",
+    "hertzforge-capture",
+    "hertzforge-channel-table",
+    "hertzforge-data",
+    "hertzforge-demo",
+    "hertzforge-dsp",
+    "hertzforge-engine",
+    "hertzforge-explorer-host",
+    "hertzforge-formats",
+    "hertzforge-hal",
+    "hertzforge-hal-ni",
+    "hertzforge-hal-sim",
+    "hertzforge-host",
+    "hertzforge-insight",
+    "hertzforge-ipc",
+    "hertzforge-module-abi",
+    "hertzforge-protocol",
+    "hertzforge-random",
+    "hertzforge-recorder",
+    "hertzforge-shaker-db",
+    "hertzforge-shock-common",
+    "hertzforge-shock-host",
+    "hertzforge-sine",
+    "hertzforge-srs",
+    "hertzforge-station",
+    "hertzforge-twr",
 ];
 
 /// The controller's modules (`modules/`), imported and reviewed with the crates.
@@ -211,12 +211,12 @@ fn the_lockfile_holds_only_reviewed_controller_crates_for_any_platform() {
     let entries = locked();
     let names: BTreeSet<&str> = entries.iter().map(|p| p.name.as_str()).collect();
     assert!(
-        names.contains("eigen-random") && names.contains("tokio"),
+        names.contains("hertzforge-random") && names.contains("tokio"),
         "the lockfile scan found none of the expected packages; the check cannot be trusted"
     );
     let unreviewed: Vec<&&str> = names
         .iter()
-        .filter(|n| n.starts_with("eigen-") && !IMPORTED_CONTROLLER_CRATES.contains(*n))
+        .filter(|n| n.starts_with("hertzforge-") && !IMPORTED_CONTROLLER_CRATES.contains(*n))
         .collect();
     assert!(
         unreviewed.is_empty(),
@@ -237,7 +237,7 @@ fn every_package_built_from_this_repository_is_on_a_reviewed_list() {
         .map(|p| p.name)
         .collect();
     // The scan must see the workspace, or a pass would prove nothing.
-    for known in ["sds-control", "eigen-random", "smart"] {
+    for known in ["sds-control", "hertzforge-random", "smart"] {
         assert!(
             own.contains(known),
             "the lockfile scan did not find {known} among this repository's packages; the \
@@ -290,7 +290,7 @@ fn no_package_is_built_from_source_outside_the_repository() {
         })
         .collect();
     assert!(
-        local.iter().any(|(n, _)| n == "eigen-random"),
+        local.iter().any(|(n, _)| n == "hertzforge-random"),
         "the metadata scan found no controller crate built from source; the check cannot be \
          trusted"
     );
@@ -309,7 +309,7 @@ fn no_package_is_built_from_source_outside_the_repository() {
 fn the_desktop_app_is_not_reachable() {
     let deps = reachable();
     // The walk must be able to find something, or a pass would prove nothing.
-    for known in ["eigen-random", "eigen-hal-sim", "tokio"] {
+    for known in ["hertzforge-random", "hertzforge-hal-sim", "tokio"] {
         assert!(
             deps.iter().any(|p| p.name == known),
             "the dependency walk did not find {known}; the check cannot be trusted"
@@ -330,7 +330,7 @@ fn the_desktop_app_is_not_reachable() {
 fn controller_crates_are_the_reviewed_set() {
     let mut controller: Vec<String> = reachable()
         .into_iter()
-        .filter(|p| p.name.starts_with("eigen-"))
+        .filter(|p| p.name.starts_with("hertzforge-"))
         .map(|p| p.name)
         .collect();
     controller.sort();

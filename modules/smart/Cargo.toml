@@ -9,6 +9,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-eigen-module-abi = { path = "../../crates/eigen-module-abi" }
-eigen-dsp = { path = "../../crates/eigen-dsp" }
-eigen-channel-table = { path = "../../crates/eigen-channel-table" }
+hertzforge-module-abi = { path = "../../crates/hertzforge-module-abi" }
+hertzforge-dsp = { path = "../../crates/hertzforge-dsp" }
+hertzforge-channel-table = { path = "../../crates/hertzforge-channel-table" }
