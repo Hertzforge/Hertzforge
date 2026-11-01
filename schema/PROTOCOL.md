@@ -572,7 +572,8 @@ object to every connection on every change of `state`, `phase`, `mode`, `level_d
 drive) and `ramping_down` added. `run_id` is null when unconfigured, and new at every
 configure and reset. `source`, `station`, `grid` and `clock` describe the run's station
 (`clock`, `shared`, `independent` or `unknown`, is null until the run arms). `level_db` is the
-commanded level, null when nothing drives. `elapsed_s` counts from `random.start` (null
+commanded level (the identification level during system identification), null when nothing
+drives. `elapsed_s` counts from `random.start` (null
 before). `at_level_s` and `remaining_at_level_s` are the time at the present level and the
 time left on it (null in `manual`). `alarm` is true while an alarm condition holds (see
 `random.live`). `feasibility` is null until arm, then `{"verdict","message"}` with `verdict`
@@ -616,6 +617,8 @@ identification until the run finishes, and once more with the final state:
  "views":[control spectrum, drive spectrum, run readings]}
 ```
 
+- `level_db` is the level the loop runs at now; after a level change it walks to the commanded
+  level over `level_ramp_s`. Null when nothing drives.
 - `loop` counts control loops since the start. `control_rms_g` is the composite control rms
   over the band (null before the first loop), `reference_rms_g` the reference rms at the
   present level, `drive_rms_v` the drive rms.
