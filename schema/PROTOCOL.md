@@ -468,14 +468,23 @@ and last levels, until stopped; `full_level_s` applies if the ladder is handed b
 | `max_sigma` | 5 | Drive clip, in standard deviations; null for no clip |
 | `drive_ceiling_vrms` | 10 | The drive is held at or below this rms |
 | `drive_abort_vrms` | null | A drive rms at or above this aborts; null for none |
-| `sysid_level_db` | -20 | Level of the system identification, dB relative to full |
 | `coherence_floor` | 0.5 | Band coherence the system identification must reach |
 | `review_after_sysid` | true | Hold after system identification for the operator to proceed |
-| `pretest` | `{"averages":4,"max_vrms":1,"min_vrms":0.01,"shaped":false}` | System identification drive; `shaped` follows the reference's shape instead of a flat band |
+| `pretest` | `{"averages":4,"level_db":-20,"max_vrms":1,"start_vrms":0.01,"shaped":false}` | System identification (below); `shaped` follows the reference's shape instead of a flat band |
 | `soft_start_db` | 9 | The run engages this far below the first level and ramps up to it |
 | `soft_start_relax_db` | 6 | The bands widen by this much until the first level is reached |
 | `level_ramp_s` | 3 | Ramp time of every level change |
 | `shutdown_ramp_s` | 3 | Ramp time of a controlled stop |
+
+**System identification.** It excites relative to the reference. It starts at `start_vrms` and
+steps its drive until the control response's rms over the band is `level_db` (-60 to 0) relative
+to the reference's rms over the band, within 1 dB, then measures the system over `averages`
+control loops at that drive. The drive never exceeds `max_vrms` (null: no ceiling of its own)
+or `drive_ceiling_vrms`. When the response cannot reach its level within that, or does not settle
+on it, the run ends `sysid_level_unreachable` without driving further. `start_vrms` is greater
+than 0 and at most `max_vrms`. The run's aborts (each channel's `abort` limits, and
+`drive_abort_vrms`) are armed from the first identification drive, exactly as in the control
+loop.
 
 **Limits.** `[{"channel","kind","rows":[{"freq_hz","ceiling"}...]}]`, `kind` `response` or
 `force`, `ceiling` a PSD in the channel's unit squared per Hz. The controller lowers the drive
@@ -543,7 +552,7 @@ Result column is the `random.state` object below.
   `feasibility_exceeded`, `override_not_needed`, `bad_params` (an empty acknowledgement),
   `arm_refused`, `hardware_busy`, `devices_absent`, `table_invalid`.
 - **`random.start`** from `configured` arms first, with the same refusals. It then runs the
-  system identification at `sysid_level_db` and the coherence gate, and either holds for review
+  system identification at `pretest.level_db` and the coherence gate, and either holds for review
   (`review`) or engages: the soft start, then the schedule. It answers at once (`running`).
 - **`random.proceed`** releases the review hold and engages.
 - **`random.level`**, in `manual` only: `delta_db` steps from the present level (the shell's
@@ -600,7 +609,7 @@ object to every connection on every change of `state`, `phase`, `mode`, `level_d
 drive) and `ramping_down` added. `run_id` is null when unconfigured, and new at every
 configure and reset. `source`, `station`, `grid` and `clock` describe the run's station
 (`clock`, `shared`, `independent` or `unknown`, is null until the run arms). `level_db` is the
-commanded level (the identification level during system identification), null when nothing
+commanded level (`pretest.level_db` during system identification), null when nothing
 drives. `elapsed_s` counts from `random.start` (null
 before). `at_level_s` and `remaining_at_level_s` are the time at the present level and the
 time left on it (null in `manual`). `alarm` is true while an alarm condition holds (see
@@ -617,11 +626,13 @@ time left on it (null in `manual`). `alarm` is true while an alarm condition hol
 | `safe_stop` | Nobody held control for `timeout_s`; the service stopped the run (see Controller and Observers) |
 | `aborted` | A protection abort tripped; `trip` says which |
 | `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
+| `sysid_level_unreachable` | System identification could not bring the control response to `pretest.level_db` within its drive ceiling, or the response did not settle on it; the run never drove at test level |
 | `fault` | The loop or the station failed; `message` is the controller's words |
 
 The shell shows every outcome but `completed` and `operator_stop` as an abort with `message`.
 `trip` is null unless `outcome` is `aborted`, and then has `at_level_db`, `at_loop` and its
-`kind`'s facts:
+`kind`'s facts. A trip during system identification has `at_loop` 0 and `at_level_db`
+`pretest.level_db`, and `message` says it came during system identification:
 
 | `kind` | Facts |
 |---|---|

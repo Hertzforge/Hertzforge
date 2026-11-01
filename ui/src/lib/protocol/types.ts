@@ -548,8 +548,11 @@ export type CompositeMode = 'weighted_avg' | 'min' | 'max';
 
 export interface PretestParams {
 	averages?: number;
+	/** The control response identification steps up to, dB relative to the reference. */
+	level_db?: number;
 	max_vrms?: number | null;
-	min_vrms?: number | null;
+	/** The drive identification starts from, V rms. */
+	start_vrms?: number;
 	shaped?: boolean;
 }
 
@@ -564,7 +567,6 @@ export interface ControlParams {
 	max_sigma?: number | null;
 	drive_ceiling_vrms?: number;
 	drive_abort_vrms?: number | null;
-	sysid_level_db?: number;
 	coherence_floor?: number;
 	review_after_sysid?: boolean;
 	pretest?: PretestParams;
@@ -697,7 +699,7 @@ export type Trip = { at_level_db: number; at_loop: number } & (
 	| { kind: 'divergence'; consecutive_loops: number; divergent_bins: number }
 );
 
-export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'fault';
+export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault';
 
 export interface RunEnd {
 	outcome: RandomOutcome;

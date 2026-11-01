@@ -68,12 +68,15 @@ pub struct Control {
     pub max_sigma: Option<f64>,
     pub drive_ceiling_vrms: f64,
     pub drive_abort_vrms: Option<f64>,
-    pub sysid_level_db: f64,
     pub coherence_floor: f64,
     pub review_after_sysid: bool,
     pub pretest_averages: i64,
+    /// The identification level, dB relative to the reference (the control
+    /// response the identification steps its drive up to).
+    pub pretest_level_db: f64,
     pub pretest_max_vrms: Option<f64>,
-    pub pretest_min_vrms: Option<f64>,
+    /// The drive the identification starts from, V rms.
+    pub pretest_start_vrms: f64,
     pub pretest_shaped: bool,
     pub soft_start_db: f64,
     pub soft_start_relax_db: f64,
@@ -93,12 +96,12 @@ impl Default for Control {
             max_sigma: Some(5.0),
             drive_ceiling_vrms: 10.0,
             drive_abort_vrms: None,
-            sysid_level_db: -20.0,
             coherence_floor: 0.5,
             review_after_sysid: true,
             pretest_averages: 4,
+            pretest_level_db: -20.0,
             pretest_max_vrms: Some(1.0),
-            pretest_min_vrms: Some(0.01),
+            pretest_start_vrms: 0.01,
             pretest_shaped: false,
             soft_start_db: 9.0,
             soft_start_relax_db: 6.0,
@@ -452,7 +455,6 @@ pub fn parse(config: &Value) -> Result<WireConfig, MethodError> {
         set(&mut control.control_dof, "control_dof")?;
         set(&mut control.damping, "damping")?;
         set(&mut control.drive_ceiling_vrms, "drive_ceiling_vrms")?;
-        set(&mut control.sysid_level_db, "sysid_level_db")?;
         set(&mut control.coherence_floor, "coherence_floor")?;
         set(&mut control.soft_start_db, "soft_start_db")?;
         set(&mut control.soft_start_relax_db, "soft_start_relax_db")?;
@@ -474,8 +476,13 @@ pub fn parse(config: &Value) -> Result<WireConfig, MethodError> {
             if let Some(n) = po.opt_int("averages")? {
                 control.pretest_averages = n;
             }
+            if let Some(x) = po.opt_f64("level_db")? {
+                control.pretest_level_db = x;
+            }
             control.pretest_max_vrms = po.nullable_f64("max_vrms", control.pretest_max_vrms)?;
-            control.pretest_min_vrms = po.nullable_f64("min_vrms", control.pretest_min_vrms)?;
+            if let Some(x) = po.opt_f64("start_vrms")? {
+                control.pretest_start_vrms = x;
+            }
             if let Some(b) = po.opt_bool("shaped")? {
                 control.pretest_shaped = b;
             }
@@ -818,13 +825,6 @@ impl WireConfig {
         );
         range(
             r,
-            "control.sysid_level_db",
-            Some(c.sysid_level_db),
-            |v| (-60.0..=0.0).contains(&v),
-            "it runs from -60 to 0 dB",
-        );
-        range(
-            r,
             "control.max_sigma",
             c.max_sigma,
             |v| v >= 1.0,
@@ -846,11 +846,30 @@ impl WireConfig {
         );
         range(
             r,
-            "control.pretest.min_vrms",
-            c.pretest_min_vrms,
-            |v| v >= 0.0,
-            "it must not be negative, or null for no floor",
+            "control.pretest.level_db",
+            Some(c.pretest_level_db),
+            |v| (-60.0..=0.0).contains(&v),
+            "it runs from -60 to 0 dB",
         );
+        range(
+            r,
+            "control.pretest.start_vrms",
+            Some(c.pretest_start_vrms),
+            |v| v > 0.0,
+            "it must be above 0",
+        );
+        if let Some(mx) = c.pretest_max_vrms.filter(|m| *m > 0.0) {
+            range(
+                r,
+                "control.pretest.start_vrms",
+                Some(c.pretest_start_vrms),
+                |v| v <= 0.0 || v <= mx,
+                &format!(
+                    "it must not exceed the largest identification drive, {} V rms",
+                    num(mx)
+                ),
+            );
+        }
         for (k, v) in [
             ("soft_start_db", c.soft_start_db),
             ("soft_start_relax_db", c.soft_start_relax_db),
@@ -1022,13 +1041,17 @@ impl WireConfig {
         t.hinv.damping = c.damping;
         t.divergence_loops = c.max_loops_out.max(1) as u32;
         t.max_lines_out = c.max_lines_out.max(0) as usize;
-        t.sysid_level_db = c.sysid_level_db;
         t.coherence_floor = c.coherence_floor;
         t.drive_clip_sigma = c.max_sigma;
         t.level_ramp_s = c.level_ramp_s;
         t.shutdown_ramp_s = c.shutdown_ramp_s;
+        // The identification excites relative to the reference (2026-11-01, bench
+        // finding 1): it steps its drive from `start_vrms` until the control
+        // response is `level_db` below the reference, never above `max_vrms`.
+        t.pretest_reference_db = Some(c.pretest_level_db);
+        t.pretest_start_vrms = Some(c.pretest_start_vrms);
         t.pretest_max_vrms = c.pretest_max_vrms;
-        t.pretest_min_vrms = c.pretest_min_vrms;
+        t.pretest_min_vrms = None;
         t.shaped_pretest = c.pretest_shaped;
         t.soft_start_db = c.soft_start_db;
         t.soft_start_relax_db = c.soft_start_relax_db;
@@ -1132,11 +1155,11 @@ pub fn field_words(field: &str) -> String {
         "max_loops_out" => "The diverging loops before an abort",
         "max_lines_out" => "The lines out before an abort",
         "control_dof" => "The control degrees of freedom",
-        "sysid_level_db" => "The identification level",
+        "level_db" => "The identification level",
         "max_sigma" => "The drive clip",
         "averages" => "The identification averages",
         "max_vrms" => "The identification drive ceiling",
-        "min_vrms" => "The identification drive floor",
+        "start_vrms" => "The identification starting drive",
         "soft_start_db" => "The soft start depth",
         "soft_start_relax_db" => "The soft start band widening",
         "level_ramp_s" => "The level ramp",
@@ -1439,6 +1462,58 @@ mod tests {
             built.loop_cfg.band_hi_hz, 2000.0,
             "the band is the profile's, not clamped"
         );
+    }
+
+    /// The identification is relative to the reference: the build hands the
+    /// controller `pretest.level_db` and `start_vrms` (2026-11-01, bench finding
+    /// 1), and a start above the ceiling is a named item.
+    #[test]
+    fn the_identification_level_is_relative_to_the_reference() {
+        let cfg = parse(&golden_config()).unwrap();
+        assert_eq!(cfg.control.pretest_level_db, -20.0);
+        assert_eq!(cfg.control.pretest_start_vrms, 0.01);
+        let t = cfg.build(&table_with_monitor()).unwrap().test;
+        assert_eq!(t.pretest_reference_db, Some(-20.0));
+        assert_eq!(t.pretest_start_vrms, Some(0.01));
+        assert_eq!(t.pretest_max_vrms, Some(0.5));
+        assert_eq!(
+            t.pretest_min_vrms, None,
+            "the referenced level has no floor"
+        );
+
+        let mut v = golden_config();
+        v["control"]["pretest"]["level_db"] = json!(-30);
+        v["control"]["pretest"]["start_vrms"] = json!(0.002);
+        let t = parse(&v)
+            .unwrap()
+            .build(&table_with_monitor())
+            .unwrap()
+            .test;
+        assert_eq!(t.pretest_reference_db, Some(-30.0));
+        assert_eq!(t.pretest_start_vrms, Some(0.002));
+
+        let mut v = golden_config();
+        v["control"]["pretest"]["start_vrms"] = json!(0.8);
+        let (r, _) = parse(&v).unwrap().check(&table_with_monitor());
+        let item = r
+            .errors
+            .iter()
+            .find(|i| i.at == crate::table::At::Field("control.pretest.start_vrms".into()))
+            .expect("a start above the ceiling is named");
+        assert_eq!(item.reason, "out_of_range");
+        assert!(
+            item.message.contains("largest identification drive"),
+            "{}",
+            item.message
+        );
+
+        let mut v = golden_config();
+        v["control"]["pretest"]["level_db"] = json!(3);
+        let (r, _) = parse(&v).unwrap().check(&table_with_monitor());
+        assert!(r
+            .errors
+            .iter()
+            .any(|i| i.at == crate::table::At::Field("control.pretest.level_db".into())));
     }
 
     #[test]

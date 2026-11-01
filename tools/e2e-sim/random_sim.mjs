@@ -10,8 +10,9 @@
 // minutes, because the simulator runs in real time. It is not part of `npm --prefix ui test`.
 //
 // 1. One screen takes control, selects the simulator, sets the channel table and the bench
-//    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review,
-//    proceeds, steps the level on the manual ladder and stops with the ramp.
+//    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review
+//    (identification at the reference -20 dB, read from the run log), proceeds, steps the level
+//    on the manual ladder and stops with the ramp.
 // 2. A second browser (its own storage) observes: it shows the setup the service holds and its
 //    numbers; a new run starts and the observer aborts it with Ctrl and period.
 // 3. A new run starts, and the controlling screen is closed while it drives: the observer sees
@@ -86,6 +87,30 @@ async function waitFor(what, test, ms = 60_000) {
 		if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`);
 		await new Promise((r) => setTimeout(r, 200));
 	}
+}
+
+// ---- the service, directly ---------------------------------------------------------------------
+/** One read-only request on a connection of its own (it observes; it never claims control). */
+function serviceCall(port, method, params = {}) {
+	return new Promise((resolve, reject) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+		const timer = setTimeout(() => {
+			ws.close();
+			reject(new Error(`no answer to ${method}`));
+		}, 10_000);
+		ws.onmessage = (m) => {
+			if (typeof m.data !== 'string') return;
+			const v = JSON.parse(m.data);
+			if (v.type === 'hello') ws.send(JSON.stringify({ type: 'request', id: 1, method, params }));
+			else if (v.type === 'response' && v.id === 1) {
+				clearTimeout(timer);
+				ws.close();
+				if (v.error) reject(new Error(`${method}: ${v.error.message}`));
+				else resolve(v.result);
+			}
+		};
+		ws.onerror = () => reject(new Error(`cannot reach the service for ${method}`));
+	});
 }
 
 // ---- checks -----------------------------------------------------------------------------------
@@ -255,6 +280,18 @@ try {
 	await verb(a, 'act-start');
 	await until(a, 'the review hold', async (p) => (await stateOf(p)) === 'review', 90_000);
 	check('Start: identification holds for review', await tid(a, 'review-hold').isVisible());
+	// Identification excites relative to the reference: the run log states the control response
+	// it reached, which must be the reference less 20 dB within the controller's 1 dB, and the
+	// steps it took to get there from the starting drive.
+	const sysLog = (await serviceCall(servicePort, 'random.log')).entries.map((e) => e.text);
+	const steps = sysLog.filter((t) => t.startsWith('identification level step'));
+	const at = sysLog.map((t) => t.match(/^identification at ([\d.]+) V rms: .* ([+-]\d+(?:\.\d+)?) dB against the reference/)).find(Boolean);
+	check(
+		'identification: the control response sits at the reference less 20 dB',
+		at !== undefined && Math.abs(Number(at[2]) + 20) <= 1.0,
+		at ? `${at[2]} dB at ${at[1]} V rms after ${steps.length} step(s)` : `no identification line in ${sysLog.length} log entries`
+	);
+	check('identification: the drive stayed within its 0.2 V rms limit', at !== undefined && Number(at[1]) <= 0.2, at ? `${at[1]} V rms` : '');
 	await shot(a, '05-review-hold');
 	await tid(a, 'review-proceed').click();
 

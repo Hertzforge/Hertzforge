@@ -76,6 +76,7 @@ export const OUTCOME_WORDS: Record<RandomOutcome, string> = {
 	safe_stop: 'Stopped: Nobody Held Control',
 	aborted: 'Aborted by a Protection',
 	held: 'Held at the Coherence Check',
+	sysid_level_unreachable: 'Stopped: Identification Level Not Reached',
 	fault: 'Stopped on a Fault'
 };
 

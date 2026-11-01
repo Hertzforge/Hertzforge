@@ -26,7 +26,7 @@ use crate::table::{role_name, unit_name, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_random::service::engine::BlockObserver;
 use hertzforge_random::service::report::EventKind;
-use hertzforge_random::{RandomService, RunMode, RunState, TripKind};
+use hertzforge_random::{RandomService, RunMode, RunState, ServiceError, TripKind};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
@@ -416,7 +416,7 @@ impl Actor {
             _ => return Err(self.run_active()),
         }
         self.started = Some(Instant::now());
-        let sysid = self.plan.config.control.sysid_level_db;
+        let sysid = self.plan.config.control.pretest_level_db;
         self.view.level_db = Some(sysid);
         self.view.live_level_db = Some(sysid);
         self.view.streaming = true;
@@ -424,8 +424,8 @@ impl Actor {
         self.shared.add_log(
             "note",
             format!(
-                "started; system identification at {}",
-                db(self.plan.config.control.sysid_level_db)
+                "started; system identification at {} against the reference",
+                db(sysid)
             ),
         );
         Ok(())
@@ -587,12 +587,61 @@ impl Actor {
             return;
         };
         let r = svc.run_sysid(segments);
+        let tripped = svc.state() == RunState::Aborted;
         self.forward_log_now();
-        if let Err(e) = r {
-            self.after_error(&e.to_string(), "system identification failed");
-            return;
+        match r {
+            Err(ServiceError::SysIdLevelUnreachable {
+                level_db,
+                target_rms,
+                reached_rms,
+                drive_vrms,
+                ceiling_vrms,
+                probes,
+            }) => {
+                if self.interrupted() {
+                    return;
+                }
+                let unit = self.control_unit();
+                let below = num(super::config::round(-level_db, 1));
+                let first = if drive_vrms >= ceiling_vrms * (1.0 - 1e-9) && reached_rms < target_rms
+                {
+                    format!(
+                        "System identification could not reach its level: at its largest drive, \
+                         {ceiling_vrms:.3} V rms, the control response was {reached_rms:.4} \
+                         {unit} rms, short of the {target_rms:.4} {unit} rms that {below} dB below \
+                         the reference asks for. Raise the largest identification drive, or check \
+                         the drive and the sensor."
+                    )
+                } else {
+                    format!(
+                        "System identification did not settle on its level: after {probes} \
+                         drives the control response was {reached_rms:.4} {unit} rms at \
+                         {drive_vrms:.3} V rms, against the {target_rms:.4} {unit} rms that \
+                         {below} dB below the reference asks for. Check the drive and the \
+                         sensor."
+                    )
+                };
+                self.end(
+                    "sysid_level_unreachable",
+                    "stopped",
+                    None,
+                    Some(format!("{first} The run never drove at test level.")),
+                );
+                return;
+            }
+            Err(e) => {
+                self.after_error(&e.to_string(), "system identification failed");
+                return;
+            }
+            Ok(()) => {}
         }
         if self.interrupted() {
+            return;
+        }
+        if tripped {
+            // A protection tripped during identification (it runs under the same
+            // aborts as a control loop): end on the trip, as a loop would.
+            self.finish_from_controller();
             return;
         }
         self.set(State::Running, "coherence_gate");
@@ -667,6 +716,15 @@ impl Actor {
         );
     }
 
+    /// The unit of the first control row, for a message.
+    fn control_unit(&self) -> String {
+        self.table
+            .channels
+            .iter()
+            .find(|c| c.enabled && c.role == ChannelRole::Control)
+            .map_or_else(|| "g".to_owned(), |c| unit_name(&c.units).to_string())
+    }
+
     fn engaged(&mut self) {
         let phase = match self.svc.as_ref().map(|s| s.state()) {
             Some(RunState::FullLevel) => "full_level",
@@ -712,7 +770,8 @@ impl Actor {
                 let trip = svc.trip().cloned();
                 match trip {
                     Some(t) => {
-                        let (json, message) = trip_facts(&t);
+                        let during_sysid = self.view.phase == "sysid";
+                        let (json, message) = trip_facts(&t, during_sysid);
                         self.shared.add_log("trip", message.clone());
                         self.end("aborted", "aborted", Some(json), Some(message));
                     }
@@ -1212,15 +1271,25 @@ fn verdict(r: &hertzforge_shaker_db::FeasibilityReport, given: bool) -> (&'stati
 }
 
 /// The trip's facts for `end.trip`, and the end message.
-fn trip_facts(t: &hertzforge_random::TripRecord) -> (Value, String) {
+fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, String) {
     let at = super::config::round(t.at_level_db, 2);
+    let at_words = |level_db: f64| -> String {
+        if during_sysid {
+            format!(
+                "during system identification ({} against the reference)",
+                db(level_db)
+            )
+        } else {
+            format!("at {}", db(level_db))
+        }
+    };
     let (mut facts, message) = match &t.kind {
         TripKind::Envelope { abort_lines, worst_db } => (
             json!({"kind": "envelope", "abort_lines": abort_lines, "worst_db": num(super::config::round(finite_db(*worst_db), 2))}),
             format!(
-                "Envelope abort: {abort_lines} lines outside the abort band, worst {}, at {}.",
+                "Envelope abort: {abort_lines} lines outside the abort band, worst {}, {}.",
                 db(finite_db(*worst_db)),
-                db(t.at_level_db)
+                at_words(t.at_level_db)
             ),
         ),
         TripKind::Kinematic { channel_index, axis, value, limit, .. } => {
@@ -1234,25 +1303,25 @@ fn trip_facts(t: &hertzforge_random::TripRecord) -> (Value, String) {
                 json!({"kind": "kinematic", "channel": channel_index, "axis": axis,
                        "value": num(super::config::round(*value, 3)), "limit": num(*limit)}),
                 format!(
-                    "Kinematic abort on channel {channel_index}: {axis} {value:.2} against a {} limit, at {}.",
+                    "Kinematic abort on channel {channel_index}: {axis} {value:.2} against a {} limit, {}.",
                     num(*limit),
-                    db(t.at_level_db)
+                    at_words(t.at_level_db)
                 ),
             )
         }
         TripKind::DriveVrms { realized_vrms, limit_vrms } => (
             json!({"kind": "drive_vrms", "realized_vrms": num(super::config::round(*realized_vrms, 4)), "limit_vrms": num(*limit_vrms)}),
             format!(
-                "Drive abort: {realized_vrms:.3} V rms at or above the {} V limit, at {}.",
+                "Drive abort: {realized_vrms:.3} V rms at or above the {} V limit, {}.",
                 num(*limit_vrms),
-                db(t.at_level_db)
+                at_words(t.at_level_db)
             ),
         ),
         TripKind::Divergence { consecutive_loops, divergent_bins } => (
             json!({"kind": "divergence", "consecutive_loops": consecutive_loops, "divergent_bins": divergent_bins}),
             format!(
-                "Divergence abort: {divergent_bins} lines diverged for {consecutive_loops} loops in a row, at {}.",
-                db(t.at_level_db)
+                "Divergence abort: {divergent_bins} lines diverged for {consecutive_loops} loops in a row, {}.",
+                at_words(t.at_level_db)
             ),
         ),
     };

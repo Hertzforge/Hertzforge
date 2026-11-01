@@ -506,15 +506,15 @@
         "max_sigma": {"type": ["number", "null"]},
         "drive_ceiling_vrms": {"type": "number"},
         "drive_abort_vrms": {"type": ["number", "null"]},
-        "sysid_level_db": {"type": "number"},
         "coherence_floor": {"type": "number"},
         "review_after_sysid": {"type": "boolean"},
         "pretest": {
           "type": "object", "additionalProperties": false,
           "properties": {
             "averages": {"type": "integer"},
+            "level_db": {"type": "number"},
             "max_vrms": {"type": ["number", "null"]},
-            "min_vrms": {"type": ["number", "null"]},
+            "start_vrms": {"type": "number"},
             "shaped": {"type": "boolean"}
           }
         },
@@ -696,7 +696,7 @@
       "type": ["object", "null"], "required": ["outcome", "message", "at_s", "level_db", "trip"],
       "additionalProperties": false,
       "properties": {
-        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "fault"]},
+        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault"]},
         "message": {"type": "string", "minLength": 1},
         "at_s": {"type": ["number", "null"], "minimum": 0},
         "level_db": {"type": ["number", "null"]},

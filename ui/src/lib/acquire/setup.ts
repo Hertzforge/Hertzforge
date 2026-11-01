@@ -47,10 +47,10 @@ export interface ControlDraft {
 	drive_ceiling_vrms: number;
 	/** null: no drive abort. */
 	drive_abort_vrms: number | null;
-	sysid_level_db: number;
 	coherence_floor: number;
 	review_after_sysid: boolean;
-	pretest: { averages: number; max_vrms: number | null; min_vrms: number | null; shaped: boolean };
+	/** level_db: the control response identification steps up to, dB relative to the reference. */
+	pretest: { averages: number; level_db: number; max_vrms: number | null; start_vrms: number; shaped: boolean };
 	soft_start_db: number;
 	soft_start_relax_db: number;
 	level_ramp_s: number;
@@ -91,10 +91,9 @@ export function defaultControl(): ControlDraft {
 		max_sigma: 5,
 		drive_ceiling_vrms: 10,
 		drive_abort_vrms: null,
-		sysid_level_db: -20,
 		coherence_floor: 0.5,
 		review_after_sysid: true,
-		pretest: { averages: 4, max_vrms: 1, min_vrms: 0.01, shaped: false },
+		pretest: { averages: 4, level_db: -20, max_vrms: 1, start_vrms: 0.01, shaped: false },
 		soft_start_db: 9,
 		soft_start_relax_db: 6,
 		level_ramp_s: 3,
@@ -179,10 +178,9 @@ export function toConfig(d: SetupDraft): RandomConfig {
 		max_sigma: finiteOrNull(c.max_sigma),
 		drive_ceiling_vrms: c.drive_ceiling_vrms,
 		drive_abort_vrms: finiteOrNull(c.drive_abort_vrms),
-		sysid_level_db: c.sysid_level_db,
 		coherence_floor: c.coherence_floor,
 		review_after_sysid: c.review_after_sysid,
-		pretest: { averages: c.pretest.averages, max_vrms: finiteOrNull(c.pretest.max_vrms), min_vrms: finiteOrNull(c.pretest.min_vrms), shaped: c.pretest.shaped },
+		pretest: { averages: c.pretest.averages, level_db: c.pretest.level_db, max_vrms: finiteOrNull(c.pretest.max_vrms), start_vrms: c.pretest.start_vrms, shaped: c.pretest.shaped },
 		soft_start_db: c.soft_start_db,
 		soft_start_relax_db: c.soft_start_relax_db,
 		level_ramp_s: c.level_ramp_s,
@@ -378,7 +376,7 @@ export function localErrors(d: SetupDraft): FieldErrors {
 	});
 	needNumber(out, 'schedule.full_level_s', d.schedule.full_level_s);
 	const c = d.control;
-	for (const key of ['control_dof', 'damping', 'drive_ceiling_vrms', 'sysid_level_db', 'coherence_floor', 'soft_start_db', 'soft_start_relax_db', 'level_ramp_s', 'shutdown_ramp_s'] as const) {
+	for (const key of ['control_dof', 'damping', 'drive_ceiling_vrms', 'coherence_floor', 'soft_start_db', 'soft_start_relax_db', 'level_ramp_s', 'shutdown_ramp_s'] as const) {
 		needNumber(out, `control.${key}`, c[key]);
 	}
 	needNumber(out, 'control.max_lines_out', c.max_lines_out, true);
@@ -386,8 +384,9 @@ export function localErrors(d: SetupDraft): FieldErrors {
 	needOptional(out, 'control.max_sigma', c.max_sigma);
 	needOptional(out, 'control.drive_abort_vrms', c.drive_abort_vrms);
 	needNumber(out, 'control.pretest.averages', c.pretest.averages, true);
+	needNumber(out, 'control.pretest.level_db', c.pretest.level_db);
 	needOptional(out, 'control.pretest.max_vrms', c.pretest.max_vrms);
-	needOptional(out, 'control.pretest.min_vrms', c.pretest.min_vrms);
+	needNumber(out, 'control.pretest.start_vrms', c.pretest.start_vrms);
 	c.weights.forEach((w, i) => needNumber(out, `control.weights.${i}`, w.weight));
 	d.limits.forEach((lim, i) =>
 		lim.rows.forEach((r, k) => {

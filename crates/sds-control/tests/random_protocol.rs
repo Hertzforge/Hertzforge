@@ -516,6 +516,103 @@ async fn an_abort_during_system_identification_ends_it_at_the_next_block() {
     );
 }
 
+/// System identification runs under the run's own aborts (2026-11-01, bench
+/// finding 1): a control-row accel abort below the identification's peaks ends
+/// the run `aborted` during identification, at loop 0 and the identification
+/// level, before anything drives at test level. Red before the fix: the run
+/// passed identification and tripped later, on the ladder.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_kinematic_abort_trips_during_system_identification() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Shell"})).await;
+    c.ok("station.select", json!({"kind": "sim"})).await;
+    let t = c.ok("channels.get", json!({})).await;
+    let mut rows = t["channels"].as_array().unwrap().clone();
+    // The identification's control response is the reference rms -20 dB (about
+    // 0.6 g rms for this profile): a 0.5 g abort sits under its peaks.
+    rows[0]["abort"]["accel_g"] = json!(0.5);
+    c.ok(
+        "channels.set",
+        json!({"revision": t["revision"], "channels": rows}),
+    )
+    .await;
+    let config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+    c.ok("random.configure", json!({ "config": config })).await;
+    c.ok("random.start", json!({})).await;
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "aborted", "{end}");
+    let trip = &end["end"]["trip"];
+    assert_eq!(trip["kind"], "kinematic");
+    assert_eq!(trip["channel"], 1);
+    assert_eq!(
+        trip["at_loop"], 0,
+        "it tripped before any control loop: {trip}"
+    );
+    assert_eq!(trip["at_level_db"], -20);
+    assert_eq!(end["end"]["level_db"], -20);
+    let message = end["end"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("during system identification"),
+        "{message}"
+    );
+    // Nothing was ever engaged.
+    assert!(
+        !c.of_topic("random.state")
+            .iter()
+            .any(|e| e.data()["phase"] == "engaged"),
+        "the run engaged after the identification tripped"
+    );
+}
+
+/// A level the identification's ceiling cannot reach ends the run by name,
+/// `sysid_level_unreachable`, with the facts in the message, before anything
+/// drives at test level.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_identification_level_the_ceiling_cannot_reach_ends_the_run_by_name() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let mut config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+    config["control"]["pretest"]["max_vrms"] = json!(0.002);
+    config["control"]["pretest"]["start_vrms"] = json!(0.001);
+    configured(&mut c, config).await;
+    c.ok("random.start", json!({})).await;
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "sysid_level_unreachable", "{end}");
+    assert_eq!(end["phase"], "stopped");
+    assert_eq!(end["end"]["trip"], Value::Null);
+    let message = end["end"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("could not reach its level") && message.contains("0.002 V rms"),
+        "{message}"
+    );
+    assert!(message.contains("never drove at test level"), "{message}");
+    let log = c.ok("random.log", json!({})).await;
+    let steps = log["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            e["text"]
+                .as_str()
+                .is_some_and(|t| t.starts_with("identification level step"))
+        })
+        .count();
+    assert!(steps >= 1, "the level steps are in the run log: {log}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn observers_read_stop_and_abort_and_nothing_else() {
     let svc = Service::with_options(options(

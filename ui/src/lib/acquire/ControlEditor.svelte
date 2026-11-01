@@ -38,7 +38,6 @@
 	}
 
 	const SYSID: Spec[] = [
-		{ key: 'sysid_level_db', label: 'Identification level', unit: 'dB', step: 1, max: 0, help: 'Relative to full level. Lower is gentler on the article; too low and the measurement is noisy.' },
 		{ key: 'coherence_floor', label: 'Coherence floor', step: 0.05, min: 0, max: 1, help: 'The band coherence identification must reach. Below it, the run holds and never drives at test level.' }
 	];
 	const LOOP: Spec[] = [
@@ -144,9 +143,10 @@
 		<div class="aq-fields more">
 			{@render toggle('ctl-review', 'Hold for review after identification', c.review_after_sysid, (v) => (c.review_after_sysid = v), 'Nothing drives at test level until you proceed.')}
 			{@render toggle('ctl-shaped', 'Shaped identification drive', c.pretest.shaped, (v) => (c.pretest.shaped = v), 'Follow the reference shape instead of a flat band.')}
+			<NumberField id="ctl-pre-level" label="Identification level" unit="dB" step={1} max={0} bind:value={c.pretest.level_db} errors={errs('control.pretest.level_db')} help="Of the control response, relative to the reference. The drive steps up from the starting drive until the response is there." disabled={locked} />
 			<NumberField id="ctl-pre-avg" label="Identification averages" integer step={1} min={1} bind:value={c.pretest.averages} errors={errs('control.pretest.averages')} help="More is steadier and takes longer." disabled={locked} />
-			<NumberField id="ctl-pre-max" label="Largest identification drive" unit="V rms" step={0.1} nullable="No limit" fallback={1} bind:value={c.pretest.max_vrms} errors={errs('control.pretest.max_vrms')} disabled={locked} />
-			<NumberField id="ctl-pre-min" label="Smallest identification drive" unit="V rms" step={0.01} nullable="No floor" fallback={0.01} bind:value={c.pretest.min_vrms} errors={errs('control.pretest.min_vrms')} disabled={locked} />
+			<NumberField id="ctl-pre-max" label="Largest identification drive" unit="V rms" step={0.1} nullable="No limit" fallback={1} bind:value={c.pretest.max_vrms} errors={errs('control.pretest.max_vrms')} help="If the level needs more, the run stops before driving at test level." disabled={locked} />
+			<NumberField id="ctl-pre-start" label="Starting identification drive" unit="V rms" step={0.01} min={0} bind:value={c.pretest.start_vrms} errors={errs('control.pretest.start_vrms')} help="Identification starts here and steps up." disabled={locked} />
 		</div>
 	</div>
 

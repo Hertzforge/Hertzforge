@@ -83,6 +83,24 @@ pub enum ServiceError {
     Plant(String),
     /// A capture/snapshot IO error.
     Io(String),
+    /// The referenced system identification could not bring the control
+    /// response to its level (`RandomTestConfig::pretest_reference_db`) within
+    /// its drive ceiling, or the response did not settle onto it. Nothing was
+    /// driven above the ceiling; the run never reached test level.
+    SysIdLevelUnreachable {
+        /// The identification level asked for, dB relative to the reference.
+        level_db: f64,
+        /// The control response's in-band rms the level asks for (EU).
+        target_rms: f64,
+        /// The control response's in-band rms at the last drive tried (EU).
+        reached_rms: f64,
+        /// The last drive tried, V rms.
+        drive_vrms: f64,
+        /// The identification's drive ceiling, V rms.
+        ceiling_vrms: f64,
+        /// Drives tried.
+        probes: usize,
+    },
 }
 
 impl std::fmt::Display for ServiceError {
@@ -92,6 +110,32 @@ impl std::fmt::Display for ServiceError {
             ServiceError::BadState(s) => write!(f, "bad state: {s}"),
             ServiceError::Plant(s) => write!(f, "plant error: {s}"),
             ServiceError::Io(s) => write!(f, "io error: {s}"),
+            ServiceError::SysIdLevelUnreachable {
+                level_db,
+                target_rms,
+                reached_rms,
+                drive_vrms,
+                ceiling_vrms,
+                probes,
+            } => {
+                let below = -level_db;
+                if *drive_vrms >= *ceiling_vrms * (1.0 - 1e-9) && reached_rms < target_rms {
+                    write!(
+                        f,
+                        "system identification could not reach its level: at the {ceiling_vrms:.4} \
+                         V rms drive ceiling the control response was {reached_rms:.4} rms, short \
+                         of the {target_rms:.4} rms that {below:.1} dB below the reference asks for"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "system identification did not settle on its level: after {probes} \
+                         drives the control response was {reached_rms:.4} rms at {drive_vrms:.4} \
+                         V rms, against the {target_rms:.4} rms that {below:.1} dB below the \
+                         reference asks for"
+                    )
+                }
+            }
         }
     }
 }
@@ -783,14 +827,8 @@ impl RandomService {
         }
 
         // Build the kinematic monitor (reactive tri-field) from the channel table.
-        let kin = KinematicMonitor::new(
-            &self.table,
-            self.loop_cfg.fs_hz,
-            5.0, // HP corner, decade below typical bands
-            1,   // sustain (spike-sensitive; the settle window suppresses derived-axis)
-            5.0, // settle HP constants
-        );
-        self.kinematic = if kin.is_active() { Some(kin) } else { None };
+        // It is fed from the first identification segment on.
+        self.kinematic = self.build_kinematic();
 
         self.notch_mask = vec![false; self.loop_cfg.nbins()];
         self.transition(RunState::SysId);
@@ -799,11 +837,28 @@ impl RandomService {
 
     // --- sysID + coherence gate ------------------------------------------------
 
-    /// Run the pre-test system-ID at the sysID level (default -20 dB
-    /// amplitude of full). Drives a low-level flat band-limited excitation for a few
+    /// Run the pre-test system-ID. Drives a band-limited excitation for a few
     /// segments, estimates `|H|^2` + coherence, seeds the control law, and computes the
     /// band coherence. Transitions `SysId -> CoherenceGate`. `pretest_segments` bounds
     /// the sysID length (>= 1).
+    ///
+    /// The LEVEL: with `pretest_reference_db` set, the drive is stepped from
+    /// `pretest_start_vrms` until the control response sits at the reference rms
+    /// plus that many dB, then held there for the identification record (see
+    /// [`RandomTestConfig::pretest_reference_db`]); a level the ceiling cannot
+    /// reach is refused with [`ServiceError::SysIdLevelUnreachable`]. Without
+    /// it, the legacy absolute level: `sysid_level_db` of a 0.05 base, bounded by
+    /// the pretest Vrms floor and ceiling.
+    ///
+    /// PROTECTION (2026-11-01, bench finding 1): every identification segment,
+    /// the level steps included, runs under the same absolute aborts as a control
+    /// loop: the drive-Vrms abort, the engine's raw-ring watchdog and the
+    /// kinematic monitor. A trip ends the identification with the run
+    /// `Aborted` and the trip recorded, and this returns `Ok(())`; the caller
+    /// reads the state. Before, a watchdog trip only shortened a segment and the
+    /// monitor was not fed at all: on the bench a 0.4 g abort sat under 48
+    /// blocks peaking at 0.608 g for the whole identification and nothing
+    /// tripped.
     pub fn run_sysid(&mut self, pretest_segments: usize) -> Result<(), ServiceError> {
         if !matches!(self.state, RunState::SysId) {
             return Err(ServiceError::BadState(format!(
@@ -812,18 +867,16 @@ impl RandomService {
             )));
         }
         let (band, nbins, df) = (self.band, self.loop_cfg.nbins(), self.df_hz);
-        // sysID excitation: a flat band-limited PSD at the sysID amplitude relative to a
-        // small pretest reference. Amplitude scale is 10^(sysid_level_db/20) of a modest
-        // pretest base (kept low so the plant is gently excited).
-        let base = 0.05f64; // pretest drive amplitude base (matches the demo)
-        let amp = base * 10f64.powf(self.cfg.sysid_level_db / 20.0);
-        let lvl = amp * amp;
+        // The level the identification is said to run at, for a trip's record.
+        self.schedule_level_db = self
+            .cfg
+            .pretest_reference_db
+            .unwrap_or(self.cfg.sysid_level_db);
+        // The excitation's SHAPE: flat in band, or (operator knob) proportional to
+        // the reference in band so a resonant article gets its energy where the
+        // run will put it. Normalized to 1 V rms; the level is set below.
         let mut pretest_psd = vec![0.0f64; nbins];
         if self.cfg.shaped_pretest {
-            // SHAPED pretest (operator knob): excite the plant the way the
-            // test will - proportional to the reference in band, normalized
-            // so the band-mean power matches the flat pretest level. A
-            // resonant article gets its energy where the run will put it.
             let mean = {
                 let sl = &self.full_target[band.0..band.1.min(self.full_target.len())];
                 let m = sl.iter().sum::<f64>() / sl.len().max(1) as f64;
@@ -837,41 +890,29 @@ impl RandomService {
                 .iter_mut()
                 .zip(self.full_target[band.0..].iter())
             {
-                *p = lvl * (t / mean).max(0.0);
+                *p = (t / mean).max(0.0);
             }
         } else {
             for p in pretest_psd[band.0..band.1].iter_mut() {
-                *p = lvl;
+                *p = 1.0;
             }
         }
-        // Operator Vrms bounds on the pretest drive. The FLOOR raises a
-        // too-quiet pretest into the coherent range; the CEILING is the
-        // safety bound and is applied LAST so it always wins.
-        let vrms = (pretest_psd.iter().sum::<f64>() * df).sqrt();
-        if vrms > 0.0 {
-            let mut scale2 = 1.0f64;
-            if let Some(mn) = self.cfg.pretest_min_vrms {
-                if vrms * scale2.sqrt() < mn {
-                    scale2 = (mn / vrms).powi(2);
-                }
+        let unit_vrms = Self::psd_vrms(&pretest_psd, df);
+        if unit_vrms > 0.0 {
+            let k = 1.0 / (unit_vrms * unit_vrms);
+            for p in pretest_psd.iter_mut() {
+                *p *= k;
             }
-            if let Some(mx) = self.cfg.pretest_max_vrms {
-                if vrms * scale2.sqrt() > mx {
-                    scale2 = (mx / vrms).powi(2);
-                }
-            }
-            if (scale2 - 1.0).abs() > 1e-12 {
-                for p in pretest_psd.iter_mut() {
-                    *p *= scale2;
-                }
-                self.log.push(EventKind::Note {
-                    text: format!(
-                        "pretest drive scaled to Vrms bounds: {:.4} -> {:.4} Vrms",
-                        vrms,
-                        vrms * scale2.sqrt()
-                    ),
-                });
-            }
+        }
+        let drive_vrms = match self.cfg.pretest_reference_db {
+            Some(level_db) => match self.sysid_drive_for_level(&pretest_psd, level_db)? {
+                Some(v) => v,
+                None => return Ok(()), // a protection tripped; the run is Aborted
+            },
+            None => self.legacy_sysid_drive_vrms(unit_vrms),
+        };
+        for p in pretest_psd.iter_mut() {
+            *p *= drive_vrms * drive_vrms;
         }
 
         // The FULL pretest record, not the last segment (the 2026-08-03 arm-refused
@@ -911,25 +952,9 @@ impl RandomService {
             // that scales with nfft and happens while the AO is running on a
             // finite buffer - and synthesis is exactly that. Nothing writes AO
             // during it, so a synth longer than the committed AO queue starves
-            // the output before the segment's first tick.
-            let t_synth = std::time::Instant::now();
-            let (mut leadin, mut drive) = self.synth_segment(&pretest_psd)?;
-            let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
-            // eprintln, not a log Note: in the failing case the pretest aborts on
-            // segment 0, and the abort path's event tail did not carry the note
-            // through. A diagnostic that only survives the HEALTHY path is no
-            // diagnostic at all - it is absent from exactly the run you need it for.
-            eprintln!(
-                "pretest segment {ran}: synth {synth_ms:.1} ms for {} frames (nfft {})",
-                self.loop_cfg.window_len(),
-                self.loop_cfg.nfft
-            );
-            if let Some(sig) = self.cfg.drive_clip_sigma {
-                Self::clip_sigma(&mut leadin, sig);
-                Self::clip_sigma(&mut drive, sig);
-            }
-            let seg = self.run_plant_segment(leadin, drive.clone())?;
-            let r = self.composite_control_signal(&seg);
+            // the output before the segment's first tick. (The synthesis is timed
+            // inside `sysid_segment`.)
+            //
             // STEP 4. Drive and response are each CORRECT (ratio 1.0076,
             // in-band fraction 0.9991 at nfft 32768) yet do not correlate, so
             // the fault is in the PAIRING. The concatenated records only line
@@ -950,28 +975,16 @@ impl RandomService {
             // tick, so the pretest was hitting the same AO stall already fixed
             // for the control loop - but here it truncated instead of
             // faulting, because nothing checked.
-            // ...but ONLY when the segment offers no reason of its own. A
-            // kinematic trip or an engine fault legitimately ends a segment
-            // early, and reporting THAT as a pairing fault would bury the real
-            // cause behind a length complaint (caught by the (e) kinematic-
-            // abort acceptance test, which trips a tight monitor limit during
-            // the pretest on purpose).
-            // A FAULTED engine stop is an ERROR here too. `loop_tick` already says
-            // so (see its step 5.0), but the PRETEST path never got the
-            // rule, and `run_plant_segment` deliberately returns the segment
-            // rather than judging it. So an engine fault mid-pretest arrived
-            // here as nothing more than a short record - and the length guard
-            // below then EXCUSED it, because a fault counts as a reason. Two
-            // correct-looking pieces of caution composed into silence: the
-            // record was truncated at the staging cap, concatenated, and paired
-            // sample-for-sample with a full drive (2026-08-03).
-            if let Some(msg) = seg.faulted.clone() {
-                return Err(ServiceError::Plant(format!(
-                    "pretest segment {ran} faulted: {msg}"
-                )));
-            }
-            let unexplained = seg.watchdog_trip.is_none();
-            if r.len() != drive.len() && unexplained {
+            // A kinematic trip ends a segment early for a reason of its own; it now
+            // ends the identification (`sysid_segment` returns `None`), so the
+            // length guard below only ever sees segments that ran to their budget.
+            // A FAULTED engine stop is an ERROR (`sysid_segment` returns it), never
+            // a short record the length guard could excuse (2026-08-03).
+            let Some((drive, seg)) = self.sysid_segment(&pretest_psd, ran)? else {
+                return Ok(()); // a protection tripped; the run is Aborted
+            };
+            let r = self.composite_control_signal(&seg);
+            if r.len() != drive.len() {
                 return Err(ServiceError::Plant(format!(
                     "pretest segment {ran} returned {} response samples against a {} \
                      sample drive (nfft {}). A truncated acquisition cannot be paired \
@@ -1191,11 +1204,223 @@ impl RandomService {
         Ok(())
     }
 
+    /// The legacy ABSOLUTE identification drive, V rms: `sysid_level_db` of a
+    /// fixed 0.05 base over a shape whose 1-per-line form is `unit_vrms` V rms,
+    /// then the operator's Vrms floor and ceiling (the ceiling applied last, so
+    /// it always wins). Unchanged arithmetic from before the referenced mode.
+    fn legacy_sysid_drive_vrms(&mut self, unit_vrms: f64) -> f64 {
+        let base = 0.05f64; // pretest drive amplitude base (matches the demo)
+        let amp = base * 10f64.powf(self.cfg.sysid_level_db / 20.0);
+        let vrms = amp * unit_vrms;
+        if vrms <= 0.0 {
+            return vrms;
+        }
+        let mut out = vrms;
+        if let Some(mn) = self.cfg.pretest_min_vrms {
+            if out < mn {
+                out = mn;
+            }
+        }
+        if let Some(mx) = self.cfg.pretest_max_vrms {
+            if out > mx {
+                out = mx;
+            }
+        }
+        if (out / vrms - 1.0).abs() > 1e-12 {
+            self.log.push(EventKind::Note {
+                text: format!("pretest drive scaled to Vrms bounds: {vrms:.4} -> {out:.4} Vrms"),
+            });
+        }
+        out
+    }
+
+    /// The referenced identification's drive, V rms: step from the start drive
+    /// until the control response's in-band rms is the reference's in-band rms
+    /// plus `level_db`, within [`config::PRETEST_LEVEL_TOLERANCE_DB`]. `unit_psd`
+    /// is the excitation shape at 1 V rms.
+    ///
+    /// Each step is one protected identification segment. The next drive is the
+    /// linear prediction `v * target / measured`, held within 20 dB of the last
+    /// drive (a noise-dominated first reading can only under-predict the gain,
+    /// so the walk comes up from below) and never above the ceiling:
+    /// `pretest_max_vrms` and the test's own `drive_ceiling_vrms`, whichever is
+    /// lower. Returns `Ok(None)` when a protection aborted the run, and
+    /// [`ServiceError::SysIdLevelUnreachable`] when the ceiling cannot reach the
+    /// level or the response does not settle within the probe budget.
+    fn sysid_drive_for_level(
+        &mut self,
+        unit_psd: &[f64],
+        level_db: f64,
+    ) -> Result<Option<f64>, ServiceError> {
+        const MAX_PROBES: usize = 16;
+        const MAX_STEP_DB: f64 = 20.0;
+        let tol = config::PRETEST_LEVEL_TOLERANCE_DB;
+        let step = 10f64.powf(MAX_STEP_DB / 20.0);
+        let (band, df) = (self.band, self.df_hz);
+        let target = self.full_target_grms() * 10f64.powf(level_db / 20.0);
+        let ceiling = self
+            .cfg
+            .pretest_max_vrms
+            .unwrap_or(f64::INFINITY)
+            .min(self.cfg.drive_ceiling_vrms);
+        let mut v = self
+            .cfg
+            .pretest_start_vrms
+            .unwrap_or(ceiling * 0.01)
+            .min(ceiling);
+        let mut reached = 0.0f64;
+        let mut probes = 0usize;
+        while probes < MAX_PROBES {
+            let psd: Vec<f64> = unit_psd.iter().map(|p| p * v * v).collect();
+            let Some((_drive, seg)) = self.sysid_segment(&psd, probes)? else {
+                return Ok(None);
+            };
+            probes += 1;
+            let per_channel = self.measure_per_channel(&seg);
+            let composite = self.composite_of(&per_channel)?;
+            reached = Self::inband_rms(&composite, band, df);
+            let err_db = if reached > 0.0 && target > 0.0 {
+                20.0 * (reached / target).log10()
+            } else {
+                f64::NEG_INFINITY
+            };
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "identification level step {probes}: drive {v:.4} V rms, control \
+                     {reached:.4} rms against {target:.4} rms ({err_db:+.1} dB)"
+                ),
+            });
+            if err_db.abs() <= tol {
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "identification at {v:.4} V rms: the control response is \
+                         {reached:.4} rms, {:+.1} dB against the reference \
+                         ({level_db:+.1} dB asked)",
+                        level_db + err_db
+                    ),
+                });
+                return Ok(Some(v));
+            }
+            if err_db < 0.0 && v >= ceiling * (1.0 - 1e-9) {
+                break; // at the ceiling and still short: refuse
+            }
+            let want = if reached > 0.0 {
+                v * target / reached
+            } else {
+                v * step
+            };
+            v = want.clamp(v / step, v * step).min(ceiling);
+        }
+        Err(ServiceError::SysIdLevelUnreachable {
+            level_db,
+            target_rms: target,
+            reached_rms: reached,
+            drive_vrms: v,
+            ceiling_vrms: ceiling,
+            probes,
+        })
+    }
+
+    /// Drive ONE identification segment of `psd` under every absolute
+    /// protection a control loop has (2026-11-01, bench finding 1): the
+    /// drive-Vrms abort on the segment's drive, the engine's raw-ring watchdog
+    /// and the service's kinematic monitor on its response, and the overload
+    /// latch. `Ok(None)` means a protection aborted the run (state `Aborted`, the
+    /// trip recorded); a faulted engine stop is an error, as in the control loop.
+    fn sysid_segment(
+        &mut self,
+        psd: &[f64],
+        index: usize,
+    ) -> Result<Option<(Vec<f64>, engine::SegmentResult)>, ServiceError> {
+        let vrms = Self::psd_vrms(psd, self.df_hz);
+        if let Some(abort_v) = self.cfg.drive_abort_vrms {
+            if vrms >= abort_v {
+                self.abort(TripKind::DriveVrms {
+                    realized_vrms: vrms,
+                    limit_vrms: abort_v,
+                });
+                return Ok(None);
+            }
+        }
+        let t_synth = std::time::Instant::now();
+        let (mut leadin, mut drive) = self.synth_segment(psd)?;
+        let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
+        // eprintln, not a log Note: in the failing case the pretest aborts on
+        // segment 0, and the abort path's event tail did not carry the note
+        // through. A diagnostic that only survives the HEALTHY path is no
+        // diagnostic at all - it is absent from exactly the run you need it for.
+        eprintln!(
+            "pretest segment {index}: synth {synth_ms:.1} ms for {} frames (nfft {})",
+            self.loop_cfg.window_len(),
+            self.loop_cfg.nfft
+        );
+        if let Some(sig) = self.cfg.drive_clip_sigma {
+            Self::clip_sigma(&mut leadin, sig);
+            Self::clip_sigma(&mut drive, sig);
+        }
+        let seg = self.run_plant_segment(leadin, drive.clone())?;
+        if let Some(msg) = seg.faulted.clone() {
+            return Err(ServiceError::Plant(format!(
+                "pretest segment {index} faulted: {msg}"
+            )));
+        }
+        if let Some(t) = seg.watchdog_trip {
+            let ktrip = KinematicTrip {
+                channel_index: t.channel_index,
+                axis: format!("{:?}", t.axis),
+                value: t.value,
+                limit: t.limit,
+                at_frame: t.at_frame,
+                at_level_db: self.schedule_level_db,
+                at_loop: self.loop_count,
+            };
+            self.abort(TripKind::from_kinematic(ktrip));
+            return Ok(None);
+        }
+        if let Some(kin) = self.kinematic.as_mut() {
+            if let Some(t) = kin.feed(&seg.interleaved) {
+                let ktrip = KinematicTrip {
+                    channel_index: t.channel_index,
+                    axis: format!("{:?}", t.axis),
+                    value: t.value,
+                    limit: t.limit,
+                    at_frame: t.at_frame,
+                    at_level_db: self.schedule_level_db,
+                    at_loop: self.loop_count,
+                };
+                self.abort(TripKind::from_kinematic(ktrip));
+                return Ok(None);
+            }
+        }
+        self.check_overloads(&seg);
+        Ok(Some((drive, seg)))
+    }
+
+    /// A fresh kinematic monitor from the channel table, or `None` when no
+    /// channel carries a limit. Built at arm for the identification and again at
+    /// engage, so the control loop starts with its own settle window exactly as
+    /// it did before the identification was protected.
+    fn build_kinematic(&self) -> Option<KinematicMonitor> {
+        let kin = KinematicMonitor::new(
+            &self.table,
+            self.loop_cfg.fs_hz,
+            5.0, // HP corner, decade below typical bands
+            1,   // sustain (spike-sensitive; the settle window suppresses derived-axis)
+            5.0, // settle HP constants
+        );
+        kin.is_active().then_some(kin)
+    }
+
     /// The coherence gate. If the band coherence is at or above the floor,
     /// engage the loop at the START level and transition `CoherenceGate -> Engaged`.
     /// If below, PARK at `CoherenceHold` (report + event, NEVER auto-raise). Returns
     /// `true` if the gate passed (engaged), `false` if it held.
     pub fn coherence_gate(&mut self) -> Result<bool, ServiceError> {
+        // A protection that tripped during the identification left the run
+        // Aborted with its trip: there is nothing to gate and nothing to engage.
+        if matches!(self.state, RunState::Aborted) {
+            return Ok(false);
+        }
         if !matches!(self.state, RunState::CoherenceGate) {
             return Err(ServiceError::BadState(format!(
                 "coherence_gate from {:?}",
@@ -1281,6 +1506,10 @@ impl RandomService {
         // the second may straddle it (the estimator's overlap reaches back).
         self.engage_settle_loops = 2;
         self.control_est = None;
+        // The control loop's own kinematic monitor, with its own settle window:
+        // the identification's monitor saw the identification's turn-on, and the
+        // engage is a task restart.
+        self.kinematic = self.build_kinematic();
         // SOFT START (operator, 2026-08-03): engage `soft_start_db` below the
         // LOWEST scheduled level and walk up to the start level, so a big
         // article - a slip table especially - is taken hold of gently rather
@@ -2020,6 +2249,9 @@ impl RandomService {
         }
         self.arm()?;
         self.run_sysid(pretest_segments)?;
+        if matches!(self.state, RunState::Aborted) {
+            return Ok(self.state); // a protection tripped during identification
+        }
         if !self.coherence_gate()? {
             return Ok(self.state); // parked at CoherenceHold
         }

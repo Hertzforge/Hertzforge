@@ -540,7 +540,10 @@ fn acceptance_e_kinematic_abort_on_tight_monitor_limit() {
     ctrl.units = Units::AccelG;
     ctrl.range_max = 100.0;
     ctrl.abort = AbortLimits {
-        accel_g: Some(0.05), // tight: the converged in-band response blows past this
+        // Tight for full level (2.7 g rms, peaks near 10 g) but above the
+        // identification's peaks (about 0.27 g rms): identification runs under
+        // the same abort since 2026-11-01, and this test is about the loop.
+        accel_g: Some(3.0),
         ..Default::default()
     };
     let mut drv = Channel::new(2);
@@ -846,7 +849,9 @@ fn acceptance_i_drive_vrms_abort() {
     let mut cfg = RandomTestConfig::siso(demo_profile(), 1);
     cfg.schedule = LevelSchedule::manual_default();
     cfg.drive_ceiling_vrms = 1_000.0; // high: not the clamp under test
-    cfg.drive_abort_vrms = Some(1.0e-4); // tiny: the engage drive Vrms blows past this
+                                      // Above the identification's 0.135 V rms (identification runs under the
+                                      // same abort since 2026-11-01) and below the engage drive, which blows past it.
+    cfg.drive_abort_vrms = Some(0.25);
     cfg.abort_db = (48.0, 48.0); // disable the envelope
     cfg.divergence_loops = 1_000; // do not let divergence pre-empt the drive abort
 

@@ -71,8 +71,9 @@
     "review_after_sysid": true,
     "pretest": {
      "averages": 4,
+     "level_db": -20,
      "max_vrms": 0.5,
-     "min_vrms": 0.01,
+     "start_vrms": 0.01,
      "shaped": false
     },
     "level_ramp_s": 3,

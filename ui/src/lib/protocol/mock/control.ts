@@ -154,10 +154,9 @@ const CONTROL_DEFAULTS = {
 	max_sigma: 5 as number | null,
 	drive_ceiling_vrms: 10,
 	drive_abort_vrms: null as number | null,
-	sysid_level_db: -20,
 	coherence_floor: 0.5,
 	review_after_sysid: true,
-	pretest: { averages: 4, max_vrms: 1 as number | null, min_vrms: 0.01 as number | null, shaped: false },
+	pretest: { averages: 4, level_db: -20, max_vrms: 1 as number | null, start_vrms: 0.01, shaped: false },
 	soft_start_db: 9,
 	soft_start_relax_db: 6,
 	level_ramp_s: 3,
@@ -419,9 +418,12 @@ function checkConfig(config: RandomConfig, rows: ChannelRow[]): Checked {
 	range('control.max_loops_out', c.max_loops_out, (v) => Number.isInteger(v) && v >= 1, 'it must be a whole number of at least 1');
 	range('control.max_lines_out', c.max_lines_out, (v) => Number.isInteger(v) && v >= 0, 'it must be a whole number of at least 0');
 	range('control.control_dof', c.control_dof, (v) => v >= 2, 'it must be at least 2');
-	range('control.sysid_level_db', c.sysid_level_db, (v) => v >= -60 && v <= 0, 'it runs from -60 to 0 dB');
 	range('control.max_sigma', c.max_sigma, (v) => v >= 1, 'it must be at least 1, or null for no clip');
 	range('control.pretest.averages', c.pretest.averages, (v) => Number.isInteger(v) && v >= 1, 'it must be a whole number of at least 1');
+	range('control.pretest.level_db', c.pretest.level_db, (v) => v >= -60 && v <= 0, 'it runs from -60 to 0 dB');
+	range('control.pretest.start_vrms', c.pretest.start_vrms, (v) => v > 0, 'it must be above 0');
+	if (c.pretest.max_vrms !== null && c.pretest.max_vrms > 0)
+		range('control.pretest.start_vrms', c.pretest.start_vrms, (v) => v <= 0 || v <= (c.pretest.max_vrms as number), `it must not exceed the largest identification drive, ${c.pretest.max_vrms} V rms`);
 	for (const key of ['soft_start_db', 'soft_start_relax_db', 'level_ramp_s', 'shutdown_ramp_s'] as const) {
 		range(`control.${key}`, c[key], (v) => v >= 0, 'it must not be negative');
 	}
@@ -866,7 +868,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			clock: r.clock,
 			mode: r.mode,
 			levels_db: r.config.schedule.levels.map((l) => l.db),
-			level_db: driving ? round(r.phase === 'sysid' || r.phase === 'coherence_gate' ? r.ctl.sysid_level_db : r.target, 2) : null,
+			level_db: driving ? round(r.phase === 'sysid' || r.phase === 'coherence_gate' ? r.ctl.pretest.level_db : r.target, 2) : null,
 			full_level_s: r.config.schedule.full_level_s,
 			elapsed_s: r.t === null ? null : round(r.t, 2),
 			at_level_s: timing.at,
@@ -933,8 +935,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			t: null,
 			phaseT: 0,
 			engagedT: 0,
-			level: ctl.sysid_level_db,
-			target: ctl.sysid_level_db,
+			level: ctl.pretest.level_db,
+			target: ctl.pretest.level_db,
 			rate: Infinity,
 			levelIndex: 0,
 			atLevelT: 0,
@@ -1002,7 +1004,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	function start(r: RandomRun) {
 		r.t = 0;
-		r.level = r.ctl.sysid_level_db;
+		r.level = r.ctl.pretest.level_db;
 		r.target = r.level;
 		setPhase(r, 'running', 'sysid');
 		r.timer = setInterval(() => tick(r), FRAME_MS);
@@ -1092,7 +1094,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		const next = rng(hashSeed(r.id, r.loops));
 		const sysid = r.phase === 'sysid';
 		const driving = DRIVING.includes(r.phase);
-		const level = sysid ? r.ctl.sysid_level_db : r.level;
+		const level = sysid ? r.ctl.pretest.level_db : r.level;
 		const k = 10 ** (level / 10);
 		const scatter = sysid ? 2.0 : 1.1 / Math.sqrt(1 + r.loops / 3) + 0.3;
 		const growth = options.abortDemoAtS !== undefined && driving ? Math.max(0, r.engagedT - options.abortDemoAtS) * 1.5 : 0;
@@ -1236,7 +1238,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	function live(r: RandomRun): RandomLive {
 		const L = r.lines as Lines;
 		const driving = r.state === 'running' || r.state === 'stopping';
-		const level = r.phase === 'sysid' || r.phase === 'coherence_gate' ? r.ctl.sysid_level_db : r.level;
+		const level = r.phase === 'sysid' || r.phase === 'coherence_gate' ? r.ctl.pretest.level_db : r.level;
 		const k = 10 ** (level / 10);
 		const at = (band: (i: number) => number) => Float64Array.from(L.ref, (ref, i) => ref * k * 10 ** (band(i) / 10));
 		const stepped = (name: string, role: SpectrumView['series'][number]['role'], y: Float64Array) => ({

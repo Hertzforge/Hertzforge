@@ -123,7 +123,7 @@ describe('control text goldens', () => {
 				drive_ceiling_vrms: 2.5,
 				drive_abort_vrms: null,
 				review_after_sysid: true,
-				pretest: { averages: 4, max_vrms: 0.5, min_vrms: 0.01, shaped: false },
+				pretest: { averages: 4, level_db: -20, max_vrms: 0.5, start_vrms: 0.01, shaped: false },
 				level_ramp_s: 3,
 				shutdown_ramp_s: 3
 			},
