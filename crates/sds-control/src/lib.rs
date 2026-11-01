@@ -23,6 +23,7 @@ pub mod protocol;
 pub mod server;
 pub mod session;
 pub mod sim;
+pub mod station;
 pub mod views;
 
 /// Default bind address.

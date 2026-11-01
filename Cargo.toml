@@ -13,11 +13,15 @@ license = "MIT"
 # list (crates/sds-control/tests/forbidden_deps.rs enforces it).
 [workspace.dependencies]
 hertzforge-breakpoints = { path = "crates/hertzforge-breakpoints" }
+hertzforge-capture = { path = "crates/hertzforge-capture" }
 hertzforge-channel-table = { path = "crates/hertzforge-channel-table" }
+hertzforge-dsp = { path = "crates/hertzforge-dsp" }
 hertzforge-hal = { path = "crates/hertzforge-hal" }
 hertzforge-hal-sim = { path = "crates/hertzforge-hal-sim" }
 hertzforge-module-abi = { path = "crates/hertzforge-module-abi" }
 hertzforge-random = { path = "crates/hertzforge-random" }
+hertzforge-shaker-db = { path = "crates/hertzforge-shaker-db" }
+hertzforge-station = { path = "crates/hertzforge-station" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }
