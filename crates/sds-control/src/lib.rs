@@ -21,6 +21,7 @@ pub mod codec;
 pub mod profiles;
 pub mod protocol;
 pub mod server;
+pub mod session;
 pub mod sim;
 pub mod views;
 
