@@ -57,7 +57,7 @@
 		const verb = (id: keyof typeof a, title: string, keywords: string, icon: IconName, run: () => unknown): Command | null =>
 			a[id].visible ? { id: `random:${id}`, group: 'Actions', title, subtitle: 'Acquire & Control', keywords, icon, disabledReason: a[id].reason, run: () => void run() } : null;
 		const out: (Command | null)[] = [
-			verb('abort', 'Abort Random Run', 'emergency halt end now immediate', 'stop', () => acq.abort()),
+			verb('abort', 'Abort Random Run', 'emergency halt end now immediate', 'abort', () => acq.abort()),
 			verb('stop', 'Stop Random Run, Ramped', 'halt end controlled', 'stop', () => acq.stop()),
 			verb('apply', 'Apply Random Setup', 'configure send profile', 'action', () => acq.apply()),
 			verb('arm', 'Arm Random Run', 'open station gate', 'action', () => acq.arm()),

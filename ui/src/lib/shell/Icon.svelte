@@ -10,6 +10,7 @@
 		| 'search'
 		| 'play'
 		| 'stop'
+		| 'abort'
 		| 'close'
 		| 'tool'
 		| 'dataset'
@@ -75,6 +76,9 @@
 		<path d="M6 4.2v11.6l9.2-5.8z" fill="currentColor" stroke="none" />
 	{:else if name === 'stop'}
 		<rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />
+	{:else if name === 'abort'}
+		<path d="M7 2.5h6l4.5 4.5v6L13 17.5H7L2.5 13V7z" fill="currentColor" stroke="none" />
+		<path d="M7.5 10h5" stroke="var(--bg-2)" stroke-width="1.8" />
 	{:else if name === 'close'}
 		<path d="M5 5l10 10M15 5L5 15" />
 	{:else if name === 'tool'}
