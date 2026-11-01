@@ -4,8 +4,9 @@
 	import { workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import ConnectionPill from './ConnectionPill.svelte';
+	import { db, STATE_WORDS } from '$lib/acquire/words';
 	import Icon from './Icon.svelte';
-	import SimBadge from './SimBadge.svelte';
+	import ProvenanceBadge from './ProvenanceBadge.svelte';
 
 	interface Props {
 		app: AppState;
@@ -14,6 +15,9 @@
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
+	const prov = $derived(app.provenance);
+	/** A live Random run stays in reach from every other workspace. */
+	const away = $derived(app.workspace !== 'acquire' && app.acquire.isLive ? app.acquire : null);
 </script>
 
 <header class="topbar">
@@ -40,7 +44,16 @@
 				Mock Services
 			</span>
 		{/if}
-		{#if app.simOnScreen}<SimBadge compact />{/if}
+		{#if away}
+			<span class="runpill" data-testid="run-pill">
+				<button class="go" onclick={() => app.go('acquire')} title="Go to Acquire & Control">
+					<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
+					Random {STATE_WORDS[away.run?.state ?? 'running'].toLowerCase()}{#if away.frame?.level_db !== null && away.frame?.level_db !== undefined}<span class="num lv">{db(away.frame.level_db)}</span>{/if}
+				</button>
+				<button class="abort" data-testid="run-pill-abort" disabled={!away.actions.abort.enabled} onclick={() => away.abort()} title="Abort the run now ({isMac ? 'Cmd' : 'Ctrl'} and period)">Abort</button>
+			</span>
+		{/if}
+		{#if prov}<ProvenanceBadge source={prov.source} cls={prov.cls} compact />{/if}
 		<ConnectionPill client={app.analysis} label="Analysis" testid="conn-analysis" />
 		<ConnectionPill client={app.control} label="Control" testid="conn-control" />
 		<button class="btn ghost sm themebtn" data-testid="theme-toggle" onclick={() => theme.cycle()} title="Theme: {themeLabel}. Click to change." aria-label="Theme: {themeLabel}">
@@ -145,6 +158,51 @@
 		border: 1px dashed var(--line-3);
 		border-radius: 11px;
 		white-space: nowrap;
+	}
+
+	.runpill {
+		display: inline-flex;
+		align-items: stretch;
+		height: 26px;
+		overflow: hidden;
+		border: 1px solid var(--blue-line);
+		border-radius: var(--radius-md);
+		font-size: var(--text-xs);
+	}
+
+	.runpill .go {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 0 9px;
+		color: var(--blue-1);
+		background: var(--blue-weak);
+		border: 0;
+		white-space: nowrap;
+	}
+
+	.runpill .lv {
+		margin-left: 2px;
+		padding-left: 7px;
+		border-left: 1px solid var(--blue-line);
+	}
+
+	.runpill .go svg {
+		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	.runpill .abort {
+		padding: 0 10px;
+		font-weight: var(--weight-strong);
+		color: var(--status-fail-text);
+		background: var(--status-fail-fill);
+		border: 0;
+	}
+
+	@keyframes pulse {
+		50% {
+			opacity: 0.35;
+		}
 	}
 
 	.themebtn span {

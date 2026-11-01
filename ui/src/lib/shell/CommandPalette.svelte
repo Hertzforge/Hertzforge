@@ -50,6 +50,39 @@
 		return null;
 	}
 
+	/** The Random run's verbs, each with the run bar's own reason when it cannot run now. */
+	function randomCommands(): Command[] {
+		const acq = app.acquire;
+		const a = acq.actions;
+		const verb = (id: keyof typeof a, title: string, keywords: string, icon: IconName, run: () => unknown): Command | null =>
+			a[id].visible ? { id: `random:${id}`, group: 'Actions', title, subtitle: 'Acquire & Control', keywords, icon, disabledReason: a[id].reason, run: () => void run() } : null;
+		const out: (Command | null)[] = [
+			verb('abort', 'Abort Random Run', 'emergency halt end now immediate', 'abort', () => acq.abort()),
+			verb('stop', 'Stop Random Run, Ramped', 'halt end controlled', 'stop', () => acq.stop()),
+			verb('apply', 'Apply Random Setup', 'configure send profile', 'action', () => acq.apply()),
+			verb('arm', 'Arm Random Run', 'open station gate', 'action', () => acq.arm()),
+			verb('start', 'Start Random Run', 'run go begin', 'play', () => {
+				app.go('acquire');
+				return acq.start();
+			}),
+			verb('proceed', 'Proceed After Review', 'continue engage system identification', 'play', () => acq.proceed()),
+			verb('reset', 'New Random Run', 'reset again repeat', 'reset', () => acq.reset()),
+			acq.isController
+				? null
+				: {
+						id: 'random:claim',
+						group: 'Actions',
+						title: 'Take Control',
+						subtitle: 'Acquire & Control',
+						keywords: 'claim controller seat',
+						icon: 'action',
+						disabledReason: !acq.connected ? 'Control service is not connected' : acq.session?.controller?.present ? `${acq.session.controller.name} has control` : null,
+						run: () => void acq.claim()
+					}
+		];
+		return out.filter((c): c is Command => c !== null);
+	}
+
 	const commands = $derived.by((): Command[] => {
 		const out: Command[] = [
 			{
@@ -75,6 +108,7 @@
 				disabledReason: controlReason('stop'),
 				run: () => void app.sim.stop()
 			},
+			...randomCommands(),
 			{
 				id: 'act:clear',
 				group: 'Actions',
