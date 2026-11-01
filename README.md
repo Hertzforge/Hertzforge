@@ -2,8 +2,8 @@
 
 Hertzforge will be one toolset for structural dynamics testing, from
 acquiring the data to analyzing it. It is being built by merging two
-existing projects: Hertzforge, Kevin Cross's data acquisition software, and
-Visual Dynamics, Brandon Zwink's structural dynamics toolset
+existing projects: Kevin Cross's data acquisition software, and Visual
+Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
 The `hertzforge` package on PyPI (0.0.1) does not contain that code yet.
