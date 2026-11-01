@@ -1,0 +1,192 @@
+"""Principle 6, checked rather than aspired to.
+
+Two standards, because one size was the wrong answer (Brandon,
+2026-08-25). *Every* public callable carries a docstring — that is the
+floor, and it is enforced everywhere. The **scripting surface** —
+what `hertzforge.__all__` exports, and the public methods on those
+classes — carries NumPy `Parameters` and `Returns` sections as well,
+because that is where somebody arrives without context and a table
+earns its place.
+
+Prose stays the house style elsewhere on purpose. The docstrings in
+this codebase explain *why the obvious approach was rejected*, and
+several bugs here were caused by code that looked right; a Parameters
+table cannot say that, and mandating one everywhere would trade the
+useful half of the documentation for the mechanical half.
+
+`ENFORCED` is a ratchet. Adding a module to it is how the standard
+spreads; the list only ever grows.
+"""
+
+from __future__ import annotations
+
+import inspect
+
+import pytest
+
+import hertzforge
+
+#: Where NumPy sections are required today. Grows as they are written;
+#: nothing is ever removed, which is what makes it a ratchet.
+ENFORCED = ('Project', 'TimeHistory', 'DataArray', 'Psd', 'Frf',
+            'Spectrum', 'Srs', 'ShapeSet', 'Geometry', 'ChannelTable',
+            'UnitSystem', 'Report', 'Specification', 'ShockSpecification',
+            'TransientSpecification')
+
+
+def public_surface():
+    """[(label, object)] every callable a script can reach."""
+    out = []
+    for name in sorted(hertzforge.__all__):
+        obj = getattr(hertzforge, name, None)
+        if inspect.isclass(obj):
+            for attr in sorted(vars(obj)):
+                if attr.startswith('_'):
+                    continue
+                member = vars(obj)[attr]
+                if inspect.isfunction(member) or isinstance(member, property):
+                    out.append((f'{name}.{attr}', member))
+        elif inspect.isfunction(obj):
+            out.append((name, obj))
+    return out
+
+
+def docstring_of(obj):
+    """The object's own docstring, or None.
+
+    The `fget` branch is for properties, and it is written this way
+    for a reason found the hard way: `getattr(getattr(obj, 'fget',
+    None), '__doc__', None)` returns *NoneType's* docstring when
+    there is no `fget`, which is a non-empty string and always
+    truthy — so the test that used it could never fail, and reported
+    a clean bill while thirteen public methods had no docstring at
+    all (2026-08-25).
+    """
+    if isinstance(obj, property):
+        return obj.fget.__doc__ if obj.fget else None
+    return obj.__doc__
+
+
+def takes_parameters(obj):
+    target = obj.fget if isinstance(obj, property) else obj
+    try:
+        sig = inspect.signature(target)
+    except (TypeError, ValueError):
+        return False
+    return any(p not in ('self', 'cls') for p in sig.parameters)
+
+
+def test_every_public_callable_has_a_docstring():
+    """A name can carry a one-line helper; it cannot carry an API."""
+    bare = [label for label, obj in public_surface()
+            if not docstring_of(obj)]
+    assert not bare, ('undocumented on the public surface:\n  '
+                      + '\n  '.join(bare))
+
+
+def test_the_scripting_verbs_document_their_parameters():
+    """Where a script arrives without context, the parameters are a
+    table rather than something to infer from the prose."""
+    missing = []
+    for label, obj in public_surface():
+        if not label.startswith(ENFORCED) or '.' not in label:
+            continue
+        if not takes_parameters(obj):
+            continue          # no parameters, nothing to tabulate
+        doc = docstring_of(obj) or ''
+        if 'Parameters\n' not in doc:
+            missing.append(label)
+    covered = sum(1 for label, obj in public_surface()
+                  if label.startswith(ENFORCED) and '.' in label
+                  and takes_parameters(obj))
+    # The ratchet reached zero on 2026-08-25: every parameterized
+    # method on the scripting surface documents its parameters. It
+    # stays at zero — a new public method arrives with its table, or
+    # this fails.
+    assert covered > 100, 'the surface shrank; check ENFORCED'
+    assert not missing, (
+        f'{len(missing)} of {covered} scripting methods lack a '
+        'Parameters section:\n  ' + '\n  '.join(missing))
+
+
+def test_a_documented_verb_names_every_parameter_it_takes():
+    """A half-filled table is worse than none: a reader trusts it and
+    is then missing an argument."""
+    wrong = []
+    for label, obj in public_surface():
+        doc = docstring_of(obj) or ''
+        if 'Parameters\n' not in doc or not label.startswith(ENFORCED):
+            continue
+        target = obj.fget if isinstance(obj, property) else obj
+        params = [p for p in inspect.signature(target).parameters
+                  if p not in ('self', 'cls')]
+        section = doc.split('Parameters')[1]
+        for p in params:
+            bare = p.lstrip('*')
+            if bare not in section:
+                wrong.append(f'{label} does not document {p!r}')
+    assert not wrong, '\n  '.join(wrong)
+
+
+def test_a_documented_verb_says_what_it_returns():
+    """A generator says what it yields instead — NumPy's own section
+    for one, and the one the API reference renders for it."""
+    for label, obj in public_surface():
+        doc = docstring_of(obj) or ''
+        if 'Parameters\n' in doc and label.startswith(ENFORCED):
+            target = obj.fget if isinstance(obj, property) else obj
+            section = ('Yields\n' if inspect.isgeneratorfunction(target)
+                       else 'Returns\n')
+            assert section in doc, \
+                f'{label} tabulates its parameters but not its result'
+
+
+@pytest.mark.parametrize('verb', ['compute_psds', 'compute_srs',
+                                  'filter_data', 'integrate',
+                                  'import_file', 'export_report'])
+def test_the_verbs_a_script_starts_with_are_documented(verb):
+    """The ones a first script actually calls, named individually so
+    the ratchet cannot drift past them."""
+    doc = getattr(hertzforge.Project, verb).__doc__ or ''
+    assert 'Parameters\n' in doc and 'Returns\n' in doc, \
+        f'Project.{verb} is where people start; it needs both sections'
+
+
+def test_the_exported_functions_document_their_parameters_and_result():
+    """The surface `docs/architecture.md` names is what `__all__`
+    exports *and* the public methods on those classes; every test above
+    walks methods on `ENFORCED` classes only, so a function exported at
+    the top level was never checked, and twenty of the twenty-two that
+    take arguments went without the sections — the one-call reports,
+    `import_file`, `export_file`, `convert` among them (Brandon,
+    2026-10-05: "I thought all functions were required to have that?").
+
+    Each parameter must head its own entry (``name :``, or ``*args`` /
+    ``**kwargs`` on a line of its own), not merely appear somewhere in
+    the section: `path` is a word the prose of half these functions
+    uses, and a check by substring would pass a table that left it
+    out."""
+    import re
+
+    missing, unnamed, covered = [], [], 0
+    for label, obj in public_surface():
+        if '.' in label or not takes_parameters(obj):
+            continue
+        covered += 1
+        doc = docstring_of(obj) or ''
+        result = ('Yields\n' if inspect.isgeneratorfunction(obj)
+                  else 'Returns\n')
+        if 'Parameters\n' not in doc or result not in doc:
+            missing.append(label)
+            continue
+        section = doc.split('Parameters\n')[1].split(result)[0]
+        for name in inspect.signature(obj).parameters:
+            bare = name.lstrip('*')
+            entry = rf'^\s*\*{{0,2}}{re.escape(bare)}\s*(:|$)'
+            if not re.search(entry, section, flags=re.MULTILINE):
+                unnamed.append(f'{label}: {name}')
+    assert covered >= 20, 'the exported functions shrank; check the walk'
+    assert not missing, ('exported functions without Parameters and '
+                         'Returns:\n  ' + '\n  '.join(missing))
+    assert not unnamed, ('a table that leaves a parameter out:\n  '
+                         + '\n  '.join(unnamed))

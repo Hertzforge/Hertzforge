@@ -27,7 +27,9 @@ jobs:
   # The hertzforge package on PyPI: its own tests and the repository's lint.
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The core suite takes about eight minutes on four workers on a recent
+    # Mac; Visual Dynamics measured hosted runners at several times that.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -38,13 +40,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its test tools
-        run: pip install -e . pytest ruff
+        run: pip install -e . pytest pytest-xdist ruff
       - name: Lint every Python file in the repository
         run: ruff check .
       - name: No GPL package installed, every import accounted for
         run: python tools/check_licenses.py --scope package
+      - name: Fetch the plate test data at the release the core came from
+        run: bash scripts/fetch_testdata.sh
       - name: Test
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q -n auto --durations=20
 
   # The analysis service over the visualdynamics core, at the latest release
   # of everything it declares (`--upgrade` reads past the local lockfile).

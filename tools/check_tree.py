@@ -4,7 +4,9 @@
    any tracked file. The names are held as truncated SHA-256 hashes of the
    normalized phrase (lower case, punctuation as spaces), so the list that
    keeps them out does not publish them. Every one-, two- and three-word
-   run of every line is hashed and looked up.
+   run of every line is hashed and looked up. A third-party license
+   notice that must be redistributed word for word is listed in
+   NOTICES and not read.
 2. **Every Python file checked.** Every tracked Python file is in a scope of
    `check_licenses.SCOPES`, so `check_licenses.py`, run in each scope's
    installed environment, checks its imports and every package installed
@@ -60,6 +62,14 @@ ALLOWED_LICENSES = frozenset({
 #: Lockfiles name third-party packages, not this project's words.
 SKIPPED = frozenset({'package-lock.json', 'uv.lock', 'Cargo.lock'})
 
+#: Third-party license notices the name check does not read, by path from
+#: the root. Each is a license whose terms require its copyright line to
+#: travel with the files it covers, so it cannot be reworded.
+NOTICES = frozenset({
+    # BSD-3-Clause, for the ESCDF specification files the reader parses
+    'src/hertzforge/io/escdf_specifications/LICENSE',
+})
+
 _WORD = re.compile(r'[a-z0-9]+')
 
 
@@ -88,12 +98,13 @@ def _text(path: pathlib.Path) -> str | None:
 
 
 def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
-                names: frozenset[str] = NAMES) -> list[str]:
+                names: frozenset[str] = NAMES,
+                notices: frozenset[str] = NOTICES) -> list[str]:
     """Every line where a run of one to three words hashes to a listed name.
     The finding gives the place, never the word."""
     found = []
     for path in files:
-        if path.name in SKIPPED:
+        if path.name in SKIPPED or path.relative_to(root).as_posix() in notices:
             continue
         text = _text(path)
         if text is None:

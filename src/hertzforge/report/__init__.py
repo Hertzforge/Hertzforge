@@ -1,0 +1,4171 @@
+"""Render a Report to one self-contained HTML file.
+
+The reader opens the file in the browser they already have, with
+nothing to install, no network, and no third-party code inside the file.
+Everything interactive is JavaScript written for this package (about
+2,200 lines, in `page.py`): an orthographic 3-D scene the reader can
+turn, which animates mode shapes with the same phase arithmetic as the
+desktop animator, and zoomable plots with the app's own axis labels.
+The data is carried as one JSON payload, already converted to the
+display unit system, so the file shows what the screen showed.
+"""
+
+from __future__ import annotations
+
+import html as html_escape
+import json
+import os
+import re
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from numpy.typing import ArrayLike
+
+from ..decimate import peak_decimate
+from ..drawing.plot import (
+    CURVE_COLORS,
+    CURVE_COLORS_LIGHT,
+    CURVE_WIDTH,
+    MEASURED_ALPHA,
+    MEASURED_WIDTH,
+    PHASE_LIMITS,
+    PHASE_TICKS,
+    STOOD_BACK_WIDTH,
+    as_power_law,
+    bin_edges,
+    display_factor,
+    drawing_shape,
+)
+from ..drawing.theme import PAIR_COLORS, overlay_alphas
+from ..units import DEFAULT_SYSTEM
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..core.report import Report
+    from ..units import UnitSystem
+
+MAX_REPORT_CURVES = 24
+
+#: points a 2-D time-history figure carries in all, shared by its
+#: curves. The stage's two million per page made a 144-channel run at
+#: 16 kHz a 200 MB report; a record's figure is read for where the
+#: run was at level and how the frames sat on it, which a quarter of
+#: a million peak-kept points draw at every zoom the page offers
+#: (Brandon, 2026-09-20: "switch those plots to 2D so the report can
+#: be smaller").
+TIME_FIGURE_POINTS = 160_000
+
+#: points one figure may carry, across every curve on it. A report is
+#: a deliverable that gets zoomed into — Brandon found the shock
+#: traces thinned when he looked closely (2026-08-24) — and a figure
+#: whose data has been reduced cannot answer a question asked of it
+#: later, however faithful the reduction was at the opening view. So
+#: the budget is set where the data itself usually fits: every plate
+#: run here draws untouched, sample for sample, and only a survey of
+#: stress-test size is thinned at all.
+#:
+#: It is a bound on the *file*, not a preference: at roughly twenty
+#: bytes of JSON a point this is some forty megabytes of geometry in
+#: a self-contained page, and the drone's 13-million-point random run
+#: would be 261 MB unthinned. Where it does bite, the thinning is
+#: `decimate.peak_decimate` — every extreme kept, no spike walked
+#: past — and the caption says it happened.
+MAX_FIGURE_POINTS = 2_000_000
+
+#: what one curve of a flat plot may carry, from that budget
+MAX_POINTS_PER_CURVE = MAX_FIGURE_POINTS // MAX_REPORT_CURVES
+MAX_MAP_COLUMNS = 1200
+
+#: how many records one 3-D stage figure may hold. What each record
+#: brings is `MAX_FIGURE_POINTS` shared between them, so a figure of
+#: a few channels draws them whole and one of forty-eight thins only
+#: if the records are very long.
+MAX_STAGE_RECORDS = 48
+
+#: how many records one stage *block* may draw, across as many
+#: continuation figures as that takes. There is no cap on the figures
+#: themselves (Brandon, 2026-08-24) — an object with more channels
+#: than a stage holds legibly continues into the next figure, exactly
+#: as the app's own pages do. This bounds the file instead, and for a
+#: measured reason: a full figure is ~736 KB of geometry inside the
+#: self-contained HTML, so the 25,380-record stress set would want
+#: 529 figures and a 399 MB document that no browser opens and the
+#: report editor cannot load. A thousand is ~21 figures and ~15 MB —
+#: above every real survey block here (the largest is 560) and far
+#: below the wall.
+MAX_STAGE_TOTAL = 1000
+
+#: time columns a report scalogram is thinned to. About the canvas's
+#: own width: finer is invisible and weighs the file down — a hundred
+#: frequency rows each carry this many points.
+#: 240 rather than the 700 the line drawing carried: the sheet fills
+#: a quad per cell per repaint, and a rotating figure has to stay
+#: under the hand (principle 8) — the ridges survive peak-hold at
+#: this width, and the note says the thinning either way
+SCALOGRAM_COLUMNS = 240
+
+
+#: the page blocks that are numbered as figures; a 'table' is numbered
+#: as a table
+_FIGURE_KINDS = ('plot', 'mac', 'map', 'scene', 'image', 'bars', 'stage',
+                 'grid')
+
+
+def render_html(report: Report, objects: Mapping[str, Any],
+                unit_system: UnitSystem | None = None, edit: bool = False,
+                channel_js: str | None = None,
+                object_groups: Sequence[Mapping[str, Any]] | None = None,
+                selected: int | None = None,
+                labels: list[tuple[str, str]] | None = None,
+                fill: bool = False, theme: str | None = None) -> str:
+    """The report as one HTML document string.
+
+    `objects` maps names to the project's objects, and `unit_system` is
+    the display unit system (the default system when None).
+    `object_groups` is the project's object groups: symbolic bindings
+    such as '@basis:Frf' are resolved against them, so a report depends
+    on how the project is linked, not on what its objects are named.
+
+    The reading page (`edit` False) leaves out blocks whose references
+    cannot be resolved, since an unbound block in a template is a place
+    to fill, not an error to show a reader. The edit page (`edit` True)
+    shows them as cards to bind again, tags every block with its index,
+    frames the block at `selected`, and sends one message to the app over
+    Qt's web channel: which block was clicked. `channel_js` is the text
+    of Qt's qwebchannel.js to put inline in the edit page; without it the
+    page loads it from qrc:. All editing is done from the app's bar and
+    pane, and the page has no insert bars, block toolbars or editors.
+    Only the app loads the edit page; an exported file has none of it.
+
+    `labels`, when given, is filled with (label, caption) for every
+    numbered figure and table, in order: what the editor's Reference
+    menu offers, with the same numbering the page shows.
+
+    The report features enabled on `report` (`report.features`) act
+    here, each only as its description says; with none enabled the
+    document is the one this function has always written, byte for
+    byte.
+
+    `fill` makes the page one figure filling its frame, without a title,
+    marking or theme toggle (`export_html`). `theme`, 'light' or 'dark',
+    fixes the page's theme, which otherwise follows the reader's.
+    """
+    # All editing moved to the app's bar and pane on 2026-09-08.
+    from .features import enabled as enabled_features
+
+    payload = _report_payload(report, objects, unit_system, edit,
+                              object_groups, selected, labels, fill, theme)
+    active = enabled_features(report)
+    css = ''
+    if 'report_identity' in active:
+        from .identity import page_css
+
+        css = page_css(report)
+    if 'flash_report' in active:
+        from ..core.run_log_extract import held
+        from .flash import LOG_CSS
+
+        if held(objects or {}):
+            # the run log's part of the flash page, set tight; a page
+            # without a run log keeps its stylesheet as it was
+            css += LOG_CSS
+    return _page_html(payload, edit, channel_js, active, css)
+
+
+def _report_payload(report, objects, unit_system=None, edit=False,
+                    object_groups=None, selected=None, labels=None,
+                    fill=False, theme=None) -> dict[str, Any]:
+    """The data a report's page draws from, as `render_html` describes
+    its arguments: one JSON-ready dict, already in display units."""
+    us = unit_system or DEFAULT_SYSTEM
+    from ..drawing.theme import DARK, LIGHT, VIRIDIS
+
+    payload = {'title': report.title, 'edit': bool(edit),
+               'marking': report.marking,
+               'marking_color': report.marking_color,
+               # the page is told the colors it draws with rather
+               # than carrying its own copies: one color scale and
+               # one pair of mark colors, from the app's own theme.
+               # Both themes ride along because the reader can flip
+               # between them in the page.
+               'viridis': [list(stop) for stop in VIRIDIS],
+               'marks_color': {
+                   side['name']: {
+                       'band': side['averaging_band'],
+                       'window': side['averaging_window']}
+                   for side in (LIGHT, DARK)},
+               'blocks': [], 'fill': bool(fill), 'theme': theme,
+               'curve_width': CURVE_WIDTH,
+               'curve_colors': {'light': CURVE_COLORS_LIGHT,
+                                'dark': CURVE_COLORS}}
+    if edit:
+        payload['selected'] = -1 if selected is None else int(selected)
+    # the report features enabled on this report (`report.features`).
+    # Each acts only when enabled, so with none the page below is the
+    # page it always was, byte for byte
+    from .features import enabled as enabled_features
+
+    active = enabled_features(report)
+    if 'flash_report' in active:
+        # the flash report is the page: one preliminary page drawn from
+        # the identity, the result table and the register, in place of
+        # the report's own blocks (`report/flash.py`)
+        from .flash import page_blocks
+
+        payload['blocks'] = page_blocks(report, objects, object_groups)
+        if labels is not None:
+            labels[:] = []
+        return payload
+    conventions = 'plot_conventions' in active
+    # record captions: every measured spectrum's figure carries the
+    # caption block its records carry, as the per-block check box gives
+    # one figure (the feature stood registered and unbuilt while the
+    # block's own check box did the same thing, 2026-10-28)
+    captions = 'record_captions' in active
+    # calibration in date: the channel table against the test date
+    calibration = 'calibration_in_date' in active
+    # skeleton sections: the page laid out on the sections a test
+    # report needs, the author's own blocks held back to head them
+    skeleton = 'skeleton_sections' in active
+    # the data index: every file the report rests on, generated into
+    # the record section (or at the end, without the skeleton)
+    indexed = 'data_index' in active
+    # identity and issue: the identification block first, the end mark
+    # last, and the printed page's margins (`report/identity.py`)
+    identity = 'report_identity' in active
+    # the test requirement: its words and its result table, and the
+    # pass/fail box read from it (or labeled a screening)
+    required = 'test_requirement' in active
+    #: each requirement block's words and results, held for the
+    #: skeleton's Requirement and Results
+    requirements: list[Any] = []
+    #: the report block each page block was built from, and each
+    #: section's own blocks, for the skeleton
+    origins: list[Mapping[str, Any]] = []
+    held: dict[str, list[tuple[int, Mapping[str, Any], dict[str, Any]]]] = {}
+    if conventions:
+        from .plot_conventions import apply as apply_conventions
+        from .plot_conventions import figure_kind
+    #: (built block, its figure kind) for the plot conventions
+    kinded: list[tuple[dict[str, Any], str | None]] = []
+    figures = tables = 0
+    if 'check_blocks' in active:
+        from . import check_blocks
+
+        # the readings the Checks below will state, read before the
+        # figures, so a figure's caption states the same check and
+        # never "not checked" beside it. Each is read as the Checks
+        # read it (`check_blocks.read`): kept, or canceled and kept so,
+        # when the app has already read it on its worker
+        for item in check_blocks.items(report, objects, object_groups):
+            check_blocks.read(item, objects)
+    for index, block in enumerate(report.blocks):
+        if 'check' in block:
+            # a check of its own (`check_blocks.add`): drawn with the
+            # other checks, and only while that feature is on
+            continue
+        if 'requirement' in block:
+            # a test requirement (`requirement.add`): drawn only while
+            # its feature is on, in place, or under the skeleton's
+            # Requirement and Results
+            if not required:
+                continue
+            from .findings import register as findings_register
+            from .requirement import build as build_requirement
+
+            made = build_requirement(
+                block, objects, object_groups,
+                uncertainty_on='control_uncertainty' in active,
+                roles_on='cross_axis' in active,
+                register=(findings_register(report)
+                          if 'findings' in active else None))
+            if made is None:
+                continue
+            if edit:
+                for built in made.words + made.results:
+                    built['index'] = index
+            if skeleton:
+                requirements.append(made)
+                continue
+            for built in made.words + made.results:
+                if built['kind'] == 'table':
+                    tables += 1
+                    built['label'] = f'Table {tables}'
+                payload['blocks'].append(built)
+            continue
+        if 'section' in block:
+            # a skeleton section's own words: drawn only while the
+            # feature is on, as the head of their section
+            if skeleton:
+                held.setdefault(str(block['section']), []).append(
+                    (index, block, _build_block(block, objects, us,
+                                                object_groups)))
+            continue
+        if block.get('kind') == 'prediction':
+            # responses against prediction: drawn only while the
+            # feature is on
+            if 'prediction' not in active:
+                continue
+            from .prediction import build as build_prediction
+
+            built = build_prediction(block, objects, us, object_groups)
+        else:
+            built = _build_block(_captioned(block) if captions else block,
+                                 objects, us, object_groups)
+            if required and block.get('kind') == 'verdict':
+                from .requirement import verdict as requirement_verdict
+
+                built = requirement_verdict(built, block, report, objects,
+                                            object_groups)
+        if built is None:
+            if not edit:
+                continue
+            # tell the truth on the card: a block whose bindings all
+            # resolve but that still has nothing to draw is not
+            # 'unbound' — rebinding it would change nothing
+            from ..core.report import resolve_binding
+            needed = [block.get(key) for key in
+                      ('source', 'geometry', 'dofs_source', 'shapes')
+                      if block.get(key)]
+            resolvable = bool(needed) and all(
+                resolve_binding(name, objects, object_groups) in objects
+                for name in needed)
+            built = {'kind': 'unbound',
+                     'was': block.get('kind', 'block'),
+                     'empty': resolvable}
+        if (calibration and isinstance(built, dict)
+                and built['kind'] == 'table'):
+            from .calibration import apply as apply_calibration
+
+            built = apply_calibration(built, block, objects, object_groups)
+        # one block can answer with several figures — a stage with
+        # more channels than it holds legibly continues into the next
+        # one. They share the block's index, so the editor edits the
+        # block whichever of its figures was clicked.
+        drawn = built if isinstance(built, list) else [built]
+        for built in drawn:
+            if built['kind'] in _FIGURE_KINDS:
+                figures += 1
+                built['label'] = f'Figure {figures}'
+            elif built['kind'] == 'table':
+                tables += 1
+                built['label'] = f'Table {tables}'
+            if edit:
+                # the block's index rides with each of its figures, so a
+                # click on any of them selects the block
+                built['index'] = index
+            payload['blocks'].append(built)
+            if conventions:
+                kinded.append((built, figure_kind(block, objects,
+                                                  object_groups)))
+            if skeleton:
+                origins.append(block)
+    # check blocks: every check the report can make, with its verdict,
+    # its numbers and its figures, under a Checks heading that closes the
+    # results
+    checks = 'check_blocks' in active
+    if checks:
+        from . import check_blocks
+
+        made = check_blocks.page(report, objects, us, object_groups,
+                                 edit=edit)
+        if made:
+            at = check_blocks.position(payload['blocks'])
+            payload['blocks'][at:at] = made
+            if skeleton:
+                origins[at:at] = [check_blocks.origin(built)
+                                  for built in made]
+            figures = tables = 0
+            for built in payload['blocks']:
+                if built['kind'] in _FIGURE_KINDS:
+                    figures += 1
+                    built['label'] = f'Figure {figures}'
+                elif built['kind'] == 'table':
+                    tables += 1
+                    built['label'] = f'Table {tables}'
+    if skeleton:
+        from .skeleton import arrange
+
+        built_from = {id(built): origin for built, origin
+                      in zip(payload['blocks'], origins, strict=True)}
+        payload['blocks'] = arrange(payload['blocks'], origins, held,
+                                    objects, object_groups, edit=edit)
+        if requirements:
+            from .requirement import place as place_requirements
+
+            payload['blocks'] = place_requirements(payload['blocks'],
+                                                   requirements)
+        if indexed:
+            from .data_index import page_blocks
+            from .skeleton import under
+
+            payload['blocks'] = under(payload['blocks'], 'record',
+                                      page_blocks(objects))
+        if 'run_sections' in active:
+            # runs and chronology: the Results section grouped by run
+            from .runs import group_results
+
+            payload['blocks'] = group_results(payload['blocks'], built_from,
+                                              objects, object_groups)
+            if edit:
+                # a drafted chronology, marked, under the owed section
+                from .runs import mark_drafted
+
+                mark_drafted(payload['blocks'], report, objects)
+        # numbered again in the order the page now shows them
+        figures = tables = 0
+        for built in payload['blocks']:
+            if built['kind'] in _FIGURE_KINDS:
+                figures += 1
+                built['label'] = f'Figure {figures}'
+            elif built['kind'] == 'table':
+                tables += 1
+                built['label'] = f'Table {tables}'
+    elif indexed:
+        from .data_index import page_blocks
+
+        for built in page_blocks(objects, heading=True):
+            if built['kind'] == 'table':
+                tables += 1
+                built['label'] = f'Table {tables}'
+            payload['blocks'].append(built)
+    #: the findings register: section 9 and the summary's line of
+    #: findings, drawn into the skeleton's heads
+    registered = None
+    if 'findings' in active:
+        from .findings import prepare as prepare_findings
+
+        registered = prepare_findings(payload['blocks'], report, edit)
+    if conventions:
+        apply_conventions(payload, kinded,
+                          shared='shared_decades' in active)
+    # text renders last: only now does every figure have its number, so
+    # {{figure:...}} references can resolve — and renumber themselves
+    # the next time a block is added, removed, or moved
+    from .markdown import to_html
+
+    labeled = [(built['label'], built.get('caption', ''))
+               for built in payload['blocks'] if built.get('label')]
+    if labels is not None:
+        labels[:] = labeled
+    for built in payload['blocks']:
+        # a text block that arrives drawn (the data index's lines) keeps
+        # its HTML
+        if built['kind'] == 'text' and 'html' not in built:
+            built['html'] = to_html(
+                _resolve_figures(built.pop('text'), labeled, edit),
+                tables=skeleton)
+    if checks:
+        check_blocks.finish(payload['blocks'])
+    if skeleton:
+        from .skeleton import END, finish
+
+        heads = [at for at, built in enumerate(payload['blocks'])
+                 if built.get('skeleton', {}).get('key') == 'identification']
+        if identity and heads:
+            # the identification section is filled by the identity
+            # block, so it is not owed; anything the author wrote in it
+            # stays, above the block
+            meta = payload['blocks'][heads[0]]['skeleton']
+            if meta['state'] == 'owed':
+                meta['state'] = 'quiet'
+        if identity:
+            from .identity import end_mark
+
+            finish(payload['blocks'], end=end_mark(report))
+        else:
+            finish(payload['blocks'], end=END)
+    if 'run_sections' in active:
+        from .runs import finish as finish_runs
+
+        finish_runs(payload['blocks'])
+    if identity:
+        from .identity import block_html, end_mark
+
+        first = {'kind': 'text', 'html': block_html(report)}
+        if skeleton:
+            payload['blocks'].insert(heads[0] + 1 if heads else 0, first)
+        else:
+            payload['blocks'].insert(0, first)
+            payload['blocks'].append({
+                'kind': 'text',
+                'html': f'<p class="endmark">'
+                        f'{html_escape.escape(end_mark(report))}</p>'})
+    if registered is not None:
+        from .findings import draw as draw_findings
+
+        draw_findings(registered)
+    return payload
+
+
+def _page_html(payload, edit=False, channel_js=None, features=(),
+               extra_css='') -> str:
+    """The one-file page around a payload: its stylesheet, its viewers
+    and the payload itself inline. `features` are the report features
+    enabled (`report.features`), whose page code `page_parts` adds; with
+    none, the page as it always was. `extra_css` follows the page's own
+    stylesheet: the printed margins of identity and issue."""
+    data = json.dumps(payload, allow_nan=False)
+    css, script = page_parts(features)
+    css += extra_css
+    scripts = script + (_EDIT_JS if edit else '')
+    shell = _PAGE
+    if edit:
+        # the app hands over Qt's own qwebchannel.js to inline, because
+        # the editor page loads from a file and file: pages cannot
+        # reach qrc:; the qrc tag remains for anything rendering edit
+        # HTML without the app
+        channel = (f'<script>{channel_js}</script>' if channel_js else
+                   '<script src="qrc:///qtwebchannel/qwebchannel.js">'
+                   '</script>')
+        # edit pages trap script errors where the app can read them —
+        # a blank editor with no diagnosis cost a debugging session
+        trap = ('<script>window.__err = [];'
+                "window.onerror = (m, s, l) => __err.push(m + ' @' + l);"
+                '</script>')
+        shell = shell.replace('<script id="data"',
+                              trap + channel + '\n<script id="data"')
+    return (shell.replace('__TITLE__', html_escape.escape(payload['title']))
+                 .replace('__DATA__', data.replace('</', '<\\/'))
+                 .replace('__CSS__', css + (_EDIT_CSS if edit else ''))
+                 .replace('__JS__', scripts))
+
+
+#: significant digits a number keeps on the page. A figure is a
+#: picture: seven digits draw it to a part in ten million, where the
+#: seventeen a float prints by default were most of what made a
+#: 144-channel report 200 MB (Brandon, 2026-09-20).
+PAGE_DIGITS = 7
+
+
+def _compact(value) -> float:
+    return float(f'{float(value):.{PAGE_DIGITS}g}')
+
+
+def _finite(values):
+    return [None if not np.isfinite(v) else _compact(v) for v in values]
+
+
+def _decades(coords, logx):
+    """Coordinates for a frequency axis in decades: log10, a line at
+    or below 0 Hz a gap. Applied to a finished curve — bin edges, a
+    power law's fill-in — never to the lines they are built from."""
+    if not logx:
+        return np.asarray(coords, dtype=float)
+    coords = np.asarray(coords, dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return np.where(coords > 0,
+                        np.log10(np.where(coords > 0, coords, 1.0)), np.nan)
+
+
+def _positive_lines(source):
+    """The source without its lines at or below 0 Hz, when its axis
+    reads in decades — a controller's target starts at 0 Hz, which no
+    log axis can draw; the app's plot drops the line silently and the
+    figure has to as well, since a NaN coordinate is not JSON. The
+    source is untouched: a shallow copy carries the sliced arrays."""
+    import copy
+
+    if not getattr(source, 'log_abscissa', False):
+        return source
+    x = np.asarray(source.abscissa, dtype=float)
+    keep = x > 0
+    if keep.all():
+        return source
+    out = copy.copy(source)
+    out.abscissa = x[keep]
+    out.ordinate = np.asarray(source.ordinate)[:, keep]
+    if getattr(source, 'limits', None):
+        out.limits = {name: np.asarray(values)[:, keep]
+                      for name, values in source.limits.items()}
+    widths = getattr(source, 'bandwidth', None)
+    if widths is not None and np.ndim(widths) == 1 and len(widths) == len(x):
+        out.bandwidth = np.asarray(widths)[keep]
+    return out
+
+
+def _thinned_note(drawn: int, held: int) -> str:
+    """What to say on a figure whose data was reduced to fit it.
+
+    Every path that thins says the same sentence (Brandon,
+    2026-08-24: any plot where the data gets decimated should be
+    clearly marked). A reader zooming into a figure is entitled to
+    know whether they are looking at the record or at a reading of
+    it — and the thinning is `decimate.peak_decimate`, which keeps
+    the smallest and largest value of every slice, so the envelope
+    is exact and no spike is walked past even where detail between
+    the extremes is gone.
+    """
+    if drawn >= held:
+        return ''
+    return (f'Thinned for the file: {drawn} points drawn of {held}, '
+            'every extreme kept.')
+
+
+def _decimate(x, y, budget=None):
+    """Peak-keeping decimation: a report is a document, not a scope."""
+    cx, cy = peak_decimate(np.asarray(x), np.asarray(y),
+                           MAX_POINTS_PER_CURVE if budget is None else int(budget))
+    return [_compact(v) for v in cx], [_compact(v) for v in cy]
+
+
+_REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+
+
+def resolve_references(text: str, objects: Mapping[str, Any], us: UnitSystem,
+                       object_groups: Sequence[Mapping[str, Any]] | None = None) -> str:
+    """Replace each {{Object Name.field}} in report text with the
+    object's current value, formatted in the unit system `us`.
+
+    This is what makes templates work: a summary that says how the data
+    was sampled fills itself in, in whatever project the template is
+    used. The name may be a symbolic selector, such as
+    {{@basis:TimeHistory.sample_rate}}, resolved against `object_groups`,
+    so the text does not depend on the objects' names either. A
+    reference that cannot be resolved (no such object, or a field the
+    object does not have) is left in the text as written, the same way
+    an unbound block is left as a place to fill.
+    """
+    from ..core.report import resolve_binding
+
+    def swap(match: re.Match) -> str:
+        name, dot, field = match.group(1).rpartition('.')
+        obj = (objects.get(resolve_binding(name.strip(), objects,
+                                           object_groups) or '')
+               if dot else None)
+        if obj is not None:
+            value = _field_value(obj, field.strip(), us)
+            if value is not None:
+                return value
+        return match.group(0)
+
+    return _REFERENCE.sub(swap, text or '')
+
+
+def _field_value(obj, field, us):
+    """A named fact about an object, formatted for prose; None when
+    this object cannot answer it."""
+    from ..core.channel_table import ChannelTable
+    from ..core.geometry import Geometry
+    from ..core.photos import Photos
+    from ..core.shapes import ShapeSet
+
+    def hz(value: float) -> str:
+        return f'{float(value):g} {us.label_text("frequency")}'
+
+    if isinstance(obj, ShapeSet):
+        return {
+            'num_modes': lambda: f'{obj.num_shapes}',
+            'min_frequency': lambda: hz(np.min(obj.frequency)),
+            'max_frequency': lambda: hz(np.max(obj.frequency)),
+        }.get(field, lambda: None)()
+    if isinstance(obj, Geometry):
+        return {
+            'num_nodes': lambda: f'{len(obj.node_id)}',
+            'num_elements': lambda: f'{len(obj.elem_id)}',
+            'num_blocks': lambda: f'{len(obj.group_id)}',
+        }.get(field, lambda: None)()
+    if isinstance(obj, ChannelTable):
+        return f'{obj.num_channels}' if field == 'num_channels' else None
+    if isinstance(obj, Photos):
+        return f'{obj.num_photos}' if field == 'num_photos' else None
+    if not hasattr(obj, 'abscissa'):
+        return None
+    # a data array: counts first, then whatever its abscissa can say
+    n = len(obj.abscissa)
+    channels = len({(dof, obj.known_dim(i))
+                    for i, dof in enumerate(obj.response_dof)})
+    counts = {'num_records': obj.num_records,
+              'num_channels': channels,
+              'num_averages': obj.num_records // max(channels, 1),
+              'num_samples': n}
+    if field in counts:
+        return f'{counts[field]}'
+    # how the record is to be cut up, for a summary that states the
+    # settings rather than leaving them to be filled in later
+    # (Brandon, 2026-08-24). A record nobody has framed answers
+    # nothing, and the reference stays visible as written.
+    averaging = getattr(obj, 'averaging', None)
+    if averaging is not None:
+        answer = {
+            'num_frames': lambda: f'{averaging.frames}',
+            'frame_length': lambda: f'{averaging.frame_length}',
+            'window': lambda: f'{averaging.window}',
+            'overlap': lambda: averaging.overlap_text(),
+        }.get(field, lambda: None)()
+        if answer is not None:
+            return answer
+    # the filter riding the record, so a caption that names the
+    # corners stays true after an edge moves and the chain refreshes
+    filtering = getattr(obj, 'filtering', None)
+    if filtering is not None:
+        answer = {
+            'filter_description': lambda: filtering.describe(),
+            'filter_order': lambda: f'{filtering.order}',
+        }.get(field, lambda: None)()
+        if answer is not None:
+            return answer
+    if field == 'num_shocks':
+        shocks = getattr(obj, 'shocks', None)
+        return f'{len(shocks)}' if shocks else None
+    if n < 2:
+        return None
+    if obj.abscissa_dim == 'time':
+        dt = float(obj.abscissa[1] - obj.abscissa[0])
+        return {
+            'sample_rate': lambda: hz(1.0 / dt),
+            'duration': lambda: f'{n * dt:g} s',
+            'frequency_resolution': lambda: hz(1.0 / (n * dt)),
+        }.get(field, lambda: None)()
+    if obj.abscissa_dim == 'frequency':
+        return {
+            'frequency_resolution': lambda: hz(
+                obj.abscissa[1] - obj.abscissa[0]),
+            'min_frequency': lambda: hz(np.min(obj.abscissa)),
+            'max_frequency': lambda: hz(np.max(obj.abscissa)),
+        }.get(field, lambda: None)()
+    return None
+
+
+#: any reference left on the page, and the figure or table citation
+#: it may be
+_ANY_REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+_CITATION = re.compile(r'(figure|table)\s*:\s*(.+)', re.IGNORECASE)
+_FIGURE = re.compile(r'\{\{\s*(figure|table)\s*:\s*([^{}]+?)\s*\}\}',
+                     re.IGNORECASE)
+
+
+#: where one sentence of prose ends and the next begins: a full stop,
+#: question or exclamation mark, then space and a capital or an opening
+#: bracket. A decimal point has no space after it, so '1.0 means' stays
+#: one sentence.
+_SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z(\[{])')
+
+
+def _resolve_figures(text, labeled, edit=False):
+    """{{figure:<start of caption>}} becomes 'Figure 3' — whatever
+    number that figure carries right now. Same for {{table:...}}.
+
+    A reference that resolves to nothing never reaches a reader: a
+    figure or table reference that matches no caption, or a field
+    reference (`resolve_references`) left standing because its object
+    or field is not there. On the reading page the sentence holding it
+    is left out: a sentence that cites a figure is about that figure,
+    and one that quotes a value is about that value. A line that is
+    not prose (a heading, a table row) keeps its words and loses only
+    the reference. On the edit page the reference is marked in place
+    instead, so a person who typed a caption or a field wrong sees it
+    rather than losing the sentence.
+    """
+    # Brandon, 2026-10-27: the report printed '({{figure:Excitation
+    # degrees of freedom (force)}})' for a figure a run without force
+    # channels never built. The templates now name what they built
+    # (core.report.dof_references); this is the guard for anything
+    # that still does not, text typed in the editor included. A field
+    # reference the page could not fill ({{@basis:Srs.min_frequency}}
+    # on a run with no SRS) was printed as written the same way, and
+    # is guarded here too (2026-10-28).
+    def label_of(match: re.Match) -> str | None:
+        inner = match.group(1).strip()
+        cited = _CITATION.fullmatch(inner)
+        if cited is None:
+            return None
+        wanted = cited.group(1).lower()
+        target = cited.group(2).strip().lower()
+        for label, caption in labeled:
+            if (label.lower().startswith(wanted)
+                    and caption.lower().startswith(target)):
+                return label
+        return None
+
+    def mark(match: re.Match) -> str:
+        found = label_of(match)
+        if found is not None:
+            return found
+        if edit:
+            inner = match.group(1).strip()
+            cited = _CITATION.fullmatch(inner)
+            if cited is None:
+                return f'[no value for {inner}]'
+            return f'[no {cited.group(1).lower()} starts "{cited.group(2).strip()}"]'
+        return ''
+
+    if edit:
+        return _ANY_REFERENCE.sub(mark, text)
+
+    def prose(line: str) -> str:
+        if not _ANY_REFERENCE.search(line):
+            return line
+        if line.lstrip().startswith(('#', '|')):
+            # not a sentence to drop: the words stay, the reference goes
+            return re.sub(r'\s*\(\s*\)', '', _ANY_REFERENCE.sub(mark, line)).rstrip()
+        kept = [sentence for sentence in _SENTENCE_END.split(line)
+                if all(label_of(m) is not None
+                       for m in _ANY_REFERENCE.finditer(sentence))]
+        return _ANY_REFERENCE.sub(mark, ' '.join(kept))
+
+    return '\n'.join(prose(line) for line in text.split('\n'))
+
+
+def _captioned(block):
+    """A plot block with its record caption asked for, as the record
+    captions feature asks it of every plot block; any other block as it
+    is. The stored block is not changed."""
+    if block.get('kind') != 'plot' or block.get('record_caption'):
+        return block
+    return {**block, 'record_caption': True}
+
+
+def _build_block(block, objects, us, object_groups=None):
+    from ..core.report import resolve_binding
+
+    # symbolic bindings resolve here, once, into a working copy — every
+    # builder below sees plain names, and the stored block keeps its
+    # selector
+    resolved = {key: (resolve_binding(block.get(key), objects, object_groups)
+                      or '')
+                for key in ('source', 'geometry', 'shapes', 'dofs_source',
+                            'measured', 'specification') if block.get(key)}
+    block = {**block, **resolved}
+    if block.get('caption'):
+        # captions carry live references too — a filtered-transients
+        # figure names its corner, and the number must follow the
+        # setting the way the prose does. Field references only:
+        # `{{figure:...}}` has no dot, so the resolver leaves it be
+        # (a caption is what figures are *labeled* by; one referring
+        # to another resolves at markdown time like the prose)
+        block['caption'] = resolve_references(
+            block['caption'], objects, us, object_groups)
+    kind = block.get('kind')
+    if kind == 'text':
+        # markdown waits: figure references need every label assigned
+        return {'kind': 'text', 'text': resolve_references(
+            block.get('text', ''), objects, us, object_groups)}
+    if kind == 'plot':
+        source = objects.get(block.get('source'))
+        if source is None:
+            return None
+        if block.get('grid'):
+            geometry = objects.get(
+                resolve_binding('@basis:Geometry', objects, object_groups) or '')
+            built = _grid_block(block, source, objects, us, geometry)
+            if built is not None and block.get('record_caption'):
+                _caption_figures(built, block, source, objects, us)
+            return _without_records(built)
+        built = _plot_block(block, source, objects, us)
+        if built is not None and block.get('record_caption'):
+            _caption_figures(built, block, source, objects, us)
+        return _without_records(built)
+    if kind == 'scene':
+        geometry = objects.get(block.get('geometry'))
+        if geometry is None:
+            return None
+        shapes = objects.get(block.get('shapes')) \
+            if block.get('shapes') else None
+        return _scene_block(block, geometry, shapes, us, objects)
+    if kind == 'table':
+        source = objects.get(block.get('source'))
+        if source is None:
+            return None
+        # the basis geometry brings the channel table its direction
+        # columns, as it does in the window
+        geometry = objects.get(
+            resolve_binding('@basis:Geometry', objects, object_groups) or '')
+        return _table_block(block, source, geometry)
+    if kind == 'photo':
+        source = objects.get(block.get('source'))
+        if source is None:
+            return None
+        return _photo_block(block, source)
+    if kind == 'bars':
+        source = objects.get(block.get('source'))
+        if block.get('mode') == 'sine':
+            from ..core.sine import (
+                SineLevel,
+                SineLevelSet,
+                SineSweepSpecification,
+            )
+            if not isinstance(source, SineSweepSpecification):
+                return None
+            # every level in the project, not one binding: the chart
+            # exists to say where the whole test stands. Grouped sets
+            # and loose levels both count, so older projects keep
+            # their bars
+            levels = []
+            for obj in objects.values():
+                if isinstance(obj, SineLevelSet):
+                    levels.extend(obj.levels)
+                elif isinstance(obj, SineLevel):
+                    levels.append(obj)
+            return _sine_bars(block, source, levels)
+        if block.get('mode') == 'kurtosis':
+            return _kurtosis_bars(block, source)
+        if block.get('mode') == 'snr':
+            floor_object = objects.get(block.get('floor', '') or '')
+            if source is None or floor_object is None:
+                return None
+            return _snr_bars(block, source, floor_object)
+        measured = objects.get(block.get('measured'))
+        if source is None or measured is None:
+            return None
+        return _bars_block(block, source, measured, us)
+    if kind == 'pairs':
+        return _pairs_block(block, objects)
+    if kind == 'overlay':
+        return _overlay_block(block, objects, us, object_groups)
+    if kind == 'verdict':
+        source = objects.get(block.get('source'))
+        measured = objects.get(block.get('measured'))
+        if source is None or measured is None:
+            return None
+        return _verdict_block(source, measured,
+                              block.get('level_label') or 'Test level')
+    return None
+
+
+def block_caption(block: Mapping[str, Any], objects: Mapping[str, Any],
+                  object_groups: Sequence[Mapping[str, Any]] | None = None,
+                  unit_system: UnitSystem | None = None) -> Any:
+    """The caption block a plot block's first figure carries, or None.
+
+    What the report editor reads out beside a plot block: the caption
+    `Project.caption_of` reads for the records the figure opens on: the
+    channel the block names, else the first channel the block's
+    requirement names, else the records its filter keeps that the
+    first figure draws. None when the block draws no measured record a
+    caption reads (`report_caption.caption_kind`), draws a grid, or the
+    objects are not a project.
+
+    Parameters
+    ----------
+    block : mapping
+        The plot block.
+    objects : Project
+        The project the report reads.
+    object_groups : sequence of mapping, optional
+        The project's object groups, for symbolic bindings.
+    unit_system : UnitSystem, optional
+        The display units.
+
+    Returns
+    -------
+    RecordCaption, SrsCaption, SineCaption, TimeCaption or None
+    """
+    from ..core.compliance import matched_records
+    from ..core.data import ShockSpecification, Specification
+    from ..core.report import base_quantity, resolve_binding
+    from ..core.report_caption import caption_kind
+    from ..core.sine import SineLevelSet, SineSweepSpecification
+
+    caption_of = getattr(objects, 'caption_of', None)
+    if caption_of is None or block.get('kind') != 'plot' or block.get('grid'):
+        return None
+    name = resolve_binding(block.get('source'), objects, object_groups)
+    source = objects.get(name or '')
+    kind = caption_kind(source)
+    if kind is None:
+        return None
+    against = objects.get(resolve_binding(block.get('specification'), objects,
+                                          object_groups) or '')
+    named = block.get('channel')
+    tone = block.get('tone') or None
+    measured, target = source, None
+    if kind == 'sine' and isinstance(source, SineLevelSet):
+        try:
+            measured = (source.tone(tone) if tone else
+                        source.levels[0] if source.levels else None)
+        except KeyError:
+            return None
+        if measured is None:
+            return None
+    if kind == 'spectrum' and isinstance(against, Specification):
+        pairs = [mi for _label, si, mi in matched_records(against, source)
+                 if not named or _channel_label(against, si) == str(named)]
+        if not pairs:
+            return None
+        record = pairs[0]
+    elif kind == 'srs' and isinstance(against, ShockSpecification):
+        target = against
+    elif kind == 'sine' and isinstance(against, SineSweepSpecification):
+        try:
+            target = against.tone_curve(measured.tone)
+        except KeyError:
+            return None
+    else:
+        against = None
+    if target is not None:
+        # an SRS or sine figure draws a channel at a time, every event
+        # of it: the channel the block names, else the requirement's
+        # first that the measurement holds (`_srs_comparison_block`)
+        held = {_pair_key(measured, i) for i in range(measured.num_records)}
+        keys = [_pair_key(target, j) for j in range(target.num_records)
+                if _pair_key(target, j) in held
+                and (not named or _channel_label(target, j) == str(named))]
+        if not keys:
+            return None
+        record = [i for i in range(measured.num_records)
+                  if _pair_key(measured, i) == keys[0]]
+    elif kind != 'spectrum' or against is None:
+        select = block.get('select', '')
+        records = list(range(measured.num_records))
+        if select == 'drive' and measured.reference_dof is not None:
+            records = [i for i in records
+                       if measured.response_dof[i] == measured.reference_dof[i]]
+        elif select.startswith('dim:'):
+            records = [i for i in records
+                       if base_quantity(measured.known_dim(i)) == select[4:]]
+        if not records:
+            return None
+        # the figure's own records: a block of many continues into
+        # further figures, and the first draws the first page of them
+        record = records[:MAX_REPORT_CURVES]
+    extra = {'tone': measured.tone} if kind == 'sine' else {}
+    return caption_of(name, record, specification=against,
+                      per_octave=(int(block['octave']) if block.get('octave')
+                                  else None),
+                      unit_system=unit_system or DEFAULT_SYSTEM, **extra)
+
+
+def _caption_figures(built, block, source, objects, us):
+    """Give each figure of a plot block the caption block its records
+    carry (`Project.caption_of`), as `facts`: (label, text) rows the
+    page sets under the caption. A figure drawn a channel at a time
+    carries one per channel, and the page shows the one picked.
+
+    A grid says once what its cells share, under the grid (for a
+    spectrum the run, the estimate, the resolution, the window and the
+    DOF), and each cell says only its own channel's rows (the caption's
+    `CHANNEL_ROWS`), so eight cells do not repeat the same five lines
+    eight times.
+
+    A measured spectrum, a shock response spectrum, a sine level and a
+    time history have one (`report_caption.caption_kind`), and only
+    when the objects are a project, since the run and the settings are
+    read from its provenance; any other figure is left as it is.
+    """
+    from ..core.data import ShockSpecification, Specification
+    from ..core.report_caption import caption_kind
+    from ..core.sine import SineSweepSpecification
+
+    caption_of = getattr(objects, 'caption_of', None)
+    kind = caption_kind(source)
+    if caption_of is None or kind is None:
+        return
+    name = block.get('source')
+    against = (objects.get(block['specification'])
+               if block.get('specification') else None)
+    # the requirement each kind is drawn against: a spectrum's
+    # specification, a shock response spectrum's, a sine level's sweep
+    if not isinstance(against, {'spectrum': Specification,
+                                'srs': ShockSpecification,
+                                'sine': SineSweepSpecification}.get(kind,
+                                                                    ())):
+        against = None
+    octave = int(block['octave']) if block.get('octave') else None
+    extra = {'tone': block['tone']} if block.get('tone') else {}
+
+    def read(records, specification):
+        return caption_of(name, records, specification=specification,
+                          per_octave=octave, unit_system=us, **extra)
+
+    def rows(caption, only=None):
+        return [list(row) for row in caption.rows()
+                if only is None or row[0] in only]
+
+    def channels_of(figure):
+        return [channel for channel in figure.get('channels') or []
+                if isinstance(channel, dict)
+                and channel.get('_record') is not None]
+
+    def records_of(channel):
+        # a spectrum's channel draws one record; an SRS channel draws
+        # one per event, and a sine channel one per tone's channel
+        held = channel['_record']
+        return [int(held)] if np.ndim(held) == 0 else [int(r) for r in held]
+
+    for figure in built if isinstance(built, list) else [built]:
+        if figure.get('kind') == 'grid':
+            drawn = []
+            for row in figure.get('rows') or []:
+                for column in row.get('cells') or []:
+                    for cell in column:
+                        own = channels_of(cell)
+                        for channel in own:
+                            caption = read(channel['_record'], against)
+                            channel['facts'] = rows(caption,
+                                                    caption.CHANNEL_ROWS)
+                            drawn.extend(records_of(channel))
+                        if own:
+                            cell['facts'] = own[0]['facts']
+            if drawn:
+                # a spectrum's shared rows do not read the requirement;
+                # a sine level's sweep is the requirement's
+                shared = read(sorted(set(drawn)),
+                              None if kind == 'spectrum' else against)
+                figure['facts'] = rows(shared, [
+                    label for label in shared.ROWS
+                    if label not in shared.CHANNEL_ROWS])
+            continue
+        own = channels_of(figure)
+        for channel in own:
+            channel['facts'] = rows(read(channel['_record'], against))
+        if own:
+            figure['facts'] = own[0]['facts']
+        elif figure.get('_records'):
+            figure['facts'] = rows(read(figure['_records'], None))
+
+
+def _without_records(built):
+    """The figure with the record indices its caption was read from
+    taken out: they are the builder's bookkeeping, not the page's."""
+    for figure in (built if isinstance(built, list)
+                   else [] if built is None else [built]):
+        figure.pop('_records', None)
+        for channel in figure.get('channels') or []:
+            if isinstance(channel, dict):
+                channel.pop('_record', None)
+        for row in figure.get('rows') or []:
+            if isinstance(row, dict):
+                for cell in row.get('cells') or []:
+                    _without_records(cell)
+    return built
+
+
+def _verdict_block(specification, measured, level_label='Test level'):
+    """The pass/fail box: `compliance.verdict` over the comparison of
+    `measured` against `specification`, the scale resolved once for
+    the pair the way the bar charts resolve it. None when the two
+    have no channel in common or cannot be compared."""
+    from ..core.compliance import compare_all, comparison_scale_db, verdict
+
+    scale = comparison_scale_db(specification, measured)
+    rows = compare_all(specification, measured, scale_db=scale)
+    read = verdict(rows)
+    if read['passed'] is None:
+        return None
+    # the test level the comparison was judged at, beside the verdict
+    # it decided (Brandon, 2026-09-26): the scale is what was *added*
+    # to the measurement, so the level the run was at is its negative,
+    # and whether it was detected or set by hand is said with it
+    held = getattr(measured, 'scale_db', None) is not None
+    return {'kind': 'verdict', 'passed': bool(read['passed']),
+            'test_level_db': -float(scale) + 0.0,
+            'level_source': 'set' if held else 'detected',
+            'level_label': str(level_label),
+            'channels': int(read['channels']),
+            'lines_percent': _compact(read['lines_percent']),
+            'rms_percent': _compact(read['rms_percent']),
+            'lines_limit': float(read['lines_limit']),
+            'rms_limit': float(read['rms_limit']),
+            'lines_fail_percent': float(read['lines_fail_percent']),
+            'rms_fail_percent': float(read['rms_fail_percent'])}
+
+
+def _pairs_block(block, objects):
+    """The matched-modes table: both sets' parameters side by side
+    with the frequency error against the first set, the MAC of each
+    pair and their sizes' ratio — `core.tables.matched_rows`, the rows
+    the window and `Project.table` read too. The block binds a
+    MatchedModes object by name."""
+    from ..core.matches import MatchedModes
+    from ..core.tables import table_of
+
+    bound = objects.get(block.get('source'))
+    if not isinstance(bound, MatchedModes) or not bound.pairs:
+        return None
+    if objects.get(bound.first) is None or objects.get(bound.second) is None:
+        return None
+    headers, rows = table_of(bound, objects=objects)
+    return {'kind': 'table', 'caption': block.get('caption', ''),
+            'headers': headers, 'rows': rows}
+
+
+def _photo_block(block, photos):
+    """The photo as a data: URI — the image rides inside the file, like
+    everything else in the deliverable."""
+    import base64
+
+    from ..core.photos import Photos
+
+    name = block.get('photo', '')
+    if not isinstance(photos, Photos) or name not in photos.names:
+        return None
+    i = photos.names.index(name)
+    encoded = base64.b64encode(photos.images[i]).decode('ascii')
+    return {'kind': 'image', 'caption': block.get('caption', ''),
+            'src': f'data:image/{photos.formats[i]};base64,{encoded}'}
+
+
+def _hex(rgb):
+    return '#{:02x}{:02x}{:02x}'.format(*tuple(round(255 * v) for v in rgb))
+
+
+def _stage_budget(records: int) -> int:
+    """Points per record for a stage figure of `records` of them.
+
+    The figure's whole budget shared out, so a handful of channels
+    draw sample for sample and only a very long or very wide set is
+    thinned at all (Brandon, 2026-08-24: a report should not reduce
+    the data it is reporting). Never below a floor — a curve of two
+    hundred points is not a trace of anything.
+    """
+    return max(MAX_FIGURE_POINTS // max(records, 1), 512)
+
+
+def _stage_page(block, source, objects, us, caption, page):
+    """One stage block as the figures it needs — the app's own pages.
+
+    A stage holds `MAX_STAGE_RECORDS` records legibly, and an object
+    with more of them continues into further figures rather than
+    being truncated at one (Brandon, 2026-08-24: there is no reason
+    to cap the figure count). The pages are `waterfall_arrays`' own,
+    so the report's continuation figures *are* the pages the app
+    steps through on its bar.
+
+    What is capped is the total drawn, and for a reason that is not
+    taste: the geometry rides inside the self-contained HTML at about
+    three quarters of a megabyte a figure, so the 25,380-record
+    stress set would ask for 529 of them and a 399 MB file that no
+    browser opens and the report editor cannot load.
+    `MAX_STAGE_TOTAL` is set well above any real survey block and
+    well below that, and whatever it leaves out is said in the last
+    caption.
+
+    Answers ``(figure, pages, held)`` for one page — the built
+    figure, how many pages the object needs, and how many records the
+    drawn quantity group holds — or ``(None, 0, 0)`` when there is
+    nothing to draw.
+    """
+    # the app's 3-D reading, in the document: every record on the
+    # stage, receding, colored by level (Brandon, 2026-08-23).
+    # Many channels on one 2-D axis hide each other exactly where
+    # it matters — the tenth curve lands on the first nine — and
+    # a system ID's whole plant is thirty-two of them.
+    #
+    # With a `floor` it is the paired stage instead: the two
+    # objects met station by station, overlaid or divided, which
+    # is the same choice the app's bar offers over two PSDs.
+    from ..drawing.viz.waterfall import (
+        STAGE,
+        stage_basis,
+        stage_curves,
+        waterfall_arrays,
+        waterfall_group,
+    )
+
+    floor_object = objects.get(block.get('floor', '') or '')
+    source = _positive_lines(source)
+    if floor_object is not None:
+        floor_object = _positive_lines(floor_object)
+    reading = block.get('reading', 'overlay')
+    note = ''
+    if floor_object is not None:
+        from ..core.report import base_quantity
+        from ..drawing.viz.paired import paired_stage_curves
+        from ..drawing.viz.waterfall import waterfall_groups
+
+        # a paired stage picks its quantity by group, not by
+        # filtering records: the stations are what the two objects
+        # share, so both sides have to be asked the same question.
+        # The block names the quantity in the interface's own word
+        # ('acceleration'), which resolves here to the
+        # (dimension, hint) key the stage groups by.
+        wanted = block.get('quantity', '')
+        group_key = None
+        if wanted:
+            for key, _members in waterfall_groups(source, None):
+                if base_quantity(key[0]) == wanted:
+                    group_key = key
+                    break
+            if group_key is None:
+                return None, 0, 0   # nothing here measures that
+        try:
+            staged = paired_stage_curves(
+                source, floor_object, mode=reading, unit_system=us,
+                budget=_stage_budget(len(
+                    getattr(source, 'response_dof', []) or [1])),
+                quantity=group_key, page=page)
+        except ValueError:
+            return None, 0, 0   # no shared channel, or mismatched lines
+        log = reading != 'ratio' and staged['log_scaled']
+        labels = [run['label'] for run in staged['runs']]
+        stations = int(staged['drawn'])
+        pages, held = int(staged['pages']), stations
+        if staged.get('unmatched'):
+            note = (f'{staged["unmatched"]} records are held by only '
+                    'one of the two and are not paired.')
+        if reading != 'ratio' and not any(
+                run['quiet'] for run in staged['runs']):
+            # the same silence the flat figure explains: an
+            # ambient channel recorded with its shaker off is
+            # exactly zero, and zero has no place on a log axis
+            note = (note + ' ' if note else '') + (
+                'Nothing to draw for the quieter side here, which '
+                'recorded exactly zero.')
+    else:
+        records = list(range(source.num_records))
+        select = block.get('select', '')
+        if select == 'drive' and source.reference_dof is not None:
+            records = [i for i in records
+                       if source.response_dof[i]
+                       == source.reference_dof[i]]
+        elif select.startswith('dim:'):
+            from ..core.report import base_quantity
+
+            records = [i for i in records
+                       if base_quantity(source.known_dim(i))
+                       == select[4:]]
+        if not records:
+            return None, 0, 0
+        # group first, then page the group — never the other way
+        # round. The stage draws one quantity group, and a cap taken
+        # before the grouping spends its places on records that were
+        # never going to be drawn (a 100-record mixed FRF came back
+        # with 26 of them). Paged here rather than inside
+        # `waterfall_arrays` because its own pages are a *vertex*
+        # budget — right for the app, where the ceiling is memory,
+        # wrong for a document, where 525 short records would land on
+        # one stage as an unreadable wall of stations.
+        chosen = waterfall_group(source, records, None)[0]
+        held = len(chosen)
+        pages = max(1, -(-held // MAX_STAGE_RECORDS))
+        if page >= pages:
+            return None, pages, held
+        drawing = chosen[page * MAX_STAGE_RECORDS:
+                         (page + 1) * MAX_STAGE_RECORDS]
+        per_record = _stage_budget(len(drawing))
+        arrays = waterfall_arrays(
+            source, drawing, us, block.get('component', 'magnitude'),
+            budget=per_record,
+            # the records are already counted out above, so the scene
+            # budget only has to be wide enough not to page them again
+            scene_budget=MAX_FIGURE_POINTS * 4)
+        staged = stage_curves(arrays, source.ordinate_limits)
+        log = arrays['log_scaled']
+        labels = list(arrays['labels'])
+        stations = staged['stations']
+        # what the *object* holds outside the drawn quantity, from
+        # the whole record list rather than this page's slice
+        left_out = len(waterfall_group(source, records, None)[1])
+        if left_out:
+            # one vertical axis holds one quantity — the app
+            # offers a box to pick the others, and a document has
+            # to say they are there
+            caption = (caption + f' — {left_out} records of other '
+                       'quantities are not shown').strip()
+    if not staged['runs']:
+        return None, 0, 0
+    # Thinned, and said (Brandon, 2026-08-24). Measured off the drawing
+    # rather than read off the budget, because the budget lies in two
+    # directions at once: a stepped spectrum is never thinned at all —
+    # cutting a staircase destroys the treads and the area under them —
+    # and it draws *two* points a line, so a budget under the line
+    # count means nothing there. Asking the budget claimed "512 points
+    # of 1025" for a spectrum drawn whole in 2050. A curve also breaks
+    # into a run per gap, so the points are summed per station before
+    # the widest is taken.
+    # a station is a *fractional* depth (0.0, 0.3, 0.6 …), so it keys
+    # as itself — `int()` rounded four curves into one bucket and
+    # summed their points, which read as four times the draw
+    per_station: dict[float, int] = {}
+    for run in staged['runs']:
+        station = float(run['station'])
+        per_station[station] = per_station.get(station, 0) + len(run['points'])
+    whole = len(source.abscissa) * (
+        2 if drawing_shape(source, False) == 'steps' else 1)
+    thinning = _thinned_note(max(per_station.values(), default=0), whole)
+    if thinning:
+        note = (note + ' ' if note else '') + thinning
+    x0, x1, z0, z1 = staged['extents']
+    # levels normalized to the stage's own range, so the color
+    # scale and the vertical axis are one scale — the app pins
+    # `clim` to exactly this pair for the same reason
+    span = (z1 - z0) or 1.0
+    # (x, z) per point with the station carried once: a run stands
+    # at one depth by construction, and a third coordinate
+    # repeated seven hundred times is a third of the figure's
+    # weight in the file for nothing. Three decimals on a stage
+    # 1.6 wide is finer than a pixel of the canvas it draws on.
+    runs = []
+    for position, run in enumerate(staged['runs']):
+        built_run = {
+            'record': run.get('record', position),
+            'station': round(float(run['station']), 4),
+            'xz': [[round(float(point[0]), 3),
+                    round(float(point[2]), 3)]
+                   for point in run['points']],
+            'levels': [round((float(v) - z0) / span, 3)
+                       for v in run['levels']]}
+        if run.get('quiet'):
+            # the stood-back object: gray, not on the color
+            # scale, exactly as the app stands it back
+            built_run['quiet'] = True
+            del built_run['levels']
+        runs.append(built_run)
+    # the marks the flat figure carries, given depth: the
+    # analyzed span as a slab across every channel, and the rail
+    # of window weights on the back wall — the app's own stage
+    # marks, from `viz.marks`' shared geometry, so the two views
+    # cannot disagree about where a frame is
+    marks = {}
+    if floor_object is None:
+        from ..drawing.viz.marks import (
+            averaging_stage_geometry,
+            shock_stage_geometry,
+        )
+
+        averaging = getattr(source, 'averaging', None)
+        if averaging is not None:
+            try:
+                rate = source.sample_rate
+            except ValueError:
+                rate = None     # unevenly sampled: no frames to draw
+            if rate is not None:
+                marks['averaging'] = averaging_stage_geometry(
+                    averaging, rate, staged['extents'],
+                    float(source.abscissa[0]))
+                marks['averaging']['label'] = (
+                    f'{averaging.frames} x {averaging.frame_length} '
+                    f'samples, {averaging.window_text()}, '
+                    f'{averaging.overlap_text()} overlap')
+        if getattr(source, 'shocks', None):
+            marks['shocks'] = shock_stage_geometry(
+                source.shocks, staged['extents'], float(source.abscissa[0]))
+    right, up = stage_basis()
+    # the canvas prints real values at decade ticks where VTK prints
+    # the exponents it was given, so the 'log10' honesty prefix comes
+    # off here and the flag goes on instead
+    logx = bool(staged.get('log_abscissa', False))
+    xlabel = staged['xlabel']
+    if logx:
+        xlabel = xlabel.removeprefix('log10 ')
+    built = {'kind': 'stage', 'caption': caption,
+             'runs': runs, 'labels': labels,
+             # which records this figure draws, for its caption block;
+             # never sent to the page (`_without_records`)
+             '_records': ([int(i) for i in drawing]
+                          if floor_object is None else []),
+             'stations': stations,
+             'extents': [float(x0), float(x1), float(z0), float(z1)],
+             'log': bool(log), 'logx': logx,
+             'xlabel': xlabel, 'zlabel': staged['zlabel'],
+             'stage': [_compact(v) for v in STAGE],
+             # the app's own opening view of data, derived from the
+             # camera `place_camera` sets — the figure opens where
+             # the reader last saw this object on screen
+             'home': [[_compact(v) for v in right],
+                      [_compact(v) for v in up]]}
+    if marks:
+        built['marks'] = marks
+    if note:
+        built['note'] = note
+    return built, pages, held
+
+
+def _scalogram_figure(block, source, us, caption):
+    """One channel's scalogram as a stage figure: time across,
+    frequency receding, amplitude up and in color.
+
+    The app's wavelet reading, in the document (Brandon, 2026-08-28:
+    the transient report should carry the 3-D plot). One channel, as
+    the view shows one: the block's `channel` names a DOF — the
+    editor offers the choice as a drop-down — and without one the
+    first channel the `select` admits is drawn, the panel's own
+    default. The rows ride a `sheet` payload the page fills as a
+    surface, cell by cell on the level colormap, stationed by log
+    frequency with the decade rows labeled in Hz — a surface, not a
+    fan of lines, because that is what the app's own stage draws
+    (Brandon, 2026-08-29).
+
+    Time is thinned to `SCALOGRAM_COLUMNS` by peak-hold — the largest
+    magnitude in each bin — because a scalogram's story is its ridges
+    and a stride would land between them; the thinning is said in the
+    note like the stage's own. The cone of influence is drawn the way
+    the app's stage draws it — two translucent walls standing where
+    the record's ends reach in (Brandon, 2026-08-29: the two views
+    disagreed, and the walls are the reading he chose) — because
+    inside the cone the picture is shaped by where the record was
+    cut rather than by the event.
+    """
+    import numpy as np
+
+    from ..core import wavelet
+    from ..drawing.viz.waterfall import STAGE, stage_basis
+
+    try:
+        rate = source.sample_rate
+    except (ValueError, AttributeError):
+        return None
+    candidates = _scalogram_candidates(block, source)
+    named = block.get('channel')
+    if named:
+        candidates = [i for i in candidates
+                      if str(source.response_dof[i]) == str(named)]
+    if not candidates:
+        return None
+    channel = candidates[0]
+    dims = list(np.atleast_1d(source.ordinate_dim))
+
+    values = np.real(np.asarray(source.ordinate)[channel])
+    duration = len(values) / rate
+    low, high = wavelet.default_range(rate, duration)
+    frequencies = wavelet.log_frequencies(low, high)
+    frequencies = frequencies[frequencies < rate / 2.0]
+    if frequencies.size < 2:
+        return None
+    # peak-held down to the columns a figure can carry, by the reading
+    # the app's view draws from: the ridges are the story, and a stride
+    # would land between the very samples a transient's energy lives in
+    times, magnitude = wavelet.scalogram_peaks(
+        values, rate, frequencies, columns=SCALOGRAM_COLUMNS)
+    note = ''
+    if magnitude.shape[1] < len(values):
+        note = (f'time thinned to {magnitude.shape[1]} columns of '
+                f'{len(values)}, keeping each bin\'s peak')
+
+    sx, sy, _sz = STAGE
+    z1 = float(magnitude.max()) or 1.0
+    rows = np.log10(frequencies)
+    span = float(rows[-1] - rows[0]) or 1.0
+    labels, stations = [], []
+    ticks = _decade_values(frequencies)
+    for k in range(len(frequencies)):
+        station = float((rows[k] - rows[0]) / span)
+        labels.append(f'{ticks[k]:g} Hz' if k in ticks else '')
+        stations.append(round(station * sy, 4))
+    # the cone of influence, per row, as the share of the time axis
+    # each end of the record reaches into at that row's frequency
+    reach = wavelet.cone_of_influence(frequencies, rate)
+    sheet = {
+        'xs': [round(float(t) / duration * sx, 4) for t in times],
+        'stations': stations,
+        'levels': [[round(float(v) / z1, 3) for v in magnitude[k]]
+                   for k in range(len(frequencies))],
+        'cone': [round(float(c) / duration * sx, 4) for c in reach]}
+    right, up = stage_basis()
+
+    unit = None
+    units = getattr(source, 'ordinate_unit', None)
+    if units is not None:
+        unit = list(np.atleast_1d(units))[min(channel, len(
+            list(np.atleast_1d(units))) - 1)]
+    zlabel = str(dims[min(channel, len(dims) - 1)])
+    if unit:
+        zlabel = f'{zlabel} [{unit}]'
+    cone = float(wavelet.cone_of_influence([frequencies[0]], rate)[0])
+    built = {'kind': 'stage',
+             'caption': (f'{caption} — {source.record_label(channel)}, '
+                         f'{frequencies[0]:.3g} to {frequencies[-1]:.3g} Hz'
+                         f'; the walls mark where the record\'s ends '
+                         f'reach in, {cone:.2g} s at the lowest '
+                         f'row').strip(),
+             'sheet': sheet, 'labels': labels, 'stations': stations,
+             'extents': [0.0, float(duration), 0.0, z1],
+             'log': False, 'logx': False,
+             'xlabel': f'time [{us.label_text("time")}]',
+             'zlabel': zlabel,
+             'stage': [_compact(v) for v in STAGE],
+             'home': [[_compact(v) for v in right], [_compact(v) for v in up]]}
+    if note:
+        built['note'] = note
+    return built
+
+
+def _scalogram_candidates(block, source):
+    """Record indices the block's `select` admits — the one list the
+    figure draws from and the editor's channel drop-down offers, so
+    the two cannot disagree."""
+    import numpy as np
+
+    from ..core.report import base_quantity
+
+    select = block.get('select', '')
+    wanted_dim = select[4:] if select.startswith('dim:') else None
+    dims = list(np.atleast_1d(source.ordinate_dim))
+    return [i for i in range(len(source.response_dof))
+            if wanted_dim is None
+            or base_quantity(str(dims[min(i, len(dims) - 1)]))
+            == wanted_dim]
+
+
+def scalogram_channel_options(block, objects, object_groups=()):
+    """The DOF names a scalogram block can draw, for the editor's
+    drop-down list. The figure shows one channel, so the person editing
+    the report chooses which.
+
+    Parameters
+    ----------
+    block : dict
+        The scalogram plot block.
+    objects : mapping
+        The report's objects, name to object.
+    object_groups : sequence, optional
+        The project's object groups, for symbolic source bindings.
+
+    Returns
+    -------
+    list of str
+        The response DOFs the block's `select` allows; empty when the
+        source does not resolve or has no DOFs.
+    """
+    # One channel, chosen in the editor (Brandon, 2026-08-29).
+    from ..core.report import resolve_binding
+
+    name = resolve_binding(block.get('source', ''), objects, object_groups)
+    source = objects.get(name)
+    if source is None or not hasattr(source, 'response_dof'):
+        return []
+    return [str(source.response_dof[i])
+            for i in _scalogram_candidates(block, source)]
+
+
+def _decade_values(frequencies):
+    """{row index: tick value}: 1, 2, 5 per decade, at the nearest row.
+
+    The rows are twelfths of an octave and nobody reads 158.7 Hz off
+    an axis — the same choice the app\'s 3-D scalogram makes. The
+    label carries the round value, not the row\'s own frequency: a
+    row within a twelfth of an octave of 5 Hz labeled "5.04 Hz"
+    reads as a measurement where it is a ruling.
+    """
+    import numpy as np
+
+    from ..core import wavelet
+
+    return {int(np.argmin(np.abs(frequencies - value))): value
+            for value in wavelet.decade_values(frequencies[0],
+                                               frequencies[-1])}
+
+
+def _stage_figures(block, source, objects, us, caption):
+    """One stage block as the figures it needs.
+
+    A stage holds `MAX_STAGE_RECORDS` records legibly, and an object
+    with more of them continues into further figures rather than
+    being truncated at one (Brandon, 2026-08-24: there is no reason
+    to cap the figure count). The continuation figures are
+    `waterfall_arrays`' own pages — the very pages the app steps
+    through on its bar — so the document shows what the screen shows,
+    all of it.
+
+    What *is* bounded is the total drawn, for a reason that is not
+    taste: the geometry rides inside the self-contained HTML at about
+    three quarters of a megabyte a figure, so the 25,380-record
+    stress set would ask for 529 of them and a 399 MB file that no
+    browser opens and the report editor cannot load.
+    `MAX_STAGE_TOTAL` sits well above any real survey block (the
+    largest here is 560 records) and well below that; what it leaves
+    out is said in the last caption.
+
+    Returns the list of built figures, or None when there is nothing
+    to draw at all.
+    """
+    figures = []
+    page = 0
+    while True:
+        built, pages, held = _stage_page(block, source, objects, us,
+                                         caption, page)
+        if built is None:
+            break
+        figures.append(built)
+        page += 1
+        drawn = sum(len(f['labels']) for f in figures)
+        if page >= pages:
+            break
+        if drawn >= MAX_STAGE_TOTAL:
+            figures[-1]['caption'] = (
+                figures[-1]['caption']
+                + f' — {held - drawn} further records are not drawn; '
+                  'this figure would not fit in the document'
+            ).strip()
+            break
+    if not figures:
+        return None
+    if len(figures) > 1:
+        # each figure says which stretch of the channels it holds, or
+        # a reader has no way to tell one continuation from the next
+        at = 0
+        for figure in figures:
+            count = len(figure['labels'])
+            figure['caption'] = (
+                f'{figure["caption"]} — records {at + 1} to '
+                f'{at + count} of {held}').strip()
+            at += count
+    return figures
+
+
+def _grid_block(block, source, objects, us, geometry=None):
+    """Many control channels as one figure: a grid, a row per node and
+    a column per direction (`core.report.channel_grid`), each cell the
+    channel's own figure — the very block `_plot_block` draws for a
+    block naming that channel, so a cell reads exactly as the single
+    figure would (Brandon, 2026-09-19). The columns are the global
+    axes when the basis geometry can place the channels, the DOF's own
+    letters when it cannot."""
+    from ..core.report import channel_grid, control_channels_of
+
+    bounded = (objects.get(block['specification'])
+               if block.get('specification') else source)
+    labels = control_channels_of(bounded)
+    if not labels:
+        return None
+    layout = channel_grid(labels, geometry)
+    rows, drawn_any = [], False
+    for row in layout['rows']:
+        cells = []
+        for column in row['cells']:
+            drawn = []
+            for entry in column:
+                cell = _plot_block({**block, 'grid': False,
+                                    'channel': entry['channel'],
+                                    'caption': entry['channel']},
+                                   source, objects, us)
+                if cell is None:
+                    continue
+                if entry['note']:
+                    cell['note'] = entry['note']
+                drawn.append(cell)
+                drawn_any = True
+            cells.append(drawn)
+        rows.append({'label': row['label'], 'cells': cells})
+    if not drawn_any:
+        return None
+    return {'kind': 'grid', 'caption': block.get('caption', ''),
+            'columns': layout['columns'], 'rows': rows}
+
+
+def _plot_block(block, source, objects, us):
+    from ..core.shapes import ShapeSet
+    from ..core.sine import SineLevelSet
+
+    if isinstance(source, SineLevelSet):
+        # the set is grouping; a figure shows one tone's level, named
+        # by the block, so the template emits one block per tone
+        try:
+            source = source.tone(block.get('tone', ''))
+        except KeyError:
+            return None
+    mode = block.get('mode', 'curves')
+    caption = block.get('caption', '')
+    if mode == 'overlay':
+        against = objects.get(block.get('specification')) \
+            if block.get('specification') else None
+        return _replication_overlay_block(block, source, against, us)
+    if mode == 'mac':
+        if not isinstance(source, ShapeSet):
+            return None
+        if block.get('shapes'):
+            # a second set makes it the cross-MAC — test against the
+            # projected finite element model, DOF-name aligned. A named
+            # partner that is not here yet keeps this an unbound slot,
+            # never a silent fall-back to the auto-MAC.
+            from ..core.shapes import cross_mac
+
+            other = objects.get(block.get('shapes'))
+            if other is None:
+                return None
+            try:
+                matrix = cross_mac(source, other)
+            except ValueError:
+                return None     # no shared DOFs: nothing to compare
+            columns = [f'{float(f):.1f}' for f in other.frequency]
+        else:
+            matrix = source.auto_mac()
+            columns = None
+        labels = [f'{float(f):.1f}' for f in source.frequency]
+        rows, columns = labels, columns or labels
+        # the committed matches checker their squares, exactly as the
+        # comparison screen marks them — found by the pair of set
+        # names, in either order
+        pairs = []
+        if block.get('shapes'):
+            from ..core.matches import MatchedModes
+            for matched in objects.values():
+                if not isinstance(matched, MatchedModes):
+                    continue
+                ends = (matched.first, matched.second)
+                if ends == (block['source'], block['shapes']):
+                    pairs = [list(pair) for pair in matched.pairs]
+                    break
+                if ends == (block['shapes'], block['source']):
+                    pairs = [[c, r] for r, c in matched.pairs]
+                    break
+        # a cross-MAC reads tall: whichever set has more modes makes
+        # the rows, matching the GUI's own orientation
+        if len(columns) > len(rows):
+            matrix = np.asarray(matrix).T
+            rows, columns = columns, rows
+            pairs = [[c, r] for r, c in pairs]
+        pairs = [[r, c] for r, c in pairs
+                 if 0 <= r < len(rows) and 0 <= c < len(columns)]
+        return {'kind': 'mac', 'caption': caption,
+                'rows': rows, 'columns': columns, 'pairs': pairs,
+                'matrix': [[_compact(v) for v in row] for row in matrix]}
+    if mode == 'stage':
+        return _stage_figures(block, source, objects, us, caption)
+    if mode == 'scalogram':
+        return _scalogram_figure(block, source, us, caption)
+    if mode == 'pair':
+        # the two densities overlaid, one figure per quantity — the
+        # flat reading of the app's paired stage (Brandon,
+        # 2026-08-23). The pair is named the way the ratio names it,
+        # and pairs its channels through the same rule, so this
+        # figure and the ratio below it cannot disagree about which
+        # channel is which.
+        from ..core.data import paired_channels
+        from ..core.report import base_quantity
+
+        floor_object = objects.get(block.get('floor', '') or '')
+        if floor_object is None:
+            return None
+        try:
+            shared = paired_channels(source, floor_object)
+        except (ValueError, AttributeError):
+            return None
+        select = block.get('select', '')
+        if select.startswith('dim:'):
+            wanted_dim = select[4:]
+            shared = [row for row in shared
+                      if base_quantity(row[3]) == wanted_dim]
+        if not shared:
+            return None
+        # a dozen channels a figure, two curves each, continuing into
+        # further figures rather than dropping the rest (2026-10-05:
+        # this figure replaced the stage in the system ID report)
+        per_page = MAX_REPORT_CURVES // 2
+        pages = -(-len(shared) // per_page)
+        if pages > 1 and 'page' not in block:
+            return [built for k in range(pages)
+                    for built in [_plot_block({**block, 'page': k},
+                                              source, objects, us)]
+                    if built is not None]
+        if pages > 1:
+            first = int(block['page']) * per_page
+            caption = (f'{caption} — channels {first + 1}–'
+                       f'{min(first + per_page, len(shared))} of '
+                       f'{len(shared)}')
+            shared = shared[first:first + per_page]
+        x = np.asarray(source.display_abscissa(us), dtype=float)
+        loud = np.asarray(source.display_ordinate(
+            us, [i for i, _j, _d, _q in shared])).real
+        quiet = np.asarray(floor_object.display_ordinate(
+            us, [j for _i, j, _d, _q in shared])).real
+        logy = source.log_scaled()
+
+        thinned = [0, 0]
+
+        def curve(values, position, label, dashed):
+            """One channel's density, or None when it has nothing to
+            draw — an ambient channel recorded while its shaker was
+            off is exactly zero, and zero has no place on a log axis.
+            A legend entry for a curve that draws nothing is a claim
+            the figure does not support."""
+            y = np.asarray(values[position], dtype=float)
+            if logy:
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    y = np.where(y > 0.0,
+                                 np.log10(np.maximum(y, 1e-300)), np.nan)
+            if not np.isfinite(y).any():
+                return None
+            cx, cy = _decimate(x, y)
+            thinned[:] = [max(thinned[0], len(x)), max(thinned[1], len(cx))]
+            built_curve = {'label': label, 'color': position,
+                           'x': (cx if len(cx) != len(x) else None),
+                           'y': _finite(cy)}
+            if dashed:
+                built_curve['dash'] = True
+            return built_curve
+
+        # the quieter set follows the louder one the way every
+        # follower curve here does: the same color as the channel it
+        # belongs to, dashed — so a channel and its own noise floor
+        # read as one pair rather than as two unrelated curves
+        loud_name = block.get('source', '')
+        quiet_name = block.get('floor', '')
+        curves, quiet_drawn = [], 0
+        for position, (_i, _j, dof, _q) in enumerate(shared):
+            for values, label, dashed in (
+                    (loud, f'{loud_name}: {dof}', False),
+                    (quiet, f'{quiet_name}: {dof}', True)):
+                one = curve(values, position, label, dashed)
+                if one is None:
+                    continue
+                curves.append(one)
+                quiet_drawn += dashed
+        if not curves:
+            return None
+        if not quiet_drawn:
+            # the reader is promised a pair and is getting one side:
+            # say why rather than leaving the missing half unexplained
+            caption = (caption + ' — nothing to draw for the quieter '
+                       'side on these channels, which recorded exactly '
+                       'zero').strip()
+        built = {'kind': 'plot', 'caption': caption, 'logy': bool(logy),
+                 'x': [_compact(v) for v in x],
+                 'xlabel': f'frequency [{us.label_text("frequency")}]',
+                 'ylabel': _axis_text(source, us, shared[0][0]),
+                 'curves': curves}
+        thinning = _thinned_note(thinned[1], thinned[0])
+        if thinning:
+            built['note'] = thinning
+        return built
+    if mode == 'ratio':
+        # the signal-to-noise of two densities, in decibels (Brandon,
+        # 2026-08-25; the subtracted form since 2026-10-03, see
+        # `core.snr`). The louder is the signal; the block names the
+        # pair, and either missing keeps this an unbound slot rather
+        # than half of a ratio.
+        from ..core.snr import signal_to_noise
+
+        floor_object = objects.get(block.get('floor', '') or '')
+        if floor_object is None:
+            return None
+        try:
+            x, rows, dofs, _dims = signal_to_noise(source, floor_object)
+        except ValueError:
+            return None
+        with np.errstate(divide='ignore', invalid='ignore'):
+            decibels = 10.0 * np.log10(np.real(rows))
+        curves = [{'label': dof, 'color': k, 'y': _finite(decibels[k])}
+                  for k, dof in enumerate(dofs)
+                  if np.isfinite(decibels[k]).any()]
+        if not curves:
+            return None
+        return {'kind': 'plot', 'caption': caption, 'logy': False,
+                'x': [_compact(v) for v in x],
+                'xlabel': f'frequency [{us.label_text("frequency")}]',
+                'ylabel': 'signal to noise [dB]', 'curves': curves}
+    if mode == 'cmif':
+        from ..drawing.plot import cmif_curves
+
+        singular, x = cmif_curves(source, None, us)
+        curves = [{'label': f'CMIF {k + 1}', 'color': k,
+                   'y': _finite(np.log10(np.maximum(singular[k], 1e-300)))}
+                  for k in range(singular.shape[0])]
+        shapes = objects.get(block.get('shapes')) \
+            if block.get('shapes') else None
+        built = {'kind': 'plot', 'caption': caption, 'logy': True,
+                 'x': [_compact(v) for v in x],
+                 'xlabel': f'frequency [{us.label_text("frequency")}]',
+                 'ylabel': _axis_text(source, us), 'curves': curves}
+        if shapes is not None:
+            synthesized = _synthesized_cmif(source, shapes, us)
+            built['curves'] = curves + [
+                {'label': f'Synthesized CMIF {k + 1}', 'color': k,
+                 'dash': True,
+                 'y': _finite(np.log10(np.maximum(synthesized[k], 1e-300)))}
+                for k in range(synthesized.shape[0])]
+            # open on the mode band: 80% of the lowest resynthesized
+            # frequency to 120% of the highest (frequency is Hz in
+            # every unit system, so this is already display units)
+            freqs = np.asarray(shapes.frequency, dtype=float)
+            if freqs.size:
+                built['home_x'] = [0.8 * float(freqs.min()),
+                                   1.2 * float(freqs.max())]
+                # the fitting screen's gray bookmarks, in the report
+                # too; coincident frequencies collapse to one line
+                built['marks'] = list(
+                    dict.fromkeys(float(f) for f in freqs))
+        return built
+    if mode == 'map':
+        # the coherence map: frequency across, channel down, the color
+        # scale pinned to 0..1 exactly as the GUI pins it
+        x = np.asarray(source.display_abscissa(us), dtype=float)
+        records = list(range(source.num_records))
+        values = np.asarray(source.display_ordinate(us, records)).real
+        # a map is read as color on a ~900px canvas: column count and
+        # value precision beyond that only bloat the file
+        stride = max(1, len(x) // MAX_MAP_COLUMNS)
+        values = np.round(np.clip(values[:, ::stride], 0.0, 1.0), 3)
+        built_map = {'kind': 'map', 'caption': caption,
+                'x': [round(float(v), 3) for v in x[::stride]],
+                'xlabel': f'frequency [{us.label_text("frequency")}]',
+                'zlabel': 'coherence',
+                'labels': [source.record_label(i) for i in records],
+                'rows': [[_compact(v) for v in row] for row in values]}
+        if stride > 1:
+            # a map strides its columns where a curve keeps extremes:
+            # a color field is read across, so the honest note names
+            # what it is rather than borrowing the curve's sentence
+            built_map['note'] = (
+                f'Thinned for the file: every {stride}th frequency '
+                f'line drawn of {len(x)}.')
+        return built_map
+    # curves: the records themselves, filtered the way the GUI's own
+    # buttons filter, capped the way the screen caps
+    select = block.get('select', '')
+    indices = list(range(source.num_records))
+    if select == 'drive' and source.reference_dof is not None:
+        indices = [i for i in indices
+                   if source.response_dof[i] == source.reference_dof[i]]
+    elif select.startswith('dim:'):
+        from ..core.report import base_quantity
+
+        dimension = select[4:]
+        indices = [i for i in indices
+                   if base_quantity(source.known_dim(i)) == dimension]
+    if not indices:
+        return None     # a filter that keeps nothing has nothing to show
+    from ..core.data import Specification
+
+    # a plot naming a specification is the comparison: the response is
+    # the source, the target and its zones come from the other one
+    against = objects.get(block.get('specification')) \
+        if block.get('specification') else None
+    from ..core.data import ShockSpecification
+    from ..core.sine import SineLevel, SineLevelSet, SineSweepSpecification
+
+    if (against is not None
+            and isinstance(against, SineSweepSpecification)):
+        # the sine pair rides the SRS comparison machinery whole: the
+        # tone's requirement, derived as a Bounded curve, is the
+        # specification and the extracted level the measurement — one
+        # figure per tone, because tones sweep different frequencies
+        # and would draw different requirements over each other
+        if not isinstance(source, SineLevel):
+            return None
+        try:
+            target = against.tone_curve(source.tone)
+        except KeyError:
+            return None       # a level whose tone the spec never named
+        return _srs_comparison_block(block, source, target, us, caption)
+    if against is not None and isinstance(against, ShockSpecification):
+        # the shock pair: not the PSD comparison, which bands, scales
+        # and marks — an SRS is unscaled on principle (a spectrum
+        # sitting 12 dB low must not be rescaled into agreement) and
+        # its events are overlaid, so the marks would not say whose
+        # line went out
+        return _srs_comparison_block(block, source, against, us, caption)
+    if against is not None and isinstance(against, Specification):
+        # the scale is resolved on the measurement itself, before any
+        # banding: the report bands the narrowband PSD for its octave
+        # figures, and detecting again on the banded copy rounded to a
+        # different decibel — one report, two claimed scalings
+        from ..core.compliance import comparison_scale_db
+
+        scale_db = comparison_scale_db(against, source)
+        banded, against = _banded_pair(source, against, block)
+        if banded is None:
+            return None
+        return _comparison_block(block, banded, against, us, caption,
+                                 scale_db=scale_db)
+
+    from ..core.data import Bounded, TransientSpecification
+
+    # Bounded, not Specification: a shock specification is `Bounded,
+    # Srs` — same four limit curves, different spectrum underneath —
+    # and gating on the PSD kind left the shock report's Figure 2
+    # drawing the bare target with its tolerance band silently dropped
+    bounded = isinstance(source, Bounded) and source.has_limits
+    # a transient specification reads one channel at a time too: its
+    # waveforms overlaid are a thicket with no comparison in them
+    paged = bounded or (isinstance(source, TransientSpecification)
+                        and len(indices) > 1)
+    channels = list(indices) if paged else []
+    if paged and block.get('channel'):
+        # a block that names its channel is that channel's figure and
+        # carries no others: the random report writes one per control
+        # channel, with no drop-down anywhere in it (Brandon, 2026-09-18)
+        named = str(block['channel'])
+        channels = [i for i in channels if _channel_label(source, i) == named]
+        if not channels:
+            return None
+        indices = channels
+    if paged:
+        # One channel drawn — with its limits shaded around it when it
+        # has any — the same reading the app gives. Six targets stacked
+        # together are unreadable, so the rest are carried in the
+        # payload and reached with the drop-down instead.
+        chosen = block.get('record')
+        indices = [indices[0] if chosen is None else int(chosen)]
+    from ..core.data import TimeHistory
+
+    # what this block draws from, before any cap: a figure filtered to
+    # one quantity is a figure of that quantity's channels, and
+    # counting the object's other records told a reader that 6 of 30
+    # records were dropped from a figure that drew all 24 of its own
+    available = len(indices)
+    budget = None
+    if not paged:
+        # many records continue into further figures rather than
+        # stopping at the first two dozen — the stage's paging, in
+        # 2-D. Time histories first; every flat figure since the
+        # random, random-and-sine and system ID reports went 2-D only
+        # (Brandon, 2026-10-05), so a plant of 32 FRFs is two figures
+        # and not the first 24 of them
+        pages = max(1, -(-available // MAX_REPORT_CURVES))
+        if pages > 1 and 'page' not in block:
+            return [built for k in range(pages)
+                    for built in [_plot_block({**block, 'page': k},
+                                              source, objects, us)]
+                    if built is not None]
+        page = int(block.get('page', 0))
+        first = page * MAX_REPORT_CURVES
+        indices = indices[first:first + MAX_REPORT_CURVES]
+        if pages > 1:
+            caption = (f'{caption} — channels {first + 1}–'
+                       f'{first + len(indices)} of {available}')
+        if isinstance(source, TimeHistory):
+            # each time figure shares one point budget among its curves
+            budget = min(max(TIME_FIGURE_POINTS // max(len(indices), 1),
+                             512), MAX_POINTS_PER_CURVE)
+    wanted = indices[:MAX_REPORT_CURVES]
+    source = _positive_lines(source)
+    x = np.asarray(source.display_abscissa(us), dtype=float)
+    if budget is not None and x.size > budget:
+        # the page's curves share one time axis: an envelope on common
+        # bins, two points a bin (`decimate.envelope_rows`), so a page
+        # of two dozen channels carries one axis and not two dozen
+        from ..decimate import envelope_rows
+
+        rows = np.real(np.asarray(source.display_ordinate(us, wanted)))
+        axis, envelope = envelope_rows(x, rows, max(budget // 2, 256))
+        built = {'kind': 'plot', 'caption': caption, 'logy': False,
+                 'logx': False, 'x': [_compact(v) for v in axis],
+                 'xlabel': f'{source.abscissa_dim} '
+                           f'[{us.label_text(source.abscissa_dim)}]',
+                 'ylabel': _axis_text(source, us, wanted[0]),
+                 'curves': [{'label': source.record_label(i), 'x': None,
+                             'y': _finite(envelope[k])}
+                            for k, i in enumerate(wanted)],
+                 'note': _thinned_note(int(envelope.shape[1]), int(x.size))}
+        # a template says when the frames are not the reading's — the
+        # sine report demodulates the whole record and averages nothing
+        # (Brandon, 2026-10-02)
+        frames = (_averaging_marks(source)
+                  if block.get('averaging', True) else None)
+        if frames is not None:
+            built['averaging'] = frames
+        events = _shock_marks(source)
+        if events is not None:
+            built['shocks'] = events
+        return built
+    # the abscissa's own reading, the same flag the app consults: an
+    # SRS lays natural frequency out in decades. The curves are built
+    # in hertz — a band's edges, a power law's fill-in — and each is
+    # put into decades as it is finished (`_decades`); transforming
+    # the lines first put an octave PSD's steps and a specification's
+    # law in the wrong places once the axis became the viewer's
+    # choice (Brandon, 2026-09-05)
+    logx = (bool(getattr(source, 'log_abscissa', False))
+            # an octave-band figure reads on a log frequency axis, the
+            # way bands are read (Brandon, 2026-09-20)
+            or getattr(source, 'bandwidth', None) is not None)
+    values = source.display_ordinate(us, wanted)
+    logy = source.abscissa_dim == 'frequency' \
+        if source.log_ordinate is None else source.log_ordinate
+    # complex data reads four ways, exactly as the GUI's drop-down:
+    # anything but the magnitude is signed, so the axis goes linear
+    component = block.get('component', 'magnitude')
+    ylabel = _axis_text(source, us, wanted[0])
+    tag = (component if component != 'magnitude'
+           and np.iscomplexobj(values) else None)
+    if tag == 'real':
+        values, ylabel = np.asarray(values).real, f'{ylabel} (real)'
+    elif tag == 'imag':
+        values, ylabel = (np.asarray(values).imag,
+                          f'{ylabel} (imaginary)')
+    elif tag == 'phase':
+        values, ylabel = np.degrees(np.angle(values)), 'phase [deg]'
+    if tag:
+        logy = False
+    # One rule for every reading. `drawing_shape` is what the flat
+    # plot and the waterfall both draw by, so the exported figure
+    # cannot say something the app does not: 'steps' for a density
+    # (flat across its own bin, so the area drawn is the area summed),
+    # 'law' for a specification's breakpoints, 'line' for a value at a
+    # frequency. The JS is handed the answer rather than deciding it —
+    # it has no `interpolation` field and no way to know.
+    shape = drawing_shape(source, bool(tag))
+    rounded_x = [_compact(v) for v in x]
+    curves = []
+    thinned_from = thinned_to = 0
+    for position, i in enumerate(wanted):
+        y = np.abs(values[position]) if np.iscomplexobj(values) \
+            else np.asarray(values[position], dtype=float)
+        if shape == 'law':
+            # a breakpoint curve is a power law between its points and
+            # the frequency axis here is linear, so the straight
+            # segment a polyline would draw runs about 5 dB off
+            # mid-decade. Filled in on the object's own grid, exactly
+            # as the app fills it.
+            law_x, y = as_power_law(x, y)
+        else:
+            law_x = x
+        if logy:
+            # a point at or below zero has no place on a log axis, and
+            # log10(1e-300) is not "no place" — it is -300, which the
+            # axis then has to reach down to. A specification is written
+            # to zero outside its band, so this is most of its length.
+            # Non-finite is what `_finite` turns into a gap.
+            with np.errstate(divide='ignore', invalid='ignore'):
+                y = np.where(y > 0.0, np.log10(np.maximum(y, 1e-300)),
+                             np.nan)
+        cx, cy = _decimate(law_x, np.asarray(y, dtype=float), budget)
+        thinned_from = max(thinned_from, len(law_x))
+        thinned_to = max(thinned_to, len(cx))
+        # a curve claims its own grid only when it really is on one —
+        # a power law's fill-in, or a decimation that dropped points.
+        # Compared against the raw `x` this was true of every octave
+        # figure: `_decimate` rounds to PAGE_DIGITS and a band center
+        # is a geometric mean, so the rounded copy of the *same* grid
+        # compared unequal. The curve then carried an `x` and no
+        # `edges`, and the page reads that as "on its own grid, edges
+        # unknown" — which dropped the warning and abort zones off
+        # their steps (Brandon, 2026-09-21). Compared like with like.
+        curves.append({'label': source.record_label(i),
+                       'x': (_finite(_decades(cx, logx))
+                             if len(cx) != len(x)
+                             or not np.array_equal(cx, rounded_x) else None),
+                       'y': _finite(cy)})
+    dropped = 0 if paged or 'page' in block else available - len(wanted)
+    if dropped:
+        caption = (caption + f' (first {len(wanted)} of '
+                             f'{source.num_records} records)').strip()
+    elif paged and len(channels) > 1:
+        caption = (caption + f' — one of {len(channels)} control '
+                   'channels; the rest are on the drop-down').strip()
+    built = {'kind': 'plot', 'caption': caption, 'logy': bool(logy),
+             'logx': logx,
+             'x': [_compact(v) for v in _decades(x, logx)],
+             'xlabel': f'{source.abscissa_dim} '
+                       f'[{us.label_text(source.abscissa_dim)}]',
+             'ylabel': ylabel, 'curves': curves,
+             # which records this figure draws, for its caption block;
+             # never sent to the page (`_without_records`)
+             '_records': [int(i) for i in wanted]}
+    if tag == 'phase':
+        # the app's phase axis: every quarter turn labeled, with room for
+        # the ±180° labels at its ends (`plot.PHASE_LIMITS`, `PHASE_TICKS`)
+        built['yrange'] = list(PHASE_LIMITS)
+        built['yticks'] = list(PHASE_TICKS)
+    thinning = _thinned_note(thinned_to, thinned_from)
+    if thinning:
+        built['note'] = thinning
+    frames = (_averaging_marks(source)
+              if block.get('averaging', True) else None)
+    if frames is not None:
+        built['averaging'] = frames
+    events = _shock_marks(source)
+    if events is not None:
+        built['shocks'] = events
+    # flat across each bin exactly when the spectrum says it is one —
+    # the same field its area is worked out from, so the exported file
+    # shows the number it would compute. This used to be set only for a
+    # specification *with limits*, which was wrong both ways round: a
+    # measured PSD drew as a polyline through its bin centers, and a
+    # written specification — whose points are breakpoints of a curve —
+    # drew as the staircase it is not.
+    if shape == 'steps':
+        built['steps'] = True
+        # the object's *own* edges, not midpoints between centers: an
+        # octave band's center is the geometric mean of its edges, so
+        # midpoints miss them by several percent of a band. The JS
+        # cannot work these out — it never sees `bandwidth`.
+        own = getattr(source, 'bin_edges', None)
+        widths = own() if own is not None and getattr(
+            source, 'bandwidth', None) is not None else None
+        built['edges'] = _finite(_decades(bin_edges(x, widths), logx))
+    if bounded:
+        # a target filled in as a power law is drawn on a grid of its
+        # own, and the page draws the picked channel's values against
+        # the first curve's grid: so the channels, target and zones, are
+        # filled on one grid, and it becomes the block's. Left on the
+        # breakpoints, a specification on its own drew its four values
+        # at the first four of 800 frequencies, an empty plot
+        # (2026-10-24)
+        grid = None
+        if shape == 'law' and built['curves'][0]['x'] is not None:
+            grid = _law_grid(x, np.real(np.asarray(
+                source.display_ordinate(us, channels))))
+        built['channels'] = _specification_channels(source, channels, x,
+                                                    logy, us, grid=grid)
+        if grid is not None:
+            keep = _shared_grid(grid)
+            drawn = grid if keep is None else grid[keep]
+            built['x'] = [_compact(v) for v in _decades(drawn, logx)]
+            shown = channels.index(wanted[0]) if wanted[0] in channels else 0
+            built['curves'][0].update(
+                x=None, y=list(built['channels'][shown]['y']))
+        built['curves'][0]['ink'] = True
+        # and the figure opens on the band the target is written on,
+        # as the comparison does: a controller's target sits on every
+        # line to Nyquist, most of them empty (Brandon, 2026-09-19)
+        band = _specified_band(source, channels[0], us)
+        if band is not None:
+            built['home_x'] = [_compact(v) for v in _decades(band, logx)]
+    elif paged:
+        # the transient specification's channels: waveforms, linear,
+        # nothing to shade — a target carries no limits
+        rows = np.asarray(source.display_ordinate(us, channels)).real
+        built['channels'] = [
+            {'label': source.record_label(i),
+             'y': _finite(np.asarray(rows[k], dtype=float)), 'zones': []}
+            for k, i in enumerate(channels)]
+        built['curves'][0]['ink'] = True
+    # a curves plot that names a shape set gets the fitting screen's
+    # bookmarks: a vertical line at every identified mode — how a
+    # drive point FRF reads against the modes found in it
+    marked = (objects.get(block.get('shapes'))
+              if block.get('shapes') else None)
+    if isinstance(marked, ShapeSet) and marked.num_shapes:
+        built['marks'] = list(dict.fromkeys(
+            float(f) for f in marked.frequency))
+    return built
+
+
+def _synthesized_cmif(frf, shapes, us):
+    """The modal model's CMIF over the FRF's own records — the dashed
+    line the measured indicator is judged against, exactly as in the
+    fitting screen. Records at DOFs the shapes do not cover are left
+    out of the synthesis matrix (they contribute zero)."""
+    from ..core.data import Frf
+    from ..drawing.plot import cmif_curves
+
+    powers = {'length': 0, 'velocity': 1, 'acceleration': 2}
+    usable = [i for i in range(frf.num_records)
+              if shapes.covers(frf.response_dof[i])
+              and shapes.covers(frf.reference_dof[i])]
+    power = next((powers[frf.known_dim(i).partition('/')[0]]
+                  for i in usable
+                  if frf.known_dim(i).partition('/')[0] in powers), 2)
+    ordinate = shapes.synthesize_frf(
+        frf.abscissa,
+        [frf.response_dof[i] for i in usable],
+        [frf.reference_dof[i] for i in usable], power=power)
+    twin = Frf(frf.abscissa, ordinate,
+               response_dof=[frf.response_dof[i] for i in usable],
+               reference_dof=[frf.reference_dof[i] for i in usable],
+               ordinate_dim=[frf.ordinate_dim[i] for i in usable],
+               ordinate_unit=[frf.ordinate_unit[i] for i in usable],
+               reference_unit=[frf.reference_unit[i] for i in usable],
+               dimension_hint=[frf.dimension_hint[i] for i in usable])
+    singular, _x = cmif_curves(twin, None, us)
+    return singular
+
+
+def _axis_text(source, us, record=0):
+    """The axis label for the record actually plotted — a filtered
+    block must not wear the first record's units."""
+    from ..units import UNKNOWN
+
+    dim = source.ordinate_dim[record]
+    if dim == UNKNOWN:
+        hint = source.dimension_hint[record]
+        return f'{hint} [units undefined]' if hint else 'units undefined'
+    return us.label_text(dim)
+
+
+def _scene_geometry(geometry, us):
+    """(points, node colors, lines, faces, axis unit) — one geometry
+    as the scene payload draws it, the GUI's own palette entity for
+    entity: the report is the GUI, emailed."""
+    from ..drawing.viz.geometry import color_rgb, display_points, element_cells
+
+    # the unit the points came out in is no longer asked for:
+    # a scene draws a shape, not a measurement
+    points, _unit = display_points(geometry, us)
+    points = np.asarray(points, dtype=float)
+    # the 3-D view's own rule, element by element (`element_cells`): a
+    # brick its six faces, skinned, a quad8 its four corners — every
+    # polygon in node order drew bricks as bow ties (2026-10-11)
+    drawn_faces, drawn_lines, _points = element_cells(geometry)
+    faces = [{'nodes': corners, 'color': _hex(color_rgb(color))}
+             for color, polygons in drawn_faces.items()
+             for corners in polygons]
+    lines = [pair + [_hex(color_rgb(color))]
+             for color, pairs in drawn_lines.items() for pair in pairs]
+    node_colors = [_hex(color_rgb(c)) for c in geometry.node_color]
+    return points, node_colors, lines, faces
+
+
+def _shown_rows(geometry, faces) -> np.ndarray:
+    """The node rows a scene draws: all of them but those only inside
+    solids — a node no face of a solid's skin uses and no other element
+    names. Those are never drawn, and are left out with their share of
+    every mode: a brick model's insides were most of its page (the
+    Frame-Wing's figure, 12.8 MB, 2026-10-11). A plate's or a beam's
+    midside nodes stay, drawn as points as the 3-D view draws them."""
+    from ..core.geometry import ELEMENT_TYPES
+
+    rows = {int(n): r for r, n in enumerate(geometry.node_id)}
+    inside = np.zeros(geometry.num_nodes, dtype=bool)
+    drawn = np.zeros(geometry.num_nodes, dtype=bool)
+    for code, conn in zip(geometry.elem_type, geometry.elem_conn):
+        at = [rows[int(n)] for n in conn]
+        if ELEMENT_TYPES[int(code)][2] == 'volume':
+            inside[at] = True
+        else:
+            drawn[at] = True
+    for face in faces:
+        drawn[face['nodes']] = True
+    return np.flatnonzero(drawn | ~inside)
+
+
+def _scene_home(geometry):
+    """A scene's home view as the page's (right, up) basis: the
+    geometry's own view, the one the app opens it on (`View.basis`).
+    The page used to hold an isometric of its own, which a geometry
+    could not change."""
+    return [[_compact(v) for v in axis]
+            for axis in geometry.opening_view.basis()]
+
+
+def _scene_block(block, geometry, shapes, us, objects):
+    points, node_colors, lines, faces = _scene_geometry(geometry, us)
+    shown = _shown_rows(geometry, faces)
+    if len(shown) < len(points):
+        renumber = np.full(len(points), -1)
+        renumber[shown] = np.arange(len(shown))
+        points = points[shown]
+        node_colors = [node_colors[r] for r in shown]
+        faces = [{**face, 'nodes': [int(renumber[r]) for r in face['nodes']]}
+                 for face in faces]
+        lines = [[int(renumber[a]), int(renumber[b]), *rest]
+                 for a, b, *rest in lines]
+    node_row = {int(geometry.node_id[r]): i for i, r in enumerate(shown)}
+    built = {'kind': 'scene', 'caption': block.get('caption', ''),
+             'points': [[_compact(v) for v in p] for p in points],
+             'node_colors': node_colors,
+             'lines': lines, 'faces': faces, 'modes': [],
+             'home': _scene_home(geometry)}
+    quantity = block.get('dofs', '')
+    if quantity:
+        # a DOFs scene: labeled arrows where its one named data
+        # object measures that quantity
+        from ..core.report import (
+            EXCITATION_QUANTITIES,
+            series_quantity_dofs,
+        )
+        from ..drawing.viz.geometry import (
+            AXIS_COLORS,
+            dof_arrow_length,
+            dof_arrow_vectors,
+        )
+
+        source = objects.get(block.get('dofs_source'))
+        if source is None:
+            return None
+        arrows = []
+        dofs = series_quantity_dofs([('', source, None)], quantity)
+        for dof, found in zip(dofs, dof_arrow_vectors(geometry, dofs)):
+            if found is None:
+                continue
+            row, vector, axis = found
+            node = int(geometry.node_id[row])
+            if node not in node_row:
+                continue
+            arrows.append({'node': node_row[node],
+                           'vector': [_compact(v) for v in vector],
+                           'color': AXIS_COLORS[axis],
+                           'label': dof})
+        if not arrows:
+            return None     # nothing measured as that quantity here
+        center = points.mean(axis=0)
+        extent = float(np.sqrt(((points - center) ** 2)
+                               .sum(axis=1).max())) or 1.0
+        built['arrows'] = arrows
+        built['arrow_length'] = float(dof_arrow_length(
+            points[[arrow['node'] for arrow in arrows]], extent))
+        built['arrows_incoming'] = quantity in EXCITATION_QUANTITIES
+    if shapes is not None:
+        from ..deform import ShapeDeflection
+
+        for m in range(shapes.num_shapes):
+            deflection = ShapeDeflection(geometry, shapes.coordinate,
+                                         shapes.shape_matrix[m])
+            real = np.zeros((geometry.num_nodes, 3))
+            imag = np.zeros((geometry.num_nodes, 3))
+            real[deflection.rows] = deflection._real
+            imag[deflection.rows] = deflection._imag
+            real, imag = real[shown], imag[shown]
+            built['modes'].append({
+                'label': shapes.mode_label(m),
+                # the corner table over the animation: what is moving
+                'info': {'mode': m + 1,
+                         'description':
+                             str(shapes.description[m]).strip(),
+                         'frequency': float(shapes.frequency[m]),
+                         'damping': float(shapes.damping[m]) * 100.0},
+                'peak': float(deflection.peak_magnitude) or 1.0,
+                **_motion(real, imag)})
+    return built
+
+
+def _motion(real: np.ndarray, imag: np.ndarray) -> dict[str, Any]:
+    """A mode's motion per drawn node. A real mode leaves its imaginary
+    part out — every normal mode of a model is real, and its zeros were
+    half the Frame-Wing figure's mode data (2026-10-11); the page reads
+    a missing part as zero."""
+    motion = {'real': [[_compact(v) for v in p] for p in real]}
+    if np.any(imag):
+        motion['imag'] = [[_compact(v) for v in p] for p in imag]
+    return motion
+
+
+def _overlay_block(block, objects, us, object_groups=None):
+    """The matched pairs animated over each other: both geometries in
+    one scene — the basis side blue, the other orange — each pair's
+    two modes phase-aligned (through the projection when the
+    geometries differ) and each normalized to its own peak, so the
+    sparse test and the dense model swing comparably. Emits a 'scene'
+    payload drawn flat: the colors tell the sets apart, so the
+    deflection colormap stays out.
+
+    That per-shape normalization is also why the payload carries a
+    `note`: it makes the picture unable to show a scale difference
+    between the two sets, and a scale difference is nearly always a
+    mass unit or a normalization convention worth knowing about."""
+    from ..core.geometry import Geometry
+    from ..core.matches import MatchedModes
+    from ..core.shapes import ShapeSet, paired_mode
+    from ..deform import ShapeDeflection
+
+    matched = objects.get(block.get('source'))
+    if not isinstance(matched, MatchedModes) or not matched.pairs:
+        return None
+    a = objects.get(matched.first)
+    b = objects.get(matched.second)
+
+    def linked_geometry(name: str) -> Any:
+        # matches committed before the object remembered its
+        # geometries: the object groups still know
+        group = next((g['members'] for g in (object_groups or [])
+                      if name in g['members']), [])
+        return next((objects[member] for member in group
+                     if isinstance(objects.get(member), Geometry)),
+                    None)
+
+    geo_a = (objects.get(matched.first_geometry or '')
+             or linked_geometry(matched.first))
+    geo_b = (objects.get(matched.second_geometry or '')
+             or linked_geometry(matched.second) or geo_a)
+    if not (isinstance(a, ShapeSet) and isinstance(b, ShapeSet)
+            and isinstance(geo_a, Geometry)
+            and isinstance(geo_b, Geometry)):
+        return None
+    first_color, second_color = PAIR_COLORS
+    # The basis is the one being looked *at*; the other is drawn through
+    # it, at the same quarter opacity the comparison screen uses — the
+    # one rule (`overlay_alphas`), asked of the links, not the order the
+    # pair was matched in. Without it the report drew both solid and the
+    # near mesh simply hid the far one.
+    def role_of(name: str) -> str | None:
+        return next((group.get('role') for group in (object_groups or [])
+                     if name in group['members']), None)
+
+    first_alpha, second_alpha = overlay_alphas(role_of(matched.first),
+                                               role_of(matched.second))
+    pa, _na, la, fa = _scene_geometry(geo_a, us)
+    pb, _nb, lb, fb = _scene_geometry(geo_b, us)
+    offset = len(pa)
+    points = np.vstack([pa, pb])
+    lines = ([[i, j, first_color, first_alpha] for i, j, _c in la]
+             + [[i + offset, j + offset, second_color, second_alpha]
+                for i, j, _c in lb])
+    faces = ([{'nodes': f['nodes'], 'color': first_color,
+               'alpha': first_alpha} for f in fa]
+             + [{'nodes': [n + offset for n in f['nodes']],
+                 'color': second_color, 'alpha': second_alpha}
+                for f in fb])
+    node_colors = ([first_color] * len(pa)
+                   + [second_color] * len(pb))
+    node_alphas = [first_alpha] * len(pa) + [second_alpha] * len(pb)
+    # phase alignment across geometries runs through the projection —
+    # the raw sets share no DOFs there
+    projected = None
+    if geo_a is not geo_b:
+        from ..core.correlate import project_shapes
+        try:
+            projected, _report = project_shapes(b, geo_b, a, geo_a)
+        except ValueError:
+            projected = None
+    modes = []
+    for (r, c), mac in zip(matched.pairs, matched.macs):
+        if not (0 <= r < a.num_shapes and 0 <= c < b.num_shapes):
+            continue
+        second_shape = paired_mode(a, r, b, c, projected)
+        real = np.zeros_like(points)
+        imag = np.zeros_like(points)
+        for geometry, dofs, shape, shift in (
+                (geo_a, a.coordinate, a.shape_matrix[r], 0),
+                (geo_b, b.coordinate, second_shape, offset)):
+            deflection = ShapeDeflection(geometry, dofs, shape)
+            peak = float(deflection.peak_magnitude) or 1.0
+            real[deflection.rows + shift] = deflection._real / peak
+            imag[deflection.rows + shift] = deflection._imag / peak
+
+        def info(name: str, shape_set: Any, mode: int) -> dict[str, Any]:
+            return {'set': name, 'mode': mode + 1,
+                    'description':
+                        str(shape_set.description[mode]).strip(),
+                    'frequency': float(shape_set.frequency[mode]),
+                    'damping': float(shape_set.damping[mode]) * 100.0}
+
+        modes.append({
+            'label': (f'{matched.first} mode {r + 1} ↔ '
+                      f'{matched.second} mode {c + 1} — MAC {mac:.2f}'),
+            'info': [info(matched.first, a, r),
+                     info(matched.second, b, c)],
+            'peak': 1.0,
+            **_motion(real, imag)})
+    if not modes:
+        return None
+    # each shape is drawn to its own peak just above, which is what makes
+    # the sparse test set and the dense model swing comparably — and also
+    # what hides one set being thirty times the other. Say so when they
+    # are: a reader looking at the picture cannot tell, and it is usually
+    # a mass unit or a normalization rather than the structure.
+    from ..core.shapes import compare_scaling
+
+    caption = block.get('caption', '')
+    note = compare_scaling(a, b, matched.pairs or None).message(
+        matched.first, matched.second)
+    return {'kind': 'scene', 'caption': caption, 'note': note,
+            'flat': True,
+            'points': [[_compact(v) for v in p] for p in points],
+            'node_colors': node_colors, 'node_alphas': node_alphas,
+            'lines': lines, 'faces': faces, 'modes': modes,
+            'home': _scene_home(geo_a)}
+
+
+#: the zones a response must not be in, as the app shades them: between
+#: warning and abort in warm, past abort in hot, read the same way above
+#: the target and below it. `None` means the edge of the plot — the zone
+#: past abort has no far side.
+LIMIT_ZONES = (
+    ('warning_upper', 'abort_upper', 'warning'),
+    ('abort_upper', None, 'abort'),
+    ('abort_lower', 'warning_lower', 'warning'),
+    (None, 'abort_lower', 'abort'),
+)
+
+
+def _channel_key(channel: Mapping[str, Any], limits: Mapping[str, Any],
+                 target: Any, dimension: str) -> list[list[str]]:
+    """The legend's key to one channel's shading: which zones it shades
+    and which marks it draws, named by `plot.zone_key` with the decibels
+    the specification holds them at — the words the app's legend uses,
+    so a report's plot and the app's say the same (Brandon, 2026-09-27:
+    the report plots should always match the application plots).
+
+    `limits` and `target` are the channel's in display units, before
+    the page's own mapping; the ratio of the two is all that is read.
+    """
+    from ..drawing.plot import _zone_decibels, zone_key
+
+    zones = set()
+    for zone in channel.get('zones', []):
+        if zone['severity'] != 'abort':
+            zones.add('warning')
+        elif zone['upper'] is None:
+            zones.add('above')
+        elif zone['lower'] is None:
+            zones.add('below')
+    exceeded = {f'exceed_{side}' for side in ('over', 'under')
+                if any(v is not None for v in channel.get(side) or [])}
+    found: dict = {}
+    written = {name: values for name, values in limits.items()
+               if values is not None}
+    if written:
+        _zone_decibels(found, written, target, dimension)
+    return [list(entry) for entry in zone_key(zones, exceeded, found)]
+
+
+#: how finely the window shape is sampled for the report. The curve is
+#: smooth and a few dozen points draw it to the pixel.
+WINDOW_POINTS = 48
+
+
+def _averaging_marks(source):
+    """The frames a PSD would be averaged over, for the trace to carry.
+
+    A time history in a report is not read for its values — nobody
+    measures a volt off a printed trace. It is read for what part of
+    the run was analyzed and how, which is exactly what the app draws
+    over it and what a bare trace leaves out.
+
+    One window shape for all of them, because they share one: it is the
+    same window applied at each frame's own span.
+    """
+    from ..core.averaging import window_shape
+    from ..core.data import TimeHistory
+
+    averaging = getattr(source, 'averaging', None)
+    if not isinstance(source, TimeHistory) or averaging is None:
+        return None
+    try:
+        rate = source.sample_rate
+    except ValueError:
+        return None                 # unevenly sampled: no frames to speak of
+    shape = window_shape(averaging.window, WINDOW_POINTS,
+                         averaging.window_parameter)
+    peak = float(np.max(np.abs(shape))) or 1.0
+    levels, rows = averaging.levels(rate)
+    # the rail's geometry comes from the averaging itself — the very
+    # numbers the app's own overlay draws with. The page used to
+    # restate these proportions in its JavaScript and was held to them
+    # by matching strings; being told is the stronger seam, and it is
+    # the same seam the 3-D figure already uses.
+    rail = averaging.rail(rate)
+    return {
+        'frames': [[float(low), float(high)]
+                   for low, high in averaging.frame_bounds(
+                       rate, float(source.abscissa[0]))],
+        # which row each frame sits on. Overlapping frames cannot share
+        # one without their windows running through each other, which is
+        # what put ten of them on top of each other in the figure.
+        'levels': [int(level) for level in levels],
+        'rows': int(rows),
+        'rail': {key: rail[key] for key in
+                 ('baselines', 'glyph', 'cap', 'foot',
+                  'band_alpha', 'glyph_alpha')},
+        'window': [round(float(v / peak), 4) for v in shape],
+        'label': (f'{averaging.frames} x {averaging.frame_length} samples, '
+                  f'{averaging.window_text()}, '
+                  f'{averaging.overlap_text()} overlap'),
+    }
+
+
+def _shock_marks(source):
+    """The windows an SRS was computed from, for the trace to carry.
+
+    The same argument as `_averaging_marks`, applied to the other way
+    a record gets cut up: a time history in a report is read for what
+    part of the run was analyzed, and for a shock test that is exactly
+    where the events were found. A bare trace of a four-shock run
+    shows four bumps and says nothing about which stretches the
+    spectra came from — and the SRS figures beside it are one curve
+    per event, so the reader has no way to tell which bump is which
+    curve.
+
+    Numbered from one, as the app numbers them on screen, so a caption
+    or a table can say "shock 2" and mean something the reader can
+    find in the figure.
+    """
+    from ..core.data import TimeHistory
+
+    shocks = getattr(source, 'shocks', None)
+    if not isinstance(source, TimeHistory) or not shocks:
+        return None
+    return {
+        'windows': [[float(s.start), float(s.start + s.duration)]
+                    for s in shocks],
+        'label': (f'{len(shocks)} shock{"s" * (len(shocks) != 1)}, '
+                  'each the window its spectrum was computed from'),
+    }
+
+
+def _shared_grid(x, cap=MAX_POINTS_PER_CURVE):
+    """Indices to thin every array of one channel by, together.
+
+    `_decimate` keeps the extremes of each bin, so which points it keeps
+    depends on the values — two curves put through it separately come
+    back on two different frequency grids. A band shaded between them
+    would then be shaded between points that are not above each other.
+    An even stride keeps one grid for the target and all four of its
+    limits, which is what a filled band needs.
+    """
+    if len(x) <= cap:
+        return None
+    return np.linspace(0, len(x) - 1, cap).astype(int)
+
+
+def _law_grid(x, rows):
+    """One grid for every channel of a specification written at
+    breakpoints: `as_power_law`'s fill over the band any channel is
+    written on, with the breakpoints themselves kept, so each channel's
+    target and limits are drawn on one abscissa and a corner is drawn
+    where it is written. None when no two points can be drawn."""
+    from ..drawing.plot import POWER_LAW_POINTS
+
+    x = np.asarray(x, dtype=float)
+    rows = np.atleast_2d(np.asarray(rows, dtype=float))
+    good = (np.isfinite(x) & (x > 0.0)
+            & np.any(np.isfinite(rows) & (rows > 0.0), axis=0))
+    if good.sum() < 2:
+        return None
+    said = np.flatnonzero(good)
+    own = x[said[0]:said[-1] + 1]
+    wanted = int(np.log10(own[-1] / own[0]) * POWER_LAW_POINTS)
+    if wanted <= len(own):
+        return own
+    return np.union1d(np.geomspace(own[0], own[-1], wanted), own)
+
+
+def _specification_channels(source, records, x, logy, us, measured=None,
+                            grid=None):
+    """Every control channel, with the zones shaded around each.
+
+    All of them travel in the payload and one is drawn: the figure is
+    the app's reading of a specification, and the drop-down reaches the
+    rest without a figure per channel.
+
+    Lines were what this drew before, four of them crowding the curve
+    they bound. The app shades instead, and shading is the better
+    reading — a response is either inside the band or it is not, and a
+    filled band says that without asking anyone to tell four dashed
+    lines apart.
+
+    `measured` adds the response that answered each channel, matched by
+    DOF, which is what turns the figure into the comparison.
+
+    `grid`, frequencies, puts the target and its limits on that grid,
+    interpolated log-log from `x`, for a specification drawn as a power
+    law (`_law_grid`); it is not given with `measured`.
+    """
+    from ..core.compliance import log_interpolate
+    from ..core.data import Specification
+
+    keep = _shared_grid(x if grid is None else grid)
+
+    def mapped(values: ArrayLike) -> np.ndarray:
+        y = np.asarray(values, dtype=float)
+        if grid is not None:
+            y = log_interpolate(grid, x, y)
+        if keep is not None:
+            y = y[keep]
+        if not logy:
+            return _finite(y)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return _finite(np.where(y > 0.0,
+                                    np.log10(np.maximum(y, 1e-300)), np.nan))
+
+    shown = {name: source.display_limit(name, us)
+             for name in Specification.LIMITS}
+    answers = (_measured_by_pair(measured, us,
+                                 dimension=source.known_dim(records[0]))
+               if measured is not None and records else {})
+    out = []
+    for record in records:
+        zones = []
+        for lower, upper, severity in LIMIT_ZONES:
+            edges = []
+            for name in (lower, upper):
+                if name is None:
+                    edges.append(None)          # the edge of the plot
+                elif shown.get(name) is None:
+                    break                       # a limit never written
+                else:
+                    edges.append(mapped(shown[name][record]))
+            if len(edges) == 2 and not all(e is None for e in edges):
+                zones.append({'lower': edges[0], 'upper': edges[1],
+                              'severity': severity})
+        target = np.asarray(source.display_ordinate(us, [record])[0]).real
+        channel = {
+            'label': _channel_label(source, record),
+            'y': mapped(target),
+            'zones': zones,
+        }
+        channel['key'] = _channel_key(
+            channel, {name: None if values is None else values[record]
+                      for name, values in shown.items()},
+            target, source.known_dim(record))
+        answer = answers.get(_pair_key(source, record))
+        if answer is not None:
+            channel['response'] = mapped(answer)
+        out.append(channel)
+    return out
+
+
+def _banded(measured, block):
+    """The measurement on octave bands, when the block asks for it.
+
+    Banded here rather than requiring the reader to have made an octave
+    object first: the block says which fraction it wants and the report
+    does the integration, so a template is a description of the
+    document and not a list of prerequisites.
+    """
+    per_octave = block.get('octave')
+    if not per_octave:
+        return measured
+    try:
+        return measured.to_octave(int(per_octave))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _banded_pair(measured, specification, block):
+    """Both objects on the bands the block asks for: bands compare only
+    with the same bands (Brandon, 2026-09-19), so a block that bands
+    the measurement bands the specification with it, limits and all,
+    unless the specification is on bands already."""
+    banded = _banded(measured, block)
+    if banded is None or not block.get('octave'):
+        return banded, specification
+    if getattr(specification, 'bandwidth', None) is not None:
+        return banded, specification
+    try:
+        return banded, specification.to_octave(int(block['octave']))
+    except (ValueError, AttributeError):
+        return None, specification
+
+
+def _srs_comparison_block(block, measured, specification, us, caption):
+    """The control channel's measured shock spectra over the
+    specification and its band — the reading the app gives when the
+    SRS and its specification are selected together.
+
+    Every event of the channel on one plot: the events are what a
+    shock series compares. One channel at a time, the rest on the
+    drop-down, for the same reason the app pages them.
+
+    Unlike the PSD comparison beside it: no comparison scaling — a
+    spectrum sitting 12 dB under its requirement is the finding, and
+    rescaling it into agreement would erase it — and no
+    outside-the-limit marks, because with several events overlaid a
+    mark cannot say whose line went out (skipped deliberately;
+    Brandon, 2026-08-20).
+    """
+    from ..core.compliance import log_interpolate
+    from ..core.data import Specification
+    from ..drawing.plot import axis_label
+
+    events = {}
+    for i in range(measured.num_records):
+        events.setdefault(_pair_key(measured, i), []).append(i)
+    # a block that names its channel is one channel's figure — a grid
+    # cell, or one of a short run of figures (2026-10-01)
+    named = block.get('channel')
+    shared = [j for j in range(specification.num_records)
+              if _pair_key(specification, j) in events
+              and (not named
+                   or _channel_label(specification, j) == str(named))]
+    if not shared:
+        return None
+    x = np.asarray(measured.display_abscissa(us), dtype=float)
+    keep = _shared_grid(x)
+    grid = x if keep is None else x[keep]
+    spec_x = np.asarray(specification.display_abscissa(us), dtype=float)
+    limits = {name: specification.display_limit(name, us)
+              for name in Specification.LIMITS}
+    shown = np.asarray(measured.display_ordinate(us))
+
+    def onto(values):
+        return log_interpolate(x, spec_x, np.asarray(values, dtype=float))
+
+    def mapped(values):
+        y = np.asarray(values, dtype=float)
+        if keep is not None:
+            y = y[keep]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return _finite(np.where(y > 0.0,
+                                    np.log10(np.maximum(y, 1e-300)), np.nan))
+
+    channels = []
+    for record in shared:
+        target = onto(np.asarray(
+            specification.display_ordinate(us, [record])[0]).real)
+        edges = {name: (None if values is None else onto(values[record]))
+                 for name, values in limits.items()}
+        zones = []
+        for lower, upper, severity in LIMIT_ZONES:
+            pair = [None if name is None else edges.get(name)
+                    for name in (lower, upper)]
+            if any(name is not None and edges.get(name) is None
+                   for name in (lower, upper)):
+                continue                      # a limit never written
+            zones.append(
+                {'lower': None if pair[0] is None else mapped(pair[0]),
+                 'upper': None if pair[1] is None else mapped(pair[1]),
+                 'severity': severity})
+        rows = events[_pair_key(specification, record)]
+        responses = []
+        for i in rows:
+            name = None if measured.block is None else measured.block[i]
+            responses.append({'label': str(name) if name
+                              else measured.record_label(i),
+                              'y': mapped(np.abs(shown[i]))})
+        channel = {'label': _channel_label(specification, record),
+                   'y': mapped(target), 'zones': zones,
+                   'responses': responses,
+                   # the measured records drawn, for the caption block
+                   '_record': list(rows)}
+        channel['key'] = _channel_key(channel, edges, target,
+                                      specification.known_dim(record))
+        channels.append(channel)
+
+    first = channels[0]
+    if len(channels) > 1:
+        caption = (caption + f' — one of {len(channels)} control '
+                   'channels; the rest are on the drop-down').strip()
+    # decades on the x axis exactly when the measurement reads that
+    # way — an SRS always, a sine level never. Transformed here at the
+    # end, after every log_interpolate above has worked in real
+    # frequency; transformed at the top, the interpolation would have
+    # been onto exponents
+    logx = bool(getattr(measured, 'log_abscissa', False))
+    if logx:
+        grid = np.log10(np.maximum(np.asarray(grid, dtype=float), 1e-300))
+    built = {'kind': 'plot', 'caption': caption, 'logy': True,
+             'logx': logx,
+             'x': [_compact(v) for v in grid],
+             'xlabel': f'frequency [{us.label_html("frequency")}]',
+             'ylabel': axis_label(measured.ordinate_dim[0], us,
+                                  measured.dimension_hint[0]),
+             'curves': [{'label': first['label'], 'x': None,
+                         'y': first['y'], 'gray': True,
+                         'width': STOOD_BACK_WIDTH}],
+             'channels': channels, 'label': block.get('label')}
+    return built
+
+
+def _comparison_block(block, measured, specification, us, caption,
+                      scale_db=None):
+    """The response against its specification, a channel at a time.
+
+    The figure the app draws when both are selected: the target behind,
+    the response in front, the zones shaded around them, and the lines
+    that went outside abort marked in red above and blue below.
+
+    Built on the **measurement's** frequency axis, with the
+    specification interpolated onto it in log-log. The two rarely share
+    an axis — a specification is written at breakpoints or on the
+    controller's lines — and drawing the response against the
+    specification's grid only works while they happen to match, which
+    they did here and will not always.
+
+    `compliance.outside` decides what is out, the same call the app and
+    the table make, so a line marked on the page is a line counted in
+    the table.
+
+    The response drawn is the **scaled** one whenever a comparison
+    scale applies — the same curve the app draws and the same data the
+    error bars judge — and the caption and the curve's own label both
+    say by how much, because a reader who misses the scaling reads the
+    figure as a claim about the raw data.
+    """
+    from ..core.compliance import (
+        compare,
+        comparison_scale_db,
+        judge,
+        log_interpolate,
+        matched_records,
+        readouts,
+    )
+    from ..core.data import Specification
+
+    if scale_db is None:
+        scale_db = comparison_scale_db(specification, measured)
+    answers = _measured_by_pair(
+        measured, us, scale_db=scale_db,
+        dimension=specification.known_dim(0))
+    # a block that names its channel is one channel's figure — the
+    # random report writes one per control channel rather than one
+    # figure with a drop-down (Brandon, 2026-09-18)
+    named = block.get('channel')
+    shared = [i for i in range(specification.num_records)
+              if _pair_key(specification, i) in answers
+              and (not named
+                   or _channel_label(specification, i) == str(named))]
+    if not shared:
+        return None
+    # the pair the bar charts compare, before the lines at 0 Hz go: the
+    # readouts are the bars' own numbers (`compliance.compare`)
+    compared_spec, compared_measured = specification, measured
+    measured = _positive_lines(measured)
+    specification = _positive_lines(specification)
+    x = np.asarray(measured.display_abscissa(us), dtype=float)
+    keep = _shared_grid(x)
+    grid = x if keep is None else x[keep]
+    spec_x = np.asarray(specification.display_abscissa(us), dtype=float)
+    limits = {name: specification.display_limit(name, us)
+              for name in Specification.LIMITS}
+    # A banded specification is drawn on its own bins — the target and
+    # its zones flat across each of *its* bands, the shape its own
+    # figure and the app give it — where every specification used to
+    # be interpolated onto the measurement's grid and stepped on the
+    # measurement's bins, which drew an octave-band requirement as a
+    # staircase of the measurement's making (Brandon, 2026-09-18: "it
+    # seems wrong to compare a stair-step psd to a non-stairstep
+    # specification"). A specification on lines or at breakpoints is
+    # still read onto the measurement's axis: its power law between
+    # points needs the dense grid to be drawn as the curve it is.
+    banded = getattr(specification, 'bandwidth', None) is not None
+    spec_edges = specification.bin_edges() if banded else None
+
+    def onto(values: ArrayLike) -> np.ndarray:
+        """One of the specification's curves, on the axis it is drawn
+        on: its own bins when banded, the measurement's otherwise."""
+        values = np.asarray(values, dtype=float)
+        return values if banded else log_interpolate(x, spec_x, values)
+
+    # the measured record each specification record is judged
+    # against, by the pairing the table uses
+    measured_of = {si: mi for _label, si, mi
+                   in matched_records(specification, measured)}
+
+    def mapped(values: ArrayLike, own: bool = False) -> np.ndarray:
+        y = np.asarray(values, dtype=float)
+        if keep is not None and not own:
+            y = y[keep]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return _finite(np.where(y > 0.0,
+                                    np.log10(np.maximum(y, 1e-300)), np.nan))
+
+    channels = []
+    for record in shared:
+        target = onto(np.asarray(
+            specification.display_ordinate(us, [record])[0]).real)
+        response = answers[_pair_key(specification, record)]
+        edges = {name: (None if values is None else onto(values[record]))
+                 for name, values in limits.items()}
+        zones = []
+        for lower, upper, severity in LIMIT_ZONES:
+            pair = [None if name is None else edges.get(name)
+                    for name in (lower, upper)]
+            if any(name is not None and edges.get(name) is None
+                   for name in (lower, upper)):
+                continue                      # a limit never written
+            zones.append({'lower': None if pair[0] is None
+                          else mapped(pair[0], banded),
+                          'upper': None if pair[1] is None
+                          else mapped(pair[1], banded),
+                          'severity': severity})
+        channel = {'label': _channel_label(specification, record),
+                   'y': mapped(target, banded), 'response': mapped(response),
+                   'zones': zones,
+                   # the measured record drawn, for the caption block
+                   '_record': measured_of.get(record)}
+        for name, key in (('abort_upper', 'over'), ('abort_lower', 'under')):
+            if limits.get(name) is None or record not in measured_of:
+                continue
+            # the one judgment (`compliance.judge`, an area against an
+            # area over each cell), so a mark on the page is a cell the
+            # table counts; the mark stands at the limit's mean density
+            # over its cell, in the page's units
+            verdict = judge(specification, measured, record, measured_of[record],
+                            name, key == 'over', scale_db)
+            factor = display_factor(limits[name][record],
+                                     specification.limits[name][record])
+            channel[key] = mapped(verdict['level'] * factor)
+        channel['key'] = _channel_key(channel, edges, target,
+                                      specification.known_dim(record))
+        # the share outside abort and the RMS error, lower left and
+        # lower right, each in its box (Brandon, 2026-10-23)
+        if record in measured_of:
+            channel['readouts'] = readouts(compare(
+                compared_spec, compared_measured, record,
+                measured_of[record], scale_db=scale_db))
+        channels.append(channel)
+
+    first = channels[0]
+    measured_label = (f'measured ({scale_db:+d} dB)' if scale_db
+                      else 'measured')
+    # the app's pens: the one response read against its specification
+    # in the first curve color and wide enough to stand apart from it,
+    # the specification gray and wider still behind it
+    # (`plot.MEASURED_WIDTH`, `MEASURED_ALPHA`, `STOOD_BACK_WIDTH`)
+    curves = [{'label': first['label'], 'x': None, 'y': first['y'],
+               'gray': True, 'width': STOOD_BACK_WIDTH},
+              {'label': measured_label, 'x': None, 'y': first['response'],
+               'color': 0, 'width': MEASURED_WIDTH,
+               'alpha': MEASURED_ALPHA}]
+    if banded:
+        # the target on its own grid, stepped on its own edges; the
+        # response keeps the block's grid and edges
+        curves[0]['x'] = [_compact(v) for v in spec_x]
+        curves[0]['steps'] = True
+        curves[0]['edges'] = [_compact(v) for v in spec_edges]
+    if scale_db:
+        caption = (caption + f' — measured data scaled {scale_db:+d} dB '
+                   'to the specification').strip()
+    if len(channels) > 1:
+        caption = (caption + f' — one of {len(channels)} control '
+                   'channels; the rest are on the drop-down').strip()
+    # the view opens on the specification's own band — the lines its
+    # target is written on, not the axis it is stored on, which for a
+    # controller's target runs to Nyquist — and the measurement's
+    # wider band is a zoom away (Brandon, 2026-09-18 and again
+    # 2026-09-19)
+    home = _specified_band(specification, shared[0], us) or (
+        [spec_edges[0], spec_edges[-1]] if banded
+        else [spec_x[0], spec_x[-1]])
+    built = {'kind': 'plot', 'caption': caption, 'logy': True,
+             'x': [_compact(v) for v in grid],
+             'xlabel': f'frequency [{us.label_text("frequency")}]',
+             'ylabel': _axis_text(specification, us, shared[0]),
+             'steps': True,
+             'home_x': [float(home[0]), float(home[1])],
+             'curves': curves, 'channels': channels}
+    if keep is None:
+        # the grid *is* the measured object's own lines, so its own
+        # edges apply — and for an octave comparison those are band
+        # edges, which midpoints miss by several percent of a band.
+        # Thinned (`_shared_grid` strides a huge grid down so the
+        # target and its four limits stay on one x), the object's
+        # widths no longer describe the points being drawn, so no
+        # edges are claimed and the page falls back to midpoints of
+        # what it was given — the honest reading of a thinned grid.
+        own = getattr(measured, 'bin_edges', None)
+        widths = own() if own is not None and getattr(
+            measured, 'bandwidth', None) is not None else None
+        built['edges'] = [_compact(v) for v in bin_edges(grid, widths)]
+    if getattr(measured, 'bandwidth', None) is not None:
+        # an octave-band comparison reads on a log frequency axis, the
+        # way bands are read; the narrowband one stays linear (Brandon,
+        # 2026-09-20)
+        _into_decades(built)
+    return built
+
+
+def _into_decades(built):
+    """A finished flat figure put on a log frequency axis: every x it
+    carries — the grid, the opening window, the bin edges, a curve's
+    own grid and edges — taken to decades, and `logx` set so the page
+    labels the axis in hertz."""
+    def decades(values):
+        return _finite(_decades(np.asarray(values, dtype=float), True))
+
+    for key in ('x', 'home_x', 'edges'):
+        if built.get(key) is not None:
+            built[key] = decades(built[key])
+    for curve in built.get('curves', ()):
+        for key in ('x', 'edges'):
+            if curve.get(key) is not None:
+                curve[key] = decades(curve[key])
+    built['logx'] = True
+
+
+def _specified_band(specification, record, us):
+    """The band a specification's record actually specifies: from its
+    first to its last line whose target is finite and positive — a
+    banded one's outer bin edges — on the display axis.
+
+    A controller's target is written on every FFT line of the run,
+    NaN or zero outside the band it controlled (the plate's has 726
+    positive lines of 1025), so the specification's *abscissa* runs to
+    Nyquist and says nothing about where the requirement is. The
+    figures open on this band instead (Brandon, 2026-09-19: the
+    specification and comparison figures "zoomed across the entire
+    data range"). None when no line is positive.
+    """
+    x = np.asarray(specification.display_abscissa(us), dtype=float)
+    y = np.asarray(specification.display_ordinate(us, [record]),
+                   dtype=complex).real[0]
+    with np.errstate(invalid='ignore'):
+        lines = np.flatnonzero(np.isfinite(y) & (y > 0.0))
+    if not lines.size:
+        return None
+    first, last = int(lines[0]), int(lines[-1])
+    if getattr(specification, 'bandwidth', None) is not None:
+        edges = specification.bin_edges()
+        return [float(edges[first]), float(edges[last + 1])]
+    return [float(x[first]), float(x[last])]
+
+
+def _channel_label(data, record):
+    """How a control channel reads: the DOF alone when it is its own
+    reference.
+
+    `record_label` gives '101Z+/101Z+' for an autospectrum, which says
+    the same thing twice — and it is the compliance table's own label
+    that the marks have to agree with, so they are the same call.
+    """
+    from ..drawing.plot import pair_label
+
+    return pair_label(_pair_key(data, record))
+
+
+def _pair_key(data, record):
+    return data.record_pair(record)
+
+
+def _measured_by_pair(measured, us, scale_db=0.0, dimension=None):
+    """{DOF pair: values} for the records a measurement carries,
+    scaled by the comparison's decibels when it has any.
+
+    `dimension` filters to records measuring one quantity. It exists
+    because a DOF pair alone is not an identity: a drive point that is
+    also a control channel carries a force record and an acceleration
+    record under the same pair, and without the filter whichever came
+    last shadowed the other — which put a newtons-squared spectrum on
+    an acceleration specification's plot and marked every line as
+    under the abort floor."""
+    keep = [i for i in range(measured.num_records)
+            if dimension is None or measured.known_dim(i) == dimension]
+    shown = np.asarray(measured.display_ordinate(us, keep))
+    factor = 10.0 ** (scale_db / 10.0)
+    return {_pair_key(measured, i): np.abs(shown[k]) * factor
+            for k, i in enumerate(keep)}
+
+
+def _kurtosis_bars(block, source):
+    """How Gaussian each channel of a record is, a bar apiece.
+
+    A spectrum says nothing about the shape of the distribution that
+    produced it: two records with identical PSDs can be a smooth hiss
+    and a train of rare hard peaks, and the second fatigues an article
+    in a way the first never will. Every channel on one chart whatever
+    it measures — kurtosis is dimensionless, so this is the one
+    reading here where accelerations and forces share an axis honestly
+    (Brandon, 2026-08-24).
+    """
+    from ..core.data import TimeHistory
+    from ..core.kurtosis import (
+        HIGH,
+        LOW,
+        NOMINAL,
+        analyzed_span,
+        channel_kurtosis,
+    )
+
+    if not isinstance(source, TimeHistory):
+        return None
+    read = channel_kurtosis(source)
+    rows = [(label, value) for label, value in read if np.isfinite(value)]
+    if not rows:
+        return None
+    # a dead channel has no shape to describe and drops out — said,
+    # not dropped in silence, because a chart of eight bars from a
+    # twelve-channel record otherwise reads as a chart of everything
+    silent = len(read) - len(rows)
+    # which stretch was read, said outright: the same record answers
+    # 4.23 whole and 2.92 over its analyzed frames, and a reader
+    # cannot reconcile the number with the spectra beside it unless
+    # the figure says which one it is
+    _spans, phrase = analyzed_span(source)
+    caption = f"{block.get('caption', '')}, {phrase}".strip(', ')
+    if silent:
+        caption += (f' — {silent} channel{"s" * (silent != 1)} recorded '
+                    'nothing and cannot be read')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [label for label, _v in rows],
+        'values': [round(float(value), 4) for _l, value in rows],
+        'low': LOW, 'high': HIGH,
+        # the bars grow from the nominal, not from zero: what is being
+        # read is the departure from Gaussian, and it runs both ways
+        # (Brandon, 2026-08-24). The axis follows the bars rather than
+        # reaching down to a zero no record ever sits at.
+        'baseline': NOMINAL,
+        'floor': None,
+        'units': '',
+        'ylabel': f'Pearson kurtosis ({NOMINAL:.0f} is Gaussian)',
+    }
+
+
+def _bar_value(value):
+    """A bar's value for the page: rounded, or None (JSON null) where
+    there is no number. A channel with no reading — an RMS error with
+    nothing to compare across a short run — went out as NaN, which the
+    page's JSON refuses, and the whole report failed to write
+    (2026-10-06, a one-second random-and-sine run). The page draws a
+    null as a labeled row with no bar."""
+    value = float(value)
+    return round(value, 4) if np.isfinite(value) else None
+
+
+def _snr_bars(block, signal, floor):
+    """How far each channel's signal stands above its noise: RMS
+    signal-to-noise in dB, a bar apiece, judged against a floor.
+
+    The same rows the app's RMS signal to noise reading draws
+    (`core.snr.rms_signal_to_noise`). A channel with no signal above
+    its noise has no number: it goes out as null, is named as at the
+    noise floor, and counts under the threshold — the worst reading a
+    channel can give, so it is in the count rather than out of it. A
+    channel whose ambient recorded nothing is left out, and the
+    caption says how many.
+    None when the pair cannot pair, which keeps the slot unbound.
+    """
+    from ..core.snr import THRESHOLD_DB, at_floor, rms_signal_to_noise
+
+    try:
+        read, silent = rms_signal_to_noise(signal, floor)
+    except ValueError:
+        return None
+    rows = at_floor(read)
+    if not rows:
+        return None
+    # left off and said, as the kurtosis bars say a dead channel: a
+    # chart of eight bars from twelve channels otherwise reads as all
+    caption = block.get('caption', '')
+    if silent:
+        caption += (f' — {len(silent)} channel{"s" * (len(silent) != 1)} '
+                    'recorded no ambient noise and cannot be read')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [label for label, _v in rows],
+        'values': [round(float(v), 4) if np.isfinite(v) else None
+                   for _label, v in rows],
+        'low': THRESHOLD_DB, 'high': None, 'side': 'under',
+        'floor': None, 'units': ' dB',
+        'ylabel': 'RMS signal to noise [dB]',
+    }
+
+
+def _bars_block(block, specification, measured, us):
+    """The comparison as a bar per control channel.
+
+    A table of six channels is read; a table of sixty is scanned, and
+    the one channel that matters is somewhere in it. The same numbers as
+    bars answer which channel is worst and how many are out before
+    anything is read at all — which is why the table these replaced is
+    gone rather than sitting beside them.
+
+    Two readings, chosen by `mode`. 'error' is the level each channel
+    came out at, in dB, against a threshold either side. 'lines' is how
+    much of each channel's band fell outside its abort limits, against
+    a ceiling — no amount of staying inside is a fault, so it has no
+    floor.
+
+    A transient specification is compared a different way entirely —
+    see `_replication_bars` — because it is a waveform rather than a
+    statistic, and none of the machinery below applies to it.
+    """
+    from ..core.compliance import (
+        ERROR_DB,
+        LINES_PERCENT,
+        channel_errors,
+        channel_refusals,
+        compare_all,
+        comparison_note,
+    )
+    from ..core.data import ShockSpecification, TransientSpecification
+
+    if isinstance(specification, TransientSpecification):
+        return _replication_bars(block, specification, measured)
+    if isinstance(specification, ShockSpecification):
+        return _srs_bars(block, specification, measured)
+
+    # the scale is resolved before the banding, for the reason the
+    # comparison figure resolves it before its own: one report, one
+    # number, whichever grid a block reads the data on
+    from ..core.compliance import comparison_scale_db
+
+    scale_db = comparison_scale_db(specification, measured)
+    measured, specification = _banded_pair(measured, specification, block)
+    if measured is None:
+        return None
+    compared = compare_all(specification, measured, scale_db=scale_db)
+    rows = channel_errors(compared)
+    if not rows:
+        return None
+    reasons = channel_refusals(compared)
+    # the bars judge the scaled data, so the caption says so — an RMS
+    # error chart that quietly compared scaled data would read as a
+    # claim about the raw run
+    caption = block.get('caption', '')
+    if scale_db:
+        caption = (caption + f' — measured data scaled {scale_db:+d} dB '
+                   'to the specification').strip()
+    # and when neither side's units were declared, that the numbers
+    # were compared as they came
+    raw = comparison_note(compared)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
+    lines = block.get('mode') == 'lines'
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [label for label, _db, _pct in rows],
+        'values': [_bar_value(pct if lines else db)
+                   for _label, db, pct in rows],
+        'notes': [reasons.get(i) for i in range(len(rows))],
+        'low': LINES_PERCENT if lines else -ERROR_DB,
+        'high': None if lines else ERROR_DB,
+        # a share of a band cannot be negative, so the axis does not
+        # pretend it might be; an error in dB runs both ways and gets
+        # whatever the data needs
+        'floor': 0.0 if lines else None,
+        'units': '%' if lines else ' dB',
+        'ylabel': ('band outside abort [%]' if lines
+                   else 'RMS error [dB]'),
+    }
+
+
+#: mode -> (key, ylabel, units, two-sided). A waveform error cannot be
+#: negative and no amount of matching is a fault, so it has a ceiling
+#: and no floor; the two dB readings run either way and get both.
+def _srs_bars(block, specification, measured):
+    """How far each shock spectrum sits from the one it had to meet.
+
+    RMS across the band, in decibels. An SRS spans decades and is read
+    on log axes, so the linear distance a waveform gets is dominated by
+    whatever bands are loudest and goes blind to a large ratio error
+    where the target is small — see `core.compliance.srs_errors`. A
+    pair that cannot be compared keeps its row, with no bar and the
+    reason written along it (`notes`).
+    """
+    from ..core.compliance import SRS_ERROR_DB, comparison_note, srs_errors
+
+    rows = srs_errors(specification, measured)
+    if not rows:
+        return None
+    many = len({row.event for row in rows if row.event}) > 1
+    caption = block.get('caption', '')
+    raw = comparison_note(rows)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [f'{row.dof} {row.event}' if many and row.event
+                   else row.dof for row in rows],
+        'values': [_bar_value(row.db) for row in rows],
+        'notes': [f'not scored: {row.refused}' if row.refused else None
+                  for row in rows],
+        # both sides: the deviation is signed — over the ceiling the
+        # shock was too hard, under the floor it under-hit — and the
+        # unsigned reading that once made every miss look like an
+        # over-test is what a signed value exists to prevent
+        'low': -SRS_ERROR_DB, 'high': SRS_ERROR_DB,
+        'units': ' dB', 'ylabel': 'SRS deviation, RMS across the band [dB]',
+    }
+
+
+def _sine_bars(block, specification, levels):
+    """How far each tone's extracted level sits from its requirement.
+
+    The same signed RMS-in-decibels reading the SRS deviation gives,
+    for the same reasons — see `core.compliance.sine_errors`. Every
+    tone at every control channel, one bar each.
+    """
+    from ..core.compliance import SINE_ERROR_DB, comparison_note, sine_errors
+
+    rows = sine_errors(specification, levels)
+    if not rows:
+        return None
+    many = len({row.tone for row in rows}) > 1
+    caption = block.get('caption', '')
+    raw = comparison_note(rows)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [f'{row.dof} {row.tone}' if many else row.dof
+                   for row in rows],
+        'values': [_bar_value(row.db) for row in rows],
+        'notes': [f'not scored: {row.refused}' if row.refused else None
+                  for row in rows],
+        'low': -SINE_ERROR_DB, 'high': SINE_ERROR_DB,
+        'units': ' dB',
+        'ylabel': 'Sine level deviation, RMS across the sweep [dB]',
+    }
+
+
+def _replication_bars(block, specification, measured):
+    """How far each control channel is from its target waveform.
+
+    One bar per channel per repeat, and no repeat singled out. Which
+    playing of the waveform was the bad one is a judgment about what
+    the article is for rather than a measurement, so every one is here
+    and the reader makes it.
+
+    Only this reading. A level error wants two PSDs and an SRS
+    deviation wants two spectra; both are reached by computing them —
+    the specification's own PSD is a `Specification` and its SRS a
+    `ShockSpecification`, so the report binds those the same way the
+    random report binds its own. The waveform error is what the time
+    data alone can answer, which is why it is the one that lives here.
+
+    Every metric is a ratio against the target, so the unit system does
+    not enter: both objects are held in SI and the units divide out.
+
+    A channel whose target asks for nothing gets no bar. It cannot be
+    given a fair one — the metrics are all ratios — and a bar of zero
+    would read as a channel that replicated perfectly, which is the
+    opposite of what is known about it. The caption says which channels
+    those were rather than letting them vanish.
+    """
+    from ..core.replication import WAVEFORM_PERCENT, compare
+
+    if block.get('mode', 'waveform') != 'waveform':
+        return None
+    from ..core.compliance import comparison_note
+
+    rows = compare(measured, specification, metrics=('waveform',))
+    # a refused channel keeps its row, with why written along it
+    shown = [r for r in rows
+             if np.isfinite(r['waveform']) or r.get('refused')]
+    if not shown:
+        return None
+    # the repeat only earns a place in the label when there is more
+    # than one of them to tell apart
+    many = len({r['frame'] for r in shown}) > 1
+    caption = block.get('caption', '')
+    silent = sorted({r['label'] for r in rows if r.get('zero_target')})
+    if silent:
+        caption = (f'{caption} — {", ".join(silent)} asked for nothing '
+                   'and cannot be scored against it').strip(' —')
+    raw = comparison_note(shown)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [f"{r['label']} e{r['frame'] + 1}" if many else r['label']
+                   for r in shown],
+        'values': [_bar_value(r['waveform']) for r in shown],
+        'notes': [f"not scored: {r['refused']}" if r.get('refused')
+                  else None for r in shown],
+        # a one-sided reading carries its only threshold in `low` and
+        # leaves `high` null, which is how the page tells the two apart
+        'low': WAVEFORM_PERCENT, 'high': None, 'floor': 0.0,
+        'units': '%', 'ylabel': 'waveform error [%]',
+    }
+
+
+def _replication_overlay_block(block, measured, specification, us):
+    """The transient comparison itself: the first playing of the
+    waveform over the target it was aiming at, one control channel at
+    a time on the drop-down — the report's rendering of the app's
+    overlay view. Linear axes, because these are waveforms; the
+    channel machinery is the specification plot's, with no zones,
+    since a target waveform carries no limits."""
+    from ..core.data import TimeHistory, TransientSpecification
+    from ..core.replication import event_slice, playings
+
+    if (not isinstance(measured, TimeHistory)
+            or not isinstance(specification, TransientSpecification)):
+        return None
+    window = event_slice(measured, specification, 0)
+    if window is None:
+        return None
+    count = len(playings(measured, specification))
+    x = [_compact(v) for v in specification.display_abscissa(us)]
+    rows = {dof: i for i, dof in enumerate(window.response_dof)}
+    channels = []
+    for i, dof in enumerate(specification.response_dof):
+        if dof not in rows:
+            continue
+        target = _finite(np.asarray(
+            specification.display_ordinate(us, [i])[0]).real)
+        answer = _finite(np.asarray(
+            window.display_ordinate(us, [rows[dof]])[0]).real)
+        channels.append({'label': dof, 'y': target,
+                         'response': answer, 'zones': []})
+    if not channels:
+        return None
+    caption = block.get('caption', '')
+    first = channels[0]
+    return {'kind': 'plot', 'caption': caption, 'logy': False,
+            'x': x, 'xlabel': f'time [{us.label_text("time")}]',
+            'ylabel': _axis_text(specification, us),
+            'curves': [{'label': first['label'], 'x': None,
+                        'y': first['y'], 'gray': True,
+                        'width': STOOD_BACK_WIDTH},
+                       {'label': f'playing 1 of {count}', 'x': None,
+                        'y': first['response'], 'color': 0,
+                        'width': MEASURED_WIDTH,
+                        'alpha': MEASURED_ALPHA}],
+            'channels': channels}
+
+
+def _table_block(block, source, geometry=None):
+    """An object as a table.
+
+    The rows come from `core.tables.table_of`, so a report and a script
+    asking what is in a channel table cannot answer differently. The
+    caption is this end's business.
+    """
+    from ..core.shapes import ShapeSet
+    from ..core.tables import table_of
+
+    built = table_of(source, geometry)
+    if built is None:
+        return None
+    headers, rows = built
+    caption = block.get('caption', '')
+    if isinstance(source, ShapeSet) and getattr(source, 'unscaled', False):
+        # the reader must know: without a drive point the shapes carry
+        # an arbitrary scale, and modal masses mean nothing
+        caption = (caption + ' — mode shapes are unscaled (no drive '
+                   'point was measured); frequencies, damping and MAC '
+                   'are unaffected, but modal masses are not '
+                   'physical').strip(' —')
+    return {'kind': 'table', 'caption': caption,
+            'headers': headers, 'rows': rows}
+
+
+from .page import (
+    _EDIT_CSS,
+    _EDIT_JS,
+    _PAGE,
+    page_parts,
+)
+
+#: the fewest points a trimmed curve may keep: below this a curve
+#: draws a few segments, not its shape, and a request for it is more
+#: likely a slip than a wish
+MIN_TRIM_POINTS = 16
+
+
+def _only_channels(obj: Any, channels: Sequence[str], like: Any = None) -> Any:
+    """A copy of `obj` holding only its records at `channels`, the
+    response DOFs as the legend names them ('101Z+'), or None when it
+    holds none of them. The copy is made with the object's own
+    `delete_records`, so a specification's limit curves go with their
+    records.
+
+    With `like` (the data already narrowed) a record is kept only where
+    `like` has a record of the same quantity at its DOF: a DOF can carry
+    an acceleration and a force, and a limit is drawn against the one it
+    is written for. A record at a chosen DOF that matches no record of
+    `like` there is refused, naming both quantities, rather than drawn
+    against a curve in other units."""
+    import copy
+
+    from ..core.unit_choices import shown_dimension
+
+    held = [str(dof) for dof in obj.response_dof]
+    keep = {str(channel) for channel in channels}
+    doomed = [i for i, dof in enumerate(held) if dof not in keep]
+    if like is not None:
+        measured: dict[str, set[str]] = {}
+        for i, dof in enumerate(like.response_dof):
+            measured.setdefault(str(dof), set()).add(like.ordinate_dim[i])
+        for i, dof in enumerate(held):
+            if i in doomed or obj.ordinate_dim[i] in measured.get(dof, ()):
+                continue
+            theirs = ', '.join(sorted(shown_dimension(d)
+                                      for d in measured.get(dof, ())))
+            raise ValueError(
+                f'the specification\'s {dof} is '
+                f'{shown_dimension(obj.ordinate_dim[i])} and the data\'s is '
+                f'{theirs or "absent"}; a limit is drawn only against the '
+                'quantity it is written for')
+    if len(doomed) == len(held):
+        return None
+    out = copy.deepcopy(obj)
+    if doomed:
+        out.delete_records(doomed)
+    return out
+
+
+def _numeric_list(value: Any) -> bool:
+    return (isinstance(value, list) and bool(value)
+            and all(v is None or (isinstance(v, (int, float))
+                                  and not isinstance(v, bool))
+                    for v in value))
+
+
+def _lists_of_length(node: Any, length: int, found: list) -> None:
+    """Every list of numbers `length` long anywhere under `node`: on a
+    plot, the arrays drawn on one abscissa of that many points."""
+    if isinstance(node, dict):
+        for value in node.values():
+            _lists_of_length(value, length, found)
+    elif _numeric_list(node):
+        # one list can hang in two places (a zone's edge is the limit's
+        # own); it is thinned once
+        if len(node) == length and all(node is not f for f in found):
+            found.append(node)
+    elif isinstance(node, list):
+        for value in node:
+            _lists_of_length(value, length, found)
+
+
+def _thin_together(values: list, riders: list, budget: int
+                   ) -> tuple[int, int]:
+    """Thin `values` and `riders`, all on one abscissa, in place to the
+    same points: those that keep every extreme of every one of `values`
+    (`decimate.shared_peak_indices`). The riders, an abscissa, go along.
+    Returns (drawn, held)."""
+    from ..decimate import shared_peak_indices
+
+    held = len(values[0])
+    rows = np.array([[np.nan if v is None else v for v in a]
+                     for a in values], dtype=float)
+    keep = shared_peak_indices(rows, budget)
+    for array in values + riders:
+        array[:] = [array[i] for i in keep]
+    return len(keep), held
+
+
+def _unstep(node: Any, held: int) -> None:
+    """Draw thinned densities as lines: a stepped curve is flat across
+    each of its bins, between bin edges one longer than its values, and
+    once most bins are gone the edges left describe none of them. Past
+    a few hundred lines a line through the kept centers draws the same
+    picture."""
+    if isinstance(node, dict):
+        edges = node.get('edges')
+        if _numeric_list(edges) and len(edges) == held + 1:
+            del node['edges']
+        if node.get('steps'):
+            node['steps'] = False
+        for value in node.values():
+            _unstep(value, held)
+    elif isinstance(node, list):
+        for value in node:
+            _unstep(value, held)
+
+
+def _trim_plot(block: dict, budget: int) -> None:
+    """One plot's curves thinned to `budget` points each, in place.
+
+    A plot's arrays share its `x` unless a curve brings an `x` of its
+    own. The shared ones are thinned together, so a band still lies
+    between points that are above one another, and a curve with its own
+    abscissa is thinned with its own arrays alone. Either way every
+    extreme of every curve is kept, and the figure's note says the data
+    was thinned, as every thinned figure's does (`_thinned_note`).
+    """
+    def thin(node, abscissa):
+        found = []
+        _lists_of_length(node, len(abscissa), found)
+        values = [a for a in found if a is not abscissa]
+        riders = [abscissa]
+        if not values:
+            # an abscissa no curve is drawn on any more (each brought
+            # its own, thinned above) is thinned on its own values;
+            # carried as a rider as well it was cut twice
+            values, riders = [abscissa], []
+        drawn, held = _thin_together(values, riders, budget)
+        _unstep(node, held)
+        return drawn, held
+
+    thinned = [thin(curve, curve['x']) for curve in block.get('curves', [])
+               if _numeric_list(curve.get('x'))
+               and len(curve['x']) > budget]
+    if _numeric_list(block.get('x')) and len(block['x']) > budget:
+        thinned.append(thin(block, block['x']))
+    if thinned:
+        note = block.get('note') or ''
+        held = max(h for _, h in thinned)
+        earlier = re.search(r'Thinned for the file: \d+ points drawn of (\d+)',
+                            note)
+        if earlier:
+            # thinned already by its builder: one sentence, counting
+            # from the record, not two with the second understating it
+            # (2026-10-28)
+            held = max(held, int(earlier.group(1)))
+            note = re.sub(r'\s*Thinned for the file:[^.]*\.', '', note).strip()
+        sentence = _thinned_note(max(d for d, _ in thinned), held)
+        block['note'] = (note + ' ' + sentence if note else sentence)
+
+
+def _trim_plots(node: Any, budget: int) -> None:
+    """Every plot under `node` (a payload, a block, a grid's cells)
+    thinned to `budget` points a curve."""
+    if isinstance(node, dict):
+        if node.get('kind') == 'plot':
+            _trim_plot(node, budget)
+            return
+        for value in node.values():
+            _trim_plots(value, budget)
+    elif isinstance(node, list):
+        for value in node:
+            _trim_plots(value, budget)
+
+
+def _refuse_blank_plot(block: dict) -> None:
+    """Refuse a plot none of whose curves has a value to draw: a record
+    of zeros on a logarithmic axis, one missing throughout, or one with
+    no samples would be written as an empty frame that says nothing of
+    why."""
+    if block.get('kind') != 'plot':
+        return
+    drawn = [entry for key in ('curves', 'channels')
+             for entry in block.get(key) or [] if isinstance(entry, dict)]
+    if any(any(v is not None for v in entry.get('y') or [])
+           for entry in drawn):
+        return
+    names = ', '.join(str(entry.get('label')) for entry in drawn
+                      if entry.get('label')) or 'the data'
+    why = ('no value above zero, which is all a logarithmic axis draws'
+           if block.get('logy') else 'no finite value')
+    raise ValueError(f'nothing in the figure has a value to draw: {names} '
+                     f'holds {why}')
+
+
+#: how a complex plot can be read, as the app's drop-down reads it
+COMPONENTS = ('magnitude', 'phase', 'real', 'imag')
+
+
+def _figure_payload(data, specification, channel, mode, geometry, shapes,
+                    dofs, name, caption, theme, unit_system, fill,
+                    channels, max_points,
+                    component='magnitude') -> dict[str, Any]:
+    """The payload of one figure, as `export_html` and `export_figure`
+    both write it: built as a report of one block would be, then
+    narrowed to `channels` and thinned to `max_points`."""
+    from ..core.report import Report
+    from ..project import Project
+
+    if component not in COMPONENTS:
+        raise ValueError(f'component is {component!r}; a plot reads as '
+                         f'one of {", ".join(COMPONENTS)}')
+    if max_points is not None and int(max_points) < MIN_TRIM_POINTS:
+        raise ValueError(f'max_points is {max_points}; a curve keeps at '
+                         f'least {MIN_TRIM_POINTS} points')
+    # a setting that would do nothing is refused, not ignored
+    if max_points is not None and geometry is not None:
+        raise ValueError('max_points thins a plot\'s curves, and a scene has '
+                         'none; choose its modes by passing fewer shapes')
+    if (component != 'magnitude' and geometry is None and data is not None
+            and not np.iscomplexobj(getattr(data, 'ordinate', None))):
+        raise ValueError(f'component reads complex data, and this data is '
+                         f'real: {component!r} would draw it as it is')
+    if channels is not None:
+        if isinstance(channels, str):
+            channels = [channels]
+        if not len(channels):
+            raise ValueError('channels is empty: name at least one record '
+                             'to keep, by its response DOF (\'101Z+\')')
+        if data is None or not hasattr(data, 'response_dof'):
+            raise ValueError('channels choose the records of the data a '
+                             'plot draws; this figure has none')
+        narrowed = _only_channels(data, channels)
+        if narrowed is None:
+            raise ValueError(
+                f'none of {list(channels)} is a channel of the data; it '
+                f'holds {sorted({str(d) for d in data.response_dof})}')
+        missing = sorted(set(map(str, channels))
+                         - {str(d) for d in narrowed.response_dof})
+        if missing:
+            raise ValueError(f'{missing} not among the data\'s channels')
+        data = narrowed
+        if specification is not None:
+            specification = (_only_channels(specification, channels, like=data)
+                             or specification)
+    holder = Project('Figure')
+    if geometry is not None:
+        holder.add('Geometry', geometry)
+        block = {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
+                 'caption': caption}
+        if shapes is not None:
+            holder.add('Shapes', shapes)
+            holder.link('Geometry', 'Shapes')
+            block['shapes'] = 'Shapes'
+        if dofs is not None:
+            quantity, source = dofs
+            holder.add('Measured', source)
+            block.update(dofs=quantity, dofs_source='Measured')
+    elif data is not None:
+        label = name or ('Response' if specification is not None else 'Data')
+        holder.add(label, data)
+        block = {'kind': 'plot', 'source': label, 'mode': mode,
+                 'caption': caption}
+        if specification is not None:
+            holder.add('Specification', specification)
+            block['specification'] = 'Specification'
+        if channel is not None:
+            block['channel'] = channel
+        if component != 'magnitude':
+            block['component'] = component
+    else:
+        raise ValueError('a figure needs data to plot or a geometry '
+                         'to show')
+    report = Report('', [block], marking='')
+    payload = _report_payload(report, dict(holder.items()), unit_system,
+                              object_groups=holder.object_groups,
+                              fill=fill, theme=theme)
+    if not payload['blocks']:
+        raise ValueError('nothing in the figure could be drawn: the '
+                         'data, specification and channel do not meet')
+    for block in payload['blocks']:
+        _refuse_blank_plot(block)
+    if max_points is not None:
+        _trim_plots(payload['blocks'], int(max_points))
+    return payload
+
+
+def export_html(path: str | os.PathLike, data: Any = None, *,
+                specification: Any = None, channel: str | None = None,
+                mode: str = 'curves', geometry: Any = None,
+                shapes: Any = None, dofs: tuple[str, Any] | None = None,
+                name: str | None = None, caption: str = '',
+                theme: str | None = None,
+                unit_system: UnitSystem | None = None,
+                fill: bool = True,
+                channels: Sequence[str] | None = None,
+                max_points: int | None = None,
+                component: str = 'magnitude') -> str:
+    """Write one interactive figure as a single self-contained HTML file.
+
+        hertzforge.export_html('spec.html', psd, specification=spec,
+                                   channel='101Z+', theme='light')
+        hertzforge.export_html('modes.html', geometry=g, shapes=modes)
+
+    The figure is the one a report draws, with zoom, pan and the readout
+    on a plot, and turning and animation on a scene, and nothing else:
+    no title and no marking. With `fill` the figure fills whatever frame
+    holds it, such as an iframe or a box on a slide, and redraws when the
+    frame changes size. Everything the page needs is in the file, so it
+    opens offline.
+
+    Given a `geometry`, the figure is a scene of it, with its `shapes`
+    animating or, with `dofs`, the DOFs one object measures as a
+    quantity, ``('acceleration', frf)``, drawn as labeled arrows.
+    Otherwise it is a plot of `data`, against `specification` and its
+    zones when one is given, of one `channel` when named, in `mode`
+    ('curves', 'stage', 'cmif', 'mac' or 'map').
+
+    `channels` and `max_points` make the file smaller: the first keeps
+    only those records of `data` (and of `specification`), the second
+    thins every curve of a plot to that many points, keeping every
+    peak and dip, and says so under the figure. `export_figure` writes
+    the same figure as a data file and a script, for a page that cannot
+    carry an inline script.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Where the .html goes.
+    data : DataArray or ShapeSet, optional
+        What a plot draws.
+    specification : Specification, optional
+        What `data` is drawn against.
+    channel : str, optional
+        The one control channel of a comparison to draw.
+    mode : str, default 'curves'
+        The plot's reading.
+    geometry : Geometry, optional
+        Makes the figure a scene.
+    shapes : ShapeSet, optional
+        What the scene animates.
+    dofs : (str, object), optional
+        A quantity and an object: its DOFs of that quantity, as arrows.
+    name : str, optional
+        What the legend calls `data`.
+    caption : str, optional
+        A line under the figure.
+    theme : {'light', 'dark'}, optional
+        Fixes the figure's theme; unset, it follows the reader's.
+    unit_system : UnitSystem, optional
+        The units it is drawn in.
+    fill : bool, default True
+        Fill the frame; False lays it out as the report page does.
+    channels : sequence of str, optional
+        The records of `data` to keep, by response DOF ('101Z+').
+    max_points : int, optional
+        The most points a plot's curve keeps; at least 16.
+    component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
+        How a plot of complex data reads, as the app's drop-down
+        reads it.
+
+    Returns
+    -------
+    str
+        The path written.
+
+    Raises
+    ------
+    ValueError
+        When neither `data` nor `geometry` is given, when `channels`
+        names a channel `data` does not hold, when nothing of the
+        figure can be drawn, when `max_points` is under 16, or when
+        `component` is not one of the four.
+    """
+    # `fill` was added for an interactive slide deck made by the scripts
+    # that draw a paper's printed figures (Brandon, 2026-09-27).
+    import pathlib
+
+    payload = _figure_payload(data, specification, channel, mode, geometry,
+                              shapes, dofs, name, caption, theme,
+                              unit_system, fill, channels, max_points,
+                              component)
+    path = pathlib.Path(path)
+    path.write_text(_page_html(payload), encoding='utf-8')
+    return str(path)
+
+
+def export_figure(path: str | os.PathLike, data: Any = None, *,
+                  renderer: str | os.PathLike | None = None,
+                  specification: Any = None, channel: str | None = None,
+                  mode: str = 'curves', geometry: Any = None,
+                  shapes: Any = None,
+                  dofs: tuple[str, Any] | None = None,
+                  name: str | None = None, caption: str = '',
+                  theme: str | None = None,
+                  unit_system: UnitSystem | None = None,
+                  fill: bool = False,
+                  channels: Sequence[str] | None = None,
+                  max_points: int | None = None,
+                  component: str = 'magnitude') -> str:
+    """Write one interactive figure as a JSON data file, and optionally
+    the script that draws it, for a page that mounts the figure itself.
+
+        hertzforge.export_figure('spec.json', psd, specification=spec,
+                                     channel='101Z+', theme='light',
+                                     renderer='hertzforge-figure.js')
+
+    The figure is the one `export_html` writes, split in two. The data
+    file holds this figure alone. The renderer is one script for every
+    figure, the same viewers the HTML file carries; a page loads it from
+    its own site and draws a figure into an element of its own:
+
+        <div id="spec"></div>
+        <script src="hertzforge-figure.js"></script>
+        <script src="page.js"></script>   // HertzforgeFigure.load(
+                                          //   element, 'spec.json')
+
+    So a page whose Content-Security-Policy allows no inline script and
+    no frames can still show the figure. `HertzforgeFigure.mount(
+    element, data, options)` draws data already fetched, and `load(
+    element, url, options)` fetches it first; with ``{pageScroll:
+    true}`` the figure leaves the wheel and a vertical swipe to the
+    page and zooms on Ctrl or Cmd with the wheel. The figure's styles
+    are scoped to that element. The renderer refuses data written for
+    another format (`FIGURE_FORMAT`), so a page never draws a figure it
+    would misread.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Where the .json goes.
+    data : DataArray or ShapeSet, optional
+        What a plot draws.
+    renderer : str or path-like, optional
+        Where to write the renderer script as well. It is the same for
+        every figure this version writes, so a page needs it once.
+    specification : Specification, optional
+        What `data` is drawn against.
+    channel : str, optional
+        The one control channel of a comparison to draw.
+    mode : str, default 'curves'
+        The plot's reading.
+    geometry : Geometry, optional
+        Makes the figure a scene.
+    shapes : ShapeSet, optional
+        What the scene animates.
+    dofs : (str, object), optional
+        A quantity and an object: its DOFs of that quantity, as arrows.
+    name : str, optional
+        What the legend calls `data`.
+    caption : str, optional
+        A line under the figure.
+    theme : {'light', 'dark'}, optional
+        Fixes the figure's theme; unset, it follows the reader's.
+    unit_system : UnitSystem, optional
+        The units it is drawn in.
+    fill : bool, default False
+        Lay the figure out as the report page does, at its own height;
+        True fills the element, which must then have a height.
+    channels : sequence of str, optional
+        The records of `data` to keep, by response DOF ('101Z+').
+    max_points : int, optional
+        The most points a plot's curve keeps; at least 16.
+    component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
+        How a plot of complex data reads, as the app's drop-down
+        reads it.
+
+    Returns
+    -------
+    str
+        The data file's path.
+
+    Raises
+    ------
+    ValueError
+        As `export_html` raises them.
+    """
+    import pathlib
+
+    from .. import __version__
+    from .page import FIGURE_FORMAT, renderer_js
+
+    payload = _figure_payload(data, specification, channel, mode, geometry,
+                              shapes, dofs, name, caption, theme,
+                              unit_system, fill, channels, max_points,
+                              component)
+    payload['format'] = FIGURE_FORMAT
+    path = pathlib.Path(path)
+    path.write_text(json.dumps(payload, allow_nan=False, separators=(',', ':')),
+                    encoding='utf-8')
+    if renderer is not None:
+        # the same bytes on every platform, so a site that keeps a copy
+        # sees a change only when the renderer changed
+        pathlib.Path(renderer).write_text(renderer_js(__version__),
+                                          encoding='utf-8', newline='\n')
+    return str(path)

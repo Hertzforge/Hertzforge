@@ -1,0 +1,4108 @@
+"""Solids: the shapes a part is made of, before it is meshed.
+
+A part is described most directly by its shapes. The frame of the
+Frame-Wing example is a block with four windows and 41 holes taken out
+of it, and a wing is a block less eighteen holes. So a geometry holds a
+table of solids beside its nodes, coordinate systems and elements. Each
+one is a primitive (a block or a cylinder, or a section or a hole made
+of them, placed by a center and three angles), a boolean of others
+(union, subtract or intersect), or a pattern of copies of others. Solids
+are not elements: nothing that solves, animates or exports a geometry
+reads them, and meshing them (Mesh Solids, `extrusion_mesh`) is what
+turns them into elements.
+
+The table holds recipes, the numbers a person typed, so a saved project
+reopens editable and needs no geometry kernel to load. Evaluating a
+solid (its volume, its surface for drawing, the boolean itself) is done
+by OpenCASCADE (`shape`), through the OCP bindings the STEP importer
+also uses, a dependency of the package. Whether a point is inside a solid, which is
+what meshing asks, is worked out from the recipes without the kernel
+(`contains`).
+
+Lengths are held as the geometry holds its coordinates (meters once its
+units are defined), and angles in degrees about the geometry's fixed X,
+then Y, then Z axes, the rule the add pane turns a solid by
+(`rotate.frame_from_angles`).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import functools
+from dataclasses import dataclass, replace
+from itertools import pairwise
+from typing import Any
+
+import numpy as np
+
+from .fem import SHAPES as BEAM_SHAPES
+
+# Brandon (2026-10-11) wanted parts built from their shapes in the app, a
+# hole a cylinder subtracted rather than a parameter of one meshed
+# block, and meshed once they are right.
+
+#: the shapes a section is, along its own Z, and the dimensions each is
+#: typed by, in order (2026-10-12): the beam element's shapes, named and
+#: dimensioned as its sections are (`fem.SHAPES`), and a tee, an
+#: I-beam's dimensions
+SECTIONS: dict[str, tuple[str, ...]] = {
+    shape: BEAM_SHAPES['I-beam' if shape == 'tee' else shape][1]
+    for shape in ('I-beam', 'channel', 'tee', 'angle', 'rectangular tube',
+                  'round tube')}
+#: a hole, to subtract from a part: entered at its center, running along
+#: its own -Z, a depth of zero through the part it is cut from, a
+#: counterbore diameter of zero none
+HOLE = 'hole'
+HOLE_DIMENSIONS = ('diameter', 'depth', 'counterbore diameter', 'counterbore depth')
+#: the solids typed by their dimensions, each made of blocks and
+#: cylinders (`_pieces`)
+SHAPED = (*SECTIONS, HOLE)
+#: the primitives — the block and the cylinder, and the shapes made of
+#: them, each one row a person places, turns and sizes — the booleans
+#: over them, and the pattern: copies of its solids in rows, columns and
+#: layers, made of them as a boolean is
+BASIC = ('block', 'cylinder', 'cone', 'sphere')
+#: the basic solids no sweep makes: a cone's radius changes along it and
+#: a sphere has no axis, so bricks are fitted to them (2026-10-20)
+UNSWEPT = ('cone', 'sphere')
+#: the flat solids: a face with no thickness, meshed into plates on its
+#: own plane (`core.shells`) and never into bricks. Its thickness is its
+#: element group's, typed in the Element Groups table once it is meshed.
+# Brandon (2026-10-26): every meshable thing made from the Solids row,
+# a plate and a disk among them; Add Plane and Add Block, which typed
+# meshed planes and blocks straight into a geometry, retired
+FLAT = ('plate', 'disk')
+PRIMITIVES = (*BASIC, *SHAPED, *FLAT)
+OPERATIONS = ('union', 'subtract', 'intersect')
+PATTERN = 'pattern'
+
+#: how fine a surface is tessellated for drawing, as a fraction of the
+#: shape's size: context for the eye, not a mesh to solve — coarse on
+#: purpose, matching the guidance on CAD export settings
+DEFLECTION = 0.005
+
+
+@dataclass(frozen=True)
+class Solid:
+    """One row of a geometry's solids table.
+
+    A primitive is placed by its `center` and turned by `angles`. A block
+    is `widths` across along its own axes, and a cylinder is `radius`
+    about its own Z axis and `length` along it. A section or a hole is
+    sized by its `dimensions` (`SECTIONS`, `HOLE_DIMENSIONS`), and a
+    section is `length` along its own Z. A boolean names its `operands`
+    by id, in order (a subtraction takes the rest from the first), and
+    its own numbers are unused. A pattern names its solids as a boolean
+    does and holds `counts` copies along its own axes, `widths` apart,
+    turned by `angles`; the copies follow the originals, and the pattern
+    is changed as one.
+
+    Parameters
+    ----------
+    id : int
+        Unique within the geometry.
+    name : str
+        What a person calls it; may be empty.
+    kind : str
+        One of `PRIMITIVES`, one of `OPERATIONS`, or `PATTERN`.
+    center : tuple of float
+        The primitive's middle.
+    angles : tuple of float
+        Degrees about the fixed X, then Y, then Z axes.
+    widths : tuple of float
+        A block's three widths along its own axes, a plate's two along
+        its own X and Y (and zero along Z); a pattern's spacing along its
+        own.
+    radius, length : float
+        A cylinder's; a cone's radius at its base (its own -Z end) and
+        its height; a sphere's radius; a disk's radius, in its own XY
+        plane.
+    operands : tuple of int
+        A boolean's solids, by id.
+    corner : float
+        A block's corner radius, to which its four edges along its own Z
+        are rounded, so a window cut with rounded corners leaves the
+        fillets a part has there.
+    counts : tuple of int
+        A pattern's copies along its own axes, the original counted.
+    dimensions : tuple of float
+        A section's or a hole's, in the order `SECTIONS` and
+        `HOLE_DIMENSIONS` name them; a cone's radius at its top.
+    """
+
+    # patterns whose copies follow the original and are changed as one
+    # (Brandon, 2026-10-11); rounded corners (2026-10-11); sections and
+    # holes typed by their dimensions (2026-10-12)
+    id: int
+    name: str
+    kind: str
+    center: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    angles: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    widths: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    radius: float = 0.0
+    length: float = 0.0
+    operands: tuple[int, ...] = ()
+    corner: float = 0.0
+    counts: tuple[int, int, int] = (1, 1, 1)
+    dimensions: tuple[float, ...] = ()
+
+    def scaled(self, factor: float) -> Solid:
+        """The same solid with every length multiplied by `factor`, which
+        is what a change of the geometry's length unit does to it."""
+        return replace(self, center=tuple(float(c) * factor for c in self.center),
+                       widths=tuple(float(w) * factor for w in self.widths),
+                       radius=self.radius * factor,
+                       length=self.length * factor,
+                       corner=self.corner * factor,
+                       dimensions=tuple(float(d) * factor for d in self.dimensions))
+
+    def as_record(self) -> dict:
+        """The solid as plain numbers, for a file."""
+        return {'id': self.id, 'name': self.name, 'kind': self.kind,
+                'center': list(self.center), 'angles': list(self.angles),
+                'widths': list(self.widths), 'radius': self.radius,
+                'length': self.length, 'operands': list(self.operands),
+                'corner': self.corner, 'counts': list(self.counts),
+                'dimensions': list(self.dimensions)}
+
+    @classmethod
+    def from_record(cls, record: dict) -> Solid:
+        """The solid a file's record describes (`as_record`)."""
+        return cls(int(record['id']), str(record['name']), str(record['kind']),
+                   tuple(float(v) for v in record['center']),
+                   tuple(float(v) for v in record['angles']),
+                   tuple(float(v) for v in record['widths']),
+                   float(record['radius']), float(record['length']),
+                   tuple(int(v) for v in record['operands']),
+                   float(record.get('corner', 0.0)),
+                   tuple(int(v) for v in record.get('counts', (1, 1, 1))),
+                   tuple(float(v) for v in record.get('dimensions', ())))
+
+
+def _next_id(geometry: Any) -> int:
+    return max((s.id for s in geometry.solids), default=0) + 1
+
+
+def _numbers(values, count: int, what: str) -> tuple[float, ...]:
+    out = tuple(float(v) for v in np.asarray(values, dtype=float).ravel())
+    if len(out) != count or not all(np.isfinite(out)):
+        raise ValueError(f'{what} takes {count} finite numbers')
+    return out
+
+
+def add_block(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
+              name: str = '', corner: float = 0.0) -> int:
+    """Add a block to `geometry`'s solids, `widths` across along its own
+    axes, with its middle at `center` and turned by `angles`.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center, widths : array_like
+        Three numbers each, as the geometry holds its coordinates; every
+        width positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+    corner : float, default 0
+        The radius its four edges along its own Z are rounded to, from
+        zero to half the narrower of its widths along X and Y.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _block(_next_id(geometry), name, center, widths, angles, corner)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _block(solid_id: int, name: str, center, widths, angles, corner) -> Solid:
+    """A block's row, its numbers checked: what adding one and changing
+    one both refuse."""
+    widths = _numbers(widths, 3, 'a block\'s widths')
+    if min(widths) <= 0.0:
+        raise ValueError('a block needs a width along all three axes')
+    corner = float(corner)
+    if not 0.0 <= corner <= min(widths[:2]) / 2.0:
+        raise ValueError('a corner radius from zero to half the block\'s '
+                         'narrower width across')
+    return Solid(solid_id, name, 'block', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), widths, corner=corner)
+
+
+def add_cylinder(geometry: Any, center, radius: float, length: float,
+                 angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+    """Add a cylinder to `geometry`'s solids, `radius` about its own Z
+    axis and `length` along it, with its middle at `center` and turned by
+    `angles`. With no angles its axis is the geometry's Z.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    radius, length : float
+        As the geometry holds its coordinates; both positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _cylinder(_next_id(geometry), name, center, radius, length, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _cylinder(solid_id: int, name: str, center, radius, length, angles) -> Solid:
+    """A cylinder's row, its numbers checked."""
+    if not (float(radius) > 0.0 and float(length) > 0.0):
+        raise ValueError('a cylinder needs a radius and a length')
+    return Solid(solid_id, name, 'cylinder', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), radius=float(radius),
+                 length=float(length))
+
+
+def add_cone(geometry: Any, center, base_radius: float, top_radius: float, height: float,
+             angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+    """Add a cone to `geometry`'s solids: a frustum `height` along its own
+    Z, `base_radius` at its -Z end and `top_radius` at its +Z end, either
+    of them zero for a point, with its middle at `center` and turned by
+    `angles`. With no angles its axis is the geometry's Z.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    base_radius, top_radius : float
+        Not negative, not both zero, and not equal (that is a cylinder).
+    height : float
+        Positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    # Brandon, 2026-10-20: blocks, sections, cylinders, cones and spheres
+    # to build parts from
+    solid = _cone(_next_id(geometry), name, center, base_radius, top_radius, height, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _cone(solid_id: int, name: str, center, base_radius, top_radius, height, angles) -> Solid:
+    """A cone's row, its numbers checked."""
+    base, top, height = float(base_radius), float(top_radius), float(height)
+    if not height > 0.0:
+        raise ValueError('a cone needs a height')
+    if base < 0.0 or top < 0.0 or not (base > 0.0 or top > 0.0):
+        raise ValueError('a cone needs a radius at its base or its top, neither negative')
+    if base == top:
+        raise ValueError('a cone with one radius at both ends is a cylinder')
+    return Solid(solid_id, name, 'cone', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), radius=base, length=height,
+                 dimensions=(top,))
+
+
+def add_sphere(geometry: Any, center, radius: float, name: str = '') -> int:
+    """Add a sphere to `geometry`'s solids, `radius` about `center`.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    radius : float
+        Positive.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _sphere(_next_id(geometry), name, center, radius)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _sphere(solid_id: int, name: str, center, radius) -> Solid:
+    """A sphere's row, its numbers checked."""
+    if not float(radius) > 0.0:
+        raise ValueError('a sphere needs a radius')
+    return Solid(solid_id, name, 'sphere', _numbers(center, 3, 'a center'),
+                 radius=float(radius))
+
+
+def add_plate(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
+              name: str = '') -> int:
+    """Add a plate to `geometry`'s solids: a flat rectangle `widths`
+    across along its own X and Y, in its own XY plane, with its middle at
+    `center` and turned by `angles`. With no angles it lies in the
+    geometry's XY plane.
+
+    A plate has no thickness of its own. It is meshed into plates
+    (Mesh Solids, Shells), and the thickness is set on their element
+    group. Solids subtracted from it cut it where they cross its plane.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    widths : array_like
+        Two numbers, both positive: along its own X, then Y.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _plate(_next_id(geometry), name, center, widths, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _plate(solid_id: int, name: str, center, widths, angles) -> Solid:
+    """A plate's row, its numbers checked."""
+    widths = [float(w) for w in np.ravel(widths)]
+    if len(widths) == 3 and widths[2] == 0.0:
+        widths = widths[:2]                    # as the row holds it
+    across = _numbers(widths, 2, 'a plate\'s widths')
+    if min(across) <= 0.0:
+        raise ValueError('a plate needs a width along its X and its Y')
+    return Solid(solid_id, name, 'plate', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), (*across, 0.0))
+
+
+def add_disk(geometry: Any, center, radius: float, angles=(0.0, 0.0, 0.0),
+             name: str = '') -> int:
+    """Add a disk to `geometry`'s solids: a flat circle of `radius` in
+    its own XY plane, centered at `center` and turned by `angles`. With
+    no angles it lies in the geometry's XY plane.
+
+    A disk has no thickness of its own; as a plate's, it is set on the
+    element group it is meshed into (Mesh Solids, Shells).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    radius : float
+        Positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    solid = _disk(_next_id(geometry), name, center, radius, angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _disk(solid_id: int, name: str, center, radius, angles) -> Solid:
+    """A disk's row, its numbers checked."""
+    if not float(radius) > 0.0:
+        raise ValueError('a disk needs a radius')
+    return Solid(solid_id, name, 'disk', _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), radius=float(radius))
+
+
+def is_flat(geometry: Any, solid_id: int) -> bool:
+    """Whether a solid is flat: a plate or a disk, or a boolean or a
+    pattern whose material is one, such as a plate with holes subtracted
+    from it. A flat solid is meshed into plates on its plane, and a
+    union of flat and solid ones is refused when it is made.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solid.
+    solid_id : int
+        Which.
+
+    Returns
+    -------
+    bool
+    """
+    item = solid(geometry, solid_id)
+    if item.kind in FLAT:
+        return True
+    if item.kind in ('subtract', 'intersect'):
+        return is_flat(geometry, item.operands[0])
+    if item.kind in ('union', PATTERN):
+        return all(is_flat(geometry, o) for o in item.operands)
+    return False
+
+
+def _top(item: Solid) -> float:
+    """A cone's radius at its top."""
+    return float(item.dimensions[0]) if item.dimensions else 0.0
+
+
+def add_section(geometry: Any, shape: str, center, dimensions, length: float,
+                angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+    """Add a section to `geometry`'s solids: an I-beam, a channel, a tee,
+    an angle, or a rectangular or round tube, `length` along its own Z.
+
+    A section is one row, sized by its own dimensions, where a union of
+    blocks would be three rows changed one at a time. Its middle (the
+    middle of the box it fills) is at `center`, and with no `angles` it
+    runs along the geometry's Z.
+
+    Across, along its own axes: an I-beam's or a tee's `depth` runs along
+    Y and its `flange width` along X, with a tee's flange at +Y; a
+    channel's flanges run along +X from its web; an angle's long leg runs
+    along +X and its short leg along +Y from the heel; a rectangular tube
+    is `width` along X and `height` along Y. The dimensions are checked by
+    the beam section's rules (`fem.Section.of_shape`), so a shape refused
+    as a beam's section is refused here, and a round tube's wall must
+    also be under half its outer diameter.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    shape : str
+        One of `SECTIONS`.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    dimensions : sequence of float
+        In the order `SECTIONS[shape]` names them, as the geometry holds
+        its coordinates.
+    length : float
+        As the geometry holds its coordinates; positive.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    # a section as one row, sized by its own dimensions (2026-10-12)
+    if shape not in SECTIONS:
+        raise ValueError(f'{shape!r} is not one of {tuple(SECTIONS)}')
+    solid = _shaped(_next_id(geometry), name, shape, center, dimensions, length,
+                    angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def add_hole(geometry: Any, center, diameter: float, depth: float | None = None,
+             angles=(0.0, 0.0, 0.0), name: str = '',
+             counterbore=None) -> int:
+    """Add a hole to `geometry`'s solids, to subtract from a part.
+
+    The hole enters at `center`, on the face it is drilled from, and runs
+    `depth` along its own -Z (down the geometry's Z with no `angles`).
+    With no depth it runs through the part it is cut from, however thick
+    that part is later made. A counterbore is a wider, shallower bore at
+    the entry.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Where it enters, three numbers as the geometry holds its
+        coordinates.
+    diameter : float
+        As the geometry holds its coordinates; positive.
+    depth : float, optional
+        As the geometry holds its coordinates; None or zero for a hole
+        through the part.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+    counterbore : (float, float), optional
+        Its diameter, wider than the hole's, and its depth, positive and
+        (for a blind hole) shallower than the hole's.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    # a hole as a solid to subtract (2026-10-12)
+    wide, deep = (0.0, 0.0) if counterbore is None else counterbore
+    solid = _shaped(_next_id(geometry), name, HOLE, center,
+                    (diameter, 0.0 if depth is None else depth, wide, deep), 0.0,
+                    angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _shaped(solid_id: int, name: str, kind: str, center, dimensions, length,
+            angles) -> Solid:
+    """A section's or a hole's row, its numbers checked: what adding one
+    and changing one both refuse. The beam sections' rules are the beam
+    element's (`fem.Section.of_shape`), so a shape refused as a beam's
+    section is refused as a solid."""
+    from .fem import Section, with_article
+
+    named = SECTIONS.get(kind, HOLE_DIMENSIONS)
+    dims = _numbers(dimensions, len(named), f'{with_article(kind)}\'s dimensions')
+    length = float(length)
+    if kind == HOLE:
+        diameter, depth, wide, deep = dims
+        if diameter <= 0.0 or depth < 0.0:
+            raise ValueError('a hole needs a diameter, and a depth of zero or '
+                             'more — zero through')
+        if (wide or deep) and (wide <= diameter or deep <= 0.0
+                               or (depth and deep >= depth)):
+            raise ValueError('a counterbore wider than the hole and shallower '
+                             'than it')
+    else:
+        if not length > 0.0:
+            raise ValueError(f'{with_article(kind)} needs a length')
+        if kind == 'tee':
+            depth, flange, tf, tw = dims
+            if min(dims) <= 0.0 or depth - tf <= 0.0 or tw > flange:
+                raise ValueError('the tee: the flanges and web do not make a tee')
+        else:
+            Section.of_shape(f'the {kind}', kind, dims)
+        if kind == 'round tube' and 2.0 * dims[1] >= dims[0]:
+            # the beam's section takes a wall of the whole radius, a rod;
+            # a solid's bore would be a cylinder of no radius
+            raise ValueError('the round tube: a wall under half its diameter '
+                             '— a rod is a cylinder')
+    return Solid(solid_id, name, kind, _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), length=length, dimensions=dims)
+
+
+#: what each kind's numbers are, to be changed by `edit`
+EDITABLE = {'block': ('center', 'angles', 'widths', 'corner'),
+            'cylinder': ('center', 'angles', 'radius', 'length'),
+            'cone': ('center', 'angles', 'radius', 'top_radius', 'length'),
+            'sphere': ('center', 'radius'),
+            'plate': ('center', 'angles', 'widths'),
+            'disk': ('center', 'angles', 'radius'),
+            **{shape: ('center', 'angles', 'dimensions', 'length')
+               for shape in SECTIONS},
+            HOLE: ('center', 'angles', 'dimensions'),
+            PATTERN: ('counts', 'spacing', 'angles')}
+
+
+def edit(geometry: Any, solid_id: int, **changes) -> None:
+    """Change a solid after it is made, in place.
+
+    What can be changed is a block's center, angles, widths and corner; a
+    cylinder's center, angles, radius and length; a cone's center,
+    angles, radius (at its base), top radius and length (its height); a
+    sphere's center and radius; a plate's center, angles and widths; a
+    disk's center, angles and radius; a section's center,
+    angles, dimensions and length; a hole's center, angles and
+    dimensions; a pattern's counts, spacing and angles; and any solid's
+    name. The rest are kept. The solid keeps its id, so a boolean it is
+    part of takes the change: a hole made larger is a larger hole in the
+    plate it was subtracted from. A mesh already made from it is not
+    changed; running Mesh Solids again meshes the change.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solid; changed in place.
+    solid_id : int
+        Which.
+    **changes
+        The numbers to change, as `add_block`, `add_cylinder`,
+        `add_section` and `pattern` take them (a hole's `dimensions` in
+        the order of `HOLE_DIMENSIONS`, a depth of zero for through), and
+        `name`.
+
+    Raises
+    ------
+    ValueError
+        For a number its kind does not have (a boolean's shape is its
+        solids', changed one at a time, and a boolean is moved whole by
+        `move`), or a value an add would refuse.
+    KeyError
+        If there is no solid `solid_id`.
+    """
+    # move it, size it, reshape it (Brandon, 2026-10-11)
+    item = solid(geometry, solid_id)
+    allowed = EDITABLE.get(item.kind, ()) + ('name',)
+    wrong = [key for key in changes if key not in allowed]
+    if wrong:
+        if item.kind in OPERATIONS:
+            raise ValueError(f'solid {solid_id} is a {item.kind}: change the '
+                             'solids it is made of, or move it whole')
+        from .fem import with_article
+
+        raise ValueError(f'{with_article(item.kind)} has no {wrong[0]}')
+    now = {'name': item.name, 'center': item.center, 'angles': item.angles,
+           'widths': item.widths, 'corner': item.corner, 'radius': item.radius,
+           'length': item.length, 'counts': item.counts, 'spacing': item.widths,
+           'dimensions': item.dimensions,
+           'top_radius': _top(item) if item.kind == 'cone' else 0.0, **changes}
+    if item.kind == 'block':
+        changed = _block(item.id, now['name'], now['center'], now['widths'],
+                         now['angles'], now['corner'])
+    elif item.kind == 'cylinder':
+        changed = _cylinder(item.id, now['name'], now['center'], now['radius'],
+                            now['length'], now['angles'])
+    elif item.kind == 'cone':
+        changed = _cone(item.id, now['name'], now['center'], now['radius'],
+                        now['top_radius'], now['length'], now['angles'])
+    elif item.kind == 'sphere':
+        changed = _sphere(item.id, now['name'], now['center'], now['radius'])
+    elif item.kind == 'plate':
+        changed = _plate(item.id, now['name'], now['center'], now['widths'],
+                         now['angles'])
+    elif item.kind == 'disk':
+        changed = _disk(item.id, now['name'], now['center'], now['radius'],
+                        now['angles'])
+    elif item.kind in SHAPED:
+        changed = _shaped(item.id, now['name'], item.kind, now['center'],
+                          now['dimensions'], now['length'], now['angles'])
+    elif item.kind == PATTERN:
+        changed = _pattern(item.id, now['name'], item.operands, now['counts'],
+                           now['spacing'], now['angles'])
+    else:
+        changed = replace(item, name=now['name'])
+    geometry.solids[geometry.solids.index(item)] = changed
+
+
+def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
+         turn=(0.0, 0.0, 0.0)) -> int:
+    """Move solids whole, each with every solid it is made of, turned by
+    `turn` about the middle of their extent and then moved by `offset`.
+
+    A boolean has no position of its own to change, so its solids are
+    moved, each center turned about that middle and each solid turned by
+    the same angles, and the part is the same shape in a new place. A
+    pattern's originals move, and its axes turn with them.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        The solids, by id.
+    offset : array_like, default (0, 0, 0)
+        How far, as the geometry holds its coordinates.
+    turn : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes, as a solid's
+        angles are.
+
+    Returns
+    -------
+    int
+        How many primitives moved.
+    """
+    from ..rotate import angles_of, frame_from_angles
+
+    ids = [int(i) for i in ids]
+    if not ids:
+        raise ValueError('pick a solid to move')
+    offset = np.asarray(_numbers(offset, 3, 'an offset'))
+    turn = _numbers(turn, 3, 'a turn')
+    low, high = zip(*(_box(geometry, i) for i in ids))
+    middle = (np.min(low, axis=0) + np.max(high, axis=0)) / 2.0
+    # a turned vector, as a row: v @ R^T, and frame_from_angles keeps R^T
+    rows = frame_from_angles(turn)[:3]
+
+    def turned(item):
+        frame = np.zeros((4, 3))
+        frame[:3] = _frame(item) @ rows
+        return tuple(float(a) for a in angles_of(frame))
+
+    # the solids as stored, each once: a pattern's copies are where its
+    # originals are, along its own axes, so the originals move and the
+    # pattern's axes turn with them
+    stored, stack = {}, list(ids)
+    while stack:
+        item = solid(geometry, stack.pop())
+        if item.id not in stored:
+            stored[item.id] = item
+            stack.extend(item.operands)
+    moved = 0
+    for item in stored.values():
+        if item.kind in PRIMITIVES:
+            center = np.asarray(item.center)
+            angles = item.angles
+            if any(turn):
+                center = middle + (center - middle) @ rows
+                angles = turned(item)
+            changed = replace(item, center=tuple(float(c) for c in center + offset),
+                              angles=angles)
+            moved += 1
+        elif item.kind == PATTERN and any(turn):
+            changed = replace(item, angles=turned(item))
+        else:
+            continue
+        geometry.solids[geometry.solids.index(item)] = changed
+    return moved
+
+
+def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
+    """Add a boolean of solids already there: their union, the first with
+    the rest subtracted from it, or what they share.
+
+    Each solid goes into one boolean only, so a solid already part of
+    another is refused. So is a boolean that would leave nothing: a
+    subtraction whose first solid lies inside the rest, or an
+    intersection of solids that do not meet. The operands become part of the new solid, and
+    the table lists only the solids nothing else uses (`top_level`).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    operation : str
+        One of `OPERATIONS`.
+    ids : sequence of int
+        Two solids or more, by id, the first first.
+    name : str, optional
+        What to call it; the first solid's name when not given, so a
+        plate named 'frame' with its holes subtracted is still 'frame',
+        and so is the element group it meshes into.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    if operation not in OPERATIONS:
+        raise ValueError(f'{operation!r} is not one of {OPERATIONS}')
+    ids = tuple(int(i) for i in ids)
+    if len(ids) < 2 or len(set(ids)) < len(ids):
+        raise ValueError('a boolean takes two solids or more, each once')
+    there = {s.id for s in geometry.solids}
+    missing = [i for i in ids if i not in there]
+    if missing:
+        raise ValueError(f'no solid {missing[0]}')
+    used = used_by(geometry)
+    taken = [i for i in ids if i in used]
+    if taken:
+        raise ValueError(f'solid {taken[0]} is already part of solid '
+                         f'{used[taken[0]]}')
+    flat = [is_flat(geometry, i) for i in ids]
+    if operation == 'union' and any(flat) and not all(flat):
+        raise ValueError('a union is of plates and disks, or of solids with a '
+                         'volume, not of both: they mesh into different elements')
+    if operation != 'union' and any(flat[1:]):
+        raise ValueError(f'solid {ids[flat[1:].index(True) + 1]} is flat and has no '
+                         f'volume to {"take away" if operation == "subtract" else "share"}')
+    name = name or solid(geometry, ids[0]).name
+    made = Solid(_next_id(geometry), name, operation, operands=ids)
+    before = list(geometry.solids)
+    geometry.solids.append(made)
+    _refuse_nothing_left(geometry, made.id, before,
+                         f'the {operation} cannot be made')
+    return made.id
+
+
+def reorder(geometry: Any, ids, within: int | None = None) -> None:
+    """Put solids in a new order: the parts, or one solid's own.
+
+    The order is what a boolean made from a pick reads first to last, and
+    a subtraction takes every solid after the first from the first, so
+    which solid comes first decides what is cut. With `within`, the ids
+    are that boolean's (or pattern's) solids in their new order, and an
+    existing subtraction then cuts the new first solid. Without it, they
+    are the parts (`top_level`) in their new order; the solids a boolean
+    uses stay where they are.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        Every one of the solids being ordered, each once, in the order
+        wanted.
+    within : int, optional
+        The boolean or pattern whose solids these are.
+
+    Raises
+    ------
+    ValueError
+        When `ids` is not exactly those solids, `within` has none, or
+        the new order would leave the boolean empty.
+    """
+    ids = [int(i) for i in ids]
+    if within is None:
+        parts = [item.id for item in top_level(geometry)]
+        if sorted(ids) != sorted(parts) or len(set(ids)) != len(ids):
+            raise ValueError(f'the parts are {parts}; give each of them '
+                             'once, in the order wanted')
+        order = iter(solid(geometry, i) for i in ids)
+        used = used_by(geometry)
+        geometry.solids = [item if item.id in used else next(order)
+                           for item in geometry.solids]
+        return
+    holder = solid(geometry, within)
+    if not holder.operands:
+        raise ValueError(f'solid {within} is not made of other solids')
+    if sorted(ids) != sorted(holder.operands) or len(set(ids)) != len(ids):
+        raise ValueError(f'solid {within} is made of {list(holder.operands)}; '
+                         'give each of them once, in the order wanted')
+    before = geometry.solids
+    geometry.solids = [replace(item, operands=tuple(ids))
+                       if item.id == holder.id else item
+                       for item in geometry.solids]
+    _refuse_nothing_left(geometry, holder.id, before,
+                         f'solid {ids[0]} cannot come first')
+
+
+def nothing_left(geometry: Any, solid_id: int) -> str | None:
+    """Why a boolean leaves nothing (a subtraction whose first solid lies
+    inside the rest, an intersection of solids that do not meet), or
+    None when something is left.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    str or None
+    """
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+
+    if TopExp_Explorer(shape(geometry, solid_id), TopAbs_FACE).More():
+        return None
+    item = solid(geometry, solid_id)
+    first, rest = item.operands[0], item.operands[1:]
+    others = ', '.join(str(i) for i in rest)
+    if item.kind == 'subtract':
+        return (f'taking solid{"s" * (len(rest) > 1)} {others} from solid '
+                f'{first} leaves nothing')
+    if item.kind == 'intersect':
+        return f'solids {first}, {others} share nothing'
+    return f'solid {solid_id} leaves nothing'
+
+
+def _refuse_nothing_left(geometry: Any, solid_id: int, before: list,
+                         why: str) -> None:
+    """Put the solids back as they were and refuse, when `solid_id`
+    leaves nothing: an empty solid has nothing to draw or mesh."""
+    try:
+        require_kernel()
+    except ValueError:
+        return                       # nothing can be drawn or meshed either
+    reason = nothing_left(geometry, solid_id)
+    if reason is not None:
+        geometry.solids = before
+        raise ValueError(f'{why}: {reason}')
+
+
+def _checked(geometry: Any, ids) -> set[int]:
+    ids = {int(i) for i in ids}
+    missing = sorted(ids - {s.id for s in geometry.solids})
+    if missing:
+        raise ValueError(f'no solid {missing[0]}')
+    used = used_by(geometry)
+    held = sorted(i for i in ids if i in used and used[i] not in ids)
+    if held:
+        raise ValueError(f'solid {held[0]} is part of solid {used[held[0]]}; '
+                         'take that apart first')
+    return ids
+
+
+def delete(geometry: Any, ids) -> int:
+    """Delete solids, each with everything it is made of: a plate with
+    holes cut in it is deleted whole, with the cylinders that cut them.
+    A solid that a boolean still uses is refused, by name, unless that
+    boolean is deleted with it; take the boolean apart first
+    (`separate`).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        The solids, by id.
+
+    Returns
+    -------
+    int
+        How many solids went, those inside included.
+    """
+    going = set()
+    stack = list(_checked(geometry, ids))
+    while stack:
+        current = stack.pop()
+        if current not in going:
+            going.add(current)
+            stack.extend(solid(geometry, current).operands)
+    geometry.solids = [s for s in geometry.solids if s.id not in going]
+    return len(going)
+
+
+def copy(geometry: Any, ids, into: Any = None) -> list[int]:
+    """Copy solids, recipe and all, into a geometry: `geometry` itself,
+    or `into`. Returns the new top-level ids, in the order of `ids`.
+
+    A boolean or a pattern is copied with every solid it is made of,
+    each under a new id, so the copy is its own: editing a cylinder of
+    the copy leaves the original. A named solid's copy is named
+    '<name> copy'; the solids inside it keep their names. The two
+    geometries have to hold their coordinates the same way, both with
+    their units defined or neither.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The solids to copy, by id.
+    into : Geometry, optional
+        Where the copies go; `geometry` when omitted.
+
+    Returns
+    -------
+    list of int
+
+    Raises
+    ------
+    ValueError
+        With no ids, an id the geometry does not hold, or geometries
+        whose units differ.
+    """
+    # Copy and Paste on solid rows (Brandon, 2026-10-18)
+    ids = [int(i) for i in ids]
+    if not ids:
+        raise ValueError('pick a solid to copy')
+    target = geometry if into is None else into
+    if (geometry.length_unit is None) != (target.length_unit is None):
+        raise ValueError('the geometries hold their coordinates in different '
+                         'units: define both or neither before copying '
+                         'solids between them')
+    for i in ids:
+        solid(geometry, i)      # refused by name when it is not there
+    made = []
+    for i in ids:
+        original = solid(geometry, i)
+        new = _clone(geometry, original, target)
+        if original.name.strip():
+            target.solids[-1] = replace(new, name=f'{original.name.strip()} copy')
+        made.append(new.id)
+    return made
+
+
+def _clone(geometry: Any, item: Solid, target: Any) -> Solid:
+    """`item` and everything it is made of, added to `target` under new
+    ids, inner solids first so a boolean's operands exist before it."""
+    operands = tuple(_clone(geometry, solid(geometry, o), target).id
+                     for o in item.operands)
+    new = replace(item, id=_next_id(target), operands=operands)
+    target.solids.append(new)
+    return new
+
+
+def separate(geometry: Any, ids) -> int:
+    """Take booleans and patterns apart: each one is removed, and its
+    operands stand as parts again, which undoes a subtraction made by
+    mistake. A primitive has nothing to take apart and is refused, and so
+    is a solid that is still part of another.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        The booleans or patterns, by id.
+
+    Returns
+    -------
+    int
+        How many solids stand again.
+    """
+    ids = _checked(geometry, ids)
+    plain = sorted(i for i in ids if solid(geometry, i).kind in PRIMITIVES)
+    if plain:
+        raise ValueError(f'solid {plain[0]} is a {solid(geometry, plain[0]).kind}, '
+                         'with nothing to take apart')
+    freed = sum(len(solid(geometry, i).operands) for i in ids)
+    geometry.solids = [s for s in geometry.solids if s.id not in ids]
+    return freed
+
+
+#: past this many copies a pattern is refused rather than made
+PATTERN_LIMIT = 10_000
+
+
+def pattern(geometry: Any, ids, counts, spacing) -> int:
+    """A pattern of solids: `counts` copies along the geometry's X, Y and
+    Z, `spacing` apart, with the originals as the first of each.
+
+    Thirteen holes along a rail are one hole and counts of (13, 1, 1) at
+    the insert pitch. The pattern is one solid, made of the originals as
+    a boolean is, so changing the hole changes every copy, and the
+    pattern's counts and spacing are changed as one (`edit`). It takes
+    its first solid's name, as a boolean does. A pattern of a pattern is
+    a grid of grids: the row of 13, then two rows across the rails. More
+    than `PATTERN_LIMIT` (10,000) copies is refused.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids; changed in place.
+    ids : sequence of int
+        The solids to copy, by id: solids nothing else uses.
+    counts : sequence of int
+        How many along X, Y and Z, the original included; each one or
+        more.
+    spacing : sequence of float
+        How far apart along X, Y and Z, as the geometry holds its
+        coordinates; it may be zero only along an axis with one copy.
+
+    Returns
+    -------
+    int
+        The pattern's id.
+    """
+    # one solid, made of the originals as a boolean is (Brandon,
+    # 2026-10-11)
+    ids = tuple(int(i) for i in ids)
+    if not ids or len(set(ids)) < len(ids):
+        raise ValueError('a pattern takes one solid or more, each once')
+    used = used_by(geometry)
+    for i in ids:
+        solid(geometry, i)
+        if i in used:
+            raise ValueError(f'solid {i} is part of solid {used[i]}; pattern '
+                             'that one')
+    made = _pattern(_next_id(geometry), solid(geometry, ids[0]).name, ids, counts,
+                    spacing, (0.0, 0.0, 0.0))
+    geometry.solids.append(made)
+    return made.id
+
+
+def _pattern(solid_id: int, name: str, ids, counts, spacing, angles) -> Solid:
+    """A pattern's row, its numbers checked: what making one and
+    changing one both refuse."""
+    counts = tuple(int(c) for c in np.asarray(counts).ravel())
+    spacing = _numbers(spacing, 3, 'spacing')
+    if len(counts) != 3 or min(counts) < 1:
+        raise ValueError('a pattern takes one or more along each of X, Y and Z')
+    for axis, (count, step) in enumerate(zip(counts, spacing)):
+        if count > 1 and step == 0.0:
+            raise ValueError(f'more than one along {"XYZ"[axis]} needs a '
+                             'spacing there, or the copies sit on each other')
+    total = len(ids) * (counts[0] * counts[1] * counts[2] - 1)
+    if total > PATTERN_LIMIT:
+        raise ValueError(f'{total:,} copies: more than {PATTERN_LIMIT:,}')
+    return Solid(solid_id, name, PATTERN, angles=_numbers(angles, 3, 'angles'),
+                 widths=spacing, operands=tuple(ids), counts=counts)
+
+
+def _offsets(item: Solid) -> np.ndarray:
+    """(n, 3): where a pattern puts each copy of its solids, the
+    original's (zeros) first."""
+    grid = np.stack(np.meshgrid(*(np.arange(c) for c in item.counts), indexing='ij'),
+                    axis=-1).reshape(-1, 3)
+    return (grid * np.asarray(item.widths)) @ _frame(item)
+
+
+def used_by(geometry: Any) -> dict[int, int]:
+    """{solid id: the id of the boolean or pattern it is part of}, for
+    every solid that is an operand of another."""
+    return {operand: s.id for s in geometry.solids for operand in s.operands}
+
+
+def top_level(geometry: Any) -> list[Solid]:
+    """The solids no boolean uses: the parts as they stand, which are the
+    ones a person sees, edits and meshes."""
+    used = used_by(geometry)
+    return [s for s in geometry.solids if s.id not in used]
+
+
+def solid(geometry: Any, solid_id: int) -> Solid:
+    """The solid with this id; KeyError if there is none."""
+    for s in geometry.solids:
+        if s.id == int(solid_id):
+            return s
+    raise KeyError(f'no solid {solid_id}')
+
+
+# ---- the kernel ------------------------------------------------------------
+
+def require_kernel():
+    """The OCP bindings, or a ValueError whose message says why they
+    did not import and how to reinstall them."""
+    # A dependency since 2026-10-29, so this refuses only a broken
+    # install, or a wheel that will not load on this machine (an older
+    # glibc), and says which rather than naming an extra that is gone.
+    try:
+        import OCP
+    except ImportError as failure:
+        raise ValueError(
+            'solids and STEP/IGES need the OpenCASCADE kernel, which did '
+            f'not import ({failure}) — reinstall it with pip install '
+            '--force-reinstall cadquery-ocp-novtk') from None
+    return OCP
+
+
+def _placed(shape, item: Solid):
+    """`shape`, built about the origin along the geometry's axes, turned
+    by the solid's angles and moved to its center."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Trsf
+
+    from ..rotate import frame_from_angles
+
+    frame = frame_from_angles(item.angles, item.center)
+    turn = frame[:3].T                     # columns: the solid's own axes
+    trsf = gp_Trsf()
+    trsf.SetValues(*turn[0], frame[3][0], *turn[1], frame[3][1],
+                   *turn[2], frame[3][2])
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+
+def shape(geometry: Any, solid_id: int):
+    """The solid as an OpenCASCADE shape, in the units the geometry holds
+    its coordinates in.
+
+    A block or a cylinder is built and placed, a section or a hole is
+    built from the blocks and cylinders it is made of, and a boolean or a
+    pattern is computed from its operands' shapes. A boolean the kernel
+    cannot compute raises ValueError naming the solid.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    OCP.TopoDS.TopoDS_Shape
+    """
+    require_kernel()
+    from OCP.BRepAlgoAPI import (
+        BRepAlgoAPI_Common,
+        BRepAlgoAPI_Cut,
+        BRepAlgoAPI_Fuse,
+    )
+
+    item = solid(geometry, solid_id)
+    if item.kind in BASIC:
+        return _basic_shape(item)
+    if item.kind in FLAT:
+        return _flat_shape(item)
+    if item.kind in SHAPED:
+        # the uncut pieces made one, then the cut taken from them
+        pieces = _pieces(geometry, item)
+        kept = [_basic_shape(p) for cutting, p in pieces if not cutting]
+        cut = [_basic_shape(p) for cutting, p in pieces if cutting]
+        result = kept[0]
+        for operand, algorithm in ([(k, BRepAlgoAPI_Fuse) for k in kept[1:]]
+                                   + [(c, BRepAlgoAPI_Cut) for c in cut]):
+            step = algorithm(result, operand)
+            if not step.IsDone():
+                raise ValueError(f'the {item.kind} of solid {item.id} failed '
+                                 'in the kernel')
+            result = step.Shape()
+        return result
+    if item.kind == PATTERN:
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.gp import gp_Trsf, gp_Vec
+
+        originals = [shape(geometry, o) for o in item.operands]
+        copies = []
+        for offset in _offsets(item):
+            trsf = gp_Trsf()
+            trsf.SetTranslation(gp_Vec(*(float(v) for v in offset)))
+            copies.extend(BRepBuilderAPI_Transform(original, trsf, True).Shape()
+                          for original in originals)
+        operands, algorithm = copies, BRepAlgoAPI_Fuse
+    else:
+        operands = [shape(geometry, o) for o in item.operands]
+        algorithm = {'union': BRepAlgoAPI_Fuse, 'subtract': BRepAlgoAPI_Cut,
+                     'intersect': BRepAlgoAPI_Common}[item.kind]
+    result = operands[0]
+    for operand in operands[1:]:
+        step = algorithm(result, operand)
+        if not step.IsDone():
+            raise ValueError(f'the {item.kind} of solid {item.id} failed in '
+                             'the kernel')
+        result = step.Shape()
+    return result
+
+
+def _flat_shape(item: Solid):
+    """A plate or a disk as OpenCASCADE's face, placed."""
+    from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_MakeEdge,
+        BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeWire,
+    )
+    from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pln, gp_Pnt
+
+    if item.kind == 'plate':
+        wx, wy = item.widths[:2]
+        built = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)),
+                                        -wx / 2, wx / 2, -wy / 2, wy / 2).Face()
+        return _placed(built, item)
+    circle = gp_Circ(gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)), item.radius)
+    wire = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(circle).Edge()).Wire()
+    return _placed(BRepBuilderAPI_MakeFace(wire).Face(), item)
+
+
+def _basic_shape(item: Solid):
+    """A block, a cylinder, a cone or a sphere as OpenCASCADE's shape,
+    placed."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    from OCP.BRepPrimAPI import (
+        BRepPrimAPI_MakeBox,
+        BRepPrimAPI_MakeCone,
+        BRepPrimAPI_MakeCylinder,
+        BRepPrimAPI_MakeSphere,
+    )
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    if item.kind == 'cone':
+        axis = gp_Ax2(gp_Pnt(0.0, 0.0, -item.length / 2), gp_Dir(0.0, 0.0, 1.0))
+        built = BRepPrimAPI_MakeCone(axis, item.radius, _top(item), item.length).Shape()
+        return _placed(built, item)
+    if item.kind == 'sphere':
+        return _placed(BRepPrimAPI_MakeSphere(gp_Pnt(0.0, 0.0, 0.0), item.radius).Shape(),
+                       item)
+    if item.kind == 'cylinder':
+        axis = gp_Ax2(gp_Pnt(0.0, 0.0, -item.length / 2), gp_Dir(0.0, 0.0, 1.0))
+        built = BRepPrimAPI_MakeCylinder(axis, item.radius, item.length).Shape()
+        return _placed(built, item)
+    wx, wy, wz = item.widths
+    c = item.corner
+    if c <= 0.0:
+        built = BRepPrimAPI_MakeBox(gp_Pnt(-wx / 2, -wy / 2, -wz / 2),
+                                    wx, wy, wz).Shape()
+        return _placed(built, item)
+    # rounded: a box narrowed by the radius each way, and a cylinder at
+    # each corner, made one
+    pieces = [BRepPrimAPI_MakeBox(gp_Pnt(-a / 2, -b / 2, -wz / 2), a, b,
+                                  wz).Shape()
+              for a, b in ((wx - 2 * c, wy), (wx, wy - 2 * c)) if a > 0 and b > 0]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            axis = gp_Ax2(gp_Pnt(sx * (wx / 2 - c), sy * (wy / 2 - c), -wz / 2),
+                          gp_Dir(0.0, 0.0, 1.0))
+            pieces.append(BRepPrimAPI_MakeCylinder(axis, c, wz).Shape())
+    built = pieces[0]
+    for piece in pieces[1:]:
+        built = BRepAlgoAPI_Fuse(built, piece).Shape()
+    return _placed(built, item)
+
+
+def brick_count(geometry: Any, ids, size: float) -> int:
+    """About how many bricks a mesh of these parts at `size` holds:
+    their volume over the cube of the size, the volume read by sampling
+    their box on a grid as fine as the size or `_SAMPLES` points along
+    each axis, whichever is coarser. Kernel-free and quick, for the
+    limit (`MESH_LIMIT`) and the pane's preview; a part thinner than the
+    samples' spacing can be undercounted, so the meshers count the
+    bricks they keep again.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The brick size, as the geometry holds its coordinates.
+
+    Returns
+    -------
+    int
+    """
+    ids = [int(i) for i in ids]
+    low, high = zip(*(_box(geometry, i) for i in ids))
+    low, high = np.min(low, axis=0), np.max(high, axis=0)
+    span = high - low
+    counts = [int(np.clip(round(w / float(size)), 1, _SAMPLES)) for w in span]
+    rails = [low[k] + (np.arange(n) + 0.5) * span[k] / n for k, n in enumerate(counts)]
+    at = np.stack(np.meshgrid(*rails, indexing='ij'), axis=-1).reshape(-1, 3)
+    inside = np.zeros(len(at), dtype=bool)
+    for i in ids:
+        inside |= contains(geometry, i, at)
+    held = float(inside.mean()) * float(np.prod(span))
+    return round(held / float(size) ** 3)
+
+
+def _within_limits(geometry: Any, ids, size: float, cells: int) -> None:
+    """Refuse a mesh whose grid is past `GRID_LIMIT` cells, or whose
+    bricks are past `MESH_LIMIT` (`brick_count`), each saying which."""
+    if cells > GRID_LIMIT:
+        raise ValueError(f'the grid over these parts at that size is {cells:,} cells, '
+                         f'over the {GRID_LIMIT:,} it can hold: use a larger size, or '
+                         'tetrahedra')
+    bricks = brick_count(geometry, ids, size)
+    if bricks > MESH_LIMIT:
+        raise ValueError(f'about {bricks:,} bricks at that size, over the limit of '
+                         f'{MESH_LIMIT:,}: use a larger one')
+
+
+def volume(geometry: Any, solid_id: int) -> float:
+    """The solid's volume, in the cube of the geometry's length unit (m³
+    once units are defined).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    float
+    """
+    require_kernel()
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape(geometry, solid_id), props)
+    return float(props.Mass())
+
+
+def area(geometry: Any, solid_id: int) -> float:
+    """A flat solid's area, in the square of the geometry's length
+    unit (m² once units are defined): what a plate or a disk reads as,
+    having no volume.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+
+    Returns
+    -------
+    float
+    """
+    require_kernel()
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(shape(geometry, solid_id), props)
+    return float(props.Mass())
+
+
+def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
+    """The corners of the triangles OpenCASCADE tessellates a shape's
+    faces into, with `deflection` a fraction of the shape's size. This is
+    what draws a solid, and how the STEP importer reads a part.
+
+    Parameters
+    ----------
+    item : OCP.TopoDS.TopoDS_Shape
+        The shape.
+    deflection : float, optional
+        How far a triangle may stand off the surface, as a fraction of
+        the shape's size.
+
+    Returns
+    -------
+    numpy.ndarray
+        (n, 3, 3): each triangle's three corners; none for a shape with
+        nothing in it, such as a subtraction whose first solid lies
+        inside the rest.
+    """
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+
+    # the 7.9 binding suffixes a static that shares its name with a
+    # method; 8.0 drops the suffix for this one and keeps it for the
+    # rest (2026-09-13, Linux on 8.0.1 beside the Mac on 7.9.3)
+    _as_face = getattr(TopoDS, 'Face_s', None) or TopoDS.Face
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(item, box)
+    # an empty shape's box is void, and asking a void box for its
+    # corners raises (Brandon, 2026-10-27: dragging a cone's inner
+    # solid ahead of the outer one left nothing, and every redraw raised)
+    if box.IsVoid():
+        return np.empty((0, 3, 3))
+    size = max(box.CornerMax().XYZ().Subtracted(
+        box.CornerMin().XYZ()).Modulus(), 1e-9)
+    BRepMesh_IncrementalMesh(item, size * deflection, False, 0.5, True)
+    triangles: list[np.ndarray] = []
+    walker = TopExp_Explorer(item, TopAbs_FACE)
+    while walker.More():
+        face = _as_face(walker.Current())
+        location = TopLoc_Location()
+        mesh = BRep_Tool.Triangulation_s(face, location)
+        if mesh is not None:
+            matrix = location.Transformation()
+            points = np.asarray(
+                [[mesh.Node(i + 1).X(), mesh.Node(i + 1).Y(),
+                  mesh.Node(i + 1).Z()] for i in range(mesh.NbNodes())])
+            rows = np.asarray(
+                [[matrix.Value(r, c) for c in (1, 2, 3, 4)]
+                 for r in (1, 2, 3)])
+            points = points @ rows[:, :3].T + rows[:, 3]
+            faces = np.asarray(
+                [mesh.Triangle(i + 1).Get() for i in
+                 range(mesh.NbTriangles())], dtype=np.int64) - 1
+            if face.Orientation() == TopAbs_REVERSED:
+                faces = faces[:, ::-1]
+            triangles.append(points[faces])
+        walker.Next()
+    return (np.concatenate(triangles) if triangles
+            else np.empty((0, 3, 3)))
+
+
+# ---- meshing (2026-10-11) --------------------------------------------------
+#
+# Mesh Solids turns parts into bricks. Automatic hex meshing of any solid
+# is an unsolved problem; every part built so far is an extrusion — an
+# outline pushed through a thickness — and that is meshed reliably the
+# way `mesh.block` cuts its holes, generalized: a grid laid over the parts,
+# cut at every flat face of every block so those fall on grid lines, a
+# brick kept where its center is inside a part, and the nodes between a
+# cylinder's inside and a part's material pulled onto its circle. Whether
+# a point is inside is read off the recipes, not asked of the kernel: a
+# block's box and a cylinder's radius, combined as the booleans say —
+# exact, and fast enough to preview while the size is typed.
+
+#: past this many bricks a mesh is refused rather than made: bricks
+#: the mesh would hold, counted from the solid's volume (`brick_count`),
+#: not the cells of the grid over its box (Brandon, 2026-10-20: a part
+#: filling 9% of its box was refused for its box's cells)
+MESH_LIMIT = 2_000_000
+#: past this many cells the grid over the parts' box is refused rather
+#: than laid: a mesher holds every cell of its grid, solid or not, at
+#: about 3 us and 330 bytes a cell (7.5 million cells, 21.5 s and 2.5 GB
+#: to keep 710,605 bricks, 2026-10-20)
+GRID_LIMIT = 10_000_000
+#: the samples along each axis `brick_count` reads the solid's share of
+#: its box at, at most
+_SAMPLES = 48
+#: the element types Mesh Solids makes: the brick, the four- and
+#: ten-node tetrahedra (`tetmesh`), and the plate and the triangle
+#: shells are (`shells`), so meshing a part again into another kind
+#: replaces its earlier mesh whichever it was
+MESHED_TYPES = (115, 111, 118, 44, 41)
+
+
+def _frame(item: Solid) -> np.ndarray:
+    """The solid's own axes as rows, in the geometry's frame."""
+    return _frame_of(tuple(float(a) for a in item.angles))
+
+
+@functools.lru_cache(maxsize=256)
+def _frame_of(angles: tuple[float, float, float]) -> np.ndarray:
+    # built once per set of angles: a fitted mesh asks a solid's
+    # distance hundreds of thousands of times, and the rotation was a
+    # tenth of the time
+    from ..rotate import frame_from_angles
+
+    frame = frame_from_angles(angles)[:3]
+    frame.setflags(write=False)
+    return frame
+
+
+def _pieces(geometry: Any, item: Solid) -> list[tuple[bool, Solid]]:
+    """(cut, piece) for each block and cylinder a section or a hole is
+    made of, placed where it stands: its material the uncut pieces less
+    the cut ones — a tube's bore, a rectangular tube's inside. Each
+    piece carries the shape's id, so a refusal names the shape."""
+    rows = _frame(item)
+    middle = np.asarray(item.center)
+
+    def at(x, y, z):
+        return tuple(float(c) for c in middle + np.array([x, y, z]) @ rows)
+
+    def block(x, y, wx, wy):
+        return Solid(item.id, item.name, 'block', at(x, y, 0.0), item.angles,
+                     (float(wx), float(wy), float(item.length)))
+
+    def cylinder(radius, z=0.0, length=None):
+        return Solid(item.id, item.name, 'cylinder', at(0.0, 0.0, z), item.angles,
+                     radius=float(radius),
+                     length=float(item.length if length is None else length))
+
+    d = item.dimensions
+    if item.kind == HOLE:
+        diameter, depth, wide, deep = d
+        depth = depth or _through(geometry, item)
+        pieces = [(False, cylinder(diameter / 2.0, -depth / 2.0, depth))]
+        if wide:
+            pieces.append((False, cylinder(wide / 2.0, -deep / 2.0, deep)))
+        return pieces
+    if item.kind in ('I-beam', 'channel', 'tee'):
+        depth, flange, tf, tw = d
+        if item.kind == 'tee':
+            return [(False, block(0.0, (depth - tf) / 2.0, flange, tf)),
+                    (False, block(0.0, -tf / 2.0, tw, depth - tf))]
+        web_x = 0.0 if item.kind == 'I-beam' else -(flange - tw) / 2.0
+        return [(False, block(0.0, (depth - tf) / 2.0, flange, tf)),
+                (False, block(0.0, -(depth - tf) / 2.0, flange, tf)),
+                (False, block(web_x, 0.0, tw, depth - 2.0 * tf))]
+    if item.kind == 'angle':
+        long_leg, short_leg, t = d
+        return [(False, block(0.0, -(short_leg - t) / 2.0, long_leg, t)),
+                (False, block(-(long_leg - t) / 2.0, t / 2.0, t, short_leg - t))]
+    if item.kind == 'rectangular tube':
+        width, height, wall = d
+        return [(False, block(0.0, 0.0, width, height)),
+                (True, block(0.0, 0.0, width - 2.0 * wall, height - 2.0 * wall))]
+    outer, wall = d
+    return [(False, cylinder(outer / 2.0)), (True, cylinder(outer / 2.0 - wall))]
+
+
+def _through(geometry: Any, item: Solid) -> float:
+    """How deep a hole with no depth runs: from where it enters out past
+    the far side of the part it is cut from — the first solid of the
+    subtraction it is taken by, a pattern of it included — so a plate
+    made thicker keeps its hole through. Cut from nothing yet, it is
+    drawn a diameter deep."""
+    used = used_by(geometry)
+    current = item.id
+    while current in used:
+        parent = solid(geometry, used[current])
+        if parent.kind == 'subtract' and parent.operands[0] != current:
+            low, high = _box(geometry, parent.operands[0])
+            corners = np.array(np.meshgrid(*zip(low, high), indexing='ij')).reshape(3, -1).T
+            # along its own -Z, to the farthest corner, and a hundredth of
+            # the part past it, so the kernel meets no face on a face
+            reach = float(((np.asarray(item.center) - corners) @ _frame(item)[2]).max())
+            return max(reach, 0.0) + 0.01 * float(np.linalg.norm(high - low))
+        current = parent.id
+    return item.dimensions[0]
+
+
+def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
+    """The blocks and cylinders a solid is made of, where they stand: a
+    section's or a hole's pieces, a pattern's copies each its own, moved
+    — what meshing reads (its grid cut at each copy's faces, a ring
+    about each copy's circle)."""
+    item = solid(geometry, solid_id)
+    if item.kind in BASIC:
+        return [item]
+    if item.kind in FLAT:
+        # a block or a cylinder of no thickness: where it is, its box,
+        # and nothing inside it
+        return [replace(item, kind='block') if item.kind == 'plate'
+                else replace(item, kind='cylinder', length=0.0)]
+    if item.kind in SHAPED:
+        return [piece for _cut, piece in _pieces(geometry, item)]
+    leaves = [leaf for o in item.operands for leaf in _leaves(geometry, o)]
+    if item.kind != PATTERN:
+        return leaves
+    return [replace(leaf, center=tuple(float(c) for c in np.asarray(leaf.center) + offset))
+            for offset in _offsets(item) for leaf in leaves]
+
+
+def contains(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
+    """Which of `points` lie inside the solid, worked out from its recipe
+    without the kernel: a block's box and a cylinder's radius and length,
+    combined as its booleans say. A point on a face counts as inside.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+    points : array_like
+        (n, 3), as the geometry holds its coordinates.
+    ignore : collection of int, optional
+        Solids read as holding nothing: a cylinder subtracted is not
+        cut, one unioned adds nothing. The mesher reads a part this
+        way without the cylinders that run across its extrusion.
+
+    Returns
+    -------
+    numpy.ndarray of bool
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    item = solid(geometry, solid_id)
+    if item.id in ignore:
+        return np.zeros(len(points), dtype=bool)
+    if item.kind in BASIC:
+        return _basic_contains(item, points)
+    if item.kind in SHAPED:
+        return _pieces_contain(_pieces(geometry, item), points)
+    if item.kind == PATTERN:
+        # a section's or a hole's pieces worked out once, not once a copy:
+        # a through hole's depth is asked of the whole table (`_through`),
+        # and a pattern of 400 holes meshed three times slower than one of
+        # cylinders that way
+        tests = []
+        for o in item.operands:
+            if solid(geometry, o).kind in SHAPED:
+                pieces = _pieces(geometry, solid(geometry, o))
+                tests.append(lambda at, pieces=pieces: _pieces_contain(pieces, at))
+            else:
+                tests.append(lambda at, o=o: contains(geometry, o, at, ignore))
+        return np.any([test(points - offset) for offset in _offsets(item)
+                       for test in tests], axis=0)
+    inside = [contains(geometry, o, points, ignore) for o in item.operands]
+    if item.kind == 'union':
+        return np.any(inside, axis=0)
+    if item.kind == 'intersect':
+        return np.all(inside, axis=0)
+    return inside[0] & ~np.any(inside[1:], axis=0)
+
+
+def distance(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
+    """The signed distance from each of `points` to the solid's surface,
+    negative inside, worked out from its recipe: a block's and a
+    cylinder's exact distances, a union the least of its operands', an
+    intersection the greatest, a subtraction the greater of the first's
+    and the negatives of the rest's. Exact for a block and a cylinder;
+    for a boolean, exact outside and at the surface, and a bound
+    inside, which is what a mesher needs: where the surface is and
+    which way is out.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+    points : array_like
+        (n, 3), as the geometry holds its coordinates.
+    ignore : collection of int, optional
+        Solids read as holding nothing, as `contains` reads them.
+
+    Returns
+    -------
+    numpy.ndarray
+        (n,), in the geometry's length unit.
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    item = solid(geometry, solid_id)
+    if item.id in ignore:
+        return np.full(len(points), np.inf)
+    if item.kind in BASIC:
+        return _basic_distance(item, points)
+    if item.kind in SHAPED:
+        pieces = _pieces(geometry, item)
+        return _pieces_distance(pieces, points)
+    if item.kind == PATTERN:
+        tests = []
+        for o in item.operands:
+            if solid(geometry, o).kind in SHAPED:
+                pieces = _pieces(geometry, solid(geometry, o))
+                tests.append(lambda at, pieces=pieces: _pieces_distance(pieces, at))
+            else:
+                tests.append(lambda at, o=o: distance(geometry, o, at, ignore))
+        return np.min([test(points - offset) for offset in _offsets(item)
+                       for test in tests], axis=0)
+    found = [distance(geometry, o, points, ignore) for o in item.operands]
+    if item.kind == 'union':
+        return np.min(found, axis=0)
+    if item.kind == 'intersect':
+        return np.max(found, axis=0)
+    return np.maximum(found[0], -np.min(found[1:], axis=0))
+
+
+def distance_gradient(geometry: Any, solid_id: int, points,
+                      ignore=()) -> tuple[np.ndarray, np.ndarray]:
+    """`distance` and its gradient together: the unit direction out of
+    the material at each point, exact where the distance is smooth and
+    one side's value on an edge or a corner. A boolean's gradient is
+    the gradient of the operand that decided its distance, a cut
+    operand's turned inward. Four distance evaluations a point by
+    finite differences were most of a fit's projection cost (hexmesh,
+    2026-10-19).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+    points : array_like
+        (n, 3), as the geometry holds its coordinates.
+    ignore : collection of int, optional
+        Solids read as holding nothing, as `contains` reads them.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The distances, (n,), and the gradients, (n, 3).
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    item = solid(geometry, solid_id)
+    if item.id in ignore:
+        return np.full(len(points), np.inf), np.zeros_like(points)
+    if item.kind in BASIC:
+        return _basic_gradient(item, points)
+    if item.kind in SHAPED:
+        return _pieces_gradient(_pieces(geometry, item), points)
+    if item.kind == PATTERN:
+        found = []
+        for o in item.operands:
+            inner = solid(geometry, o)
+            for offset in _offsets(item):
+                if inner.kind in SHAPED:
+                    found.append(_pieces_gradient(_pieces(geometry, inner), points - offset))
+                else:
+                    found.append(distance_gradient(geometry, o, points - offset, ignore))
+        return _least(found)
+    found = [distance_gradient(geometry, o, points, ignore) for o in item.operands]
+    if item.kind == 'union':
+        return _least(found)
+    if item.kind == 'intersect':
+        return _greatest(found)
+    dc, gc = _least(found[1:])
+    return _greatest([found[0], (-dc, -gc)])
+
+
+def _least(found):
+    """The least distance among `found` (distance, gradient) pairs,
+    with its gradient."""
+    distances = np.stack([d for d, _g in found])
+    gradients = np.stack([g for _d, g in found])
+    pick = np.argmin(distances, axis=0)
+    rows = np.arange(distances.shape[1])
+    return distances[pick, rows], gradients[pick, rows]
+
+
+def _greatest(found):
+    """The greatest distance among `found`, with its gradient: the
+    least of the negatives, negated back."""
+    d, g = _least([(-d, -g) for d, g in found])
+    return -d, -g
+
+
+def _pieces_gradient(pieces, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """`_pieces_distance` with its gradient."""
+    d, g = _least([_basic_gradient(p, points) for cut, p in pieces if not cut])
+    for cut, p in pieces:
+        if cut:
+            dc, gc = _basic_gradient(p, points)
+            d, g = _greatest([(d, g), (-dc, -gc)])
+    return d, g
+
+
+def _box_distance(q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The distance to a box from its signed offsets `q` past each
+    half-width, and its gradient with respect to `q`: outside, the
+    direction of the part of `q` past the box; inside, toward the
+    nearest face alone."""
+    outside = np.maximum(q, 0.0)
+    norm = np.linalg.norm(outside, axis=1)
+    worst = q.max(axis=1)
+    d = norm + np.minimum(worst, 0.0)
+    out = norm > 0.0
+    dq = np.zeros_like(q)
+    dq[out] = outside[out] / norm[out][:, None]
+    nearest = np.argmax(q, axis=1)
+    dq[~out, nearest[~out]] = 1.0
+    return d, dq
+
+
+def _cone_local(item: Solid, local: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """A cone's signed distance at points in its own frame, and its
+    gradient there, exact: in the plane through the axis the cone is a
+    trapezium, and the nearest point is on a cap or on the slanted side,
+    whichever is nearer."""
+    h = item.length / 2.0
+    r1, r2 = item.radius, _top(item)
+    rho = np.hypot(local[:, 0], local[:, 1])
+    z = local[:, 2]
+    # the caps: the base at -h of radius r1, the top at +h of radius r2
+    cap_r = np.where(z < 0.0, r1, r2)
+    ca = np.stack([rho - np.minimum(rho, cap_r), np.abs(z) - h], axis=1)
+    # the side, from the base's rim (r1, -h) to the top's (r2, +h)
+    rim = np.array([r2, h])
+    run = np.array([r2 - r1, 2.0 * h])
+    q = np.stack([rho, z], axis=1)
+    t = np.clip(((rim - q) @ run) / (run @ run), 0.0, 1.0)
+    cb = q - rim + t[:, None] * run
+    inside = (cb[:, 0] < 0.0) & (ca[:, 1] < 0.0)
+    sign = np.where(inside, -1.0, 1.0)
+    na, nb = np.linalg.norm(ca, axis=1), np.linalg.norm(cb, axis=1)
+    use_a = na < nb
+    d = sign * np.where(use_a, na, nb)
+    # the 2-D gradient: along the vector to the nearest point, its sign
+    # the distance's; the cap's measured on |z|, so its axial part takes
+    # z's sign back
+    va = np.stack([ca[:, 0], ca[:, 1] * np.where(z < 0.0, -1.0, 1.0)], axis=1)
+    v = np.where(use_a[:, None], va, cb)
+    length = np.linalg.norm(v, axis=1)
+    g2 = sign[:, None] * v / np.where(length > 0.0, length, 1.0)[:, None]
+    radial = local[:, :2] / np.maximum(rho, 1e-300)[:, None]
+    grad = np.zeros_like(local)
+    grad[:, :2] = g2[:, [0]] * radial
+    grad[:, 2] = g2[:, 1]
+    return d, grad
+
+
+def _sphere_local(item: Solid, local: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """A sphere's signed distance at points about its center, and its
+    gradient, exact."""
+    reach = np.linalg.norm(local, axis=1)
+    out = local / np.maximum(reach, 1e-300)[:, None]
+    out[reach == 0.0] = (0.0, 0.0, 1.0)
+    return reach - item.radius, out
+
+
+def _basic_gradient(item: Solid, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """`_basic_distance` with its gradient, exact: the box's gradient
+    through the local frame, a cylinder's through its radius, a cone's
+    and a sphere's from their nearest points."""
+    frame = _frame(item)
+    local = (points - np.asarray(item.center)) @ frame.T
+    if item.kind == 'cone':
+        d, grad = _cone_local(item, local)
+        return d, grad @ frame
+    if item.kind == 'sphere':
+        return _sphere_local(item, points - np.asarray(item.center))
+    side = np.where(local >= 0.0, 1.0, -1.0)
+    grad = np.zeros_like(local)
+    if item.kind == 'block':
+        half = np.asarray(item.widths) / 2.0
+        if item.corner > 0.0:
+            q2 = np.abs(local[:, :2]) - (half[:2] - item.corner)
+            flat, dflat = _box_distance(q2)
+            q = np.stack([flat - item.corner, np.abs(local[:, 2]) - half[2]], axis=1)
+            d, dq = _box_distance(q)
+            grad[:, :2] = dq[:, [0]] * dflat * side[:, :2]
+            grad[:, 2] = dq[:, 1] * side[:, 2]
+        else:
+            d, dq = _box_distance(np.abs(local) - half)
+            grad = dq * side
+    else:
+        rho = np.hypot(local[:, 0], local[:, 1])
+        q = np.stack([rho - item.radius, np.abs(local[:, 2]) - item.length / 2.0], axis=1)
+        d, dq = _box_distance(q)
+        radial = local[:, :2] / np.maximum(rho, 1e-300)[:, None]
+        grad[:, :2] = dq[:, [0]] * radial
+        grad[:, 2] = dq[:, 1] * side[:, 2]
+    return d, grad @ frame
+
+
+def _basic_distance(item: Solid, points: np.ndarray) -> np.ndarray:
+    """The signed distance to a block (its corners rounded or not), a
+    cylinder, a cone or a sphere, exact."""
+    if item.kind in UNSWEPT:
+        return _basic_gradient(item, points)[0]
+    local = (points - np.asarray(item.center)) @ _frame(item).T
+    if item.kind == 'block':
+        half = np.asarray(item.widths) / 2.0
+        if item.corner > 0.0:
+            # the rounded rectangle in the plane, then the slab
+            q = np.abs(local[:, :2]) - (half[:2] - item.corner)
+            flat = (np.linalg.norm(np.maximum(q, 0.0), axis=1)
+                    + np.minimum(q.max(axis=1), 0.0) - item.corner)
+            q = np.stack([flat, np.abs(local[:, 2]) - half[2]], axis=1)
+        else:
+            q = np.abs(local) - half
+        return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(q.max(axis=1), 0.0)
+    q = np.stack([np.hypot(local[:, 0], local[:, 1]) - item.radius,
+                  np.abs(local[:, 2]) - item.length / 2.0], axis=1)
+    return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(q.max(axis=1), 0.0)
+
+
+def _pieces_distance(pieces, points: np.ndarray) -> np.ndarray:
+    """The signed distance to a section's or a hole's material: the
+    uncut pieces' union less the cut ones."""
+    found = np.min([_basic_distance(p, points) for cut, p in pieces if not cut], axis=0)
+    for cut, p in pieces:
+        if cut:
+            found = np.maximum(found, -_basic_distance(p, points))
+    return found
+
+def _basic_contains(item: Solid, points: np.ndarray) -> np.ndarray:
+    """Which points lie inside a block, a cylinder, a cone or a sphere,
+    a face counted."""
+    local = (points - np.asarray(item.center)) @ _frame(item).T
+    slack = 1e-9 * (max(item.widths) + item.radius + item.length)
+    if item.kind == 'sphere':
+        return np.linalg.norm(local, axis=1) <= item.radius + slack
+    if item.kind == 'cone':
+        h = item.length / 2.0
+        reach = item.radius + (_top(item) - item.radius) * (local[:, 2] + h) / item.length
+        return ((np.hypot(local[:, 0], local[:, 1]) <= reach + slack)
+                & (np.abs(local[:, 2]) <= h + slack))
+    if item.kind == 'block':
+        half = np.asarray(item.widths) / 2.0 + slack
+        inside = np.all(np.abs(local) <= half, axis=1)
+        if item.corner > 0.0:
+            # in a corner's square, only within its radius of the arc's
+            # center
+            arc = np.asarray(item.widths[:2]) / 2.0 - item.corner
+            beyond = np.abs(local[:, :2]) - arc
+            cornered = np.all(beyond > 0.0, axis=1)
+            inside &= ~cornered | (np.hypot(*beyond.T) <= item.corner + slack)
+        return inside
+    return ((np.hypot(local[:, 0], local[:, 1]) <= item.radius + slack)
+            & (np.abs(local[:, 2]) <= item.length / 2.0 + slack))
+
+
+def _pieces_contain(pieces, points: np.ndarray) -> np.ndarray:
+    """Which points lie in a section's or a hole's material: in an uncut
+    piece and in no cut one."""
+    inside = np.any([_basic_contains(p, points) for cut, p in pieces if not cut], axis=0)
+    for cut, p in pieces:
+        if cut:
+            inside &= ~_basic_contains(p, points)
+    return inside
+
+
+def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
+    """A block's, a cylinder's, a cone's or a sphere's extent along the
+    geometry's axes (a cone's as its wider end's cylinder's)."""
+    axes = _frame(item)
+    if item.kind == 'sphere':
+        center = np.asarray(item.center)
+        return center - item.radius, center + item.radius
+    if item.kind == 'cone':
+        item = replace(item, radius=max(item.radius, _top(item)))
+    if item.kind == 'block':
+        half = np.abs(axes.T) @ (np.asarray(item.widths) / 2.0)
+    else:
+        along = np.abs(axes[2]) * item.length / 2.0
+        across = item.radius * np.sqrt(np.clip(1.0 - axes[2] ** 2, 0.0, 1.0))
+        half = along + across
+    center = np.asarray(item.center)
+    return center - half, center + half
+
+
+def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
+    """The solid's extent along the geometry's axes, from its recipe."""
+    item = solid(geometry, solid_id)
+    if item.kind in BASIC:
+        return _basic_box(item)
+    if item.kind in SHAPED:
+        boxes = [_basic_box(p) for cut, p in _pieces(geometry, item) if not cut]
+        return np.min([b[0] for b in boxes], axis=0), np.max([b[1] for b in boxes], axis=0)
+    boxes = [_box(geometry, o) for o in item.operands]
+    if item.kind == PATTERN:
+        offsets = _offsets(item)
+        return (np.min([b[0] for b in boxes], axis=0) + offsets.min(axis=0),
+                np.max([b[1] for b in boxes], axis=0) + offsets.max(axis=0))
+    if item.kind == 'union':
+        return (np.min([b[0] for b in boxes], axis=0),
+                np.max([b[1] for b in boxes], axis=0))
+    if item.kind == 'intersect':
+        return (np.max([b[0] for b in boxes], axis=0),
+                np.min([b[1] for b in boxes], axis=0))
+    return boxes[0]
+
+
+class NotAnExtrusion(ValueError):
+    """The parts cannot be meshed into bricks: a solid is turned off
+    the geometry's axes. Tetrahedra can mesh them (`tetmesh`)."""
+
+
+def extrusion_axis(geometry: Any, ids) -> int:
+    """The axis (0, 1 or 2) the parts are extrusions along.
+
+    Every block must be square to the geometry's axes; a solid turned
+    off them raises `NotAnExtrusion` naming it. The axis is the one most of
+    the cylinders and rounded corners run along, the largest radius
+    deciding a tie; the rest run across the extrusion and are pulled
+    round from the grid rather than ringed. Blocks alone are an
+    extrusion along any axis, and the axis along which their extent is
+    thinnest is returned.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    int
+    """
+    leaves = [leaf for i in ids for leaf in _leaves(geometry, i)]
+    for leaf in leaves:
+        if leaf.kind in UNSWEPT:
+            raise NotAnExtrusion(f'solid {leaf.id} is a {leaf.kind}, which no sweep makes: '
+                                 'its bricks are fitted')
+        axes = np.abs(_frame(leaf))
+        if not np.allclose(np.sort(axes, axis=1), [[0, 0, 1]] * 3, atol=1e-9):
+            raise NotAnExtrusion(
+                f'solid {leaf.id} is turned off the geometry\'s axes: bricks '
+                'mesh extrusions along X, Y or Z')
+    # the cylinders along a second axis cannot be ringed, since a ring
+    # is laid in the plane and swept (Brandon, 2026-10-18: a block with
+    # a peanut cut along Z and a hole drilled in from the side along Y
+    # was refused outright); the axis with the most round features
+    # keeps its rings, and the rest are pulled round in their own plane
+    along: dict[int, tuple[int, float]] = {}
+    for leaf in leaves:
+        if leaf.kind == 'cylinder' or leaf.corner > 0.0:
+            axis = int(np.argmax(np.abs(_frame(leaf)[2])))
+            count, widest = along.get(axis, (0, 0.0))
+            along[axis] = (count + 1, max(widest, leaf.radius, leaf.corner))
+    if along:
+        return max(along, key=lambda axis: (along[axis], -axis))
+    # blocks alone are an extrusion along any axis: the thinnest one
+    low, high = zip(*(_box(geometry, i) for i in ids))
+    return int(np.argmin(np.max(high, axis=0) - np.min(low, axis=0)))
+
+
+def mesh_size(geometry: Any, ids) -> float:
+    """The element size an extrusion is meshed at by default: half the
+    thinnest feature, so every feature is two bricks across.
+
+    The thinnest feature is the shortest span between two flat faces (a
+    cylinder's end along an axis counts as one), or the narrowest
+    cylinder or rounded corner across (`smallest_feature`). With
+    nothing to measure, the size is 1.0.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    float
+    """
+    radius, wall = smallest_feature(geometry, ids)
+    thinnest = min(2.0 * radius, wall)
+    return 0.5 * thinnest if np.isfinite(thinnest) else 1.0
+
+
+def smallest_feature(geometry: Any, ids) -> tuple[float, float]:
+    """(the smallest radius, the thinnest wall) of the parts, in the
+    geometry's length unit: the narrowest cylinder or rounded corner,
+    and the shortest span between two flat faces. Infinite where there
+    is none.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    (float, float)
+    """
+    ids = [int(i) for i in ids]
+    leaves = [leaf for i in ids for leaf in _leaves(geometry, i)]
+    # a cone's radius halfway up: at a point its tip has none, and a
+    # mesh is sized by what it has to hold over most of its length
+    radii = [leaf.radius if leaf.kind in ('cylinder', 'sphere')
+             else 0.5 * (leaf.radius + _top(leaf)) if leaf.kind == 'cone' else leaf.corner
+             for leaf in leaves if leaf.kind in BASIC[1:] or leaf.corner > 0.0]
+    # the flat faces: every block's, and the caps of a cylinder along
+    # an axis; a turned cylinder's caps are not walls (the grid's cuts
+    # read them along the nearest axis, a line the grid needs and not a
+    # wall, and Mesh Solids opened at 0.95 in on a block 3 in thick
+    # with 1 in holes for it: Brandon, 2026-10-19)
+    planes: list[set] = [set(), set(), set()]
+    for leaf in leaves:
+        center = np.asarray(leaf.center, dtype=float)
+        frame = _frame(leaf)
+        if leaf.kind == 'block':
+            half = np.abs(frame.T) @ (np.asarray(leaf.widths, dtype=float) / 2.0)
+            for k in range(3):
+                planes[k].update((center[k] - half[k], center[k] + half[k]))
+        elif leaf.kind != 'sphere' and np.isclose(np.abs(frame[2]).max(), 1.0):
+            k = int(np.argmax(np.abs(frame[2])))
+            planes[k].update((center[k] - leaf.length / 2.0, center[k] + leaf.length / 2.0))
+    boxes = [_box(geometry, i) for i in ids]
+    low = np.min([lo for lo, _hi in boxes], axis=0)
+    high = np.max([hi for _lo, hi in boxes], axis=0)
+    spans = [b - a for k in range(3)
+             for a, b in pairwise(sorted(x for x in planes[k] if low[k] - 1e-9 <= x <= high[k] + 1e-9))
+             if b - a > 1e-9 * (high[k] - low[k])]
+    # a pipe's wall: the gap between the radii of two cylinders on one
+    # axis (a wye's 0.3 in walls read as 6 in, its run's length,
+    # without this)
+    cylinders = [leaf for leaf in leaves if leaf.kind == 'cylinder']
+    for a_index, a in enumerate(cylinders):
+        axis_a = _frame(a)[2]
+        for b in cylinders[a_index + 1:]:
+            axis_b = _frame(b)[2]
+            if abs(abs(float(axis_a @ axis_b)) - 1.0) > 1e-9:
+                continue
+            between = np.asarray(b.center, dtype=float) - np.asarray(a.center, dtype=float)
+            off_axis = between - float(between @ axis_a) * axis_a
+            if np.linalg.norm(off_axis) > 1e-9 * (a.radius + b.radius):
+                continue
+            gap = abs(a.radius - b.radius)
+            if gap > 0.0:
+                spans.append(gap)
+    return (float(min(radii)) if radii else np.inf, float(min(spans)) if spans else np.inf)
+
+
+
+
+def _cuts(geometry: Any, ids, also=()) -> list[np.ndarray]:
+    """Per axis, where the grid must have a line: every block face, every
+    cylinder's end along its axis, and the parts' extent, kept within
+    that extent; the faces of the solids in `also` as well, where they
+    fall within it (the earlier pieces of a union meshed in pieces, so
+    a later piece's grid is cut where it meets them)."""
+    low, high = zip(*(_box(geometry, i) for i in ids))
+    low, high = np.min(low, axis=0), np.max(high, axis=0)
+    cuts: list[set] = [{low[k], high[k]} for k in range(3)]
+    for i in [*ids, *also]:
+        for leaf in _leaves(geometry, i):
+            center = np.asarray(leaf.center)
+            if leaf.kind == 'block':
+                half = np.abs(_frame(leaf).T) @ (np.asarray(leaf.widths) / 2.0)
+                for k in range(3):
+                    cuts[k].update((center[k] - half[k], center[k] + half[k]))
+            elif leaf.kind == 'sphere':
+                continue
+            else:
+                k = int(np.argmax(np.abs(_frame(leaf)[2])))
+                cuts[k].update((center[k] - leaf.length / 2,
+                                center[k] + leaf.length / 2))
+    size = float(np.max(high - low)) or 1.0
+    out = []
+    for k in range(3):
+        kept = sorted(c for c in cuts[k]
+                      if low[k] - 1e-9 * size <= c <= high[k] + 1e-9 * size)
+        merged = [kept[0]]
+        for c in kept[1:]:
+            if c - merged[-1] > 1e-9 * size:
+                merged.append(c)
+        out.append(np.asarray(merged))
+    return out
+
+
+def _grid_lines(geometry: Any, ids, size: float, piece: bool = False, cuts_from=()):
+    """(axis, order, lines): the extrusion axis, the (u, v, w) axes and
+    the grid's lines along each, cut at every flat face and divided
+    into the whole number of bricks nearest `size`. A `piece` is a
+    union's operand meshed on its own (`brick_mesh`), which is
+    otherwise refused as part of another; `cuts_from` names solids
+    whose faces the grid is cut at too."""
+    ids = [int(i) for i in ids]
+    if not ids:
+        raise ValueError('pick a solid to mesh')
+    if not piece:
+        refuse_parts_of_another(geometry, ids)
+    if not float(size) > 0.0:
+        raise ValueError('an element size above zero')
+    axis = extrusion_axis(geometry, ids)
+    # u, v, w right-handed, w along the extrusion
+    order = [(axis + 1) % 3, (axis + 2) % 3, axis]
+    cuts = _cuts(geometry, ids, cuts_from)
+    lines = []
+    for k in order:
+        edges = [cuts[k][0]]
+        for a, b in pairwise(cuts[k]):
+            count = max(1, round((b - a) / size))
+            edges.extend(np.linspace(a, b, count + 1)[1:])
+        lines.append(np.asarray(edges))
+    return axis, order, lines
+
+
+def refuse_parts_of_another(geometry: Any, ids) -> None:
+    """Refuse a solid that is part of a boolean or a pattern: the one
+    to mesh is the one it is part of."""
+    used = used_by(geometry)
+    inside_another = [int(i) for i in ids if int(i) in used]
+    if inside_another:
+        raise ValueError(f'solid {inside_another[0]} is part of solid '
+                         f'{used[inside_another[0]]}; mesh that one')
+
+
+def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
+    """How many bricks the grid `extrusion_mesh` would lay for these
+    parts at `size` holds, voids included: the count before any
+    ownership is asked, so a pane can decide whether to preview a mesh
+    before paying for it.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The element size, as the geometry holds its coordinates.
+
+    Returns
+    -------
+    int
+
+    Raises
+    ------
+    ValueError
+        As `extrusion_mesh` does, for parts or a size it would refuse.
+    """
+    _axis, _order, lines = _grid_lines(geometry, ids, size, piece)
+    nu, nv, nw = (len(line) for line in lines)
+    return (nu - 1) * (nv - 1) * (nw - 1)
+
+
+def extrusion_mesh(geometry: Any, ids, size: float,
+                   parts_apart: bool = False,
+                   progress: Any = None, piece: bool = False,
+                   cuts_from=()) -> tuple[Any, dict]:
+    """The parts as eight-node bricks, ready to join to a geometry
+    (`mesh.join`).
+
+    Each part gets one element group, named for it (or for its kind and
+    id when it has no name). Parts that touch share their nodes there,
+    or, with `parts_apart`, each keeps its own on the same grid, so the
+    nodes of one lie on the other's and bolts can be merged there later.
+
+    The grid is cut at every flat face of every block along every axis,
+    and each span is divided into the whole number of bricks nearest
+    `size`, so flat faces fall on grid lines. A brick goes to the part
+    whose recipe holds its center (`contains`), to the later part where
+    parts overlap (a steel screw added over the insert it is threaded
+    into makes those bricks steel), and to no part in a void. A hole, a
+    boss or an insert is meshed round, not stair-stepped. About each
+    circle with room, a ring mesh with its nodes evenly spaced on the
+    circle replaces the grid. About a circle without room, or a rounded
+    corner's arc, the nodes between its inside and the material beside
+    it are moved radially onto it, except where the move would turn a
+    brick inside out.
+
+    The extrusion runs along the axis most of the cylinders and rounded
+    corners run along (`extrusion_axis`); a cylinder drilled across it
+    is cut from the grid and its nodes pulled round in its own plane,
+    without a ring, and where it meets a hole along the extrusion the
+    bricks between the two walls are skewed. A solid turned off the
+    axes is refused with the solid named, and so are a solid that is
+    part of another, a size that is not positive, and a grid of more
+    than `MESH_LIMIT` (2,000,000) bricks by its volume (`brick_count`)
+    or a grid of more than `GRID_LIMIT` (10,000,000) cells.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id; each a solid nothing else uses. Where two
+        overlap, the later takes the bricks.
+    size : float
+        The element size aimed at, as the geometry holds its
+        coordinates.
+    parts_apart : bool, default False
+        Each part keeps its own nodes where it touches another.
+    progress : callable, optional
+        Told ``(done, total)`` as the mesh goes: the grid's ownership,
+        the plane and its rings, the rounding, the bricks (the window's
+        bar reads it; anything it raises stops the mesh).
+    piece : bool, default False
+        The part is a union's operand meshed on its own (`brick_mesh`),
+        which is otherwise refused as part of another.
+    cuts_from : sequence of int, optional
+        Solids whose flat faces the grid is cut at too, where they fall
+        within the parts: the earlier pieces of a union, so the sweep
+        ends where it meets them.
+
+    Returns
+    -------
+    (Geometry, dict)
+        The bricks, in the geometry's length unit; and what was made:
+        'bricks' and 'nodes', the counts; 'axis' (0, 1 or 2); 'rounded',
+        the number of nodes moved onto a circle; 'rings', the number of
+        rings laid, one about each circle with room; and 'shortest', the
+        shortest brick edge.
+    """
+    # parts_apart is for the BARC's box, channels and beam (2026-10-11):
+    # meshed one at a time, their grids were a quarter inch from meeting.
+    from .geometry import Geometry
+    from .progress import Ticker
+
+    ids = [int(i) for i in ids]
+    axis, order, lines = _grid_lines(geometry, ids, size, piece, cuts_from)
+    nu, nv, nw = (len(line) for line in lines)
+    cells = (nu - 1) * (nv - 1) * (nw - 1)
+    _within_limits(geometry, ids, size, cells)
+    ticker = Ticker(progress)
+    ticker.add(4)
+    # the rings are laid as if the cylinders across the extrusion were
+    # not there, since a ring's rectangle must hold nothing but its own
+    # outline; the bricks are then owned by what truly holds them
+    across = _cross_cylinders(geometry, ids, axis)
+    xyz, conn, groups, made = _mesh_grid(
+        lines, order, size, lambda points: _owners(geometry, ids, points),
+        _circles(geometry, ids, axis), ticker,
+        held_plane=(lambda points: _owners(geometry, ids, points, across))
+        if across else None,
+        cross=_cross_circles(geometry, ids, axis))
+    if not len(conn):
+        raise ValueError('the parts hold nothing to mesh')
+    if parts_apart:
+        # a node for each part that uses it: one grid, no node shared
+        stride = int(groups.max()) + 1
+        key = (conn.ravel() - 1) * stride + np.repeat(groups, 8)
+        kept, inverse = np.unique(key, return_inverse=True)
+        xyz, conn = xyz[kept // stride], inverse.reshape(-1, 8) + 1
+    names, present = [], []
+    for slot, part in enumerate(ids, start=1):
+        if (groups == slot).any():
+            item = solid(geometry, part)
+            names.append(item.name.strip() or f'{item.kind.title()} {item.id}')
+            present.append(slot)
+    part = Geometry(node_id=np.arange(1, len(xyz) + 1), node_xyz=xyz,
+                    elem_conn=list(conn), elem_type=[115] * len(conn),
+                    elem_group=[int(g) for g in groups], group_id=present,
+                    group_name=names, length_unit=geometry.length_unit)
+    return part, {'bricks': len(conn), 'nodes': len(xyz), 'axis': axis, **made}
+
+
+def brick_mesh(geometry: Any, ids, size: float, parts_apart: bool = False,
+               progress: Any = None, sizes: Any = None) -> tuple[Any, dict]:
+    """The parts as eight-node bricks: `extrusion_mesh` where they are
+    an extrusion along X, Y or Z, with rings about the holes; where
+    they are not and are a union, its operands one at a time (`pieces`),
+    each swept where it is an extrusion and fitted where it is not, at
+    its own size, joined where their nodes coincide and tied at the
+    seams where they do not; and `hexmesh.overlay_mesh`, a grid fitted
+    to the shape, for a lone part that is no extrusion. What Mesh
+    Solids runs for Hexes.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id; each a solid nothing else uses.
+    size : float
+        The element size aimed at, as the geometry holds its
+        coordinates.
+    parts_apart : bool, default False
+        Each part keeps its own nodes where it touches another; the
+        extrusion mesher's option, not the fitted grid's.
+    progress : callable, optional
+        Told ``(done, total)`` as the mesh goes.
+    sizes : mapping of int to float, optional
+        A size per piece, by solid id, for a union meshed in pieces;
+        a piece without one takes `size`.
+
+    Returns
+    -------
+    (Geometry, dict)
+        The bricks and what was made, as the mesher that ran says it,
+        with 'method': 'extrusion', 'overlay' or 'pieces'. In pieces,
+        'pieces' lists each piece's readings with its 'name', 'method',
+        'size' and 'dropped' (its bricks inside the pieces before it),
+        'seam_shared' counts the nodes the pieces share at their seams,
+        'ties' the nodes joined there by rigid links and 'seams' the
+        mated surfaces that join them (`part.mates`).
+    """
+    ids = [int(i) for i in ids]
+    try:
+        part, made = extrusion_mesh(geometry, ids, size, parts_apart, progress=progress)
+    except NotAnExtrusion:
+        from .hexmesh import overlay_mesh
+
+        found = piece_cuts(geometry, ids)
+        if len(found) > 1:
+            return _pieces_mesh(geometry, found, size, sizes, progress)
+        if len(ids) == 1:
+            # one block, cylinder or section turned off the axes: swept
+            # along its own, nothing to run into (2026-10-20)
+            try:
+                part, made = turned_sweep(geometry, ids[0], size, progress=progress)
+                return part, {**made, 'method': 'extrusion'}
+            except NotAnExtrusion:
+                pass
+        part, made = overlay_mesh(geometry, ids, size, progress=progress)
+        return part, {**made, 'method': 'overlay'}
+    return part, {**made, 'method': 'extrusion'}
+
+
+def piece_cuts(geometry: Any, ids) -> list[tuple[int, tuple[int, ...]]]:
+    """The pieces a brick mesh is made in, each with the solids cut
+    from it: (piece, cuts).
+
+    A lone union gives up its operands, and a union among them gives up
+    its own, all the way down, so a part unioned again with something
+    keeps its pieces (Brandon, 2026-10-20: a table unioned with a
+    sphere was fitted whole, its legs and rod with it). A subtraction
+    whose first operand holds a union is split the same way, each
+    member less what the subtraction takes: (A + B) - C is A - C and
+    B - C. Any other solid, and a subtraction of no union, is one piece;
+    so are parts given together, each its own.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    list of (int, tuple of int)
+    """
+    ids = [int(i) for i in ids]
+    if len(ids) != 1:
+        return [(i, ()) for i in ids]
+
+    def walk(i: int, cuts: tuple[int, ...]) -> list[tuple[int, tuple[int, ...]]]:
+        item = solid(geometry, i)
+        if item.kind == 'union':
+            return [found for o in item.operands for found in walk(int(o), cuts)]
+        if item.kind == 'subtract':
+            first, *rest = (int(o) for o in item.operands)
+            inner = walk(first, (*cuts, *rest))
+            if len(inner) > 1:
+                return inner
+        return [(i, cuts)]
+
+    found = walk(ids[0], ())
+    return found if len(found) > 1 else [(ids[0], ())]
+
+
+def _cut_pieces(geometry: Any, found) -> list[int]:
+    """The solid each of `piece_cuts`' pieces is meshed as: the piece
+    itself, or a subtraction of its cuts from it, added to the
+    geometry's solids for the mesh alone and named as the piece is (the
+    caller removes the ones that are not the pieces)."""
+    made = []
+    for piece, cuts in found:
+        if not cuts:
+            made.append(int(piece))
+            continue
+        cut = Solid(id=_next_id(geometry), name=piece_name(geometry, piece), kind='subtract',
+                    operands=(int(piece), *(int(c) for c in cuts)))
+        geometry.solids.append(cut)
+        made.append(cut.id)
+    return made
+
+
+def _drop_cut_pieces(geometry: Any, found, made) -> None:
+    """Take `_cut_pieces`' subtractions off the geometry's solids."""
+    pieces = {int(piece) for piece, _cuts in found}
+    gone = {int(m) for m in made} - pieces
+    geometry.solids = [item for item in geometry.solids if item.id not in gone]
+
+
+@contextlib.contextmanager
+def meshed_as(geometry: Any, piece: int, cuts=()):
+    """The id of the solid a piece is meshed as, while the block runs:
+    the piece itself, or the subtraction of `cuts` from it, made for the
+    while and taken off after, so a reading of the piece (its likely
+    size, whether a fit is likely to fold) is a reading of what is
+    meshed, a hole included."""
+    found = [(int(piece), tuple(int(c) for c in cuts))]
+    made = _cut_pieces(geometry, found)
+    try:
+        yield made[0]
+    finally:
+        _drop_cut_pieces(geometry, found, made)
+
+
+def pieces(geometry: Any, ids) -> list[int]:
+    """The pieces a brick mesh is made in when the parts together are
+    not an extrusion (`piece_cuts`), without what is cut from them.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    list of int
+    """
+    return [piece for piece, _cuts in piece_cuts(geometry, ids)]
+
+
+def piece_name(geometry: Any, solid_id: int) -> str:
+    """The name a piece's element group takes: the solid's name, or
+    its kind and id."""
+    item = solid(geometry, solid_id)
+    return item.name.strip() or f'{item.kind.title()} {item.id}'
+
+
+def piece_plan(geometry: Any, ids, size: float, sizes: Any = None) -> list[dict]:
+    """How `brick_mesh` would mesh these parts in pieces: for each
+    piece its id, 'name', 'method' ('extrusion' for a sweep, 'overlay'
+    for a fit), 'size', 'cells', the grid's cells at that size (voids
+    included), and 'bricks', about how many the mesh holds
+    (`brick_count`), and 'cuts', the solids cut from the piece. The
+    pieces are `piece_cuts`', as deep as unions go.
+    One entry, for the parts together, where they are one extrusion or
+    no union to take apart; the pane reads it for its preview budget
+    and its sizes per piece.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The size for every piece not given its own, as the geometry
+        holds its coordinates.
+    sizes : mapping of int to float, optional
+        A size per piece, by solid id.
+
+    Returns
+    -------
+    list of dict
+    """
+    ids = [int(i) for i in ids]
+    refuse_parts_of_another(geometry, ids)
+    sizes = {int(k): float(v) for k, v in (sizes or {}).items()}
+    found, made = [], []
+    try:
+        extrusion_axis(geometry, ids)
+        parts = [ids]
+    except NotAnExtrusion:
+        found = piece_cuts(geometry, ids)
+        if len(found) == 1:
+            parts = [ids]
+        else:
+            # a piece with cuts is planned as the subtraction it is
+            # meshed as, its size kept under the piece's own id
+            made = _cut_pieces(geometry, found)
+            sizes.update({m: sizes[p] for (p, _c), m in zip(found, made) if p in sizes})
+            parts = [[m] for m in made]
+    try:
+        return _plan(geometry, parts, size, sizes, found, made)
+    finally:
+        if made:
+            _drop_cut_pieces(geometry, found, made)
+
+
+def _plan(geometry: Any, parts, size: float, sizes: dict, found, made) -> list[dict]:
+    """`piece_plan`'s entries for `parts`, each named and numbered as its
+    piece is."""
+    from .hexmesh import grid_cells as fitted_cells
+
+    piece_of = {int(m): int(p) for (p, _c), m in zip(found, made)}
+    cuts_of = {int(m): tuple(c) for (_p, c), m in zip(found, made)}
+    plan = []
+    for part in parts:
+        held = sizes.get(part[0], float(size)) if len(part) == 1 else float(size)
+        try:
+            cells = grid_cells(geometry, part, held, piece=True)
+            method = 'extrusion'
+        except NotAnExtrusion:
+            try:
+                # turned off the axes, swept along its own: the cells of
+                # it unturned, before its end is put on what it meets
+                if len(part) != 1:
+                    raise
+                item = _turned_primitive(geometry, part[0])
+                cells = grid_cells(_unturned(geometry, item), [item.id], held, piece=True)
+                method = 'extrusion'
+            except NotAnExtrusion:
+                cells = fitted_cells(geometry, part, held, piece=True)
+                method = 'overlay'
+        plan.append({'id': piece_of.get(part[0], part[0]) if len(part) == 1 else None,
+                     'name': ', '.join(piece_name(geometry, i) for i in part),
+                     'method': method, 'size': held, 'cells': int(cells),
+                     'bricks': brick_count(geometry, part, held),
+                     'cuts': cuts_of.get(part[0], ()) if len(part) == 1 else ()})
+    return plan
+
+
+def _pieces_mesh(geometry: Any, found, size: float, sizes: Any, progress: Any):
+    """`piece_cuts`' pieces meshed in turn (`_meshed_in_pieces`), each as
+    the subtraction of its cuts from it where it has any, its size and
+    its reading under its own id."""
+    sizes = {int(k): float(v) for k, v in (sizes or {}).items()}
+    made = _cut_pieces(geometry, found)
+    try:
+        held = {m: sizes[p] for (p, _c), m in zip(found, made) if p in sizes}
+        whole, said = _meshed_in_pieces(geometry, made, size, held, progress)
+    finally:
+        _drop_cut_pieces(geometry, found, made)
+    piece_of = {int(m): int(p) for (p, _c), m in zip(found, made)}
+    for reading in said['pieces']:
+        reading['id'] = piece_of.get(reading['id'], reading['id'])
+    return whole, said
+
+
+def _meshed_in_pieces(geometry: Any, parts, size: float, sizes: Any, progress: Any):
+    """The parts meshed one at a time, each swept where it is an
+    extrusion and fitted where it is not, at its own size, joined where
+    their nodes coincide and tied at the seams where they do not."""
+    from . import mesh as meshing
+    from .hexmesh import overlay_mesh
+
+    sizes = {int(k): float(v) for k, v in (sizes or {}).items()}
+    made_pieces, meshes = [], []
+    total = 100 * len(parts)
+
+    def staged(k):
+        if progress is None:
+            return None
+        return lambda done, whole: progress(100 * k + int(100 * done / max(whole, 1)), total)
+
+    for k, piece in enumerate(parts):
+        held = sizes.get(piece, float(size))
+        earlier = parts[:k]
+        try:
+            try:
+                part, made = extrusion_mesh(geometry, [piece], held, progress=staged(k),
+                                            piece=True, cuts_from=earlier)
+            except NotAnExtrusion:
+                # a block, cylinder or section turned off the axes is
+                # swept along its own (2026-10-20)
+                part, made = turned_sweep(geometry, piece, held, earlier,
+                                          progress=staged(k))
+            method = 'extrusion'
+        except NotAnExtrusion:
+            # the fit is of the piece less the pieces before it, as a
+            # subtraction that lives only for the fit: the face where
+            # the rod enters the block is then a surface of the shape,
+            # captured and held, and the seam there is on the block's
+            # skin to be mated. Fitted whole and cut after, the cut
+            # face's nodes had drifted off the block in the smoothing
+            # and the rod was tied to nothing (Brandon, 2026-10-20:
+            # the eigen solution can't be computed, disconnected
+            # meshes). The bricks inside the earlier pieces are left out
+            # by the fit too, so a fold among them is no refusal
+            remaining = _less_the_earlier(geometry, piece, earlier)
+            try:
+                part, made = overlay_mesh(
+                    geometry, [remaining.id], held, progress=staged(k), piece=True,
+                    cuts_from=earlier,
+                    discard=(lambda centers, others=earlier: _inside_any(geometry, others, centers))
+                    if earlier else None)
+            except ValueError as refusal:
+                raise ValueError(f'{piece_name(geometry, piece)}: {refusal}') from None
+            finally:
+                if remaining.id != piece:
+                    geometry.solids.remove(remaining)
+            method = 'overlay'
+        # the union held: where pieces overlap the material is the
+        # earlier operand's, so a later piece's bricks inside an earlier
+        # one go (Brandon, 2026-10-20: legs run up into the table top,
+        # and meshed whole they doubled the block's bricks there)
+        dropped = _drop_inside(geometry, part, earlier) + made.get('discarded', 0)
+        if not len(part.elem_conn):
+            raise ValueError(f'{piece_name(geometry, piece)} lies wholly inside the '
+                             'pieces before it: nothing of it to mesh')
+        meshes.append(part)
+        made_pieces.append({'id': int(piece), 'name': piece_name(geometry, piece),
+                            'method': method, 'size': held, **made,
+                            'bricks': len(part.elem_conn), 'nodes': part.num_nodes,
+                            'dropped': dropped})
+    # joined in turn, a node on one already there becoming it: pieces
+    # on one grid share their seam outright
+    from .geometry import Geometry
+    from .tetmesh import _extent
+
+    low, high = _extent(geometry, parts)
+    tolerance = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+    whole = Geometry(node_id=[], node_xyz=np.empty((0, 3)), length_unit=geometry.length_unit)
+    shared = 0
+    for part in meshes:
+        shared += meshing.join(whole, part, tolerance)['shared']
+    # the seams: where a finer piece meets a coarser one and their grids
+    # do not match, the finer piece's nodes on the coarser's skin are
+    # tied to it rigidly, as mated surfaces (`core.mates`), one set per
+    # patch, so a seam can be given a stiffness or deleted afterward. A node
+    # on a fitted skin is a few millionths of a size off its faces, so
+    # the seam is read a thousandth of the finer size wide, not the
+    # join's millionth of the extent (that missed 54 of 228 nodes,
+    # 2026-10-20)
+    from . import mates
+
+    ties = 0
+    seams = 0
+    names = list(whole.group_name)
+    ids = [int(g) for g in whole.group_id]
+    for k, a in enumerate(parts):
+        for b in parts[k + 1:]:
+            group_a = ids[names.index(piece_name(geometry, a))]
+            group_b = ids[names.index(piece_name(geometry, b))]
+            seam = 1e-3 * min(sizes.get(a, float(size)), sizes.get(b, float(size)))
+            for patch in mates.detect(whole, [group_a, group_b], seam):
+                mates.add(whole, patch['groups'], patch['nodes_a'], patch['nodes_b'])
+                ties += len(set(patch['nodes_a']) - set(patch['nodes_b']))
+                seams += 1
+    # the fitted pieces and the turned ones swept, whose ends are sheared
+    fitted = [m for m in made_pieces if m['method'] == 'overlay' or m.get('turned')]
+    made = {'method': 'pieces', 'pieces': made_pieces,
+            'bricks': sum(m['bricks'] for m in made_pieces), 'nodes': whole.num_nodes,
+            'seam_shared': shared, 'ties': ties, 'seams': seams,
+            'shortest': min(m['shortest'] for m in made_pieces)}
+    if fitted:
+        made['quality'] = min(m['quality'] for m in fitted)
+        made['poor'] = sum(m['poor'] for m in fitted)
+    return whole, made
+
+
+def _turned_primitive(geometry: Any, piece: int) -> Solid:
+    """The piece, when it is one block, cylinder or section turned off
+    the geometry's axes; NotAnExtrusion, saying why, when it is not."""
+    item = solid(geometry, piece)
+    if item.kind not in PRIMITIVES or item.kind == HOLE:
+        raise NotAnExtrusion(f'{piece_name(geometry, piece)} is not one block, cylinder '
+                             'or section')
+    if np.allclose(np.sort(np.abs(_frame(item)), axis=1), [[0, 0, 1]] * 3, atol=1e-9):
+        raise NotAnExtrusion(f'{piece_name(geometry, piece)} is square to the axes')
+    return item
+
+
+def _unturned(geometry: Any, item: Solid) -> Any:
+    """A scratch geometry holding the solid unturned at the origin, named
+    as the piece is, to be swept there and put back."""
+    from .geometry import Geometry
+
+    scratch = Geometry(node_id=[], node_xyz=np.empty((0, 3)), length_unit=geometry.length_unit)
+    scratch.solids = [replace(item, center=(0.0, 0.0, 0.0), angles=(0.0, 0.0, 0.0),
+                              name=piece_name(geometry, item.id))]
+    return scratch
+
+
+#: how many points along a line of nodes are tried for where it leaves
+#: the pieces before it, before the crossing is found by halving
+_COLUMN_SAMPLES = 64
+
+
+def _end_on_earlier(geometry: Any, item: Solid, local: np.ndarray, axis: int,
+                    earlier, tolerance: float) -> tuple[np.ndarray, int]:
+    """The swept nodes `local` (the solid's own frame) with each line of
+    them along `axis` ending where it leaves the earlier pieces: its
+    nodes spread evenly between that crossing and its free end, so the
+    end layer lies on the earlier pieces' surface. Returns the nodes and
+    how many lines were cut. NotAnExtrusion when a line is inside the
+    earlier pieces in its middle or along its whole length, or the lines
+    are cut at both ends: no one sweep holds that."""
+    frame = _frame(item)
+    center = np.asarray(item.center, dtype=float)
+    across = [a for a in range(3) if a != axis]
+    keys = np.round(local[:, across] / tolerance).astype(np.int64)
+    _unique, column = np.unique(keys, axis=0, return_inverse=True)
+    column = column.ravel()
+    count = int(column.max()) + 1
+    low = np.full(count, np.inf)
+    high = np.full(count, -np.inf)
+    np.minimum.at(low, column, local[:, axis])
+    np.maximum.at(high, column, local[:, axis])
+    first = np.zeros(count, dtype=np.int64)
+    first[column[::-1]] = np.arange(len(local))[::-1]
+    base = local[first].copy()
+
+    def world(t):
+        # (columns, samples) positions along each line, in the geometry
+        points = np.repeat(base[:, None, :], t.shape[1], axis=1)
+        points[:, :, axis] = t
+        return center + points @ frame
+
+    fractions = np.linspace(0.0, 1.0, _COLUMN_SAMPLES)
+    t = low[:, None] + fractions[None, :] * (high - low)[:, None]
+    inside = _inside_any(geometry, earlier, world(t).reshape(-1, 3)).reshape(count, -1)
+    cut_low = np.zeros(count, dtype=bool)
+    cut_high = np.zeros(count, dtype=bool)
+    edge = np.zeros(count, dtype=np.int64)
+    for c in range(count):
+        row = inside[c]
+        if not row.any():
+            continue
+        changes = int(np.count_nonzero(row[1:] != row[:-1]))
+        if row.all() or changes != 1:
+            raise NotAnExtrusion(f'{piece_name(geometry, item.id)} runs through the pieces '
+                                 'before it, not into them at one end')
+        if row[0]:
+            cut_low[c] = True
+            edge[c] = int(np.argmin(row)) - 1
+        else:
+            cut_high[c] = True
+            edge[c] = int(np.argmax(row)) - 1
+    if cut_low.any() and cut_high.any():
+        raise NotAnExtrusion(f'{piece_name(geometry, item.id)} meets the pieces before it '
+                             'at both ends')
+    cut = cut_low | cut_high
+    if not cut.any():
+        return local, 0
+    # the crossing, halved down between the last sample on one side and
+    # the first on the other
+    lines = np.flatnonzero(cut)
+    a = t[lines, edge[lines]]
+    b = t[lines, edge[lines] + 1]
+    inner_at_a = cut_low[lines]
+    for _ in range(48):
+        middle = 0.5 * (a + b)
+        points = base[lines].copy()
+        points[:, axis] = middle
+        inside_mid = _inside_any(geometry, earlier, center + points @ frame)
+        # keep the bracket: a is on the inside when the cut is at the low end
+        move_a = inside_mid == inner_at_a
+        a = np.where(move_a, middle, a)
+        b = np.where(move_a, b, middle)
+    crossing = np.full(count, np.nan)
+    crossing[lines] = 0.5 * (a + b)
+    out = local.copy()
+    z = local[:, axis]
+    span = (high - low)[column]
+    share = np.where(span > 0, (z - low[column]) / np.where(span > 0, span, 1.0), 0.0)
+    at_low = cut_low[column]
+    at_high = cut_high[column]
+    out[at_low, axis] = (crossing[column][at_low]
+                         + share[at_low] * (high[column][at_low] - crossing[column][at_low]))
+    out[at_high, axis] = (low[column][at_high]
+                          + share[at_high] * (crossing[column][at_high] - low[column][at_high]))
+    return out, int(cut.sum())
+
+
+def turned_sweep(geometry: Any, piece: int, size: float, earlier=(),
+                 progress: Any = None) -> tuple[Any, dict]:
+    """A block, cylinder or section turned off the geometry's axes,
+    swept along its own axis: meshed as an extrusion unturned at the
+    origin (`extrusion_mesh`), its end where it runs into the pieces
+    before it put on their surface, and turned and placed back.
+
+    The end goes on the earlier pieces' surface line by line: each line
+    of nodes along the sweep is cut where it leaves them and its nodes
+    spread evenly between there and its free end, so a rod entering a
+    block at a slant is sheared over its length, its last layer on the
+    block's face. A block or a section is a grid along all three of its
+    own axes, so the sweep runs along whichever of them meets the
+    earlier pieces at one end; a cylinder's rings run along its own Z.
+    The bricks' quality is the worst scaled Jacobian (`hexmesh`), and a
+    brick folded by the shear refuses the sweep, as does a piece that
+    meets the earlier pieces other than at one end (NotAnExtrusion,
+    saying why): the piece is then fitted.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    piece : int
+        The piece, by id: one primitive nothing else uses.
+    size : float
+        The brick size, as the geometry holds its coordinates.
+    earlier : sequence of int
+        The pieces meshed before it, which it runs into.
+    progress : callable, optional
+        Told ``(done, total)``.
+
+    Returns
+    -------
+    (Geometry, dict)
+        The bricks, in the geometry's frame, and what `extrusion_mesh`
+        says, with 'axis' None (its own), 'turned' True, 'cut', how
+        many lines of nodes end on the earlier pieces, 'quality' and
+        'poor' (worst scaled Jacobian, and how many under 0.3).
+    """
+    # Brandon, 2026-10-20: the mesh on the tilted rod did not look
+    # aligned with it; sweep each piece along its own axis, its end on
+    # the face it meets, and check the end bricks' quality
+    from .hexmesh import _scaled_jacobians
+
+    item = _turned_primitive(geometry, piece)
+    scratch = _unturned(geometry, item)
+    part, made = extrusion_mesh(scratch, [item.id], size, progress=progress, piece=True)
+    local = part.node_xyz.copy()
+    tolerance = 1e-6 * float(np.linalg.norm(np.ptp(local, axis=0)) or 1.0)
+    rows = {int(n): k for k, n in enumerate(part.node_id)}
+    hexes = np.array([[rows[int(n)] for n in conn] for conn in part.elem_conn], dtype=np.int64)
+    cut = 0
+    if earlier:
+        tried = [2] if item.kind == 'cylinder' else [2, 0, 1]
+        reasons = []
+        for axis in tried:
+            try:
+                local, cut = _end_on_earlier(geometry, item, local, axis, earlier, tolerance)
+                break
+            except NotAnExtrusion as why:
+                reasons.append(str(why))
+        else:
+            raise NotAnExtrusion(reasons[0])
+    part.node_xyz = np.asarray(item.center, dtype=float) + local @ _frame(item)
+    quality = _scaled_jacobians(part.node_xyz, hexes).min(axis=1)
+    # a guard rather than a case: each line keeps its order along the
+    # sweep and every brick its cross-section, so the shear lowers a
+    # brick's quality and cannot turn it inside out (no test can fold
+    # one, 2026-10-20); a later change to the spreading could
+    folded = int((quality <= 0.0).sum())
+    if folded:
+        raise NotAnExtrusion(f'{piece_name(geometry, piece)}: {folded:,} bricks fold where '
+                             'its end meets the pieces before it')
+    return part, {**made, 'axis': None, 'turned': True, 'cut': cut,
+                  'quality': float(quality.min()), 'poor': int((quality < 0.3).sum())}
+
+
+def _less_the_earlier(geometry: Any, piece: int, earlier) -> Solid:
+    """The solid a later piece is fitted as: itself less the pieces
+    before it, a subtraction added to the geometry's solids for the
+    fit alone (the caller removes it), named as the piece is so the
+    bricks' element group is the piece's. The piece itself with no
+    earlier pieces."""
+    if not earlier:
+        return solid(geometry, piece)
+    remaining = Solid(id=_next_id(geometry), name=piece_name(geometry, piece),
+                      kind='subtract', operands=(int(piece), *(int(e) for e in earlier)))
+    geometry.solids.append(remaining)
+    return remaining
+
+
+def _inside_any(geometry: Any, others, points) -> np.ndarray:
+    """Which of `points` lie inside any of the solids `others`."""
+    inside = np.zeros(len(points), dtype=bool)
+    for other in others:
+        inside |= contains(geometry, other, points)
+    return inside
+
+
+def _drop_inside(geometry: Any, part: Any, others) -> int:
+    """Remove the bricks of `part` whose centers lie inside any of the
+    solids `others`, with the nodes only they used; how many went."""
+    if not others or not len(part.elem_conn):
+        return 0
+    conn = np.asarray(part.elem_conn)
+    centers = part.node_xyz[part.node_index(conn.ravel())].reshape(len(conn), -1, 3).mean(axis=1)
+    inside = _inside_any(geometry, others, centers)
+    if inside.any():
+        part.delete_elements([int(e) for e in np.asarray(part.elem_id)[inside]], nodes=True)
+    return int(inside.sum())
+
+
+def meshed_elements(geometry: Any, names) -> np.ndarray:
+    """The ids of the elements Mesh Solids makes, bricks, tetrahedra
+    and shells, in the element groups named `names`: what meshing
+    those parts again replaces (`Project.mesh_solids`, and the pane's
+    reading before Mesh is pressed).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose elements.
+    names : iterable of str
+        The element groups' names; an empty one names none.
+
+    Returns
+    -------
+    numpy.ndarray of int
+    """
+    names = {name for name in names if name}
+    wanted = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
+              if name in names]
+    mask = (np.isin(np.asarray(geometry.elem_group, dtype=int), wanted)
+            & np.isin(np.asarray(geometry.elem_type, dtype=int), MESHED_TYPES))
+    return np.asarray(geometry.elem_id, dtype=int)[mask]
+
+
+def _mesh_grid(lines, order, size, held, circles, ticker=None,
+               held_plane=None, cross=None):
+    """Bricks on a grid swept along w, rings laid about the circles:
+    the one mesher behind Mesh Solids and `mesh.block`'s holes. `ticker`,
+    when given, is ticked four times: ownership, the plane, the
+    rounding, the bricks.
+
+    `lines` are the grid's lines along u, v and w, `order` the axes
+    (x 0, y 1, z 2) u, v and w are, right-handed. `held(points)` says
+    which part holds each point (n, 3): 0 none, else a part's number.
+    `circles` are (center, radius, low, high, whole), round w, the
+    first two of the center read along u and v: a whole circle is
+    ringed where there is room (`_plane`), the rest pulled round from
+    the grid (`_round_onto_circles`). `cross`, when given, holds the
+    circles along the other axes, by axis: their nodes are pulled round
+    in their own plane after the bricks are owned, and `held_plane` is
+    what holds each point with the cylinders across the extrusion read
+    as nothing, which is what the plane and its rings are laid from.
+
+    Returns
+    -------
+    (xyz, conn, groups, made)
+        The nodes that bricks use, (n, 3); each brick's eight, numbered
+        from 1 in that order; each brick's part; and 'rounded', 'rings'
+        and 'shortest' as `extrusion_mesh` says them. No bricks if
+        nothing holds any.
+    """
+    from .geometry import _CORNER_EDGES
+
+    nu, nv, nw = (len(line) for line in lines)
+    mids = [(line[:-1] + line[1:]) / 2.0 for line in lines]
+    cu, cv, cw = np.meshgrid(*mids, indexing='ij')
+    centers = np.zeros((cu.size, 3))
+    for slot, k in enumerate(order):
+        centers[:, k] = (cu, cv, cw)[slot].ravel()
+    owner = (held_plane or held)(centers).reshape(nu - 1, nv - 1, nw - 1)
+    if ticker is not None:
+        ticker.tick()
+    if not owner.any():
+        if ticker is not None:
+            ticker.tick(3)
+        return (np.zeros((0, 3)), np.zeros((0, 8), dtype=int), np.zeros(0, dtype=int),
+                {'rounded': 0, 'rings': 0, 'shortest': 0.0})
+    # the plane's mesh, rings about the circles swapped in for the grid
+    # there, then swept along w: node (p, k) is p * nw + k, so where
+    # there is no ring the numbering is the grid's own
+    plane, quads, known, on_circle, left, ringed = _plane(lines, order, size, owner,
+                                                          circles, held_plane or held)
+    if ticker is not None:
+        ticker.tick()
+    xyz = np.zeros((len(plane) * nw, 3))
+    xyz[:, order[0]] = np.repeat(plane[:, 0], nw)
+    xyz[:, order[1]] = np.repeat(plane[:, 1], nw)
+    xyz[:, order[2]] = np.tile(lines[2], len(plane))
+    base = quads[:, None, :] * nw + np.arange(nw - 1)[None, :, None]
+    # every brick, empty ones too: a hole's inside is what its rim is
+    # found against
+    corners = np.concatenate([base, base + 1], axis=2).reshape(-1, 8)
+    if len(corners) > GRID_LIMIT:
+        raise ValueError(f'the grid over these parts at that size is {len(corners):,} cells, '
+                         f'over the {GRID_LIMIT:,} it can hold: use a larger size, or '
+                         'tetrahedra')
+    groups = known.ravel().copy()
+    rounded = 0
+    # a brick's center, its long diagonal's midpoint
+    middles = (xyz[corners[:, 0]] + xyz[corners[:, 6]]) / 2.0
+    if held_plane is not None:
+        # the plane was laid without the cylinders across it: each
+        # brick, a ring's too, goes to what truly holds its center
+        groups = held(middles)
+    if left or cross:
+        cell = float(np.linalg.norm([np.diff(line).max() for line in lines]))
+        bounds = np.array([[lines[0][0], lines[1][0]], [lines[0][-1], lines[1][-1]]])
+        if left:
+            rounded = _round_onto_circles(left, xyz, corners, groups, middles, order,
+                                          cell, bounds)
+        along = dict(zip(order, lines))
+        before = xyz.copy() if cross else None
+        for axis, found in (cross or {}).items():
+            # the same pull, in that axis's own plane; a node this would
+            # fold is not moved
+            order2 = [(axis + 1) % 3, (axis + 2) % 3, axis]
+            bounds2 = np.array([[along[order2[0]][0], along[order2[1]][0]],
+                                [along[order2[0]][-1], along[order2[1]][-1]]])
+            rounded += _round_onto_circles(found, xyz, corners, groups, middles,
+                                           order2, cell, bounds2)
+            _rejoin(xyz, before, circles, order, axis, corners, groups)
+    if ticker is not None:
+        ticker.tick()
+    corners, groups = corners[groups > 0], groups[groups > 0]
+    # counted again, kept: a part thinner than `brick_count`'s samples
+    # can have been undercounted there
+    if len(corners) > MESH_LIMIT:
+        raise ValueError(f'{len(corners):,} bricks at that size, over the limit of '
+                         f'{MESH_LIMIT:,}: use a larger one')
+    keep = np.unique(corners)
+    rounded += int(np.isin(keep // nw, on_circle).sum())
+    renumber = np.zeros(len(xyz), dtype=int)
+    renumber[keep] = np.arange(1, len(keep) + 1)
+    # all twelve edges, as four opposite corners' three each: a ring's
+    # brick has its short edge on the circle, which corner 0's three
+    # miss (the pane read 0.1 in for a hole whose circle's were 0.059)
+    shortest = min(float(np.linalg.norm(xyz[corners[:, list(_CORNER_EDGES[8][c])]]
+                                        - xyz[corners[:, [c]]], axis=2).min())
+                   for c in (0, 2, 5, 7))
+    if ticker is not None:
+        ticker.tick()
+    return xyz[keep], renumber[corners], groups, {'rounded': rounded, 'rings': ringed,
+                                                  'shortest': shortest}
+
+
+def _rejoin(xyz, before, circles, order, axis, corners, groups) -> None:
+    """Put the nodes a cross-axis pull took off a wall along the
+    extrusion back on it: where a hole drilled across meets a hole along
+    the extrusion, a node on both walls belongs on the curve where they
+    cross. The pull in the cross plane sets the coordinate the planes
+    share; the one along the cross axis is solved again so the node is
+    on its own circle too, and the move is undone where it would fold a
+    brick. `before` is every node as it stood before the pull."""
+    from .geometry import _CORNER_EDGES
+
+    u, v, w = order
+    shared = ({0, 1, 2} - {w, axis}).pop()
+    moved = np.flatnonzero(np.any(xyz != before, axis=1))
+    if not len(moved):
+        return
+    edges = np.asarray(_CORNER_EDGES[8])
+    material = corners[groups > 0]
+    for center, radius, low, high, _whole in circles:
+        was = before[moved]
+        on_wall = (np.isclose(np.hypot(was[:, u] - center[u], was[:, v] - center[v]),
+                              radius, rtol=0, atol=1e-9 * radius)
+                   & (was[:, w] >= low - 1e-9 * radius)
+                   & (was[:, w] <= high + 1e-9 * radius))
+        for n in moved[on_wall]:
+            here = xyz[n].copy()
+            reach = radius ** 2 - (here[shared] - center[shared]) ** 2
+            if reach < 0.0:
+                continue
+            side = np.sign(before[n, axis] - center[axis]) or 1.0
+            xyz[n, axis] = center[axis] + side * np.sqrt(reach)
+            rows = material[np.any(material == n, axis=1)]
+            if len(rows):
+                legs = xyz[rows][:, edges] - xyz[rows][:, :, None, :]
+                shares = np.einsum('mci,mci->mc', legs[:, :, 0],
+                                   np.cross(legs[:, :, 1], legs[:, :, 2]))
+                legs0 = before[rows][:, edges] - before[rows][:, :, None, :]
+                shares0 = np.einsum('mci,mci->mc', legs0[:, :, 0],
+                                    np.cross(legs0[:, :, 1], legs0[:, :, 2]))
+                if (shares * shares0 <= 0).any():
+                    xyz[n] = here
+
+
+def _owners(geometry: Any, ids, points, ignore=()) -> np.ndarray:
+    """Which part holds each point: 0 none, else 1 + its place in
+    `ids`. Where parts overlap the later one takes it, as a later layer
+    of paint covers an earlier one — a steel screw added over an insert
+    makes those bricks steel. `ignore` is `contains`'s."""
+    owner = np.zeros(len(points), dtype=int)
+    for slot, part in enumerate(ids):
+        owner[contains(geometry, part, points, ignore)] = slot + 1
+    return owner
+
+
+def _plane(lines, order, size, owner, circles, held):
+    """The mesh of the plane square to the extrusion, before it is
+    swept: the grid's nodes and quads, with a ring mesh laid about each
+    circle there is room for (`_ring`).
+
+    Pulling a staircase of grid nodes onto a circle (all Mesh Solids did
+    at first) left the hole jagged: a pull that would fold a brick is
+    not made, so some rim nodes stayed inside the hole, and where the
+    staircase runs at 45 degrees it puts twice the nodes on the circle
+    that it does along the grid, so the bricks there came out thin
+    (Brandon, 2026-10-11, a two-inch hole). The grid's own layout puts
+    the wrong count of nodes on the circle, so no smoothing mends it;
+    a ring mesh — the circle's nodes evenly spaced, layers out to the
+    grid around it — is how a block-structured mesh is made round.
+    Circles about one center are one ring (a hole and its insert, a
+    washer about a hole); a rounded corner's arc, a circle with no room
+    about it, and one less than a brick across are left to
+    `_round_onto_circles`.
+
+    Returns
+    -------
+    plane : (n, 2)
+        Every node's (u, v); node p is the grid's (i, j) for p = i * nv + j.
+    quads : (m, 4)
+        Node numbers, counterclockwise about w.
+    known : (m, nw - 1)
+        The part each quad's brick in each layer belongs to: the grid's
+        own, and a ring's by the band it lies in.
+    on_circle : array
+        The plane's nodes on a circle.
+    left : list
+        The circles to round the old way.
+    ringed : int
+        How many rings were laid.
+    """
+    u, v, _w = order
+    lu, lv, _lw = lines
+    nu, nv = len(lu), len(lv)
+    gu, gv = np.meshgrid(lu, lv, indexing='ij')
+    plane = [np.stack([gu.ravel(), gv.ravel()], axis=1)]
+    count = nu * nv
+    alive = np.ones((nu - 1, nv - 1), dtype=bool)
+    tol = 1e-9 * float(max(lu[-1] - lu[0], lv[-1] - lv[0]))
+    left, centered = [], []
+    for circle in circles:
+        if not circle[4]:
+            left.append(circle)
+            continue
+        here = circle[0][[u, v]]
+        for center, members in centered:
+            if np.hypot(*(center - here)) <= tol:
+                members.append(circle)
+                break
+        else:
+            centered.append((here, [circle]))
+    rings, ring_owners, on_circle = [], [], []
+
+    def lay(made):
+        """A ring's pieces into the plane; whether one was laid."""
+        nonlocal count
+        if not made:
+            return False
+        (i0, i1, j0, j1, mask), positions, quads, held_by, circle_nodes = made
+        alive[i0:i1, j0:j1] &= ~mask
+        plane.append(positions)
+        count += len(positions)
+        rings.append(quads)
+        ring_owners.append(held_by)
+        on_circle.append(circle_nodes)
+        return True
+
+    # circles about one center are one ring; circles that overlap one
+    # another are one lobed outline (a peanut, a slot, a keyhole:
+    # Brandon, 2026-10-18), ringed as one hole by `_lobed_ring`
+    lobed = []
+    singles = []
+    for center, members in centered:
+        if len(members) == 1 and members[0][4]:
+            singles.append((center, members[0]))
+        else:
+            lobed.append(None)
+    groups = _overlapping(singles, tol)
+    lobed = [group for group in groups if len(group) > 1]
+    grouped = {id(circle) for group in lobed for _c, circle in group}
+    for group in lobed:
+        circles_here = [circle for _c, circle in group]
+        made = _lobed_ring(lines, order, size, owner, alive, circles_here,
+                           tol, count, held)
+        if made is None:
+            left.extend(circles_here)
+        elif lay(made):
+            pass
+    for center, members in centered:
+        if any(id(m) in grouped for m in members):
+            continue
+        radii = []
+        for r in sorted(m[1] for m in members):
+            if not radii or r - radii[-1] > tol:
+                radii.append(r)
+        # a circle less than a brick across is no ring's business: its
+        # core's bricks would be a fraction of the size asked for
+        if radii[-1] < size / 2.0:
+            left.extend(members)
+            continue
+        made = _ring(lines, order, size, owner, alive, center, radii, tol, count,
+                     held)
+        if made is None:
+            left.extend(members)
+        else:
+            lay(made)
+    ci, cj = np.nonzero(alive)
+    grid = np.stack([ci * nv + cj, (ci + 1) * nv + cj, (ci + 1) * nv + cj + 1,
+                     ci * nv + cj + 1], axis=1)
+    known = owner[ci, cj]
+    if rings:
+        grid = np.concatenate([grid, *rings])
+        known = np.concatenate([known, *ring_owners])
+    on_circle = np.concatenate(on_circle) if on_circle else np.zeros(0, dtype=int)
+    return np.concatenate(plane), grid, known, on_circle, left, len(rings)
+
+
+def _overlapping(singles, tol):
+    """Groups of circles whose disks overlap one another, each as
+    [(center (u, v), circle)], joined through their overlaps: two
+    circles crossing are one group, a chain of three one group. A
+    circle inside another throughout, or one touching another only,
+    is left on its own."""
+    groups = []
+    for center, circle in singles:
+        radius = circle[1]
+        joined = []
+        for group in groups:
+            for other_center, other in group:
+                apart = float(np.hypot(*(center - other_center)))
+                if (abs(radius - other[1]) + tol < apart < radius + other[1] - tol
+                        and other[3] > circle[2] + tol and other[2] < circle[3] - tol):
+                    joined.append(group)
+                    break
+        merged = [(center, circle)]
+        for group in joined:
+            merged.extend(group)
+            groups.remove(group)
+        groups.append(merged)
+    return groups
+
+
+def _lobed_ring(lines, order, size, owner, alive, circles, tol, start, held):
+    """A ring mesh about the outline of overlapping circles, the hole they
+    cut together: nodes along the outline, layers out to a rectangle of
+    grid cells, the rectangle's edge the grid's own nodes. None where
+    no such ring fits.
+
+    The outline is the union's boundary, found from a point inside
+    every circle: along each ray from it the outline is the farthest
+    exit from any of the circles. A node is placed exactly at each
+    cusp, where two arcs meet, so a peanut keeps its waist. Only a hole
+    is ringed this way, nothing but one material around it and nothing
+    inside it; a lobed boss or an insert is left to the grid. A ring
+    whose bricks would fold at a cusp is not laid.
+    """
+    # Brandon, 2026-10-18: a peanut-shaped cut (two cylinders unioned
+    # and subtracted) got the pulled grid, stair-stepped, since each
+    # circle had the other in its rectangle and no ring was laid.
+    u, v, w = order
+    lu, lv, lw = lines
+    nu, nv, nw = len(lu), len(lv), len(lw)
+    centers = np.array([c[0][[u, v]] for c in circles])
+    radii = np.array([c[1] for c in circles])
+    low_w = max(c[2] for c in circles)
+    high_w = min(c[3] for c in circles)
+    if high_w <= low_w + tol:
+        return None
+    inside_point = centers.mean(axis=0)
+
+    def inside_union(points):
+        return np.any(np.hypot(points[:, None, 0] - centers[None, :, 0],
+                               points[:, None, 1] - centers[None, :, 1])
+                      <= radii[None, :] + tol, axis=1)
+
+    # The outline, arc by arc: each circle's arcs that no other circle
+    # covers, cut at the crossings (the cusps), chained into one loop
+    # and measured by arc length. Parameterized by length, not by
+    # angle about a point: a cusp off that point's axis is where a ray
+    # crosses the boundary twice, and the radial outline jumps there (a
+    # slot of three circles, 2026-10-18).
+    arcs = []                       # (circle, start angle, end angle), ccw
+    cusps = []
+    for a in range(len(circles)):
+        cuts = []
+        for b in range(len(circles)):
+            if b == a:
+                continue
+            shift = centers[b] - centers[a]
+            apart = float(np.hypot(*shift))
+            if not abs(radii[a] - radii[b]) < apart < radii[a] + radii[b]:
+                continue
+            along = (radii[a] ** 2 - radii[b] ** 2 + apart ** 2) / (2.0 * apart)
+            across = np.sqrt(max(radii[a] ** 2 - along ** 2, 0.0))
+            foot = centers[a] + along * shift / apart
+            side = np.array([-shift[1], shift[0]]) / apart
+            for point in (foot + across * side, foot - across * side):
+                others = [k for k in range(len(circles)) if k not in (a, b)]
+                if not others or not np.any(
+                        np.hypot(*(centers[others] - point).T) < radii[others] - tol):
+                    cuts.append(float(np.arctan2(*(point - centers[a])[::-1])))
+                    if a < b:
+                        cusps.append(point)
+        if not cuts:
+            # a circle no other crosses on the outline: wholly inside
+            # the union (no arc) or the whole outline on its own
+            middle = centers[a] + np.array([radii[a], 0.0])
+            others = [k for k in range(len(circles)) if k != a]
+            if others and np.any(np.hypot(*(centers[others] - middle).T) < radii[others] - tol):
+                continue
+            arcs.append((a, 0.0, 2.0 * np.pi))
+            continue
+        cuts = sorted({round(c, 12) for c in cuts})
+        for k in range(len(cuts)):
+            t0 = cuts[k]
+            t1 = cuts[(k + 1) % len(cuts)]
+            if t1 <= t0:
+                t1 += 2.0 * np.pi
+            mid = centers[a] + radii[a] * np.array([np.cos((t0 + t1) / 2.0),
+                                                     np.sin((t0 + t1) / 2.0)])
+            others = [k2 for k2 in range(len(circles)) if k2 != a]
+            if np.any(np.hypot(*(centers[others] - mid).T) < radii[others] - tol):
+                continue
+            arcs.append((a, t0, t1))
+    if not arcs:
+        return None
+
+    def arc_point(arc, t):
+        a, _t0, _t1 = arc
+        return centers[a] + radii[a] * np.array([np.cos(t), np.sin(t)])
+
+    # chain the arcs into one counterclockwise loop
+    loop = [arcs.pop(0)]
+    while arcs:
+        head = arc_point(loop[-1], loop[-1][2])
+        nearest = min(range(len(arcs)), key=lambda k: float(np.hypot(
+            *(arc_point(arcs[k], arcs[k][1]) - head))))
+        if float(np.hypot(*(arc_point(arcs[nearest], arcs[nearest][1]) - head))) > 1e3 * tol:
+            return None             # the outline is not one loop
+        loop.append(arcs.pop(nearest))
+    if len(loop) > 1 and float(np.hypot(*(arc_point(loop[-1], loop[-1][2])
+                                            - arc_point(loop[0], loop[0][1])))) > 1e3 * tol:
+        return None
+    lengths = np.array([radii[a] * (t1 - t0) for a, t0, t1 in loop])
+    total = float(lengths.sum())
+    starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+
+    def outline(fraction):
+        """The outline's point at `fraction` of its length from the
+        first arc's start, counterclockwise."""
+        s_along = (fraction % 1.0) * total
+        k = min(int(np.searchsorted(starts, s_along, 'right')) - 1, len(loop) - 1)
+        a, t0, _t1 = loop[k]
+        return arc_point(loop[k], t0 + (s_along - starts[k]) / radii[a])
+
+    dense = np.array([outline(f) for f in np.linspace(0.0, 1.0, 720, endpoint=False)])
+    if not inside_union(inside_point[None, :])[0]:
+        return None
+
+    outer = float(radii.max())
+    reach = max(0.25 * outer, 0.5 * size)
+    low = (centers - radii[:, None]).min(axis=0) - reach
+    high = (centers + radii[:, None]).max(axis=0) + reach
+    i0 = int(np.searchsorted(lu, low[0] + tol, 'right')) - 1
+    i1 = int(np.searchsorted(lu, high[0] - tol, 'left'))
+    j0 = int(np.searchsorted(lv, low[1] + tol, 'right')) - 1
+    j1 = int(np.searchsorted(lv, high[1] - tol, 'left'))
+    i0, j0, i1, j1 = max(i0, 0), max(j0, 0), min(i1, nu - 1), min(j1, nv - 1)
+    middles = (lw[:-1] + lw[1:]) / 2.0
+
+    def layered(points):
+        found = np.zeros((len(points) * (nw - 1), 3))
+        found[:, u] = np.repeat(points[:, 0], nw - 1)
+        found[:, v] = np.repeat(points[:, 1], nw - 1)
+        found[:, w] = np.tile(middles, len(points))
+        return held(found).reshape(len(points), nw - 1)
+
+    def fits(i0, i1, j0, j1):
+        """(inside band, outside band) when the rectangle holds nothing
+        but this outline: every cell wholly inside the union holds the
+        inside band in every layer, every cell wholly outside the
+        outside band; a cell the outline crosses may hold either."""
+        corners_u, corners_v = np.meshgrid(lu[i0:i1 + 1], lv[j0:j1 + 1], indexing='ij')
+        at = np.stack([corners_u.ravel(), corners_v.ravel()], axis=1)
+        within = inside_union(at).reshape(i1 - i0 + 1, j1 - j0 + 1)
+        cell_in = within[:-1, :-1] & within[1:, :-1] & within[1:, 1:] & within[:-1, 1:]
+        cell_out = ~(within[:-1, :-1] | within[1:, :-1] | within[1:, 1:] | within[:-1, 1:])
+        corner = np.where(inside_point - np.array([lu[i0], lv[j0]])
+                          > np.array([lu[i1], lv[j1]]) - inside_point,
+                          np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]]))
+        # the outline point nearest the corner, and the middle of the
+        # way from it to the corner: outside the union, inside the
+        # rectangle, where the outside band is read
+        nearest = dense[int(np.argmin(np.hypot(*(dense - corner).T)))]
+        sample = (nearest + corner) / 2.0
+        if inside_union(sample[None, :])[0]:
+            return None
+        bands = layered(np.array([inside_point, sample]))
+        cells = owner[i0:i1, j0:j1]
+        if ((cell_in[:, :, None] & (cells != bands[0][None, None, :])).any()
+                or (cell_out[:, :, None] & (cells != bands[1][None, None, :])).any()):
+            return None
+        return bands
+
+    bands = None
+    lowest = (centers - radii[:, None]).min(axis=0)
+    highest = (centers + radii[:, None]).max(axis=0)
+    while i1 - i0 >= 2 and j1 - j0 >= 2:
+        # a layer of bricks has to fit between the outline and the edge
+        room = float(min(lowest[0] - lu[i0], lowest[1] - lv[j0],
+                         lu[i1] - highest[0], lv[j1] - highest[1]))
+        if room < 0.1 * size - tol:
+            break
+        if alive[i0:i1, j0:j1].all():
+            bands = fits(i0, i1, j0, j1)
+            if bands is not None:
+                break
+        i0, i1, j0, j1 = i0 + 1, i1 - 1, j0 + 1, j1 - 1
+    if bands is None:
+        return None
+    if bands[0].any():
+        return None           # material inside the outline: no core for a lobed shape
+    if not (bands[1] != bands[0]).any():
+        return False          # nothing bounded
+
+    # the rectangle's edge, counterclockwise from (i0, j0); each edge
+    # node meets the outline at its share of the way round
+    edge = ([(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)]
+            + [(i, j1) for i in range(i1, i0, -1)]
+            + [(i0, j) for j in range(j1, j0, -1)])
+    q = np.array([(lu[i], lv[j]) for i, j in edge])
+    count = len(q)
+    steps = np.linalg.norm(np.roll(q, -1, axis=0) - q, axis=1)
+    along = np.concatenate([[0.0], np.cumsum(steps)[:-1]])
+    perimeter = float(steps.sum())
+    if len(loop) == 1:
+        # one circle's outline: edge node k, at `share[k]` of the way
+        # round the rectangle, meets the outline at the same share of
+        # its length, the two loops aligned where the outline comes
+        # nearest the edge's first node
+        first = np.argmin(np.hypot(*(dense - q[0]).T)) / len(dense)
+        where = (first + along / perimeter) % 1.0
+    else:
+        # A cusp's spoke runs down the middle of its wedge of material,
+        # away from both circles, to the edge node nearest where that
+        # ray leaves the rectangle; the edge between two cusps' nodes
+        # is shared evenly along the arc between the cusps. One share
+        # for the whole loop put a slot's cusp node 0.57 in to the side
+        # of its cusp, three degrees outside the wedge, and the quad
+        # beside the cusp folded into the hole (2026-10-18).
+        lo = np.array([lu[i0], lv[j0]])
+        hi = np.array([lu[i1], lv[j1]])
+        anchors = []
+        for k, (a, t0, _t1) in enumerate(loop):
+            cusp = arc_point(loop[k], t0)
+            b = loop[k - 1][0]
+            away = (cusp - centers[a]) / radii[a] + (cusp - centers[b]) / radii[b]
+            exits = [(hi[d] - cusp[d]) / away[d] if away[d] > 0 else
+                     (lo[d] - cusp[d]) / away[d] for d in range(2) if away[d] != 0]
+            hit = cusp + min(exits) * away
+            anchors.append(int(np.argmin(np.hypot(*(q - hit).T))))
+        laps = (np.diff(anchors + [anchors[0]]) % count)
+        if (laps == 0).any() or laps.sum() != count:
+            return None         # two cusps on one edge node, or out of order
+        offsets = (along - along[anchors[0]]) % perimeter
+        marks = np.concatenate([offsets[anchors], [perimeter]])
+        k = np.minimum(np.searchsorted(marks, offsets, 'right') - 1, len(loop) - 1)
+        fraction = (offsets - marks[k]) / (marks[k + 1] - marks[k])
+        where = (starts[k] + fraction * lengths[k]) / total
+    rim = np.array([outline(f) for f in where])
+    edge_nodes = np.array([i * nv + j for i, j in edge])
+    positions, rings = [], [edge_nodes]
+    made = start
+
+    def ring_at(points):
+        nonlocal made
+        positions.append(points)
+        made += len(points)
+        return np.arange(made - len(points), made)
+
+    layers = 1 if not bands[1].any() else max(1, round(float(np.median(
+        np.linalg.norm(rim - q, axis=1))) / size))
+    for step in range(1, layers + 1):
+        rings.append(ring_at(q + step / layers * (rim - q)))
+    k = np.arange(count)
+    following = (k + 1) % count
+    quads = np.concatenate([
+        np.stack([outer_ring[k], outer_ring[following], inner_ring[following],
+                  inner_ring[k]], axis=1)
+        for outer_ring, inner_ring in pairwise(rings)])
+    # a quad folded or concave at a cusp: no ring, the grid instead
+    everything = {int(n): xy for ring, pts in zip(rings[1:], positions) for n, xy in zip(ring, pts)}
+    everything.update({int(n): q[m] for m, n in enumerate(edge_nodes)})
+    pts = np.array([[everything[int(n)] for n in quad] for quad in quads])
+    sides = np.roll(pts, -1, axis=1) - pts
+    turns = (sides[:, :, 0] * np.roll(sides, -1, axis=1)[:, :, 1]
+             - sides[:, :, 1] * np.roll(sides, -1, axis=1)[:, :, 0])
+    if not ((turns > 0).all() or (turns < 0).all()):
+        return None
+    area = 0.5 * np.sum(pts[:, :, 0] * np.roll(pts[:, :, 1], -1, axis=1)
+                        - np.roll(pts[:, :, 0], -1, axis=1) * pts[:, :, 1], axis=1)
+    if not (np.sign(area) == np.sign(area[0])).all() or (area == 0).any():
+        return None
+    mask = np.ones((i1 - i0, j1 - j0), dtype=bool)
+    owners = np.repeat(bands[1][None, :], len(quads), axis=0)
+    return ((i0, i1, j0, j1, mask), np.concatenate(positions), quads, owners,
+            rings[-1])
+
+
+def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
+    """A ring mesh about circles sharing `center`, `radii` ascending, in
+    a rectangle of grid cells: None where there is no room for one,
+    False where no circle bounds anything (a cylinder unioned inside a
+    plate), else ((i0, i1, j0, j1), new nodes' (u, v), quads, the nodes
+    on a circle), new nodes numbered from `start`.
+
+    The rectangle reaches past the largest circle by a quarter of its
+    radius or half a brick, whichever is more, out to the next grid
+    line, and its edge keeps the grid's nodes, so the ring meets the
+    grid around it node for node. It must hold nothing but these
+    circles' boundaries: no ring already there, and in every layer one
+    material across each band between circles — sampled at a point,
+    and held to the grid's own bricks there, so a face crossing the
+    rectangle is seen, as is another circle in it. Where the rectangle
+    runs past the grid it stops at the grid's edge, and where it holds
+    more than the circles (a table's legs under a large hole) the
+    largest one inside it that does is taken, a grid line in on every
+    side at a time — so long as the circle fits inside it, touching
+    it included. A circle nearer the rectangle's edge than a tenth of a
+    brick (a leg flush with a table's corner touches two edges) is held
+    that far in there, so no layer of bricks has no thickness: exactly
+    round elsewhere, flattened by that much where it comes closer.
+    Where no rectangle holds with that room, the ring's outline steps:
+    the grid's cells inside a disk clear of what is in the way, an 11 in
+    hole in a 12 in table's top stepping round its legs (`staircase`),
+    a tenth of a brick of room left; a rectangle the circle would be
+    held in from is taken only when no outline steps. Each brick of the ring takes its band's part,
+    layer by layer — beyond the outer circle, between two, or inside
+    the inner — not the part its center lies in: where the circle is
+    held in, a thin brick's center can lie inside the true circle, and
+    a flush leg grew out to the table's edge that way.
+
+    Each circle gets as many nodes as the rectangle's edge has, spaced
+    evenly between the angles of the rectangle's corners, and layers of
+    about `size` run between edge and circle and between circles. A
+    circle with material inside it gets a core: a grid of the
+    rectangle's own counts, a quarter of the circle's width, with
+    layers out to it."""
+    u, v, w = order
+    lu, lv, lw = lines
+    nu, nv, nw = len(lu), len(lv), len(lw)
+    outer = radii[-1]
+    reach = outer + max(0.25 * outer, 0.5 * size)
+    i0 = int(np.searchsorted(lu, center[0] - reach + tol, 'right')) - 1
+    i1 = int(np.searchsorted(lu, center[0] + reach - tol, 'left'))
+    j0 = int(np.searchsorted(lv, center[1] - reach + tol, 'right')) - 1
+    j1 = int(np.searchsorted(lv, center[1] + reach - tol, 'left'))
+    i0, j0, i1, j1 = max(i0, 0), max(j0, 0), min(i1, nu - 1), min(j1, nv - 1)
+    middles = (lw[:-1] + lw[1:]) / 2.0
+    # a rectangle's circle comes no nearer its edge than a tenth of a
+    # brick: a leg flush with a table's corner touches its two edges,
+    # and the layer there would have no thickness, so the circle is held
+    # that far in where it comes closer — flattened there by that much,
+    # and exactly round everywhere else; a stepped outline must leave
+    # that much room (Brandon, 2026-10-12)
+    clear = 0.1 * size
+
+    def layered(points):
+        """(points, layers): the part at each point in each layer."""
+        found = np.zeros((len(points) * (nw - 1), 3))
+        found[:, u] = np.repeat(points[:, 0], nw - 1)
+        found[:, v] = np.repeat(points[:, 1], nw - 1)
+        found[:, w] = np.tile(middles, len(points))
+        return held(found).reshape(len(points), nw - 1)
+
+    def agreement(i0, i1, j0, j1, bands):
+        """(corners, agree): each grid cell's four corners' distances
+        from the center, and, layer by layer, whether the grid's brick
+        there holds the part of the band it lies in — one across a
+        circle that of a band it touches."""
+        du, dv = np.meshgrid(lu[i0:i1 + 1] - center[0], lv[j0:j1 + 1] - center[1],
+                             indexing='ij')
+        far = np.hypot(du, dv)
+        corners = np.stack([far[:-1, :-1], far[1:, :-1], far[1:, 1:], far[:-1, 1:]])
+        inner = np.searchsorted(radii, corners.min(axis=0) + tol)
+        outmost = np.searchsorted(radii, corners.max(axis=0) - tol)
+        cells = owner[i0:i1, j0:j1]
+        agree = np.zeros(cells.shape, dtype=bool)
+        for t, band in enumerate(bands):
+            agree |= (((inner <= t) & (t <= outmost))[:, :, None]
+                      & (cells == band[None, None, :]))
+        return corners, agree
+
+    def fits(i0, i1, j0, j1):
+        """The bands' parts in this rectangle, or None where it holds
+        more than these circles' boundaries."""
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        # each band's part, layer by layer, at one point: the middle,
+        # each annulus's mid radius, and halfway from the outer circle
+        # to the rectangle's farthest corner, where there is room even
+        # when the rectangle touches the circle
+        corner = np.where(center - low > high - center, low, high) - center
+        reach_out = float(np.hypot(*corner))
+        across = [0.0] + [(r0 + r1) / 2.0 for r0, r1 in pairwise(radii)]
+        across.append((outer + reach_out) / 2.0)
+        bands = layered(center + np.outer(across, corner / reach_out))
+        _corners, agree = agreement(i0, i1, j0, j1, bands)
+        return bands if agree.all() else None
+
+    def staircase(i0, i1, j0, j1):
+        """The cells of this rectangle inside a disk about the center wide
+        enough for the circles and clear of every cell that holds more
+        than them, with their outline; None where even that will not
+        hold a ring. Where the rectangle cannot, a stepped outline about
+        the hole can: a hole nearly as wide as a table's top, whose every
+        rectangle took in the legs at its corners, steps round them
+        (Brandon, 2026-10-12)."""
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        # the band beyond the circles sampled toward the side with the
+        # most room, clear of a corner's leg
+        gaps = np.array([center[0] - low[0], high[0] - center[0],
+                         center[1] - low[1], high[1] - center[1]])
+        side = int(np.argmax(gaps))
+        toward = np.array([(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)][side])
+        across = [0.0] + [(r0 + r1) / 2.0 for r0, r1 in pairwise(radii)]
+        across.append((outer + gaps[side]) / 2.0)
+        bands = layered(center + np.outer(across, toward))
+        corners, agree = agreement(i0, i1, j0, j1, bands)
+        bad = ~agree.all(axis=2) | ~alive[i0:i1, j0:j1]
+        if not bad.any():
+            return None
+        # every cell wholly inside the nearest bad cell's nearest corner:
+        # a bad cell reaches past that radius, so none is taken
+        cap = float(corners.min(axis=0)[bad].min())
+        inside = (corners.max(axis=0) <= cap + tol) & ~bad
+        path = _outline(inside)
+        if path is None:
+            return None
+        nodes = [(i0 + ci, j0 + cj) for ci, cj in path]
+        q = np.array([(lu[i], lv[j]) for i, j in nodes])
+        following = np.roll(q, -1, axis=0) - q
+        t = np.clip(((center - q) * following).sum(axis=1)
+                    / (following * following).sum(axis=1), 0.0, 1.0)
+        room = float(np.hypot(*(q + t[:, None] * following - center).T).min()) - outer
+        if room < -tol or (bands[-1].any() and room < clear):
+            return None
+        # star-shaped about the center, or a ring drawn to it would fold;
+        # begun at its bottom left, as a rectangle's edge is
+        turn = np.arctan2(q[:, 1] - center[1], q[:, 0] - center[0])
+        first = int(np.argmin(np.abs(np.angle(np.exp(1j * (turn + 0.75 * np.pi))))))
+        nodes, q = nodes[first:] + nodes[:first], np.roll(q, -first, axis=0)
+        theta = np.unwrap(np.roll(turn, -first))
+        if (np.diff(theta) <= 0).any() or theta[-1] - theta[0] >= 2.0 * np.pi:
+            return None
+        return bands, inside, nodes, q, theta
+
+    # the rectangle a quarter radius out, else the largest inside it that
+    # holds nothing but these circles, a grid line in on every side at a
+    # time: a hole of 4.5 in in a table's top reached its legs' columns,
+    # 5 in out, and was pulled round from the grid instead (Brandon,
+    # 2026-10-12) — while a layer of bricks still fits between
+    bands = stepped = touching = None
+    preferred = (i0, i1, j0, j1)
+    while i1 - i0 >= 2 and j1 - j0 >= 2:
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        room = float(min((center - low).min(), (high - center).min())) - outer
+        if room < -tol:
+            break
+        if alive[i0:i1, j0:j1].all():
+            bands = fits(i0, i1, j0, j1)
+            if bands is not None and room < clear and bands[-1].any():
+                # one the circle would be held in from: kept for last,
+                # since a stepped outline may hold it round — round legs
+                # set in a quarter inch left a 9 in hole's rectangle
+                # touching it, flattened four times (2026-10-12)
+                touching, bands = (bands, i0, i1, j0, j1), None
+                break
+            if bands is not None:
+                break
+        i0, i1, j0, j1 = i0 + 1, i1 - 1, j0 + 1, j1 - 1
+    if bands is None and preferred[1] - preferred[0] >= 2 \
+            and preferred[3] - preferred[2] >= 2:
+        # no rectangle holds it with room: the stepped outline, since a
+        # rectangle's circle nodes are evenly spaced and its outline's
+        # follow the steps
+        stepped = staircase(*preferred)
+        if stepped is not None:
+            bands = stepped[0]
+    if bands is None and touching is not None:
+        bands, i0, i1, j0, j1 = touching
+    if bands is None:
+        return None
+    kept = [r for t, r in enumerate(radii) if (bands[t] != bands[t + 1]).any()]
+    if not kept:
+        return False
+    if stepped is not None:
+        # the stepped outline: each circle node at its outline node's own
+        # angle, the radial lines straight; a core of half the count a
+        # side, as near square as the count allows
+        _bands, mask, edge, q, theta = stepped
+        i0, i1, j0, j1 = preferred
+        count = len(q)
+        a = count // 4
+        b = count // 2 - a
+    else:
+        mask = np.ones((i1 - i0, j1 - j0), dtype=bool)
+        a, b = i1 - i0, j1 - j0
+        # the rectangle's edge, counterclockwise about w from (i0, j0)
+        edge = ([(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)]
+                + [(i, j1) for i in range(i1, i0, -1)]
+                + [(i0, j) for j in range(j1, j0, -1)])
+        q = np.array([(lu[i], lv[j]) for i, j in edge])
+        count = len(q)
+        # the circles' nodes: evenly spaced between the corners' angles
+        marks = [0, a, a + b, 2 * a + b, count]
+        angles = np.arctan2(*(q[marks[:4]] - center).T[::-1])
+        angles = np.append(angles[0] + np.mod(angles - angles[0], 2.0 * np.pi),
+                           angles[0] + 2.0 * np.pi)
+        theta = np.empty(count)
+        for side in range(4):
+            first, last = marks[side], marks[side + 1]
+            along = (np.linalg.norm(q[first:last] - q[first], axis=1)
+                     / np.linalg.norm(q[last % count] - q[first]))
+            theta[first:last] = angles[side] + along * (angles[side + 1] - angles[side])
+    edge_nodes = np.array([i * nv + j for i, j in edge])
+    unit = np.stack([np.cos(theta), np.sin(theta)], axis=1)
+    # held in only where there is material beyond the circle: a lone
+    # cylinder touches its own grid's edge, and beyond it is nothing
+    if stepped is None and bands[-1].any():
+        inward = (np.array([lu[i0], lv[j0]]) + clear, np.array([lu[i1], lv[j1]]) - clear)
+    else:
+        inward = None
+
+    def placed(radius):
+        """A circle's nodes, held `clear` inside a rectangle's edge."""
+        points = center + radius * unit
+        return points if inward is None else np.clip(points, *inward)
+    positions, rings, on_circle = [], [edge_nodes], []
+    # the band each pair of rings bounds: `len(radii)` beyond the outer
+    # circle, `t` between radii[t - 1] and radii[t], 0 inside
+    between: list[int] = []
+    made = start
+
+    def ring_at(points):
+        nonlocal made
+        positions.append(points)
+        made += len(points)
+        return np.arange(made - len(points), made)
+
+    rim = placed(kept[-1])
+    layers = 1 if not bands[-1].any() else max(1, round(float(np.median(
+        np.linalg.norm(rim - q, axis=1))) / size))
+    for step in range(1, layers + 1):
+        rings.append(ring_at(q + step / layers * (rim - q)))
+        between.append(len(radii))
+    on_circle.append(rings[-1])
+    reached = kept[-1]
+    for r in reversed(kept[:-1]):
+        layers = max(1, round((reached - r) / size))
+        band = int(np.searchsorted(radii, (reached + r) / 2.0))
+        for step in range(1, layers + 1):
+            rings.append(ring_at(placed(reached - step / layers * (reached - r))))
+            between.append(band)
+        on_circle.append(rings[-1])
+        reached = r
+    quads = []
+    if bands[0].any():
+        # a core of the rectangle's own counts, so its edge meets the
+        # circle node for node, its bricks square
+        half = 0.5 * reached / max(a, b)
+        cu = center[0] + half * (2 * np.arange(a + 1) - a)
+        cv = center[1] + half * (2 * np.arange(b + 1) - b)
+        gu, gv = np.meshgrid(cu, cv, indexing='ij')
+        core = ring_at(np.stack([gu.ravel(), gv.ravel()], axis=1)).reshape(a + 1, b + 1)
+        rim = placed(reached)
+        core_edge = np.array([core[k, 0] for k in range(a)] + [core[a, j] for j in range(b)]
+                             + [core[k, b] for k in range(a, 0, -1)]
+                             + [core[0, j] for j in range(b, 0, -1)])
+        edge_xy = np.concatenate(positions)[core_edge - start]
+        layers = max(1, round(float(np.median(np.linalg.norm(rim - edge_xy, axis=1)))
+                              / size))
+        for step in range(layers - 1, 0, -1):
+            rings.append(ring_at(edge_xy + step / layers * (rim - edge_xy)))
+            between.append(0)
+        rings.append(core_edge)
+        between.append(0)
+        quads.append(np.stack([core[:-1, :-1].ravel(), core[1:, :-1].ravel(),
+                               core[1:, 1:].ravel(), core[:-1, 1:].ravel()], axis=1))
+    k = np.arange(count)
+    following = (k + 1) % count
+    owners = [np.repeat(bands[band][None, :], count, axis=0) for band in between]
+    if quads:
+        owners.append(np.repeat(bands[0][None, :], len(quads[0]), axis=0))
+    quads = [np.stack([outer_ring[k], outer_ring[following], inner_ring[following],
+                       inner_ring[k]], axis=1)
+             for outer_ring, inner_ring in pairwise(rings)] + quads
+    return ((i0, i1, j0, j1, mask), np.concatenate(positions), np.concatenate(quads),
+            np.concatenate(owners), np.concatenate(on_circle))
+
+
+def _outline(inside: np.ndarray) -> list[tuple[int, int]] | None:
+    """The outline of a set of grid cells, counterclockwise, as the
+    (i, j) of its corners in order — every grid node along it, as a
+    rectangle's edge has — or None where it is not one simple loop (two
+    cells meeting at a corner only, or a hole in the set)."""
+    a, b = inside.shape
+
+    def cell(i, j):
+        return 0 <= i < a and 0 <= j < b and bool(inside[i, j])
+
+    step: dict[tuple[int, int], tuple[int, int]] = {}
+    for i, j in zip(*np.nonzero(inside)):
+        i, j = int(i), int(j)
+        for start, end, beyond in (((i, j), (i + 1, j), (i, j - 1)),
+                                   ((i + 1, j), (i + 1, j + 1), (i + 1, j)),
+                                   ((i + 1, j + 1), (i, j + 1), (i, j + 1)),
+                                   ((i, j + 1), (i, j), (i - 1, j))):
+            if not cell(*beyond):
+                if start in step:
+                    return None
+                step[start] = end
+    if not step:
+        return None
+    first = min(step)
+    path, at = [first], step[first]
+    while at != first:
+        path.append(at)
+        at = step.get(at)
+        if at is None or len(path) > len(step):
+            return None
+    return path if len(path) == len(step) else None
+
+
+def _circles(geometry, ids, w: int) -> list[tuple[np.ndarray, float, float, float, bool]]:
+    """(center, radius, low, high, whole) of every circle the parts'
+    outlines draw along `w`, their extrusion axis: each cylinder's along
+    it, whole, and each rounded block's four corner arcs — a circle of
+    the corner's radius about the arc's center, spanning the block
+    along `w`, a quarter of it drawn. Circles along another axis are
+    `_cross_circles`."""
+    return _circles_along(geometry, ids).get(w, [])
+
+
+def _cross_circles(geometry, ids, w: int) -> dict[int, list]:
+    """The circles that run across the extrusion, by their own axis:
+    `_circles`' tuples, the span read along that axis."""
+    return {axis: found for axis, found in _circles_along(geometry, ids).items()
+            if axis != w}
+
+
+def _cross_cylinders(geometry, ids, w: int) -> set[int]:
+    """The ids of the cylinders that run across the extrusion."""
+    return {leaf.id for i in ids for leaf in _leaves(geometry, i)
+            if leaf.kind == 'cylinder'
+            and int(np.argmax(np.abs(_frame(leaf)[2]))) != w}
+
+
+def _circles_along(geometry, ids) -> dict[int, list]:
+    out: dict[int, list] = {}
+    for i in ids:
+        for leaf in _leaves(geometry, i):
+            center = np.asarray(leaf.center)
+            axes = _frame(leaf)
+            w = int(np.argmax(np.abs(axes[2])))
+            found = out.setdefault(w, [])
+            if leaf.kind == 'cylinder':
+                found.append((center, leaf.radius, center[w] - leaf.length / 2,
+                              center[w] + leaf.length / 2, True))
+            elif leaf.corner > 0.0:
+                wx, wy, wz = leaf.widths
+                for sx in (-1, 1):
+                    for sy in (-1, 1):
+                        arc = center + (sx * (wx / 2 - leaf.corner) * axes[0]
+                                        + sy * (wy / 2 - leaf.corner) * axes[1])
+                        found.append((arc, leaf.corner, center[w] - wz / 2,
+                                      center[w] + wz / 2, False))
+    return out
+
+
+def _round_onto_circles(circles, xyz, corners, groups, centers, order,
+                        cell: float, bounds) -> int:
+    """Pull the nodes on each circle's rim onto it, in place; how many
+    moved. For the circles no ring could be laid about (`_plane`): a
+    rounded corner's arc, which its block's faces touch, and a circle
+    with no room around it. `cell` is a brick's diagonal, at most;
+    `bounds` the grid's lowest and highest (u, v), its outer faces.
+
+    Within the circle's length, a rim node is one the
+    bricks inside the circle and the bricks beyond it share, where no
+    material — empty counted as one — lies on both sides of it: a hole
+    (empty or an insert inside, the part beyond), a boss (the part
+    inside, empty beyond). A node with the same material on both sides
+    is not on a boundary the circle draws, and one a hole shares with
+    an edge's empty space keeps its place. A node on the grid's outer
+    face, where a hole breaks out through it, slides along that face to
+    where the circle crosses it rather than leaving it (`mesh.block`'s
+    rule, 2026-09-30). A node two circles claim goes to the nearer.
+
+    The pulls are made one at a time, the node nearest its circle first,
+    and one that turns a brick beside it inside out is made as far as
+    it can be instead, or not at all: where three corners of a brick
+    land on the circle, the arc carries the middle one past the line
+    between the others and folds the brick into a dart (a hole six
+    bricks across, 2026-10-11). No distance rule caught every case,
+    since whether a pull folds a brick depends on its neighbors' pulls;
+    trying each against them does."""
+    from .geometry import _CORNER_EDGES
+
+    edges = np.asarray(_CORNER_EDGES[8])
+
+    def volumes(points):
+        """Each corner's share of a brick's volume, for bricks (m, 8, 3):
+        its sign says the brick is still the right way out."""
+        legs = points[:, edges] - points[:, :, None, :]
+        return np.einsum('mci,mci->mc', legs[:, :, 0],
+                         np.cross(legs[:, :, 1], legs[:, :, 2]))
+
+    u, v, w = order
+    best: dict[int, tuple[float, np.ndarray]] = {}
+    classes = np.unique(groups)
+
+    def on_the_outline(target, center, radius, low, high, here):
+        """`target`, moved to where this circle's outline ends when it
+        runs inside another of these circles: the nearest point where
+        the two cross. A circle inside another throughout has no outline
+        there, so None."""
+        # Two overlapping cylinders subtracted from a block (Brandon,
+        # 2026-10-18, a peanut-shaped cut): the rim nodes at the waist
+        # were pulled onto the nearer circle's arc, which there lies
+        # inside the other hole, and twelve bricks of material stood
+        # inside the cut. The cut's outline is the union's, and a node
+        # at the cusp belongs where the circles cross.
+        for other_center, other_radius, other_low, other_high, _w in circles:
+            if other_center is center or other_high <= low or other_low >= high:
+                continue
+            shift = other_center[[u, v]] - center[[u, v]]
+            apart = float(np.hypot(*shift))
+            if apart == 0.0 or np.hypot(*(target - other_center[[u, v]])) \
+                    >= other_radius - 1e-9 * other_radius:
+                continue
+            if apart >= radius + other_radius or apart <= abs(radius - other_radius):
+                return None      # one inside the other: no outline of its own here
+            along = (radius ** 2 - other_radius ** 2 + apart ** 2) / (2.0 * apart)
+            across = np.sqrt(max(radius ** 2 - along ** 2, 0.0))
+            foot = center[[u, v]] + along * shift / apart
+            side = np.array([-shift[1], shift[0]]) / apart
+            crossings = [foot + across * side, foot - across * side]
+            target = min(crossings, key=lambda c: float(np.hypot(*(c - here))))
+        return target
+
+    for center, radius, low, high, _whole in circles:
+        span = (centers[:, w] > low) & (centers[:, w] < high)
+        reach = np.hypot(centers[:, u] - center[u], centers[:, v] - center[v])
+        # only the bricks about the circle: a rim node's bricks are all
+        # within a brick's diagonal of it
+        near = np.flatnonzero(span & (reach <= radius + 2 * cell))
+        inside = reach[near] <= radius
+        if not inside.any() or inside.all():
+            continue
+        around, owners = corners[near], groups[near]
+        rim = np.intersect1d(around[inside], around[~inside])
+        for material in classes:
+            both = np.intersect1d(around[inside & (owners == material)],
+                                  around[~inside & (owners == material)])
+            rim = np.setdiff1d(rim, both)
+        for n in rim:
+            here = xyz[n, [u, v]]
+            offset = here - center[[u, v]]
+            distance = float(np.hypot(*offset))
+            if distance == 0.0:
+                continue
+            target = center[[u, v]] + offset * (radius / distance)
+            # a node on two faces is the grid's corner, one brick's own,
+            # never on a rim
+            faces = [k for k in (0, 1) if np.isclose(here[k], bounds[0][k], rtol=0, atol=1e-9 * cell)
+                     or np.isclose(here[k], bounds[1][k], rtol=0, atol=1e-9 * cell)]
+            if faces:
+                held, other = faces[0], 1 - faces[0]
+                reach = radius ** 2 - offset[held] ** 2
+                if reach < 0.0:
+                    continue
+                target[held] = here[held]
+                target[other] = center[[u, v]][other] + (np.sign(offset[other]) or 1.0) * np.sqrt(reach)
+            target = on_the_outline(target, center, radius, low, high, here)
+            if target is None:
+                continue
+            gap = float(np.hypot(*(target - here)))
+            if n not in best or gap < best[n][0]:
+                best[n] = (gap, target)
+    if not best:
+        return 0
+    material = corners[groups > 0]
+    rows = np.flatnonzero(np.isin(material, list(best)).any(axis=1))
+    beside: dict[int, list[int]] = {}
+    for row in rows:
+        for n in material[row]:
+            if int(n) in best:
+                beside.setdefault(int(n), []).append(int(row))
+    grid = xyz.copy()
+    moved = 0
+    for n in sorted(best, key=lambda m: best[m][0]):
+        held = xyz[n].copy()
+        bricks = material[beside.get(n, [])]
+        # a pull that would fold a brick is made as far as it can be
+        # instead: the dart's middle node stops short of the circle, on
+        # the way to it, rather than staying a brick's corner deep in
+        # the hole (a hole four bricks across, every 45-degree node;
+        # Brandon's side-drilled hole, 2026-10-18)
+        for share in (1.0, 0.75, 0.5, 0.25):
+            xyz[n, [u, v]] = held[[u, v]] + share * (best[n][1] - held[[u, v]])
+            if not len(bricks) or not (volumes(grid[bricks]) * volumes(xyz[bricks]) <= 0).any():
+                moved += share == 1.0
+                break
+        else:
+            xyz[n] = held
+    return moved

@@ -41,7 +41,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 #: the directories whose Python files each environment imports from
 SCOPES = {
-    'package': ('src', 'tests', 'tools', 'schema'),
+    'package': ('src', 'tests', 'tools', 'schema', 'testdata'),
     'analysis': ('python',),
 }
 
@@ -278,17 +278,22 @@ def in_scope(path: pathlib.Path, scope: str, root: pathlib.Path = ROOT) -> bool:
     return path.relative_to(root).parts[0] in SCOPES[scope]
 
 
-def first_party(files: Iterable[pathlib.Path]) -> dict[pathlib.Path, frozenset[str]]:
+def first_party(files: Iterable[pathlib.Path],
+                root: pathlib.Path = ROOT) -> dict[pathlib.Path, frozenset[str]]:
     """For each file, the top-level names of this repository's own code it
     can import: every top-level package (the outermost directory holding an
-    `__init__.py`), and each module outside a package that sits in the
-    file's directory or one above it, as a test reaches its conftest or a
-    tool beside its tests. A module inside a package is not a top-level
-    name, so a reader at `io/rattlesnake.py` does not make `import
-    rattlesnake` this repository's."""
+    `__init__.py`), every directory directly under the root that holds
+    Python (a namespace package, as `testdata.generate_plate` is imported
+    with the root on the path), and each module outside a package that
+    sits in the file's directory or one above it, as a test reaches its
+    conftest or a tool beside its tests. A module inside a package is not
+    a top-level name, so a reader at `io/rattlesnake.py` does not make
+    `import rattlesnake` this repository's."""
     files = list(files)
     package_dirs = {path.parent for path in files if path.name == '__init__.py'}
     packages = {d.name for d in package_dirs if d.parent not in package_dirs}
+    packages |= {path.relative_to(root).parts[0] for path in files
+                 if len(path.relative_to(root).parts) > 1}
     loose: dict[pathlib.Path, set[str]] = {}
     for path in files:
         if path.parent not in package_dirs:
@@ -348,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     scope = parser.parse_args(argv).scope
     files = tracked_python()
     mine = [path for path in files if in_scope(path, scope)]
-    findings = check_installed() + check_imports(mine, first_party(files))
+    findings = check_installed() + check_imports(mine, first_party(files, ROOT))
     for finding in findings:
         print(finding)
     count = sum(1 for _ in metadata.distributions())

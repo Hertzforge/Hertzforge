@@ -126,7 +126,7 @@ __import__("sdynpy")
     helpers = _write(tmp_path / 'src' / 'pkg' / 'helpers.py', 'import pkg\n')
     init = _write(tmp_path / 'src' / 'pkg' / '__init__.py', '')
     files = [reader, helpers, init]
-    found = cl.check_imports(files, cl.first_party(files),
+    found = cl.check_imports(files, cl.first_party(files, tmp_path),
                              provided={'numpy': ['numpy']}, root=tmp_path)
     tail = ('which no installed package provides; declare the package that does, so its '
             'license is checked')
@@ -143,7 +143,7 @@ def test_a_module_inside_a_package_is_not_a_top_level_name(tmp_path):
     init = _write(tmp_path / 'src' / 'pkg' / '__init__.py', '')
     io_init = _write(tmp_path / 'src' / 'pkg' / 'io' / '__init__.py', '')
     user = _write(tmp_path / 'src' / 'pkg' / 'io' / 'reads.py', 'import rattlesnake\n')
-    own = cl.first_party([reader, init, io_init, user])
+    own = cl.first_party([reader, init, io_init, user], tmp_path)
     assert 'pkg' in own[user]
     assert 'rattlesnake' not in own[user]
     (finding,) = cl.check_imports([user], own, provided={}, root=tmp_path)
@@ -154,9 +154,19 @@ def test_a_loose_module_is_ours_beside_it_and_below_it_only(tmp_path):
     tool = _write(tmp_path / 'tools' / 'helper.py', 'x = 1\n')
     test = _write(tmp_path / 'tools' / 'tests' / 'test_helper.py', 'import helper\n')
     elsewhere = _write(tmp_path / 'src' / 'reader.py', 'import helper\n')
-    own = cl.first_party([tool, test, elsewhere])
+    own = cl.first_party([tool, test, elsewhere], tmp_path)
     assert 'helper' in own[test]
     assert 'helper' not in own[elsewhere]
+
+
+def test_a_directory_under_the_root_is_a_namespace_package(tmp_path):
+    generator = _write(tmp_path / 'testdata' / 'generate.py', 'RATE = 1\n')
+    test = _write(tmp_path / 'tests' / 'test_it.py', 'from testdata.generate import RATE\n')
+    deep = _write(tmp_path / 'src' / 'pkg' / 'readers' / 'reader.py', 'x = 1\n')
+    own = cl.first_party([generator, test, deep], tmp_path)
+    assert {'testdata', 'tests', 'src'} <= own[test]
+    assert 'readers' not in own[test]
+    assert 'generate' not in own[test]
 
 
 def test_an_installed_package_is_found_by_the_name_it_is_imported_as():
