@@ -448,6 +448,75 @@ async fn manual_levels_mode_and_the_controlled_stop() {
     assert_eq!(again["end"]["outcome"], "operator_stop");
 }
 
+/// The controlled stop starts at the next output block, not the next control
+/// loop, and walks down smoothly (2026-11-01, bench finding 2). In real time,
+/// with a one-second control loop and a 2 s, 40 dB ramp, the live level is
+/// below the stop level within 0.6 s of the request and falls in many small
+/// steps. Red before the fix: the level held for the rest of the loop in
+/// progress and the next one, then fell 26 dB per loop.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        1.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let mut config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+    config["acquisition"]["n_avg"] = json!(16); // a one-second control loop
+    config["control"]["shutdown_ramp_s"] = json!(2.0);
+    config["control"]["soft_start_db"] = json!(0);
+    configured(&mut c, config).await;
+    c.ok("random.start", json!({})).await;
+    c.wait_phase("engaged", LONG).await;
+    c.pump(Duration::from_millis(2300)).await; // two loops at -6 dB, then mid-loop
+
+    let t0 = Instant::now();
+    let stopping = c.ok("random.stop", json!({})).await;
+    assert_eq!(stopping["state"], "stopping", "{stopping}");
+    let mut seen: Vec<(f64, f64)> = Vec::new();
+    let deadline = t0 + LONG;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Some(m) = c.read(left).await else {
+            panic!("the stop did not finish");
+        };
+        if m["type"] == "event" && m["topic"] == "random.state" && m["data"]["state"] == "finished"
+        {
+            break;
+        }
+        if let Some(e) = c.events.last() {
+            if e.topic() == "random.live" && e.data()["state"] == "stopping" {
+                if let Some(l) = e.data()["level_db"].as_f64() {
+                    seen.push((t0.elapsed().as_secs_f64(), l));
+                }
+            }
+        }
+    }
+    println!("live levels while stopping: {seen:?}");
+    let first_down = seen.iter().find(|(_, l)| *l < -6.5).map(|(t, _)| *t);
+    assert!(
+        first_down.is_some_and(|t| t < 0.6),
+        "the drive was still at -6 dB {first_down:?} s after the stop"
+    );
+    let mut distinct: Vec<f64> = seen.iter().map(|(_, l)| *l).collect();
+    distinct.dedup();
+    assert!(
+        distinct.len() >= 6,
+        "the level fell in {} steps: {seen:?}",
+        distinct.len()
+    );
+    let worst = distinct
+        .windows(2)
+        .map(|w| w[0] - w[1])
+        .fold(0.0f64, f64::max);
+    assert!(worst < 10.0, "a {worst:.1} dB step between two live frames");
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended() {
     let svc = Service::with_options(options(

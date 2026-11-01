@@ -197,8 +197,13 @@ pub struct RunView {
     pub clock: Option<&'static str>,
     /// The commanded level (the identification level during system identification).
     pub level_db: Option<f64>,
-    /// The level the loop runs at now.
+    /// The level the loop runs at now (the level of its last control loop).
     pub live_level_db: Option<f64>,
+    /// The level the drive is at now, block by block (the drive level ramp),
+    /// while the loop drives; the live display's `level_db`.
+    pub drive_now_db: Option<f64>,
+    /// The level `drive_psd` and `drive_rms_v` were synthesized at.
+    pub drive_level_db: Option<f64>,
     pub elapsed_s: Option<f64>,
     pub at_level_s: Option<f64>,
     pub remaining_at_level_s: Option<f64>,
@@ -383,7 +388,8 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
         },
         Row::text(
             "Level",
-            &v.live_level_db
+            &v.drive_now_db
+                .or(v.live_level_db)
                 .map_or_else(|| "not driving".to_owned(), db_text),
             Status::Info,
         ),
@@ -423,7 +429,7 @@ pub fn live_json(v: &RunView, arrays: &mut Arrays) -> Value {
     m.insert(
         "level_db".into(),
         if driving {
-            opt_r(v.live_level_db, 2)
+            opt_r(v.drive_now_db.or(v.live_level_db), 2)
         } else {
             Value::Null
         },

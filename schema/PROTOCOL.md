@@ -473,8 +473,8 @@ and last levels, until stopped; `full_level_s` applies if the ladder is handed b
 | `pretest` | `{"averages":4,"level_db":-20,"max_vrms":1,"start_vrms":0.01,"shaped":false}` | System identification (below); `shaped` follows the reference's shape instead of a flat band |
 | `soft_start_db` | 9 | The run engages this far below the first level and ramps up to it |
 | `soft_start_relax_db` | 6 | The bands widen by this much until the first level is reached |
-| `level_ramp_s` | 3 | Ramp time of every level change |
-| `shutdown_ramp_s` | 3 | Ramp time of a controlled stop |
+| `level_ramp_s` | 3 | Ramp time of every level change: the drive moves smoothly, output block by output block, while the control loop keeps its own cadence |
+| `shutdown_ramp_s` | 3 | Ramp time of a controlled stop: 40 dB down from the level the stop began at, smoothly, block by block |
 
 **System identification.** It excites relative to the reference. It starts at `start_vrms` and
 steps its drive until the control response's rms over the band is `level_db` (-60 to 0) relative
@@ -562,9 +562,10 @@ Result column is the `random.state` object below.
 - **`random.mode`** hands the ladder over live. `auto` to `manual` holds the present level;
   `manual` to `auto` resumes from the present level with its dwell restarted, and from a level
   between two of the schedule's, it moves to the one above when the dwell ends.
-- **`random.stop`** is the controlled stop: while driving, the level ramps down over
-  `shutdown_ramp_s` (state `stopping`) and the run ends `operator_stop`; from `armed` or
-  `review` it ends at once. It answers at once.
+- **`random.stop`** is the controlled stop: while driving, the drive starts down at the next
+  output block, not the next control loop, and ramps 40 dB down over `shutdown_ramp_s` (state
+  `stopping`); the run ends `operator_stop` at the end of the control loop in which the ramp
+  arrives. From `armed` or `review` it ends at once. It answers at once.
 - **`random.abort`** ends the run within one control loop (`grid.loop_s`), without the shutdown
   ramp; the station takes the drive down with its own stop. The outcome is `operator_abort`. It
   answers when the loop has ended.
@@ -609,8 +610,8 @@ object to every connection on every change of `state`, `phase`, `mode`, `level_d
 drive) and `ramping_down` added. `run_id` is null when unconfigured, and new at every
 configure and reset. `source`, `station`, `grid` and `clock` describe the run's station
 (`clock`, `shared`, `independent` or `unknown`, is null until the run arms). `level_db` is the
-commanded level (`pretest.level_db` during system identification), null when nothing
-drives. `elapsed_s` counts from `random.start` (null
+commanded level (`pretest.level_db` during system identification, and the level the
+ramp-down is headed for while `stopping`), null when nothing drives. `elapsed_s` counts from `random.start` (null
 before). `at_level_s` and `remaining_at_level_s` are the time at the present level and the
 time left on it (null in `manual`). `alarm` is true while an alarm condition holds (see
 `random.live`). `feasibility` is null until arm, then `{"verdict","message"}` with `verdict`
@@ -656,11 +657,14 @@ identification until the run finishes, and once more with the final state:
  "views":[control spectrum, drive spectrum, run readings]}
 ```
 
-- `level_db` is the level the loop runs at now; after a level change it walks to the commanded
-  level over `level_ramp_s`. Null when nothing drives.
+- `level_db` is the level the drive is at now, read for every frame; after a level change it
+  walks to the commanded level over `level_ramp_s`, and in a controlled stop it walks down over
+  `shutdown_ramp_s`. Null when nothing drives.
 - `loop` counts control loops since the start. `control_rms_g` is the composite control rms
   over the band (null before the first loop), `reference_rms_g` the reference rms at the
-  present level, `drive_rms_v` the drive rms.
+  last control loop's level, `drive_rms_v` the drive rms: the last loop's drive spectrum at the
+  level the drive is at now. The Control view's reference and bands are drawn at the last
+  control loop's level, the level its measured series belongs to.
 - `lines` counts the band's lines, and how many lie outside the alarm and the abort bands in
   the last loop.
 - `channels` lists every enabled input row in table order, with its rms over the band in its
@@ -676,8 +680,8 @@ The views are the viz kit's, in this order:
    (`reference`), `Alarm high` and `Alarm low` (`tolerance`), `Abort high` and `Abort low`
    (`abort`). Every series is on the band's lines of the grid the run actually uses, with
    `shape: "steps"` and its `edges`, so each line is drawn flat across its own bin (the
-   stairstep). The reference and the bands are drawn at the present level, with each row's own
-   bands applied.
+   stairstep). The reference and the bands are drawn at the last control loop's level, with
+   each row's own bands applied.
 2. **Drive** (`spectrum`, y `PSD` V²/Hz log, same `link`): `Drive` (`drive`), stepped on the same
    lines.
 3. **Run** (`reading`): the numbers above as rows, for a pane that shows readings.

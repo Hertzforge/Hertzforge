@@ -35,6 +35,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod ramp;
 pub mod report;
 
 use crate::control::{composite_psd, ControlLaw, HinvLaw, LoopInputs, NotchReport, NotchSet};
@@ -46,6 +47,7 @@ use hertzforge_capture::{
 };
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_shaker_db::{FeasibilityCalculator, FeasibilityReport};
+use ramp::DriveRamp;
 use report::{
     ChannelRow, CompositeModeRecord, EventKind, EventLog, FeasibilityDigest, Honesty,
     LevelHistoryEntry, LimitProfileRow, ReportData, RunSettings, RunState, Status, TripKind,
@@ -53,6 +55,7 @@ use report::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The mode payload for a periodic-save [`Snapshot`] (the report spectra).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -189,6 +192,9 @@ pub struct FrfPairResult {
 /// Soft-start climb duration when the operator set no explicit level ramp.
 const DEFAULT_SOFT_START_S: f64 = 5.0;
 
+/// How far the controlled stop ramps the level down before the run stops, dB.
+pub const STOP_RAMP_DEPTH_DB: f64 = 40.0;
+
 /// The host-side Random run service (Path B). Owns the control law + the plant
 /// loop + the protection engines + capture + the event log.
 pub struct RandomService {
@@ -269,14 +275,15 @@ pub struct RandomService {
     /// quadruples the effective DOF within a second. Scaled in place on level
     /// change (the estimate is level-proportional power), cleared at engage.
     control_est: Option<Vec<f64>>,
-    /// The level the operator COMMANDED (the ramp walks `schedule_level_db`
-    /// toward it; equal when no ramp is in flight).
+    /// The level the operator COMMANDED (the ramp walks toward it; equal to
+    /// `schedule_level_db` when no ramp is in flight).
     level_target_db: f64,
-    /// The in-flight ramp rate, dB/s (set per transition from `level_ramp_s`).
-    level_ramp_db_per_s: f64,
-    /// A controlled stop is pending: when the ramp-down reaches its target,
-    /// the run stops. Aborts NEVER take this path - they stay immediate.
-    stop_after_ramp: bool,
+    /// The drive level ramp, walked per OUTPUT BLOCK by the playback step
+    /// (2026-11-01, bench finding 2). `schedule_level_db` is the level the
+    /// control loop works at and follows it at every segment boundary. A
+    /// controlled stop is pending once `ramp.stop_requested()` is set; when the
+    /// ramp-down arrives, the run stops. Aborts NEVER take this path.
+    ramp: Arc<DriveRamp>,
     /// The soft-start floor this run engaged at, while the climb to the start
     /// level is still in progress (`None` = no soft start / already arrived).
     soft_start_floor_db: Option<f64>,
@@ -468,6 +475,7 @@ impl RandomService {
             .collect();
 
         let data_root = data_root.unwrap_or_else(default_data_root);
+        let shutdown_ramp_s = cfg.shutdown_ramp_s;
 
         Ok(RandomService {
             cfg,
@@ -501,8 +509,7 @@ impl RandomService {
             engage_settle_loops: 0,
             control_est: None,
             level_target_db: 0.0,
-            level_ramp_db_per_s: 0.0,
-            stop_after_ramp: false,
+            ramp: Arc::new(DriveRamp::new(STOP_RAMP_DEPTH_DB, shutdown_ramp_s)),
             soft_start_floor_db: None,
             frf_pairs: Vec::new(),
             frf_results: Vec::new(),
@@ -594,6 +601,22 @@ impl RandomService {
     /// the two are equal. A controlled stop's ramp-down target is reported here too.
     pub fn commanded_level_db(&self) -> f64 {
         self.level_target_db
+    }
+
+    /// The drive level ramp. A front end reads the level the drive is at now
+    /// from it (the control loop's own level moves at segment boundaries), and
+    /// may start the controlled stop from another thread with
+    /// [`DriveRamp::request_stop`]: the ramp-down then starts at the next output
+    /// block rather than the next control loop. Follow it with
+    /// [`Self::request_stop`] on the run thread.
+    pub fn drive_ramp(&self) -> Arc<DriveRamp> {
+        self.ramp.clone()
+    }
+
+    /// The level the drive was at when the controlled stop was requested, once
+    /// it has been.
+    pub fn stop_requested_db(&self) -> Option<f64> {
+        self.ramp.stop_requested()
     }
     /// The in-band gRMS of the FULL (0 dB) shaped target.
     pub fn full_target_grms(&self) -> f64 {
@@ -1345,6 +1368,9 @@ impl RandomService {
         let t_synth = std::time::Instant::now();
         let (mut leadin, mut drive) = self.synth_segment(psd)?;
         let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
+        if let Some(p) = self.plant_loop.as_mut() {
+            p.set_drive_ramp(None); // identification records play as synthesized
+        }
         // eprintln, not a log Note: in the failing case the pretest aborts on
         // segment 0, and the abort path's event tail did not carry the note
         // through. A diagnostic that only survives the HEALTHY path is no
@@ -1531,18 +1557,20 @@ impl RandomService {
             // is the operator's level-ramp when they set one; otherwise a
             // deliberate default so the soft start is a RAMP, never a step.
             self.apply_level_now(floor);
-            self.schedule_level_db = floor;
+            self.ramp.set(floor);
             self.level_target_db = self.cfg.schedule.start_db;
             let ramp_s = if self.cfg.level_ramp_s > f64::EPSILON {
                 self.cfg.level_ramp_s
             } else {
                 DEFAULT_SOFT_START_S
             };
-            self.level_ramp_db_per_s =
-                ((self.cfg.schedule.start_db - floor).abs() / ramp_s).max(0.1);
+            let rate = ((self.cfg.schedule.start_db - floor).abs() / ramp_s).max(0.1);
+            self.ramp.ramp_to(self.cfg.schedule.start_db, rate);
             self.log.push(EventKind::Note {
                 text: format!(
-                    "SOFT START: engaging at {floor:.1} dB ({soft:.0} dB below the lowest                      scheduled level) and ramping to {:.1} dB over {ramp_s:.0} s; envelope                      enforcement relaxed by {:.0} dB until the start level is reached",
+                    "SOFT START: engaging at {floor:.1} dB ({soft:.0} dB below the lowest \
+                     scheduled level) and ramping to {:.1} dB over {ramp_s:.0} s; envelope \
+                     enforcement relaxed by {:.0} dB until the start level is reached",
                     self.cfg.schedule.start_db, self.cfg.soft_start_relax_db
                 ),
             });
@@ -1649,16 +1677,19 @@ impl RandomService {
         let from = self.schedule_level_db;
         self.level_target_db = level_db;
         // RAMPED when the operator configured a ramp and the loop is driving:
-        // the level WALKS to the target in per-segment steps (see loop_tick).
-        // Instant otherwise - including every non-driving state, where there
-        // is no loop to walk it.
+        // the drive WALKS to the target block by block (`ramp`), and the loop's
+        // level follows at each segment boundary (see loop_tick). Instant
+        // otherwise - including every non-driving state, where there is no loop
+        // to walk it.
         let ramping = self.cfg.level_ramp_s > f64::EPSILON
             && matches!(self.state, RunState::Engaged | RunState::FullLevel)
             && (level_db - from).abs() > 1e-9;
         if ramping {
-            self.level_ramp_db_per_s = ((level_db - from).abs() / self.cfg.level_ramp_s).max(0.1);
+            let rate = ((level_db - from).abs() / self.cfg.level_ramp_s).max(0.1);
+            self.ramp.ramp_to(level_db, rate);
         } else {
             self.apply_level_now(level_db);
+            self.ramp.set(level_db);
         }
         self.elapsed_at_level_s = 0.0;
         self.level_history.push(LevelHistoryEntry {
@@ -1684,23 +1715,23 @@ impl RandomService {
     /// nothing is driving. Aborts NEVER come through here - a protection trip
     /// stops now, and softening it would trade the article for politeness.
     pub fn request_stop(&mut self) -> Result<(), ServiceError> {
-        if self.cfg.shutdown_ramp_s > f64::EPSILON
-            && matches!(self.state, RunState::Engaged | RunState::FullLevel)
-        {
-            let down_db = self.schedule_level_db - 40.0;
-            self.level_target_db = down_db;
-            self.level_ramp_db_per_s = (40.0 / self.cfg.shutdown_ramp_s).max(0.1);
-            self.stop_after_ramp = true;
-            self.log.push(EventKind::Note {
-                text: format!(
-                    "controlled stop: ramping down over {:.1} s, then stopping",
-                    self.cfg.shutdown_ramp_s
-                ),
-            });
-            Ok(())
-        } else {
-            self.stop()
+        if matches!(self.state, RunState::Engaged | RunState::FullLevel) {
+            // Idempotent: a front end may already have started the ramp-down
+            // from another thread (`drive_ramp().request_stop()`), and the level
+            // it started from is kept.
+            if let Some(from) = self.ramp.request_stop() {
+                self.level_target_db = self.ramp.target_db();
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "controlled stop: ramping down over {:.1} s, then stopping (from {from:+.1} \
+                         dB)",
+                        self.cfg.shutdown_ramp_s
+                    ),
+                });
+                return Ok(());
+            }
         }
+        self.stop()
     }
 
     /// Advance the AUTO ladder one rung if the current level's dwell has elapsed. When
@@ -1957,8 +1988,18 @@ impl RandomService {
         // 3. Drive-Vrms ceiling clamp: clamp the drive PSD so its
         //    realized Vrms does not exceed the ceiling; a hard breach beyond the abort
         //    threshold aborts. The Vrms is sqrt(sum(psd)*df) over the whole grid.
-        self.clamp_drive_vrms(&mut drive_psd);
-        let realized_vrms = Self::psd_vrms(&drive_psd, df);
+        //    The segment's drive is synthesized at the level it starts at and the
+        //    level ramp scales it block by block from there, so both judge the
+        //    HIGHEST level the ramp can reach in this segment (only this thread
+        //    raises a target; a stop from another thread only lowers it).
+        let base_db = self.schedule_level_db;
+        let peak_db = self
+            .ramp
+            .projected(self.loop_cfg.segment_seconds())
+            .max(base_db);
+        let lift = 10f64.powf((peak_db - base_db) / 20.0);
+        self.clamp_drive_vrms_at(&mut drive_psd, lift);
+        let realized_vrms = Self::psd_vrms(&drive_psd, df) * lift;
         if let Some(abort_v) = self.cfg.drive_abort_vrms {
             if realized_vrms >= abort_v {
                 self.abort(TripKind::DriveVrms {
@@ -1973,37 +2014,11 @@ impl RandomService {
         // 4. Synthesize the drive stream + run one plant segment.
         // Phase timing: synthesis is the LAST thing before acquisition
         // resumes, so it sits squarely inside the AO-unfed window.
-        // LEVEL RAMP walker: one bounded step per segment toward the
-        // commanded target, feedforward-retargeted each step - smooth by
-        // construction, never stepwise (a step into an armature is a
-        // broadband impulse). When a controlled stop armed the ramp-down,
-        // reaching the floor stops the run.
-        if (self.schedule_level_db - self.level_target_db).abs() > 1e-9 {
-            let step = (self.level_ramp_db_per_s * self.loop_cfg.segment_seconds()).max(1e-3);
-            let delta = self.level_target_db - self.schedule_level_db;
-            let next = if delta.abs() <= step {
-                self.level_target_db
-            } else {
-                self.schedule_level_db + step.copysign(delta)
-            };
-            self.apply_level_now(next);
-            // A moving level re-arms a short judgment settle: the estimate is
-            // being rescaled every segment and the envelope must not chase it.
-            self.engage_settle_loops = self.engage_settle_loops.max(1);
-        } else if self.soft_start_floor_db.is_some()
-            && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
-        {
-            // Arrived: full enforcement from here on.
-            self.soft_start_floor_db = None;
-            self.log.push(EventKind::Note {
-                text: "soft start complete: at the start level, full envelope enforcement".into(),
-            });
-        } else if self.stop_after_ramp {
-            self.stop_after_ramp = false;
-            self.stop()?;
-            return Ok(false);
-        }
-
+        // LEVEL RAMP: the segment's drive is synthesized at `base_db`, and the
+        // playback step scales every output block by the ramp's walk from it -
+        // smooth by construction, never stepwise (a step into an armature is a
+        // broadband impulse). The loop's own level follows the ramp at the end
+        // of the segment.
         let t_synth = std::time::Instant::now();
         let (mut leadin, mut drive) = self.synth_segment(&drive_psd)?;
         // Sigma clip (operator "max sigma"): bound the crest factor delivered
@@ -2019,7 +2034,36 @@ impl RandomService {
         }
         let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
         let t_pre = self.pre_segment_start.take();
+        if let Some(p) = self.plant_loop.as_mut() {
+            p.set_drive_ramp(Some((self.ramp.clone(), base_db)));
+        }
         let seg = self.run_plant_segment(leadin, drive)?;
+        // The level the drive reached by the end of this segment is the level
+        // the loop works at from here: rescale the estimate, retarget the law.
+        let end_db = self.ramp.level_db();
+        let moved = (end_db - base_db).abs() > 1e-9;
+        if moved {
+            // The synthesis overlap still carries the end of this segment at its
+            // synthesis level; the next segment is synthesized at `end_db`, so the
+            // carry is brought to the level the ramp reached (without this, every
+            // ramped segment boundary crossfaded in from the old level: one
+            // window up to 20 dB high in the middle of a stop).
+            if let Some(synth) = self.synth.as_mut() {
+                synth.scale_carry(10f64.powf((end_db - base_db) / 20.0));
+            }
+            self.apply_level_now(end_db);
+            // A moving level re-arms a short judgment settle: this segment
+            // measured a level in motion and the envelope must not chase it.
+            self.engage_settle_loops = self.engage_settle_loops.max(1);
+        } else if self.soft_start_floor_db.is_some()
+            && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
+        {
+            // Arrived: full enforcement from here on.
+            self.soft_start_floor_db = None;
+            self.log.push(EventKind::Note {
+                text: "soft start complete: at the start level, full envelope enforcement".into(),
+            });
+        }
         if let Some(t) = self.last_segment_timing.as_mut() {
             t.synth_ms = synth_ms;
             t.pre_ms = t_pre
@@ -2088,6 +2132,13 @@ impl RandomService {
         // 7. Overload proxy per channel: |eu| >= fraction * range_max
         //    latches the per-channel indicator (NOT an abort).
         self.check_overloads(&seg);
+
+        // 7a. A controlled stop whose ramp-down has arrived stops the run at the
+        //     end of this segment (the protections above judged it first).
+        if self.ramp.stop_requested().is_some() && !self.ramp.moving() {
+            self.stop()?;
+            return Ok(false);
+        }
 
         // 8. Measure per-channel PSDs + composite, then iterate the law.
         let per_channel = self.measure_per_channel(&seg);
@@ -2292,8 +2343,8 @@ impl RandomService {
     /// Scales the whole PSD down uniformly if over-ceiling (a per-bin clamp would distort
     /// the shape; a uniform scale preserves it, which is the physical drive-limit
     /// behavior).
-    fn clamp_drive_vrms(&self, drive_psd: &mut [f64]) {
-        let vrms = Self::psd_vrms(drive_psd, self.df_hz);
+    fn clamp_drive_vrms_at(&self, drive_psd: &mut [f64], lift: f64) {
+        let vrms = Self::psd_vrms(drive_psd, self.df_hz) * lift.max(1.0);
         let ceiling = self.cfg.drive_ceiling_vrms;
         if vrms > ceiling && vrms > 0.0 {
             let scale2 = (ceiling / vrms).powi(2);

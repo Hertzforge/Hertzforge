@@ -25,6 +25,7 @@ use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_random::service::engine::BlockObserver;
+use hertzforge_random::service::ramp::DriveRamp;
 use hertzforge_random::service::report::EventKind;
 use hertzforge_random::{RandomService, RunMode, RunState, ServiceError, TripKind};
 use serde_json::{json, Value};
@@ -63,6 +64,13 @@ pub struct RunShared {
     /// Who sent the stop or abort, set with the signal so a run that ends inside a
     /// long call can name them.
     pub ended_by: Mutex<Option<String>>,
+    /// A controlled stop started from the socket's thread (`RandomRun::begin_stop`):
+    /// its outcome and who asked, for a ramp-down that arrives before the run
+    /// thread takes the queued request.
+    pub pending_stop: Mutex<Option<(&'static str, String)>>,
+    /// The run's drive level ramp while it is armed (the controller's), so the
+    /// socket's thread can start the stop and read the level the drive is at.
+    pub ramp: Mutex<Option<Arc<DriveRamp>>>,
     /// Told after every publish, with the run id and the view published, so every
     /// change of state reaches the service in order (none is folded into a later one).
     pub notify: tokio::sync::mpsc::UnboundedSender<Notice>,
@@ -562,6 +570,9 @@ impl Actor {
         self.view.mode = cfg.mode;
         self.view.channels = live_channels(&table);
         self.table = table;
+        if let Ok(mut r) = self.shared.ramp.lock() {
+            *r = Some(svc.drive_ramp());
+        }
         self.svc = Some(svc);
         self.lock = lock;
         self.set(State::Armed, "armed");
@@ -746,10 +757,12 @@ impl Actor {
             self.fault("the run lost its station");
             return;
         };
+        let base = svc.schedule_level_db();
         let r = svc.loop_tick();
         match r {
             Ok(more) => {
                 self.view.loops += 1;
+                self.view.drive_level_db = Some(base);
                 self.after_loop();
                 if !more {
                     self.finish_from_controller();
@@ -781,6 +794,16 @@ impl Actor {
             RunState::Stopped if self.view.state == State::Stopping => {
                 self.end(self.stop_outcome, "stopped", None, None);
             }
+            // The ramp-down started from the socket's thread arrived before the run
+            // thread took the queued stop request: end as that request says.
+            RunState::Stopped if svc.stop_requested_db().is_some() => {
+                let pending = self.shared.pending_stop.lock().ok().and_then(|p| p.clone());
+                if let Some((outcome, by)) = pending {
+                    self.stop_outcome = outcome;
+                    self.stopped_by = by;
+                }
+                self.end(self.stop_outcome, "stopped", None, None);
+            }
             RunState::Stopped => {
                 let s = self.plan.config.full_level_s;
                 self.end(
@@ -803,11 +826,7 @@ impl Actor {
         let st = svc.status();
         let driving = matches!(st.state, RunState::Engaged | RunState::FullLevel);
         self.view.live_level_db = Some(st.current_level_db);
-        self.view.level_db = Some(if self.view.state == State::Stopping {
-            st.current_level_db
-        } else {
-            svc.commanded_level_db()
-        });
+        self.view.level_db = Some(svc.commanded_level_db());
         self.view.mode = st.run_mode;
         self.view.at_level_s = driving.then_some(st.elapsed_at_level_s);
         self.view.remaining_at_level_s = if driving {
@@ -1036,11 +1055,13 @@ impl Actor {
                 let Some(svc) = self.svc.as_mut() else { return };
                 let r = svc.request_stop();
                 let stopped = svc.state() == RunState::Stopped;
+                let commanded = svc.commanded_level_db();
                 self.forward_log_now();
                 if r.is_err() || stopped {
                     self.end(outcome, "stopped", None, None);
                 } else {
-                    self.view.level_db = self.view.live_level_db;
+                    // The commanded level is where the ramp-down is headed.
+                    self.view.level_db = Some(commanded);
                     self.set(State::Stopping, "ramping_down");
                 }
             }
@@ -1098,6 +1119,9 @@ impl Actor {
             self.shared.signal.store(ABORT, Ordering::SeqCst);
         }
         self.svc = None;
+        if let Ok(mut r) = self.shared.ramp.lock() {
+            *r = None;
+        }
         self.lock = None;
         self.view.end = Some(End {
             outcome,
@@ -1111,6 +1135,7 @@ impl Actor {
         self.view.remaining_at_level_s = None;
         self.set(State::Finished, phase);
         self.view.live_level_db = None;
+        self.view.drive_now_db = None;
         self.shared.add_log("note", message);
         self.publish();
     }

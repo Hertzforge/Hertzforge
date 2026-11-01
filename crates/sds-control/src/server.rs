@@ -770,6 +770,8 @@ impl Service {
             clock: None,
             level_db: None,
             live_level_db: None,
+            drive_now_db: None,
+            drive_level_db: None,
             elapsed_s: None,
             at_level_s: None,
             remaining_at_level_s: None,
@@ -794,6 +796,8 @@ impl Service {
             log: std::sync::Mutex::new(Vec::new()),
             signal: Arc::new(AtomicU8::new(0)),
             ended_by: std::sync::Mutex::new(None),
+            pending_stop: std::sync::Mutex::new(None),
+            ramp: std::sync::Mutex::new(None),
             notify: self.notify.clone(),
         });
         let raw = cfg.raw.clone();
@@ -942,6 +946,7 @@ impl Service {
                     }
                     continue;
                 }
+                let v = run.live_view(v);
                 let mut arrays = Arrays::new();
                 let data = view::live_json(&v, &mut arrays);
                 svc.emit_binary("random.live", data, &arrays);
@@ -1263,6 +1268,11 @@ async fn stop_run(run: &RandomRun, outcome: &'static str, by: String, wait: bool
     }
     if v.state == State::Running && matches!(v.phase, "sysid" | "coherence_gate") {
         run.signal(STOP);
+    }
+    // While the loop drives, the drive starts down at the next output block, not
+    // at the end of the control loop in progress (2026-11-01, bench finding 2).
+    if v.state == State::Running && matches!(v.phase, "engaged" | "full_level") {
+        run.begin_stop(outcome, &by);
     }
     if wait {
         let w = wait_for(run);

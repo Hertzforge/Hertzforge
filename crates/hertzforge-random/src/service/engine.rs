@@ -458,6 +458,10 @@ pub type BlockObserver = std::sync::Arc<dyn Fn(&[f32], usize) + Send + Sync>;
 
 struct PlaybackStep {
     drive: Vec<f64>,
+    /// The drive level ramp and the level this segment's drive was synthesized
+    /// at: each output block is scaled by the ramp's walk from that level
+    /// (`super::ramp`). `None`: the record plays as synthesized.
+    ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64, f64)>,
     pos: usize,
     n_ch: usize,
     /// Interleaved recorded response: `n_ch` samples per frame.
@@ -476,6 +480,7 @@ impl PlaybackStep {
     fn new(drive: Vec<f64>, n_ch: usize) -> Self {
         PlaybackStep {
             drive,
+            ramp: None,
             pos: 0,
             n_ch: n_ch.max(1),
             interleaved: Vec::new(),
@@ -487,6 +492,15 @@ impl PlaybackStep {
 
     fn with_observer(mut self, o: Option<BlockObserver>) -> Self {
         self.observer = o;
+        self
+    }
+
+    fn with_ramp(
+        mut self,
+        ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>,
+        fs_hz: f64,
+    ) -> Self {
+        self.ramp = ramp.map(|(r, base)| (r, base, fs_hz));
         self
     }
 }
@@ -514,10 +528,17 @@ impl ProcessStep for PlaybackStep {
                 }
             };
             self.pos += 1;
-            if d.abs() > self.drive_peak {
-                self.drive_peak = d.abs();
-            }
             drive_out.push(d as f32);
+        }
+        // The level ramp, per output block (bench finding 2, 2026-11-01).
+        if let Some((ramp, base_db, fs_hz)) = &self.ramp {
+            super::ramp::scale_block(ramp, *base_db, *fs_hz, drive_out);
+        }
+        for d in drive_out.iter() {
+            let a = f64::from(d.abs());
+            if a > self.drive_peak {
+                self.drive_peak = a;
+            }
         }
         // Display tap: hand this tick's freshly acquired block out
         // BEFORE the segment completes. Cheap by contract; never blocks.
@@ -635,6 +656,11 @@ pub struct PlantLoop {
     /// Per-tick display tap; installed by the service, fired by
     /// `PlaybackStep` inside `run_segment`.
     block_observer: Option<BlockObserver>,
+    /// The drive level ramp for the next segment and the level its drive is
+    /// synthesized at (see [`PlantLoop::set_drive_ramp`]).
+    drive_ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>,
+    /// The rate the station programmed, for the ramp's time base.
+    fs_hz: f64,
     /// What the last segment boundary's arm/start actually did.
     last_boundary: Option<BoundaryTrace>,
     /// Whether THIS run has already primed the output.
@@ -849,6 +875,8 @@ impl PlantLoop {
 
         Ok(PlantLoop {
             block_observer: None,
+            drive_ramp: None,
+            fs_hz: cfg.fs_hz,
             last_boundary: None,
             output_primed: false,
             carry_queue: Vec::new(),
@@ -931,6 +959,14 @@ impl PlantLoop {
 
     pub fn set_block_observer(&mut self, o: Option<BlockObserver>) {
         self.block_observer = o;
+    }
+
+    /// Scale the next segments' output blocks by `ramp`'s walk from `base_db`, the
+    /// level their drive is synthesized at (`None`: play records as synthesized).
+    /// The service sets it before every control segment and clears it for the
+    /// identification.
+    pub fn set_drive_ramp(&mut self, ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>) {
+        self.drive_ramp = ramp;
     }
 
     /// Drive-to-response pipeline lag, frames. See the field doc; consumers that
@@ -1117,7 +1153,8 @@ impl PlantLoop {
             }
             self.output_primed = true;
             let mut step = PlaybackStep::new(drive.clone(), self.n_ch)
-                .with_observer(self.block_observer.clone());
+                .with_observer(self.block_observer.clone())
+                .with_ramp(self.drive_ramp.clone(), self.fs_hz);
             let mut sink = VecCaptureSink::new();
             let report = engine.run_ticks(&mut self.backend, &mut step, &mut sink, ticks);
             // AO free space right after the last write of the segment.
@@ -1274,6 +1311,14 @@ impl DriveSynth {
         }
         out.truncate(frames);
         out
+    }
+
+    /// Scale the synthesis overlap carried into the next segment by `gain` (see
+    /// `ColaSynth::scale_tail`): after a segment whose output a level ramp scaled
+    /// from its synthesis level, so the next segment, synthesized at the level
+    /// the ramp reached, does not crossfade in from the old level.
+    pub fn scale_carry(&mut self, gain: f64) {
+        self.cola.scale_tail(gain);
     }
 
     /// Synthesize one window-length drive segment from a one-sided drive PSD

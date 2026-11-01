@@ -12,7 +12,8 @@
 // 1. One screen takes control, selects the simulator, sets the channel table and the bench
 //    loopback setup, sees the service draw the profile, applies, arms, starts, holds for review
 //    (identification at the reference -20 dB, read from the run log), proceeds, steps the level
-//    on the manual ladder and stops with the ramp.
+//    on the manual ladder and stops with the ramp, which starts at once and walks down smoothly
+//    (the run bar's live level, sampled ten times a second).
 // 2. A second browser (its own storage) observes: it shows the setup the service holds and its
 //    numbers; a new run starts and the observer aborts it with Ctrl and period.
 // 3. A new run starts, and the controlling screen is closed while it drives: the observer sees
@@ -318,6 +319,22 @@ try {
 	await shot(a, '06-manual-ladder-live');
 
 	await tid(a, 'act-stop').click();
+	// The live level from the click: the drive starts down at the next output block, not after the
+	// control loop in progress (1.28 s here), and walks 40 dB over the 3 s ramp in small steps.
+	const tStop = Date.now();
+	const fall = [];
+	while (Date.now() - tStop < 6000) {
+		const m = (await text(a, 'run-level')).match(/^([+-]?\d+(?:\.\d+)?) dB/);
+		const st = await stateOf(a);
+		if (st === 'finished') break;
+		if (m) fall.push([(Date.now() - tStop) / 1000, Number(m[1])]);
+		await a.waitForTimeout(100);
+	}
+	const firstDown = fall.find(([, l]) => l < -6.5);
+	check('Stop: the drive starts down within 0.6 s of the click', firstDown !== undefined && firstDown[0] < 0.6, firstDown ? `${firstDown[1]} dB at ${firstDown[0].toFixed(2)} s` : 'never below -6.5 dB');
+	const levels = fall.map(([, l]) => l).filter((l, i, all) => i === 0 || l !== all[i - 1]);
+	const worst = levels.slice(1).reduce((w, l, i) => Math.max(w, levels[i] - l), 0);
+	check('Stop: the drive walks down in small steps, not loop-sized ones', levels.length >= 8 && worst < 8, `${levels.length} levels, largest step ${worst.toFixed(1)} dB, last ${levels.at(-1)} dB`);
 	await until(a, 'stopping', async (p) => ['stopping', 'finished'].includes(await stateOf(p)), 10_000);
 	const sawStopping = (await stateOf(a)) === 'stopping';
 	await until(a, 'finished', async (p) => (await stateOf(p)) === 'finished', 30_000);

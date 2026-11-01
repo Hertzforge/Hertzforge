@@ -64,6 +64,45 @@ impl RandomRun {
         }
     }
 
+    /// Start the controlled stop at the next output block, from the socket's
+    /// thread, while the run thread is inside a control loop; the queued stop
+    /// request then finds it under way. Records how the run will end, in case the
+    /// ramp-down arrives before that request is taken. `false` when no stop ramp
+    /// is configured or the run has not armed (the request alone stops it).
+    pub fn begin_stop(&self, outcome: &'static str, by: &str) -> bool {
+        if let Ok(mut p) = self.shared.pending_stop.lock() {
+            if p.is_none() {
+                *p = Some((outcome, by.to_owned()));
+            }
+        }
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        ramp.is_some_and(|r| r.request_stop().is_some())
+    }
+
+    /// `view` for the live display: while the loop drives, its level and drive
+    /// are the ones the drive level ramp has reached now, block by block, not the
+    /// last control loop's.
+    pub fn live_view(&self, view: Arc<RunView>) -> Arc<RunView> {
+        let driving = matches!(view.state, view::State::Running | view::State::Stopping)
+            && matches!(view.phase, "engaged" | "full_level" | "ramping_down");
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        let (true, Some(ramp)) = (driving, ramp) else {
+            return view;
+        };
+        let now = ramp.level_db();
+        let mut v = (*view).clone();
+        v.drive_now_db = Some(now);
+        if let Some(base) = v.drive_level_db {
+            let g = 10f64.powf((now - base) / 20.0);
+            v.drive_rms_v = v.drive_rms_v.map(|x| x * g);
+            v.drive_psd = v
+                .drive_psd
+                .as_ref()
+                .map(|p| Arc::new(p.iter().map(|x| x * g * g).collect()));
+        }
+        Arc::new(v)
+    }
+
     /// Set the station signal (stop or abort) before a request is queued, so a long
     /// controller call ends at the next engine block.
     pub fn signal(&self, s: u8) {
