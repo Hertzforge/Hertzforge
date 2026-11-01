@@ -41,6 +41,8 @@ jobs:
         run: pip install -e . pytest ruff
       - name: Lint every Python file in the repository
         run: ruff check .
+      - name: No GPL package installed, every import accounted for
+        run: python tools/check_licenses.py --scope package
       - name: Test
         run: python -m pytest tests -q
 
@@ -104,6 +106,10 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; fi
           $RUN uv run --upgrade --project python --python "${{ matrix.python-version }}" \
             pytest python -q -m timing
+      - name: No GPL package installed, every import accounted for
+        run: |
+          uv run --upgrade --project python --python "${{ matrix.python-version }}" \
+            python tools/check_licenses.py --scope analysis
 
   # The shell: types, unit tests and a production build, on every platform
   # a desktop build targets.
@@ -195,8 +201,10 @@ jobs:
       - name: Licenses, bans, sources and advisories
         run: cargo deny check
 
-  # The tree's own rules: no names, no copyleft imports, permissive npm
-  # licenses (tools/check_tree.py, with tests that plant each case).
+  # The tree's own rules: no names, every Python file in a license-check
+  # scope, permissive npm licenses (tools/check_tree.py, with tests that plant
+  # each case). The licenses of the Python packages are checked where they
+  # are installed, in the package and analysis jobs (tools/check_licenses.py).
   tree:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -205,7 +213,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - name: Names, copyleft imports and npm licenses
+      - name: Names, license-check scopes and npm licenses
         run: python tools/check_tree.py
       - name: The checks catch what they claim to
         run: |
