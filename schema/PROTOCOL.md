@@ -617,7 +617,10 @@ time left on it (null in `manual`). `alarm` is true while an alarm condition hol
 `random.live`). `feasibility` is null until arm, then `{"verdict","message"}` with `verdict`
 `pass`, `advisory`, `exceeded` or `not_evaluated`.
 
-`end` is null until the run finishes, then `{"outcome","message","at_s","level_db","trip"}`:
+`end` is null until the run finishes, then `{"outcome","message","at_s","level_db","trip"}`.
+`level_db` and `message` give the level where the end began: where the drive was when the stop
+or abort was asked for (a controlled stop's ramp-down starts there), or where the trip came;
+`level_db` is null when nothing drove.
 
 | `outcome` | How the run ended |
 |---|---|

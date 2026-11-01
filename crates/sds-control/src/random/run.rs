@@ -71,6 +71,8 @@ pub struct RunShared {
     /// The run's drive level ramp while it is armed (the controller's), so the
     /// socket's thread can start the stop and read the level the drive is at.
     pub ramp: Mutex<Option<Arc<DriveRamp>>>,
+    /// The level the drive was at when the run was first asked to stop or abort.
+    pub requested_level: Mutex<Option<f64>>,
     /// Told after every publish, with the run id and the view published, so every
     /// change of state reaches the service in order (none is folded into a later one).
     pub notify: tokio::sync::mpsc::UnboundedSender<Notice>,
@@ -1092,8 +1094,24 @@ impl Actor {
             }
         }
         let was_driving = matches!(self.view.state, State::Running | State::Stopping);
+        // The level where the end began (2026-11-01, bench finding 3): a controlled
+        // stop's ramp starts from it and a trip records it; the level the drive
+        // reached by the end of a ramp-down is not where the operator stopped.
+        let requested = match outcome {
+            "operator_stop" | "safe_stop" => self
+                .svc
+                .as_ref()
+                .and_then(|s| s.stop_requested_db())
+                .or_else(|| self.shared.requested_level.lock().ok().and_then(|l| *l)),
+            "operator_abort" => self.shared.requested_level.lock().ok().and_then(|l| *l),
+            "aborted" => trip
+                .as_ref()
+                .and_then(|t| t.get("at_level_db"))
+                .and_then(Value::as_f64),
+            _ => None,
+        };
         let level = if was_driving {
-            self.view.live_level_db
+            requested.or(self.view.live_level_db)
         } else {
             None
         };

@@ -62,6 +62,28 @@ impl RandomRun {
         if let Ok(mut b) = self.shared.ended_by.lock() {
             *b = Some(by.to_owned());
         }
+        self.note_request_level();
+    }
+
+    /// Keep the level the drive is at as the run is asked to end (the first ask
+    /// wins): the end says where the stop or abort began, not where a ramp-down
+    /// finished (2026-11-01, bench finding 3).
+    pub fn note_request_level(&self) {
+        let v = self.shared.view();
+        if !matches!(v.state, view::State::Running | view::State::Stopping) {
+            return;
+        }
+        let driving = matches!(v.phase, "engaged" | "full_level" | "ramping_down");
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        let level = match (driving, ramp) {
+            (true, Some(r)) => Some(r.level_db()),
+            _ => v.live_level_db,
+        };
+        if let Ok(mut l) = self.shared.requested_level.lock() {
+            if l.is_none() {
+                *l = level;
+            }
+        }
     }
 
     /// Start the controlled stop at the next output block, from the socket's

@@ -342,6 +342,9 @@ describe('a Random run', () => {
 		expect([stopping.state, stopping.phase]).toEqual(['stopping', 'ramping_down']);
 		await until(() => states.at(-1)?.state === 'finished');
 		expect(states.at(-1)?.end?.outcome).toBe('operator_stop');
+		// The end gives the level the stop began at, not the floor of the 40 dB ramp-down
+		// (while stopping, the commanded level is that floor).
+		expect(states.at(-1)?.end?.level_db).toBeCloseTo((stopping.level_db as number) + 40, 1);
 		c.close();
 	});
 

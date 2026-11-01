@@ -567,6 +567,8 @@ interface RandomRun {
 	levelIndex: number;
 	atLevelT: number;
 	stopOutcome: RandomOutcome;
+	/** The level the controlled stop began at; the end reports it, not the ramp's floor. */
+	stopFrom: number | null;
 	/** The client that stopped or aborted the run, named in the log and the end message. */
 	endedBy: string | null;
 	loops: number;
@@ -941,6 +943,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			levelIndex: 0,
 			atLevelT: 0,
 			stopOutcome: 'operator_stop',
+			stopFrom: null,
 			endedBy: null,
 			loops: 0,
 			loopAcc: 0,
@@ -1031,6 +1034,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	function requestStop(r: RandomRun, outcome: RandomOutcome) {
 		if (DRIVING.includes(r.phase) && r.ctl.shutdown_ramp_s > 0) {
 			r.stopOutcome = outcome;
+			r.stopFrom = r.level;
 			r.target = r.level - 40;
 			r.rate = 40 / r.ctl.shutdown_ramp_s;
 			addLog('note', `controlled stop: ramping down over ${r.ctl.shutdown_ramp_s} s`);
@@ -1041,8 +1045,15 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		finish(r, outcome, 'stopped');
 	}
 
+	/** Where the end began: a controlled stop's starting level, a trip's level, else the level now. */
+	function endLevel(r: RandomRun, outcome: RandomOutcome, trip: Trip | null): number {
+		if ((outcome === 'operator_stop' || outcome === 'safe_stop') && r.stopFrom !== null) return r.stopFrom;
+		if (trip) return trip.at_level_db;
+		return r.level;
+	}
+
 	function endMessage(r: RandomRun, outcome: RandomOutcome, trip: Trip | null): string {
-		const at = `${fmt(r.level)} dB after ${(r.t ?? 0).toFixed(1)} s`;
+		const at = `${fmt(endLevel(r, outcome, trip))} dB after ${(r.t ?? 0).toFixed(1)} s`;
 		switch (outcome) {
 			case 'completed':
 				return `Test complete: ${r.config.schedule.full_level_s} s held at full level.`;
@@ -1074,7 +1085,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	function finish(r: RandomRun, outcome: RandomOutcome, phase: RandomPhase, trip: Trip | null = null) {
 		const atLevel = DRIVING.includes(r.phase) || r.phase === 'ramping_down';
-		r.end = { outcome, message: endMessage(r, outcome, trip), at_s: r.t === null ? null : round(r.t, 2), level_db: atLevel ? round(r.level, 2) : null, trip };
+		const from = endLevel(r, outcome, trip);
+		r.end = { outcome, message: endMessage(r, outcome, trip), at_s: r.t === null ? null : round(r.t, 2), level_db: atLevel ? round(from, 2) : null, trip };
 		if (trip) addLog('trip', r.end.message);
 		const streaming = r.timer !== null;
 		setPhase(r, 'finished', phase);

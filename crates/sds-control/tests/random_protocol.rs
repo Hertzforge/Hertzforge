@@ -517,6 +517,44 @@ async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
     assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
 }
 
+/// The end says where the stop began, not where the ramp-down finished
+/// (2026-11-01, bench finding 3): a stop at -6 dB ends "at -6.0 dB" with
+/// end.level_db -6, and so does the safe stop. Red before the fix: -46 dB, the
+/// floor of the 40 dB ramp-down.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_end_gives_the_level_where_the_stop_began() {
+    for safe in [false, true] {
+        let svc = Service::with_options(options(
+            no_driver(),
+            4.0,
+            Duration::from_millis(1500),
+            Duration::from_secs(5),
+        ));
+        let addr = serve(svc).await;
+        let mut c = Client::connect(addr).await;
+        let mut o = Client::connect(addr).await;
+        let mut config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+        config["control"]["soft_start_db"] = json!(0);
+        configured(&mut c, config).await;
+        c.ok("random.start", json!({})).await;
+        c.wait_phase("engaged", LONG).await;
+        c.pump(Duration::from_millis(600)).await;
+        let end = if safe {
+            drop(c);
+            o.wait_state("finished", LONG).await
+        } else {
+            c.ok("random.stop", json!({})).await;
+            c.wait_state("finished", LONG).await
+        };
+        let outcome = if safe { "safe_stop" } else { "operator_stop" };
+        assert_eq!(end["end"]["outcome"], outcome, "{end}");
+        assert_eq!(end["end"]["level_db"], -6, "{end}");
+        let message = end["end"]["message"].as_str().unwrap();
+        let at = if safe { "from -6.0 dB" } else { "at -6.0 dB" };
+        assert!(message.contains(at), "{message}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended() {
     let svc = Service::with_options(options(

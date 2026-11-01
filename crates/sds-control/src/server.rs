@@ -798,6 +798,7 @@ impl Service {
             ended_by: std::sync::Mutex::new(None),
             pending_stop: std::sync::Mutex::new(None),
             ramp: std::sync::Mutex::new(None),
+            requested_level: std::sync::Mutex::new(None),
             notify: self.notify.clone(),
         });
         let raw = cfg.raw.clone();
@@ -1266,6 +1267,7 @@ async fn stop_run(run: &RandomRun, outcome: &'static str, by: String, wait: bool
     if !v.state.is_live() {
         return;
     }
+    run.note_request_level();
     if v.state == State::Running && matches!(v.phase, "sysid" | "coherence_gate") {
         run.signal(STOP);
     }
