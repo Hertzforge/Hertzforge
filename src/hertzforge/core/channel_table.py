@@ -1,0 +1,1373 @@
+"""Channel table: per-channel test metadata (sensor, DOF, engineering units).
+
+The table has one fixed set of columns, each with a type and a rule for
+what it accepts, and a source's other columns are dropped. Because every
+column says what it holds, a direction can be offered as a drop-down, a
+unit can be limited by the channel's type, and an expiration is read as
+a date.
+
+A file and an edit are checked differently:
+
+- A file is read leniently. A value that cannot be read takes the
+  column's default (blank for most columns) and the import goes on,
+  because refusing the import would leave the user nothing to correct,
+  and this table is where they correct it. `validate.dofs` does the
+  same for DOFs.
+- An edit is refused. When a person types a value the column cannot
+  hold, `set_cell` raises with the reason and writes nothing.
+"""
+
+from __future__ import annotations
+
+import datetime as _datetime
+import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+
+import numpy as np
+
+from .validate import DIRECTIONS
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    import pandas as pd
+
+# One fixed set of columns rather than whatever a source carried: the
+# table used to be a pandas frame that took anything, and a Rattlesnake
+# import arrived with thirteen columns of controller settings behind the
+# ones hertzforge reads. A column that can hold anything is a column
+# no logic can be written about.
+
+
+class Spec(NamedTuple):
+    """What one column holds, and what it accepts.
+
+    `kind` is how a value is read ('int', 'index', 'float', 'choice',
+    'flag', 'date', 'unit' or 'text'), `default` fills a missing or
+    unreadable cell, `choices` limits a 'choice' column, `minimum`
+    bounds a numeric one, and `unique` makes the column a key.
+    """
+
+    kind: str                              # how the value is coerced
+    default: str = ''
+    choices: tuple[str, ...] = ()
+    minimum: int | None = None             # ints and floats
+    unique: bool = False
+
+
+#: The quantities a channel can measure. The dimension vocabulary the
+#: rest of the package uses (`units._DIMENSIONALITY`), so a channel's
+#: type and a record's dimension are the same word and the unit
+#: shortlist follows from it — not a second vocabulary to keep in step.
+CHANNEL_TYPES = ('acceleration', 'velocity', 'length', 'force', 'pressure',
+                 'strain', 'voltage', 'temperature')
+
+#: what a channel is *for*: a reference drives, a response answers, a
+#: monitor is recorded and judged as neither. One value, not three
+#: booleans, so the one nonsense state — a channel that is both the
+#: input and the output of the same estimation — cannot be written.
+ROLES = ('reference', 'response', 'monitor')
+
+#: Which leg of a triaxial accelerometer this channel is, for the
+#: record. Not a DOF: the direction column says where it points.
+TRIAX = ('X', 'Y', 'Z')
+
+
+#: Headers, where title-casing the column name is not the answer.
+#: Sensitivity says its units here because it has no column to say them
+#: in — it is mV per whatever the Unit cell beside it holds, and the two
+#: are one calibration statement. The two ranges are always volts: the
+#: DAQ input's, and the sensor's own full-scale output.
+TITLES = {
+    'triax_dof': 'Triax DOF',
+    'sensitivity': 'Sensitivity (mV/Unit)',
+    'daq_range': 'DAQ Range (V)',
+    'sensor_range': 'Sensor Range (V)',
+    'unit_x': 'Unit X',
+    'unit_y': 'Unit Y',
+    'unit_z': 'Unit Z',
+    'nearest_axis': 'Nearest Axis',
+    'axis_angle': 'Angle to Axis (deg)',
+}
+
+#: the columns a geometry adds beside the table's own, in order: the
+#: channel's measured direction as a unit vector in the geometry's
+#: global system, the global axis it is nearest, and how far off it
+#: sits (Brandon, 2026-09-20). Derived — read from the geometry each
+#: time, never stored — so they follow an edit to the node or the
+#: direction at once and never disagree with the geometry.
+DERIVED_COLUMNS = ('unit_x', 'unit_y', 'unit_z', 'nearest_axis', 'axis_angle')
+AXES = ('X', 'Y', 'Z')
+
+
+def title_of(name: str) -> str:
+    """The header shown for a column, in the window and in the report.
+
+    Parameters
+    ----------
+    name : str
+        The column name, such as 'serial_number'.
+
+    Returns
+    -------
+    str
+        The header, from `TITLES` or the name title-cased
+        ('Serial Number').
+    """
+    return TITLES.get(name) or name.replace('_', ' ').title()
+
+
+def COLUMNS_KIND(name: str) -> str:
+    """What kind of value a column holds, its `Spec.kind`.
+
+    Parameters
+    ----------
+    name : str
+        The column name.
+
+    Returns
+    -------
+    str
+        The kind, such as 'int', 'choice' or 'text'.
+    """
+    return ChannelTable.COLUMNS[name].kind
+
+
+def CHOICES_FOR(name: str) -> tuple[str, ...]:
+    """The values a column is limited to, empty when it is not limited.
+
+    A flag column such as 'control' returns ('True', 'False'), since a
+    spreadsheet treats it as a choice of two.
+
+    Parameters
+    ----------
+    name : str
+        The column name.
+
+    Returns
+    -------
+    tuple of str
+        The allowed values.
+    """
+    spec = ChannelTable.COLUMNS[name]
+    if spec.kind == 'flag':
+        return ('True', 'False')
+    return spec.choices
+
+
+def canonical_name(name: str) -> str:
+    """A source's column name as this schema spells it.
+
+    The name is lower-cased, spaces and hyphens become underscores, and
+    a trailing colon and anything from an opening parenthesis on are
+    dropped; then `ChannelTable.ALIASES` maps the words that differ.
+    Dropping the parenthetical unit reads this table's own headers back
+    ('Sensitivity (mV/Unit)'), and a calibration sheet's
+    ('Sensitivity (mV/g)') into the same column.
+
+    Parameters
+    ----------
+    name : str
+        The column name as the source wrote it.
+
+    Returns
+    -------
+    str
+        The schema's name for it, or the tidied name if it has none.
+    """
+    text = str(name).strip().rstrip(':')
+    if '(' in text:
+        text = text.split('(', 1)[0]
+    key = '_'.join(text.lower().replace('-', ' ').split())
+    return _ALIAS_OF.get(key, key)
+
+
+def _parse_flag(text: str) -> bool:
+    """'True'/'False' in any case, 1/0, yes/no, or blank for False —
+    the spellings a spreadsheet paste actually contains."""
+    value = text.strip().lower()
+    if value in ('true', '1', 'yes', 'checked'):
+        return True
+    if value in ('', 'false', '0', 'no', 'unchecked'):
+        return False
+    raise ValueError(f'{text!r} is not a yes or a no')
+
+
+#: Date forms a spreadsheet actually contains, tried in order. ISO
+#: first because it is what we store and what round-trips unambiguously;
+#: the American and European orders are ambiguous with each other, so
+#: the American one wins by being the one a US calibration lab writes.
+_DATE_FORMATS = ('%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%d.%m.%Y', '%Y/%m/%d')
+
+
+def _parse_date(text: str) -> str:
+    """A date as ISO text, or a refusal.
+
+    Stored as text rather than a pandas datetime: this table round-trips
+    through xlsx and HDF5, and a string that reads the same in all three
+    is worth more here than a dtype.
+    """
+    value = str(text).strip()
+    if not value:
+        return ''
+    value = value.split(' ')[0]        # a spreadsheet's midnight timestamp
+    for form in _DATE_FORMATS:
+        try:
+            return _datetime.datetime.strptime(
+                value, form).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError(f'{text!r} is not a date — try YYYY-MM-DD')
+
+
+#: what a table's channels can be chosen by: every channel, the control
+#: channels (by their flag, whatever their role), or one role
+CHANNEL_CHOICES = ('all', 'control', 'reference', 'response', 'monitor')
+
+
+@dataclass
+class Environment:
+    """One control loop of a run: the channels the controller read as
+    its control channels, the ones it drove, and the transformations
+    it put over them, if any.
+
+    Channels are named by number (the `channel` column, the table's
+    join key), so the record survives a row deleted elsewhere in the
+    table. The controller's order is kept, because a transformation's
+    columns are the controls, or the drives, in that order.
+
+    Attributes
+    ----------
+    controls : list of int
+        The control channels' numbers, in the controller's order.
+    drives : list of int
+        The drive channels' numbers, in the controller's order.
+    response_transformation : numpy.ndarray or None
+        `(rows, len(controls))`: what the controller applied to every
+        frame of its control channels, controlling the rows in their
+        place. None when it controlled the channels themselves.
+    reference_transformation : numpy.ndarray or None
+        `(rows, len(drives))`: what it applied to its drive signals.
+        None when it drove the channels themselves.
+    """
+    # A combined run has one channel table and a loop per environment:
+    # a sine and a random over the same hardware may control different
+    # channels through different matrices (Brandon, 2026-10-28, on a
+    # file whose sine controls went unmarked). One table carries the
+    # instrumentation once; what differs between the loops is this.
+
+    controls: list[int] = field(default_factory=list)
+    drives: list[int] = field(default_factory=list)
+    response_transformation: np.ndarray | None = None
+    reference_transformation: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        # a matrix typed as nested lists is a matrix from here on, so
+        # the shape checks and the equality have one thing to look at
+        self.controls = [int(n) for n in self.controls]
+        self.drives = [int(n) for n in self.drives]
+        for form in TRANSFORMATION_FORMS:
+            matrix = getattr(self, f'{form}_transformation')
+            if matrix is not None:
+                setattr(self, f'{form}_transformation',
+                        np.asarray(matrix, dtype=float))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Environment):
+            return NotImplemented
+        return (list(self.controls) == list(other.controls)
+                and list(self.drives) == list(other.drives)
+                and _same_matrix(self.response_transformation,
+                                 other.response_transformation)
+                and _same_matrix(self.reference_transformation,
+                                 other.reference_transformation))
+
+    def matrix(self, form: str) -> np.ndarray | None:
+        """The 'response' or the 'reference' transformation."""
+        if form not in TRANSFORMATION_FORMS:
+            raise ValueError(f'{form!r} is not a transformation; use one '
+                             f'of {TRANSFORMATION_FORMS}')
+        return getattr(self, f'{form}_transformation')
+
+
+#: the two transformations a control loop may hold, by the roles the
+#: controller gives them
+TRANSFORMATION_FORMS = ('response', 'reference')
+
+
+def _same_matrix(a: np.ndarray | None, b: np.ndarray | None) -> bool:
+    if a is None or b is None:
+        return a is b
+    return a.shape == b.shape and bool(np.array_equal(a, b))
+
+
+class ChannelTable:
+    """Per-channel metadata, in one fixed set of typed columns.
+
+    Parameters
+    ----------
+    columns : mapping or pandas.DataFrame
+        The columns, by name, each with one entry per channel. Names are
+        read through `canonical_name`, columns outside `COLUMNS` are
+        dropped, missing ones take their default, and the values are
+        read leniently (see the module description). A channel type left
+        blank is filled in from the unit when the unit names one.
+    environments : mapping of str to Environment, optional
+        The run's control loops by name, each checked as
+        `set_environment` checks it.
+
+    Raises
+    ------
+    ValueError
+        If a column in `CORE` is missing, or the columns differ in
+        length.
+
+    Attributes
+    ----------
+    frame : pandas.DataFrame
+        The table, one row per channel, columns in `SCHEMA` order. Every
+        cell is text except `channel`, which is an integer.
+        `node` is text too, blank where no node was recorded.
+    environments : dict of str to Environment
+        The control loops, in the order they were set. Empty for a
+        table that describes no controller run. While a table has
+        any, its Control column is the union of their control
+        channels and is set through them (`set_control`), not directly.
+    """
+    # Text and not numbers for the other columns: a serial number that
+    # happens to be all digits is not a number, and a column read back
+    # as int64 would lose a leading zero and come out of a round trip a
+    # different string.
+
+    #: Every column, in the order the table shows them, each with the
+    #: rule its cells answer to. A source's other columns are dropped:
+    #: a Rattlesnake save carries its coupling, excitation and feedback
+    #: wiring, which describe the controller's run rather than the
+    #: measurement, and carrying them made this object a place data went
+    #: to be ignored.
+    COLUMNS: ClassVar[dict[str, Spec]] = {
+        # 'int' is a number the column must have; 'index' is one it may
+        # have. A channel without a number is not a channel — it is the
+        # join key — but a node nobody recorded is the ordinary case
+        # this table exists to let someone fix, and 0 cannot stand in
+        # for 'unstated' when 0 is itself a legal node number.
+        'channel': Spec('int', minimum=1, unique=True),
+        'node': Spec('index', minimum=0),
+        'direction': Spec('choice', choices=DIRECTIONS),
+        'role': Spec('choice', choices=ROLES),
+        'control': Spec('flag', default='False'),
+        'channel_type': Spec('choice', choices=CHANNEL_TYPES),
+        'unit': Spec('unit'),
+        'sensitivity': Spec('float', minimum=0),
+        # Two limits, either of which clips a channel: the DAQ input's
+        # range and the sensor's own full-scale output (an ICP
+        # accelerometer saturates near 5 V whatever the DAQ is set to).
+        # Volts, blank when unstated. Until Brandon, 2026-10-24, there
+        # was one 'range', a whole number defaulting to 5: a 0.5 V input
+        # read as 5 V and passed a clipped channel with 20 dB of headroom
+        # it did not have, and 0.5 V could not be typed at all
+        'daq_range': Spec('float', minimum=0),
+        'sensor_range': Spec('float', minimum=0),
+        'serial_number': Spec('text'),
+        'make': Spec('text'),
+        'model': Spec('text'),
+        'triax_dof': Spec('choice', choices=TRIAX),
+        'expiration': Spec('date'),
+        'comment': Spec('text'),
+    }
+    SCHEMA = tuple(COLUMNS)
+    #: What other people call these columns. Applied after a generic
+    #: tidy — 'Serial Number' and 'serial-number' both reach
+    #: `serial_number` without help — so this holds only the genuinely
+    #: different words. Every source goes through it, which is what
+    #: makes "everything parses into these columns" true of a
+    #: controller save, a calibration lab's spreadsheet and an older
+    #: .vdyn alike, rather than of whichever importer remembered.
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        'channel': ('channel_number', 'ch', 'chan', 'channel_index'),
+        'node': ('node_number', 'node_id', 'point', 'point_number', 'grid'),
+        'direction': ('dir', 'axis', 'component', 'dof_direction',
+                      'node_direction'),
+        'unit': ('units', 'engineering_unit', 'engineering_units', 'eu'),
+        'channel_type': ('type', 'sensor_type', 'measurement', 'quantity'),
+        'sensitivity': ('sens', 'sensitivity_mv_eu', 'cal_factor'),
+        # 'range' is the one column a saved table had before there were
+        # two; it was the DAQ's limit by every source that filled it
+        'daq_range': ('range', 'voltage_range', 'input_range', 'daq_input_range'),
+        'sensor_range': ('full_scale', 'full_scale_voltage', 'full_scale_output',
+                         'sensor_full_scale'),
+        'serial_number': ('serial', 'sn', 'serial_no'),
+        'make': ('manufacturer', 'vendor', 'brand'),
+        'model': ('model_number', 'part_number', 'model_no'),
+        'triax_dof': ('triax', 'triax_axis', 'triaxial_dof'),
+        'expiration': ('cal_due', 'calibration_due', 'cal_date', 'expires',
+                       'expiration_date', 'calibration_expiration'),
+        'comment': ('comments', 'note', 'notes', 'description'),
+    }
+    #: the four a table is meaningless without; a source missing one is
+    #: refused rather than filled in
+    CORE = ('channel', 'node', 'direction', 'unit')
+    ROLES = ROLES
+    CHANNEL_TYPES = CHANNEL_TYPES
+    TRIAX = TRIAX
+
+    def __init__(self, columns: Mapping[str, Any] | pd.DataFrame,
+                 environments: Mapping[str, Environment] | None = None
+                 ) -> None:
+        import pandas as pd
+
+        if isinstance(columns, pd.DataFrame):
+            frame = columns.copy()
+        else:
+            lengths = {name: len(values) for name, values in columns.items()}
+            if len(set(lengths.values())) > 1:
+                first = next(iter(lengths.values()))
+                bad = next(name for name, n in lengths.items() if n != first)
+                raise ValueError(
+                    f'column {bad!r} has {lengths[bad]} entries, '
+                    f'expected {first}')
+            frame = pd.DataFrame(dict(columns))
+        frame = frame.rename(columns={name: canonical_name(name)
+                                      for name in frame.columns})
+        # a source naming one column two ways keeps the first
+        frame = frame.loc[:, ~frame.columns.duplicated()]
+        for name in self.CORE:
+            if name not in frame.columns:
+                raise ValueError(f'missing core column {name!r}')
+        for name, spec in self.COLUMNS.items():
+            if name not in frame.columns:
+                frame[name] = spec.default
+        # the schema and nothing else: an older file's extras, and a
+        # controller's run settings, stop here
+        self.frame: pd.DataFrame = self._typed(frame[list(self.SCHEMA)])
+        self.environments: dict[str, Environment] = {}
+        for name, environment in (environments or {}).items():
+            self.set_environment(name, environment)
+
+    @classmethod
+    def _typed(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        """Coerce a whole frame, leniently: what will not read, blanks."""
+        import pandas as pd
+
+        frame = frame.reset_index(drop=True)
+        for name, spec in cls.COLUMNS.items():
+            values = []
+            for raw in frame[name]:
+                try:
+                    values.append(cls._coerce(name, raw))
+                except (ValueError, TypeError):
+                    # lenient here, as the docstring says: an unreadable
+                    # value takes the default rather than failing the
+                    # import, and an int column's default is its own
+                    values.append(spec.default or (0 if spec.kind == 'int'
+                                                   else ''))
+            if spec.kind == 'int':
+                frame[name] = pd.Series(
+                    [int(v) if str(v) != '' else 0 for v in values],
+                    dtype='int64')
+            else:
+                frame[name] = pd.Series(values, dtype='string').fillna('')
+        # a Series of its own type, as the other text columns: a bare list
+        # with no channels in it read as an empty float column
+        frame['channel_type'] = pd.Series(cls._typed_by_unit(frame),
+                                          dtype='string')
+        return frame
+
+    @classmethod
+    def _typed_by_unit(cls, frame) -> list[str]:
+        """The type column with its blanks answered by the unit beside
+        them.
+
+        A source states a channel's type in its own words, and the
+        coercion above is lenient: a spelling the schema does not know
+        blanks rather than failing the import. So a controller writing
+        'Accel' — or nothing at all — lost the type while its 'Voltage'
+        channels kept theirs, and a table of accelerometers in G came
+        in typeless (Brandon, 2026-09-20). The unit is the same claim
+        said another way, and `dimension_of` already reads it, so a
+        blank type takes the unit's answer. A stated type is never
+        overruled: a disagreement between the two is the owner's to
+        resolve, and `set_cell` refuses to create one.
+
+        Only a unit that names a channel type answers. A unitless unit
+        reads as 'dimensionless', which is no channel type — strain and
+        a bare ratio share that dimensionality, which is the whole
+        reason they are two names.
+        """
+        from ..units import dimension_of
+
+        out = []
+        for declared, unit in zip(frame['channel_type'], frame['unit']):
+            declared = '' if declared is None else str(declared)
+            unit = '' if unit is None else str(unit)
+            if declared or not unit:
+                out.append(declared)
+                continue
+            found = dimension_of(unit)
+            out.append(found if found in CHANNEL_TYPES else '')
+        return out
+
+    @classmethod
+    def _coerce(cls, name: str, value: object) -> Any:
+        """One value, in the column's own terms, or a refusal.
+
+        Uniqueness is not checked here — it is a property of the column
+        rather than of the value, so `set_cell` owns it.
+        """
+        spec = cls.COLUMNS[name]
+        text = '' if value is None else str(value).strip()
+        if spec.kind == 'int':
+            if not text:
+                # an int column has no blank: a channel without a number
+                # is not a channel
+                raise ValueError(f'{name} cannot be blank')
+            number = float(text)
+            if number != int(number):
+                raise ValueError(f'{name} is a whole number')
+            number = int(number)            # '5.0' from a spreadsheet
+            if spec.minimum is not None and number < spec.minimum:
+                what = ('positive' if spec.minimum == 1 else
+                        f'at least {spec.minimum}')
+                raise ValueError(f'{name} must be {what}')
+            return number
+        if spec.kind == 'index':
+            if not text:
+                return ''
+            number = int(float(text))
+            if spec.minimum is not None and number < spec.minimum:
+                raise ValueError(f'{name} must be {spec.minimum} or more')
+            return str(number)
+        if spec.kind == 'float':
+            if not text:
+                return ''
+            number = float(text)
+            if spec.minimum is not None and not number > spec.minimum:
+                raise ValueError(f'{name} must be greater than {spec.minimum}')
+            return text
+        if spec.kind == 'choice':
+            if not text:
+                return ''
+            if name == 'channel_type':
+                # the interface — and the spreadsheet it exports — says
+                # 'displacement' where the schema stores 'length'
+                from .unit_choices import stored_dimension
+                text = stored_dimension(text)
+            wanted = {choice.lower(): choice for choice in spec.choices}
+            if text.lower() not in wanted:
+                raise ValueError(
+                    f'{name} is one of {", ".join(spec.choices)} '
+                    '(or blank for undeclared)')
+            return wanted[text.lower()]
+        if spec.kind == 'flag':
+            return str(_parse_flag(text))
+        if spec.kind == 'date':
+            return _parse_date(text)
+        if spec.kind == 'unit':
+            if text:
+                from ..units import si_transform
+                si_transform(text.replace('^', '**'))   # raises if unreadable
+            return text
+        return text
+
+    def set_cell(self, name: str, row: int, value: object) -> None:
+        """Write one cell, or refuse a value the column cannot hold.
+
+        A unit that is not of the channel's declared type is refused;
+        change the type first. Changing the type clears a unit of another
+        kind. A model in the sensor catalog (`core.sensor_catalog`) fills
+        a blank Make with its maker; a make already written is kept. A
+        triaxial accelerometer's model or serial number is written once:
+        the other acceleration rows at its node, its other legs, get its
+        Make, Model and Serial Number where theirs are blank (and their
+        model is blank or the same). A row of another type at that node,
+        a force gauge, is never filled.
+
+        Parameters
+        ----------
+        name : str
+            The column to write.
+        row : int
+            Which channel.
+        value : object
+            The value, refused if the column cannot hold it.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        KeyError
+            If there is no column `name`.
+        ValueError
+            If the value cannot be read for that column, repeats a
+            channel number, or disagrees with the channel's type.
+        """
+        # Strict where `_typed` is lenient: a person typing gets the
+        # reason, where a file gets the benefit of the doubt.
+        if name not in self.COLUMNS:
+            raise KeyError(f'no column {name!r}')
+        if name == 'control' and self.environments:
+            raise ValueError(
+                'this table\'s control channels are per environment ('
+                + ', '.join(self.environments)
+                + '); set them with set_control')
+        spec = self.COLUMNS[name]
+        coerced = self._coerce(name, value)
+        if spec.unique and coerced != '':
+            clash = np.flatnonzero(self[name] == coerced)
+            if len(clash) and clash[0] != row:
+                raise ValueError(
+                    f'{name} {coerced} already exists — it is the join key '
+                    'and must be unique')
+        # Control and role are two questions, answered independently
+        # (Brandon, 2026-09-26): what the controller drove the test to
+        # match, and what the channel is to an FRF. A controlled force
+        # can be an FRF's reference, a controlled voltage too, and
+        # either can be a monitor. The schema once refused every
+        # control channel that was not a response, as "the one nonsense
+        # pair"; force and voltage control are why it was not one.
+        if name == 'unit' and coerced:
+            self._agrees_with_type(row, str(coerced))
+        self.frame.loc[row, name] = coerced
+        if name == 'channel_type':
+            # a unit of some other kind is no longer an answer here —
+            # the same withdrawal the Imported Units pane makes
+            unit = str(self.frame.loc[row, 'unit'])
+            if unit and coerced:
+                from ..units import dimension_of
+                if dimension_of(unit) != coerced:
+                    self.frame.loc[row, 'unit'] = ''
+        if name == 'model' and coerced:
+            # picking a model names its maker too (Brandon, 2026-10-26)
+            from .sensor_catalog import lookup
+
+            entry = lookup(str(coerced))
+            if entry is not None and not str(self.frame.loc[row, 'make']).strip():
+                self.frame.loc[row, 'make'] = entry.make
+        if name in ('model', 'serial_number') and coerced:
+            self._fill_triax(row)
+
+    def _fill_triax(self, row: int) -> None:
+        """Copy a triax row's Make, Model and Serial Number into the blank
+        cells of its other legs: the other acceleration rows at its node
+        whose model is blank or the same. Only a model the catalog knows
+        is a triax is spread, and only into acceleration rows."""
+        # Brandon, 2026-10-27: a triax's identity typed three times was
+        # one too many; legs wired one or two at a time are why the cells
+        # are filled rather than merged, and a force gauge at the node is
+        # why the type has to match.
+        from .sensor_catalog import lookup
+
+        frame = self.frame
+        entry = lookup(str(frame.loc[row, 'model']))
+        node = str(frame.loc[row, 'node']).strip()
+        if (entry is None or entry.kind != 'triax' or not node
+                or str(frame.loc[row, 'channel_type']) != 'acceleration'):
+            return
+        for other in range(self.num_channels):
+            if (other == row or str(frame.loc[other, 'node']).strip() != node
+                    or str(frame.loc[other, 'channel_type']) != 'acceleration'):
+                continue
+            model = str(frame.loc[other, 'model']).strip()
+            if model and lookup(model) is not entry:
+                continue
+            for column in ('make', 'model', 'serial_number'):
+                if not str(frame.loc[other, column]).strip():
+                    frame.loc[other, column] = frame.loc[row, column]
+
+    def _agrees_with_type(self, row: int, unit: str) -> None:
+        """A declared type and a unit have to describe one channel."""
+        from ..units import dimension_of
+
+        declared = str(self.frame.loc[row, 'channel_type'])
+        if not declared:
+            return
+        actual = dimension_of(unit)
+        # `dimension_of` never answers 'strain': strain and
+        # dimensionless have the same (empty) dimensionality, and a unit
+        # cannot tell them apart — which is the whole reason they are
+        # two names. So a unitless unit answers for either.
+        if declared in ('strain', 'dimensionless'):
+            if actual == 'dimensionless':
+                return
+            raise ValueError(
+                f'{unit} is a {actual}, and this channel is declared '
+                f'{declared} — change the type first')
+        if actual is not None and actual != declared:
+            raise ValueError(
+                f'{unit} is a {actual}, and this channel is declared '
+                f'{declared} — change the type first')
+
+    def units_for(self, row: int) -> list[str]:
+        """The units to offer for this channel, given its declared type.
+
+        Parameters
+        ----------
+        row : int
+            Which channel.
+
+        Returns
+        -------
+        list of str
+            The shortlist for the declared type, or every unit in every
+            shortlist when the type is blank.
+        """
+        from .unit_choices import ALL_ORDINATE_UNITS, ORDINATE_UNITS
+
+        declared = str(self.frame.loc[row, 'channel_type'])
+        return list(ORDINATE_UNITS.get(declared, ALL_ORDINATE_UNITS))
+
+    def add_channels(self, count: int = 1) -> list[int]:
+        """Add blank channels at the end of the table, numbered on from
+        the highest channel in it (from 1 in an empty table).
+
+        Every other cell takes its column's default, so the node,
+        direction and unit are blank until they are typed in.
+
+        Parameters
+        ----------
+        count : int, default 1
+            How many channels to add.
+
+        Returns
+        -------
+        list of int
+            The new channels' numbers.
+
+        Raises
+        ------
+        ValueError
+            If `count` is less than 1.
+        """
+        import pandas as pd
+
+        count = int(count)
+        if count < 1:
+            raise ValueError(f'cannot add {count} channels; add at least one')
+        start = int(self.frame['channel'].max()) + 1 if self.num_channels else 1
+        numbers = list(range(start, start + count))
+        added = self._typed(pd.DataFrame(
+            {name: numbers if name == 'channel' else [spec.default] * count
+             for name, spec in self.COLUMNS.items()}))
+        self.frame = pd.concat([self.frame, added], ignore_index=True)
+        return numbers
+
+    def chosen(self, choice: str = 'all') -> list[int]:
+        """The rows of the channels `choice` picks, in table order.
+
+        Parameters
+        ----------
+        choice : str, default 'all'
+            One of `CHANNEL_CHOICES`: 'control' for the channels with
+            Control checked, whatever their role, or a role.
+
+        Returns
+        -------
+        list of int
+            The rows.
+
+        Raises
+        ------
+        ValueError
+            If `choice` is not one of `CHANNEL_CHOICES`.
+        """
+        # One rule for every place channels are picked this way: the
+        # arrows on a geometry and the shape values at a table's DOFs
+        # (Brandon, 2026-10-22 and 2026-10-23).
+        if choice not in CHANNEL_CHOICES:
+            raise ValueError(f'{choice!r} is not a choice; use one of '
+                             f'{CHANNEL_CHOICES}')
+        if choice == 'all':
+            return list(range(self.num_channels))
+        if choice == 'control':
+            return [int(i) for i in np.flatnonzero(self.controls())]
+        return [i for i, role in enumerate(self.roles()) if role == choice]
+
+    def choices(self) -> list[str]:
+        """The `CHANNEL_CHOICES` that pick a channel, in that order:
+        'all' always, then 'control' when a channel has Control checked,
+        then each role a channel holds."""
+        held = set(self.roles())
+        return [choice for choice in CHANNEL_CHOICES
+                if choice == 'all' or (choice == 'control' and self.controls().any())
+                or choice in held]
+
+    def delete_channels(self, indices: Sequence[int]) -> None:
+        """Remove the given rows in place. At least one row must remain.
+
+        Parameters
+        ----------
+        indices : sequence of int
+            Which rows to remove.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        IndexError
+            If an index is out of range.
+        ValueError
+            If every row would be removed.
+        """
+        doomed = {int(i) for i in indices}
+        bad = [i for i in doomed if not 0 <= i < self.num_channels]
+        if bad:
+            raise IndexError(f'no such channels: {sorted(bad)}')
+        keep = [i for i in range(self.num_channels) if i not in doomed]
+        if not keep:
+            raise ValueError('cannot delete every channel; delete the '
+                             'object instead')
+        gone = {int(self.frame['channel'].iloc[i]) for i in doomed}
+        self.frame = self.frame.iloc[keep].reset_index(drop=True)
+        # a deleted control or drive leaves its loop, and its column
+        # leaves the transformation with it: the matrix stays over the
+        # channels that are still there, rather than over a channel
+        # count the table no longer has
+        for environment in self.environments.values():
+            for form, listed in (('response', 'controls'),
+                                 ('reference', 'drives')):
+                numbers = list(getattr(environment, listed))
+                stay = [k for k, n in enumerate(numbers) if n not in gone]
+                setattr(environment, listed, [numbers[k] for k in stay])
+                matrix = environment.matrix(form)
+                if matrix is not None and len(stay) != len(numbers):
+                    setattr(environment, f'{form}_transformation',
+                            matrix[:, stay])
+        self._sync_controls()
+
+    @property
+    def num_channels(self) -> int:
+        """How many channels the table describes, one per row."""
+        return len(self.frame)
+
+    @property
+    def column_names(self) -> list[str]:
+        """The table's column names, in order (`title_of` gives the
+        headers shown)."""
+        return [str(name) for name in self.frame.columns]
+
+    def orientation(self, row: int, geometry: Any
+                    ) -> tuple[np.ndarray | None, str | None, float | None]:
+        """One channel's measured direction on a geometry.
+
+        The row's DOF (node and direction) is read through the coordinate
+        system its node is measured in (`Geometry.dof_direction`). The
+        result is that direction as a unit vector in the geometry's
+        global system, the signed global axis nearest it ('X+', 'Z-'),
+        and the angle between the two in degrees. These are the values
+        the derived columns show.
+
+        Parameters
+        ----------
+        row : int
+            The channel's row.
+        geometry : Geometry
+            The geometry the channel is measured on.
+
+        Returns
+        -------
+        tuple
+            (vector, axis, angle), each None when the geometry is None
+            or cannot place the channel: the node is not on it, the
+            direction is missing, or the node is measured in a
+            coordinate system that turns with position.
+        """
+        if geometry is None:
+            return None, None, None
+        vector = geometry.dof_direction(self.dof_strings()[row])
+        if vector is None:
+            return None, None, None
+        k = int(np.argmax(np.abs(vector)))
+        axis = f'{AXES[k]}{"+" if vector[k] >= 0 else "-"}'
+        angle = float(np.degrees(np.arccos(min(1.0, abs(float(vector[k]))))))
+        return vector, axis, angle
+
+    def derived_cells(self, row: int, geometry: Any) -> list[str]:
+        """The derived columns' cells for one row, as text.
+
+        The three components of the direction to three decimals, the
+        nearest axis, and the angle to a tenth of a degree; all empty
+        when the geometry cannot place the channel.
+
+        Parameters
+        ----------
+        row : int
+            The channel's row.
+        geometry : Geometry
+            The geometry the channel is measured on.
+
+        Returns
+        -------
+        list of str
+            One cell per `DERIVED_COLUMNS` entry.
+        """
+        vector, axis, angle = self.orientation(row, geometry)
+        if vector is None:
+            return [''] * len(DERIVED_COLUMNS)
+        return [f'{float(v):+.3f}' for v in vector] + [axis, f'{angle:.1f}']
+
+    def dof_strings(self) -> list[str]:
+        """Each channel's degree of freedom, as '101Z+' strings: the node
+        and direction cells joined, so a missing one is left out."""
+        return [f'{node}{direction}' for node, direction
+                in zip(self.frame['node'], self.frame['direction'])]
+
+    def rename_dof(self, old: str, new: str,
+                   quantity: str | None = None) -> int:
+        """Give the channel at coordinate `old` the coordinate `new`, in
+        place, by rewriting its node and direction cells.
+
+        This is the same correction as `DataArray.rename_dof`, made in the
+        table that names the channels. Only the channels at `old` that
+        match `quantity` are changed, not every channel at the node.
+
+        Parameters
+        ----------
+        old : str
+            The coordinate as the table has it, '101Z+'.
+        new : str
+            The coordinate to give it: a node number then a direction,
+            normalized as every DOF is. It is refused if either part is
+            missing, although a table row may lack one.
+        quantity : str, optional
+            Which channel at `old`, by the quantity its unit names
+            ('acceleration', 'force' and so on; 'unknown' where the unit
+            names none). Every channel at the coordinate when omitted.
+
+        Returns
+        -------
+        int
+            How many channels changed; 0 when `new` equals `old`.
+
+        Raises
+        ------
+        ValueError
+            If `new` is not a whole DOF, or no channel matches.
+        """
+        # The table's version of a data array's `rename_dof` (Brandon,
+        # 2026-09-06), with the same rule: the channel moves, not every
+        # channel at the point.
+        from ..units import dimension_of
+        from .data import parse_dof
+        from .validate import dofs
+
+        old = str(old).strip()
+        (new,) = dofs([str(new)], 'DOF')
+        node, direction = parse_dof(new)
+        if node is None:
+            raise ValueError(f'{new!r} has no node number')
+        units = [str(u).strip() for u in self.frame['unit']]
+        named = [(dimension_of(u) if u else None) or 'unknown' for u in units]
+        rows = [i for i, dof in enumerate(self.dof_strings())
+                if dof == old and quantity in (None, named[i])]
+        if not rows:
+            raise ValueError(f'no {quantity + " " if quantity else ""}channel '
+                             f'at {old!r}')
+        if new == old:
+            return 0
+        for i in rows:
+            self.set_cell('node', i, node)
+            self.set_cell('direction', i, direction)
+        return len(rows)
+
+    def identities(self, history: Any = None) -> list[Any]:
+        """Each row as the (DOF, quantity) channel of `history` it names.
+
+        The row's channel type is the quantity, the same word a time
+        history's `ordinate_dim` uses. A row with no channel type names
+        the history's channel at its DOF when there is exactly one
+        there. A row that names none of the history's channels is None.
+
+        Parameters
+        ----------
+        history : TimeHistory, optional
+            The recording the table describes. Without one, each row's
+            own (DOF, type) is returned.
+
+        Returns
+        -------
+        list of (str, str) or None
+            One entry per row.
+        """
+        # The rule the project's role pairing used privately, made the
+        # table's so the overload check reads ranges by the same match.
+        dofs, types = self.dof_strings(), self.types()
+        if history is None:
+            return list(zip(dofs, types))
+        identities = history.channel_identities()
+        known = set(identities)
+        out: list[Any] = []
+        for dof, kind in zip(dofs, types):
+            if kind:
+                out.append((dof, kind) if (dof, kind) in known else None)
+            else:
+                at = [identity for identity in identities
+                      if identity[0] == dof]
+                out.append(at[0] if len(at) == 1 else None)
+        return out
+
+    def roles(self) -> list[str]:
+        """Each channel's declared role ('reference', 'response' or
+        'monitor'), '' where undeclared."""
+        return [str(v) for v in self.frame['role']]
+
+    def controls(self, environment: str | None = None) -> np.ndarray:
+        """Which channels are control channels, as a boolean per row.
+
+        Parameters
+        ----------
+        environment : str, optional
+            One of `environments`: that loop's control channels. Left
+            out, the Control column, which is the union of every
+            environment's when the table has any.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is a control channel, one per row.
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        if environment is None:
+            return np.array([_parse_flag(str(v)) for v in self.frame['control']])
+        return self._flags(self._environment(environment).controls)
+
+    def controls_for(self, dofs: Sequence[Any]) -> np.ndarray:
+        """The control channels a reference over `dofs` was held at, as
+        a boolean per row.
+
+        A reference belongs to the loop that controlled what it is
+        over: a transformed loop's rows ('1', '2', ...), or another
+        loop's control channels. With no environments, or one, that is
+        the Control column (`controls`). With several, it is the one
+        loop the DOFs name; where none or more than one is named, no
+        channel is flagged, so a reader falls back to the reference's
+        own pairing rather than taking every loop's controls.
+
+        Parameters
+        ----------
+        dofs : sequence
+            The reference's DOFs, compared as text.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is a control channel of that loop.
+        """
+        # The union of every loop's controls read a sine's channels into
+        # a random reading of a combined run (found in Kevin Cross's
+        # #199 on 2026-10-28; Brandon asked for the fix 2026-10-29).
+        if len(self.environments) <= 1:
+            return self.controls()
+        asked = {str(d) for d in dofs}
+        strings = self.dof_strings()
+        named = []
+        for name, environment in self.environments.items():
+            matrix = environment.response_transformation
+            if matrix is not None:
+                held = {str(k + 1) for k in range(matrix.shape[0])}
+            else:
+                held = {strings[r] for r in self.rows_of(environment.controls)}
+            if held & asked:
+                named.append(name)
+        if len(named) != 1:
+            return np.zeros(len(self.frame), dtype=bool)
+        return self.controls(named[0])
+
+    def drives(self, environment: str) -> np.ndarray:
+        """Which channels the environment drove, as a boolean per row.
+
+        Parameters
+        ----------
+        environment : str
+            One of `environments`.
+
+        Returns
+        -------
+        numpy.ndarray
+            True where the channel is one of that loop's drives.
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        return self._flags(self._environment(environment).drives)
+
+    def _flags(self, numbers: Sequence[int]) -> np.ndarray:
+        wanted = {int(n) for n in numbers}
+        return np.array([int(n) in wanted for n in self.frame['channel']],
+                        dtype=bool)
+
+    def _environment(self, name: str) -> Environment:
+        if name not in self.environments:
+            raise ValueError(
+                f'no environment {name!r}; the table has '
+                + (', '.join(self.environments) or 'none'))
+        return self.environments[name]
+
+    def rows_of(self, numbers: Sequence[int]) -> list[int]:
+        """The rows of the given channel numbers, in the given order.
+
+        Parameters
+        ----------
+        numbers : sequence of int
+            Channel numbers (the `channel` column).
+
+        Returns
+        -------
+        list of int
+            Their rows.
+
+        Raises
+        ------
+        ValueError
+            If a number is no channel of the table.
+        """
+        held = {int(n): r for r, n in enumerate(self.frame['channel'])}
+        missing = [int(n) for n in numbers if int(n) not in held]
+        if missing:
+            raise ValueError(f'no such channels: {missing}')
+        return [held[int(n)] for n in numbers]
+
+    def set_environment(self, name: str, environment: Environment) -> None:
+        """Record a control loop, or replace the one of that name.
+
+        Parameters
+        ----------
+        name : str
+            The environment's name, as the controller names it.
+        environment : Environment
+            Its channels and matrices. Every channel number must be a
+            channel of the table, listed once; a response transformation
+            must be two-dimensional with one column per control channel,
+            and a reference transformation one per drive.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If the name is blank or any of that fails. Nothing is
+            recorded then.
+        """
+        name = str(name).strip()
+        if not name:
+            raise ValueError('an environment needs a name')
+        checked = Environment(
+            controls=[int(n) for n in environment.controls],
+            drives=[int(n) for n in environment.drives])
+        for listed in ('controls', 'drives'):
+            numbers = getattr(checked, listed)
+            if len(set(numbers)) != len(numbers):
+                raise ValueError(f'{name}: a channel is listed twice among '
+                                 f'its {listed}')
+            try:
+                self.rows_of(numbers)
+            except ValueError as refusal:
+                raise ValueError(f'{name} {listed}: {refusal}') from None
+        for form, listed in (('response', 'controls'),
+                             ('reference', 'drives')):
+            matrix = environment.matrix(form)
+            if matrix is None:
+                continue
+            matrix = np.asarray(matrix, dtype=float)
+            count = len(getattr(checked, listed))
+            if matrix.ndim != 2 or matrix.shape[1] != count:
+                raise ValueError(
+                    f'{name}: the {form} transformation is '
+                    f'{matrix.shape} but the environment has {count} '
+                    f'{listed}')
+            setattr(checked, f'{form}_transformation', matrix.copy())
+        self.environments[name] = checked
+        self._sync_controls()
+
+    def remove_environment(self, name: str) -> None:
+        """Forget a control loop. The Control column keeps what it
+        showed, which a table without environments may then edit.
+
+        Parameters
+        ----------
+        name : str
+            The environment to forget.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If there is no environment of that name.
+        """
+        self._environment(name)
+        del self.environments[name]
+        if self.environments:
+            self._sync_controls()
+
+    def _sync_controls(self) -> None:
+        """The Control column is the environments' union while there
+        are any — one statement, read everywhere the column is."""
+        if not self.environments:
+            return
+        union = {n for env in self.environments.values() for n in env.controls}
+        self.frame['control'] = ['True' if int(n) in union else 'False'
+                                 for n in self.frame['channel']]
+
+    def set_control(self, environment: str, row: int, value: object) -> None:
+        """Check or clear Control on one channel for one environment.
+
+        A channel checked joins the loop's control channels, after the
+        ones it has; cleared, it leaves them. The Control column follows
+        as the union.
+
+        Parameters
+        ----------
+        environment : str
+            Which loop.
+        row : int
+            Which channel.
+        value : object
+            True or False, in any spelling `Control` accepts.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If there is no such environment, the flag cannot be read, or
+            the environment transforms its control channels: the
+            matrix's columns are those channels, so it is set with them
+            (`set_environment`), not one at a time.
+        """
+        held = self._environment(environment)
+        flag = _parse_flag(str(value))
+        if held.response_transformation is not None:
+            raise ValueError(
+                f'{environment} transforms its control channels; the '
+                'transformation\'s columns are those channels, so set them '
+                'together with set_environment')
+        number = int(self.frame['channel'].iloc[int(row)])
+        if flag and number not in held.controls:
+            held.controls.append(number)
+        elif not flag and number in held.controls:
+            held.controls.remove(number)
+        self._sync_controls()
+
+    def transformation(self, environment: str, form: str = 'response'):
+        """A control loop's transformation as a labeled matrix.
+
+        Parameters
+        ----------
+        environment : str
+            Which loop.
+        form : str, default 'response'
+            'response' for the matrix over its control channels, applied
+            to what they measure, or 'reference' for the one over its
+            drives, applied to the drive signals.
+
+        Returns
+        -------
+        core.transform.MatrixAt
+            The rows numbered from 1, as the controller's records of
+            them are named, and a column per control (or drive) channel
+            headed by its DOF, in the controller's order.
+
+        Raises
+        ------
+        ValueError
+            If there is no such environment, or it holds no such
+            transformation.
+        """
+        from .transform import MatrixAt
+
+        held = self._environment(environment)
+        matrix = held.matrix(form)
+        if matrix is None:
+            raise ValueError(f'{environment} holds no {form} transformation')
+        numbers = held.controls if form == 'response' else held.drives
+        dofs = self.dof_strings()
+        return MatrixAt(form=form,
+                        rows=[str(k + 1) for k in range(matrix.shape[0])],
+                        columns=[dofs[r] for r in self.rows_of(numbers)],
+                        values=matrix.copy())
+
+    def types(self) -> list[str]:
+        """Each channel's type (what it measures), '' where undeclared."""
+        return [str(v) for v in self.frame['channel_type']]
+
+    def sensitivities(self) -> np.ndarray:
+        """Each channel's sensitivity in mV per engineering unit, NaN where
+        undeclared."""
+        return np.array([float(v) if str(v).strip() else np.nan
+                         for v in self.frame['sensitivity']])
+
+    def daq_ranges(self) -> np.ndarray:
+        """Each channel's DAQ input range in volts, NaN where unstated."""
+        return self._volts('daq_range')
+
+    def sensor_ranges(self) -> np.ndarray:
+        """Each sensor's full-scale output in volts, NaN where unstated."""
+        return self._volts('sensor_range')
+
+    def clip_ranges(self) -> np.ndarray:
+        """The level each channel clips at, in volts: the smaller of its
+        DAQ range and its sensor range, whichever is stated, NaN where
+        neither is."""
+        with np.errstate(invalid='ignore'):
+            return np.fmin(self.daq_ranges(), self.sensor_ranges())
+
+    def _volts(self, column: str) -> np.ndarray:
+        return np.array([float(v) if str(v).strip() else np.nan
+                         for v in self.frame[column]])
+
+    def __getitem__(self, name: str) -> np.ndarray:
+        """A column as a numpy array, which is what every reader wants."""
+        column = self.frame[name]
+        if self.COLUMNS[name].kind == 'int':
+            return column.to_numpy(dtype=np.int64)
+        return column.to_numpy(dtype=object).astype(str)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ChannelTable):
+            return NotImplemented
+        return (self.column_names == other.column_names
+                and all(np.array_equal(self[name], other[name])
+                        for name in self.column_names)
+                and self.environments == other.environments)
+
+    def __repr__(self) -> str:
+        return (f'ChannelTable({self.num_channels} channels, '
+                f'columns: {", ".join(self.column_names)})')
+
+    def save(self, path: str | os.PathLike) -> None:
+        """Write the table to a file of its own, in the `.vdyn` format.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            Where to write it; `.vdyn` is added when the suffix is not
+            there.
+
+        Returns
+        -------
+        None
+        """
+        from ..io import native
+        native.save(self, path)
+
+
+#: built after the class, since it reads its own alias table
+_ALIAS_OF = {spelling: canonical
+             for canonical, spellings in ChannelTable.ALIASES.items()
+             for spelling in spellings}

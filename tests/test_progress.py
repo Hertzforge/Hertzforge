@@ -1,0 +1,18 @@
+"""A stage that cannot count itself: announced as BUSY, shown as a
+moving bar, and counted again on the next ordinary report."""
+
+from __future__ import annotations
+
+from hertzforge.core.progress import BUSY, Ticker
+
+
+def test_busy_is_told_at_once_and_the_next_tick_counts_again():
+    told = []
+    ticker = Ticker(lambda done, total: told.append((done, total)),
+                    interval=0.0)
+    ticker.add(4)
+    ticker.tick()
+    ticker.busy()
+    ticker.tick()
+    assert told == [(0, 4), (1, 4), (1, BUSY), (2, 4)]
+    Ticker(None).busy()     # no callback, nothing to tell

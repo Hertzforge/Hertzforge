@@ -9,3 +9,4 @@ node_modules/
 .data/
 ui/.svelte-kit/
 .DS_Store
+testdata/plate/

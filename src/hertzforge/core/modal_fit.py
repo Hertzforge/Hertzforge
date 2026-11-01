@@ -1,0 +1,1422 @@
+"""Fit real normal modes to measured FRFs, one mode at a time.
+
+The session holds the measured FRF matrix and the modes confirmed so far.
+Everything it shows is computed on the residual, the measurement minus
+the synthesis of the confirmed modes, so a confirmed mode removes its own
+peak from the CMIF and the most prominent peak left is the next
+suggestion.
+
+One mode is fitted from the residual alone:
+
+- the SVD at the peak line gives the shape direction (its first left
+  singular vector, rotated to the nearest real vector, since these are
+  real normal modes);
+- the frequency and damping are the values that leave the least
+  residual over a band around the peak, searched from a half-power
+  estimate (`search`, `search_damping`);
+- a least-squares fit of the SDOF term over a band around the peak gives
+  one real residue per reference, which scales the unit shape into a
+  mass-normalized one. A drive point (a reference also measured as a
+  response) sets the scale. Without one the scale comes from the residue
+  magnitudes, the synthesis still reproduces the measured records, and
+  the shape set is marked unscaled.
+
+References
+----------
+The single-degree-of-freedom residue fit is standard; these are where
+it and the indicator driving it are set out.
+
+1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
+   Application*, 2nd ed. Research Studies Press. The residue form
+   fitted here, and what neighboring modes leave behind as residuals.
+2. Allemang, R. J., & Brown, D. L. (1998). "A Complete Review of the
+   Complex Mode Indicator Function (CMIF) with Applications."
+   *Proceedings of ISMA*. The indicator whose peaks suggest the next
+   mode, and whose peak drops away once that mode is confirmed.
+3. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
+   Experimental Modal Analysis*. Research Studies Press. Residue to
+   mode-shape scaling, including the unit-modal-mass convention.
+
+The way of working, one mode at a time with the analyst choosing each
+pole, was inspired by SMAC; its computations are not the ones here.
+
+4. Klenke, S. E., & Mayes, R. L. (1999). "The SMAC Modal Parameter
+   Extraction Package." *International Modal Analysis Conference*,
+   Orlando, FL. Synthesize Modes And Correlate, which fits modes one
+   at a time by correlating a trial root's synthesized response with
+   the measured data.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from .data import Frf
+    from .shapes import ShapeSet
+
+from ..units import UNKNOWN
+from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
+
+_POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
+
+
+def prominence_window(lines: int) -> int:
+    """How many lines either side a peak's prominence is measured
+    over, for a search across `lines` lines: a twelfth of them, and at
+    least 25."""
+    return max(25, int(lines) // 12)
+
+
+def prominence(values: Any, peaks: Any, window: int) -> np.ndarray:
+    """How far each of `peaks` (line indices) stands above its
+    surroundings: its log value less the median log value of the
+    `window` lines either side of it.
+
+    This is how a peak looks on a plot, and it is the ranking the
+    fitting screen's suggestion uses. Ranked by raw height instead, the
+    tallest line of an accelerance (which grows as frequency squared) is
+    nearly always a shoulder of the highest dense cluster, never the
+    first mode. One rule, so the suggestion and the signature
+    comparison's mode finding (`signature.find_modes`) rank alike.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    logs = np.log(np.maximum(values, 1e-300))
+    out = np.empty(len(peaks))
+    for k, i in enumerate(peaks):
+        lo, hi = max(0, i - window), min(len(values), i + window + 1)
+        out[k] = logs[i] - np.median(logs[lo:hi])
+    return out
+
+
+class ModalFitSession:
+    """An interactive fit of real normal modes to one FRF set.
+
+    `frf` is the measured FRF. `records` picks which of its records
+    take part, all of them when None. `coherence`, when given, weights
+    each response channel at each line in the least squares by
+    γ²/(1 - γ²), the inverse of the FRF estimate's relative variance,
+    with γ² capped at 0.999 and the weights scaled to a maximum of one.
+    A channel with low coherence counts for less, and a response the
+    coherence does not cover has weight one. A suggestion is made when
+    the session is
+    created, so `pending` already holds a frequency and damping.
+    """
+
+    def __init__(self, frf: Frf, records: Sequence[int] | None = None,
+                 coherence: Any | None = None) -> None:
+        self.frf: Frf = frf
+        self.rows: list[int] = (list(range(frf.num_records)) if records is None
+                     else [int(i) for i in records])
+        self.responses: list[str] = list(dict.fromkeys(
+            frf.response_dof[i] for i in self.rows))
+        self.references: list[str] = list(dict.fromkeys(
+            frf.reference_dof[i] for i in self.rows))
+        self.frequencies: np.ndarray = np.asarray(frf.abscissa, dtype=np.float64)
+        self.omega: np.ndarray = 2.0 * np.pi * self.frequencies
+        # the measured quantity, from the first record that says;
+        # accelerance is the modal-test norm when nothing does
+        self.power: int = 2
+        for i in self.rows:
+            numerator = frf.known_dim(i).partition('/')[0]
+            if numerator in _POWERS:
+                self.power = _POWERS[numerator]
+                break
+        row = {dof: k for k, dof in enumerate(self.responses)}
+        column = {dof: k for k, dof in enumerate(self.references)}
+        self.matrix: np.ndarray = np.zeros(
+            (len(self.frequencies), len(self.responses),
+             len(self.references)), dtype=np.complex128)
+        for i in self.rows:
+            self.matrix[:, row[frf.response_dof[i]],
+                        column[frf.reference_dof[i]]] = frf.ordinate[i]
+        # shapes cover every DOF seen, response or reference
+        self.coordinate: list[str] = self.responses + [
+            dof for dof in self.references if dof not in row]
+        #: one dict per confirmed mode: frequency, damping, shape,
+        #: description — the published ShapeSet is built from these
+        self.modes: list[dict[str, Any]] = []
+        #: (frequency, damping) in the order confirmed — the residual
+        #: is peeled sequentially, so order is part of the fit, and
+        #: this is what `fit_modes(at=...)` replays and the session
+        #: journal records. `refined` counts refine passes for the
+        #: same reason.
+        self.confirmed: list[tuple[float, float]] = []
+        self.refined: int = 0
+        #: per-(line, response) least-squares weight from a coherence
+        #: object, or None. Coherence is the measurement's own statement
+        #: of which channel to believe where: the variance of an FRF
+        #: estimate goes as (1 - g2)/g2, so the weight is its inverse,
+        #: capped — a line claiming perfect coherence must not carry
+        #: infinite weight into a least squares.
+        self.weights: np.ndarray | None = self._coherence_weights(coherence)
+        #: the residual and its CMIF, held against the mode count. Both
+        #: are independent of the cursor, and dragging wants them every
+        #: tick.
+        self._residual = None
+        self._residual_stamp = None
+        self._cmif = None
+        self.pending: dict[str, Any] = {'frequency': 0.0, 'damping': 0.01,
+                        'description': '', 'overridden': False}
+        #: the pending mode once Fit Mode has run, before Confirm
+        self.preview: dict[str, Any] | None = None
+        #: the whole measured range; a suggestion never leaves it, and
+        #: what narrows it is the plot's own x limits and nothing else
+        self.span: tuple[float, float] = (float(self.frequencies[0]),
+                                          float(self.frequencies[-1]))
+        self.suggest()
+
+    def _coherence_weights(self, coherence) -> np.ndarray | None:
+        """(lines, responses) weights from a coherence object's curves.
+
+        Matched to this fit's responses by DOF name and to its lines by
+        interpolation; a response the coherence does not cover weighs
+        1.0 — no statement is not a bad statement. Values are clipped
+        into [0, 0.999] before the variance inversion so a perfect line
+        cannot claim infinite weight, and normalized to a maximum of
+        one so the weights say *relative* trust and nothing else.
+        """
+        if coherence is None:
+            return None
+        curves = {dof: i for i, dof in enumerate(coherence.response_dof)}
+        out = np.ones((len(self.frequencies), len(self.responses)))
+        found = False
+        for j, dof in enumerate(self.responses):
+            if dof not in curves:
+                continue
+            found = True
+            gamma = np.interp(self.frequencies,
+                              np.asarray(coherence.abscissa, dtype=float),
+                              np.asarray(coherence.ordinate[curves[dof]],
+                                         dtype=float))
+            gamma = np.clip(gamma, 0.0, 0.999)
+            out[:, j] = gamma / (1.0 - gamma)
+        if not found:
+            return None
+        peak = float(out.max())
+        return out / peak if peak > 0 else None
+
+    def adopt(self, shapes: ShapeSet) -> None:
+        """Start the fit from an existing shape set's modes.
+
+        This is how a published fit is edited. A shape set holds the
+        frequency, damping, shape and description of each mode, which is
+        everything the session keeps for a confirmed mode. Shapes are
+        matched to this session's DOFs by name: a DOF the set does not
+        have gets zero, and the set's DOFs that are not in this FRF are
+        dropped. A shape set does not store the order its modes were
+        confirmed in, so the adopted modes are replayed in frequency
+        order. A new suggestion is made afterward.
+        """
+        positions = {dof: k for k, dof in enumerate(shapes.coordinate)}
+        for m in range(shapes.num_shapes):
+            shape = np.zeros(len(self.coordinate),
+                             dtype=shapes.shape_matrix.dtype)
+            for k, dof in enumerate(self.coordinate):
+                index = positions.get(dof)
+                if index is not None:
+                    shape[k] = shapes.shape_matrix[m, index]
+            self.modes.append({'frequency': float(shapes.frequency[m]),
+                               'damping': float(shapes.damping[m]),
+                               'shape': shape,
+                               'scaled': not getattr(shapes, 'unscaled',
+                                                     False),
+                               'description': shapes.description[m]})
+            # a published set has lost its confirm order, so an
+            # adopted session replays in frequency order — the one
+            # canonical reading of a set whose sequence is gone
+            self.confirmed.append((float(shapes.frequency[m]),
+                                   float(shapes.damping[m])))
+        self.modes.sort(key=lambda mode: mode['frequency'])
+        self.confirmed.sort()
+        self.suggest()
+
+    # ---- the residual -------------------------------------------------------
+
+    def _mode_term(self, mode):
+        """This mode's contribution to the matrix, (freqs, resp, ref).
+
+        An adopted rigid-body mode meets the 0 Hz line as 0/0 — the same
+        cancellation ShapeSet.synthesize_frf handles: its denominator is
+        exactly -w^2, so its accelerance there is the finite residue. For
+        other powers that line is unbounded and contributes nothing here
+        rather than a NaN that stops the whole residual's SVD converging.
+        """
+        q = self._mode_scalars(mode)
+        shape = mode['shape']
+        residue = np.outer(shape[:len(self.responses)],
+                           [shape[self.coordinate.index(dof)]
+                            for dof in self.references])
+        return q[:, None, None] * residue[None, :, :]
+
+    def _mode_scalars(self, mode):
+        """This mode's frequency response, one complex value per line —
+        the scalar half of `_mode_term`, shared with the factored CMIF
+        so the two paths cannot disagree about what a mode sounds
+        like."""
+        omega_r = 2.0 * np.pi * mode['frequency']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            q = ((1j * self.omega) ** self.power
+                 / (omega_r ** 2 - self.omega ** 2
+                    + 2j * mode['damping'] * omega_r * self.omega))
+        if omega_r == 0.0:
+            q[self.omega == 0.0] = 1.0 if self.power == 2 else 0.0
+        return q
+
+    def synthesis_matrix(self) -> np.ndarray:
+        """The synthesis of the confirmed modes, (lines, responses,
+        references), in the layout of `matrix`."""
+        out = np.zeros_like(self.matrix)
+        for mode in self.modes:
+            out += self._mode_term(mode)
+        return out
+
+    def residual_matrix(self) -> np.ndarray:
+        """The measured matrix minus the synthesis of the confirmed modes,
+        (lines, responses, references).
+
+        The result is cached against the number of confirmed modes. It
+        does not depend on the cursor, and a drag asks for it on every
+        mouse move.
+        """
+        # The SVD over the residual is 4.7 ms on the airplane's FRFs, a
+        # third of a frame at 60 Hz, which is why the drag path must not
+        # recompute it.
+        stamp = len(self.modes)
+        if self._residual is None or self._residual_stamp != stamp:
+            self._residual = self.matrix - self.synthesis_matrix()
+            self._residual_stamp = stamp
+            self._cmif = None
+        residual = self._residual
+        assert residual is not None
+        return residual
+
+    def synthesis_singular_values(self, include_preview: bool = True
+                                  ) -> np.ndarray | None:
+        """The singular values of the synthesis CMIF, (k, lines),
+        computed without building the synthesis matrix.
+
+        The modal synthesis of m modes has rank m: each mode adds
+        `q_k(w) * outer(shape, participation)`, so the whole matrix is
+        `U diag(q(w)) V^T` with U and V constant over frequency.
+        Singular values do not change under a matrix with orthonormal
+        columns on the left or orthonormal rows on the right, so U and V
+        are each QR-factored once, and the SVD at each line is taken of
+        a core at most m by m built from the two R factors, in place of
+        the full (responses x references) matrix. The values are the
+        same as the full SVD gives, to rounding.
+
+        `include_preview` adds the previewed mode (fitted, not yet
+        confirmed). The result is padded with zero rows up to
+        min(responses, references), the number of rows the full SVD
+        returns: the extra singular values of a rank-m matrix are zero,
+        and the plot's floor test counts rows. None when there is no
+        mode to synthesize.
+        """
+        # On the drone survey this is the difference between 6.5 s
+        # (building a two-gigabyte record array and decomposing 1197x12
+        # at every line) and a few milliseconds.
+        modes = list(self.modes)
+        if include_preview and self.preview is not None:
+            modes.append(self.preview)
+        if not modes:
+            return None
+        left = np.stack([mode['shape'][:len(self.responses)]
+                         for mode in modes], axis=1)
+        right = np.stack(
+            [[mode['shape'][self.coordinate.index(dof)]
+              for dof in self.references] for mode in modes], axis=1)
+        scalars = np.stack([self._mode_scalars(mode) for mode in modes],
+                           axis=1)                       # (freqs, m)
+        r_left = np.linalg.qr(left, mode='r')            # (min(nr,m), m)
+        r_right = np.linalg.qr(right, mode='r')          # (min(nc,m), m)
+        core = np.einsum('im,fm,jm->fij', r_left, scalars, r_right)
+        singular = np.linalg.svd(core, compute_uv=False).T   # (k, freqs)
+        full = min(len(self.responses), len(self.references))
+        if singular.shape[0] < full:
+            singular = np.vstack([
+                singular, np.zeros((full - singular.shape[0],
+                                    singular.shape[1]))])
+        return singular
+
+    def synthesis_records(self, include_preview: bool = True) -> np.ndarray:
+        """The synthesis of the confirmed modes, and of the previewed mode
+        when `include_preview` is set, in the source FRF's record layout,
+        (records, lines). The dashed CMIF is drawn from this."""
+        modes = list(self.modes)
+        if include_preview and self.preview is not None:
+            modes.append(self.preview)
+        total = np.zeros_like(self.matrix)
+        for mode in modes:
+            total += self._mode_term(mode)
+        row = {dof: k for k, dof in enumerate(self.responses)}
+        column = {dof: k for k, dof in enumerate(self.references)}
+        return np.stack([
+            total[:, row[self.frf.response_dof[i]],
+                  column[self.frf.reference_dof[i]]]
+            for i in self.rows])
+
+    def _residual_cmif(self):
+        residual = self.residual_matrix()
+        if self._cmif is None:
+            self._cmif = np.linalg.svd(residual, compute_uv=False)[:, 0]
+        return self._cmif
+
+    # ---- suggesting where the next mode is ----------------------------------
+
+    def searched(self,
+                 within: tuple[float, float] | None = None
+                 ) -> tuple[float, float]:
+        """(low, high), the frequency range a suggestion may land in.
+
+        `within` is the plot's view, (low, high) in Hz; zooming to a
+        region is how the user says the next mode is in there. Without
+        it the whole measured range is searched. The range is clamped to
+        the measured range, so a view scrolled past the end of the data
+        still searches data, and a view entirely outside the data gives
+        the whole range.
+        """
+        # The view is the only way to narrow the search. There used to
+        # be a pair of draggable bounds as well, shading the rest of the
+        # plot out, and this intersected the two. They added nothing: the
+        # answer was almost always the view, and saying the same thing
+        # twice meant zooming and then dragging two bars to match.
+        if within is None:
+            return self.span
+        near, far = sorted((float(within[0]), float(within[1])))
+        low, high = max(self.span[0], near), min(self.span[1], far)
+        # a view entirely off the end of the data leaves nothing between
+        # them; there is no mode out there to find, so the whole range
+        # answers rather than an empty one
+        return (low, high) if low < high else self.span
+
+    def suggest(self, within: tuple[float, float] | None = None
+                ) -> tuple[float, float]:
+        """Move the pending mode to the most prominent residual CMIF peak
+        and return its (frequency, damping).
+
+        `within` is the plot's view, as for `searched`; without it the
+        whole measured range is searched. Peaks are ranked by
+        prominence, not height: how far a peak stands above the median
+        of the log CMIF around it (at least 25 lines either side), which
+        is how a peak looks on the plot. The CMIF of accelerance grows
+        as frequency squared, so ranked by raw height the tallest
+        residual line is nearly always a shoulder of the highest dense
+        cluster.
+
+        Lines inside a confirmed mode's half-power width are skipped,
+        unless the residual there has a shape the confirmed modes do not
+        explain (`_another_mode_at`). Subtracting a fitted mode is exact
+        only when the mode is alone; in a cluster it leaves a ridge that
+        keeps the shape of the mode that left it, while the second mode
+        of a repeated pair, at the same frequency, has a shape of its
+        own. When no local peak qualifies, the tallest free line is
+        taken. The frequency and damping are then found by `search`, and
+        the pending mode's held damping is released. The cursor can
+        still be dragged anywhere by hand.
+        """
+        # Prominence, not height: ranked by height, ten
+        # Confirms on a real survey all landed inside a single 1340 Hz
+        # cluster and never reached the 64 Hz fundamental an engineer
+        # would fit first. Ranked by prominence, the same ten Confirms
+        # landed on the set of modes the survey's engineer had picked by
+        # hand.
+        #
+        # The half-power exclusion exists because, without it, the ridge
+        # a cluster's imperfect subtraction leaves kept the same line the
+        # tallest, and the loop confirmed fourteen modes at one frequency
+        # without moving on. Frequency alone cannot tell that ridge from
+        # a real neighbor (a repeated pair's second mode was shadowed for
+        # exactly that reason), and shape can.
+        s1 = self._residual_cmif()
+        low, high = self.searched(within)
+        inside = (self.frequencies >= low) & (self.frequencies <= high)
+        if not inside.any():
+            # a view narrower than the line spacing, or one falling
+            # between two lines: nothing to choose from, so widen to
+            # everything rather than refuse to suggest
+            inside = np.ones(len(s1), dtype=bool)
+        free = inside.copy()
+        for mode in self.modes:
+            free &= np.abs(self.frequencies
+                           - mode['frequency']) > self._claim(mode)
+        if not free.any():
+            free = inside
+        interior = [i for i in range(1, len(s1) - 1)
+                    if inside[i]
+                    and s1[i] >= s1[i - 1] and s1[i] >= s1[i + 1]
+                    and (free[i] or self._another_mode_at(i))]
+        if interior:
+            rank = prominence(s1, interior,
+                              prominence_window(int(np.count_nonzero(inside))))
+            index = interior[int(np.argmax(rank))]
+        else:
+            candidates = np.where(free)[0]
+            index = int(candidates[np.argmax(s1[candidates])])
+        frequency, damping = self.search(index)
+        self.pending = {'frequency': frequency,
+                        'damping': damping,
+                        'description': self.pending['description'],
+                        'overridden': False}
+        return self.pending['frequency'], self.pending['damping']
+
+    #: how much of a residual peak's direction may lie in the confirmed
+    #: modes' span before the peak is theirs. The threshold has to sit
+    #: below the *blends*, not merely below pure ridge: measured on the
+    #: plate's repeated pair, leftover ridge projects 0.99 onto the mode
+    #: that left it and the pair's second tooth 0.002 — but in a dense
+    #: worked-over cluster, an unfit neighbor's skirt mixed with fit
+    #: error projects 0.25-0.30, and at 0.5 the loop fit one of those
+    #: 0.26 Hz from a confirmed mode. 0.1 passes only what the confirmed
+    #: modes explain almost none of, which is what a genuinely new mode
+    #: looks like.
+    RIDGE_FRACTION = 0.1
+
+    #: how much of the measurement a residual peak must hold to be a
+    #: mode of its own. Shape alone stopped being enough once a fit came
+    #: out nearly exact (four search passes, 2026-10-11): a confirmed
+    #: mode subtracted almost perfectly leaves at its own line only the
+    #: tails of everything else, whose shape is nobody's confirmed mode
+    #: — and log prominence makes a remainder that small look as tall
+    #: as anything. The cruel cluster's 20 Hz mode then left 2.5 % of
+    #: its line, offered as a second mode and fit at z = 0.26 on top of
+    #: the first. A genuine neighbor is a mode, not a remainder: the
+    #: second tooth of a repeated pair held 0.42 of the measurement on
+    #: the synthetic pair and 0.39 on the plate's 1142 Hz pair, four
+    #: times this floor, as the remainder is four times under it.
+    NEIGHBOR_FLOOR = 0.1
+
+    def _claim(self, mode: Mapping[str, Any]) -> float:
+        """How far either side of a confirmed mode's frequency is its own,
+        in Hz: its half-power half-width, damping times frequency, and
+        never less than half the line spacing, so the line it sits on is
+        always its own.
+
+        Without the floor a mode whose damping collapsed to the search's
+        least claimed less than a line. On FRFs 2 Hz apart with one line
+        forty times its neighbors at 530 Hz, the fit confirmed five modes
+        within half a hertz of it at 0.01 %, each a little off the line
+        and so leaving it free to be offered again.
+        """
+        # found on the raw plate stream (2026-09-03), reproduced with a
+        # planted spike and fixed 2026-10-18
+        if self.frequencies.size < 2:
+            return float(mode['damping'] * mode['frequency'])
+        half_line = 0.5 * float(np.median(np.diff(self.frequencies)))
+        return max(float(mode['damping'] * mode['frequency']), half_line)
+
+    def _another_mode_at(self, index: int) -> bool:
+        """Whether the residual at this line belongs to a mode not yet
+        confirmed, judged by shape.
+
+        Asked only for a peak inside a confirmed mode's half-power
+        width. The test is against the *span* of every confirmed mode
+        covering the line, not each shape one at a time: the ridge left
+        in a worked-over cluster is a blend of the modes taken from it,
+        and a blend can sit below any per-mode MAC threshold while
+        lying entirely in their span. Two SVDs of one line, on a Find
+        Mode click — never on the drag path.
+        """
+        covering = [mode['shape'][:len(self.responses)]
+                    for mode in self.modes
+                    if abs(self.frequencies[index] - mode['frequency'])
+                    <= self._claim(mode)]
+        basis = np.array([shape for shape in covering
+                          if np.vdot(shape, shape).real > 0.0]).T
+        if basis.size == 0:
+            # adopted modes with no shape on these DOFs: nothing to
+            # compare, so the frequency exclusion stands
+            return False
+        u, s, _vh = np.linalg.svd(self.residual_matrix()[index])
+        measured = float(np.linalg.svd(self.matrix[index],
+                                       compute_uv=False)[0])
+        if not s[0] >= self.NEIGHBOR_FLOOR * measured:
+            return False
+        q, _ = np.linalg.qr(basis)
+        return float(np.linalg.norm(q.conj().T @ u[:, 0]) ** 2) \
+            < self.RIDGE_FRACTION
+
+    def move_to(self, frequency: float, damping: bool = True) -> None:
+        """Move the pending mode to `frequency`, in Hz, where the cursor is.
+
+        With `damping` True (the default), and the damping not held by
+        hand, the damping is searched at the new frequency
+        (`search_damping`). The residual is cached against the confirmed
+        modes, so this costs one small SVD at the cursor line and a
+        one-dimensional search over a few dozen lines. A caller that
+        cannot afford even that, such as a drag that is already running
+        behind, passes False and the damping is left as it was. Any
+        preview is dropped.
+        """
+        # This used to be free by necessity: the damping estimate meant
+        # a full SVD of the residual on every mouse move, until the
+        # residual was cached against the modes.
+        self.pending['frequency'] = float(frequency)
+        if damping and not self.pending['overridden']:
+            # seeded from the half-power width *at this line*, never
+            # from the previous tick's answer. The residual cost over
+            # damping often has two minima — a sharp fit to the narrow
+            # peak and a fat one that also swallows the shoulders — and
+            # a search seeded from the last answer stayed in whichever
+            # basin the drag entered first: the same line gave different
+            # dampings depending on where the cursor had come from, and
+            # the synthesis jumped between solutions mid-drag. Seeded
+            # locally, the answer is a pure function of the line.
+            self.pending['damping'] = self.search_damping(frequency)
+        self.preview = None       # fitted somewhere else, if at all
+
+    def override_damping(self, damping: float) -> None:
+        """Hold the pending mode's damping at `damping` (a fraction of
+        critical), clipped to 1e-4 to 0.5.
+
+        The pending mode keeps this value until Find Mode suggests again
+        or a confirm resets it. Where two solutions sit at nearly the
+        same frequency they differ in damping, and the automatic search
+        finds only one of them; holding the damping chooses which one
+        the fit lands on. Any preview is dropped.
+        """
+        self.pending['damping'] = float(np.clip(damping, 1e-4, 0.5))
+        self.pending['overridden'] = True
+        self.preview = None
+
+    def pending_curve(self, unit_system: Any | None = None
+                      ) -> tuple[np.ndarray, np.ndarray]:
+        """The SDOF magnitude curve of the pending (frequency, damping),
+        as (frequencies, values).
+
+        This is the curve drawn under the cursor to show how sharp a
+        mode is about to be fitted. Its peak is scaled to meet the
+        residual CMIF at the cursor's line, and its width shows the
+        damping, which is what lets a vertical drag set the damping. It
+        covers max(6ζ, 0.015) times the frequency either side of the
+        cursor, and at least two lines. It is closed form (no SVD, no
+        least squares), so it can be redrawn on every mouse move.
+
+        `unit_system` converts the values the way the plotted CMIF is
+        converted: the session works in SI and the plot draws display
+        units. When no fit record has a defined dimension, the values
+        are returned unconverted.
+        """
+        # Without the conversion, on in-lbf-s data the SI-valued curve
+        # was drawn a couple of orders of magnitude below the curves it
+        # was meant to meet, which on screen looks like not being drawn
+        # at all. It passed every test, because the test fixture's units
+        # were undefined and undefined values display as they stand.
+        frequency = self.pending['frequency']
+        damping = self.pending['damping']
+        index = int(np.argmin(np.abs(self.frequencies - frequency)))
+        band = self._search_band(index, max(2.0 * damping, 0.005))
+        omega = self.omega[band]
+        omega_r = 2.0 * np.pi * max(frequency, 1e-9)
+        q = np.abs((1j * omega) ** self.power
+                   / (omega_r ** 2 - omega ** 2
+                      + 2j * damping * omega_r * omega))
+        peak = float(q.max()) or 1.0
+        height = float(self._residual_cmif()[index])
+        values = np.asarray(height * q / peak, dtype=np.float64)
+        return self.frequencies[band], self._displayed(values, unit_system)
+
+    def _displayed(self, values, unit_system):
+        """CMIF-valued `values` in the units the plotted CMIF is drawn
+        in, or unconverted when `unit_system` is None."""
+        if unit_system is None:
+            return values
+        # the dimension the plotted CMIF was converted by: with one
+        # dimension across the fit rows the CMIF scales by exactly this
+        # factor, and mixed or undefined rows draw as they stand — the
+        # same rule as display_ordinate
+        dim = next((self.frf.ordinate_dim[i] for i in self.rows
+                    if self.frf.ordinate_dim[i] != UNKNOWN), None)
+        return values if dim is None else unit_system.from_si(values, dim)
+
+    def estimate_damping(self, frequency: float) -> float:
+        """The half-power damping estimate at the line nearest
+        `frequency`, read from the residual CMIF.
+
+        A side that never falls to half power borrows the other side's
+        width; with no crossing on either side the estimate is 0.01. The
+        result is clipped to 1e-4 to 0.5. This is the seed the searches
+        start from, not the damping a fit uses.
+        """
+        s1 = self._residual_cmif()
+        index = int(np.argmin(np.abs(self.frequencies - frequency)))
+        return self._half_power(s1, index)
+
+    def half_power(self, frequency: float | None = None, *,
+                   unit_system: Any | None = None,
+                   warn: bool = True) -> HalfPower:
+        """Read Q from the half-power width of the residual CMIF peak
+        under the cursor, or at `frequency`.
+
+        This is the readout beside the fit: the peak the cursor sits on,
+        its frequency, the two half-power crossings, Q and the damping
+        ratio they give, read off the residual CMIF the cursor works on
+        (`core.half_power.read_half_power`). For one FRF the CMIF is its
+        magnitude, so the reading is that FRF's peak. It is a reading of
+        the curve, not a fit, and it differs from the fitted damping
+        where the curve is not one clean mode: a close pair reads as one
+        wide peak, and the fit's search does not. Reading it costs a
+        climb along the cached CMIF, so a cursor can show it on every
+        move.
+
+        Parameters
+        ----------
+        frequency : float, optional
+            A frequency on the peak to read, in Hz; the pending mode's
+            (the cursor's) when omitted.
+        unit_system : UnitSystem, optional
+            The height is converted to these units, as the plotted CMIF
+            is (`pending_curve`); SI when omitted.
+        warn : bool, default True
+            Warn a missing crossing or too few lines as a
+            `HalfPowerWarning`; the notes are kept on the reading either
+            way.
+
+        Returns
+        -------
+        HalfPower
+            The reading.
+        """
+        near = (self.pending['frequency'] if frequency is None
+                else float(frequency))
+        reading = read_half_power(self.frequencies, self._residual_cmif(),
+                                  near, warn=warn, stacklevel=2)
+        height = float(self._displayed(np.array([reading.height]),
+                                       unit_system)[0])
+        return replace(reading, height=height)
+
+    def _half_power(self, s1, index):
+        """Damping from the half-power points around a CMIF peak.
+
+        A side that never crosses (a shoulder, or the edge of the band)
+        borrows the other side's width; neither crossing falls back to a
+        nominal 1 %.
+        """
+        # the crossings are found where the half-power readout finds
+        # them (`core.half_power.crossings`); this kept its own loop
+        # until the readout arrived, and two loops over one rule drift
+        f = self.frequencies
+        low, high = crossings(f, s1, index, s1[index] * HALF_POWER)
+        peak = f[index]
+        if low is None and high is None:
+            return 0.01
+        width = ((high - low) if low is not None and high is not None
+                 else 2.0 * abs((high if high is not None else low) - peak))
+        return float(np.clip(width / (2.0 * peak), 1e-4, 0.5)) if peak else 0.01
+
+    # ---- fitting one mode ---------------------------------------------------
+
+    def fit_pending(self) -> dict[str, Any]:
+        """Fit the pending mode where the cursor is, without adding it,
+        and return it.
+
+        Unless the damping is held by hand, it is searched at the cursor
+        first (`search_damping`, as `move_to` does), so the fit uses the
+        damping the cursor's curve showed. The shape is then computed and
+        the result held as `preview`: the synthesis and the MAC show it,
+        and Confirm adopts it. With the damping held by hand, the mode's
+        amplitude is scaled so its own CMIF at the cursor meets the
+        residual CMIF there, by a factor between 0.25 and 4.
+
+        The returned mode is a dict of `frequency`, `damping`, `shape`
+        (over `coordinate`), `description` and `scaled` (False when no
+        drive point set the scale).
+        """
+        if not self.pending['overridden']:
+            # the residual search, as the cursor's own estimate is
+            # (`move_to`): this read the half-power width, which the
+            # search replaced, so a dragged fit took a damping other than
+            # the one its parabola showed (2026-10-13, found by the
+            # website pass)
+            self.pending['damping'] = self.search_damping(
+                self.pending['frequency'])
+        self.preview = self._fit_mode(self.pending['frequency'],
+                                      self.pending['damping'],
+                                      self.pending['description'],
+                                      pin=self.pending['overridden'])
+        return self.preview
+
+    def confirm(self, frequency: float | None = None,
+                damping: float | None = None,
+                description: str | None = None) -> dict[str, Any]:
+        """Add the pending mode to the confirmed modes, and return it.
+
+        `frequency`, `damping` and `description` replace the pending
+        values when given. The preview is used when it was fitted at the
+        same frequency and damping; otherwise the mode is fitted here.
+        The modes are kept sorted by frequency, the confirm order is
+        recorded in `confirmed`, and the pending description and any
+        held damping are cleared.
+        """
+        frequency = (self.pending['frequency'] if frequency is None
+                     else float(frequency))
+        damping = (self.pending['damping'] if damping is None
+                   else float(damping))
+        description = (self.pending['description'] if description is None
+                       else description)
+        mode = self.preview
+        if (mode is None or mode['frequency'] != frequency
+                or mode['damping'] != damping):
+            mode = self._fit_mode(frequency, damping, description,
+                                  pin=self.pending['overridden'])
+        mode['description'] = description
+        self.modes.append(mode)
+        self.confirmed.append((float(mode['frequency']),
+                               float(mode['damping'])))
+        self.modes.sort(key=lambda entry: entry['frequency'])
+        self.pending['description'] = ''
+        self.pending['overridden'] = False
+        self.preview = None
+        return mode
+
+    def _fit_mode(self, frequency, damping, description, pin=False):
+        """One real normal mode from the residual.
+
+        The shape direction is the residual's first left singular vector at
+        the peak line, rotated to the nearest real vector; the residues
+        come from a least-squares fit of the SDOF term over the half-power
+        band, one per reference; a drive point ties down the
+        mass-normalized scale.
+        """
+        index = int(np.argmin(np.abs(self.frequencies - frequency)))
+        residual = self.residual_matrix()
+
+        u, _s, _vh = np.linalg.svd(residual[index])
+        direction = u[:, 0]
+        # the nearest real vector: rotate by half the phase of sum(u^2)
+        direction = np.real(
+            direction * np.exp(-0.5j * np.angle(np.sum(direction ** 2))))
+        norm = np.linalg.norm(direction)
+        direction = direction / norm if norm else direction
+
+        band = self._band(index)
+        omega = self.omega[band]
+        omega_r = 2.0 * np.pi * frequency
+        q = ((1j * omega) ** self.power
+             / (omega_r ** 2 - omega ** 2 + 2j * damping * omega_r * omega))
+        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        weight = float(np.sum(np.abs(q) ** 2)) or 1.0
+        residues = np.real(np.conj(q) @ projected) / weight   # one per ref
+
+        # The parabola's crown is a promise the fit keeps — but only
+        # for a fit the user *aimed*. With the damping held by hand,
+        # the amplitude is scaled so this mode's own CMIF at the fitted
+        # line meets the residual CMIF there, the very value the
+        # cursor's parabola showed: the plain band LSQ traded that peak
+        # away whenever the held damping differed from the data's, up
+        # to 25 % low at twice the true width. For an *automatic* fit
+        # the pin is exactly wrong, and it shipped on for one day: in a
+        # dense cluster the residual's peak is several modes deep, and
+        # pinning each rank-one fit to the whole of it let an auto loop
+        # stack fourteen modes at one frequency, each inflated toward a
+        # total forty times the measurement. The least squares knows
+        # how much of the residual its one direction explains; the pin
+        # only knows what the user meant — so it applies only when the
+        # user has said what they mean.
+        if pin:
+            omega_line = self.omega[index]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                q_line = ((1j * omega_line) ** self.power
+                          / (omega_r ** 2 - omega_line ** 2
+                             + 2j * damping * omega_r * omega_line))
+            base = float(np.abs(q_line) * np.linalg.norm(residues))
+            target = float(self._residual_cmif()[index])
+            if base > 0 and np.isfinite(base) and target > 0:
+                residues = residues * float(
+                    np.clip(target / base, 0.25, 4.0))
+
+        shape, scaled = self._shape_from(direction, residues)
+        return {'frequency': frequency, 'damping': damping,
+                'shape': shape, 'description': description,
+                'scaled': scaled}
+
+    def _shape_from(self, direction, residues):
+        """(shape over the coordinate, scaled?) from a unit direction
+        and one residue per reference.
+
+        Mass-normalized scale: residue_jk = phi_j phi_k, so a reference
+        that was also measured as a response — a drive point — says
+        what phi_k is: ratio_k = A_k / u_k is phi_k-squared up to the
+        common scale. Each drive point votes, weighted by u_k squared —
+        how much of the mode actually lives at that drive — because a
+        drive point near a node has no standing on scale: the plate's
+        647 Hz mode sat on one shaker's node, that drive's noise-signed
+        ratio averaged the scale down by half, and the synthesis
+        visibly missed the CMIF. A ratio still negative after the sign
+        convention below is that same noise self-declared — a true
+        drive-point residue is phi_k squared, never negative — and is
+        discarded rather than voted.
+
+        A shape is only defined up to sign, so when the *weighted
+        consensus* is negative the SVD's sign was against the residues:
+        both flip, and an all-negative vote scales normally. Without
+        any usable vote — no drive point measured, or every one nodal —
+        the residue magnitudes stand in and the returned flag says so.
+        """
+        row = {dof: k for k, dof in enumerate(self.responses)}
+        votes = [(residues[k] / direction[row[dof]],
+                  float(direction[row[dof]]) ** 2)
+                 for k, dof in enumerate(self.references)
+                 if dof in row and abs(direction[row[dof]]) > 1e-6]
+        if sum(ratio * weight for ratio, weight in votes) < 0:
+            direction, residues = -direction, -residues
+            votes = [(-ratio, weight) for ratio, weight in votes]
+        kept = [(ratio, weight) for ratio, weight in votes if ratio > 0]
+        if kept:
+            squared = (sum(ratio * weight for ratio, weight in kept)
+                       / sum(weight for _ratio, weight in kept))
+        else:
+            squared = float(np.linalg.norm(residues))
+        scale = np.sqrt(squared) if squared > 0 else 1.0
+
+        shape = np.empty(len(self.coordinate))
+        shape[:len(self.responses)] = scale * direction
+        for position, dof in enumerate(self.coordinate[len(self.responses):],
+                                       start=len(self.responses)):
+            k = self.references.index(dof)
+            shape[position] = residues[k] / scale if scale else 0.0
+        return shape, bool(kept)
+
+    def refine_residues(self) -> int:
+        """Fit the residues of all confirmed modes again, together, with
+        the frequencies and dampings held, and return how many modes were
+        refined (0 with none confirmed).
+
+        Each mode was fit on the residual as it stood when it was
+        confirmed, so the first of a close pair was fit on data that
+        still held the second mode's tail, and its residues took up part
+        of it. The sum of the pair matches the measurement; the error is
+        in how it is split between them. Here the residues are fitted
+        with all the SDOF terms present at once, over the lines near
+        each mode (3ζf either side, at least two lines). Lines far from
+        every mode are left out, because they hold only what was never
+        fitted, and a full-band solve would spread that into the shapes.
+
+        Modes are solved together only when their bands overlap, and
+        each such cluster is solved on the measurement minus the other
+        modes at their current residues. Where close modes have similar
+        shapes the least squares is badly conditioned and noise moves
+        amplitude between the pair, so each cluster compares five
+        candidates: the plain least-squares answer, three answers
+        regularized toward the current residues (ridge weights 0.01,
+        0.05 and 0.2 of the mean diagonal), and the current residues
+        themselves. The candidate whose synthesized CMIF is closest to
+        the measured CMIF over the cluster's band is kept, so refining
+        cannot make that score worse. A mode alone in its cluster keeps
+        its shape. With coherence weights, each response channel's
+        equations are weighted by its coherence weight.
+
+        The frequencies and dampings do not change, and the shapes do not
+        change where the current residues won. Any preview is dropped.
+        """
+        # Why a ladder of candidates and not one solve: the plain joint
+        # solve shipped first and its failure was caught by eye. With
+        # close poles and similar shapes, the least squares turned
+        # measurement noise into amplitude swaps between the pair; the
+        # shapes' directions stayed right while the synthesized CMIF
+        # moved visibly away from the measured one. Regularizing toward
+        # the sequential answer reduces the swap, but no fixed weight
+        # suits both a parallel pair and a well-separated one. The
+        # residues are optimized on the FRFs and the candidate is chosen
+        # on the CMIF, the curve the fit is judged by.
+        if not self.modes:
+            return 0
+        self.refined += 1
+        df = (self.frequencies[1] - self.frequencies[0]
+              if len(self.frequencies) > 1 else 1.0)
+        lines: set[int] = set()
+        for mode in self.modes:
+            index = int(np.argmin(np.abs(self.frequencies
+                                         - mode['frequency'])))
+            half_width = 3.0 * mode['damping'] * mode['frequency']
+            reach = max(round(half_width / df), 2)
+            lines.update(range(max(index - reach, 0),
+                               min(index + reach + 1,
+                                   len(self.frequencies))))
+        chosen = np.array(sorted(lines))
+        omega = self.omega[chosen]
+        terms = []
+        for mode in self.modes:
+            omega_r = 2.0 * np.pi * mode['frequency']
+            terms.append((1j * omega) ** self.power
+                         / (omega_r ** 2 - omega ** 2
+                            + 2j * mode['damping'] * omega_r * omega))
+        basis = np.stack(terms, axis=1)               # (lines, modes)
+        count = len(self.modes)
+        responses, references = len(self.responses), len(self.references)
+        # the sequential answer, as residue matrices: the ridge's prior
+        # and the ladder's safety net
+        prior = []
+        for mode in self.modes:
+            phi = mode['shape'][:responses]
+            psi = np.array([mode['shape'][self.coordinate.index(dof)]
+                            for dof in self.references])
+            prior.append(np.outer(phi, psi))
+        prior = np.stack(prior).reshape(count, -1)
+        # real residues: the real and imaginary parts are two statements
+        # of the same unknowns, stacked into one real least squares.
+        # With coherence weights the solve runs per response, each
+        # channel's equations scaled by the root of its weight — the
+        # measurement's own statement of which channel to believe where,
+        # which is what keeps one bad channel from voting noise into
+        # every mode's residues.
+
+        # Modes couple through the solve only when their bands overlap.
+        # An accelerance SDOF term tends to a constant at frequencies
+        # far above its pole — the mass line — so a low mode's basis
+        # column has presence across every higher cluster's lines, and
+        # the global joint solve inflated a 64 Hz fundamental fivefold
+        # to shim milli-errors across a 1400 Hz cluster's hundreds of
+        # lines. Clustered by band overlap, distant modes are not
+        # solved for together — but their tails are still in each
+        # cluster's lines, so each cluster is solved on the measurement
+        # less the other modes at their sequential residues, the same
+        # fixed background its ladder judges against. Solved on the
+        # measurement as it stood, a 50/53 Hz pair that refits exactly
+        # alone came back 1.2 % and 4.0 % off beside a 75 Hz mode
+        # (2026-10-11): the pair's residues absorbed the third mode's
+        # tail.
+        bands = []
+        for mode in self.modes:
+            index = int(np.argmin(np.abs(self.frequencies
+                                         - mode['frequency'])))
+            half_width = 3.0 * mode['damping'] * mode['frequency']
+            reach = max(round(half_width / df), 2)
+            bands.append((max(index - reach, 0),
+                          min(index + reach + 1, len(self.frequencies))))
+        clusters, current = [], [0]
+        for r in range(1, count):
+            if bands[r][0] <= max(bands[i][1] for i in current):
+                current.append(r)
+            else:
+                clusters.append(current)
+                current = [r]
+        clusters.append(current)
+
+        def solve_joint(fraction):
+            answer = prior.copy()
+            for members in clusters:
+                lo = min(bands[r][0] for r in members)
+                hi = max(bands[r][1] for r in members)
+                lines = chosen[(chosen >= lo) & (chosen < hi)]
+                omega_c = self.omega[lines]
+                columns_c = []
+                for r in members:
+                    omega_r = 2.0 * np.pi * self.modes[r]['frequency']
+                    columns_c.append(
+                        (1j * omega_c) ** self.power
+                        / (omega_r ** 2 - omega_c ** 2
+                           + 2j * self.modes[r]['damping'] * omega_r
+                           * omega_c))
+                basis_c = np.stack(columns_c, axis=1)
+                n = len(members)
+                sub_prior = prior[members]
+                others = [r for r in range(count) if r not in members]
+                target = self.matrix[lines]
+                if others:
+                    held = basis[np.isin(chosen, lines)][:, others]
+                    target = target - (held @ prior[others]).reshape(
+                        len(lines), responses, references)
+                if self.weights is None:
+                    stacked_c = np.vstack([basis_c.real, basis_c.imag])
+                    block = target.reshape(len(lines), -1)
+                    rhs = np.vstack([block.real, block.imag])
+                    g = stacked_c.T @ stacked_c
+                    u = float(np.trace(g)) / n
+                    if fraction == 0.0:
+                        solved, *_ = np.linalg.lstsq(stacked_c, rhs,
+                                                     rcond=None)
+                    else:
+                        solved = np.linalg.solve(
+                            g + fraction * u * np.eye(n),
+                            stacked_c.T @ rhs + fraction * u * sub_prior)
+                    answer[members] = solved
+                    continue
+                for j in range(responses):
+                    root = np.sqrt(self.weights[lines, j])
+                    weighted = np.vstack([basis_c.real * root[:, None],
+                                          basis_c.imag * root[:, None]])
+                    block = target[:, j, :]
+                    rhs = np.vstack([block.real * root[:, None],
+                                     block.imag * root[:, None]])
+                    g = weighted.T @ weighted
+                    u = float(np.trace(g)) / n
+                    cols = [j * references + k for k in range(references)]
+                    if fraction == 0.0:
+                        solved, *_ = np.linalg.lstsq(weighted, rhs,
+                                                     rcond=None)
+                    else:
+                        solved = np.linalg.solve(
+                            g + fraction * u * np.eye(n),
+                            weighted.T @ rhs
+                            + fraction * u * sub_prior[:, cols])
+                    answer[np.ix_(members, cols)] = solved
+            return answer
+        # Each cluster judges its own ladder, on its own band. A
+        # global score was tried twice and failed twice: linearly, a
+        # quiet fundamental's fivefold inflation cost nothing against a
+        # loud cluster's lines; and in log, the noise floor's vote came
+        # back. Locally, the mode being judged dominates the lines
+        # doing the judging, so a weak mode's sequential rung wins
+        # whenever the refit would only be chasing noise — and the
+        # never-worse guarantee holds cluster by cluster, in the score
+        # each cluster is chosen by. The other clusters stand as a
+        # fixed background at their prior residues while one is judged.
+        candidates = {fraction: solve_joint(fraction)
+                      for fraction in (0.0, 0.01, 0.05, 0.2)}
+        best_shapes: list[tuple[np.ndarray, bool] | None] = [None] * count
+
+        def adopted_forms(residues_flat, members):
+            """(shapes, rank-one adopted matrices) for these modes."""
+            shapes, adopted = [], []
+            for r in members:
+                matrix = residues_flat[r].reshape(responses, references)
+                u, _s, _vh = np.linalg.svd(matrix)
+                direction = u[:, 0]
+                shape, scaled = self._shape_from(direction,
+                                                 direction @ matrix)
+                shapes.append((shape, scaled))
+                adopted.append(np.outer(
+                    shape[:responses],
+                    [shape[self.coordinate.index(dof)]
+                     for dof in self.references]).ravel())
+            return shapes, adopted
+
+        for members in clusters:
+            if len(members) == 1:
+                # A cluster of one has nobody to borrow from, and
+                # refining it can only chase what is not the mode:
+                # noise, and the smooth tails of louder neighbors —
+                # a quiet fundamental under a loud cluster came back
+                # fourfold inflated from its own locally-judged refit,
+                # because absorbing the cluster's stiffness-line tail
+                # genuinely fits the measurement better. The sequential
+                # estimator's projection is the robust answer for a
+                # lone mode, and it stands.
+                mode = self.modes[members[0]]
+                best_shapes[members[0]] = (mode['shape'], mode['scaled'])
+                continue
+            lo = min(bands[r][0] for r in members)
+            hi = max(bands[r][1] for r in members)
+            lines = chosen[(chosen >= lo) & (chosen < hi)]
+            local_basis = np.stack(
+                [basis[np.isin(chosen, lines)][:, r]
+                 for r in range(count)], axis=1)
+            others = [r for r in range(count) if r not in members]
+            background = (local_basis[:, others]
+                          @ prior[others] if others else 0.0)
+            if self.weights is None:
+                trust = None
+                judged = self.matrix[lines]
+            else:
+                trust = np.sqrt(self.weights[lines])[:, :, None]
+                judged = self.matrix[lines] * trust
+            s_measured = np.linalg.svd(judged, compute_uv=False)[:, 0]
+            chosen_shapes, chosen_score = None, None
+            for fraction in (0.0, 0.01, 0.05, 0.2, None):
+                flat = prior if fraction is None else candidates[fraction]
+                shapes, adopted = adopted_forms(flat, members)
+                cluster_part = local_basis[:, members] @ np.stack(adopted)
+                synthesis = (background + cluster_part).reshape(
+                    len(lines), responses, references)
+                if trust is not None:
+                    synthesis = synthesis * trust
+                s_synthesis = np.linalg.svd(synthesis,
+                                            compute_uv=False)[:, 0]
+                score = float(np.linalg.norm(s_synthesis - s_measured))
+                if chosen_score is None or score < chosen_score:
+                    chosen_shapes, chosen_score = shapes, score
+            for r, pair in zip(members, chosen_shapes):
+                best_shapes[r] = pair
+
+        for mode, (shape, scaled) in zip(self.modes, best_shapes):
+            mode['shape'] = shape
+            mode['scaled'] = scaled
+        # the caches stamp on the mode *count*, which did not change —
+        # the shapes did, so the residual is stale and must be dropped
+        # by hand or the plot goes on drawing the unrefined world
+        self._residual = None
+        self._cmif = None
+        self.preview = None
+        return count
+
+    def residual_records(self) -> np.ndarray:
+        """The residual in the source FRF's record layout, (records,
+        lines). A plot of the residual draws this."""
+        row = {dof: k for k, dof in enumerate(self.responses)}
+        column = {dof: k for k, dof in enumerate(self.references)}
+        residual = self.residual_matrix()
+        return np.stack([
+            residual[:, row[self.frf.response_dof[i]],
+                     column[self.frf.reference_dof[i]]]
+            for i in self.rows])
+
+    def _search_band(self, index, widest):
+        """Lines to search over: three half-power widths of the widest
+        damping considered, at least five lines, clipped to the data.
+
+        Wider than the band a fit uses, because the search has to be
+        able to move the damping out to `widest` and still be looking
+        at the shoulders that would tell it to.
+        """
+        half_width = 3.0 * widest * self.frequencies[index]
+        df = (self.frequencies[1] - self.frequencies[0]
+              if len(self.frequencies) > 1 else 1.0)
+        lines = max(round(half_width / df), 2)
+        return slice(max(index - lines, 0),
+                     min(index + lines + 1, len(self.frequencies)))
+
+    def _residual_cost(self, index, widest):
+        """A function of (frequency, damping) saying what a mode there
+        would leave behind, and the cheapest possible one.
+
+        Everything that does not depend on the two parameters is worked
+        out once: the shape direction from the residual's first left
+        singular vector at the peak, and the residual projected onto it
+        over the band. What is left per candidate is one SDOF term over
+        a couple of dozen lines, a dot product for the residues, and a
+        norm — microseconds, where a full `_fit_mode` is six
+        milliseconds on the airplane's FRFs.
+
+        That is the whole reason a grid search is affordable here: only
+        the frequency and the damping are nonlinear. Given them, the
+        residues are a linear least squares, so the two-parameter
+        surface can be walked directly rather than handed to an
+        optimizer that would have to rediscover the same structure.
+        Returns a cost normalized by the projected residual's own size,
+        so 0 is a perfect mode and 1 is having explained nothing.
+        """
+        residual = self.residual_matrix()
+        u, _s, _vh = np.linalg.svd(residual[index])
+        direction = np.real(u[:, 0] * np.exp(
+            -0.5j * np.angle(np.sum(u[:, 0] ** 2))))
+        norm = np.linalg.norm(direction)
+        direction = direction / norm if norm else direction
+
+        band = self._search_band(index, widest)
+        omega = self.omega[band]
+        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        total = float(np.sum(np.abs(projected) ** 2)) or 1.0
+
+        def cost(frequency: float, damping: float) -> float:
+            omega_r = 2.0 * np.pi * frequency
+            with np.errstate(divide='ignore', invalid='ignore'):
+                q = ((1j * omega) ** self.power
+                     / (omega_r ** 2 - omega ** 2
+                        + 2j * damping * omega_r * omega))
+            if not np.all(np.isfinite(q)):
+                return 1.0
+            weight = float(np.sum(np.abs(q) ** 2))
+            if weight <= 0.0:
+                return 1.0
+            residues = np.real(np.conj(q) @ projected) / weight
+            left = projected - q[:, None] * residues[None, :]
+            return float(np.sum(np.abs(left) ** 2)) / total
+
+        return cost
+
+    @staticmethod
+    def _vertex(low, middle, high):
+        """Where three costs put the minimum, as a fraction of a step.
+
+        Zero when they do not bracket one — a flat or rising triple has
+        no vertex to find, and pretending otherwise is how interpolation
+        invents an answer.
+        """
+        curvature = low - 2.0 * middle + high
+        if curvature <= 0.0:
+            return 0.0
+        return float(np.clip(0.5 * (low - high) / curvature, -0.5, 0.5))
+
+    def search_damping(self, frequency: float, seed: float | None = None,
+                       refine: int = 4, steps: int = 5) -> float:
+        """The damping that leaves the least residual at `frequency`,
+        with the frequency held.
+
+        This is the one-dimensional form of `search`, for a cursor being
+        dragged: the user sets the frequency by hand, so only the damping
+        is searched. `seed` is where the search starts (the half-power
+        estimate when None or zero). Each of the `refine` passes tries
+        `steps` dampings across the current span, starting at the seed
+        plus or minus the seed, and fits a parabola through the best
+        and its neighbors; each pass then narrows the span to a fifth.
+        The result is clipped to 1e-4 to 0.5.
+
+        It is cheap enough to run on every mouse move: the residual is
+        cached against the confirmed modes, so a call costs one small
+        SVD at the cursor line and a few dozen SDOF evaluations.
+        """
+        index = int(np.argmin(np.abs(self.frequencies - frequency)))
+        seed = float(seed) if seed else self._half_power(
+            self._residual_cmif(), index)
+        seed = float(np.clip(seed, 1e-4, 0.5))
+        cost = self._residual_cost(index, min(seed * 4.0, 0.5))
+        best, span = seed, seed
+        for _pass in range(max(int(refine), 1)):
+            candidates = np.clip(best + np.linspace(-span, span, steps),
+                                 1e-4, 0.5)
+            costs = [cost(frequency, z) for z in candidates]
+            j = int(np.argmin(costs))
+            offset = (self._vertex(costs[j - 1], costs[j], costs[j + 1])
+                      if 0 < j < steps - 1 else 0.0)
+            step = candidates[1] - candidates[0]
+            best = float(np.clip(candidates[j] + offset * step, 1e-4, 0.5))
+            span /= 5.0
+        return best
+
+    def search(self, index: int, damping: float | None = None,
+               refine: int = 4, steps: int = 5) -> tuple[float, float]:
+        """The (frequency, damping) near line `index` that leave the least
+        residual.
+
+        The search runs coarse to fine. The first pass is a `steps` by
+        `steps` grid over half a line either side in frequency and the
+        seed plus or minus the seed in damping; each later pass repeats
+        the grid around the best point at a fifth of the span, `refine`
+        passes in all. Each pass ends with a parabola through the best
+        point and its neighbors in each direction. A pass whose best
+        frequency is on the edge of its grid moves the grid and looks
+        again (up to eight times) instead of narrowing, as long as the
+        best frequency stays within 1.5 lines of the starting line and
+        short of every confirmed mode's half-power width. A start inside
+        a confirmed mode's half-power width does not move the grid at
+        all. The damping is clipped to 1e-4 to 0.5.
+
+        This is used in place of reading the damping from two
+        half-power crossings. Those are two points on a curve and assume
+        the peak is one isolated mode; where two modes are close, the
+        width they measure is the pair's, and the damping comes out too
+        high with nothing to show it. A residual minimum does not assume
+        either.
+
+        `damping` seeds the span when the user has typed one; otherwise
+        the half-power estimate seeds it, which is a good enough start
+        even where it is a poor answer.
+        """
+        # Four passes (2026-10-11): the cost is not quite a parabola at a
+        # pass's spacing, so the vertex lands a little off the minimum,
+        # and two passes read the damping of exact data 0.46 % high in
+        # every case tried. Each pass reduces that about twenty-five
+        # times (three left 0.02 %, four 0.001 %) for under a millisecond
+        # more per search, against a residual whose SVD costs far more.
+        line = float(self.frequencies[index])
+        df = float(self.frequencies[1] - self.frequencies[0]
+                   if len(self.frequencies) > 1 else 1.0)
+        seed = (float(damping) if damping
+                else self._half_power(self._residual_cmif(), index))
+        seed = float(np.clip(seed, 1e-4, 0.5))
+        widest = min(seed * 4.0, 0.5)
+        cost = self._residual_cost(index, widest)
+
+        best = (line, seed)
+        span_f, span_z = 0.5 * df, seed
+        # The frequency may walk; the damping may not, and the leash on
+        # each is a measured decision (2026-08-28). The fixed schedule
+        # used to stop *on* its frequency edge when the minimum lay
+        # just outside and answer the edge as though converged — on the
+        # plate's own recording the 823 Hz mode came back 0.29 Hz low
+        # from an unpadded FRF and right from a padded one, which is a
+        # grid artifact in an estimator that should not have one. So a
+        # pass whose winner sits on the frequency edge re-centers and
+        # looks again rather than shrinking around a point that only
+        # won by being nearest the door. Bounded twice: never further
+        # than `farthest` from the picked line (a search that can
+        # wander past the next line can slide onto a neighboring
+        # mode), and never into a confirmed mode's own half-power span
+        # — the rule `suggest` already speaks about its motion, spoken
+        # here about this one, because a cluster's imperfect
+        # subtraction leaves ridge enough to walk home on and stack a
+        # second pole over the first.
+        #
+        # The damping axis is different: in a cluster a fatter mode
+        # always explains more of the band, so a walking damping
+        # inflated fits into blends that swallowed their neighbors —
+        # measured, not feared: the four-mode cluster in
+        # test_a_confirmed_peak_is_not_offered_again came back as one
+        # z=0.027 blend the moment damping could roam.
+        farthest = 1.5 * df
+        for mode in self.modes:
+            width = self._claim(mode)
+            edge_low = mode['frequency'] - width
+            edge_high = mode['frequency'] + width
+            if line < edge_low:
+                farthest = min(farthest, edge_low - line)
+            elif line > edge_high:
+                farthest = min(farthest, line - edge_high)
+            else:
+                # starting inside a claim: a line `suggest` offers only
+                # when the ridge's shape belongs to a mode not yet
+                # confirmed. A delicate cluster case — no roaming.
+                farthest = 0.0
+        passes = max(int(refine), 1)
+        completed = 0
+        walked = 0
+        while completed < passes:
+            frequencies = best[0] + np.linspace(-span_f, span_f, steps)
+            dampings = np.clip(best[1] + np.linspace(-span_z, span_z, steps),
+                               1e-4, 0.5)
+            grid = [[cost(f, z) for z in dampings] for f in frequencies]
+            i, j = np.unravel_index(int(np.argmin(grid)), (steps, steps))
+            # a parabola through the winner and its neighbors, in each
+            # direction independently — the surface is separable enough
+            # near its minimum for that, and it costs nothing
+            step_f = frequencies[1] - frequencies[0]
+            step_z = dampings[1] - dampings[0]
+            offset_f = (self._vertex(grid[i - 1][j], grid[i][j],
+                                     grid[i + 1][j])
+                        if 0 < i < steps - 1 else 0.0)
+            offset_z = (self._vertex(grid[i][j - 1], grid[i][j],
+                                     grid[i][j + 1])
+                        if 0 < j < steps - 1 else 0.0)
+            best = (float(frequencies[i] + offset_f * step_f),
+                    float(np.clip(dampings[j] + offset_z * step_z,
+                                  1e-4, 0.5)))
+            if (i in (0, steps - 1) and walked < 8
+                    and abs(best[0] - line) < farthest):
+                walked += 1
+                continue
+            span_f, span_z = span_f / 5.0, span_z / 5.0
+            completed += 1
+        return best
+
+    def _band(self, index):
+        """Frequency lines around a peak worth fitting over: three
+        half-power widths, at least five lines, clipped to the data."""
+        s1 = self._residual_cmif()
+        zeta = self._half_power(s1, index)
+        half_width = 3.0 * zeta * self.frequencies[index]
+        df = (self.frequencies[1] - self.frequencies[0]
+              if len(self.frequencies) > 1 else 1.0)
+        lines = max(round(half_width / df), 2)
+        return slice(max(index - lines, 0),
+                     min(index + lines + 1, len(self.frequencies)))
+
+    # ---- what the fit is ----------------------------------------------------
+
+    def shape_set(self) -> ShapeSet:
+        """The confirmed modes as a ShapeSet, ready for the project.
+
+        The mass unit is kg when every fit record has a defined
+        dimension, and None otherwise, since shapes fitted to raw values
+        are raw. The set is marked unscaled when any mode had no drive
+        point to set its scale.
+        """
+        from .shapes import ShapeSet
+
+        # defined, not merely hinted: known_dim falls back to the file's
+        # claim, and a hint scales nothing — shapes fitted to raw values
+        # are raw, whatever the file said they measured
+        known = all(self.frf.ordinate_dim[i] != UNKNOWN for i in self.rows)
+        return ShapeSet(
+            frequency=[mode['frequency'] for mode in self.modes],
+            damping=[mode['damping'] for mode in self.modes],
+            coordinate=self.coordinate,
+            shape_matrix=np.array([mode['shape'] for mode in self.modes]),
+            description=[mode['description'] for mode in self.modes],
+            mass_unit='kg' if known else None,
+            unscaled=any(not mode.get('scaled', True)
+                         for mode in self.modes))

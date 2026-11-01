@@ -1,0 +1,4818 @@
+"""Beams, plates and solids, and the eigensolution they give.
+
+Visual Dynamics is an analysis toolset, and this module is the smallest
+modeling capability that produces something worth analyzing. It has
+three-dimensional two-node beams; flat-shell plates, as four-node
+rectangles (MITC4) and three-node triangles (MITC3); solids, as
+eight-node hexahedra with incompatible modes, six-node wedges and
+four-node tetrahedra; and lumped masses, discrete springs, rigid links
+and grounds. These are assembled into mass and stiffness matrices and
+solved for real normal modes, dense for a small model and sparse past
+`SPARSE_ABOVE` degrees of freedom. A demonstration needs a reference
+model, an analytical answer the measured one can be compared against,
+and building one should not require another package.
+
+There are three ways to build a model. The first is member by member,
+as the example below does. The second is to give a geometry's element
+groups their properties (`GroupProperties`): a material and a thickness
+for an element group of plates, a material and a section for one of
+beams, a material alone for one of solids, a mass for point masses, a
+stiffness for springs and the directions held for ground.
+`from_geometry` then builds every element as the element it is, which
+is how an Exodus file describes a structure and how a model of a simple
+test article is built in the app. The third is to draw a shape as a
+surface mesh and let `from_geometry`, given one material and one
+section, put a beam along every edge of it. That is the shortest route
+from any geometry to a set of modes, and it is how
+`hertzforge.demo.drone` is built.
+
+This is not a general finite element code. The quad plate is
+rectangular only: a skewed or warped quad is refused rather than solved
+badly, because the MITC4 tying assumes the element's natural axes run
+along its sides (`Plate`). The triangle takes any flat shape. Every
+shell is flat, so a curved surface is a faceted one. A solid carries
+three translations per node and no rotations, and the linear wedge and
+tetrahedron lock in bending where the brick does not (`Solid`). The
+constraints are held degrees of freedom (`fixed`, `add_ground`) and
+rigid links, which the eigensolution eliminates exactly instead of
+approximating them with a stiff member (`constraint_transform`). There
+is no general multipoint constraint and no static solution; modes are
+the only result. Wiring a surface mesh's edges with `from_geometry`
+makes a grillage of beams, not plates. That is a modeling choice with a
+known cost, not an approximation hidden inside an element: it shows the
+order of mode density and the mode families a shape has, and it is not
+shell theory.
+
+Everything here is SI, because the mass and stiffness matrices are the
+one place in Visual Dynamics where several dimensions have to be
+consistent with each other at once. A length in millimeters beside a
+modulus in pascals is not wrong in any single entry; it is wrong only in
+the answer. The objects that come out (`Geometry`, `ShapeSet`) carry
+their units, so the conversion happens once, at the boundary, as it
+does everywhere else.
+
+    from hertzforge import fem
+
+    aluminum = fem.Material('aluminum', youngs_modulus=70e9, density=2700)
+    tube = fem.Section.round_tube('16 mm tube', outer=0.016, wall=0.001)
+
+    model = fem.Model('cantilever')
+    for i in range(11):
+        model.add_node(100 + i, i * 0.1, 0.0, 0.0)
+    model.add_chain(range(100, 111), aluminum, tube)
+    shapes = model.eigensolution(maximum_frequency=2000,
+                                 fixed=['100'], damping=0.01)
+
+The beam is Euler-Bernoulli with a consistent mass matrix: no shear
+flexibility and no section rotary inertia. That is accurate while a
+member is slender (length more than about ten times its depth), and
+the frequencies come out increasingly high when it is not. A drone arm
+180 mm long and 16 mm deep is well inside that limit; a short, deep
+mounting stub is not, and its frequencies read high.
+
+References
+----------
+The Euler-Bernoulli beam element and its consistent mass matrix are
+textbook, and so is the eigenproblem; the first three are where they are
+set out. The plate and brick formulations each come from a paper, the
+last four.
+
+1. Przemieniecki, J. S. (1968). *Theory of Matrix Structural
+   Analysis*. McGraw-Hill.
+2. Cook, R. D., Malkus, D. S., Plesha, M. E., & Witt, R. J. (2002).
+   *Concepts and Applications of Finite Element Analysis*, 4th ed.
+   Wiley. The cubic Hermite shape functions the consistent mass
+   follows from, and why consistent rather than lumped changes the
+   frequencies returned.
+3. Craig, R. R., & Kurdila, A. J. (2006). *Fundamentals of Structural
+   Dynamics*, 2nd ed. Wiley. The generalized symmetric eigenproblem
+   this solves, and normalization to unit modal mass.
+4. Dvorkin, E. N., & Bathe, K.-J. (1984). A continuum mechanics based
+   four-node shell element for general non-linear analysis.
+   *Engineering Computations*. The MITC4 assumed transverse shear,
+   tied at the edge midpoints.
+5. Lee, P.-S., & Bathe, K.-J. (2004). Development of MITC isotropic
+   triangular shell finite elements. *Computers & Structures*. The
+   MITC3 triangle, tied along its edges.
+6. Wilson, E. L., Taylor, R. L., Doherty, W. P., & Ghaboussi, J.
+   (1973). Incompatible displacement models. In *Numerical and
+   Computer Methods in Structural Mechanics*. Academic Press.
+   The bubble modes that let a trilinear brick bend.
+7. Taylor, R. L., Beresford, P. J., & Wilson, E. L. (1976). A
+   non-conforming element for stress analysis. *International Journal
+   for Numerical Methods in Engineering*. Those
+   modes' strains from the centroid's Jacobian, so a distorted brick
+   still passes the patch test.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import math
+import os
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
+from itertools import pairwise
+from typing import Any
+
+import numpy as np
+
+from .data import direction_code
+from .geometry import ELEMENT_TYPES, Geometry
+from .progress import Ticker
+from .shapes import ShapeSet
+
+#: The six degrees of freedom every node carries, in order. A beam
+#: transmits moments, so rotations are structural here rather than a
+#: bookkeeping convenience — leaving them out would model pin joints.
+DIRECTIONS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
+#: the six global directions by name, unsigned: what a ground holds
+AXES = ('X', 'Y', 'Z', 'RX', 'RY', 'RZ')
+
+
+def ground_axes(directions: Any) -> tuple[str, ...]:
+    """A ground's directions as `AXES` names, in their order.
+
+    True means all six, and False, None or an empty value means none.
+    Otherwise the names are given as a sequence, or as one string separated
+    by spaces or commas ('X', 'RY'); sign and case make no difference, so
+    'x+' is 'X'. A name that is not a direction raises ValueError.
+    """
+    if directions is True:
+        return AXES
+    if not directions:
+        return ()
+    if isinstance(directions, str):
+        directions = directions.replace(',', ' ').split()
+    wanted = set()
+    for name in directions:
+        axis = str(name).strip().upper().rstrip('+-')
+        if axis not in AXES:
+            raise ValueError(f'{name!r} is not a direction to hold: '
+                             + ', '.join(AXES))
+        wanted.add(axis)
+    return tuple(axis for axis in AXES if axis in wanted)
+
+#: When a mode's strain energy is called zero, so its frequency is set to
+#: zero exactly rather than left at the 1e-4 Hz round-off gives it.
+#: Downstream code distinguishes a rigid mode by `frequency == 0` — the FRF
+#: synthesis cancels its 0/0 that way — so 'very small' would arrive as a
+#: resonance a hair above DC instead.
+#:
+#: The measure is how much cancellation happened: phi^T K phi against the
+#: same sum with every sign removed. A motion that strains nothing is a
+#: total cancellation of large terms and lands at 1e-16; a real mode, even
+#: the softest one a fine mesh has, keeps a part in a million of what it
+#: adds up. Six orders of margin either side, and no knowledge of how stiff
+#: the structure is.
+#:
+#: Over the whole structure that holds only when every element takes part.
+#: A board on four soft springs bounces at 1.66 Hz straining nothing but
+#: the springs, and their energy was 5e-13 of the board's sum: called
+#: rigid, read as 0 Hz (2026-10-26, a student's deck). So the same ratio
+#: is asked of each element too (`Model._strains_no_element`,
+#: `ZERO_ELEMENT_ENERGY`).
+#:
+#: Projecting onto the analytically known rigid-body vectors was tried
+#: first and is wrong: a cantilever's first bending mode is 99.04% rigid
+#: translation in the mass metric, because that is what a cantilever mode
+#: looks like. Being *shaped* like a rigid motion and *being* one are
+#: different questions, and only the energy asks the second.
+ZERO_ENERGY = 1e-12
+
+#: How much of a mode's size an element may strain and the mode still be
+#: rigid: each element's energy against what it would hold moved by the
+#: mode's largest translation and rotation (`Model._strains_no_element`).
+#: Measured 2026-10-26: rigid modes 1e-17 in every element of plates
+#: regular and distorted, bricks, beams and the student's board without
+#: its springs, and up to 3e-6 where a suspension mode close to zero
+#: leaves its trace in them; the board's bounce on its springs 0.2. Not
+#: the element's own motion as the measure: a spring grounded at one end
+#: cancels nothing, so that trace read as 1.0, a full stretch.
+ZERO_ELEMENT_ENERGY = 1e-3
+
+#: past this many degrees of freedom `Model.eigensolution` solves sparse
+#: rather than dense: the dense solve of a 662-node plate model (3972
+#: DOF) already took ten seconds and 2.2 GB, peaking near ten times its
+#: two matrices (2026-09-26)
+SPARSE_ABOVE = 3000
+
+#: the element type a solid is written back as, by its node count
+#: (`Model.geometry`): hex8, wedge6, tet4, tet10 in `ELEMENT_TYPES`
+SOLID_CODES = {8: 115, 6: 112, 4: 111, 10: 118}
+
+#: the sparse solver polishes what Lanczos hands it until every mode
+#: asked for has a relative residual below this (`polish_modes`), or a
+#: step stops helping, or `POLISH_STEPS` have been spent. The residual
+#: floors where the conditioning says it must — the rigid-link test
+#: model, scaled to a condition number of 4e9, floors at 3e-7 on this
+#: machine's builds — so the polish stops at the floor rather than
+#: spending its steps there, and the threshold is what a clean start
+#: passes on the way down. A runner's build once handed it a start it
+#: did not clean in the three steps that used to be fixed (2026-09-30,
+#: Python 3.12 on GitHub: the twelfth mode of that model, 1.45 % from
+#: its neighbor, came back with a MAC of 1 - 2.6e-8 against the dense
+#: solver's, while every build here gave 1 - 1e-14; a start corrupted
+#: by a part in a thousand reproduces it, 3e-4 after three steps and the
+#: floor after eight). A residual is measured; a step count is hoped for.
+POLISH_RESIDUAL = 1e-8
+POLISH_STEPS = 12
+#: modes asked of Lanczos beyond the ones wanted. Block inverse
+#: iteration cleans a wanted mode of the modes *outside* its block at
+#: the rate (lambda_k - sigma) / (lambda_outside - sigma) per step, so
+#: the highest wanted mode, whose nearest outside neighbor may be a
+#: percent away, would barely move without a band of unwanted modes
+#: above it to widen that gap. Eight is cheap: Lanczos computes them
+#: nearly for free and the polish is a few extra solves.
+#: the eigen stage's length on the bar is an estimate — shift-invert
+#: Lanczos solves with the factor a few times per mode it is asked
+#: for — and the bar is kept short of full until the stage ends
+#: (`Ticker.extend_to`)
+EIGEN_SOLVES_PER_MODE = 6
+LANCZOS_GUARD = 8
+#: which eigensolver the sparse solve runs on the shift-inverted
+#: operator: 'block', the block Lanczos written here
+#: (`block_lanczos_modes`), or 'arpack', scipy's `eigsh`. The block
+#: solver hands a model it does not converge to ARPACK itself, with a
+#: warning that says so; the setting is for tests, which run both.
+SPARSE_EIGENSOLVER = 'block'
+#: the block Lanczos' block width, in vectors. Its solves are blocks,
+#: and a block solve costs far less a column than a single one does
+#: (Accelerate, Frame-Wing: 37 ms for one column, 8 ms a column for
+#: twelve, 6 ms for forty-eight), while the Krylov dimension it needs
+#: to converge grows only slowly with the width (120 vectors at 8, 144
+#: at 12, 176 at 16, 288 at 32, for 32 modes of the same model); the
+#: product is flat from 8 to 16 and twelve is taken. The width must
+#: cover the multiplicity of a repeated eigenvalue, the six rigid modes
+#: of a free-free model above all, and a model asked for fewer modes
+#: than this still gets a block this wide.
+LANCZOS_BLOCK = 12
+#: the block Lanczos stops when every mode asked for has a residual of
+#: the shift-inverted operator, |A x - theta x|_M / theta, below this,
+#: or when a step no longer halves the worst once it is under a
+#: hundred times this. The polish then measures the modes against K
+#: and M themselves and finishes them, and it is the polish that sets
+#: the accuracy: the factor's solves carry the condition number's
+#: share of round-off, and the Lanczos vectors converge to the
+#: operator those solves make, whose modes mix neighbors a part in a
+#: hundred by the stiffness's own measure however far the iteration
+#: runs (Frame-Wing: 1e-2 at 1e-4 and at 1e-15 alike). The polish took
+#: two steps to the same floor from either, so the iteration stops
+#: where it stops helping.
+LANCZOS_RESIDUAL = 1e-6
+#: the Krylov basis the block Lanczos may grow to, as a multiple of the
+#: modes asked for (never over the model's size); a model not converged
+#: by then goes to ARPACK. The Frame-Wing's 32 modes took 120 vectors.
+LANCZOS_BASIS = 20
+#: once the basis holds the modes asked for, the block Lanczos checks
+#: them only each time the basis has grown by this fraction since the
+#: last check, not after every block. A check is a dense eigensolve of
+#: the whole projected matrix; the basis grows to about twice the
+#: modes before they converge, so checking after every block did forty
+#: of them for 400 modes (2026-10-29), and growing by a twentieth
+#: between checks costs at most a twentieth more basis than needed.
+LANCZOS_CHECK_GROWTH = 0.05
+#: the logical CPUs per BLAS thread the sparse eigensolution allows each
+#: OpenBLAS pool (`blas_threads`), and the most threads it gives one.
+#: numpy and scipy load one pool each, a thread per logical CPU, and
+#: the solver alternates between them on every step; an idle OpenBLAS
+#: thread spins before it sleeps, so the two pools together are
+#: twice the machine. Measured on the 10,086-DOF plate for 200 modes
+#: (2026-10-29): on 20 logical CPUs 1.7 s at four or six threads a
+#: pool, 2.8 s at ten, 9.0 s at twelve and 19.6 s at the default
+#: twenty; on four-CPU Linux and three-CPU Apple silicon runners 2.8
+#: and 3.0 s at one or two against 10.1 and 10.2 s at the default.
+#: Windows' OpenBLAS showed no contention and is unaffected either way,
+#: and Accelerate, which macOS 14 and later's wheels use, is not an
+#: OpenBLAS pool and is left alone.
+BLAS_CPUS_PER_THREAD = 4
+BLAS_MOST_THREADS = 8
+#: a search up to a frequency that falls short asks next for the modes
+#: `predicted_count` expects below it, times this. A count short of the
+#: frequency costs another whole Lanczos run, a count past it only the
+#: extra modes, so the margin errs high.
+SEARCH_MARGIN = 1.15
+
+
+#: how many elements of one family are rotated and scattered at once:
+#: enough that the per-chunk cost vanishes, few enough that a fine mesh's
+#: (E, 24, 24) arrays stay in the tens of megabytes
+ASSEMBLY_CHUNK = 4096
+
+
+@dataclass(frozen=True)
+class Material:
+    """An isotropic elastic material.
+
+    The modulus is in Pa and the density in kg/m^3. The shear modulus is
+    derived from the modulus and Poisson's ratio unless
+    `modulus_of_rigidity` is given. For carbon fiber laminates the
+    isotropic relation is a poor estimate, and the torsional stiffness it
+    implies can be off by a factor of two, so it can be stated directly.
+    """
+
+    name: str
+    youngs_modulus: float          #: Pa
+    density: float                 #: kg/m^3
+    poissons_ratio: float = 0.3
+    modulus_of_rigidity: float | None = None    #: Pa, derived when None
+
+    @property
+    def is_rigid(self) -> bool:
+        """Whether this is `RIGID`, the material that makes rigid links. A
+        modulus left blank in the Element Groups table (None) is a material not
+        yet finished, not a link.
+        """
+        return (self.youngs_modulus is not None
+                and math.isinf(self.youngs_modulus))
+
+    @property
+    def shear_modulus(self) -> float:
+        if self.modulus_of_rigidity is not None:
+            return float(self.modulus_of_rigidity)
+        return self.youngs_modulus / (2.0 * (1.0 + self.poissons_ratio))
+
+
+#: US handbooks state a modulus in psi and a density in lb/in^3, and the
+#: library keeps their numbers rather than a rounding of a conversion —
+#: the same choice the demonstration plate made for its 6061-T6
+PSI = 6894.757293168361                   #: Pa
+LB_PER_IN3 = 27679.90471020312            #: kg/m^3
+
+
+@dataclass(frozen=True)
+class LibraryMaterial:
+    """A material the library offers, with where its numbers came from.
+
+    The note names the kind of source and what the values are typical of.
+    A handbook's typical modulus and density are what a modal solution
+    needs, and they are not what a particular heat of a particular alloy
+    measures, so a person with the part's certification in hand types
+    those numbers over the library's.
+    """
+
+    material: Material
+    note: str
+
+
+def _handbook(name, modulus_msi, density_lb_in3, poissons_ratio, note):
+    return LibraryMaterial(
+        Material(name, youngs_modulus=modulus_msi * 1e6 * PSI,
+                 density=density_lb_in3 * LB_PER_IN3,
+                 poissons_ratio=poissons_ratio), note)
+
+
+_METALS = 'typical room-temperature handbook values for the wrought alloy'
+_PLASTIC = ('typical room-temperature values; a plastic varies by grade '
+            'and supplier more than a metal does')
+
+#: The materials the Element Groups table offers and `material()` answers to:
+#: common structural alloys and a few plastics, each as the handbooks
+#: state it. Typical values, to be checked against the part's own
+#: certification when it matters; every entry says so in its note.
+MATERIAL_LIBRARY: tuple[LibraryMaterial, ...] = (
+    _handbook('6061-T6', 10.0, 0.098, 0.33, _METALS + ' (aluminum)'),
+    _handbook('7075-T6', 10.4, 0.101, 0.33, _METALS + ' (aluminum)'),
+    _handbook('2024-T3', 10.6, 0.100, 0.33, _METALS + ' (aluminum)'),
+    _handbook('1018 steel', 29.0, 0.284, 0.29, _METALS + ' (carbon steel)'),
+    _handbook('A36 steel', 29.0, 0.284, 0.26, _METALS + ' (carbon steel)'),
+    _handbook('4130 steel', 29.7, 0.283, 0.29, _METALS + ' (alloy steel)'),
+    _handbook('304 stainless', 28.0, 0.289, 0.29, _METALS + ' (austenitic)'),
+    _handbook('316 stainless', 28.0, 0.289, 0.27, _METALS + ' (austenitic)'),
+    _handbook('17-4 PH stainless', 28.5, 0.282, 0.27,
+              _METALS + ' (precipitation hardening, H900)'),
+    _handbook('Ti-6Al-4V', 16.5, 0.160, 0.342, _METALS + ' (titanium)'),
+    _handbook('AZ31B magnesium', 6.5, 0.0639, 0.35, _METALS + ' (magnesium)'),
+    _handbook('C26000 brass', 16.0, 0.308, 0.375, _METALS + ' (cartridge brass)'),
+    _handbook('C11000 copper', 17.0, 0.323, 0.33, _METALS + ' (ETP copper)'),
+    _handbook('Inconel 718', 29.0, 0.296, 0.29, _METALS + ' (nickel superalloy)'),
+    _handbook('acrylic (PMMA)', 0.45, 0.0426, 0.37, _PLASTIC),
+    _handbook('polycarbonate', 0.35, 0.0433, 0.37, _PLASTIC),
+    _handbook('ABS', 0.33, 0.038, 0.35, _PLASTIC),
+    _handbook('nylon 6/6', 0.41, 0.0412, 0.39, _PLASTIC),
+)
+
+#: An element group of two-node lines made of this is a set of rigid, massless
+#: links (Brandon, 2026-09-26): each joins two nodes so that one moves as
+#: the other plus its rotation about it, and adds no mass. What a bolt
+#: joining two plates whose mid-surfaces do not meet is, in a model built
+#: from planes. Not a material with a very large modulus — that makes the
+#: stiffness matrix ill-conditioned and the higher modes wrong — but an
+#: exact constraint the eigensolution eliminates (`Model.add_rigid_link`).
+RIGID = Material('rigid (massless)', youngs_modulus=math.inf, density=0.0,
+                 poissons_ratio=0.0)
+
+#: the library by name, for a lookup — and the rigid link, which is not a
+#: handbook material but is picked where one is
+MATERIALS: dict[str, Material] = {entry.material.name: entry.material
+                                  for entry in MATERIAL_LIBRARY}
+MATERIALS[RIGID.name] = RIGID
+
+
+def material(name: str) -> Material:
+    """A library material by name, such as `material('6061-T6')`: the same
+    entry the Element Groups table's Material drop-down fills a row from.
+    The rigid link, `RIGID`, is found by its name too.
+
+    A name not in the library raises `KeyError` with the library's names
+    listed, so a typo can be seen as one.
+    """
+    try:
+        return MATERIALS[name]
+    except KeyError:
+        raise KeyError(f'{name!r} is not in the material library; it '
+                       f'has {", ".join(MATERIALS)}') from None
+
+
+@dataclass(frozen=True)
+class Section:
+    """A beam cross section, as the four numbers the element needs.
+
+    `iy` and `iz` are second moments of area about the element's own local
+    y and z axes, and `j` is the St Venant torsion constant, which equals
+    the polar second moment only for a circular section. For any other
+    section it is smaller, and using the polar value overstates the
+    torsional stiffness; the constructors below use the correct formula for
+    the shapes they build. Areas are in m^2 and the moments in m^4.
+
+    A section built from one of the shapes (`SHAPES`) remembers it: `shape`
+    and its `dimensions` in meters, in the order the constructor takes
+    them, so a table can show the dimensions and a file or a session script
+    can rebuild the section from them. One rule sets which way a shape
+    faces: its width or flanges run along local y and its depth or height
+    along local z, so the orientation vector (which names local y) points
+    across the flanges, and `iy` is the strong-axis bending of an I-beam or
+    a channel. An angle is the exception, because its leg axes are not
+    principal and the element has no product term. Its `iy` and `iz` are
+    its principal moments, and the orientation vector points along the
+    major principal axis (`angle_major_axis` gives where that is relative
+    to the legs).
+
+    The element assumes the shear center is at the centroid. For the
+    symmetric shapes it is; for a channel and an angle it is not, and the
+    twisting that a load through their centroid causes is not in the model.
+
+    `polar` is the inertia term, always the true polar second moment
+    (iy + iz), because rotary inertia about the axis depends only on where
+    the material is and has nothing to do with warping.
+    """
+
+    name: str
+    area: float                    #: m^2
+    iy: float                      #: m^4, bending about local y
+    iz: float                      #: m^4, bending about local z
+    j: float                       #: m^4, St Venant torsion constant
+    shape: str = ''                #: one of `SHAPES`, '' for four numbers
+    dimensions: tuple[float, ...] = ()   #: m, in the constructor's order
+
+    @property
+    def polar(self) -> float:
+        return self.iy + self.iz
+
+    @classmethod
+    def of_shape(cls, name: str, shape: str,
+                 dimensions: Sequence[float]) -> Section:
+        """The section of a named shape (`SHAPES`), given its dimensions
+        in meters in the order the shape's constructor takes them.
+
+        A shape not in `SHAPES`, the wrong number of dimensions, or dimensions
+        the constructor refuses raise ValueError.
+
+        Parameters
+        ----------
+        name : str
+            What to call the section.
+        shape : str
+            A key of `SHAPES`.
+        dimensions : sequence of float
+            The shape's dimensions, in meters.
+
+        Returns
+        -------
+        Section
+        """
+        if shape not in SHAPES:
+            raise ValueError(f'{shape!r} is not a section shape: '
+                             + ', '.join(SHAPES))
+        method, names = SHAPES[shape]
+        if len(dimensions) != len(names):
+            raise ValueError(f'{with_article(shape)} takes {len(names)} '
+                             'dimensions — ' + ', '.join(names))
+        return getattr(cls, method)(name, *(float(v) for v in dimensions))
+
+    @classmethod
+    def round_tube(cls, name: str, outer: float, wall: float) -> Section:
+        """A circular tube, given its outside diameter and wall thickness."""
+        ro, ri = outer / 2.0, outer / 2.0 - wall
+        if ri < 0 or wall <= 0 or outer <= 0:
+            raise ValueError(f'{name}: a round tube needs a wall between 0 '
+                             'and the radius')
+        area = math.pi * (ro ** 2 - ri ** 2)
+        i = math.pi * (ro ** 4 - ri ** 4) / 4.0
+        # a closed circular section is the one case where torsion is the
+        # polar moment exactly: it does not warp
+        return cls(name, area, i, i, 2.0 * i, 'round tube',
+                   (float(outer), float(wall)))
+
+    @classmethod
+    def rod(cls, name: str, diameter: float) -> Section:
+        """A solid circular rod."""
+        section = cls.round_tube(name, diameter, diameter / 2.0)
+        return cls(name, section.area, section.iy, section.iz, section.j,
+                   'rod', (float(diameter),))
+
+    @classmethod
+    def rectangle(cls, name: str, width: float, height: float) -> Section:
+        """A solid rectangle, `width` along local y and `height` along z."""
+        if width <= 0 or height <= 0:
+            raise ValueError(f'{name}: a rectangle needs a width and a height')
+        area = width * height
+        iz = width ** 3 * height / 12.0     # bending in the local x-y plane
+        iy = width * height ** 3 / 12.0     # bending in the local x-z plane
+        long, short = max(width, height), min(width, height)
+        # St Venant's constant for a solid rectangle, from the exact series
+        # solution of the Prandtl stress function (Timoshenko & Goodier,
+        # Theory of Elasticity, sec. 109). The odd terms fall as n^-5, so a
+        # hundred of them leave under a part in 1e10. This replaced Roark's
+        # closed approximation (2026-09-23), which had been described as
+        # good to 0.1% and is 0.45% off at an aspect ratio of 1.2.
+        tail = sum(math.tanh(n * math.pi * long / (2.0 * short)) / n ** 5
+                   for n in range(1, 200, 2))
+        j = long * short ** 3 / 3.0 * (
+            1.0 - 192.0 / math.pi ** 5 * (short / long) * tail)
+        return cls(name, area, iy, iz, j, 'rectangle',
+                   (float(width), float(height)))
+
+    @classmethod
+    def rectangular_tube(cls, name: str, width: float, height: float,
+                         wall: float) -> Section:
+        """A rectangular tube of one wall thickness, `width` along local y
+        and `height` along z, both outside dimensions."""
+        inner_w, inner_h = width - 2.0 * wall, height - 2.0 * wall
+        if wall <= 0 or inner_w <= 0 or inner_h <= 0:
+            raise ValueError(f'{name}: wall {wall} closes the section')
+        area = width * height - inner_w * inner_h
+        iy = (width * height ** 3 - inner_w * inner_h ** 3) / 12.0
+        iz = (width ** 3 * height - inner_w ** 3 * inner_h) / 12.0
+        # Bredt's thin-wall formula, J = 4 A_m^2 t / s: A_m the area inside
+        # the wall's centreline, s that centreline's length
+        mean_w, mean_h = width - wall, height - wall
+        j = 4.0 * (mean_w * mean_h) ** 2 * wall / (2.0 * (mean_w + mean_h))
+        return cls(name, area, iy, iz, j, 'rectangular tube',
+                   (float(width), float(height), float(wall)))
+
+    @classmethod
+    def square_tube(cls, name: str, width: float, wall: float) -> Section:
+        """A square tube, given its outside width and wall thickness: a
+        rectangular tube with equal sides.
+        """
+        return cls.rectangular_tube(name, width, width, wall)
+
+    @classmethod
+    def i_beam(cls, name: str, depth: float, flange_width: float,
+               flange_thickness: float, web_thickness: float) -> Section:
+        """A doubly symmetric I-beam, with overall `depth` along local z and
+        flanges `flange_width` wide along y. Fillets are left out, which puts
+        the area and the torsion constant a few percent under a rolled shape's
+        table values (for a W8x31, 8.99 in² against 9.13, and J of 0.50 in⁴
+        against 0.54).
+        """
+        d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
+        web = d - 2.0 * tf
+        if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
+            raise ValueError(f'{name}: the flanges and web do not make an I')
+        area = 2.0 * bf * tf + web * tw
+        iy = (bf * d ** 3 - (bf - tw) * web ** 3) / 12.0
+        iz = 2.0 * tf * bf ** 3 / 12.0 + web * tw ** 3 / 12.0
+        # an open thin-walled section: the sum of b t^3 / 3 over its
+        # plates, the web taken between the flanges' mid-planes
+        j = (2.0 * bf * tf ** 3 + (d - tf) * tw ** 3) / 3.0
+        return cls(name, area, iy, iz, j, 'I-beam',
+                   (float(d), float(bf), float(tf), float(tw)))
+
+    @classmethod
+    def channel(cls, name: str, depth: float, flange_width: float,
+                flange_thickness: float, web_thickness: float) -> Section:
+        """A channel, with overall `depth` along local z and the flanges
+        `flange_width` wide (web included), running along +y from the web.
+        `iz` is about the centroid, which is off the web; the shear center is
+        further off it on the other side, and the element does not include
+        that. The flanges have one thickness. A rolled channel's flanges taper
+        toward their tips and its table flange thickness is an average, so
+        this `iz` is high for one (a C6x10.5 gives 1.06 in⁴ against the
+        table's 0.86); for a bent-plate channel it is exact.
+        """
+        d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
+        web = d - 2.0 * tf
+        if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
+            raise ValueError(f'{name}: the flanges and web do not make a '
+                             'channel')
+        flange_area, web_area = bf * tf, web * tw
+        area = 2.0 * flange_area + web_area
+        iy = (bf * d ** 3 - (bf - tw) * web ** 3) / 12.0
+        # centroid along y, from the back of the web
+        centroid = (2.0 * flange_area * bf / 2.0 + web_area * tw / 2.0) / area
+        iz = (2.0 * (tf * bf ** 3 / 12.0
+                     + flange_area * (bf / 2.0 - centroid) ** 2)
+              + web * tw ** 3 / 12.0 + web_area * (tw / 2.0 - centroid) ** 2)
+        j = (2.0 * bf * tf ** 3 + (d - tf) * tw ** 3) / 3.0
+        return cls(name, area, iy, iz, j, 'channel',
+                   (float(d), float(bf), float(tf), float(tw)))
+
+    @classmethod
+    def angle(cls, name: str, long_leg: float, short_leg: float,
+              thickness: float) -> Section:
+        """An angle of one thickness, its short leg no longer than its long
+        one. Its leg axes are not principal and the element has no product
+        term, so `iy` and `iz` are the principal moments, major and minor, and
+        the orientation vector should point along the major principal axis
+        (`angle_major_axis`).
+        """
+        a, b, t = long_leg, short_leg, thickness
+        if min(a, b, t) <= 0 or t >= min(a, b) or b > a:
+            raise ValueError(f'{name}: an angle needs a long leg, a short '
+                             'leg no longer, and a thickness under both')
+        area, (i_major, i_minor), _theta = _angle_properties(a, b, t)
+        j = (a + b - t) * t ** 3 / 3.0
+        return cls(name, area, i_major, i_minor, j, 'angle',
+                   (float(a), float(b), float(t)))
+
+
+def _angle_properties(a: float, b: float, t: float
+                      ) -> tuple[float, tuple[float, float], float]:
+    """(area, (I major, I minor), angle of the major axis) for an angle
+    with its long leg `a` along y and short leg `b` along z from the
+    heel, both `t` thick: two rectangles, their centroidal moments and
+    product about the combined centroid, and the principal values of
+    that tensor. The angle is in degrees from the long leg toward the
+    short one."""
+    # the long leg: y in [0, a], z in [0, t]; the short leg above it:
+    # y in [0, t], z in [t, b]
+    parts = [(a, t, a / 2.0, t / 2.0), (t, b - t, t / 2.0, t + (b - t) / 2.0)]
+    area = sum(w * h for w, h, _y, _z in parts)
+    cy = sum(w * h * y for w, h, y, _z in parts) / area
+    cz = sum(w * h * z for w, h, _y, z in parts) / area
+    iyy = sum(w * h ** 3 / 12.0 + w * h * (z - cz) ** 2
+              for w, h, _y, z in parts)            # about y: z squared
+    izz = sum(h * w ** 3 / 12.0 + w * h * (y - cy) ** 2
+              for w, h, y, _z in parts)            # about z: y squared
+    iyz = sum(w * h * (y - cy) * (z - cz) for w, h, y, z in parts)
+    tensor = np.array([[iyy, -iyz], [-iyz, izz]])
+    values, vectors = np.linalg.eigh(tensor)
+    major = vectors[:, 1]                          # the larger moment's axis
+    theta = math.degrees(math.atan2(major[1], major[0])) % 180.0
+    return area, (float(values[1]), float(values[0])), theta
+
+
+def with_article(shape: str) -> str:
+    """A shape's name with its article, for a sentence: 'a channel', 'an
+    I-beam', 'an angle'.
+    """
+    return ('an ' if shape[:1].lower() in 'aeio' or shape.startswith('I-')
+            else 'a ') + shape
+
+
+def angle_major_axis(long_leg: float, short_leg: float,
+                     thickness: float) -> float:
+    """Where an angle's major principal axis lies, which is the direction
+    its orientation vector points, in degrees from the long leg toward the
+    short leg; 45 for an equal angle.
+
+    Parameters
+    ----------
+    long_leg, short_leg, thickness : float
+        The angle's dimensions, in any one unit.
+
+    Returns
+    -------
+    float
+        Degrees from the long leg, 0 to 180.
+    """
+    return _angle_properties(long_leg, short_leg, thickness)[2]
+
+
+#: the shapes a section can be built from: {shape: (constructor, the
+#: dimensions it takes, in order)} — what the Element Groups table offers, and
+#: what a file or a session script rebuilds a section from
+SHAPES: dict[str, tuple[str, tuple[str, ...]]] = {
+    'round tube': ('round_tube', ('outer diameter', 'wall')),
+    'rod': ('rod', ('diameter',)),
+    'rectangle': ('rectangle', ('width', 'height')),
+    'rectangular tube': ('rectangular_tube', ('width', 'height', 'wall')),
+    'I-beam': ('i_beam', ('depth', 'flange width', 'flange thickness',
+                          'web thickness')),
+    'channel': ('channel', ('depth', 'flange width', 'flange thickness',
+                            'web thickness')),
+    'angle': ('angle', ('long leg', 'short leg', 'thickness')),
+}
+
+
+@dataclass
+class GroupProperties:
+    """What an element group of a geometry is made of, for `Model.from_geometry`.
+
+    There is one property set per element group of one element type, the
+    way finite element formats state a structure. An element group of
+    plates (triangles or quads) takes a material and a thickness, in
+    meters. An element group of beams takes a material and a section, and
+    optionally an orientation vector for the roll, as `Model.add_beam`
+    takes it. An element group of solids takes the material alone, and an
+    element group of two-node lines made of `RIGID` is a set of rigid
+    links. An element group given both a thickness and a section, or a
+    group of plates or beams given neither, is refused by name when the
+    model is built.
+
+    An element group of point elements given a `mass`, and no material, is
+    a set of lumped masses: ``GroupProperties(mass=m)`` puts ``m``
+    kilograms at the node of every element in the element group (a bolt, a
+    sensor, a fitting too small to mesh), which is how a finite element
+    deck states one, as a CONM2 or a point-mass element group.
+
+    An element group given a `stiffness`, six numbers in the global X, Y,
+    Z, RX, RY and RZ directions (N/m and N m/rad) with None for free, is a
+    group of springs. Every two-node line in it is a spring between its two
+    nodes in each direction given (`Model.add_spring`), the nodes free to
+    coincide, and every point element is a spring from its node to ground.
+    That is a Nastran CBUSH, or CELAS cards one direction at a time. An
+    element group given `ground` holds points, and each one's node is held
+    in each direction given (`Model.add_ground`): all six with
+    ``ground=True``, the translations alone with ``ground=('X', 'Y',
+    'Z')``. That is a support, or the far end of a spring to ground drawn
+    as a line. A Nastran SPC1 reads as one, its components the directions.
+    """
+    # point masses (2026-10-07); springs and ground (Brandon, 2026-10-08:
+    # a spring is a kind of line element, and ground a kind of point)
+
+    material: Material | None = None
+    thickness: float | None = None            #: m, for an element group of plates
+    section: Section | None = None            #: for an element group of beams
+    orientation: tuple[float, float, float] | None = None
+    mass: float | None = None                 #: kg, each, for point masses
+    #: N/m along X, Y, Z and N m/rad about them, None for free: springs
+    stiffness: tuple[float | None, ...] | None = None
+    #: the directions points are held in (`AXES`); True for all six
+    ground: tuple[str, ...] | bool = ()
+
+    def __post_init__(self) -> None:
+        self.ground = ground_axes(self.ground)
+
+    @property
+    def kind(self) -> str:
+        """What the element group is: 'ground', 'mass', 'spring', 'rigid',
+        'plate', 'beam' or 'solid', or else what is wrong with it ('no
+        material', 'both a thickness and a section'). Ground comes first,
+        then a mass, then a stiffness, whatever else is set, since each is the
+        one thing such a group can use. A rigid element group takes no
+        thickness and no section, and any left from before the material was
+        picked are ignored. A material alone is an element group of solids,
+        which take nothing else; an element group of plates or beams given
+        only a material is refused where the elements are built, by what they
+        are.
+        """
+        # a material alone is an element group of solids (2026-09-30)
+        if self.ground:
+            return 'ground'
+        if self.mass is not None:
+            return 'mass'
+        if self.stiffness is not None:
+            return 'spring'
+        if self.material is None:
+            return 'no material'
+        if self.material.is_rigid:
+            return 'rigid'
+        if self.thickness is not None and self.section is None:
+            return 'plate'
+        if self.section is not None and self.thickness is None:
+            return 'beam'
+        if self.section is None and self.thickness is None:
+            return 'solid'
+        return 'both a thickness and a section'
+
+
+@dataclass
+class Beam:
+    """One two-node beam element."""
+
+    node_a: int
+    node_b: int
+    material: Material
+    section: Section
+    #: a vector defining the local x-y plane, so the section's iy and iz
+    #: mean something on a member that is not round. None picks a default.
+    orientation: tuple[float, float, float] | None = None
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class Plate:
+    """One four-node plate-bending element.
+
+    A flat shell: plane-stress membrane action in its own plane and
+    Mindlin bending out of it, with the transverse shear tied at the edge
+    midpoints (MITC4, in its covariant form). The tying is necessary. A
+    plain bilinear Mindlin element locks in shear as the plate gets thin,
+    and a 12x12 mesh of the locking element puts the first elastic mode
+    of a thin free plate several times too high.
+
+    Any convex quad is accepted. A quad that is not convex, has no area,
+    or is warped beyond `QUAD_WARP` of its shorter diagonal is refused:
+    the element is flat, and its corners are projected onto their mean
+    plane.
+
+    Nodes run around the perimeter: 1-2 is the first edge, 1-4 the second,
+    and corner 3 is opposite corner 1. The thickness is in meters.
+    """
+    # Rectangles only until 2026-10-26, when a student's free-meshed
+    # circuit board (1,111 of its 11,489 quads off square, the worst by
+    # 49 degrees) needed the covariant form (Brandon: the proper
+    # solution, not quads split into triangles).
+
+    nodes: tuple[int, int, int, int]
+    material: Material
+    thickness: float               #: m
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class Triangle:
+    """One three-node triangular plate-bending element.
+
+    The same theory as the quad, so a mesh of triangles and a mesh of
+    rectangles agree: a flat shell with plane-stress membrane action in its
+    own plane and Mindlin bending out of it, with the transverse shear tied
+    along the three edges (MITC3, Lee & Bathe 2004). The tying keeps a
+    linear triangle from locking in shear as the plate gets thin; a plain
+    linear Mindlin triangle locks badly. Any flat triangle is a valid
+    element, and only a degenerate one (zero area) is refused.
+
+    Nodes run around the perimeter, counterclockwise about the normal the
+    element takes as its own +z. The thickness is in meters.
+    """
+
+    nodes: tuple[int, int, int]
+    material: Material
+    thickness: float               #: m
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class Solid:
+    """One solid element: a hexahedron, a wedge or a tetrahedron, told
+    apart by how many nodes it names (8, 6 or 4).
+
+    Each node has three translations and no rotations. A solid has no
+    rotational stiffness, and the rotations of a node that only solids
+    touch are grounded by the eigensolution rather than left as degrees of
+    freedom with nothing on them (`Model.dangling_rotations`).
+
+    The hexahedron is trilinear with Wilson's incompatible bending modes,
+    in Taylor's form (the extra modes' strains are taken from the Jacobian
+    at the centroid, so a distorted brick still passes the patch test). A
+    plain trilinear brick is far too stiff in bending, and a part meshed a
+    few elements through its thickness would come out a third high. With
+    the modes, one layer of bricks bends like a beam. The wedge is the
+    linear six-node element and the tetrahedron the constant-strain one.
+    They are for transitions and imported meshes, not what a part is
+    meshed with here (`mesh.block` makes bricks); a linear tetrahedron
+    locks in bending, and a mesh of them is accurate only where it is fine.
+
+    Nodes run around the bottom face and then the top, the same way round
+    (the UFF 2412 and Nastran CHEXA/CPENTA/CTETRA order).
+    """
+
+    nodes: tuple[int, ...]
+    material: Material
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class RigidLink:
+    """Two nodes held rigidly together, with no mass of their own. In each
+    rigid body the node added to the model first leads, and the others
+    follow its translation and rotation exactly (`Model.add_rigid_link`,
+    `RIGID`).
+    """
+
+    node_a: int
+    node_b: int
+    group: str = ''
+
+
+@dataclass
+class Spring:
+    """A discrete spring between two degrees of freedom, or from one to
+    ground: the flexible counterpart of a `RigidLink`, and what a Nastran
+    CELAS states.
+
+    Each end is a node and a signed direction code (`direction_code`: 1-3
+    the translations, 4-6 the rotations). The spring resists the difference
+    of the two motions, each taken along its own sign, so 'X+' to 'X+' is
+    the ordinary axial spring. `node_b` None grounds it. The stiffness is
+    in N/m between translations and N m/rad between rotations.
+    """
+    # proposed for two-beam substructuring cases (2026-10-08), where a test
+    # article meets its fixture at coincident nodes with no length between
+    # them for a beam
+
+    node_a: int
+    direction_a: int
+    node_b: int | None
+    direction_b: int
+    stiffness: float          #: N/m between translations, N m/rad rotations
+    name: str = ''
+
+
+#: how a tie holds each direction of its frame
+TIE_MODES = ('rigid', 'stiffness', 'free')
+
+
+@dataclass
+class Tie:
+    """A node held to a point of a surface, in a frame of its own: along
+    the surface's normal there, and in its plane. The point moves as the
+    surface's nodes around it do, weighted (a point inside a triangle is
+    its three corners, a point on a node that node alone). Each of the
+    frame's three directions is held rigidly, by a spring, or not at all
+    (`Model.add_tie`). Only translations are tied, which is how a node of
+    one mesh is tied to a surface of another (Mate Surfaces,
+    `core.mates`): a tie to the point it lies on carries a rigid motion
+    exactly, where a tie to a nearby node resists a rotation.
+    """
+    # Brandon, 2026-10-20: a normal and a shear setting, each rigid, a
+    # stiffness or free, and on curved surfaces too, so the frame is
+    # each node's own
+
+    node_a: int                         #: the node that follows
+    nodes_b: tuple[int, ...]            #: the nodes the point moves with
+    weights: tuple[float, ...]          #: each one's share, summing to one
+    frame: tuple                        #: three unit rows: normal, then in-plane
+    modes: tuple[str, str, str]         #: per row: 'rigid', 'stiffness' or 'free'
+    stiffness: tuple[float, float, float]   #: per row, N/m where 'stiffness'
+    group: str = ''
+
+
+@dataclass
+class LumpedMass:
+    """A rigid item carried at a node: a motor, a battery, a camera.
+
+    The mass is in kg and the inertias, in kg m^2, are about the global
+    axes through the node. A point mass leaves them zero, which is accurate
+    for something small compared with the members carrying it and wrong
+    for a battery the size of the structure: a mass with no inertia cannot
+    rock, so a rocking mode will not appear.
+    """
+
+    node: int
+    mass: float                                     #: kg
+    inertia: tuple[float, float, float] = (0.0, 0.0, 0.0)   #: kg m^2
+    name: str = ''
+
+
+@dataclass
+class Face:
+    """A face for drawing: shading, not stiffness.
+
+    A grillage of beams draws as a wireframe, and a wireframe of a drone
+    deck is hard to read. Faces spanning nodes that are already there give
+    the renderer something to shade and the animation something to deform,
+    and they add nothing to the matrices. That is why they are a separate
+    kind rather than a zero-stiffness element.
+    """
+
+    nodes: tuple[int, ...]
+    color: int = 1
+    group: str = ''
+
+
+def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
+    """The connected components of an adjacency map, largest first.
+
+    One piece is a structure; more than one is that many free bodies, each
+    with its own six zero-frequency modes. The model (over its elements)
+    and the drone's drawing (over its face edges, before a model exists)
+    both use this one search, so the two agree about what "joined" means.
+    """
+    seen: set[int] = set()
+    found: list[list[int]] = []
+    for start in neighbors:
+        if start in seen:
+            continue
+        stack, piece = [start], []
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            piece.append(node)
+            stack.extend(neighbors[node] - seen)
+        found.append(sorted(piece))
+    return sorted(found, key=len, reverse=True)
+
+
+def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
+                 wanted: int, factor: Any = None, ticker: Any = None
+                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Refine a block of approximate modes until they are converged.
+
+    This is block inverse iteration with the shifted factor (K - sigma M),
+    each step followed by Rayleigh-Ritz on the block (the small projected
+    generalized problem, solved densely). It repeats until each of the
+    first `wanted` modes has a relative residual below `POLISH_RESIDUAL`,
+    or a step no longer halves the largest of them (the floor the
+    conditioning sets), or `POLISH_STEPS` steps are spent. The residual of
+    a mode is |K v - lambda M v| over |(K - sigma M) v|, which is defined
+    for a rigid-body mode too (its numerator and |K v| are both zero). The
+    block is refined as a whole: the Ritz step separates the modes inside
+    it exactly, and the iteration removes what comes in from outside it at
+    a rate set by the gap between the last wanted mode and the first one
+    beyond the block, which is why the caller passes extra modes above the
+    wanted ones.
+
+    Parameters
+    ----------
+    stiffness, mass : scipy.sparse matrix
+        K and M, in CSC form.
+    sigma : float
+        The shift.
+    vectors : numpy.ndarray
+        (n, m), the approximate modes to start from.
+    wanted : int
+        How many of the lowest modes must converge.
+    factor : optional
+        The factorization of (K - sigma M), as `sparse_solve.factor_symmetric`
+        gives it (anything with `solve` and `shape`);
+        computed when not given.
+    ticker : Ticker, optional
+        Told one tick per step.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray)
+        The eigenvalues and the mass-normal vectors for the whole block, in
+        ascending order, and each mode's residual after the last step.
+    """
+    from scipy.linalg import eigh as scipy_eigh
+
+    from .sparse_solve import factor_symmetric
+
+    if factor is None:
+        factor = factor_symmetric((stiffness - sigma * mass).tocsc())
+    wanted = min(int(wanted), vectors.shape[1])
+    worst = math.inf
+    if ticker is not None:
+        ticker.add(POLISH_STEPS)
+    for step in range(POLISH_STEPS):
+        if ticker is not None:
+            ticker.tick()
+        if step:
+            vectors = factor.solve(mass @ vectors)
+        eigenvalues, ritz = scipy_eigh(vectors.T @ (stiffness @ vectors),
+                                       vectors.T @ (mass @ vectors))
+        vectors = vectors @ ritz
+        k_v = stiffness @ vectors
+        m_v = mass @ vectors
+        residuals = (np.linalg.norm(k_v - m_v * eigenvalues, axis=0)
+                     / np.linalg.norm(k_v - sigma * m_v, axis=0))
+        before, worst = worst, float(residuals[:wanted].max())
+        if worst < POLISH_RESIDUAL or worst > 0.5 * before:
+            break
+    return eigenvalues, vectors, residuals
+
+
+class NotConverged(Exception):
+    """The block Lanczos ran out of basis before the modes asked for
+    converged; the caller solves by ARPACK instead."""
+
+
+def _m_orthonormal(block: np.ndarray, mass: Any, m_block: np.ndarray | None = None,
+                   passes: int = 2, final_product: bool = True
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """W = Q R with Q^T M Q = I, by Gram-Schmidt column by column, each
+    column orthogonalized against those before it twice (the second
+    pass is what keeps the result orthonormal when a column's share
+    outside the earlier ones is small) and normalized by its M-norm;
+    returns Q, M Q, R, which columns survived, and each column's share:
+    what was left of it outside the earlier columns, over its own norm.
+    A column whose share is below 1e-12 is dependent on them, and is
+    dropped: a zero column of Q and a zero row of R, its coefficients
+    kept.
+
+    Column by column rather than through the Gram matrix: a block that
+    one solve with the shifted factor has left almost wholly in the
+    rigid modes carries the elastic ones at the ratio of their
+    shift-inverted eigenvalues, 1e-9 on a small model of bricks tied
+    across a seam (elastic modes at 20 kHz), and the Gram matrix holds
+    that squared, below round-off, so an orthonormalization through
+    its eigenvectors lost the elastic directions or kept them as noise
+    (2026-10-19, the block method lost such a model while ARPACK, with
+    this orthogonalization, did not). Subtracting the earlier columns
+    leaves a remainder whose relative accuracy is round-off over the
+    share, and that is what the elastic modes need. The product M Q is
+    taken afresh after each pass rather than carried along as the same
+    combinations of M W: carried, it keeps the cancellation's round-off,
+    1e-7 of a remainder at 1e-9, and the block came out orthonormal to
+    5e-3 (measured; 9e-16 taken afresh). Cholesky QR, the first attempt,
+    fails outright on these Gram matrices, whose condition is the spread
+    of the spectrum squared. `m_block`, when given, is M W as the caller
+    has it, for the first pass; the block is held column-major so the
+    products against its earlier columns run in place, and the caller's
+    arrays are worked on in place where they are column-major already.
+    `passes` is one for a block that is orthonormal already but for a
+    small perturbation, which one pass takes out. `final_product` false
+    leaves the image as carried through the last pass, for a caller
+    that takes a fresh one later.
+    """
+    # the block and its image are the caller's to give up: worked on in
+    # place where they are column-major already
+    q = np.asfortranarray(block, dtype=np.float64)
+    count = q.shape[1]
+    mq = np.asfortranarray(mass @ q if m_block is None else m_block, dtype=np.float64)
+    original = np.sqrt(np.abs(np.sum(q * mq, axis=0)))
+    # W = Q R throughout: a subtraction q_j -= c q_i adds c times row j
+    # of R to row i, a normalization q_j /= s scales row j by s
+    r = np.eye(count)
+    keep = np.ones(count, dtype=bool)
+    for _pass in range(passes):
+        for j in range(count):
+            if not keep[j]:
+                continue
+            if j:
+                # a dropped column is zero, so its share is nothing
+                c = mq[:, :j].T @ q[:, j]
+                q[:, j] -= q[:, :j] @ c
+                mq[:, j] -= mq[:, :j] @ c
+                r[:j, :] += c[:, None] * r[j, :]
+            norm = math.sqrt(abs(float(q[:, j] @ mq[:, j])))
+            # the share outside the earlier columns over both passes is
+            # the diagonal of R, the product of the norms taken out: the
+            # first pass leaves a column's own non-orthogonality (1e-10
+            # of it, classical Gram-Schmidt's), which the second takes
+            # out, and a column that is a multiple of another is seen
+            # only across the two
+            if norm * r[j, j] > 1e-12 * original[j]:
+                q[:, j] /= norm
+                mq[:, j] /= norm
+                r[j, :] *= norm
+            else:
+                keep[j] = False
+                q[:, j] = 0.0
+                mq[:, j] = 0.0
+                r[j, :] = 0.0
+        if _pass + 1 < passes or final_product:
+            mq = np.asfortranarray(mass @ q)
+    share = np.where(keep, np.abs(np.diag(r)) / np.where(original > 0.0, original, 1.0), 0.0)
+    return q, mq, r, keep, share
+
+
+def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
+                        width: int = LANCZOS_BLOCK, ticker: Any = None,
+                        seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """The `count` eigenpairs nearest the shift, by block Lanczos on the
+    shift-inverted operator A = (K - sigma M)^-1 M.
+
+    A is self-adjoint in the M-inner product, and its largest
+    eigenvalues theta are the modes nearest the shift, lambda = sigma +
+    1 / theta. The Krylov basis is grown a block at a time: each new
+    block is A applied to the last (one block solve with the factor),
+    M-orthogonalized against the whole basis twice, and M-orthonormalized
+    (`_m_orthonormal`). The coefficients fill the Rayleigh-Ritz matrix
+    H = V^T M A V, each block column mirrored into its row since A is
+    self-adjoint, and the Ritz pairs are H's eigenpairs. The computed
+    relation A V = V R + Q B is kept beside it, R the coefficients
+    above the diagonal and the orthonormalization's triangle below,
+    and a Ritz pair's residual |A x - theta x|_M then has two parts,
+    read for nothing: the last block's share, |B s|, which another
+    block of basis shrinks, and |(R - H) s|, which no basis can shrink,
+    since it is how far the computed operator is from self-adjoint and
+    the basis from orthogonal (LU's solves leave the operator 8e-9 off
+    on the rigid-link model, Cholesky's 1e-15; measured). The iteration
+    stops when every wanted mode's first part over its theta is under
+    `LANCZOS_RESIDUAL`, or at the floor, or when the basis spans the
+    whole space, and reports the whole residual, both parts, as what it
+    claims for each pair. A direction the orthogonalization
+    leaves empty is left out, and the block shrinks by it. The basis is held
+    as (n, dimension) column-major arrays, V and M V, so the products
+    against it run in place.
+
+    Why a block method: the single-vector Lanczos of ARPACK applies the
+    operator one vector at a time, and a sparse factor solves a block
+    of right-hand sides for little more than one (the supernodal
+    solve runs on every core). The sixty-eight single solves of a
+    270,000-DOF model were 2.5 s; twelve block solves of twelve are
+    about 1 s. LOBPCG with the factor as a preconditioner on K was
+    tried first and failed on the free-free rigid modes; shift-invert
+    Lanczos has no such case, since the shift puts the rigid modes
+    nearest it and a block wider than six finds all six.
+
+    Parameters
+    ----------
+    factor
+        The factorization of (K - sigma M), as `sparse_solve.factor_symmetric`
+        gives it.
+    mass : scipy.sparse matrix
+        M.
+    sigma : float
+        The shift.
+    count : int
+        How many modes, the nearest the shift.
+    width : int
+        The block width; at most `count`'s size allows.
+    ticker : Ticker, optional
+        Told one tick per column solved, the estimate extended ahead.
+    seed : int
+        The random start's seed: a model solved twice gives one answer.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray)
+        The eigenvalues lambda, nearest the shift first, the Ritz
+        vectors as columns, M-orthonormal, and each pair's residual
+        |A x - theta x|_M / theta as the relation claims it.
+
+    Raises
+    ------
+    NotConverged
+        When the basis reaches its limit (`LANCZOS_BASIS` times `count`,
+        at most the size), or runs out of directions, with a wanted
+        residual's first part above 1e-5.
+    """
+    from scipy.linalg import eigh as scipy_eigh
+
+    size = mass.shape[0]
+    rng = np.random.default_rng(seed)
+    width = max(1, min(int(width), size))
+    limit = min(size, LANCZOS_BASIS * int(count))
+    # the basis columns are read and written in place: column-major
+    basis = np.empty((size, limit), order='F')
+    m_basis = np.empty((size, limit), order='F')
+    projected = np.zeros((limit, limit))
+    relation = np.zeros((limit, limit))
+    dimension = 0
+    start = rng.standard_normal((size, width))
+    block, m_block, _r, _keep, _share = _m_orthonormal(start, mass)
+    worst_before = math.inf
+    check_at = min(int(count), size)
+    while True:
+        width = block.shape[1]
+        grown = dimension + width
+        basis[:, dimension:grown] = block
+        m_basis[:, dimension:grown] = m_block
+        if ticker is not None:
+            ticker.extend_to(width)
+        applied = factor.solve(m_block)
+        if ticker is not None:
+            ticker.tick(width)
+        vectors, m_vectors = basis[:, :grown], m_basis[:, :grown]
+        # M-orthogonalized against the basis, then orthonormalized within
+        # the block, then both again: the coefficients are the new block
+        # column of H = V^T M A V, and what the second round takes out
+        # is carried through the first round's triangle. The second
+        # round comes after the block is normalized because a column's
+        # share outside the basis can be 1e-10 of it (the tied bricks
+        # of 2026-10-19), and what two passes leave at round-off of the
+        # whole is 1e-6 of that share once it is scaled to one; the
+        # basis then lost its orthogonality block by block (3e-7, 2e-4,
+        # 2e-2, 0.8, measured) and the iteration everything
+        coefficients = m_vectors.T @ applied
+        applied -= vectors @ coefficients
+        block, m_block, beta, keep, _share = _m_orthonormal(applied, mass,
+                                                            final_product=False)
+        # always, not only where a share looks small: the share that
+        # matters is the block's outside the basis, which the in-block
+        # share does not read, and skipping the round on it lost the
+        # rigid-link model its orthonormality (measured)
+        again = m_vectors.T @ block
+        block -= vectors @ again
+        m_block -= m_vectors @ again
+        coefficients += again @ beta
+        block, m_block, more, keep, _share = _m_orthonormal(block, mass, m_block, passes=1)
+        beta = more @ beta
+        projected[:grown, dimension:grown] = coefficients
+        projected[dimension:grown, :dimension] = coefficients[:dimension].T
+        relation[:grown, dimension:grown] = coefficients
+        dimension = grown
+        # the next block: the surviving directions, as many as the
+        # space the basis has not yet taken has room for; a dependent
+        # direction's column is empty and its row of the triangle zero,
+        # and the block shrinks by it (fewer survivors than the room
+        # means an invariant subspace was found, which a seeded random
+        # start never lands in; a block with none left and the modes
+        # not converged goes to ARPACK below). The choice is by the
+        # survivor mask, not position: the Gram's eigen-order puts the
+        # empty columns first
+        room = min(block.shape[1], size - dimension, limit - dimension)
+        chosen = np.flatnonzero(keep)[:room]
+        # the relation's block below the diagonal is the triangle the
+        # next block came from, not the transpose of the block above
+        # it: the two differ by the computed operator's asymmetry, and
+        # a residual read from the last block alone did not see it
+        # (2026-10-19, found on the public runner's SuperLU: the
+        # estimate said 9e-8 where the pairs were at 4e-4). The Ritz
+        # matrix stays the mirrored one: it is the projection, and
+        # halving its corrections moved a 14 kHz Ritz value by 1e-7
+        relation[dimension:dimension + len(chosen), dimension - width:dimension] = \
+            beta[chosen]
+        block = block[:, chosen]
+        # M Q taken afresh, not the combinations of M W the
+        # orthonormalization carried: the first solve's block is almost
+        # all rigid content, its Gram condition 1e10, and the carried
+        # product came out 6e-10 of the largest off M Q. The next solve
+        # is of that product, and the shift-inverse magnifies its rigid
+        # error by theta_rigid / theta, 4e6 for the free plate's
+        # twelfth mode: the pairs measured up to 6.8 times their claim,
+        # by an amount that moved with Accelerate's thread count
+        # (2026-10-20, a full gate failing a third of the time). Since the
+        # second orthonormalization round above (merged after this line)
+        # takes its own fresh M Q, this one is a product too many, the
+        # same numbers again; kept so the guarantee does not rest on
+        # that call's default
+        m_block = mass @ block
+        # No Ritz step until the basis holds as many vectors as modes
+        # asked for (then one per LANCZOS_CHECK_GROWTH of growth):
+        # fewer cannot converge them all, and the dense
+        # eigensolve of the whole projected matrix after every block
+        # was the stage that grew fastest with the modes asked for
+        # (2026-10-29: 2.5 of a 59,000-DOF plate's 22.6 s for 400 modes,
+        # 46 solves of up to 552 square for 200). The basis does not
+        # depend on the Ritz pairs, so skipping the early ones changes
+        # nothing it is built from.
+        if dimension < check_at and len(chosen) and dimension < size:
+            continue
+        check_at = dimension + max(1, math.ceil(LANCZOS_CHECK_GROWTH * dimension))
+        h = (projected[:dimension, :dimension]
+             + projected[:dimension, :dimension].T) / 2.0
+        theta, ritz = scipy_eigh(h)
+        order = np.argsort(theta)[::-1][:count]
+        theta, ritz = theta[order], ritz[:, order]
+        krylov = np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
+        drift = np.linalg.norm((relation[:dimension, :dimension] - h) @ ritz, axis=0)
+        residuals = np.sqrt(krylov ** 2 + drift ** 2) / np.abs(theta)
+        worst = float((krylov / np.abs(theta)).max())
+        if worst < LANCZOS_RESIDUAL or dimension >= size:
+            break
+        if worst < 100.0 * LANCZOS_RESIDUAL and worst > 0.5 * worst_before:
+            break
+        worst_before = worst
+        if not len(chosen):
+            if worst < 1e-5:
+                break
+            raise NotConverged(
+                f'{dimension} Lanczos vectors left a residual of {worst:.1e}')
+    return sigma + 1.0 / theta, basis[:, :dimension] @ ritz, residuals
+
+
+def predicted_count(eigenvalues: Any, limit: float) -> int | None:
+    """How many modes have an eigenvalue below `limit`, read off how the
+    count of the lowest modes grows with their eigenvalue.
+
+    The count of modes below an eigenvalue grows as a power of it, the
+    power set by the structure's dimension (Weyl's law: one half for a
+    bar, one for a plate, three halves for a solid, and in between for
+    a model that mixes them), so a line through log count against log
+    eigenvalue, fitted to the upper half of the elastic modes found,
+    reaches the limit's count. None when fewer than eight elastic modes
+    were found to fit, and the caller doubles instead.
+
+    Parameters
+    ----------
+    eigenvalues : array_like
+        The lowest modes' eigenvalues, (rad/s)², rigid modes included.
+    limit : float
+        The eigenvalue the count is wanted below.
+
+    Returns
+    -------
+    int or None
+        The expected count, rigid modes included, at least one more than
+        were found.
+
+    References
+    ----------
+    A standard result, used here to size the next search:
+
+    1. H. Weyl, *Das asymptotische Verteilungsgesetz der Eigenwerte
+       linearer partieller Differentialgleichungen*, Mathematische
+       Annalen, 1912.
+    """
+    values = np.sort(np.asarray(eigenvalues, dtype=float))
+    elastic = np.flatnonzero(values > 0.0)
+    if len(elastic) < 8:
+        return None
+    upper = elastic[len(elastic) // 2:]
+    power, offset = np.polyfit(np.log(values[upper]), np.log(upper + 1.0), 1)
+    if not (np.isfinite(power) and power > 0.0):
+        return None
+    expected = math.exp(offset + power * math.log(float(limit)))
+    return max(len(values) + 1, math.ceil(expected))
+
+
+@contextlib.contextmanager
+def blas_threads() -> Iterator[int | None]:
+    """Hold each BLAS thread pool to a quarter of the logical CPUs (at
+    least one, at most `BLAS_MOST_THREADS`) for the duration, and yield
+    that count; None, and nothing limited, when the user has set
+    ``OPENBLAS_NUM_THREADS`` themselves.
+
+    The sparse eigensolution runs inside this. Its steps alternate
+    between numpy's BLAS and scipy's, which are separate libraries
+    with separate pools, and the operations are small enough that a
+    pool's threads mostly wait on one another, so fewer threads are
+    faster and two full pools contend (`BLAS_CPUS_PER_THREAD`). The
+    limit is undone on the way out, so the rest of the package keeps
+    every core.
+    """
+    from threadpoolctl import threadpool_limits
+
+    if os.environ.get('OPENBLAS_NUM_THREADS'):
+        yield None
+        return
+    threads = max(1, min(BLAS_MOST_THREADS,
+                         (os.cpu_count() or 1) // BLAS_CPUS_PER_THREAD))
+    with threadpool_limits(limits=threads, user_api='blas'):
+        yield threads
+
+
+class Model:
+    """A structure's nodes, elements, masses, springs and constraints, and
+    the modes they give.
+
+    One set of element matrices is assembled two ways. Dense (`matrices`)
+    is (6 x nodes) square, and every mode is solved; it is exact, and it is
+    used for a model of up to `SPARSE_ABOVE` degrees of freedom. Sparse
+    (`sparse_matrices`) stores only the nonzeros, and the lowest modes are
+    found by shift-invert Lanczos. A plate model of the BARC at a quarter
+    inch, 1,500 nodes, is about 13 GB dense; sparse, its eighth-inch mesh of
+    6,150 nodes solves in three seconds in under half a gigabyte.
+
+    Attributes:
+        name: What the model is called; it becomes the geometry's name
+            and the shape set's comment.
+        length_unit: What the coordinates are in. Everything inside is
+            SI; this is what the `Geometry` is told on the way out.
+        beams: Every member, as `Beam` records naming two nodes, a
+            material and a section.
+        plates, triangles, solids: The plate and solid elements, as
+            `Plate`, `Triangle` and `Solid` records.
+        rigid_links: Rigid, massless links between two nodes, as
+            `RigidLink` records (`add_rigid_link`).
+        masses: Lumped masses, as `LumpedMass` records at a node.
+        springs: Discrete springs between two degrees of freedom or to
+            ground, as `Spring` records (`add_spring`).
+        grounds: The nodes held, and in which directions, {node: axes
+            0-5} (`add_ground`).
+        faces: Surfaces for drawing, as `Face` records naming three or
+            four nodes. They carry no stiffness; `wire_faces` puts beams
+            on their edges.
+    """
+    # The dense path was the only one, its ceiling (~1000 nodes)
+    # deliberate, until a plate model of a small real structure met it: the
+    # BARC example (2026-09-26).
+
+    def __init__(self, name: str = '', length_unit: str = 'm') -> None:
+        self.name: str = name
+        #: everything here is SI; this is what the Geometry is told
+        self.length_unit: str = length_unit
+        self._nodes: dict[int, np.ndarray] = {}
+        self._node_group: dict[int, str] = {}
+        self.beams: list[Beam] = []
+        self.plates: list[Plate] = []
+        self.triangles: list[Triangle] = []
+        self.solids: list[Solid] = []
+        self.rigid_links: list[RigidLink] = []
+        self.springs: list[Spring] = []
+        self.ties: list[Tie] = []
+        #: {node: the axes held, 0-5}
+        self.grounds: dict[int, tuple[int, ...]] = {}
+        self.masses: list[LumpedMass] = []
+        self.faces: list[Face] = []
+        #: {node: its displacement frame's axes as rows}, for each node a
+        #: geometry measures in a turned frame: the modes are written in
+        #: it (`eigensolution`), as every shape set's DOFs are read
+        self.displacement_frames: dict[int, np.ndarray] = {}
+
+    # ---- building ---------------------------------------------------------
+
+    def add_node(self, node_id: int, x: float, y: float, z: float,
+                 group: str = '') -> int:
+        node_id = int(node_id)
+        if node_id in self._nodes:
+            raise ValueError(f'node {node_id} is already in the model')
+        self._nodes[node_id] = np.array([x, y, z], dtype=np.float64)
+        self._node_group[node_id] = group
+        return node_id
+
+    def add_beam(self, node_a: int, node_b: int, material: Material,
+                 section: Section,
+                 orientation: Sequence[float] | None = None,
+                 color: int = 1, group: str = '') -> Beam:
+        for node in (node_a, node_b):
+            if int(node) not in self._nodes:
+                raise ValueError(f'beam names node {node}, which is not in the model')
+        if int(node_a) == int(node_b):
+            raise ValueError(f'beam from node {node_a} to itself has no length')
+        beam = Beam(int(node_a), int(node_b), material, section,
+                    None if orientation is None
+                    else tuple(float(v) for v in orientation), color, group)
+        self.beams.append(beam)
+        return beam
+
+    def add_chain(self, nodes: Sequence[int], material: Material,
+                  section: Section,
+                  orientation: Sequence[float] | None = None,
+                  color: int = 1, group: str = '') -> list[Beam]:
+        """A run of beams through consecutive nodes: one member in one call."""
+        nodes = [int(n) for n in nodes]
+        return [self.add_beam(a, b, material, section, orientation, color, group)
+                for a, b in pairwise(nodes)]
+
+    def add_plate(self, nodes: Sequence[int], material: Material,
+                  thickness: float, color: int = 1,
+                  group: str = '') -> Plate:
+        """One four-node plate element over existing nodes, `thickness` in
+        meters. A quad that is not convex, has no area or is warped is
+        refused (`Plate`).
+        """
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) != 4 or len(set(nodes)) != 4:
+            raise ValueError('a plate spans four distinct nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(
+                    f'plate names node {node}, which is not in the model')
+        if float(thickness) <= 0.0:
+            raise ValueError('a plate needs a positive thickness')
+        # validate the shape at build time, not at solve time: the
+        # person holding the bad corner coordinate is the one adding it
+        _quad_frame(*[self._nodes[n] for n in nodes])
+        plate = Plate(nodes, material, float(thickness), color, group)
+        self.plates.append(plate)
+        return plate
+
+    def add_triangle(self, nodes: Sequence[int], material: Material,
+                     thickness: float, color: int = 1,
+                     group: str = '') -> Triangle:
+        """One triangular plate element over three existing nodes, `thickness`
+        in meters. A triangle with no area is refused.
+        """
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) != 3 or len(set(nodes)) != 3:
+            raise ValueError('a triangle spans three distinct nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(
+                    f'triangle names node {node}, which is not in the model')
+        if float(thickness) <= 0.0:
+            raise ValueError('a triangle needs a positive thickness')
+        _triangle_frame(*[self._nodes[n] for n in nodes])
+        triangle = Triangle(nodes, material, float(thickness), color, group)
+        self.triangles.append(triangle)
+        return triangle
+
+    def add_solid(self, nodes: Sequence[int], material: Material,
+                  color: int = 1, group: str = '') -> Solid:
+        """One solid element over eight, six, four or ten existing nodes:
+        a hexahedron, a wedge, a tetrahedron or a ten-node tetrahedron.
+
+        A solid with no volume is refused, and so is one made of `RIGID`. One
+        numbered the other way round (its volume negative) is the same element
+        and is accepted.
+
+        Parameters
+        ----------
+        nodes : sequence of int
+            The corners, bottom face then top, the same way round; a
+            ten-node tetrahedron's four corners, then the midsides of
+            edges 1-2, 2-3, 1-3, 1-4, 2-4, 3-4.
+        material : Material
+            What it is made of.
+        color, group : optional
+            As for a plate.
+
+        Returns
+        -------
+        Solid
+        """
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) not in SOLID_CODES or len(set(nodes)) != len(nodes):
+            raise ValueError('a solid spans eight, six, four or ten distinct nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(
+                    f'solid names node {node}, which is not in the model')
+        if material.is_rigid:
+            raise ValueError('a solid is made of a material, not rigid')
+        # a flat element is caught here, by the person holding the bad
+        # coordinate, not by the eigensolver. One numbered the other way
+        # round (its volume negative) is the same element and is taken:
+        # meshers disagree on the handedness, and Linderholt's frame
+        # mesh arrived inside out to this convention (2026-09-30)
+        xyz = np.array([self._nodes[n] for n in nodes])
+        if abs(_solid_volume(xyz)) <= 1e-12 * float(np.ptp(xyz)) ** 3:
+            raise ValueError(f'solid {nodes} has no volume')
+        solid = Solid(nodes, material, color, group)
+        self.solids.append(solid)
+        return solid
+
+    def add_rigid_link(self, node_a: int, node_b: int,
+                       group: str = '') -> RigidLink:
+        """Join two nodes rigidly, adding no mass.
+
+        Links that share nodes join into one rigid body, however they are
+        chained. Each body moves as its first node does (the one added to the
+        model first), and the others follow it exactly. The eigensolution
+        eliminates the followers' degrees of freedom rather than stiffening
+        anything, so the answer is the limit of an infinitely stiff member and
+        the matrices stay well conditioned.
+
+        Parameters
+        ----------
+        node_a, node_b : int
+            The nodes, both already in the model, and different.
+        group : str, optional
+            The part the link belongs to (its element group, from a geometry).
+
+        Returns
+        -------
+        RigidLink
+        """
+        for node in (node_a, node_b):
+            if int(node) not in self._nodes:
+                raise ValueError(f'rigid link names node {node}, which is not '
+                                 'in the model')
+        if int(node_a) == int(node_b):
+            raise ValueError(f'a rigid link joins two nodes; it names node '
+                             f'{node_a} twice')
+        link = RigidLink(int(node_a), int(node_b), group)
+        self.rigid_links.append(link)
+        return link
+
+    def add_spring(self, dof_a: str, dof_b: str | None, stiffness: float,
+                   name: str = '') -> Spring:
+        """A spring between two degrees of freedom, or from one to ground.
+
+        The ends are written the way `fixed` writes them, a node and a
+        direction: ``model.add_spring('101Z+', '201Z+', 5e5)`` joins two
+        nodes' Z translations, ``model.add_spring('101RY+', '201RY+', 2e3)``
+        their rotations about Y, and ``model.add_spring('1Z+', None, 1e4)``
+        grounds node 1 in Z. The nodes may coincide, as at a joint between two
+        parts meshed to the same point, where no beam can go, and a joint stiff
+        in more than one direction is one spring per direction. A spring adds
+        no mass. A spring to a node nothing else touches is a spring to
+        ground, since that node is grounded whole (`loose_nodes`). A spring on
+        a rotation must be on a node that a beam, plate or rigid link holds,
+        or on a ground point; otherwise the solve refuses it.
+
+        A spring far stiffer than the structure costs the solve accuracy: two
+        beams joined by springs ten orders of magnitude stiffer than their
+        EI/L came out 0.2 % low on the dense solver, where five orders were
+        within 3e-5 of the single beam. A joint meant to be rigid should be a
+        rigid link (`add_rigid_link`), which costs no accuracy.
+
+        Parameters
+        ----------
+        dof_a : str
+            The first end, as '<node><direction>': 'X+' to 'Z+' a
+            translation, 'RX+' to 'RZ+' a rotation; a minus sign turns the end
+            around.
+        dof_b : str or None
+            The second end, the same way, or None for ground. Both ends are
+            translations or both are rotations.
+        stiffness : float
+            Positive: N/m between translations, N m/rad between rotations.
+        name : str, optional
+            What the spring is called (its element group, from a geometry).
+
+        Returns
+        -------
+        Spring
+        """
+        # the 0.2 % measurement is from 2026-10-08
+        ends = [self._spring_end(text) for text in (dof_a, dof_b)
+                if text is not None]
+        if not float(stiffness) > 0.0:
+            raise ValueError(f'a spring\'s stiffness is positive; it was '
+                             f'given {stiffness!r}')
+        if len(ends) == 2:
+            (node_a, code_a), (node_b, code_b) = ends
+            if (abs(code_a) > 3) != (abs(code_b) > 3):
+                raise ValueError(f'{dof_a!r} and {dof_b!r}: a spring joins two '
+                                 'translations or two rotations')
+            if node_a == node_b and abs(code_a) == abs(code_b):
+                raise ValueError(f'{dof_a!r} and {dof_b!r} are one degree of '
+                                 'freedom; a spring joins two, or one to '
+                                 'ground')
+        else:
+            (node_a, code_a), (node_b, code_b) = ends[0], (None, 0)
+        spring = Spring(node_a, code_a, node_b, code_b, float(stiffness), name)
+        self.springs.append(spring)
+        return spring
+
+    def move_node(self, node: int, x: float, y: float, z: float) -> None:
+        """Move a node already in the model to (x, y, z): how a node tied
+        to a surface is put on it (`add_tie`), the way a tie constraint's
+        position adjustment does in other solvers. Elements are built from
+        the positions when the matrices are assembled, so a move before
+        then is a move of every element on the node."""
+        if int(node) not in self._nodes:
+            raise ValueError(f'no node {node} in the model')
+        self._nodes[int(node)] = np.array([float(x), float(y), float(z)])
+
+    def add_tie(self, node_a: int, node_b: Any, normal: Sequence[float],
+                normal_mode: str = 'rigid', shear_mode: str = 'rigid',
+                normal_stiffness: float = 0.0, shear_stiffness: float = 0.0,
+                group: str = '', weights: Sequence[float] | None = None) -> Tie:
+        """Tie node `node_a`'s translation to a point that moves with
+        `node_b` (one node, or several weighted by `weights`), along
+        `normal` and in the plane across it.
+
+        Each of the two is held rigidly ('rigid'), by a spring of the
+        given stiffness ('stiffness'), or not at all ('free'); the plane's
+        two directions are held alike. A rigid direction makes `node_a`
+        follow `node_b` there exactly: the eigensolution writes that part
+        of `node_a`'s motion through `node_b`'s, as it does a rigid link's
+        followers, with no stiffness to cost accuracy. Rotations are not
+        tied, so a tie between two solids' nodes adds no rotation that
+        nothing resists. A tie spans no gap: a node a hair off the
+        surface is tied as if on it, so it should be moved there first
+        (`move_node`); `from_geometry` does for mated surfaces. A node
+        follows one tie at most.
+
+        Parameters
+        ----------
+        node_a : int
+            The node that follows.
+        node_b : int or sequence of int
+            The node it follows, or the nodes the point it follows moves
+            with: a surface's corners around it. All already in the
+            model, none of them `node_a`.
+        normal : sequence of float
+            The direction across the surface; any length but zero.
+        normal_mode, shear_mode : {'rigid', 'stiffness', 'free'}
+            How the normal and the plane are held.
+        normal_stiffness, shear_stiffness : float
+            In N/m, positive where the mode is 'stiffness'.
+        group : str, optional
+            What the tie belongs to (its set of mated surfaces).
+        weights : sequence of float, optional
+            Each of `node_b`'s share of the point's motion, summing to
+            one; equal shares when omitted.
+
+        Returns
+        -------
+        Tie
+        """
+        nodes_b = (tuple(int(n) for n in node_b) if isinstance(node_b, (list, tuple, np.ndarray))
+                   else (int(node_b),))
+        shares = (np.full(len(nodes_b), 1.0 / len(nodes_b)) if weights is None
+                  else np.asarray(weights, dtype=float))
+        if not nodes_b or len(shares) != len(nodes_b):
+            raise ValueError('a tie follows one node or more, a weight each')
+        if abs(float(shares.sum()) - 1.0) > 1e-9:
+            raise ValueError(f"a tie's weights sum to one, not {float(shares.sum())!r}")
+        for node in (node_a, *nodes_b):
+            if int(node) not in self._nodes:
+                raise ValueError(f'tie names node {node}, which is not in the model')
+        if int(node_a) in nodes_b:
+            raise ValueError(f'a tie joins a node to others; it names node {node_a} on '
+                             'both ends')
+        for mode, value in ((normal_mode, normal_stiffness), (shear_mode, shear_stiffness)):
+            if mode not in TIE_MODES:
+                raise ValueError(f"a tie's direction is held 'rigid', 'stiffness' or "
+                                 f"'free', not {mode!r}")
+            if mode == 'stiffness' and not float(value) > 0.0:
+                raise ValueError(f"a tie's stiffness is positive; it was given {value!r}")
+        if normal_mode == shear_mode == 'free':
+            raise ValueError('a tie free in every direction holds nothing')
+        n = np.asarray(normal, dtype=float)
+        length = float(np.linalg.norm(n))
+        if not length > 0.0:
+            raise ValueError('a tie needs a normal direction')
+        n = n / length
+        # any two directions across the normal: the plane is held alike
+        # both ways, so which two does not matter
+        helper = np.eye(3)[int(np.argmin(np.abs(n)))]
+        t1 = np.cross(n, helper)
+        t1 /= np.linalg.norm(t1)
+        t2 = np.cross(n, t1)
+        tie = Tie(int(node_a), nodes_b, tuple(float(w) for w in shares),
+                  (tuple(n), tuple(t1), tuple(t2)),
+                  (normal_mode, shear_mode, shear_mode),
+                  (float(normal_stiffness), float(shear_stiffness), float(shear_stiffness)),
+                  group)
+        self.ties.append(tie)
+        return tie
+
+    def add_ground(self, node: int, directions: Any = True) -> int:
+        """Hold a node in some or all of the six directions.
+
+        This is a support, solved as `fixed` would hold it but carried by the
+        model; a ground point in a geometry builds one. A node nothing else
+        touches is held whole already (`loose_nodes`); this holds a node the
+        structure also touches. A node held twice is held in the directions of
+        both.
+
+        Parameters
+        ----------
+        node : int
+            The node, already in the model.
+        directions : bool or sequence of str, default True
+            The directions held, as `AXES` names ('X', 'RY') or anything
+            `ground_axes` reads; True for all six. Holding none is refused.
+
+        Returns
+        -------
+        int
+            The node.
+        """
+        if int(node) not in self._nodes:
+            raise ValueError(f'ground names node {node}, which is not in '
+                             'the model')
+        axes = {AXES.index(axis) for axis in ground_axes(directions)}
+        if not axes:
+            raise ValueError(f'a ground at node {node} holds no direction')
+        held = set(self.grounds.get(int(node), ())) | axes
+        self.grounds[int(node)] = tuple(sorted(held))
+        return int(node)
+
+    def _rotation_held(self, node: int, code: int) -> bool:
+        """Whether the rotation `code` (4-6) of `node` is grounded."""
+        return abs(code) - 1 in self.grounds.get(node, ())
+
+    def _spring_end(self, text: str) -> tuple[int, int]:
+        """(node, signed direction code) of a spring end, '101RY+'."""
+        text = str(text).strip()
+        digits = 0
+        while digits < len(text) and text[digits].isdigit():
+            digits += 1
+        node = int(text[:digits]) if digits else None
+        if node not in self._nodes:
+            raise ValueError(f'{text!r} does not name a node in the model')
+        if not text[digits:]:
+            raise ValueError(f'{text!r} names a node and no direction; a '
+                             'spring acts along one, \'X+\' to \'RZ+\'')
+        try:
+            code = direction_code(text[digits:])
+        except (KeyError, ValueError):
+            raise ValueError(f'{text!r}: {text[digits:]!r} is not a '
+                             'direction, \'X+\' to \'RZ+\'') from None
+        return node, code
+
+    def rigid_bodies(self) -> list[list[int]]:
+        """The sets of nodes the rigid links join, each in the model's node
+        order, so its first node is the one the others follow.
+        """
+        neighbors: dict[int, set[int]] = {}
+        for link in self.rigid_links:
+            neighbors.setdefault(link.node_a, set()).add(link.node_b)
+            neighbors.setdefault(link.node_b, set()).add(link.node_a)
+        order = {node: i for i, node in enumerate(self._nodes)}
+        return [sorted(piece, key=order.__getitem__)
+                for piece in connected_pieces(neighbors)]
+
+    def add_mass(self, node: int, mass: float,
+                 inertia: Sequence[float] = (0.0, 0.0, 0.0),
+                 name: str = '') -> LumpedMass:
+        if int(node) not in self._nodes:
+            raise ValueError(f'mass names node {node}, which is not in the model')
+        item = LumpedMass(int(node), float(mass),
+                          tuple(float(v) for v in inertia), name)
+        self.masses.append(item)
+        return item
+
+    def add_face(self, nodes: Sequence[int], color: int = 1,
+                 group: str = '') -> Face:
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) not in (3, 4):
+            raise ValueError('a face spans three or four nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(f'face names node {node}, which is not in the model')
+        face = Face(nodes, color, group)
+        self.faces.append(face)
+        return face
+
+    @classmethod
+    def from_geometry(cls, geometry: Geometry, material: Material | None = None,
+                      section: Section | None = None,
+                      total_mass: float | None = None,
+                      name: str = '',
+                      groups: dict[int, str] | None = None,
+                      sections: dict[str, Section] | None = None) -> Model:
+        """A structure from a geometry: its elements built from their element
+        groups' properties or, without them, beams on its edges.
+
+        When `geometry.group_properties` gives what each element group is made
+        of (`GroupProperties`), every element becomes the element it is: a
+        quad a plate, a triangle a triangle, a two-node line a beam, a rigid
+        link or springs, a hexahedron, wedge or tetrahedron a solid, and a
+        point element a lumped mass, a spring to ground or a ground point,
+        each with its element group's properties, and each set of mated
+        surfaces (`geometry.mates`) ties between its two sides
+        (`add_tie`). That is the model an Exodus
+        file describes, one property set per element group of one element
+        type. An element group with no properties, or an element type the
+        solver has no element for, is refused by name, and `material`,
+        `section` and `sections` are not used. Nodes no element touches are
+        grounded at solve time (`loose_nodes`) rather than refused, as a
+        deck's reference points are; a point mass on such a node, and a
+        geometry in more than one piece, are refused.
+
+        Without element group properties a grillage is built, and `material`
+        and `section` are required. Every element contributes its own edges as
+        beams (a face its perimeter, a line element its run, so a wireframe
+        geometry holds together), and each face of three or four nodes is also
+        kept as a `Face` for drawing. This is a check on a shape, not a
+        mesher. The beams stand in for whatever the real structure is, with
+        one section for the whole model chosen to put the modes where they are
+        wanted, and shell bending, membrane action and any real thickness are
+        not represented. What it shows is the order of mode density and the
+        mode families a shape has, which is usually the first question about a
+        display model. A node connected to nothing, and a geometry in more than
+        one piece, are refused.
+
+        Parameters
+        ----------
+        geometry : Geometry
+            The shape. The model takes its name and its length unit.
+        material : Material, optional
+            The grillage's material.
+        section : Section, optional
+            The grillage's section.
+        total_mass : float, optional
+            What the model weighs in all, in kg. Whatever the elements and
+            point masses do not already weigh is shared over the nodes by
+            the length of beam each carries (`distribute_mass`), so it
+            needs beams to share over; a model already heavier than this
+            is refused.
+        name : str, optional
+            The model's name; the geometry's name when not given.
+        groups : dict of int to str, optional
+            {node: part}, the label of the part each node belongs to
+            (`Model.group`), since the first question asked of a result is
+            which part of the structure a mode is in. Taken from the
+            geometry's element groups when not given.
+        sections : dict of str to Section, optional
+            For a grillage, {part: section}: the beams on the edges of the
+            elements in an element group whose name starts with `part` take
+            that section, so a part can be made stiffer or softer than the
+            rest without redrawing anything.
+
+        Returns
+        -------
+        Model
+        """
+        # One property set per element group of one element type is the model
+        # an exodus file means (Brandon, 2026-09-25), and the demonstration
+        # plate rebuilt from its own geometry this way is the same model to the
+        # last digit (`tests/test_block_model.py`).
+        model = cls(name or getattr(geometry, 'name', '') or 'geometry',
+                    length_unit=geometry.length_unit or 'm')
+        model.displacement_frames = _displacement_frames(geometry)
+        properties = dict(getattr(geometry, 'group_properties', {}) or {})
+        if properties:
+            return _from_groups(model, geometry, properties, total_mass,
+                                groups)
+        if material is None or section is None:
+            raise ValueError(
+                'the geometry carries no element group properties, so a material '
+                'and a section are needed to make a grillage of it — or '
+                'give each element group its properties (fem.GroupProperties) and '
+                'the elements build themselves')
+        labels = dict(groups or {})
+        if not labels:
+            # A geometry that carries element groups says for itself which
+            # part each node belongs to, so nothing has to be passed
+            # alongside it. That matters because a side-channel does not
+            # survive being saved: a geometry written to a file and read
+            # back could not reproduce the model it came from.
+            labels = _labels_from_groups(geometry)
+        for node, xyz in zip(geometry.node_id, geometry.node_xyz):
+            model.add_node(int(node), *[float(v) for v in xyz],
+                           group=labels.get(int(node), ''))
+
+        # A member takes its section from the element group of the element it came
+        # from, not from labels on its end nodes. A node on a seam belongs
+        # to two parts and can only answer for one, which left 24 of the
+        # drone's 1248 blade members reading as ordinary frame; an element
+        # belongs to exactly one element group and is never ambiguous.
+        parts = _group_labels(geometry)
+        runs: list[tuple[list[int], str]] = []
+        for index, (kind, conn) in enumerate(zip(geometry.elem_type,
+                                                 geometry.elem_conn)):
+            nodes = [int(n) for n in conn]
+            label = parts[index] if index < len(parts) else ''
+            shape = ELEMENT_TYPES.get(int(kind), (None, 0, 'line'))[2]
+            if shape == 'line':
+                runs.append((nodes, label))
+            else:
+                # a face closes on itself; three or four of them also
+                # become a Face, so the shape can be drawn back
+                runs.append((nodes + nodes[:1], label))
+                if len(nodes) in (3, 4):
+                    model.add_face(nodes, group=label)
+        seen: set[frozenset[int]] = set()
+        for run, label in runs:
+            chosen = section
+            for part, alternative in (sections or {}).items():
+                if label.startswith(part):
+                    chosen = alternative
+                    break
+            for a, b in pairwise(run):
+                edge = frozenset((a, b))
+                if a == b or edge in seen:
+                    continue
+                seen.add(edge)
+                model.add_beam(a, b, material, chosen, group=label)
+        if not seen:
+            raise ValueError(
+                'the geometry has no elements to make members '
+                'from, so there is nothing to connect its nodes')
+
+        loose = sorted(set(model.node_ids)
+                       - {n for edge in seen for n in edge})
+        if loose:
+            raise ValueError(
+                f'{len(loose)} nodes are connected to nothing, so they would '
+                'carry mass with no stiffness and the solution would not '
+                'factorize: ' + ', '.join(str(n) for n in loose[:8]))
+        pieces = model.pieces()
+        if len(pieces) > 1:
+            sizes = ', '.join(str(len(p)) for p in pieces[:6])
+            raise ValueError(
+                f'the geometry is {len(pieces)} disconnected pieces ({sizes} '
+                'nodes), which would solve as that many free bodies and give '
+                f'{6 * len(pieces)} zero-frequency modes rather than 6. Its '
+                'elements do not join them: either they are '
+                'meant to be separate structures, or the connectivity is '
+                'incomplete')
+        if total_mass is not None:
+            _bring_to(model, total_mass)
+        return model
+
+    def pieces(self) -> list[list[int]]:
+        """The structure's disconnected parts, as lists of node ids, largest
+        first.
+
+        One piece is a structure; more than one is that many free bodies, each
+        with its own six zero-frequency modes. It is the first thing to check
+        on a model that comes back with too many zero-frequency modes. Elements,
+        rigid links and springs between two nodes all join what they connect.
+        """
+        # the old airplane fixture, meshed and wired through its own drawn
+        # lines, turned out to be three pieces: the fuselage, a wing and the
+        # tail, none joined
+        neighbors: dict[int, set[int]] = {n: set() for n in self.node_ids}
+        for beam in self.beams:
+            if beam.node_a in neighbors and beam.node_b in neighbors:
+                neighbors[beam.node_a].add(beam.node_b)
+                neighbors[beam.node_b].add(beam.node_a)
+        for plate in self.plates:
+            for k, node in enumerate(plate.nodes):
+                other = plate.nodes[(k + 1) % 4]
+                neighbors[node].add(other)
+                neighbors[other].add(node)
+        for triangle in self.triangles:
+            for k, node in enumerate(triangle.nodes):
+                other = triangle.nodes[(k + 1) % 3]
+                neighbors[node].add(other)
+                neighbors[other].add(node)
+        for solid in self.solids:
+            first = solid.nodes[0]
+            for node in solid.nodes[1:]:
+                neighbors[first].add(node)
+                neighbors[node].add(first)
+        for link in self.rigid_links:
+            neighbors[link.node_a].add(link.node_b)
+            neighbors[link.node_b].add(link.node_a)
+        # a spring joins what it connects: a test article on springs to
+        # its fixture is one structure, not two free bodies
+        for spring in self.springs:
+            if spring.node_b is not None:
+                neighbors[spring.node_a].add(spring.node_b)
+                neighbors[spring.node_b].add(spring.node_a)
+        for tie in self.ties:
+            for node in tie.nodes_b:
+                neighbors[tie.node_a].add(node)
+                neighbors[node].add(tie.node_a)
+        return connected_pieces(neighbors)
+
+    def wire_faces(self, material: Material, section: Section,
+                   color: int = 1, group: str = '') -> int:
+        """Put a beam along every edge of every face, and return how many were
+        added.
+
+        This is the shortest route from a shape to a structure: draw it as a
+        surface mesh and let its own edges be its members. The geometry is then
+        the model, with nothing derived, nothing tied, and no second set of
+        nodes that exist only to be drawn.
+
+        Beams are used, not axial springs. A spring on each edge leaves a quad
+        free to shear and a flat sheet free to fold, since the edges never
+        change length and nothing resists it, and the model comes back a
+        mechanism with as many zero-frequency modes as it has panels. A beam
+        carries moment, so a wireframe of them is a space frame and is stable.
+        It is the same beam element the rest of this module uses.
+
+        Shared edges are wired once. An edge that already has a beam is left
+        alone, so explicit members (a truss strut, a standoff) can be placed
+        first and keep their own section. Each new beam is in `group`, or in
+        'edge N' when no group is given.
+        """
+        seen = {frozenset((beam.node_a, beam.node_b)) for beam in self.beams}
+        added = 0
+        for face in self.faces:
+            nodes = face.nodes
+            for k, node in enumerate(nodes):
+                other = nodes[(k + 1) % len(nodes)]
+                edge = frozenset((node, other))
+                if edge in seen or node == other:
+                    continue
+                seen.add(edge)
+                self.add_beam(node, other, material, section, color=color,
+                              group=group or f'edge {len(self.beams)}')
+                added += 1
+        return added
+
+    def distribute_mass(self, total: float, spin: float = 1.0 / 12.0
+                        ) -> dict[int, float]:
+        """Share `total` over the nodes by the beams meeting at each, as lumped
+        masses, and return {node: mass}.
+
+        A node's share is proportional to the length of beam it carries (half
+        of every beam that reaches it), so the mass follows the material.
+        Sharing it equally would let the node count decide where the mass
+        goes, and a node count only says how finely something was drawn.
+
+        Each node also gets a rotary inertia, without which its three
+        rotational degrees of freedom carry no mass, the mass matrix is
+        singular and the Cholesky factorization fails. It is
+        `spin * m * L^2`, with L the mean length of the beams meeting there
+        (the patch of structure the node stands for, spun about its own
+        middle); the default 1/12 is a uniform rod's. Masses shared by an
+        earlier call are replaced. Only beams count, so a model with no beams
+        is refused.
+
+        Parameters
+        ----------
+        total : float
+            The mass to share, in kg.
+        spin : float, default 1/12
+            The rotary inertia's factor.
+
+        Returns
+        -------
+        dict of int to float
+            {node: mass in kg}.
+        """
+        # Sharing it equally is the obvious thing and a trap. On the
+        # demonstration airframe that put 42% of the mass into the propellers
+        # (they need the finest mesh to look right, so they collect the most
+        # nodes), and 117 g on each rotor buried every airframe mode below
+        # 1.8 kHz under blade motion, while the battery, the heaviest real item
+        # on the aircraft, was left with 51 g.
+        nodes = self.node_ids
+        if not nodes:
+            raise ValueError('there are no nodes to share the mass over')
+        reach: dict[int, list[float]] = {node: [] for node in nodes}
+        for beam in self.beams:
+            length = self._length(beam)
+            for node in (beam.node_a, beam.node_b):
+                if node in reach:
+                    reach[node].append(length)
+        carried = {node: sum(lengths) / 2.0 for node, lengths in reach.items()}
+        span = sum(carried.values())
+        if span <= 0.0:
+            raise ValueError(
+                'no node carries any member, so there is nothing to share '
+                'the mass out in proportion to')
+
+        self.masses = [item for item in self.masses if item.name != 'shared']
+        shares = {}
+        for node in nodes:
+            share = float(total) * carried[node] / span
+            lengths = reach[node]
+            scale = float(np.mean(lengths)) if lengths else 0.0
+            inertia = spin * share * scale ** 2
+            self.add_mass(node, share, (inertia, inertia, inertia),
+                          name='shared')
+            shares[node] = share
+        return shares
+
+    # ---- what is in it ----------------------------------------------------
+
+    @property
+    def node_ids(self) -> list[int]:
+        """The node ids in the order they were added, which is the matrices'
+        row order.
+        """
+        return list(self._nodes)
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self._nodes)
+
+    @property
+    def num_dof(self) -> int:
+        return 6 * len(self._nodes)
+
+    def position(self, node: int) -> np.ndarray:
+        return self._nodes[int(node)]
+
+    def group(self, node: int) -> str:
+        """The part this node was added as part of, such as 'arm 2' or 'top
+        deck'.
+
+        It is a label for the modeler: nothing here reads it, but which part of
+        a structure a mode is in is the first question asked of any result, and
+        working that out from coordinates afterwards is guesswork.
+        """
+        return self._node_group[int(node)]
+
+    def dof_strings(self) -> list[str]:
+        """Every degree of freedom, '101X+', '101Y+', ..., in the matrices'
+        own order.
+        """
+        return [f'{node}{direction}'
+                for node in self._nodes for direction in DIRECTIONS]
+
+    @property
+    def structural_mass(self) -> float:
+        """What the elements weigh, in kg (beams, plates, triangles and
+        solids), before any lumped mass is added.
+        """
+        beams = float(sum(beam.section.area * beam.material.density
+                          * self._length(beam) for beam in self.beams))
+        plates = 0.0
+        for plate in self.plates:
+            _, xy = _quad_frame(*[self._nodes[n] for n in plate.nodes])
+            plates += plate.material.density * plate.thickness * _quad_area(xy)
+        for triangle in self.triangles:
+            _, xy = _triangle_frame(*[self._nodes[n] for n in triangle.nodes])
+            plates += (triangle.material.density * triangle.thickness
+                       * _triangle_area(xy))
+        solids = 0.0
+        for count in {len(solid.nodes) for solid in self.solids}:
+            kind = [solid for solid in self.solids if len(solid.nodes) == count]
+            xyz = np.array([[self._nodes[n] for n in solid.nodes]
+                            for solid in kind])
+            density = np.array([solid.material.density for solid in kind])
+            solids += float(np.sum(density * np.abs(_solid_volumes(xyz))))
+        return beams + plates + solids
+
+    @property
+    def total_mass(self) -> float:
+        return self.structural_mass + float(sum(m.mass for m in self.masses))
+
+    def _length(self, beam: Beam) -> float:
+        return float(np.linalg.norm(self._nodes[beam.node_b]
+                                    - self._nodes[beam.node_a]))
+
+    # ---- the matrices -----------------------------------------------------
+
+    def _contributions(self):
+        """Every element's (rows, stiffness, mass) in global coordinates,
+        and every lumped mass's (rows, None, mass) — `_batches` one
+        element at a time, for the dense assembly."""
+        for rows, k, m in self._batches():
+            for e in range(len(rows)):
+                yield rows[e], (None if k is None else k[e]), m[e]
+
+    def _batches(self, chunk: int = ASSEMBLY_CHUNK):
+        """The elements' (rows, stiffness, mass) in global coordinates,
+        as arrays of up to `chunk` elements of one family at a time —
+        rows (E, r), stiffness and mass (E, r, r) — what both assemblies
+        scatter, so the dense and the sparse matrices cannot differ in
+        anything but storage.
+
+        Each distinct element's local matrices are computed once (2026-10-03):
+        a plate's depend only on its material, thickness and side lengths,
+        a beam's on its material, section and length, a triangle's on its
+        corners in its own plane, so a meshed model of twenty thousand
+        identical plates built one 24x24 pair twenty thousand times in
+        Python, half its solve (Brandon: is the solve multi-threaded? It
+        was not, and threads were not the answer). The key is the exact
+        inputs, so a cached matrix is the matrix; the rotations into the
+        global axes are one einsum per chunk, and the chunk bounds the
+        memory a fine mesh takes. A solid's matrices are built for every
+        element of a kind at once (`_solid_matrices_many`): a meshed
+        solid's bricks are mostly distinct, so there the cache saved
+        little and the one-at-a-time build was the cost.
+        """
+        index = {node: 6 * i for i, node in enumerate(self.node_ids)}
+
+        def dof_rows(nodes_per, per_node):
+            idx = np.array([[index[n] for n in nodes] for nodes in nodes_per],
+                           dtype=np.int64)
+            return (idx[:, :, None] + np.arange(per_node)).reshape(len(idx), -1)
+
+        def rotated(rotations, local):
+            # k_g = T^T k_l T with T the rotation repeated down the diagonal
+            count, size, _ = local.shape
+            blocks = size // 3
+            grid = local.reshape(count, blocks, 3, blocks, 3)
+            out = np.einsum('epi,eapbq,eqj->eaibj', rotations, grid, rotations,
+                            optimize=True)
+            return out.reshape(count, size, size)
+
+        def cached(compute, keys):
+            store: dict = {}
+            first = []
+            for key in keys:
+                if key not in store:
+                    store[key] = len(first)
+                    first.append(key)
+            which = np.array([store[key] for key in keys], dtype=np.int64)
+            pairs = [compute(key) for key in first]
+            k = np.array([pair[0] for pair in pairs])
+            m = np.array([pair[1] for pair in pairs])
+            return which, k, m
+
+        for lo in range(0, len(self.beams), chunk):
+            beams = self.beams[lo:lo + chunk]
+            lengths = []
+            rotations = []
+            for beam in beams:
+                length = self._length(beam)
+                if length == 0.0:
+                    raise ValueError(f'beam {beam.node_a}-{beam.node_b} has zero length')
+                lengths.append(length)
+                rotations.append(_element_axes(self._nodes[beam.node_a],
+                                               self._nodes[beam.node_b],
+                                               beam.orientation))
+            which, k, m = cached(
+                lambda key: (_beam_stiffness(*key), _beam_mass(*key)),
+                [(beam.material, beam.section, length)
+                 for beam, length in zip(beams, lengths)])
+            rotations = np.array(rotations)
+            rows = dof_rows([(beam.node_a, beam.node_b) for beam in beams], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
+
+        for lo in range(0, len(self.plates), chunk):
+            plates = self.plates[lo:lo + chunk]
+            corners = np.array([[self._nodes[n] for n in plate.nodes]
+                                for plate in plates], dtype=np.float64)
+            rotations, xy = _quad_frames(corners)
+            which, k, m = cached(
+                lambda key: _quad_matrices(key[0], key[1],
+                                           np.array(key[2]).reshape(4, 2)),
+                [(plate.material, plate.thickness,
+                  tuple(float(v) for v in xy[e].ravel()))
+                 for e, plate in enumerate(plates)])
+            rows = dof_rows([plate.nodes for plate in plates], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
+
+        for lo in range(0, len(self.triangles), chunk):
+            triangles = self.triangles[lo:lo + chunk]
+            frames = [_triangle_frame(*[self._nodes[n] for n in triangle.nodes])
+                      for triangle in triangles]
+            which, k, m = cached(
+                lambda key: _triangle_matrices(key[0], key[1],
+                                               np.array(key[2]).reshape(3, 2)),
+                [(triangle.material, triangle.thickness,
+                  tuple(float(v) for v in xy.ravel()))
+                 for triangle, (_rotation, xy) in zip(triangles, frames)])
+            rotations = np.array([rotation for rotation, _xy in frames])
+            rows = dof_rows([triangle.nodes for triangle in triangles], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
+
+        if self.solids:
+            ordinal = {node: i for i, node in enumerate(self.node_ids)}
+            positions = np.array([self._nodes[node] for node in self.node_ids],
+                                 dtype=np.float64)
+            # tets, wedges and bricks side by side differ in size, and
+            # `_solid_matrices_many` takes one material, so each kind
+            # and material is its own run of chunks
+            by_kind: dict[tuple[int, Material], list] = {}
+            for solid in self.solids:
+                by_kind.setdefault((len(solid.nodes), solid.material),
+                                   []).append(solid)
+            jobs = []
+            for (_count, material), members in by_kind.items():
+                which = np.array([[ordinal[n] for n in solid.nodes]
+                                  for solid in members], dtype=np.int64)
+                for lo in range(0, len(which), chunk):
+                    jobs.append((material, which[lo:lo + chunk]))
+
+            def solid_batch(job):
+                material, which = job
+                # every element at once, rather than each distinct one
+                # cached (2026-10-19): the Frame-Wing's 33,000 bricks are
+                # 2,800 distinct ones, 2.4 s built one at a time in
+                # Python and 0.1 s as arrays
+                k, m = _solid_matrices_many(material, positions[which])
+                # three translations per node: the rows of each node's
+                # first three degrees of freedom, and nothing on its rotations
+                rows = (6 * which[:, :, None] + np.arange(3)).reshape(len(which), -1)
+                return rows, k, m
+
+            # the chunks on threads, a few at a time so the memory stays
+            # bounded: numpy lets go of the interpreter lock inside the
+            # array calls that are all of a batch, and eight chunks of
+            # bricks take 81 ms on eight threads against 436 ms on one
+            # (measured 2026-10-19)
+            yield from _on_threads(solid_batch, jobs)
+
+        if self.masses:
+            rows = dof_rows([(item.node,) for item in self.masses], 6)
+            mass = np.array([np.diag([item.mass] * 3 + list(item.inertia))
+                             for item in self.masses])
+            yield rows, None, mass
+
+        # a spring is k v v^T over its one or two rows, v each end's sign
+        # (the second negated: it resists the difference), and no mass
+        for grounded in (False, True):
+            springs = [spring for spring in self.springs
+                       if (spring.node_b is None) == grounded]
+            if not springs:
+                continue
+            ends = [[(spring.node_a, spring.direction_a)]
+                    + ([] if grounded else
+                       [(spring.node_b, -spring.direction_b)])
+                    for spring in springs]
+            rows = np.array([[index[node] + abs(code) - 1 for node, code in end]
+                             for end in ends], dtype=np.int64)
+            signs = np.array([[np.sign(code) for _node, code in end]
+                              for end in ends], dtype=np.float64)
+            k = (np.array([spring.stiffness for spring in springs])[:, None, None]
+                 * signs[:, :, None] * signs[:, None, :])
+            yield rows, k, np.zeros_like(k)
+
+        # a tie's springs act on d = u_a - sum w_i u_i, the node's motion
+        # less the point's: B^T (R^T diag(k) R) B over the translations,
+        # B = [I, -w_1 I, ...], k zero where held rigidly or free; batched
+        # by how many nodes the point moves with
+        sprung: dict[int, list[Tie]] = {}
+        for tie in self.ties:
+            if 'stiffness' in tie.modes:
+                sprung.setdefault(len(tie.nodes_b), []).append(tie)
+        for ties in sprung.values():
+            rows = np.array([[index[node] + i for node in (tie.node_a, *tie.nodes_b)
+                              for i in range(3)] for tie in ties], dtype=np.int64)
+            frames = np.array([tie.frame for tie in ties], dtype=np.float64)
+            held = np.array([[k if mode == 'stiffness' else 0.0
+                              for mode, k in zip(tie.modes, tie.stiffness)]
+                             for tie in ties], dtype=np.float64)
+            block = np.einsum('eki,ek,ekj->eij', frames, held, frames)
+            shares = np.array([(1.0, *(-w for w in tie.weights)) for tie in ties])
+            k = np.einsum('ei,ej,ekl->eikjl', shares, shares, block).reshape(
+                len(ties), rows.shape[1], rows.shape[1])
+            yield rows, k, np.zeros_like(k)
+
+    def matrices(self) -> tuple[np.ndarray, np.ndarray]:
+        """Assemble the global mass and stiffness matrices, dense.
+
+        Rows and columns run node by node in the order the nodes were added,
+        six per node in `DIRECTIONS` order, which is what `dof_strings()`
+        lists. Every node has its six rows, including a node nothing touches;
+        the eigensolution holds those.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            (mass, stiffness), each (num_dof, num_dof) and symmetric.
+        """
+        n = self.num_dof
+        mass = np.zeros((n, n), dtype=np.float64)
+        stiffness = np.zeros((n, n), dtype=np.float64)
+        for rows, k, m in self._contributions():
+            grid = np.ix_(rows, rows)
+            if k is not None:
+                stiffness[grid] += k
+            mass[grid] += m
+        # assembly is symmetric by construction, but floating point addition
+        # is not associative and the halves drift apart in the last bits;
+        # eigh reads only one triangle, so an asymmetry here is silent
+        return (mass + mass.T) / 2.0, (stiffness + stiffness.T) / 2.0
+
+    def sparse_matrices(self, ticker: Any = None) -> tuple[Any, Any]:
+        """The same mass and stiffness matrices as `matrices`, stored sparse
+        (scipy CSR).
+
+        Each node couples only to the nodes of the elements it touches, so a
+        row holds a few dozen nonzero entries out of thousands, and the
+        storage grows in proportion to the number of nodes.
+
+        Parameters
+        ----------
+        ticker : Ticker, optional
+            Told one tick per element as it is assembled.
+
+        Returns
+        -------
+        tuple of scipy.sparse.csr_matrix
+            (mass, stiffness), symmetric.
+        """
+        from scipy import sparse
+
+        n = self.num_dof
+        rows, cols, vals = [], [], []
+        if ticker is not None:
+            ticker.add(len(self.beams) + len(self.plates)
+                       + len(self.triangles) + len(self.solids)
+                       + len(self.springs)
+                       + sum('stiffness' in tie.modes for tie in self.ties))
+        # Only the upper triangle of each element's matrix is scattered,
+        # the diagonal at half, and the matrix is the triangle plus its
+        # transpose: symmetric by construction, and half the entries to
+        # sort and sum. Scattering the whole and averaging it with its
+        # transpose was 0.8 s of the Frame-Wing's assembly (2026-10-19).
+        # Halving and doubling are exact, so the diagonal is unchanged.
+        # The mass and the stiffness share one pattern, so they travel
+        # as one complex value, mass + i stiffness, and are sorted and
+        # summed once (each part is summed on its own, exactly as apart).
+        for batch, k, m in self._batches():
+            count, r = batch.shape
+            upper = np.triu(np.ones((r, r), dtype=bool))
+            weight = np.where(np.eye(r, dtype=bool), 0.5, 1.0)[upper]
+            # 32-bit indices: a quarter less to sort, and scipy's limit
+            # of two billion rows is far above any model this holds
+            rows.append(np.broadcast_to(batch[:, :, None], (count, r, r))
+                        [:, upper].ravel().astype(np.int32))
+            cols.append(np.broadcast_to(batch[:, None, :], (count, r, r))
+                        [:, upper].ravel().astype(np.int32))
+            both = (m[:, upper] * weight).astype(np.complex128)
+            if k is not None:
+                both.imag = k[:, upper] * weight
+                if ticker is not None:
+                    ticker.tick(count)
+            vals.append(both.ravel())
+
+        if not rows:
+            return sparse.csr_matrix((n, n)), sparse.csr_matrix((n, n))
+        triangle = sparse.coo_matrix(
+            (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+            shape=(n, n)).tocsr()
+        whole = (triangle + triangle.T).tocsr()
+        split = [sparse.csr_matrix((part, whole.indices.copy(), whole.indptr.copy()),
+                                   shape=(n, n))
+                 for part in (whole.data.real.copy(), whole.data.imag.copy())]
+        return split[0], split[1]
+
+    def rigid_body_vectors(self) -> np.ndarray:
+        """The six rigid-body motions, as columns over the model's DOFs:
+        translations along X, Y and Z, then rotations about X, Y and Z through
+        the nodes' mean position.
+
+        They are written down from the node positions rather than found from
+        the matrices, because they are what the null space of an unconstrained
+        stiffness matrix should be, and so they check it. The eigensolution
+        does not use them to recognize a rigid mode; it uses the mode's strain
+        energy (`ZERO_ENERGY`).
+        """
+        n = self.num_dof
+        solved = self.node_ids
+        vectors = np.zeros((n, 6), dtype=np.float64)
+        center = np.mean(np.array([self._nodes[k] for k in solved]), axis=0)
+        for i, node in enumerate(solved):
+            offset = self._nodes[node] - center
+            for axis in range(3):
+                vectors[6 * i + axis, axis] = 1.0            # translations
+                # a small rotation about `axis` moves a point by the cross
+                # product of the axis with its offset, and rotates it by
+                # the axis itself
+                spin = np.zeros(3)
+                spin[axis] = 1.0
+                vectors[6 * i:6 * i + 3, 3 + axis] = np.cross(spin, offset)
+                vectors[6 * i + 3 + axis, 3 + axis] = 1.0
+        return vectors
+
+    # ---- the answer -------------------------------------------------------
+
+    def eigensolution(self, maximum_frequency: float | None = None,
+                      num_modes: int | None = None, damping: float = 0.0,
+                      fixed: Sequence[str] = (),
+                      solver: str = 'auto',
+                      progress: Callable[[int, int], None] | None = None
+                      ) -> ShapeSet:
+        """Real normal modes, mass-normalized, as a ShapeSet.
+
+        `fixed` names degrees of freedom to ground: '101X+' fixes one, and
+        '101' fixes all six of that node; the sign makes no difference. Rigid
+        links are eliminated exactly (`constraint_transform`). Ground points
+        (`add_ground`), nodes nothing touches (`loose_nodes`) and rotations
+        nothing acts on (`dangling_rotations`, `idle_lead_rotations`) are held
+        as well. A mode that strains no element (`ZERO_ENERGY`) is given a
+        frequency of exactly 0 Hz.
+
+        There are two solvers, giving one answer. The dense solver, for a model
+        of up to `SPARSE_ABOVE` degrees of freedom, solves the symmetric
+        generalized problem K phi = lambda M phi whole: M is factored
+        (Cholesky), the problem reduced to a standard symmetric one and the
+        result transformed back, which gives every mode, mass-normalized to
+        machine precision. The sparse solver, for larger models, stores the
+        matrices as their nonzeros (`sparse_matrices`) and finds the lowest
+        modes by shift-invert block Lanczos (`block_lanczos_modes`, the
+        method large finite element codes use, its solves taken a block
+        at a time), refined by `polish_modes`; a model the block method
+        does not converge is solved by ARPACK (`scipy.sparse.linalg.eigsh`)
+        instead, with a warning. Its one factorization is Accelerate's
+        supernodal Cholesky on a Mac and SuperLU's symmetric LU elsewhere
+        (`sparse_solve.factor_symmetric`). It finds the lowest `num_modes`, or every mode up to
+        `maximum_frequency`, and one of the two must be given. Its memory
+        grows with the number of nodes instead of its square: a plate model of
+        1,500 nodes that needs about 13 GB dense needs tens of megabytes
+        sparse.
+
+        `damping` is a fraction of critical, given to every mode. A model has
+        no damping of its own; it is stated so the modes can synthesize an FRF
+        that looks like a measurement.
+
+        Parameters
+        ----------
+        maximum_frequency : float, optional
+            Keep every mode up to this frequency, in Hz.
+        num_modes : int, optional
+            Keep this many, the lowest, rigid ones included. With
+            `maximum_frequency` as well, the lowest this many of those.
+        damping : float, default 0.0
+            The fraction of critical damping every mode is given.
+        fixed : sequence of str
+            Degrees of freedom to ground, as above. A node that follows a
+            rigid link cannot be fixed by itself (`constraint_transform`).
+        solver : {'auto', 'dense', 'sparse'}, default 'auto'
+            Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees of
+            freedom and sparse beyond.
+        progress : callable, optional
+            Told ``(done, total)`` as the solve advances: the assembly per
+            element, the factorization, the eigen iterations (an estimated
+            length, extended while they run), and the polish. The dense
+            solver's eigensolution is one call that cannot count itself,
+            and is announced as ``(done, core.progress.BUSY)``. The
+            window's progress bar reads it, and anything it raises stops
+            the solve.
+
+        Returns
+        -------
+        ShapeSet
+            The modes in ascending frequency, at every degree of freedom
+            (`dof_strings`), with mass in kg. A node the geometry measures
+            in a turned displacement frame has its six components written
+            in that frame, as every shape set's DOFs are read. Each mode's leading component
+            is positive (`signed_modes`), so a model solved twice gives the
+            same shapes.
+        """
+        # the sparse solver came for the BARC example (Brandon, 2026-09-26):
+        # the dense ceiling, deliberate until then, was measured and met
+        if solver not in ('auto', 'dense', 'sparse'):
+            raise ValueError(f'{solver!r} is not a solver: auto, dense, sparse')
+        ticker = Ticker(progress)
+        if solver == 'sparse' or (solver == 'auto'
+                                  and self.num_dof > SPARSE_ABOVE):
+            with blas_threads():
+                eigenvalues, full, stiffness = self._sparse_modes(
+                    fixed, maximum_frequency, num_modes, ticker)
+        else:
+            eigenvalues, full, stiffness = self._dense_modes(fixed, ticker)
+        if ticker.total:
+            ticker.tick(ticker.total - ticker.done)
+        # a rigid-body eigenvalue is zero plus round-off, and comes out
+        # either side of it; the negative ones are not oscillations
+        frequency = np.sqrt(np.clip(eigenvalues, 0.0, None)) / (2.0 * np.pi)
+        # the whole structure's sum picks the modes that may be rigid, and
+        # each element then has its say: a soft suspension's bounce strains
+        # only its springs, a part in 1e13 of a stiff board's sum (2026-10-26)
+        zero = _strains_nothing(full, stiffness)
+        if zero.any():
+            zero[zero] = self._strains_no_element(full[:, zero])
+        frequency[zero] = 0.0
+
+        order = np.argsort(frequency, kind='stable')
+        # in each node's displacement frame before the sign is chosen, so
+        # the sign rule reads what is stored
+        frequency = frequency[order]
+        full = signed_modes(self._in_displacement_frames(full[:, order]))
+        keep = np.ones(len(frequency), dtype=bool)
+        if maximum_frequency is not None:
+            keep &= frequency <= float(maximum_frequency)
+        keep = np.flatnonzero(keep)
+        if num_modes is not None:
+            keep = keep[:int(num_modes)]
+
+        return ShapeSet(frequency=frequency[keep],
+                        damping=np.full(len(keep), float(damping)),
+                        coordinate=self.dof_strings(),
+                        shape_matrix=full[:, keep].T,
+                        mass_unit='kg',
+                        comment=self.name or '')
+
+    def _strains_no_element(self, shapes: np.ndarray) -> np.ndarray:
+        """Which of these modes (one per column, at every degree of
+        freedom) strain no element: in each element, the energy is under
+        `ZERO_ELEMENT_ENERGY` of what that element would hold moved by
+        the mode's largest translation and rotation.
+
+        The whole structure's sum (`_strains_nothing`) cannot tell a
+        rigid motion from one that strains a few soft elements in a stiff
+        structure, since the soft elements' share is smaller than the
+        stiff ones' round-off; an element's own share can. Measured
+        against the mode's size rather than the element's own motion,
+        because a spring with one end grounded cancels nothing, and the
+        trace of a nearby soft mode that the solver leaves in a rigid one
+        would read as a full stretch.
+        """
+        rotation = (np.arange(shapes.shape[0]) % 6) >= 3
+        largest = np.abs(shapes)
+        scale = np.where(rotation[:, None], largest[rotation].max(axis=0),
+                         largest[~rotation].max(axis=0))
+        worst = np.zeros(shapes.shape[1])
+        for rows, k, _m in self._batches():
+            if k is None:
+                continue
+            phi = shapes[rows]
+            energy = np.einsum('erc,ers,esc->ec', phi, k, phi, optimize=True)
+            size = np.einsum('erc,ers,esc->ec', scale[rows], np.abs(k),
+                             scale[rows], optimize=True)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = np.nan_to_num(np.abs(energy) / size, nan=0.0)
+            worst = np.maximum(worst, ratio.max(axis=0))
+        return worst < ZERO_ELEMENT_ENERGY
+
+    def _in_displacement_frames(self, full):
+        """`full` (six rows per node in `dof_strings` order, a column per
+        mode, global) with each node in `displacement_frames` written in
+        its frame: `local = R @ global`, the translations and the
+        rotations alike."""
+        # The solve wrote global components under labels every reader takes
+        # in the node's displacement frame (`deform.dof_directions`), so a
+        # node measured in a turned frame was drawn, arrowed and planned
+        # along the wrong axes; the matrices were identical turned or not
+        # (Brandon, 2026-10-23).
+        if not self.displacement_frames:
+            return full
+        index = {node: k for k, node in enumerate(self._nodes)}
+        held = [(index[node], rotation)
+                for node, rotation in self.displacement_frames.items()
+                if node in index]
+        if not held:
+            return full
+        rows = np.array([k for k, _rotation in held], dtype=np.int64)
+        rotations = np.array([rotation for _k, rotation in held])
+        for first in (0, 3):        # the translations, then the rotations
+            at = 6 * rows[:, None] + first + np.arange(3)
+            full[at] = np.einsum('nij,njm->nim', rotations, full[at])
+        return full
+
+    def _dense_modes(self, fixed, ticker=None):
+        """(eigenvalues, shapes at every DOF, stiffness) solved whole."""
+        if ticker is not None:
+            # the dense path is one factorization and one eigh: two
+            # steps, the second the long one
+            ticker.add(2)
+        mass, stiffness = self.matrices()
+        # u = T q: q the degrees of freedom that remain — every node's,
+        # less those grounded and those following a rigid link's first
+        # node — and T writes every one of the model's in terms of them
+        transform = self.constraint_transform(fixed)
+        free = np.arange(transform.shape[1])
+        if not len(free):
+            raise ValueError('every degree of freedom is fixed')
+        reduced_m = transform.T @ mass @ transform
+        reduced_k = transform.T @ stiffness @ transform
+
+        try:
+            factor = np.linalg.cholesky(reduced_m)
+        except np.linalg.LinAlgError:
+            names = self.dof_strings()
+            kept = [names[int(np.flatnonzero(column)[0])]
+                    for column in transform.T]
+            starved = [kept[i]
+                       for i in np.flatnonzero(np.diag(reduced_m) <= 0.0)]
+            raise ValueError(
+                'the mass matrix is not positive definite, so these degrees '
+                'of freedom carry no mass and no rotary inertia: '
+                + (', '.join(starved[:6]) or 'none on the diagonal, so the '
+                   'model is nearly a mechanism')) from None
+
+        # M = L L^T, so K phi = lambda M phi becomes A y = lambda y with
+        # A = L^-1 K L^-T and phi = L^-T y. y orthonormal then gives
+        # phi^T M phi = y^T y = I exactly, which is the normalization we
+        # want and not something applied afterwards.
+        temporary = np.linalg.solve(factor, reduced_k)
+        standard = np.linalg.solve(factor, temporary.T).T
+        if ticker is not None:
+            ticker.tick()
+            # one call that reports nothing while it runs, and the most
+            # of the dense solve's time: a moving bar for it, not one
+            # standing at half (Brandon, 2026-10-18)
+            ticker.busy()
+        eigenvalues, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
+        if ticker is not None:
+            ticker.tick()
+        shapes = np.linalg.solve(factor.T, vectors)
+
+        full = transform @ shapes
+        return eigenvalues, full, stiffness
+
+    def scaled_system(self, fixed: Sequence[str] = (),
+                      ticker: Any = None) -> tuple[Any, ...]:
+        """The sparse eigenproblem as the sparse solver sets it up.
+
+        The shift is -(2 pi)^2, just below zero, so the rigid-body modes
+        (eigenvalue 0) are nearest it and come first, and K - sigma M =
+        K + |sigma| M is positive definite even when K alone is singular
+        (free-free). The scaling is symmetric and diagonal, S K S and S M S
+        with S = 1/sqrt of the shifted diagonal, which keeps the eigenvalues
+        and makes the modes S phi'. It is needed because a model of plates
+        mixes meters with radians, and rigid links put lever arms into the
+        rotations: unscaled, the rigid-link test model's shifted matrix has a
+        condition number of 4e12, and Lanczos, which converges no better than
+        its linear solves, leaves residuals of 1e-2. Scaled, the condition
+        number is 4e9. This is public so a test can give the polish a start of
+        its own choosing.
+
+        Parameters
+        ----------
+        fixed : sequence of str
+            Degrees of freedom to ground, as `eigensolution` takes them.
+        ticker : Ticker, optional
+            Passed to `sparse_matrices`.
+
+        Returns
+        -------
+        tuple
+            (K, M, T, S, sigma, stiffness): the constrained, symmetrically
+            scaled stiffness and mass in CSC form; the constraint transform T
+            and the scaling S, which carry a solution back to every degree of
+            freedom as T (S phi); the shift sigma; and the unconstrained sparse
+            stiffness.
+        """
+        # the condition numbers were measured 2026-09-26
+        from scipy import sparse
+
+        mass, stiffness = self.sparse_matrices(ticker)
+        transform = self.constraint_transform(fixed, sparse=True)
+        reduced_m = (transform.T @ mass @ transform).tocsc()
+        reduced_k = (transform.T @ stiffness @ transform).tocsc()
+        if not reduced_m.shape[0]:
+            raise ValueError('every degree of freedom is fixed')
+        sigma = -(2.0 * np.pi) ** 2
+        scale = sparse.diags(1.0 / np.sqrt(
+            (reduced_k - sigma * reduced_m).diagonal()))
+        reduced_k = (scale @ reduced_k @ scale).tocsc()
+        reduced_m = (scale @ reduced_m @ scale).tocsc()
+        return reduced_k, reduced_m, transform, scale, sigma, stiffness
+
+    def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
+        """(eigenvalues, shapes at every DOF, stiffness) for the lowest
+        modes, by shift-invert block Lanczos on the sparse matrices,
+        ARPACK's Lanczos behind it."""
+        import warnings
+
+        from scipy.sparse.linalg import LinearOperator, eigsh
+
+        from .sparse_solve import factor_symmetric
+
+        if num_modes is None and maximum_frequency is None:
+            raise ValueError(
+                f'a model of {self.num_dof} degrees of freedom is solved '
+                'for its lowest modes: say how many (num_modes) or up to '
+                'what frequency (maximum_frequency)')
+        reduced_k, reduced_m, transform, scale, sigma, stiffness = \
+            self.scaled_system(fixed, ticker)
+        size = reduced_m.shape[0]
+        # the shifted factor, once: eigsh's shift-invert and the polish
+        # both solve with it, and eigsh built its own until the bar
+        # needed to count the solves (2026-10-01) — the operator ticks
+        # per application against an estimate the bar is kept short of.
+        # Accelerate's on a Mac, SuperLU's in symmetric mode elsewhere
+        # (`sparse_solve`, 2026-10-18): the factorization and its solves
+        # were 23 of a 270,000-DOF model's 29 seconds, on one core
+        if ticker is not None:
+            ticker.add(1)
+        try:
+            factor = factor_symmetric((reduced_k - sigma * reduced_m).tocsc())
+        except RuntimeError as failure:
+            empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
+                                   & (reduced_k.diagonal() <= 0.0))
+            raise ValueError(
+                'the model could not be factored: degrees of freedom '
+                'with neither mass nor stiffness'
+                + (f' ({len(empty)} of them)' if len(empty) else '')
+                + f' — {failure}') from None
+        if ticker is not None:
+            ticker.tick()
+
+        def solve(vector):
+            if ticker is not None:
+                ticker.extend_to(1)
+                ticker.tick()
+            return factor.solve(np.asarray(vector, dtype=float))
+
+        def arpack(count):
+            shifted_inverse = LinearOperator(factor.shape, matvec=solve,
+                                             dtype=float)
+            return eigsh(reduced_k, k=count, M=reduced_m, sigma=sigma,
+                         which='LM', OPinv=shifted_inverse)
+
+        def nearest(count):
+            # the block method (2026-10-19), ARPACK behind it: a model
+            # the block basis does not converge is not left unsolved
+            if SPARSE_EIGENSOLVER != 'block':
+                return arpack(count)
+            try:
+                eigenvalues, vectors, _claimed = block_lanczos_modes(
+                    factor, reduced_m, sigma, count, ticker=ticker)
+                return eigenvalues, vectors
+            except NotConverged as why:
+                warnings.warn(f'the block Lanczos did not converge ({why}); '
+                              'solving by ARPACK instead', stacklevel=3)
+                return arpack(count)
+
+        limit = (None if maximum_frequency is None
+                 else (2.0 * np.pi * float(maximum_frequency)) ** 2)
+        wanted = int(num_modes) if num_modes is not None else 24
+        if limit is not None and num_modes is None:
+            # Every mode up to a frequency: counted first, from the
+            # signs of one more factorization (`sparse_solve.count_below`),
+            # so one Lanczos run asks for them all; two over the count
+            # for a pivot whose sign is round-off. Guessing instead ran
+            # the whole Lanczos three to six times (2026-10-29: 24.9 s
+            # for 400 modes doubling from 24, 8.2 s predicting, 4.7 s
+            # asked outright). The check below still holds a miscount
+            # to the answer, at the cost of another run.
+            from .sparse_solve import count_below
+            try:
+                wanted = count_below(reduced_k, reduced_m, limit) + 2
+            except RuntimeError:
+                pass
+        while True:
+            wanted = max(1, min(wanted, size - 1))
+            count = min(wanted + LANCZOS_GUARD, size - 1)
+            try:
+                if ticker is not None:
+                    ticker.extend_to(EIGEN_SOLVES_PER_MODE * count)
+                eigenvalues, vectors = nearest(count)
+            except RuntimeError as failure:
+                empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
+                                       & (reduced_k.diagonal() <= 0.0))
+                raise ValueError(
+                    'the model could not be factored: degrees of freedom '
+                    'with neither mass nor stiffness'
+                    + (f' ({len(empty)} of them)' if len(empty) else '')
+                    + f' — {failure}') from None
+            # the wanted modes, not the guard, have to reach the limit:
+            # the guard is what keeps the last of them clean, and a
+            # guard mode is never the answer to "every mode up to"
+            # with `num_modes` as well, the lowest that many are the
+            # answer whether or not they reach the limit
+            if (limit is None or num_modes is not None
+                    or np.sort(eigenvalues)[wanted - 1] > limit
+                    or wanted >= size - 1):
+                break
+            # Short of the limit: the next run asks for the count the
+            # modes found predict, not twice as many. Each run starts
+            # afresh, and doubling from 24 ran the whole Lanczos five or
+            # six times for a few hundred modes, 24.9 s where asking for
+            # the 400 modes outright took 4.7 s (2026-10-29)
+            expected = predicted_count(eigenvalues[:wanted], limit)
+            wanted = (2 * wanted if expected is None
+                      else max(wanted + 1, math.ceil(SEARCH_MARGIN * expected)))
+        # Polish: block inverse iteration with the shifted factor, each
+        # step followed by Rayleigh-Ritz, until the residuals say the
+        # modes are converged (`polish_modes`). What is left of the
+        # conditioning after scaling still bounds Lanczos' own accuracy
+        # (measured on the rigid-link model: 1e-4 residual before, 1.5e-6
+        # after two fixed steps, 2026-09-26), and a fixed count of steps
+        # was the flaw: a start the polish did not clean in three steps
+        # slipped through on one runner's build. The guard band above
+        # the wanted modes is trimmed by the caller's `keep`. The Ritz
+        # step also makes the modes mass-normal exactly.
+        eigenvalues, vectors, _residuals = polish_modes(
+            reduced_k, reduced_m, sigma, vectors, wanted, factor=factor,
+            ticker=ticker)
+        return eigenvalues, transform @ (scale @ vectors), stiffness
+
+    def constraint_transform(self, fixed: Sequence[str] = (),
+                             sparse: bool = False) -> Any:
+        """T, with u = T q: every degree of freedom of the model written in terms
+        of those that remain free.
+
+        Held degrees of freedom are removed (those `fixed` names, and those
+        the eigensolution holds on its own), and each rigid body's followers
+        are written through its first node, u_b = u_a + θ_a × (x_b − x_a) and
+        θ_b = θ_a. With nothing to constrain, T is the identity.
+
+        Parameters
+        ----------
+        fixed : sequence of str
+            Degrees of freedom to ground, as `eigensolution` takes them. A
+            rigid body is grounded through its first node; naming one of its
+            followers is refused, since fixing a follower alone would fix part
+            of a rigid body and not the rest.
+
+        sparse : bool, default False
+            Return it as a scipy CSR matrix, for the sparse solver.
+
+        Returns
+        -------
+        numpy.ndarray or scipy.sparse.csr_matrix
+            (num_dof, remaining) and real.
+        """
+        index = {node: 6 * i for i, node in enumerate(self.node_ids)}
+        follows: dict[int, int] = {}
+        for body in self.rigid_bodies():
+            for node in body[1:]:
+                follows[node] = body[0]
+        free = self._free_dofs(fixed)
+        followers = {index[node] + k for node in follows for k in range(6)}
+        held = sorted(set(range(self.num_dof)) - {int(i) for i in free})
+        clash = sorted({self.node_ids[i // 6] for i in held if i in followers})
+        if clash:
+            raise ValueError(
+                'node ' + ', '.join(str(n) for n in clash) + ' follows a '
+                'rigid link; ground the node it follows instead')
+        ties = self._tie_followers(follows)
+        tied = {index[node] + k for node in ties for k in range(3)}
+        clash = sorted({self.node_ids[i // 6] for i in held if i in tied})
+        if clash:
+            raise ValueError(
+                'node ' + ', '.join(str(n) for n in clash) + ' follows a '
+                'tie; ground the node it follows instead')
+        kept = [int(i) for i in free if int(i) not in followers and int(i) not in tied]
+        column = {dof: k for k, dof in enumerate(kept)}
+        entries = [(dof, k, 1.0) for dof, k in column.items()]
+        for node, lead in follows.items():
+            r = self._nodes[node] - self._nodes[lead]
+            # θ × r = -[r]× θ: the lead's rotation moves the follower
+            arm = np.array([[0.0, r[2], -r[1]],
+                            [-r[2], 0.0, r[0]],
+                            [r[1], -r[0], 0.0]])
+            rows = index[node]
+            lead_row = index[lead]
+            for k in range(6):
+                source = lead_row + k
+                if source not in column:
+                    continue                  # the lead is grounded there
+                entries.append((rows + k, column[source], 1.0))
+                if k >= 3:
+                    entries.extend((rows + axis, column[source],
+                                    float(arm[axis, k - 3]))
+                                   for axis in range(3) if arm[axis, k - 3])
+        width = len(kept)
+        if ties:
+            entries, width = self._tie_rows(ties, index, entries, width)
+        shape = (self.num_dof, width)
+        # a lead whose followers lie on a slanted line (`oblique_lead_lines`)
+        # keeps two rotations, in a basis turned to the line, and not the
+        # one about it: its three rotation columns are combined into two
+        # by a second transform, T R, R the identity elsewhere (the ties'
+        # own columns past len(kept) included: a tie row reads a lead's
+        # rotation only through a rigid follower, which the dropped
+        # rotation about the line does not move)
+        turned = []
+        for lead, line in self.oblique_lead_lines():
+            axes = [column[index[lead] + 3 + k] for k in range(3)
+                    if index[lead] + 3 + k in column]
+            if len(axes) == 3:
+                turned.append((axes, _plane_basis(line)))
+        if turned:
+            dropped = {axis for axes, _basis in turned for axis in axes}
+            fresh = {}
+            for k in range(width):
+                if k not in dropped:
+                    fresh[k] = len(fresh)
+            mixing = [(k, fresh[k], 1.0) for k in fresh]
+            for axes, basis in turned:
+                first = len(fresh) + 2 * len([1 for a, _b in turned if a < axes])
+                for k in range(2):
+                    mixing.extend((axes[row], first + k, float(basis[row, k]))
+                                  for row in range(3) if basis[row, k])
+            columns = len(fresh) + 2 * len(turned)
+        if sparse:
+            from scipy import sparse as sp
+
+            if not entries:
+                return sp.csr_matrix(shape)
+            i, j, v = zip(*entries, strict=True)
+            transform = sp.coo_matrix((v, (i, j)), shape=shape).tocsr()
+            if turned:
+                i, j, v = zip(*mixing, strict=True)
+                transform = (transform @ sp.coo_matrix(
+                    (v, (i, j)), shape=(width, columns)).tocsr()).tocsr()
+            return transform
+        transform = np.zeros(shape, dtype=np.float64)
+        for i, j, v in entries:
+            transform[i, j] = v
+        if turned:
+            reduce = np.zeros((width, columns))
+            for i, j, v in mixing:
+                reduce[i, j] = v
+            transform = transform @ reduce
+        return transform
+
+    def _tie_followers(self, follows) -> dict[int, Tie]:
+        """{node: its tie} for every node a tie makes follow, refusing a
+        node that follows two ties or is in a rigid body."""
+        ties: dict[int, Tie] = {}
+        bodies = {n for body in self.rigid_bodies() for n in body}
+        for tie in self.ties:
+            if tie.node_a in ties:
+                other = ties[tie.node_a]
+                raise ValueError(
+                    f'node {tie.node_a} follows two ties ({other.group or "unnamed"} '
+                    f'and {tie.group or "unnamed"}): take it out of one')
+            if tie.node_a in bodies:
+                raise ValueError(
+                    f'node {tie.node_a} follows a tie ({tie.group or "unnamed"}) and is '
+                    'in a rigid body: take it out of one')
+            ties[tie.node_a] = tie
+        return ties
+
+    def _tie_rows(self, ties, index, entries, width):
+        """The transform's rows for the translations of the nodes ties
+        make follow: along a rigid direction e, e e^T times the followed
+        point's rows, its nodes' weighted; along a direction held by a
+        spring or free, e times a column of its own. A followed node that
+        follows a tie itself is written out first; a loop of ties is
+        refused."""
+        rows: dict[int, dict[int, float]] = {}
+        for dof, col, value in entries:
+            rows.setdefault(dof, {})
+            rows[dof][col] = rows[dof].get(col, 0.0) + value
+        done: set[int] = set()
+        visiting: set[int] = set()
+        added = []
+
+        def resolve(node: int) -> None:
+            nonlocal width
+            if node in done:
+                return
+            if node in visiting:
+                raise ValueError(f'the ties through node {node} follow one another '
+                                 'round a loop')
+            visiting.add(node)
+            tie = ties[node]
+            for other in tie.nodes_b:
+                if other in ties:
+                    resolve(other)
+            base_a = index[node]
+            out = [{} for _ in range(3)]
+            for e, mode in zip(tie.frame, tie.modes):
+                e = np.asarray(e, dtype=float)
+                if mode == 'rigid':
+                    # u_a . e = (sum w_i u_i) . e
+                    for other, share in zip(tie.nodes_b, tie.weights):
+                        base_b = index[other]
+                        for j in range(3):
+                            for col, value in rows.get(base_b + j, {}).items():
+                                for i in range(3):
+                                    weight = e[i] * e[j] * share * value
+                                    if weight:
+                                        out[i][col] = out[i].get(col, 0.0) + weight
+                else:
+                    col = width
+                    width += 1
+                    for i in range(3):
+                        if e[i]:
+                            out[i][col] = out[i].get(col, 0.0) + float(e[i])
+            for i in range(3):
+                rows[base_a + i] = out[i]
+                added.extend((base_a + i, col, value) for col, value in out[i].items()
+                             if value)
+            visiting.discard(node)
+            done.add(node)
+
+        for node in ties:
+            resolve(node)
+        return entries + added, width
+
+    def dangling_rotations(self) -> list[int]:
+        """The nodes whose rotations nothing acts on.
+
+        These are nodes touched by solids or translational springs and by
+        nothing that carries a rotation: no beam, plate or triangle, and no
+        rigid link, whose lead's rotation moves its followers. Neither a solid
+        nor a spring along an axis gives a rotational stiffness, so these
+        rotations are grounded by the eigensolution; left free, they would be
+        degrees of freedom with neither mass nor stiffness, and the
+        factorization would fail. A mass hung from a structure on springs is
+        one case, since its node is no beam's. Nodes already held in all three
+        rotations are not listed, and a lumped mass with rotary inertia on one
+        of these nodes is refused at solve time.
+
+        Returns
+        -------
+        list of int
+            The nodes, in the model's order.
+        """
+        # a mass on springs is the newer case (2026-10-08): a tuned mass hung
+        # from a structure by spring lines, its node no beam's
+        rotating = self._rotating_nodes()
+        touched = {n for solid in self.solids for n in solid.nodes}
+        touched |= {node for spring in self.springs
+                    for node, code in ((spring.node_a, spring.direction_a),
+                                       (spring.node_b, spring.direction_b))
+                    if node is not None and abs(code) <= 3}
+        # a tie holds translations alone
+        touched |= {n for tie in self.ties for n in (tie.node_a, *tie.nodes_b)}
+        # a held node's rotations are held already
+        held = set(self.loose_nodes()) | {
+            node for node, axes in self.grounds.items()
+            if {3, 4, 5} <= set(axes)}
+        return [n for n in self.node_ids
+                if n in touched and n not in rotating and n not in held]
+
+    def idle_lead_rotations(self) -> list[tuple[int, int]]:
+        """(lead node, axis 0-2) for each rotation of a rigid body's lead that
+        nothing acts on.
+
+        A body that only solids touch, with its nodes on one line, cannot feel
+        a rotation about that line: the rotation moves no follower, and a
+        solid has no rotational stiffness, so the rotation is a degree of
+        freedom with neither mass nor stiffness. Tying two brick meshes whose
+        columns line up (the app's Tie on any two conforming brick meshes)
+        makes such bodies, each tied node leading only the nodes straight
+        above it. These rotations are grounded like those of a node only
+        solids touch (`dangling_rotations`): the rotation about the line where
+        the line runs along a global axis, and all three where the body's
+        nodes coincide. A line at a slant is held through a rotated basis
+        in `constraint_transform` (`oblique_lead_lines`): a fine mesh tied
+        to a coarse one node to nearest node has most of its ties on
+        slanted arms, and left to the factorization, which refused the
+        matrix on a Mac and handed back garbage elsewhere, no solver
+        could find the modes.
+
+        Returns
+        -------
+        list of (int, int)
+            The lead's node and the rotation's axis, in the model's order.
+        """
+        # Found tying a beam of bricks to the channels under it (the BARC in
+        # hexes, 2026-10-07): the two meshes' columns line up, so each tied
+        # channel node leads only the beam nodes straight above it.
+        idle = []
+        for lead, line in self._lead_lines():
+            if line is None:
+                idle.extend((lead, axis) for axis in range(3))
+                continue
+            axis = int(np.argmax(np.abs(line)))
+            if abs(line[axis]) > 1.0 - 1e-9:
+                idle.append((lead, axis))
+        return idle
+
+    def oblique_lead_lines(self) -> list[tuple[int, np.ndarray]]:
+        """(lead node, unit direction) for each rigid body that only
+        solids touch whose nodes lie on one line at a slant to the axes.
+
+        Such a body's rotation about its line is a degree of freedom
+        with neither mass nor stiffness, as `idle_lead_rotations` says,
+        and no single rotation of the lead can be held for it; the
+        constraint transform writes the lead's rotation in a basis
+        turned to the line and leaves that component out. A fine brick
+        mesh tied to a coarse one node to nearest node makes these by
+        the dozen, each fine node's arm to its lead running diagonally.
+
+        Returns
+        -------
+        list of (int, numpy.ndarray)
+            The lead and the line's direction, a unit vector, in the
+            model's order.
+        """
+        return [(lead, line) for lead, line in self._lead_lines()
+                if line is not None and np.abs(line).max() <= 1.0 - 1e-9]
+
+    def _lead_lines(self) -> list[tuple[int, np.ndarray | None]]:
+        """(lead, unit direction of the line its followers lie on, or
+        None where they coincide with it) for each rigid body only
+        solids touch whose nodes are on one line."""
+        if not self.solids:
+            return []
+        carried = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
+        carried |= {n for plate in self.plates for n in plate.nodes}
+        carried |= {n for triangle in self.triangles for n in triangle.nodes}
+        carried |= {m.node for m in self.masses if any(m.inertia)}
+        lines: list[tuple[int, np.ndarray | None]] = []
+        for body in self.rigid_bodies():
+            if any(node in carried for node in body):
+                continue
+            lead = body[0]
+            arms = np.array([self._nodes[node] - self._nodes[lead]
+                             for node in body[1:]], dtype=float)
+            size = float(np.abs(arms).max()) if arms.size else 0.0
+            if size == 0.0:
+                lines.append((lead, None))
+                continue
+            _u, spread, direction = np.linalg.svd(arms / size)
+            if spread.size > 1 and spread[1] > 1e-9 * spread[0]:
+                continue                      # not on one line: all stiff
+            lines.append((lead, direction[0] / np.linalg.norm(direction[0])))
+        return lines
+
+    def loose_nodes(self) -> list[int]:
+        """The nodes nothing touches: no element, no rigid link and no lumped
+        mass (a spring alone does not count).
+
+        A finite element deck often has them (a reference point, a
+        constraint's own grid point), and a model built from its element
+        groups grounds them whole rather than refusing the deck. The grillage
+        path of `from_geometry` still refuses them, since there a loose node is
+        a drawn node that was never wired.
+
+        Returns
+        -------
+        list of int
+            The nodes, in the model's order.
+        """
+        # grounded rather than refused since 2026-09-30
+        touched = self._rotating_nodes()
+        touched |= {n for solid in self.solids for n in solid.nodes}
+        touched |= {m.node for m in self.masses}
+        touched |= {n for tie in self.ties for n in (tie.node_a, *tie.nodes_b)}
+        return [n for n in self.node_ids if n not in touched]
+
+    def _rotating_nodes(self) -> set[int]:
+        """Every node something with a rotation acts on."""
+        rotating = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
+        rotating |= {n for plate in self.plates for n in plate.nodes}
+        rotating |= {n for triangle in self.triangles for n in triangle.nodes}
+        # a rigid body's lead rotates its followers, so its rotation has
+        # something to act on; the followers' rotations are written
+        # through the lead's and are not free to ground
+        rotating |= {n for body in self.rigid_bodies() for n in body}
+        return rotating
+
+    def _free_dofs(self, fixed) -> np.ndarray:
+        """Which rows survive after grounding what `fixed` names, the
+        ground points (`add_ground`), the rotations nothing acts on
+        (`dangling_rotations`), the rotations of a rigid body's lead
+        nothing acts on (`idle_lead_rotations`), and every degree of
+        freedom of a node nothing touches."""
+        index = {node: 6 * i for i, node in enumerate(self.node_ids)}
+        held = set()
+        for node in self.loose_nodes():
+            held.update(range(index[node], index[node] + 6))
+        for node, axes in self.grounds.items():
+            held.update(index[node] + axis for axis in axes)
+        # a rotational spring's end must rotate with something, or be held:
+        # on a node only solids, masses or other springs touch it would be
+        # grounded with that node's rotations, silently, or be a rotation
+        # with stiffness and no mass
+        rotating = self._rotating_nodes()
+        whole = set(self.loose_nodes())
+        twisted = sorted({node for spring in self.springs
+                          for node, code in ((spring.node_a,
+                                              spring.direction_a),
+                                             (spring.node_b,
+                                              spring.direction_b))
+                          if node is not None and abs(code) > 3
+                          and node not in rotating and node not in whole
+                          and not self._rotation_held(node, code)})
+        if twisted:
+            raise ValueError(
+                f'a spring acts on a rotation of node {twisted[0]}, but '
+                'nothing that carries a rotation touches the node — no '
+                'beam, plate or rigid link; put it on a node one of those '
+                'holds, or on a ground point')
+        dangling = self.dangling_rotations()
+        if dangling:
+            inert = sorted({m.node for m in self.masses
+                            if any(m.inertia) and m.node in set(dangling)})
+            if inert:
+                raise ValueError(
+                    f'the mass at node {inert[0]} has rotary inertia, but '
+                    'nothing that carries a rotation touches the node — '
+                    'a solid, a point mass or a spring gives a rotation '
+                    'nothing to act on; put it on a node a beam, a plate '
+                    'or a rigid link holds')
+            for node in dangling:
+                held.update(range(index[node] + 3, index[node] + 6))
+        held.update(index[node] + 3 + axis
+                    for node, axis in self.idle_lead_rotations())
+        for item in fixed:
+            text = str(item).strip()
+            digits = 0
+            while digits < len(text) and text[digits].isdigit():
+                digits += 1
+            node = int(text[:digits]) if digits else None
+            if node not in index:
+                raise ValueError(f'{item!r} does not name a node in the model')
+            direction = text[digits:]
+            if not direction:
+                held.update(range(index[node], index[node] + 6))
+            else:
+                # a sign is meaningless when grounding — X- is the same
+                # constraint as X+ — so the code's magnitude is the axis
+                held.add(index[node] + abs(direction_code(direction)) - 1)
+        return np.array([i for i in range(self.num_dof) if i not in held],
+                        dtype=np.int64)
+
+    # ---- what it looks like -----------------------------------------------
+
+    def geometry(self, beams: bool = True) -> Geometry:
+        """The model as a Geometry: its nodes, and its beams, rigid links,
+        plates, triangles, solids and faces as elements, each in the element
+        group of the part it belongs to.
+
+        Beams become element type 21 (beam2) rather than tracelines, because
+        they are elements. A traceline is a line drawn through nodes to make a
+        display readable, and treating the two alike would make the model's
+        own connectivity indistinguishable from a drawing aid as soon as
+        anything edited it. Rigid links are two-node lines too, in element
+        groups of their own; plates and triangles are written as quads and
+        triangles (types 44 and 41), and solids by their node count
+        (`SOLID_CODES`).
+
+        `beams=False` leaves the beams out, for a model whose members are all
+        covered by surfaces: there the beams run inside the shells, and drawing
+        them puts a wireframe over the thing it is the skeleton of.
+        """
+        node_ids = self.node_ids
+        connectivity, types, colors = [], [], []
+        for beam in self.beams if beams else ():
+            connectivity.append([beam.node_a, beam.node_b])
+            types.append(21)
+            colors.append(beam.color)
+        # rigid links are two-node lines too, in element groups of their own — a
+        # geometry given `RIGID` on those element groups rebuilds them
+        for link in self.rigid_links:
+            connectivity.append([link.node_a, link.node_b])
+            types.append(21)
+            colors.append(1)
+        # plates are structural quads and appear as such — unlike faces,
+        # which are drawings; both shade, only one carries stiffness
+        for plate in self.plates:
+            connectivity.append(list(plate.nodes))
+            types.append(44)
+            colors.append(plate.color)
+        for triangle in self.triangles:
+            connectivity.append(list(triangle.nodes))
+            types.append(41)
+            colors.append(triangle.color)
+        for solid in self.solids:
+            connectivity.append(list(solid.nodes))
+            types.append(SOLID_CODES[len(solid.nodes)])
+            colors.append(solid.color)
+        for face in self.faces:
+            connectivity.append(list(face.nodes))
+            types.append(44 if len(face.nodes) == 4 else 41)
+            colors.append(face.color)
+        # Elements go into the element group of the part they belong to, so the
+        # geometry states its own regions and a saved file can rebuild the
+        # structure. Without this the element groups live only on the drawing, and
+        # the model's own geometry — which is what gets saved — carries
+        # nothing: the file comes back with every member the same section.
+        # The part comes off the element, never off its first node: a node
+        # on a seam belongs to two parts and answers for one, which put
+        # five of the drone's blade members into the frame element group.
+        parts, groups = {}, []
+        for part in ([b.group for b in (self.beams if beams else ())]
+                     + [link.group or 'rigid links'
+                        for link in self.rigid_links]
+                     + [p.group for p in self.plates]
+                     + [t.group for t in self.triangles]
+                     + [s.group for s in self.solids]
+                     + [f.group for f in self.faces]):
+            groups.append(parts.setdefault(part or 'body', len(parts) + 1))
+        return Geometry(
+            node_id=node_ids,
+            node_xyz=np.array([self._nodes[node] for node in node_ids]),
+            elem_conn=connectivity or None,
+            elem_type=types or None,
+            elem_color=colors or None,
+            elem_group=groups or None,
+            group_id=list(parts.values()) or None,
+            group_name=list(parts) or None,
+            length_unit=self.length_unit)
+
+
+def group_masses(geometry: Geometry) -> dict[int, float | None]:
+    """{element group: mass in kg}, what each of a geometry's element
+    groups weighs as the model built from it counts it.
+
+    Each element group's elements are built as `Model.from_geometry`
+    builds them, with that group's properties, and weighed as
+    `Model.total_mass` weighs a model: beams, plates, triangles and
+    solids by their density, point masses by their mass, and rigid
+    links, springs and ground points as nothing. A group whose
+    properties do not yet make elements (no properties, no material, a
+    beam section not finished) is None, so a partial sum can say what
+    it leaves out.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry, with its element groups' properties
+        (`group_properties`).
+
+    Returns
+    -------
+    dict of int to float or None
+        Every element group the geometry's elements belong to, in kg.
+    """
+    # the status line's weight (Brandon, 2026-10-18): the mass the solve
+    # would use, so the two cannot disagree. A model per group, holding
+    # only that group's nodes, so the cost is one pass over the elements
+    properties = dict(getattr(geometry, 'group_properties', {}) or {})
+    groups = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    index = {int(node): row for row, node in enumerate(geometry.node_id)}
+    out: dict[int, float | None] = {}
+    for group in dict.fromkeys(int(g) for g in groups):
+        model = Model('', length_unit=geometry.length_unit or 'm')
+        used = {int(node) for row in np.flatnonzero(groups == group)
+                for node in np.asarray(geometry.elem_conn[row]).ravel()}
+        for node in sorted(used):
+            model.add_node(node, *[float(v) for v in
+                                   geometry.node_xyz[index[node]]])
+        try:
+            _element_by_group(model, geometry, properties, only=group)
+        except ValueError:
+            out[group] = None
+            continue
+        out[group] = model.total_mass
+    return out
+
+
+def _from_groups(model: Model, geometry: Geometry,
+                 properties: dict[int, GroupProperties],
+                 total_mass: float | None, groups) -> Model:
+    """`from_geometry`'s element group path: nodes, then every element as
+    itself, then the same checks the grillage path makes."""
+    labels = dict(groups or {}) or _labels_from_groups(geometry)
+    for node, xyz in zip(geometry.node_id, geometry.node_xyz):
+        model.add_node(int(node), *[float(v) for v in xyz],
+                       group=labels.get(int(node), ''))
+    if not _element_by_group(model, geometry, properties):
+        raise ValueError('the geometry has no elements to build from')
+    _mated_links(model, geometry)
+    joined = {n for beam in model.beams for n in (beam.node_a, beam.node_b)}
+    joined |= {n for plate in model.plates for n in plate.nodes}
+    joined |= {n for triangle in model.triangles for n in triangle.nodes}
+    joined |= {n for solid in model.solids for n in solid.nodes}
+    # a point mass on a node nothing holds is a mass free to fly off:
+    # three modes at 0 Hz that are no rigid-body motion, said here by
+    # node rather than left for the reader of the mode list to find
+    held = joined | {n for link in model.rigid_links
+                     for n in (link.node_a, link.node_b)}
+    held |= {n for spring in model.springs
+             for n in (spring.node_a, spring.node_b) if n is not None}
+    held |= {n for tie in model.ties for n in (tie.node_a, *tie.nodes_b)}
+    held |= set(model.grounds)
+    stray = [m.node for m in model.masses if m.node not in held]
+    if stray:
+        shown = ', '.join(str(n) for n in stray[:4])
+        raise ValueError(f'a point mass sits on node {shown}, which no '
+                         'element touches: put it on a node of the '
+                         'structure')
+    # nodes no element touches are grounded at solve time
+    # (`Model.loose_nodes`), not refused: a deck's reference points
+    pieces = [piece for piece in model.pieces()
+              if len(piece) > 1 or piece[0] in joined]
+    if len(pieces) > 1:
+        sizes = ', '.join(str(len(p)) for p in pieces[:6])
+        raise ValueError(
+            f'the geometry is {len(pieces)} disconnected pieces ({sizes} '
+            'nodes); a model is one structure')
+    if total_mass is not None:
+        _bring_to(model, total_mass)
+    return model
+
+
+def _mated_links(model: Model, geometry: Geometry) -> None:
+    """The ties of the geometry's mated surfaces (`core.mates`): each
+    node of a set's first side tied to the point of the second side's
+    surface it lies on, along the normal there and across it, as the set
+    holds each (`Model.add_tie`)."""
+    from .mates import links
+
+    # a node on the edge between two groups that both rest on one
+    # surface is in a set for each (a frame node at a screw's hole, under
+    # a washer: "frame on washers" and "screws on washers"), tied twice to
+    # one point the same way: the second is the first again and is left
+    # out. Two that differ, another surface or another hold, still reach
+    # `constraint_transform`, which refuses them by name (2026-10-20)
+    held: dict[int, tuple] = {}
+    for mated in getattr(geometry, 'mates', None) or []:
+        how = (int(mated.groups[1]), mated.normal_mode, mated.shear_mode,
+               float(mated.normal_stiffness), float(mated.shear_stiffness))
+        for nodes, weights, node, normal, point in links(geometry, mated):
+            if held.get(node) == how:
+                continue
+            held.setdefault(node, how)
+            # the node moved onto the point it is tied to, in the model
+            # alone: a tie across even a hair's gap resists a rigid turn
+            # (a shaft tied rigidly in its bore, its nodes a chord's sag
+            # off the bore's facets, kept three of its six free modes,
+            # 2026-10-20)
+            model.move_node(node, *point)
+            model.add_tie(node, nodes, normal, mated.normal_mode, mated.shear_mode,
+                          mated.normal_stiffness, mated.shear_stiffness, group=mated.name,
+                          weights=weights)
+
+
+def _bring_to(model: Model, total_mass: float) -> None:
+    """Make up the difference between what the model already weighs and
+    `total_mass`, shared over the beams (`distribute_mass`)."""
+    # Sharing all of total_mass on top of the elements' own mass made a
+    # model with a dense material weigh more than it was asked to; every
+    # caller so far used a massless material, where the two agree.
+    already = model.total_mass
+    if total_mass < already:
+        raise ValueError(
+            f'the elements and point masses already weigh {already:.4g} kg, '
+            f'more than the {total_mass:.4g} kg asked for: lower the '
+            "materials' densities or leave total_mass out")
+    if total_mass > already:
+        model.distribute_mass(total_mass - already)
+
+
+def _element_by_group(model: Model, geometry: Geometry,
+                      properties: dict[int, GroupProperties],
+                      only: int | None = None) -> int:
+    """Every element as the element it is, with its element group's properties,
+    or with `only` the elements of that one element group. Returns how many
+    were built."""
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
+    names = list(getattr(geometry, 'group_name', []))
+    group_name = {int(b): (names[i] if i < len(names) else '')
+                  for i, b in enumerate(ids)}
+    groups = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+
+    def named(group: int) -> str:
+        label = group_name.get(group, '')
+        return f'element group {group}' + (f' ({label})' if label else '')
+
+    built = 0
+    for index, (kind, conn) in enumerate(zip(geometry.elem_type,
+                                             geometry.elem_conn)):
+        group = int(groups[index]) if index < len(groups) else 0
+        if only is not None and group != only:
+            continue
+        props = properties.get(group)
+        if props is None:
+            raise ValueError(
+                f'{named(group)} has no properties: give every element group a '
+                'material and a thickness or a section (fem.GroupProperties)')
+        if props.kind == 'no material':
+            raise ValueError(f'{named(group)} has no material: give it '
+                             'one, or a mass if it is an element group of point '
+                             'masses')
+        if props.kind == 'spring' and not any(props.stiffness or ()):
+            raise ValueError(f'{named(group)} is a group of springs with no '
+                             'stiffness in any direction: give it one')
+        if props.kind not in ('plate', 'beam', 'solid', 'rigid', 'mass',
+                              'spring', 'ground'):
+            raise ValueError(f'{named(group)} has {props.kind}: an element group of '
+                             'plates takes a thickness, an element group of beams a '
+                             'section, never both')
+        shape = ELEMENT_TYPES.get(int(kind), ('', 0, 'unknown'))[2]
+        if shape == 'volume' and props.kind in ('beam', 'plate', 'both a thickness and a section'):
+            # a group of solids given a beam's section or a plate's
+            # thickness: said as that, not as an unfinished section
+            # (Brandon, 2026-10-20: his bricks carried an empty round
+            # tube, and the solve asked for its dimensions)
+            held = ('a beam section' if props.kind == 'beam' else
+                    'a thickness' if props.kind == 'plate' else 'a thickness and a section')
+            clear = ('its Shape and Section' if props.kind == 'beam' else
+                     'its Thickness' if props.kind == 'plate'
+                     else 'its Thickness, Shape and Section')
+            raise ValueError(f'{named(group)} holds solid elements, which take a material '
+                             f'alone, and it has {held}: clear {clear} in the Element '
+                             'Groups table')
+        if props.kind == 'beam' and not min(
+                props.section.area, props.section.iy, props.section.iz,
+                props.section.j) > 0.0:
+            # a shape picked in the table and its dimensions not yet typed,
+            # or a number left blank: a beam of no stiffness is a
+            # singular model, said here rather than by the eigensolver
+            what = (f'its {props.section.shape} has no dimensions yet'
+                    if props.section.shape and not props.section.dimensions
+                    else 'its A, Iy, Iz and J must all be positive')
+            raise ValueError(f'{named(group)}: the section is not finished — '
+                             f'{what}')
+        nodes = [int(n) for n in conn]
+        shape_name, _count, shape = ELEMENT_TYPES.get(
+            int(kind), (f'type {int(kind)}', 0, 'unknown'))
+        label = group_name.get(group, '')
+        if shape == 'face' and len(nodes) == 3 and props.kind == 'plate':
+            model.add_triangle(nodes, props.material, props.thickness,
+                               group=label)
+        elif shape == 'face' and len(nodes) == 4 and props.kind == 'plate':
+            model.add_plate(nodes, props.material, props.thickness,
+                            group=label)
+        elif shape == 'line' and len(nodes) == 2 and props.kind == 'beam':
+            model.add_beam(nodes[0], nodes[1], props.material, props.section,
+                           props.orientation, group=label)
+        elif shape == 'line' and len(nodes) == 2 and props.kind == 'rigid':
+            model.add_rigid_link(nodes[0], nodes[1], group=label)
+        elif (shape == 'volume' and len(nodes) in SOLID_CODES
+                and props.kind == 'solid'):
+            model.add_solid(nodes, props.material, group=label)
+        elif shape == 'point' and len(nodes) == 1 and props.kind == 'mass':
+            model.add_mass(nodes[0], props.mass, name=label)
+        elif shape == 'point' and len(nodes) == 1 and props.kind == 'ground':
+            model.add_ground(nodes[0], props.ground)
+        elif (props.kind == 'spring' and len(nodes) in (1, 2)
+                and shape in ('point', 'line')):
+            for direction, k in zip(DIRECTIONS, props.stiffness):
+                if k:
+                    model.add_spring(f'{nodes[0]}{direction}',
+                                     f'{nodes[-1]}{direction}'
+                                     if len(nodes) == 2 else None,
+                                     k, name=label)
+        elif props.kind == 'rigid':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'rigid (massless) element group holds two-node lines, '
+                             'one link each')
+        elif props.kind == 'mass':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; an '
+                             'element group given a mass holds point elements, one '
+                             'mass each')
+        elif props.kind == 'ground':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'ground group holds point elements, one held '
+                             'node each')
+        elif props.kind == 'spring':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'group of springs holds two-node lines, a spring '
+                             'between their nodes, or points, a spring to '
+                             'ground')
+        else:
+            wanted = ('a thickness' if shape == 'face' else
+                      'a section or a stiffness' if shape == 'line' else
+                      'a mass, a stiffness or ground' if shape == 'point'
+                      else 'a material alone')
+            solvable = ((shape in ('face', 'line') and len(nodes) in (2, 3, 4))
+                        or (shape == 'volume' and len(nodes) in SOLID_CODES)
+                        or (shape == 'point' and len(nodes) == 1))
+            raise ValueError(
+                f'{named(group)} holds {shape_name} elements, which take '
+                f'{wanted}; it was given {props.kind} properties'
+                if solvable
+                else f'{named(group)} holds {shape_name} elements, and the '
+                     'solver has no element for them: two-node beams, '
+                     'three-node triangles, four-node quads, eight-node '
+                     'hexahedra, six-node wedges, four-node tetrahedra and '
+                     'one-node point masses only')
+        built += 1
+    return built
+
+
+def _group_labels(geometry) -> list[str]:
+    """The element group name of each element, in the geometry's own order."""
+    names = list(getattr(geometry, 'group_name', []))
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
+    named = {int(b): (names[i] if i < len(names) else '')
+             for i, b in enumerate(ids)}
+    group = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    return [named.get(int(b), '') for b in group]
+
+
+def _labels_from_groups(geometry) -> dict[int, str]:
+    """{node: element group name} from a geometry's own element groups.
+
+    A node on the seam between two element groups belongs to the one holding most
+    of its elements, ties going to the element group declared first. It cannot
+    belong to both — a node has one part in every format that records the
+    question — and giving it to whichever element group happened to be numbered
+    first emptied the parts that sit *between* others: the drone's canopy
+    is ringed by waist, camera mount and four arms, and came back with a
+    single node in it, which is one accelerometer where four were meant.
+
+    Nothing structural rides on this. Sections come off the elements,
+    which are never ambiguous; these labels name the part a node is in,
+    for reading a mode and for placing sensors.
+    """
+    names = list(getattr(geometry, 'group_name', []))
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
+    named = {int(b): (names[i] if i < len(names) else '')
+             for i, b in enumerate(ids)}
+    order = {name: i for i, name in enumerate(names)}
+    group = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    votes: dict[int, dict[str, int]] = {}
+    for i, conn in enumerate(geometry.elem_conn):
+        label = named.get(int(group[i]), '') if i < len(group) else ''
+        if not label:
+            continue
+        for node in conn:
+            counted = votes.setdefault(int(node), {})
+            counted[label] = counted.get(label, 0) + 1
+    return {node: max(counted, key=lambda n: (counted[n], -order.get(n, 0)))
+            for node, counted in votes.items()}
+
+
+def _plane_basis(line: np.ndarray) -> np.ndarray:
+    """(3, 2), two orthonormal directions perpendicular to the unit
+    vector `line`: a rotation written in them has no component about
+    the line."""
+    line = np.asarray(line, dtype=np.float64)
+    other = np.zeros(3)
+    other[int(np.argmin(np.abs(line)))] = 1.0
+    first = np.cross(line, other)
+    first /= np.linalg.norm(first)
+    second = np.cross(line, first)
+    return np.column_stack([first, second])
+
+
+def _displacement_frames(geometry: Any) -> dict[int, np.ndarray]:
+    """Each node a geometry measures in a turned displacement frame, with
+    that frame's axes as rows: the one reading every shape set's DOFs
+    are taken by (`deform._cs_rotations`)."""
+    from ..deform import _cs_rotations
+
+    rotations = _cs_rotations(geometry)
+    if not rotations:
+        return {}
+    return {int(node): rotations[int(cs)]
+            for node, cs in zip(geometry.node_id, geometry.node_disp_cs)
+            if int(cs) in rotations}
+
+
+def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
+    """Which of these modes store no strain energy, and so sit at 0 Hz.
+
+    Zero-energy is asked of the mode rather than of the structure, so a
+    constrained model simply has none — a cantilever's modes all strain
+    something — and a genuine mechanism (a node nothing connects to, a
+    hinge built by accident) is found on the same footing as rigid-body
+    motion. Both really are at zero frequency; the distinction between
+    them is a modeling question, not a numerical one.
+    """
+    energy = np.sum(shapes * (stiffness @ shapes), axis=0)
+    # the same sum with every cancellation removed: how big the terms were
+    # before they annihilated each other
+    magnitude = np.sum(np.abs(shapes) * (abs(stiffness) @ np.abs(shapes)),
+                       axis=0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.abs(energy) / magnitude
+    return np.nan_to_num(ratio, nan=0.0) < ZERO_ENERGY
+
+
+#: how close to a mode's largest magnitude a component counts as tied with
+#: it when the mode's sign is chosen (`signed_modes`)
+SIGN_TIE = 1e-6
+
+
+def signed_modes(shapes: np.ndarray) -> np.ndarray:
+    """These modes, one per column, each with a definite sign.
+
+    An eigensolver's mode has no sign of its own, and which one comes out
+    can change from one solve of the same model to the next. Each mode is
+    turned so its leading component is positive: the first degree of
+    freedom, in the model's order, whose magnitude is within `SIGN_TIE` of
+    the mode's largest. First within a tolerance rather than the largest
+    outright, because an antisymmetric mode has two components of equal
+    size and opposite sign, and round-off would otherwise pick between
+    them.
+    """
+    # Found on the guide pictures (2026-10-17): fem-mode.png came out with
+    # the mode flipped on alternate regenerations
+    shapes = np.array(shapes, dtype=float, copy=True)
+    if shapes.size == 0:
+        return shapes
+    magnitude = np.abs(shapes)
+    peak = magnitude.max(axis=0)
+    lead = np.argmax(magnitude >= peak * (1.0 - SIGN_TIE), axis=0)
+    signs = np.sign(shapes[lead, np.arange(shapes.shape[1])])
+    signs[signs == 0] = 1.0
+    return shapes * signs
+
+
+# ---- element matrices -----------------------------------------------------
+
+
+def _element_axes(start: np.ndarray, end: np.ndarray, orientation) -> np.ndarray:
+    """The 3x3 rotation whose rows are the element's local axes.
+
+    Local x runs from the first node to the second. The orientation vector
+    fixes the roll about it by naming a direction the local x-y plane must
+    contain — the same job Nastran's orientation vector does. Without one,
+    global Z is used, falling back to global Y for a member that is nearly
+    vertical and would otherwise have no plane at all.
+    """
+    axis = end - start
+    length = np.linalg.norm(axis)
+    axis = axis / length
+    if orientation is None:
+        reference = np.array([0.0, 0.0, 1.0])
+        if abs(float(axis @ reference)) > 0.99:
+            reference = np.array([0.0, 1.0, 0.0])
+    else:
+        reference = np.asarray(orientation, dtype=np.float64)
+        if np.linalg.norm(reference) == 0.0:
+            raise ValueError('the orientation vector has no direction')
+        reference = reference / np.linalg.norm(reference)
+        if abs(float(axis @ reference)) > 0.9999:
+            raise ValueError('the orientation vector lies along the beam, so '
+                             'it names no plane')
+    local_y = reference - float(axis @ reference) * axis
+    local_y = local_y / np.linalg.norm(local_y)
+    local_z = np.cross(axis, local_y)
+    return np.array([axis, local_y, local_z])
+
+
+def _block_diagonal(rotation: np.ndarray, times: int) -> np.ndarray:
+    out = np.zeros((3 * times, 3 * times), dtype=np.float64)
+    for i in range(times):
+        out[3 * i:3 * i + 3, 3 * i:3 * i + 3] = rotation
+    return out
+
+
+#: how far a quad's corners may sit off its mean plane, as a fraction of
+#: its shorter diagonal. The element is a flat shell: its corners are
+#: projected onto the mean plane, which is harmless for the small warp of
+#: a mesh on a gently curved surface and wrong for a twisted one.
+QUAD_WARP = 0.01
+
+
+def _quad_frame(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
+                p4: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The element's own axes and its corners in its own plane.
+
+    Local z is the normal of the two diagonals' cross product, local x
+    runs along edge 1-2 projected into the plane, and local y completes
+    the frame; for a rectangle these are its sides, so the rectangle's
+    numbers are unchanged. Returns the rotation (rows are the axes) and
+    the 4x2 corners in it, node 1 at the origin. A quad with no area, a
+    quad that is not convex (a corner folded inward, where the
+    isoparametric map turns inside out) and one warped beyond
+    `QUAD_WARP` are refused.
+    """
+    corners = np.array([p1, p2, p3, p4], dtype=np.float64)
+    diagonal_1 = corners[2] - corners[0]
+    diagonal_2 = corners[3] - corners[1]
+    normal = np.cross(diagonal_1, diagonal_2)
+    shorter = min(float(np.linalg.norm(diagonal_1)),
+                  float(np.linalg.norm(diagonal_2)))
+    twice_area = float(np.linalg.norm(normal))
+    if shorter == 0.0 or twice_area <= 1e-12 * shorter ** 2:
+        # parallel diagonals: collinear corners, or a bowtie whose
+        # corners are listed out of order around it
+        raise ValueError('a plate has no area, or its corners are out of '
+                         'order around it')
+    e3 = normal / twice_area
+    edge = corners[1] - corners[0]
+    edge = edge - (edge @ e3) * e3
+    if float(np.linalg.norm(edge)) == 0.0:
+        raise ValueError('a plate edge has zero length')
+    e1 = edge / float(np.linalg.norm(edge))
+    e2 = np.cross(e3, e1)
+    rotation = np.array([e1, e2, e3])
+    local = (corners - corners[0]) @ rotation.T
+    warp = float(np.max(np.abs(local[:, 2] - local[:, 2].mean())))
+    if warp > QUAD_WARP * shorter:
+        raise ValueError(
+            f'a plate is warped: its corners sit {warp / shorter:.1%} of '
+            'its shorter diagonal off its plane, where a flat shell takes '
+            f'{QUAD_WARP:.0%}; split it into triangles')
+    xy = local[:, :2]
+    # convex, corners in order around the normal: each corner turns
+    # the same way
+    for k in range(4):
+        before, after = xy[k] - xy[k - 1], xy[(k + 1) % 4] - xy[k]
+        if before[0] * after[1] - before[1] * after[0] <= 0.0:
+            raise ValueError(
+                'a plate is not convex: a corner folds inward or the '
+                'corners are out of order around it')
+    return rotation, xy
+
+
+def _quad_frames(corners: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """`_quad_frame` for many plates at once: corners (E, 4, 3) in,
+    rotations (E, 3, 3) and corners in their planes (E, 4, 2) out. A
+    plate that fails a check is handed to `_quad_frame`, so the refusal
+    is the one-plate refusal, word for word."""
+    diagonal_1 = corners[:, 2] - corners[:, 0]
+    diagonal_2 = corners[:, 3] - corners[:, 1]
+    normal = np.cross(diagonal_1, diagonal_2)
+    shorter = np.minimum(np.linalg.norm(diagonal_1, axis=1),
+                         np.linalg.norm(diagonal_2, axis=1))
+    twice_area = np.linalg.norm(normal, axis=1)
+    bad = (shorter == 0.0) | (twice_area <= 1e-12 * shorter ** 2)
+    if bad.any():
+        _quad_frame(*corners[int(np.flatnonzero(bad)[0])])
+    e3 = normal / twice_area[:, None]
+    edge = corners[:, 1] - corners[:, 0]
+    edge = edge - np.einsum('ei,ei->e', edge, e3)[:, None] * e3
+    length = np.linalg.norm(edge, axis=1)
+    if (length == 0.0).any():
+        _quad_frame(*corners[int(np.flatnonzero(length == 0.0)[0])])
+    e1 = edge / length[:, None]
+    e2 = np.cross(e3, e1)
+    rotations = np.stack([e1, e2, e3], axis=1)
+    local = np.einsum('eci,eji->ecj', corners - corners[:, :1], rotations)
+    warp = np.max(np.abs(local[:, :, 2] - local[:, :, 2].mean(axis=1,
+                                                               keepdims=True)),
+                  axis=1)
+    xy = local[:, :, :2]
+    before = xy - np.roll(xy, 1, axis=1)
+    after = np.roll(xy, -1, axis=1) - xy
+    turns = before[:, :, 0] * after[:, :, 1] - before[:, :, 1] * after[:, :, 0]
+    bad = (warp > QUAD_WARP * shorter) | (turns <= 0.0).any(axis=1)
+    if bad.any():
+        _quad_frame(*corners[int(np.flatnonzero(bad)[0])])
+    return rotations, xy
+
+
+def _quad_area(xy: np.ndarray) -> float:
+    """A plate's area from its corners in its own plane (the shoelace)."""
+    x, y = xy[:, 0], xy[:, 1]
+    return 0.5 * abs(float(x @ np.roll(y, -1) - y @ np.roll(x, -1)))
+
+
+#: transverse shear correction for a homogeneous section: the parabolic
+#: shear distribution carries 5/6 of what a uniform one would
+SHEAR_CORRECTION = 5.0 / 6.0
+
+#: how much artificial drilling stiffness a plate carries, as a
+#: fraction of G*t. Any small positive number serves: the penalty
+#: exists so the in-plane rotation is not a mechanism. It acts on the
+#: gap between the drilling rotation and the rotation the membrane
+#: displacements themselves describe, (v,x - u,y)/2 — so a rigid
+#: rotation, where the two agree exactly, strains it not at all and
+#: the rigid-mode count stays six. Penalizing only the *differences*
+#: between the four nodal drillings was tried first and leaves a
+#: mesh-wide uniform spin with no displacement as a seventh
+#: zero-frequency mode, which is how this constant earned its
+#: sentence.
+DRILLING_FRACTION = 1e-3
+
+
+def _quad_matrices(material: Material, thickness: float,
+                   xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Local stiffness and consistent mass for the four-node shell.
+
+    24x24, six DOFs per node in DIRECTIONS order, corners at `xy` in the
+    element's own plane, in order around its normal. Bilinear
+    isoparametric throughout: the membrane, the curvatures, the drilling
+    tie and the mass integrate 2x2 Gauss with the Jacobian at each point.
+    The transverse shear is MITC4 (Bathe and Dvorkin), in its covariant
+    form so that any convex quad is valid:
+
+        e_xi  = x,xi  gamma_xz + y,xi  gamma_yz,  tied at (0, -1), (0, 1),
+        e_eta = x,eta gamma_xz + y,eta gamma_yz,  tied at (-1, 0), (1, 0),
+
+    each interpolated linearly across the element (e_xi in eta, e_eta in
+    xi) and turned back into (gamma_xz, gamma_yz) with the inverse
+    Jacobian where it is evaluated. The tying is what keeps a thin plate
+    from locking in shear; tying the Cartesian shears instead, as a
+    rectangle allows, is exact only when the natural axes run along the
+    sides. On a rectangle the Jacobian is constant and diagonal and this
+    is that element exactly.
+
+    Sign conventions, written down because they were derived once and
+    should not be re-derived: the tilt of the normal toward +x is
+    +theta_y and toward +y is -theta_x, so the curvatures are
+    (theta_y,x | -theta_x,y | theta_y,y - theta_x,x) and the shears
+    (w,x + theta_y | w,y - theta_x). Both vanish identically on every
+    rigid motion, which the rigid-mode test holds to machine zero.
+    """
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    G, rho, t = material.shear_modulus, material.density, thickness
+    plane = E / (1.0 - nu * nu) * np.array([[1.0, nu, 0.0],
+                                            [nu, 1.0, 0.0],
+                                            [0.0, 0.0, (1.0 - nu) / 2.0]])
+    d_membrane = t * plane
+    d_bending = t ** 3 / 12.0 * plane
+    d_shear = SHEAR_CORRECTION * G * t * np.eye(2)
+    signs = np.array([(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)])
+
+    def basis(xi: float, eta: float):
+        """The shape functions, their x and y derivatives, the Jacobian
+        (rows: d/dxi, d/deta of x and y) and its determinant."""
+        n = (1 + xi * signs[:, 0]) * (1 + eta * signs[:, 1]) / 4.0
+        natural = np.array([signs[:, 0] * (1 + eta * signs[:, 1]) / 4.0,
+                            signs[:, 1] * (1 + xi * signs[:, 0]) / 4.0])
+        jacobian = natural @ xy
+        determinant = float(np.linalg.det(jacobian))
+        if determinant <= 0.0:
+            raise ValueError('a plate is not convex: a corner folds inward '
+                             'or the corners are out of order around it')
+        dx, dy = np.linalg.solve(jacobian, natural)
+        return n, dx, dy, jacobian, determinant
+
+    def raw_shear(xi: float, eta: float) -> np.ndarray:
+        """gamma_xz = w,x + theta_y and gamma_yz = w,y - theta_x at a
+        point, as rows over the 24 DOFs, with that point's Jacobian."""
+        n, dx, dy, jacobian, _det = basis(xi, eta)
+        rows = np.zeros((2, 24))
+        for i in range(4):
+            rows[0, 6 * i + 2] = dx[i]
+            rows[0, 6 * i + 4] = n[i]
+            rows[1, 6 * i + 2] = dy[i]
+            rows[1, 6 * i + 3] = -n[i]
+        return jacobian @ rows            # (e_xi, e_eta), covariant
+
+    tie_xi = {eta: raw_shear(0.0, eta)[0] for eta in (-1.0, 1.0)}
+    tie_eta = {xi: raw_shear(xi, 0.0)[1] for xi in (-1.0, 1.0)}
+
+    stiffness = np.zeros((24, 24))
+    consistent = np.zeros((24, 24))
+    gauss = 1.0 / math.sqrt(3.0)
+    spin = rho * t ** 3 / 12.0
+    weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
+    for xi in (-gauss, gauss):
+        for eta in (-gauss, gauss):
+            n, dx, dy, jacobian, det = basis(xi, eta)
+            b_membrane = np.zeros((3, 24))
+            b_bending = np.zeros((3, 24))
+            b_drilling = np.zeros((1, 24))
+            fields = np.zeros((6, 24))
+            for i in range(4):
+                col = 6 * i
+                b_membrane[0, col] = dx[i]
+                b_membrane[1, col + 1] = dy[i]
+                b_membrane[2, col] = dy[i]
+                b_membrane[2, col + 1] = dx[i]
+                b_bending[0, col + 4] = dx[i]
+                b_bending[1, col + 3] = -dy[i]
+                b_bending[2, col + 3] = -dx[i]
+                b_bending[2, col + 4] = dy[i]
+                # the drilling tie: theta_z minus the rotation the
+                # membrane field describes, penalized softly (see
+                # DRILLING_FRACTION)
+                b_drilling[0, col] = dy[i] / 2.0
+                b_drilling[0, col + 1] = -dx[i] / 2.0
+                b_drilling[0, col + 5] = n[i]
+                for field in range(6):
+                    fields[field, col + field] = n[i]
+            covariant = np.vstack([
+                ((1 - eta) * tie_xi[-1.0] + (1 + eta) * tie_xi[1.0]) / 2.0,
+                ((1 - xi) * tie_eta[-1.0] + (1 + xi) * tie_eta[1.0]) / 2.0])
+            b_shear = np.linalg.solve(jacobian, covariant)
+            stiffness += det * (
+                b_membrane.T @ d_membrane @ b_membrane
+                + b_bending.T @ d_bending @ b_bending
+                + b_shear.T @ d_shear @ b_shear
+                + DRILLING_FRACTION * G * t * (b_drilling.T @ b_drilling))
+            # translations carry rho t, the bending rotations the
+            # section's rotary inertia rho t^3/12, and the drilling
+            # rotation a thousandth of that — not zero, because a
+            # massless DOF breaks the Cholesky factorization the
+            # eigensolution stands on, and not the full value, because
+            # inertia against penalty stiffness sets where the drilling
+            # artifact modes land: at the full inertia a half-inch plate
+            # grew a wall of a hundred and sixty fake modes at 4.2 kHz,
+            # mid-band; at a thousandth they sit near 130 kHz
+            consistent += det * (fields.T @ weights @ fields)
+    return stiffness, consistent
+
+
+def _triangle_frame(p1: np.ndarray, p2: np.ndarray,
+                    p3: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The element's own axes and its corners in its own plane.
+
+    Local x runs along edge 1-2, local z is the normal the corners
+    turn counterclockwise about, local y completes the frame. Returns
+    the rotation (rows are the axes) and the 3x2 corner coordinates in
+    it, node 1 at the origin. A zero-area triangle is refused.
+    """
+    p1 = np.asarray(p1, dtype=np.float64)
+    edge_x = np.asarray(p2, dtype=np.float64) - p1
+    edge_3 = np.asarray(p3, dtype=np.float64) - p1
+    normal = np.cross(edge_x, edge_3)
+    a = float(np.linalg.norm(edge_x))
+    twice_area = float(np.linalg.norm(normal))
+    if a == 0.0 or twice_area <= 1e-12 * max(a, float(np.linalg.norm(edge_3))) ** 2:
+        raise ValueError('a triangle has no area: its corners are collinear '
+                         'or coincide')
+    e1 = edge_x / a
+    e3 = normal / twice_area
+    e2 = np.cross(e3, e1)
+    rotation = np.array([e1, e2, e3])
+    xy = np.array([[0.0, 0.0],
+                   [a, 0.0],
+                   [float(edge_3 @ e1), float(edge_3 @ e2)]])
+    return rotation, xy
+
+
+def _triangle_area(xy: np.ndarray) -> float:
+    (x1, y1), (x2, y2), (x3, y3) = xy
+    return 0.5 * abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1))
+
+
+def _triangle_matrices(material: Material, thickness: float,
+                       xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Local stiffness and consistent mass for the triangular shell.
+
+    18x18, six DOFs per node in DIRECTIONS order, corners at `xy` in
+    the element's own plane. Linear shape functions throughout, so
+    the membrane strains and the curvatures are constant over the
+    element and their products integrate exactly with the area. The
+    transverse shear is the MITC3 assumed field: the covariant shear
+    along each natural direction is taken at that edge's midpoint and
+    the field is completed with the one linear term that makes the
+    third edge's tangential shear agree at its midpoint —
+
+        e_rt = e_rt(P1) + c s,   e_st = e_st(P2) - c r,
+        c = e_rt(P3) - e_rt(P1) - e_st(P3) + e_st(P2),
+
+    P1, P2, P3 the midpoints of the edges along r, along s, and the
+    hypotenuse. Derived here by matching the linear raw field at the
+    three tying points rather than copied, and the same field falls
+    out of the constant Jacobian either way. Linear in (r, s), so its
+    energy integrates exactly with the three-point midpoint rule, and
+    the consistent mass with it.
+
+    Sign conventions are the quad's, written down there: curvatures
+    (theta_y,x | -theta_x,y | theta_y,y - theta_x,x), shears
+    (w,x + theta_y | w,y - theta_x), the drilling tie penalizing
+    theta_z against (v,x - u,y)/2, and the rotary inertias
+    rho t^3/12 with a thousandth of that on the drilling rotation.
+    Rigid motion strains none of it, which the rigid-mode test holds
+    to machine zero.
+    """
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    G, rho, t = material.shear_modulus, material.density, thickness
+    plane = E / (1.0 - nu * nu) * np.array([[1.0, nu, 0.0],
+                                            [nu, 1.0, 0.0],
+                                            [0.0, 0.0, (1.0 - nu) / 2.0]])
+    d_membrane = t * plane
+    d_bending = t ** 3 / 12.0 * plane
+    d_shear = SHEAR_CORRECTION * G * t * np.eye(2)
+
+    area = _triangle_area(xy)
+    (x1, y1), (x2, y2), (x3, y3) = xy
+    # the linear shape functions' constant gradients (N_i = a_i + b_i x + c_i y)
+    dx = np.array([y2 - y3, y3 - y1, y1 - y2]) / (2.0 * area)
+    dy = np.array([x3 - x2, x1 - x3, x2 - x1]) / (2.0 * area)
+    # natural coordinates r, s with node 1 at the origin, node 2 at r = 1
+    # and node 3 at s = 1: x = x1 + r (x2 - x1) + s (x3 - x1), so the
+    # Jacobian rows are the two edges from node 1, constant everywhere
+    jacobian = np.array([[x2 - x1, y2 - y1],
+                         [x3 - x1, y3 - y1]])
+    inverse = np.linalg.inv(jacobian)
+
+    def basis(r: float, s: float) -> np.ndarray:
+        return np.array([1.0 - r - s, r, s])
+
+    def raw_shear(r: float, s: float) -> np.ndarray:
+        """gamma_xz = w,x + theta_y and gamma_yz = w,y - theta_x at a
+        point, as rows over the 18 DOFs."""
+        n = basis(r, s)
+        rows = np.zeros((2, 18))
+        for i in range(3):
+            rows[0, 6 * i + 2] = dx[i]
+            rows[0, 6 * i + 4] = n[i]
+            rows[1, 6 * i + 2] = dy[i]
+            rows[1, 6 * i + 3] = -n[i]
+        return rows
+
+    def covariant(r: float, s: float) -> np.ndarray:
+        # e_rt = x,r gamma_xz + y,r gamma_yz, e_st likewise with ,s
+        return jacobian @ raw_shear(r, s)
+
+    tie_r = covariant(0.5, 0.0)      # P1, the midpoint of the r edge
+    tie_s = covariant(0.0, 0.5)      # P2, the midpoint of the s edge
+    tie_h = covariant(0.5, 0.5)      # P3, the midpoint of the hypotenuse
+    c = tie_h[0] - tie_r[0] - tie_h[1] + tie_s[1]
+
+    def assumed_shear(r: float, s: float) -> np.ndarray:
+        e = np.vstack([tie_r[0] + s * c, tie_s[1] - r * c])
+        return inverse @ e                # back to gamma_xz, gamma_yz
+
+    b_membrane = np.zeros((3, 18))
+    b_bending = np.zeros((3, 18))
+    b_drilling = np.zeros((1, 18))
+    for i in range(3):
+        col = 6 * i
+        b_membrane[0, col] = dx[i]
+        b_membrane[1, col + 1] = dy[i]
+        b_membrane[2, col] = dy[i]
+        b_membrane[2, col + 1] = dx[i]
+        b_bending[0, col + 4] = dx[i]
+        b_bending[1, col + 3] = -dy[i]
+        b_bending[2, col + 3] = -dx[i]
+        b_bending[2, col + 4] = dy[i]
+        b_drilling[0, col] = dy[i] / 2.0
+        b_drilling[0, col + 1] = -dx[i] / 2.0
+    # the constant parts integrate exactly with the area; the drilling
+    # tie's theta_z term and the assumed shear vary linearly, so they
+    # and the mass take the three-point midpoint rule, exact for
+    # quadratics
+    stiffness = area * (b_membrane.T @ d_membrane @ b_membrane
+                        + b_bending.T @ d_bending @ b_bending)
+    consistent = np.zeros((18, 18))
+    spin = rho * t ** 3 / 12.0
+    weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
+    for r, s in ((0.5, 0.0), (0.0, 0.5), (0.5, 0.5)):
+        n = basis(r, s)
+        drilling = b_drilling.copy()
+        fields = np.zeros((6, 18))
+        for i in range(3):
+            drilling[0, 6 * i + 5] = n[i]
+            for field in range(6):
+                fields[field, 6 * i + field] = n[i]
+        b_shear = assumed_shear(r, s)
+        stiffness += area / 3.0 * (
+            b_shear.T @ d_shear @ b_shear
+            + DRILLING_FRACTION * G * t * (drilling.T @ drilling))
+        consistent += area / 3.0 * (fields.T @ weights @ fields)
+    return stiffness, consistent
+
+
+def _beam_stiffness(material: Material, section: Section, length: float) -> np.ndarray:
+    """The 12x12 local stiffness of an Euler-Bernoulli beam.
+
+    Degrees of freedom run u, v, w, rx, ry, rz at the first node then the
+    second. Bending in the local x-y plane pairs v with rz and uses iz;
+    bending in x-z pairs w with ry and uses iy, with the signs of the
+    coupling terms reversed because a positive rotation about y moves a
+    point in the *negative* z direction.
+    """
+    e, g = material.youngs_modulus, material.shear_modulus
+    a, iy, iz, j = section.area, section.iy, section.iz, section.j
+    length2, length3 = length ** 2, length ** 3
+    k = np.zeros((12, 12), dtype=np.float64)
+
+    k[0, 0] = k[6, 6] = e * a / length
+    k[0, 6] = -e * a / length
+
+    k[3, 3] = k[9, 9] = g * j / length
+    k[3, 9] = -g * j / length
+
+    k[1, 1] = k[7, 7] = 12.0 * e * iz / length3
+    k[1, 7] = -12.0 * e * iz / length3
+    k[1, 5] = k[1, 11] = 6.0 * e * iz / length2
+    k[5, 7] = k[7, 11] = -6.0 * e * iz / length2
+    k[5, 5] = k[11, 11] = 4.0 * e * iz / length
+    k[5, 11] = 2.0 * e * iz / length
+
+    k[2, 2] = k[8, 8] = 12.0 * e * iy / length3
+    k[2, 8] = -12.0 * e * iy / length3
+    k[2, 4] = k[2, 10] = -6.0 * e * iy / length2
+    k[4, 8] = k[8, 10] = 6.0 * e * iy / length2
+    k[4, 4] = k[10, 10] = 4.0 * e * iy / length
+    k[4, 10] = 2.0 * e * iy / length
+
+    return k + np.triu(k, 1).T
+
+
+def _beam_mass(material: Material, section: Section, length: float) -> np.ndarray:
+    """The 12x12 consistent mass matrix of the same element.
+
+    Consistent rather than lumped: the cubic shape functions that gave the
+    stiffness give the mass too, so the pair is a proper Rayleigh-Ritz
+    reduction and the frequencies converge from above. A lumped diagonal
+    would converge from below and give the rotations no inertia at all,
+    which would leave the mass matrix singular wherever nothing else does.
+    """
+    density, area = material.density, section.area
+    unit = density * area * length / 420.0
+    m = np.zeros((12, 12), dtype=np.float64)
+
+    m[0, 0] = m[6, 6] = 140.0 * unit
+    m[0, 6] = 70.0 * unit
+
+    # torsion carries the polar second moment of area, not the torsion
+    # constant: warping changes the stiffness, not where the material is
+    rotary = density * section.polar * length / 6.0
+    m[3, 3] = m[9, 9] = 2.0 * rotary
+    m[3, 9] = rotary
+
+    m[1, 1] = m[7, 7] = 156.0 * unit
+    m[1, 7] = 54.0 * unit
+    m[1, 5] = 22.0 * length * unit
+    m[1, 11] = -13.0 * length * unit
+    m[5, 7] = 13.0 * length * unit
+    m[7, 11] = -22.0 * length * unit
+    m[5, 5] = m[11, 11] = 4.0 * length ** 2 * unit
+    m[5, 11] = -3.0 * length ** 2 * unit
+
+    m[2, 2] = m[8, 8] = 156.0 * unit
+    m[2, 8] = 54.0 * unit
+    m[2, 4] = -22.0 * length * unit
+    m[2, 10] = 13.0 * length * unit
+    m[4, 8] = -13.0 * length * unit
+    m[8, 10] = 22.0 * length * unit
+    m[4, 4] = m[10, 10] = 4.0 * length ** 2 * unit
+    m[4, 10] = -3.0 * length ** 2 * unit
+
+    return m + np.triu(m, 1).T
+
+
+# ---- solids ------------------------------------------------------------
+
+#: natural coordinates of the trilinear hexahedron's corners, bottom face
+#: then top, the same way round
+_HEX_CORNERS = np.array([[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+                         [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+                        dtype=np.float64)
+_GAUSS_2 = (-1.0 / math.sqrt(3.0), 1.0 / math.sqrt(3.0))
+#: the three-point rule on the triangle, in area coordinates (L2, L3)
+#: with weights summing to the unit triangle's half
+_TRIANGLE_3 = (((1 / 6, 1 / 6), 1 / 6), ((2 / 3, 1 / 6), 1 / 6),
+               ((1 / 6, 2 / 3), 1 / 6))
+
+
+def _isotropic(material: Material) -> np.ndarray:
+    """The 6x6 elasticity matrix, strains ordered xx yy zz xy yz xz with
+    engineering shears."""
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    lame = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    mu = material.shear_modulus
+    d = np.zeros((6, 6))
+    d[:3, :3] = lame
+    d[np.arange(3), np.arange(3)] += 2.0 * mu
+    d[3:, 3:] = np.eye(3) * mu
+    return d
+
+
+def _strain_rows(derivatives: np.ndarray) -> np.ndarray:
+    """B (6 x 3n) from each node's (dN/dx, dN/dy, dN/dz)."""
+    n = len(derivatives)
+    b = np.zeros((6, 3 * n))
+    dx, dy, dz = derivatives.T
+    cols = 3 * np.arange(n)
+    b[0, cols], b[1, cols + 1], b[2, cols + 2] = dx, dy, dz
+    b[3, cols], b[3, cols + 1] = dy, dx
+    b[4, cols + 1], b[4, cols + 2] = dz, dy
+    b[5, cols], b[5, cols + 2] = dz, dx
+    return b
+
+
+def _hex_basis(xi: float, eta: float, zeta: float
+               ) -> tuple[np.ndarray, np.ndarray]:
+    """The eight trilinear functions and their natural derivatives (8, 3)."""
+    c = _HEX_CORNERS
+    n = (1 + xi * c[:, 0]) * (1 + eta * c[:, 1]) * (1 + zeta * c[:, 2]) / 8.0
+    d = np.column_stack([
+        c[:, 0] * (1 + eta * c[:, 1]) * (1 + zeta * c[:, 2]),
+        (1 + xi * c[:, 0]) * c[:, 1] * (1 + zeta * c[:, 2]),
+        (1 + xi * c[:, 0]) * (1 + eta * c[:, 1]) * c[:, 2]]) / 8.0
+    return n, d
+
+
+def _hex_matrices(material: Material, xyz: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the eight-node hexahedron with
+    incompatible modes, 24x24, three translations per node.
+
+    Wilson's three bubble modes (1 - xi^2, 1 - eta^2, 1 - zeta^2), each
+    in three directions, ride along as nine internal degrees of freedom
+    and are condensed out. Their strains are taken from the centroid's
+    Jacobian and scaled by its determinant over the local one (Taylor,
+    Beresford and Wilson, 1976), which is what lets a brick that is not
+    a parallelepiped still represent a constant strain exactly. Without
+    the modes a trilinear brick in bending carries parasitic shear and
+    comes out much too stiff; with them one layer through a plate's
+    thickness bends like the plate. Integrated 2x2x2, exact for the
+    mass of a parallelepiped and standard for the stiffness. The
+    Jacobian's sign is taken as read: an element numbered the other way
+    round is the same element.
+    """
+    d = _isotropic(material)
+    rho = material.density
+    _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
+    jacobian_0 = d0.T @ xyz
+    det_0 = abs(np.linalg.det(jacobian_0))
+    inverse_0_t = np.linalg.inv(jacobian_0).T
+    k_uu = np.zeros((24, 24))
+    k_ua = np.zeros((24, 9))
+    k_aa = np.zeros((9, 9))
+    mass = np.zeros((24, 24))
+    for xi in _GAUSS_2:
+        for eta in _GAUSS_2:
+            for zeta in _GAUSS_2:
+                n, dn = _hex_basis(xi, eta, zeta)
+                jacobian = dn.T @ xyz
+                det = abs(np.linalg.det(jacobian))
+                b_u = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+                # the bubble modes' natural derivatives, through the
+                # centroid's Jacobian
+                bubble = np.diag([-2.0 * xi, -2.0 * eta, -2.0 * zeta])
+                b_a = _strain_rows(bubble @ inverse_0_t) * (det_0 / det)
+                k_uu += det * (b_u.T @ d @ b_u)
+                k_ua += det * (b_u.T @ d @ b_a)
+                k_aa += det * (b_a.T @ d @ b_a)
+                fields = np.zeros((3, 24))
+                for i in range(8):
+                    fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+                mass += det * rho * (fields.T @ fields)
+    stiffness = k_uu - k_ua @ np.linalg.solve(k_aa, k_ua.T)
+    return (stiffness + stiffness.T) / 2.0, (mass + mass.T) / 2.0
+
+
+def _wedge_basis(l2: float, l3: float, zeta: float
+                 ) -> tuple[np.ndarray, np.ndarray]:
+    """The six linear wedge functions — a linear triangle swept
+    between zeta = -1 and 1 — and their natural derivatives (6, 3) with
+    respect to (L2, L3, zeta)."""
+    l1 = 1.0 - l2 - l3
+    lower, upper = (1.0 - zeta) / 2.0, (1.0 + zeta) / 2.0
+    n = np.array([l1 * lower, l2 * lower, l3 * lower,
+                  l1 * upper, l2 * upper, l3 * upper])
+    d = np.array([[-lower, -lower, -l1 / 2.0],
+                  [lower, 0.0, -l2 / 2.0],
+                  [0.0, lower, -l3 / 2.0],
+                  [-upper, -upper, l1 / 2.0],
+                  [upper, 0.0, l2 / 2.0],
+                  [0.0, upper, l3 / 2.0]])
+    return n, d
+
+
+def _rule(basis, points, weights):
+    """(shape functions (p, n), natural derivatives (p, n, 3), weights
+    (p,)) of a volume rule, the basis evaluated at each of its points."""
+    evaluated = [basis(*point) for point in points]
+    return (np.array([n for n, _d in evaluated]),
+            np.array([d for _n, d in evaluated]),
+            np.asarray(weights, dtype=np.float64))
+
+
+#: {nodes: (shape functions (p, n), natural derivatives (p, n, 3),
+#: weights (p,))}, the volume rules of the hexahedron (2x2x2 Gauss) and
+#: the wedge (the three-point triangle rule by two Gauss points), as
+#: their matrices use them; the ten-node tetrahedron's is added below
+_SOLID_RULES = {
+    8: _rule(_hex_basis, [(xi, eta, zeta) for xi in _GAUSS_2
+                          for eta in _GAUSS_2 for zeta in _GAUSS_2], np.ones(8)),
+    6: _rule(_wedge_basis, [(l2, l3, zeta) for (l2, l3), _weight in _TRIANGLE_3
+                            for zeta in _GAUSS_2],
+             [weight for _point, weight in _TRIANGLE_3 for _zeta in _GAUSS_2]),
+}
+
+
+def _wedge_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the six-node wedge, 18x18: the
+    three-point triangle rule by two Gauss points along its length."""
+    d = _isotropic(material)
+    rho = material.density
+    stiffness = np.zeros((18, 18))
+    mass = np.zeros((18, 18))
+    for (l2, l3), weight in _TRIANGLE_3:
+        for zeta in _GAUSS_2:
+            n, dn = _wedge_basis(l2, l3, zeta)
+            jacobian = dn.T @ xyz
+            det = abs(np.linalg.det(jacobian)) * weight
+            b = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+            stiffness += det * (b.T @ d @ b)
+            fields = np.zeros((3, 18))
+            for i in range(6):
+                fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+            mass += det * rho * (fields.T @ fields)
+    return (stiffness + stiffness.T) / 2.0, (mass + mass.T) / 2.0
+
+
+def _tet_matrices(material: Material, xyz: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the constant-strain tetrahedron,
+    12x12, in closed form."""
+    d = _isotropic(material)
+    edges = xyz[1:] - xyz[0]
+    volume = abs(np.linalg.det(edges)) / 6.0
+    # dL_i/dx from the inverse of the edge matrix: the natural
+    # coordinates L2, L3, L4 are affine in x, and L1 = 1 - the rest
+    inverse = np.linalg.inv(edges)               # d(L2, L3, L4)/dx, by columns
+    derivatives = np.vstack([-inverse.sum(axis=1), inverse.T])
+    b = _strain_rows(derivatives)
+    stiffness = volume * (b.T @ d @ b)
+    mass = np.zeros((12, 12))
+    for i in range(4):
+        for j in range(4):
+            mass[3 * i:3 * i + 3, 3 * j:3 * j + 3] = (
+                np.eye(3) * (2.0 if i == j else 1.0))
+    mass *= material.density * volume / 20.0
+    return stiffness, mass
+
+
+def _tet_rule(order: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """A quadrature rule on the tetrahedron L2 + L3 + L4 <= 1: the cube
+    rule collapsed onto it (Stroud's conical product), `order` points a
+    side, exact to degree 2 * order - 1. Points as (L2, L3, L4), weights
+    summing to the volume 1/6."""
+    from scipy.special import roots_jacobi, roots_legendre
+
+    x, a = roots_jacobi(order, 2.0, 0.0)
+    y, b = roots_jacobi(order, 1.0, 0.0)
+    z, c = roots_legendre(order)
+    points, weights = [], []
+    for xi, wa in zip(x, a):
+        l2 = (1.0 + xi) / 2.0
+        for eta, wb in zip(y, b):
+            l3 = (1.0 - l2) * (1.0 + eta) / 2.0
+            for zeta, wc in zip(z, c):
+                l4 = (1.0 - l2 - l3) * (1.0 + zeta) / 2.0
+                points.append((l2, l3, l4))
+                weights.append(wa * wb * wc)
+    weights = np.array(weights)
+    return np.array(points), weights * (1.0 / 6.0) / weights.sum()
+
+
+def _tet10_basis(l2: float, l3: float, l4: float) -> tuple[np.ndarray, np.ndarray]:
+    """The ten quadratic functions of the tetrahedron and their
+    derivatives (10, 3) with respect to (L2, L3, L4): the corners
+    L_i (2 L_i - 1), the midsides 4 L_i L_j in the order of
+    `tetmesh.TET10_EDGES` (1-2, 2-3, 1-3, 1-4, 2-4, 3-4)."""
+    l1 = 1.0 - l2 - l3 - l4
+    l = np.array([l1, l2, l3, l4])
+    # dL_i/d(L2, L3, L4)
+    dl = np.array([[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    n = list(l * (2.0 * l - 1.0))
+    d = list((4.0 * l - 1.0)[:, None] * dl)
+    for i, j in ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3)):
+        n.append(4.0 * l[i] * l[j])
+        d.append(4.0 * (l[i] * dl[j] + l[j] * dl[i]))
+    return np.array(n), np.array(d)
+
+
+_TET_RULE = _tet_rule()
+#: the ten-node tetrahedron's volume rule, beside the brick's and the wedge's
+_SOLID_RULES[10] = _rule(_tet10_basis, _TET_RULE[0], _TET_RULE[1])
+
+
+def _tet10_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the ten-node tetrahedron,
+    30x30, integrated by the 27-point conical rule, exact to degree
+    five: the stiffness's integrand is quadratic on a straight-sided
+    element and the mass's quartic. A curved side, a midside node moved
+    onto a wall, is integrated by the same rule, as the brick's is.
+    The Jacobian's sign is taken as read, as for the brick."""
+    d = _isotropic(material)
+    rho = material.density
+    stiffness = np.zeros((30, 30))
+    mass = np.zeros((30, 30))
+    for (l2, l3, l4), weight in zip(*_TET_RULE):
+        n, dn = _tet10_basis(l2, l3, l4)
+        jacobian = dn.T @ xyz
+        det = abs(np.linalg.det(jacobian))
+        b = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+        stiffness += weight * det * (b.T @ d @ b)
+        fields = np.zeros((3, 30))
+        for i in range(10):
+            fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+        mass += weight * det * rho * (fields.T @ fields)
+    return stiffness, mass
+
+
+def _solid_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """(stiffness, mass) of a solid by its node count."""
+    if len(xyz) == 8:
+        return _hex_matrices(material, xyz)
+    if len(xyz) == 6:
+        return _wedge_matrices(material, xyz)
+    if len(xyz) == 10:
+        return _tet10_matrices(material, xyz)
+    return _tet_matrices(material, xyz)
+
+
+def _on_threads(work: Callable, jobs: list, threads: int | None = None):
+    """`work(job)` for every job, in order, computed `threads` at a time
+    on a thread pool; one job alone is done in the calling thread."""
+    if len(jobs) < 2:
+        for job in jobs:
+            yield work(job)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    threads = threads or min(8, os.cpu_count() or 1)
+    with ThreadPoolExecutor(threads) as pool:
+        for lo in range(0, len(jobs), threads):
+            yield from pool.map(work, jobs[lo:lo + threads])
+
+
+def _stiffness_from_gradients(lame: float, mu: float, weights: np.ndarray,
+                              first: np.ndarray, second: np.ndarray
+                              ) -> np.ndarray:
+    """sum over the points of weight B1^T D B2, for isotropic D, from
+    the two sets' shape function gradients: `first` and `second` are
+    (elements, points, nodes, 3), `weights` (elements, points), and
+    the answer (elements, 3 nodes, 3 nodes).
+
+    With D isotropic the product B_I^T D B_J, I a node of the first set
+    and J of the second, is lambda g_I g_J^T + mu g_J g_I^T + mu (g_I . g_J)
+    I_3 in the nodes' gradients g, which the strain matrices spell out
+    entry by entry. Written this way, every element's stiffness is one
+    small matrix product (the gradients weighted against the gradients,
+    summed over the points) and two rearrangements of it, and a batch
+    of thousands of elements is one call: 0.85 ms a brick built point
+    by point in Python, with the bubble modes 1.2 s for the Frame-Wing's
+    2,000 distinct bricks (2026-10-19).
+    """
+    count, points, n1, _ = first.shape
+    n2 = second.shape[2]
+    weighted = first * weights[:, :, None, None]
+    outer = np.matmul(weighted.reshape(count, points, 3 * n1).transpose(0, 2, 1),
+                      second.reshape(count, points, 3 * n2))
+    # outer[e, I, a, J, b] = sum_p w g1[I, a] g2[J, b], and dots[e, I, J]
+    # its trace over a = b
+    outer = outer.reshape(count, n1, 3, n2, 3)
+    dots = outer[:, :, 0, :, 0] + outer[:, :, 1, :, 1] + outer[:, :, 2, :, 2]
+    stiffness = lame * outer + mu * outer.transpose(0, 1, 4, 3, 2)
+    # added down the 3x3 blocks' diagonals in three strided writes: the
+    # same through a broadcast against eye(3) wrote the whole array and
+    # was the longest step of the batch (7 ms of 56 on 4,096 bricks)
+    for axis in range(3):
+        stiffness[:, :, axis, :, axis] += mu * dots
+    return stiffness.reshape(count, 3 * n1, 3 * n2)
+
+
+def _invert_3x3(matrices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(inverses, determinants) of a stack of 3x3 matrices by their
+    cofactors: one pass of array arithmetic, where LAPACK's factorization
+    is a call per matrix and a tenth of a batch's assembly."""
+    a = matrices
+    cofactors = np.empty_like(a)
+    cofactors[..., 0, 0] = a[..., 1, 1] * a[..., 2, 2] - a[..., 1, 2] * a[..., 2, 1]
+    cofactors[..., 0, 1] = a[..., 1, 2] * a[..., 2, 0] - a[..., 1, 0] * a[..., 2, 2]
+    cofactors[..., 0, 2] = a[..., 1, 0] * a[..., 2, 1] - a[..., 1, 1] * a[..., 2, 0]
+    cofactors[..., 1, 0] = a[..., 0, 2] * a[..., 2, 1] - a[..., 0, 1] * a[..., 2, 2]
+    cofactors[..., 1, 1] = a[..., 0, 0] * a[..., 2, 2] - a[..., 0, 2] * a[..., 2, 0]
+    cofactors[..., 1, 2] = a[..., 0, 1] * a[..., 2, 0] - a[..., 0, 0] * a[..., 2, 1]
+    cofactors[..., 2, 0] = a[..., 0, 1] * a[..., 1, 2] - a[..., 0, 2] * a[..., 1, 1]
+    cofactors[..., 2, 1] = a[..., 0, 2] * a[..., 1, 0] - a[..., 0, 0] * a[..., 1, 2]
+    cofactors[..., 2, 2] = a[..., 0, 0] * a[..., 1, 1] - a[..., 0, 1] * a[..., 1, 0]
+    determinants = (a[..., 0, 0] * cofactors[..., 0, 0]
+                    + a[..., 0, 1] * cofactors[..., 0, 1]
+                    + a[..., 0, 2] * cofactors[..., 0, 2])
+    inverses = cofactors.swapaxes(-1, -2) / determinants[..., None, None]
+    return inverses, determinants
+
+
+def _solid_matrices_many(material: Material, xyz: np.ndarray
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """`_solid_matrices` of every element of one kind and one material
+    at once: `xyz` is (elements, nodes, 3), and the answer (stiffness,
+    mass), each (elements, 3 nodes, 3 nodes).
+
+    The same integration as the one-element functions — the brick's
+    2x2x2 rule with Wilson's bubble modes condensed out through the
+    centroid's Jacobian, the wedge's and the ten-node tetrahedron's
+    rules, the constant-strain tetrahedron in closed form — with the
+    Jacobians, their inverses and the stiffness products taken over
+    every element in one numpy call each, and the isotropic product
+    B^T D B folded into the gradients (`_stiffness_from_gradients`).
+    The one-element functions are the reference it is tested against
+    and agree with it to round-off.
+    """
+    xyz = np.asarray(xyz, dtype=np.float64)
+    count, nodes = xyz.shape[:2]
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    lame = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    mu = material.shear_modulus
+    rho = material.density
+
+    if nodes == 4:
+        edges = xyz[:, 1:] - xyz[:, :1]
+        inverse, determinants = _invert_3x3(edges)
+        volume = np.abs(determinants) / 6.0
+        gradients = np.concatenate([-inverse.sum(axis=2)[:, None, :],
+                                    inverse.transpose(0, 2, 1)], axis=1)
+        stiffness = _stiffness_from_gradients(lame, mu, volume[:, None],
+                                              gradients[:, None], gradients[:, None])
+        products = (1.0 + np.eye(4))[None] * (rho * volume / 20.0)[:, None, None]
+    else:
+        shapes, derivatives, rule = _SOLID_RULES[nodes]
+        # J[e, p] = dN[p]^T xyz[e], and dN/dx = dN/dxi J^-1 at every
+        # point of every element: batched products, not einsums, which
+        # are several times slower on these shapes
+        jacobians = np.matmul(derivatives.transpose(0, 2, 1)[None], xyz[:, None])
+        inverses, determinants = _invert_3x3(jacobians)
+        determinants = np.abs(determinants)
+        weights = determinants * rule
+        gradients = np.matmul(derivatives[None], inverses.transpose(0, 1, 3, 2))
+        stiffness = _stiffness_from_gradients(lame, mu, weights, gradients, gradients)
+        if nodes == 8:
+            # the bubble modes' strains through the centroid's Jacobian,
+            # scaled by its determinant over the point's, as `_hex_matrices`
+            _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
+            inverse_0, det_0 = _invert_3x3(np.matmul(d0.T[None], xyz))
+            det_0 = np.abs(det_0)
+            points = np.array([(xi, eta, zeta) for xi in _GAUSS_2
+                               for eta in _GAUSS_2 for zeta in _GAUSS_2])
+            bubble = -2.0 * points[:, :, None] * np.eye(3)[None]
+            bubbles = (np.matmul(bubble[None], inverse_0.transpose(0, 2, 1)[:, None])
+                       * (det_0[:, None] / determinants)[:, :, None, None])
+            k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
+            k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
+            stiffness = stiffness - k_ua @ np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1))
+        products = rho * np.tensordot(weights, shapes[:, :, None] * shapes[:, None, :],
+                                      axes=(1, 0))
+    # the mass couples each node pair's translations alike: the products
+    # down the blocks' diagonals, written as the stiffness's dots are
+    mass = np.zeros((count, nodes, 3, nodes, 3))
+    for axis in range(3):
+        mass[:, :, axis, :, axis] = products
+    # symmetric to round-off, and not made exactly so: the assemblies
+    # read one triangle (`sparse_matrices`) or average the whole
+    return stiffness, mass.reshape(count, 3 * nodes, 3 * nodes)
+
+
+def _solid_volume(xyz: np.ndarray) -> float:
+    """The volume of a hexahedron, wedge or tetrahedron by its nodes,
+    integrated the way its matrices are, so the two agree; negative for
+    an element numbered inside out, zero for a flat one."""
+    return float(_solid_volumes(np.asarray(xyz, dtype=np.float64)[None])[0])
+
+
+def _solid_volumes(xyz: np.ndarray) -> np.ndarray:
+    """`_solid_volume` of many elements of one kind at once: `xyz` is
+    (elements, nodes, 3), and the answer one volume per element."""
+    # The rules' natural derivatives are the same for every element, so
+    # they are built once (`_VOLUME_RULES`) and every element's Jacobians
+    # are one product. Built per element and per point, the volumes were
+    # most of the time a 33,000-brick model took to build, and twice
+    # over: once in the check on each element and again in its mass
+    # (2026-10-18, the status line's weight)
+    if xyz.shape[1] == 4:
+        return np.linalg.det(xyz[:, 1:] - xyz[:, :1]) / 6.0
+    _shapes, derivatives, weights = _SOLID_RULES[xyz.shape[1]]
+    jacobians = np.einsum('pnk,enj->epkj', derivatives, xyz)
+    return (np.linalg.det(jacobians) * weights).sum(axis=1)
+

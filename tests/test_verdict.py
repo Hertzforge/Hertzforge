@@ -1,0 +1,201 @@
+"""The pass/fail box under the random report's title.
+
+Whether the environment passed, read off the octave-band comparison
+(Brandon, 2026-09-20): the share of control channels with more than
+a tenth of their band outside the abort limits, failing at a fifth
+of them, and the share more than 3 dB off in RMS, failing at a
+tenth. One word in one color, and the two readings beside it.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+
+import pytest
+from conftest import fixture_path
+
+import hertzforge
+from hertzforge.core import compliance
+from hertzforge.core.report import random_template
+from hertzforge.report import render_html
+
+
+def _rows(abort_percents, errors_db):
+    return [(f'{101 + i}Z+', {'lines': 10, 'abort_percent': share,
+                              'difference_db': db})
+            for i, (share, db) in enumerate(zip(abort_percents, errors_db))]
+
+
+def test_the_verdict_is_two_shares_against_two_thresholds():
+    read = compliance.verdict(_rows([0, 0, 12, 0, 0, 0, 0, 0, 0, 0],
+                                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+    assert read['channels'] == 10
+    assert read['lines_percent'] == 10.0 and read['rms_percent'] == 0.0
+    assert read['passed'] is True
+    # at the number exactly, failed: a fifth of the channels out on lines
+    read = compliance.verdict(_rows([12, 12, 0, 0, 0, 0, 0, 0, 0, 0], [0] * 10))
+    assert read['lines_percent'] == 20.0 and read['passed'] is False
+    # a tenth of them off in RMS, either way
+    read = compliance.verdict(_rows([0] * 10, [-3.5, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+    assert read['rms_percent'] == 10.0 and read['passed'] is False
+    # exactly on a channel threshold is not out: 10% of the band, 3 dB
+    read = compliance.verdict(_rows([10.0, 0], [3.0, 0]))
+    assert read['lines_percent'] == 0.0 and read['rms_percent'] == 0.0
+    assert read['passed'] is True
+    # channels with nothing compared are not counted; none at all is no verdict
+    rows = _rows([50, 50], [0, 0]) + [('999Z+', {'lines': 0, 'refused': 'no'})]
+    assert compliance.verdict(rows)['channels'] == 2
+    assert compliance.verdict([('999Z+', {'lines': 0})])['passed'] is None
+
+
+def _payload(project):
+    page = render_html(random_template(project, object_groups=project.object_groups), project,
+                       object_groups=project.object_groups, unit_system=hertzforge.SI)
+    return json.loads(re.search(
+        r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
+
+
+def test_the_random_report_opens_on_its_verdict():
+    project = hertzforge.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    first = random_template(project, object_groups=project.object_groups).blocks[0]
+    assert first == {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
+                     'measured': '@basis:OctavePsd'}
+    blocks = _payload(project)['blocks']
+    assert blocks[0]['kind'] == 'verdict', 'under the title, before a word'
+    box = blocks[0]
+    assert box['channels'] == 8 and 'label' not in box, 'not a numbered figure'
+    _spec, octave_spec = project.specifications
+    _psds, octave = project.psds
+    read = compliance.verdict(compliance.compare_all(octave_spec, octave))
+    assert box['passed'] == read['passed']
+    assert box['lines_percent'] == pytest.approx(read['lines_percent'])
+    assert box['rms_percent'] == pytest.approx(read['rms_percent'])
+    assert (box['lines_fail_percent'], box['rms_fail_percent']) == (20.0, 10.0)
+
+
+def test_a_run_with_no_octave_comparison_has_no_box():
+    thin = hertzforge.Project()
+    thin.import_file(fixture_path('plate', 'random.nc4'))
+    thin.compute_psds('Time History')
+    blocks = _payload(thin)['blocks']
+    assert not [b for b in blocks if b['kind'] == 'verdict']
+    assert random_template({}).blocks[0]['kind'] == 'verdict', 'the outline keeps its slot'
+
+
+def test_the_page_paints_the_box_in_its_two_colors():
+    from hertzforge.report.page import _CSS, _JS
+
+    assert "else if (block.kind === 'verdict') verdictBlock(block);" in _JS
+    assert "word.textContent = block.passed ? 'PASS' : 'FAIL';" in _JS
+    assert "s.className = 'verdict ' + (block.passed ? 'pass' : 'fail');" in _JS
+    assert '.verdict.pass { border-color: #2e8b57;' in _CSS
+    assert '.verdict.fail { border-color: #c0392b;' in _CSS
+
+
+def test_octave_band_figures_read_on_a_log_axis_and_narrowband_ones_linear():
+    """Brandon, 2026-09-20: linear for the narrowband figures, log for
+    the octave-band ones — the specification figure and the comparison
+    both, every x they carry in decades."""
+    import numpy as np
+
+    project = hertzforge.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    grids = {b['caption']: b for b in _payload(project)['blocks'] if b['kind'] == 'grid'}
+    narrow = grids['Control against specification']['rows'][0]['cells'][0][0]
+    banded = grids['Control against specification, octave bands']['rows'][0]['cells'][0][0]
+    assert not narrow.get('logx') and banded['logx'] is True
+    _psds, octave = project.psds
+    _spec, octave_spec = project.specifications
+    assert banded['x'][1] == pytest.approx(np.log10(octave.abscissa[1]), abs=1e-5)
+    assert banded['home_x'] == pytest.approx(
+        list(np.log10([octave_spec.bin_edges()[k] for k in
+                       (int(np.flatnonzero(octave_spec.written(0))[0]),
+                        int(np.flatnonzero(octave_spec.written(0))[-1]) + 1)])), rel=1e-5)
+    assert banded['edges'][0] == pytest.approx(np.log10(octave.bin_edges()[0]), abs=1e-5)
+    # and the narrowband comparison stays linear
+    assert not grids['Control against specification'][
+        'rows'][0]['cells'][0][0].get('logx')
+    # the specification is no longer drawn on its own, in either form
+    assert not [key for key in grids if key.startswith('Test specification')]
+
+
+def test_the_box_carries_the_test_level_it_was_judged_at():
+    """Left of PASS/FAIL, the test level every comparison was judged at
+    (Brandon, 2026-09-26) — the negative of the scale added, and
+    whether it was detected or set."""
+    from test_comparison_scale import _measured, _spec
+
+    from hertzforge.report import _verdict_block
+
+    channels = tuple(f'{n}Z+' for n in range(101, 109))
+    spec = _spec(channels)
+    run = _measured(spec, [6.0] * 8, wiggle=0.3)
+    box = _verdict_block(spec, run)
+    assert box['test_level_db'] == -6.0 and box['level_source'] == 'detected'
+    run.scale_db = 3
+    box = _verdict_block(spec, run)
+    assert box['test_level_db'] == -3.0 and box['level_source'] == 'set'
+    full = _verdict_block(spec, _measured(spec, [0.0] * 8, wiggle=0.3))
+    assert full['test_level_db'] == 0.0
+    assert str(full['test_level_db']) == '0.0', 'never a negative zero'
+
+
+def test_the_level_label_is_the_reports_to_name():
+    """The box names its level as the report says: 'Test level' unless
+    the block names it. The random report under a sweep names it the
+    random's (test_mixed_type; Brandon, 2026-09-26)."""
+    from test_comparison_scale import _measured, _spec
+
+    from hertzforge.core.report import random_template
+    from hertzforge.report import _verdict_block
+    from hertzforge.report.page import _JS
+
+    plain = [b for b in random_template({}).blocks if b['kind'] == 'verdict']
+    assert 'level_label' not in plain[0], 'a random report says Test level'
+    spec = _spec(('101Z+', '102Z+'))
+    run = _measured(spec, [0.0, 0.0], wiggle=0.3)
+    assert _verdict_block(spec, run)['level_label'] == 'Test level'
+    assert _verdict_block(spec, run, 'Random test level')['level_label'] == \
+        'Random test level'
+    assert "const label = block.level_label || 'Test level';" in _JS
+
+
+def test_the_page_puts_the_level_left_of_the_verdict():
+    from hertzforge.report.page import _CSS, _JS
+
+    body = _JS[_JS.index('function verdictBlock'):]
+    body = body[:body.index('\n}\n')]
+    assert body.index("level.className = 'testlevel'") < body.index(
+        "s.className = 'verdict '"), 'the level box goes in first'
+    assert "big.textContent = testLevelText(block.test_level_db);" in body
+    assert '.testlevel .word { font-size: 2rem; font-weight: 700;' in _CSS
+    assert '.verdictrow { display: flex;' in _CSS
+
+
+def test_the_states_turn_where_the_verdict_counts():
+    """Past the tolerance is out; at it exactly is still in, as the
+    verdict counts a channel (Brandon, 2026-10-23)."""
+    assert compliance.lines_state(compliance.LINES_PERCENT) == 'in'
+    assert compliance.lines_state(compliance.LINES_PERCENT + 0.01) == 'over'
+    assert compliance.lines_state(0.0) == 'in', 'a share has no under'
+    assert compliance.rms_state(compliance.ERROR_DB) == 'in'
+    assert compliance.rms_state(compliance.ERROR_DB + 0.01) == 'over'
+    assert compliance.rms_state(-compliance.ERROR_DB) == 'in'
+    assert compliance.rms_state(-compliance.ERROR_DB - 0.01) == 'under'
+    assert compliance.rms_state(float('nan')) == 'in'
+
+
+def test_a_channels_readouts_say_the_number_and_its_state():
+    got = compliance.readouts({'lines': 40, 'abort_percent': 12.34,
+                               'difference_db': -3.5})
+    assert got == [
+        {'name': 'lines', 'label': '% Lines Out', 'text': '12.3',
+         'state': 'over'},
+        {'name': 'rms', 'label': 'RMS Error', 'text': '-3.5 dB',
+         'state': 'under'}]
+    # no abort limits written, no share; an error of nothing reads +0.0
+    got = compliance.readouts({'lines': 40, 'difference_db': -0.0})
+    assert got == [{'name': 'rms', 'label': 'RMS Error', 'text': '+0.0 dB',
+                    'state': 'in'}]
+    assert compliance.readouts({'lines': 0}) == [], 'nothing compared'
+    assert compliance.readouts({'lines': 0, 'refused': 'why'}) == []
