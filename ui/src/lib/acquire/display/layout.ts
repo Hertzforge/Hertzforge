@@ -235,9 +235,18 @@ export function readLayout(raw: unknown): Layout | null {
 	return { version: 1, pages, rate, serial };
 }
 
-/** The shape a layout is saved in (storage now, the `.hforge` setup later). */
+/**
+ * The shape a layout is saved in (storage now, the `.hforge` setup later). The fields are written
+ * in one order, whatever order they were set in, so two equal layouts always save the same text.
+ */
 export function toSaved(layout: Layout): string {
-	return JSON.stringify(layout);
+	const plot = (p: PlotSpec) => ({ id: p.id, quantity: p.quantity, channels: p.channels, arrange: p.arrange, x: p.x, y: p.y, yMin: p.yMin, yMax: p.yMax, points: p.points });
+	return JSON.stringify({
+		version: layout.version,
+		pages: layout.pages.map((p) => ({ id: p.id, name: p.name, plots: p.plots.map(plot) })),
+		rate: layout.rate,
+		serial: layout.serial
+	});
 }
 
 export function fromSaved(text: string | null): Layout | null {

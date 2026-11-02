@@ -9,12 +9,14 @@
  * touched. A window on another monitor is the same thing with its own page.
  *
  * The layout is saved per test type and per setup, and shared between this browser's windows: an
- * edit in one window reaches the others through the storage event.
+ * edit in one window reaches the others through the storage event. Each window takes the layout as
+ * storage holds it and writes only its own edits, so the windows agree on one layout and never
+ * echo each other; each still asks for its own page.
  */
 
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
-import type { DataPlot, LiveQuantity, RandomData, RandomSubscribeResult } from '$lib/protocol/types';
+import type { DataPlot, LiveQuantity, RandomData, RandomSubscribeResult, SubscribePlot } from '$lib/protocol/types';
 import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { toRefusal } from '../words';
 import {
@@ -46,6 +48,8 @@ export interface DisplayOptions {
 	storage?: Storage | null;
 	/** Where this window remembers its page; null keeps nothing. */
 	session?: Storage | null;
+	/** Where the other windows' storage events reach this one (the window); null hears none. */
+	events?: EventTarget | null;
 	/** The page to open on (a window opened for one page). */
 	page?: string | null;
 	/** Debounce of the subscription, ms. */
@@ -101,13 +105,21 @@ export class DisplayState {
 	key = $state('');
 
 	/**
-	 * The subscription last asked for, sent or waiting out the debounce. A change is compared with
-	 * this, not with what was sent, so going away and straight back within the debounce still ends
-	 * on the latest. Cleared when the connection closes, as the subscription goes with it.
+	 * The layout as this window last found it in storage or wrote it there, under `key` (its saved
+	 * text). The layout is written only when it differs, so a layout read from another window is
+	 * never written back: two windows never echo each other's edits.
 	 */
-	private wantKey = '';
-	private seq = 0;
+	private stored: string | null = null;
+
+	/** The subscription this window wants now; null while the connection is closed. */
+	private want: { key: string; rate: number; plots: SubscribePlot[] } | null = null;
+	/**
+	 * The subscription last sent on this connection, by key ('' for none). A refused one is asked
+	 * again on the next change or the next connection, not in a loop.
+	 */
+	private sentKey = '';
 	private timer: ReturnType<typeof setTimeout> | null = null;
+	private inflight = false;
 
 	constructor(control: ServiceClient, opts: DisplayOptions) {
 		this.control = control;
@@ -251,27 +263,31 @@ export class DisplayState {
 
 	/** Load the layout for the setup on screen, keep it saved, and keep the subscription current. */
 	watch(): () => void {
-		const onStorage = (e: StorageEvent) => {
-			if (e.key !== this.key || e.newValue === null) return;
-			const next = fromSaved(e.newValue);
-			if (!next || toSaved(next) === toSaved($state.snapshot(this.layout) as Layout)) return;
-			this.layout = next;
-			if (!next.pages.some((p) => p.id === this.pageId)) this.pageId = next.pages[0].id;
+		// Another window wrote a layout. Storage holds the latest write of any window, which may be
+		// newer than this event's own value, so every window ends on the same one.
+		const onStorage = (ev: Event) => {
+			if ((ev as StorageEvent).key === this.key) this.adopt();
 		};
-		if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+		const events = this.opts.events === undefined ? (typeof window === 'undefined' ? null : window) : this.opts.events;
+		events?.addEventListener('storage', onStorage);
 		const stop = $effect.root(() => {
 			// The layout follows the setup: its own, else the test type's last, else the defaults.
 			$effect(() => {
 				const key = layoutKey(this.opts.testType, this.opts.setupTitle());
 				untrack(() => this.load(key));
 			});
-			// Every change is kept, for this setup and as the test type's last.
+			// Every change made here is kept, for this setup and as the test type's last. A layout read
+			// from storage is already kept, and writing it back would answer the other window's edit
+			// with its own echo.
 			$effect(() => {
 				const text = toSaved($state.snapshot(this.layout) as Layout);
 				const key = this.key;
 				untrack(() => {
 					if (!key) return;
-					if (read(this.storage, key) !== text) write(this.storage, key, text);
+					if (text !== this.stored) {
+						this.stored = text;
+						write(this.storage, key, text);
+					}
 					write(this.storage, lastLayoutKey(this.opts.testType), text);
 				});
 			});
@@ -283,20 +299,19 @@ export class DisplayState {
 				const open = this.control.status === 'open';
 				untrack(() => {
 					if (!open) {
-						this.wantKey = '';
-						if (this.timer) clearTimeout(this.timer);
+						this.want = null;
+						this.sentKey = '';
+						this.cancelTimer();
 						return;
 					}
-					const key = JSON.stringify([rate, plots]);
-					if (key === this.wantKey) return;
-					this.wantKey = key;
-					this.schedule(rate, plots);
+					this.want = { key: JSON.stringify([rate, plots]), rate, plots };
+					if (this.want.key !== this.sentKey) this.schedule();
 				});
 			});
 		});
 		return () => {
-			if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
-			if (this.timer) clearTimeout(this.timer);
+			events?.removeEventListener('storage', onStorage);
+			this.cancelTimer();
 			stop();
 		};
 	}
@@ -306,46 +321,61 @@ export class DisplayState {
 		const own = fromSaved(read(this.storage, key));
 		const next = own ?? fromSaved(read(this.storage, lastLayoutKey(this.opts.testType))) ?? defaultRandomLayout();
 		this.key = key;
+		// A setup with no layout of its own gets this one written for it; its own is kept as it is.
+		this.stored = own ? toSaved(own) : null;
 		this.layout = next;
 		if (!next.pages.some((p) => p.id === this.pageId)) this.pageId = next.pages[0].id;
 		this.editing = null;
 	}
 
-	/** The latest change wins: a change within the debounce replaces the one waiting. */
-	private schedule(rate: number, plots: ReturnType<typeof subscriptionFor>) {
+	/** Take the layout kept for this setup, as another window left it. */
+	private adopt() {
+		const next = fromSaved(read(this.storage, this.key));
+		if (!next) return;
+		const text = toSaved(next);
+		this.stored = text;
+		if (text === toSaved($state.snapshot(this.layout) as Layout)) return;
+		this.layout = next;
+		if (!next.pages.some((p) => p.id === this.pageId)) this.pageId = next.pages[0].id;
+	}
+
+	/**
+	 * Send what is wanted after the debounce. A change while the timer runs does not restart it: the
+	 * timer sends whatever is wanted when it fires, so changes coming faster than the debounce (an
+	 * edit in another window arriving, a field typed into) delay a subscription by one debounce at
+	 * most and never hold it back.
+	 */
+	private schedule() {
+		if (this.timer) return;
+		this.timer = setTimeout(() => {
+			this.timer = null;
+			void this.send();
+		}, this.opts.subscribeDelayMs ?? 40);
+	}
+
+	private cancelTimer() {
 		if (this.timer) clearTimeout(this.timer);
-		this.timer = setTimeout(() => void this.send(rate, plots), this.opts.subscribeDelayMs ?? 40);
+		this.timer = null;
 	}
 
 	/**
 	 * One subscription in flight at a time: the service may take two requests in either order, so
 	 * a change made while one is on its way is sent when it has been answered (the latest only).
 	 */
-	private inflight = false;
-	private queued: { rate: number; plots: ReturnType<typeof subscriptionFor> } | null = null;
-
-	private async send(rate: number, plots: ReturnType<typeof subscriptionFor>) {
-		if (this.inflight) {
-			this.queued = { rate, plots };
-			return;
-		}
+	private async send() {
+		const want = this.want;
+		if (this.inflight || !want || want.key === this.sentKey) return;
 		this.inflight = true;
-		const seq = ++this.seq;
+		this.sentKey = want.key;
 		try {
-			const res = await this.control.request<RandomSubscribeResult>('random.subscribe', { rate_hz: rate, plots });
-			if (seq === this.seq) {
-				this.accepted = res;
-				this.error = null;
-			}
+			const res = await this.control.request<RandomSubscribeResult>('random.subscribe', { rate_hz: want.rate, plots: want.plots });
+			this.accepted = res;
+			this.error = null;
 		} catch (err) {
-			// Asked again on the next change or the next connection.
-			this.wantKey = '';
 			this.error = toRefusal('Show the plots', err).message;
 		} finally {
 			this.inflight = false;
-			const next = this.queued;
-			this.queued = null;
-			if (next) void this.send(next.rate, next.plots);
+			if (this.want && this.want.key !== this.sentKey) void this.send();
 		}
 	}
 

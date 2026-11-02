@@ -23,6 +23,9 @@
 //    minimized. Then it steps the level on the manual ladder and stops with the ramp, which starts
 //    at once and walks down smoothly (the run bar's live level, sampled ten times a second).
 //    After the run, "Test type" leads back to the chooser and Random comes back as it was left.
+// 1b. A page opened in a window of its own before the start, kept open through the run: the
+//    first window still asks for exactly its own page and plots each time it changes page and
+//    adds a plot (three times over), the new plot fills, and the second window keeps its page.
 // 2. A second browser (its own storage) observes: it shows the setup the service holds and its
 //    numbers; a new run starts and the observer aborts it with Ctrl and period. Meanwhile a third
 //    screen resting on the chooser sees the run go live and returns to it from the top bar, and a
@@ -221,6 +224,28 @@ async function choosePage(page, name) {
 }
 /** The drawn panes of a plot, by its test id. */
 const panes = (page, plotId) => page.locator(`[data-testid="plot-${plotId}"] [data-testid="plot-pane"] canvas`).count();
+/** The plot ids on the page a window shows, in order. */
+const plotsOnPage = (page) => page.locator('[data-testid="page-view"] [data-plot]').evaluateAll((els) => els.map((e) => e.dataset.plot));
+
+/**
+ * Every `random.subscribe` a page sends, as the list of plot ids it asks for, in order. Set up
+ * before the page opens its connection.
+ */
+function subscriptionsOf(page) {
+	const sent = [];
+	page.on('websocket', (ws) =>
+		ws.on('framesent', (f) => {
+			if (typeof f.payload !== 'string') return;
+			try {
+				const v = JSON.parse(f.payload);
+				if (v.method === 'random.subscribe') sent.push((v.params.plots ?? []).map((p) => p.id).join());
+			} catch {
+				/* not a request */
+			}
+		})
+	);
+	return sent;
+}
 
 /** The run bar's level, settled (no ramp "to" part), in dB. */
 async function settledLevel(page) {
@@ -255,6 +280,7 @@ let failed = null;
 try {
 	// ============ Run 1: the controller =========================================================
 	const a = await ctxA.newPage();
+	const subsA = subscriptionsOf(a);
 	await a.goto(URL_);
 	await chooser(a, 'the test-type chooser');
 	const cards = await a.locator('[data-testid="test-type-chooser"] [data-type]').evaluateAll((els) =>
@@ -598,6 +624,57 @@ try {
 		lastUsed && (await outcomeOf(a)) === 'operator_stop' && (await tid(a, 'run-view').isVisible()),
 		`marked last used ${lastUsed}, outcome ${await outcomeOf(a)}`
 	);
+
+	// ============ Run 1b: a window opened before the start ======================================
+	// Both windows keep the layout in this browser's storage, so an edit in one reaches the other.
+	// Each must still ask the service for exactly the page it shows, whatever the other writes.
+	await verb(a, 'act-reset');
+	await until(a, 'a new run', async (p) => (await stateOf(p)) === 'configured');
+	await choosePage(a, 'Limits');
+	const [early] = await Promise.all([ctxA.waitForEvent('page'), tid(a, 'page-popout').click()]);
+	await early.setViewportSize({ width: 1280, height: 820 });
+	await until(early, 'the window opened before the start', async (p) => (await tid(p, 'display-window').isVisible()) && (await roleOf(p)) === 'observer', 30_000);
+	check(
+		'a window opened on the Limits page before the start: an observer, with the run not yet started',
+		(await text(early, 'display-window-page')) === 'Limits' && (await stateOf(early)) === 'configured',
+		`${await text(early, 'display-window-page')}, ${await roleOf(early)}, ${await stateOf(early)}`
+	);
+	await verb(a, 'act-start');
+	await until(a, 'the review hold', async (p) => (await stateOf(p)) === 'review', 90_000);
+	await tid(a, 'review-proceed').click();
+	await until(early, 'the window to draw its page during the run', async (p) => (await stateOf(p)) === 'running' && (await panes(p, 'pl-3')) > 0, 60_000);
+	// The first window changes page and adds a time history, three times over; each time it asks
+	// for its new page and plot at once, and the plot fills.
+	for (let round = 1; round <= 3; round++) {
+		const from = subsA.length;
+		await choosePage(a, 'All Inputs');
+		await tid(a, 'plot-add').click();
+		await tid(a, 'plot-quantity').selectOption('time');
+		await tid(a, 'plot-editor-done').click();
+		const onScreen = await plotsOnPage(a);
+		const added = onScreen.at(-1);
+		const filled = await until(a, 'the new page and plot asked for and drawn', async (p) => subsA.at(-1) === onScreen.join() && (await panes(p, added)) > 0, 5_000).then(
+			() => true,
+			() => false
+		);
+		check(
+			`with the window open, change ${round} of 3: the first window asks for its new page and plot at once, and the plot fills`,
+			filled && onScreen.length === 2,
+			`on screen [${onScreen.join(', ')}]; asked for ${subsA.slice(from).map((s) => `[${s}]`).join(' then ') || 'nothing'}`
+		);
+		await a.locator(`[data-testid="plot-${added}"] [data-testid="plot-remove"]`).click();
+		await choosePage(a, 'Limits');
+		await until(a, 'the Limits page asked for again', async () => subsA.at(-1) === 'pl-3', 5_000);
+	}
+	check(
+		'the window kept its own page and plot while the first window changed its own',
+		(await text(early, 'display-window-page')) === 'Limits' && (await plotsOnPage(early)).join() === 'pl-3' && (await panes(early, 'pl-3')) > 0 && (await stateOf(early)) === 'running',
+		`${await text(early, 'display-window-page')}, [${(await plotsOnPage(early)).join(', ')}], ${await stateOf(early)}`
+	);
+	await shot(early, '07b-window-opened-before-start');
+	await verb(a, 'act-abort');
+	await until(a, 'the run to end', async (p) => (await stateOf(p)) === 'finished', 10_000);
+	await early.close();
 
 	// ============ Run 2: a second browser observes, and aborts ==================================
 	const b = await ctxB.newPage();
