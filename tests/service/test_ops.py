@@ -166,7 +166,8 @@ def test_an_empty_band_is_refused(modal_run):
 
 
 def test_a_band_above_the_data_is_refused(modal_run):
-    with pytest.raises(ProtocolError, match='no mode found between 5000 and 6000 Hz'):
+    with pytest.raises(ProtocolError, match=r"the bounds 5000 to 6000 Hz hold none of FRF's "
+                       r'lines, which span 0 to 2048 Hz'):
         run('modal_run.modes', modal_run, low_hz=5000.0, high_hz=6000.0)
 
 

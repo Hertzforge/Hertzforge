@@ -52,8 +52,12 @@ def fitted(run: ModalRun, low: float, high: float, count: int) -> Any:
     modes out of the noise floor."""
     key = (float(low), float(high), int(count))
     if key not in run.fits:
-        name = run.project.fit_modes('FRF', bounds=(low, high), limit=count,
-                                     name='Identified Modes')
+        try:
+            name = run.project.fit_modes('FRF', bounds=(low, high), limit=count,
+                                         name='Identified Modes')
+        # a band that holds none of the FRF lines, said in the core's words
+        except ValueError as error:
+            raise refused(str(error)) from None
         run.fits[key] = run.project[name]
         del run.project[name]
     return run.fits[key]
@@ -75,12 +79,6 @@ def modes(run: ModalRun, params: dict[str, Any]) -> list[dict]:
         if needed not in run.project:
             raise refused(f'{run.title} has no {needed} to fit modes on.')
     geometry = run.project['Geometry']
-    lines_hz = np.asarray(run.project['FRF'].abscissa, dtype=float)
-    # a band that misses the FRFs must not come back as a fit of the whole
-    # band, which is what the fitting loop does with bounds it cannot use
-    if high <= lines_hz[0] or low >= lines_hz[-1]:
-        raise refused(f'no mode found between {low:g} and {high:g} Hz: the FRFs '
-                      f'span {lines_hz[0]:g} to {lines_hz[-1]:g} Hz')
     shapes = fitted(run, low, high, params['count'])
     if not shapes.num_shapes:
         raise refused(f'no mode found between {low:g} and {high:g} Hz')
