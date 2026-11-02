@@ -229,6 +229,61 @@ def test_a_reference_the_survey_does_not_have_is_refused(modal_run):
         run('modal_run.ods', modal_run, reference=3)
 
 
+# ---- modal_run.mac --------------------------------------------------------------
+
+def test_the_mac_against_the_model_pairs_each_mode_with_its_own(modal_run, validate):
+    """The survey was simulated from the plate FE model, so each identified
+    mode's MAC with the model mode at its frequency is near 1 and the rest
+    near 0. The repeated pair at 1142 Hz is any rotation within its plane, so
+    the fit's pair and the model's agree less, and are not held to 0.99."""
+    (view,) = run('modal_run.mac', modal_run)
+    wire_views([view], validate)
+    values = view['values']
+    assert values.shape == (5, 5) and values.dtype == np.float32
+    assert view['rows']['ticks'] == ['439.2 Hz', '647.2 Hz', '823.5 Hz', '1142.3 Hz',
+                                     '1142.4 Hz']
+    assert view['columns']['label'] == 'FE model' and len(view['columns']['ticks']) == 5
+    assert view['value_range'] == [0.0, 1.0]
+    assert np.diag(values)[:3].min() > 0.99
+    pair = values[3:, 3:]
+    assert pair.sum(axis=1).min() > 0.95
+    off = values[:3].copy()
+    off[np.arange(3), np.arange(3)] = 0.0
+    assert off.max() < 0.02
+
+
+def test_the_mac_against_the_model_is_the_core_cross_mac(modal_run):
+    """The service only picks the columns: its values are `cross_mac`'s."""
+    from hertzforge.core.shapes import cross_mac
+    (view,) = run('modal_run.mac', modal_run)
+    shapes = modal_run.fits[(300.0, 1300.0, 5)]
+    model = modal_run.analysis_model().shapes
+    frequency = np.asarray(model.frequency)
+    keep = (frequency > 0) & (frequency >= 200.0) & (frequency <= 1950.0)
+    np.testing.assert_allclose(view['values'], cross_mac(shapes, model)[:, keep], rtol=1e-6)
+
+
+def test_the_auto_mac_has_a_unit_diagonal(modal_run, validate):
+    (view,) = run('modal_run.mac', modal_run, against='self')
+    wire_views([view], validate)
+    assert view['rows'] == view['columns']
+    np.testing.assert_allclose(np.diag(view['values']), 1.0, rtol=1e-6)
+    np.testing.assert_allclose(view['values'], view['values'].T, rtol=1e-5)
+
+
+def test_a_survey_with_no_model_is_refused_a_model_mac(modal_run):
+    bare = dataclasses.replace(modal_run, model=None, _opened_model=[])
+    with pytest.raises(ProtocolError, match='has no FE model to compare against'):
+        run('modal_run.mac', bare)
+    (view,) = run('modal_run.mac', bare, against='self')
+    assert view['view'] == 'matrix'
+
+
+def test_an_empty_band_is_refused_a_mac(modal_run):
+    with pytest.raises(ProtocolError, match='empty'):
+        run('modal_run.mac', modal_run, low_hz=900.0, high_hz=800.0)
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

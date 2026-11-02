@@ -514,6 +514,10 @@
 		height: 440px;
 	}
 
+	.view.matrix {
+		height: 420px;
+	}
+
 	.spin {
 		animation: spin 0.9s linear infinite;
 	}

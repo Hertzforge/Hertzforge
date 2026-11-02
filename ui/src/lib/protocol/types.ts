@@ -183,7 +183,20 @@ export interface WaterfallView {
 	note?: string;
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView;
+/** One value per row and column, such as a MAC (schema/PROTOCOL.md, `matrix`). */
+export interface MatrixView {
+	view: 'matrix';
+	title: string;
+	rows: { label: string; ticks: string[] };
+	columns: { label: string; ticks: string[] };
+	/** f32 [R, C], row-major: row r, column c is values[r * C + c]. */
+	values: Float32Array;
+	value_label: string;
+	/** The color scale, pinned. */
+	value_range: [number, number];
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------

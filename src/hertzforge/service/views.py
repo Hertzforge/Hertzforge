@@ -172,3 +172,20 @@ def mode(index: int, frequency_hz: float, damping: float | None,
     if label is not None:
         out['label'] = label
     return out
+
+
+def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
+           values: np.ndarray, value_label: str,
+           value_range: tuple[float, float]) -> dict[str, Any]:
+    """A `matrix` view: one value per (row, column) cell, f32 [R, C], drawn
+    as a colored grid. `rows` and `columns` are each `{"label", "ticks"}`,
+    one tick per row or column. `value_range` pins the color scale, so two
+    matrices of the same quantity read alike."""
+    values = np.ascontiguousarray(values, np.float32)
+    return {'view': 'matrix', 'title': title,
+            'rows': {'label': rows['label'], 'ticks': list(rows['ticks'])},
+            'columns': {'label': columns['label'],
+                        'ticks': list(columns['ticks'])},
+            'values': values.reshape(len(rows['ticks']), len(columns['ticks'])),
+            'value_label': value_label,
+            'value_range': [float(value_range[0]), float(value_range[1])]}

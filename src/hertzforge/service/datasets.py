@@ -430,6 +430,19 @@ class ModalRun:
     #: fitted shape sets by (low Hz, high Hz, count), so a second view of
     #: the same fit does not fit again
     fits: dict[tuple[float, float, int], Any] = field(default_factory=dict)
+    #: opens the finite element model the survey is compared against, when
+    #: the catalog names one; opened on first use, by `analysis_model`
+    model: Callable[[], ModalModel] | None = None
+    _opened_model: list[ModalModel] = field(default_factory=list)
+
+    def analysis_model(self) -> ModalModel | None:
+        """The survey's finite element model, opened once, or None when
+        the catalog names none."""
+        if self.model is None:
+            return None
+        if not self._opened_model:
+            self._opened_model.append(self.model())
+        return self._opened_model[0]
 
     def summary(self) -> dict[str, Any]:
         """The `summary` object `dataset.open` returns for the survey: what
@@ -452,10 +465,12 @@ class ModalRun:
 
 
 def open_modal_run(path: Path, title: str, cache_name: str,
-                   geometry: Path | None = None) -> ModalRun:
+                   geometry: Path | None = None,
+                   model: Callable[[], ModalModel] | None = None) -> ModalRun:
     """Read the modal survey at `path` (through the cache) into a project,
     with the test geometry at `geometry`, in meters, as its 'Geometry'
-    when one is given. A missing file is a not_found that names the fetch
+    when one is given, and `model` opening the finite element model it is
+    compared against. A missing file is a not_found that names the fetch
     script and `HERTZFORGE_TESTDATA`."""
     import hertzforge as hz
 
@@ -484,7 +499,8 @@ def open_modal_run(path: Path, title: str, cache_name: str,
 
     project, hit = _cached(name, read, notes)
     return ModalRun(title=title, source=path, project=project, notes=notes,
-                    from_cache=hit, seconds=time.perf_counter() - started)
+                    from_cache=hit, seconds=time.perf_counter() - started,
+                    model=model)
 
 
 def _plate_random() -> RandomRun:
@@ -495,7 +511,8 @@ def _plate_random() -> RandomRun:
 def _plate_modal() -> ModalRun:
     return open_modal_run(testdata_root() / 'plate' / 'modal_spectra.nc4',
                           'Plate Modal Run', 'plate-modal',
-                          testdata_root() / 'plate' / 'test_geometry.npz')
+                          testdata_root() / 'plate' / 'test_geometry.npz',
+                          model=_plate_fem)
 
 
 def _drone() -> ModalModel:

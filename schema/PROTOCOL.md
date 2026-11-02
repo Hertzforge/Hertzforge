@@ -152,6 +152,22 @@ numeric legend, and names at most 40 records, every nth past that. Records that 
 scene are on later pages, never drawn coarser. This is Visual Dynamics' 3-D data view
 (`hertzforge.drawing.viz.waterfall`).
 
+**`matrix`** (one value per row and column, such as a MAC)
+
+```
+{"view":"matrix","title":"...",
+ "rows":{"label":"Identified","ticks":["439.2 Hz","647.2 Hz",...]},     one tick per row
+ "columns":{"label":"FE model","ticks":["439.2 Hz",...]},              one tick per column
+ "values":{"$array":.. f32 [R,C]},          row r, column c
+ "value_label":"MAC",
+ "value_range":[0, 1]}                      the color scale, pinned
+```
+
+The shell draws one cell per value, colored on the sequential colormap over `value_range` with a
+numeric legend, the first row at the top and the first column at the left, and writes each value
+in its cell when the cells are large enough to hold it. Hovering a cell reads its row, column and
+value. A pinned range makes two matrices of the same quantity read alike.
+
 ## Operations: Declarative Panels
 
 The analysis service describes each operation; the shell builds the panel from the description.

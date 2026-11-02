@@ -387,6 +387,7 @@ fn decoding_matches_the_expected_json() {
         "event_random_live",
         "event_random_data",
         "response_waterfall",
+        "response_matrix",
     ] {
         let decoded = codec::decode(&read_bin(&format!("{name}.bin"))).unwrap();
         assert!(
@@ -421,6 +422,7 @@ fn decode_then_encode_round_trips_byte_for_byte() {
         "event_random_live",
         "event_random_data",
         "response_waterfall",
+        "response_matrix",
     ] {
         let bytes = read_bin(&format!("{name}.bin"));
         let order = codec::header_array_order(&bytes).unwrap();
