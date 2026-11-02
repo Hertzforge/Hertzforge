@@ -28,7 +28,7 @@ layout is a mechanical change that comes next.
 | `src/hertzforge/` | Python | The `hertzforge` package: the analysis core from Visual Dynamics, its readers and writers, reports, and the `hertzforge` command |
 | `src/hertzforge/service/` | Python | The analysis service: the core behind the protocol, started by `hertzforge serve` |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
-| `crates/sds-control/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
+| `crates/sds-control/` | Rust | The control service. Runs closed-loop Random on the simulator or on NI-DAQmx hardware, on loopback |
 | `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
