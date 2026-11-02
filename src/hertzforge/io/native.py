@@ -451,6 +451,10 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     # every comparison, so only a hand-set value travels
     if getattr(data, 'scale_db', None) is not None:
         group.attrs['scale_db'] = int(data.scale_db)
+    # simulated or measured, only when something said; absent reads as
+    # unknown, so a file from before the field reads back the same
+    if data.source is not None:
+        group.attrs['source'] = data.source
     # a mixed-mode floor's narrowbands and the width left out around its
     # tones: attributes of the specification's own group, as its band
     # constraints are, so a mixed test adds no group of its own to the
@@ -647,6 +651,9 @@ def load_data(group: h5py.Group) -> DataArray:
         data.band_constraints = json.loads(str(group.attrs['band_constraints']))
     if 'scale_db' in group.attrs:
         data.scale_db = int(group.attrs['scale_db'])
+    if 'source' in group.attrs:
+        source = group.attrs['source']
+        data.source = source.decode('utf-8') if isinstance(source, bytes) else str(source)
     if 'narrowbands' in group.attrs:
         from ..core.mixed_mode import narrowbands_from_json
 

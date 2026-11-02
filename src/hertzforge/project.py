@@ -8020,6 +8020,11 @@ class Project(dict):
     def _derive(self, source: str, obj: Any, name: str,
                 recipe: tuple[str, dict[str, Any]] | None = None,
                 link: bool = True) -> str:
+        # what a simulated run gives is simulated, however far it is
+        # carried (FILE_FORMAT_PLAN.md, "Simulated data stays labeled")
+        if getattr(obj, 'source', None) is None and getattr(
+                self[source], 'source', None) is not None:
+            obj.source = self[source].source
         added = self.add(name, obj)
         if link:
             try:
