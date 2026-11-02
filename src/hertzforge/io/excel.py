@@ -143,6 +143,13 @@ def _add_validation(sheet: Any, table: ChannelTable,
 
 def save(table: ChannelTable, path: str | os.PathLike, unit_system: UnitSystem | None = None,
          **_kwargs: Any) -> None:
+    """Write a channel table to `path` as a one-sheet workbook.
+
+    Every column goes out under the header the window uses, integer columns
+    as numbers, with drop-down lists on the columns that have fixed choices
+    and each column widened to its longest entry. `unit_system` is accepted
+    and not used: a channel table's units are labels.
+    """
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
 

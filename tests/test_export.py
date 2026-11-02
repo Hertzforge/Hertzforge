@@ -324,7 +324,7 @@ def test_the_native_format_is_the_one_that_keeps_everything(tmp_path):
     """Which is why Save and Load use it, and export is for other tools."""
     source = hertzforge.import_file(plate('frfs.npz'), response_unit='m/s**2',
                               reference_unit='N')
-    path = str(tmp_path / 'kept.vdyn')
+    path = str(tmp_path / 'kept.hforge')
     hertzforge.save(source, path)
     back = hertzforge.load(path)
     assert back.units_defined

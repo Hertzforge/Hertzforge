@@ -52,6 +52,12 @@ _MODE_HEADER = re.compile(
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.pch` file with a `$EIGENVALUE = ... MODE = ...` header
+    in its first 64 kB.
+
+    A punch from a run that wrote no eigenvectors has the suffix and nothing
+    this reads, so the header is what is looked for.
+    """
     path = str(path)
     if os.path.splitext(path)[1].lower() != '.pch':
         return False
@@ -64,6 +70,14 @@ def _float(token: str) -> float:
 
 
 def load(path: str | os.PathLike, **_unused: Any) -> Any:
+    """Read the real eigenvectors in a punch file as a ShapeSet.
+
+    Each frequency comes from its mode's eigenvalue, sqrt(lambda)/2pi Hz,
+    and 0 Hz for a negative one; the damping is zero and the shapes are
+    marked unscaled, since the punch records neither. Raises ValueError for
+    complex output, for a file with no eigenvectors, and for modes that do
+    not cover the same grids with the same number of values.
+    """
     from ..core.shapes import ShapeSet
 
     path = str(path)

@@ -82,6 +82,7 @@ class MatchedModes:
 
     @property
     def num_matches(self) -> int:
+        """How many pairs are matched."""
         return len(self.pairs)
 
     def add(self, pairs: Sequence[Sequence[int]],

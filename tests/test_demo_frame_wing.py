@@ -117,8 +117,8 @@ def test_the_project_is_the_app_workflow(tmp_path):
     project = frame_wing.project(size=COARSE, wing_size=COARSE)
     assert list(project.keys()) == ['Frame', 'Thin Wing', 'Thick Wing',
                                     'Thin Wing on Frame', 'Thick Wing on Frame']
-    project.save(tmp_path / 'frame-wing.vdyn')
-    project = hertzforge.load(tmp_path / 'frame-wing.vdyn')
+    project.save(tmp_path / 'frame-wing.hforge')
+    project = hertzforge.load(tmp_path / 'frame-wing.hforge')
     assert project['Frame'].group_properties[1].kind == 'solid'
     assert 'solve_modes' in [verb for verb, _ in project.verbs('Frame')]
     solved = project.solve_modes('Frame', num_modes=8)

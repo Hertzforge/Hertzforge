@@ -29,13 +29,19 @@ from __future__ import annotations
 
 import contextlib
 import functools
+from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from itertools import pairwise
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .fem import SHAPES as BEAM_SHAPES
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from OCP.TopoDS import TopoDS_Shape
 
 # Brandon (2026-10-11) wanted parts built from their shapes in the app, a
 # hole a cylinder subtracted rather than a parameter of one meshed
@@ -190,7 +196,8 @@ def _numbers(values, count: int, what: str) -> tuple[float, ...]:
     return out
 
 
-def add_block(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
+def add_block(geometry: Any, center: ArrayLike, widths: ArrayLike,
+              angles: ArrayLike = (0.0, 0.0, 0.0),
               name: str = '', corner: float = 0.0) -> int:
     """Add a block to `geometry`'s solids, `widths` across along its own
     axes, with its middle at `center` and turned by `angles`.
@@ -234,8 +241,8 @@ def _block(solid_id: int, name: str, center, widths, angles, corner) -> Solid:
                  _numbers(angles, 3, 'angles'), widths, corner=corner)
 
 
-def add_cylinder(geometry: Any, center, radius: float, length: float,
-                 angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+def add_cylinder(geometry: Any, center: ArrayLike, radius: float, length: float,
+                 angles: ArrayLike = (0.0, 0.0, 0.0), name: str = '') -> int:
     """Add a cylinder to `geometry`'s solids, `radius` about its own Z
     axis and `length` along it, with its middle at `center` and turned by
     `angles`. With no angles its axis is the geometry's Z.
@@ -272,8 +279,9 @@ def _cylinder(solid_id: int, name: str, center, radius, length, angles) -> Solid
                  length=float(length))
 
 
-def add_cone(geometry: Any, center, base_radius: float, top_radius: float, height: float,
-             angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+def add_cone(geometry: Any, center: ArrayLike, base_radius: float, top_radius: float,
+             height: float, angles: ArrayLike = (0.0, 0.0, 0.0),
+             name: str = '') -> int:
     """Add a cone to `geometry`'s solids: a frustum `height` along its own
     Z, `base_radius` at its -Z end and `top_radius` at its +Z end, either
     of them zero for a point, with its middle at `center` and turned by
@@ -320,7 +328,7 @@ def _cone(solid_id: int, name: str, center, base_radius, top_radius, height, ang
                  dimensions=(top,))
 
 
-def add_sphere(geometry: Any, center, radius: float, name: str = '') -> int:
+def add_sphere(geometry: Any, center: ArrayLike, radius: float, name: str = '') -> int:
     """Add a sphere to `geometry`'s solids, `radius` about `center`.
 
     Parameters
@@ -352,8 +360,8 @@ def _sphere(solid_id: int, name: str, center, radius) -> Solid:
                  radius=float(radius))
 
 
-def add_plate(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
-              name: str = '') -> int:
+def add_plate(geometry: Any, center: ArrayLike, widths: ArrayLike,
+              angles: ArrayLike = (0.0, 0.0, 0.0), name: str = '') -> int:
     """Add a plate to `geometry`'s solids: a flat rectangle `widths`
     across along its own X and Y, in its own XY plane, with its middle at
     `center` and turned by `angles`. With no angles it lies in the
@@ -398,8 +406,8 @@ def _plate(solid_id: int, name: str, center, widths, angles) -> Solid:
                  _numbers(angles, 3, 'angles'), (*across, 0.0))
 
 
-def add_disk(geometry: Any, center, radius: float, angles=(0.0, 0.0, 0.0),
-             name: str = '') -> int:
+def add_disk(geometry: Any, center: ArrayLike, radius: float,
+             angles: ArrayLike = (0.0, 0.0, 0.0), name: str = '') -> int:
     """Add a disk to `geometry`'s solids: a flat circle of `radius` in
     its own XY plane, centered at `center` and turned by `angles`. With
     no angles it lies in the geometry's XY plane.
@@ -470,8 +478,9 @@ def _top(item: Solid) -> float:
     return float(item.dimensions[0]) if item.dimensions else 0.0
 
 
-def add_section(geometry: Any, shape: str, center, dimensions, length: float,
-                angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+def add_section(geometry: Any, shape: str, center: ArrayLike, dimensions: Sequence[float],
+                length: float, angles: ArrayLike = (0.0, 0.0, 0.0),
+                name: str = '') -> int:
     """Add a section to `geometry`'s solids: an I-beam, a channel, a tee,
     an angle, or a rectangular or round tube, `length` along its own Z.
 
@@ -521,9 +530,9 @@ def add_section(geometry: Any, shape: str, center, dimensions, length: float,
     return solid.id
 
 
-def add_hole(geometry: Any, center, diameter: float, depth: float | None = None,
-             angles=(0.0, 0.0, 0.0), name: str = '',
-             counterbore=None) -> int:
+def add_hole(geometry: Any, center: ArrayLike, diameter: float, depth: float | None = None,
+             angles: ArrayLike = (0.0, 0.0, 0.0), name: str = '',
+             counterbore: tuple[float, float] | None = None) -> int:
     """Add a hole to `geometry`'s solids, to subtract from a part.
 
     The hole enters at `center`, on the face it is drilled from, and runs
@@ -617,7 +626,7 @@ EDITABLE = {'block': ('center', 'angles', 'widths', 'corner'),
             PATTERN: ('counts', 'spacing', 'angles')}
 
 
-def edit(geometry: Any, solid_id: int, **changes) -> None:
+def edit(geometry: Any, solid_id: int, **changes: Any) -> None:
     """Change a solid after it is made, in place.
 
     What can be changed is a block's center, angles, widths and corner; a
@@ -697,8 +706,8 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
     geometry.solids[geometry.solids.index(item)] = changed
 
 
-def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
-         turn=(0.0, 0.0, 0.0)) -> int:
+def move(geometry: Any, ids: Sequence[int], offset: ArrayLike = (0.0, 0.0, 0.0),
+         turn: ArrayLike = (0.0, 0.0, 0.0)) -> int:
     """Move solids whole, each with every solid it is made of, turned by
     `turn` about the middle of their extent and then moved by `offset`.
 
@@ -769,7 +778,7 @@ def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
     return moved
 
 
-def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
+def combine(geometry: Any, operation: str, ids: Sequence[int], name: str = '') -> int:
     """Add a boolean of solids already there: their union, the first with
     the rest subtracted from it, or what they share.
 
@@ -827,7 +836,7 @@ def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
     return made.id
 
 
-def reorder(geometry: Any, ids, within: int | None = None) -> None:
+def reorder(geometry: Any, ids: Sequence[int], within: int | None = None) -> None:
     """Put solids in a new order: the parts, or one solid's own.
 
     The order is what a boolean made from a pick reads first to last, and
@@ -938,7 +947,7 @@ def _checked(geometry: Any, ids) -> set[int]:
     return ids
 
 
-def delete(geometry: Any, ids) -> int:
+def delete(geometry: Any, ids: Sequence[int]) -> int:
     """Delete solids, each with everything it is made of: a plate with
     holes cut in it is deleted whole, with the cylinders that cut them.
     A solid that a boolean still uses is refused, by name, unless that
@@ -968,7 +977,7 @@ def delete(geometry: Any, ids) -> int:
     return len(going)
 
 
-def copy(geometry: Any, ids, into: Any = None) -> list[int]:
+def copy(geometry: Any, ids: Sequence[int], into: Any = None) -> list[int]:
     """Copy solids, recipe and all, into a geometry: `geometry` itself,
     or `into`. Returns the new top-level ids, in the order of `ids`.
 
@@ -1029,7 +1038,7 @@ def _clone(geometry: Any, item: Solid, target: Any) -> Solid:
     return new
 
 
-def separate(geometry: Any, ids) -> int:
+def separate(geometry: Any, ids: Sequence[int]) -> int:
     """Take booleans and patterns apart: each one is removed, and its
     operands stand as parts again, which undoes a subtraction made by
     mistake. A primitive has nothing to take apart and is refused, and so
@@ -1061,7 +1070,8 @@ def separate(geometry: Any, ids) -> int:
 PATTERN_LIMIT = 10_000
 
 
-def pattern(geometry: Any, ids, counts, spacing) -> int:
+def pattern(geometry: Any, ids: Sequence[int], counts: Sequence[int],
+            spacing: Sequence[float]) -> int:
     """A pattern of solids: `counts` copies along the geometry's X, Y and
     Z, `spacing` apart, with the originals as the first of each.
 
@@ -1157,7 +1167,7 @@ def solid(geometry: Any, solid_id: int) -> Solid:
 
 # ---- the kernel ------------------------------------------------------------
 
-def require_kernel():
+def require_kernel() -> ModuleType:
     """The OCP bindings, or a ValueError whose message says why they
     did not import and how to reinstall them."""
     # A dependency since 2026-10-29, so this refuses only a broken
@@ -1189,7 +1199,7 @@ def _placed(shape, item: Solid):
     return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
 
 
-def shape(geometry: Any, solid_id: int):
+def shape(geometry: Any, solid_id: int) -> TopoDS_Shape:
     """The solid as an OpenCASCADE shape, in the units the geometry holds
     its coordinates in.
 
@@ -1325,7 +1335,7 @@ def _basic_shape(item: Solid):
     return _placed(built, item)
 
 
-def brick_count(geometry: Any, ids, size: float) -> int:
+def brick_count(geometry: Any, ids: Sequence[int], size: float) -> int:
     """About how many bricks a mesh of these parts at `size` holds:
     their volume over the cube of the size, the volume read by sampling
     their box on a grid as fine as the size or `_SAMPLES` points along
@@ -1423,7 +1433,7 @@ def area(geometry: Any, solid_id: int) -> float:
     return float(props.Mass())
 
 
-def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
+def shape_triangles(item: TopoDS_Shape, deflection: float = DEFLECTION) -> np.ndarray:
     """The corners of the triangles OpenCASCADE tessellates a shape's
     faces into, with `deflection` a fraction of the shape's size. This is
     what draws a solid, and how the STEP importer reads a part.
@@ -1635,7 +1645,8 @@ def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
             for offset in _offsets(item) for leaf in leaves]
 
 
-def contains(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
+def contains(geometry: Any, solid_id: int, points: ArrayLike,
+             ignore: Collection[int] = ()) -> np.ndarray:
     """Which of `points` lie inside the solid, worked out from its recipe
     without the kernel: a block's box and a cylinder's radius and length,
     combined as its booleans say. A point on a face counts as inside.
@@ -1687,7 +1698,8 @@ def contains(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
     return inside[0] & ~np.any(inside[1:], axis=0)
 
 
-def distance(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
+def distance(geometry: Any, solid_id: int, points: ArrayLike,
+             ignore: Collection[int] = ()) -> np.ndarray:
     """The signed distance from each of `points` to the solid's surface,
     negative inside, worked out from its recipe: a block's and a
     cylinder's exact distances, a union the least of its operands', an
@@ -1740,8 +1752,8 @@ def distance(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
     return np.maximum(found[0], -np.min(found[1:], axis=0))
 
 
-def distance_gradient(geometry: Any, solid_id: int, points,
-                      ignore=()) -> tuple[np.ndarray, np.ndarray]:
+def distance_gradient(geometry: Any, solid_id: int, points: ArrayLike,
+                      ignore: Collection[int] = ()) -> tuple[np.ndarray, np.ndarray]:
     """`distance` and its gradient together: the unit direction out of
     the material at each point, exact where the distance is smooth and
     one side's value on an edge or a corner. A boolean's gradient is
@@ -2032,7 +2044,7 @@ class NotAnExtrusion(ValueError):
     the geometry's axes. Tetrahedra can mesh them (`tetmesh`)."""
 
 
-def extrusion_axis(geometry: Any, ids) -> int:
+def extrusion_axis(geometry: Any, ids: Sequence[int]) -> int:
     """The axis (0, 1 or 2) the parts are extrusions along.
 
     Every block must be square to the geometry's axes; a solid turned
@@ -2082,7 +2094,7 @@ def extrusion_axis(geometry: Any, ids) -> int:
     return int(np.argmin(np.max(high, axis=0) - np.min(low, axis=0)))
 
 
-def mesh_size(geometry: Any, ids) -> float:
+def mesh_size(geometry: Any, ids: Sequence[int]) -> float:
     """The element size an extrusion is meshed at by default: half the
     thinnest feature, so every feature is two bricks across.
 
@@ -2107,7 +2119,7 @@ def mesh_size(geometry: Any, ids) -> float:
     return 0.5 * thinnest if np.isfinite(thinnest) else 1.0
 
 
-def smallest_feature(geometry: Any, ids) -> tuple[float, float]:
+def smallest_feature(geometry: Any, ids: Sequence[int]) -> tuple[float, float]:
     """(the smallest radius, the thinnest wall) of the parts, in the
     geometry's length unit: the narrowest cylinder or rounded corner,
     and the shortest span between two flat faces. Infinite where there
@@ -2238,7 +2250,7 @@ def _grid_lines(geometry: Any, ids, size: float, piece: bool = False, cuts_from=
     return axis, order, lines
 
 
-def refuse_parts_of_another(geometry: Any, ids) -> None:
+def refuse_parts_of_another(geometry: Any, ids: Sequence[int]) -> None:
     """Refuse a solid that is part of a boolean or a pattern: the one
     to mesh is the one it is part of."""
     used = used_by(geometry)
@@ -2248,7 +2260,7 @@ def refuse_parts_of_another(geometry: Any, ids) -> None:
                          f'{used[inside_another[0]]}; mesh that one')
 
 
-def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
+def grid_cells(geometry: Any, ids: Sequence[int], size: float, piece: bool = False) -> int:
     """How many bricks the grid `extrusion_mesh` would lay for these
     parts at `size` holds, voids included: the count before any
     ownership is asked, so a pane can decide whether to preview a mesh
@@ -2277,10 +2289,10 @@ def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
     return (nu - 1) * (nv - 1) * (nw - 1)
 
 
-def extrusion_mesh(geometry: Any, ids, size: float,
+def extrusion_mesh(geometry: Any, ids: Sequence[int], size: float,
                    parts_apart: bool = False,
                    progress: Any = None, piece: bool = False,
-                   cuts_from=()) -> tuple[Any, dict]:
+                   cuts_from: Sequence[int] = ()) -> tuple[Any, dict]:
     """The parts as eight-node bricks, ready to join to a geometry
     (`mesh.join`).
 
@@ -2388,7 +2400,7 @@ def extrusion_mesh(geometry: Any, ids, size: float,
     return part, {'bricks': len(conn), 'nodes': len(xyz), 'axis': axis, **made}
 
 
-def brick_mesh(geometry: Any, ids, size: float, parts_apart: bool = False,
+def brick_mesh(geometry: Any, ids: Sequence[int], size: float, parts_apart: bool = False,
                progress: Any = None, sizes: Any = None) -> tuple[Any, dict]:
     """The parts as eight-node bricks: `extrusion_mesh` where they are
     an extrusion along X, Y or Z, with rings about the holes; where
@@ -2450,7 +2462,7 @@ def brick_mesh(geometry: Any, ids, size: float, parts_apart: bool = False,
     return part, {**made, 'method': 'extrusion'}
 
 
-def piece_cuts(geometry: Any, ids) -> list[tuple[int, tuple[int, ...]]]:
+def piece_cuts(geometry: Any, ids: Sequence[int]) -> list[tuple[int, tuple[int, ...]]]:
     """The pieces a brick mesh is made in, each with the solids cut
     from it: (piece, cuts).
 
@@ -2518,7 +2530,7 @@ def _drop_cut_pieces(geometry: Any, found, made) -> None:
 
 
 @contextlib.contextmanager
-def meshed_as(geometry: Any, piece: int, cuts=()):
+def meshed_as(geometry: Any, piece: int, cuts: Sequence[int] = ()) -> Iterator[int]:
     """The id of the solid a piece is meshed as, while the block runs:
     the piece itself, or the subtraction of `cuts` from it, made for the
     while and taken off after, so a reading of the piece (its likely
@@ -2532,7 +2544,7 @@ def meshed_as(geometry: Any, piece: int, cuts=()):
         _drop_cut_pieces(geometry, found, made)
 
 
-def pieces(geometry: Any, ids) -> list[int]:
+def pieces(geometry: Any, ids: Sequence[int]) -> list[int]:
     """The pieces a brick mesh is made in when the parts together are
     not an extrusion (`piece_cuts`), without what is cut from them.
 
@@ -2557,7 +2569,8 @@ def piece_name(geometry: Any, solid_id: int) -> str:
     return item.name.strip() or f'{item.kind.title()} {item.id}'
 
 
-def piece_plan(geometry: Any, ids, size: float, sizes: Any = None) -> list[dict]:
+def piece_plan(geometry: Any, ids: Sequence[int], size: float,
+               sizes: Any = None) -> list[dict]:
     """How `brick_mesh` would mesh these parts in pieces: for each
     piece its id, 'name', 'method' ('extrusion' for a sweep, 'overlay'
     for a fit), 'size', 'cells', the grid's cells at that size (voids
@@ -2884,7 +2897,7 @@ def _end_on_earlier(geometry: Any, item: Solid, local: np.ndarray, axis: int,
     return out, int(cut.sum())
 
 
-def turned_sweep(geometry: Any, piece: int, size: float, earlier=(),
+def turned_sweep(geometry: Any, piece: int, size: float, earlier: Sequence[int] = (),
                  progress: Any = None) -> tuple[Any, dict]:
     """A block, cylinder or section turned off the geometry's axes,
     swept along its own axis: meshed as an extrusion unturned at the
@@ -2997,7 +3010,7 @@ def _drop_inside(geometry: Any, part: Any, others) -> int:
     return int(inside.sum())
 
 
-def meshed_elements(geometry: Any, names) -> np.ndarray:
+def meshed_elements(geometry: Any, names: Iterable[str]) -> np.ndarray:
     """The ids of the elements Mesh Solids makes, bricks, tetrahedra
     and shells, in the element groups named `names`: what meshing
     those parts again replaces (`Project.mesh_solids`, and the pane's

@@ -34,7 +34,7 @@ def project_file(tmp_path):
 
     table = ChannelTable({'channel': [1], 'node': ['101'],
                           'direction': ['Z+'], 'unit': ['g']})
-    path = tmp_path / 'survey.vdyn'
+    path = tmp_path / 'survey.hforge'
     io.save_test(path, 'Survey', {'Geometry': geometry, 'Time': time,
                                   'Channels': table})
     return str(path)
@@ -52,7 +52,7 @@ def test_a_single_object_file_reports_nothing(tmp_path):
     """One object is one step, and a bar with one step is a light bulb."""
     geometry = hertzforge.Geometry(
         node_id=[1], node_xyz=[[0, 0, 0]], length_unit='m')
-    path = tmp_path / 'geometry.vdyn'
+    path = tmp_path / 'geometry.hforge'
     io.save(geometry, path)
     ticks = []
     io.load(str(path), progress=lambda *call: ticks.append(call))

@@ -39,6 +39,7 @@ from numpy.typing import ArrayLike
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import DataArray, Specification
+    from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
 
 def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
@@ -1662,7 +1663,8 @@ class SineError(NamedTuple):
     note: str | None = None
 
 
-def sine_errors(specification, levels) -> list[SineError]:
+def sine_errors(specification: SineSweepSpecification,
+                levels: SineLevelSet | Sequence[SineLevel]) -> list[SineError]:
     """[SineError(dof, tone, db, refused, note)] for extracted sine
     levels against the tones they were controlled to.
 

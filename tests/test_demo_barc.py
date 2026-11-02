@@ -109,8 +109,8 @@ def test_the_project_is_the_app_workflow(tmp_path):
 
     project = barc.project()
     assert list(project.keys()) == ['BARC'], 'the model alone'
-    project.save(tmp_path / 'barc.vdyn')
-    project = hertzforge.load(tmp_path / 'barc.vdyn')
+    project.save(tmp_path / 'barc.hforge')
+    project = hertzforge.load(tmp_path / 'barc.hforge')
     solved = project.solve_modes('BARC', maximum_frequency=1200.0)
     elastic = [f for f in project[solved].frequency if f > 1.0][:3]
     assert np.allclose(elastic, CHECKED[:3], rtol=0.005)

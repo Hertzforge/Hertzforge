@@ -1,4 +1,5 @@
-"""The native .vdyn file format, which is HDF5.
+"""The native .hforge file format, which is HDF5, and the reader for
+Visual Dynamics' .vdyn files it started from.
 
 A file with a single object has one group at the root, named for the
 object's kind ('geometry', 'data', 'shapes', and so on). A file with a
@@ -9,7 +10,12 @@ path. The test's name, active geometry, project type, object groups and
 provenance are attributes of the root. Ragged connectivity is stored as
 a flat array plus offsets. Every file is stamped with its schema
 version, and a file from a newer schema is refused with a message to
-update.
+update. `docs/hforge-format.md` writes the layout down.
+
+A `.hforge` file is a `.vdyn` file of schema 3 under a new stamp, with
+the element-group fields and the object groups under their current
+names (`VDYN_NAMES`). A `.vdyn` file is read, by its own stamp, and
+never written: saving it again writes `.hforge`.
 """
 
 from __future__ import annotations
@@ -30,51 +36,31 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
-    from ..core.report import Report
-    from ..core.run_log_extract import RunLogExtract
-    from ..core.shapes import ShapeSet
-
-#: the newest schema this build reads. Version 2 adds response
-#: predictions (`core.prediction`): a `Predictions` object, and the
-#: report block that reads a measurement against one. Version 3 adds
-#: the run log brought into a project (`core.run_log_extract`): a
-#: `RunLogExtract` object. A file is stamped with the newest version
-#: whose additions it holds (`schema_for`), and 1 when it holds none,
-#: so a build that reads only an earlier version still opens every
-#: file that does not need a later one, and refuses one that does with
-#: its message to update rather than failing on a kind it does not know.
-SCHEMA_VERSION = 3
-
-#: the schema of a file that holds nothing version 2 or 3 added
-BASE_SCHEMA = 1
-
-#: the schema of a file holding predictions
-PREDICTIONS_SCHEMA = 2
-
-#: the schema of a file holding a run log extract
-RUN_LOG_SCHEMA = 3
-
-
-def schema_for(objects: Any) -> int:
-    """The schema version a file holding `objects` (one object, or a
-    mapping of names to objects) is stamped with: 3 when it holds a run
-    log extract, 2 when it holds predictions or a report reading one
-    (and no extract), 1 otherwise."""
     from ..core.prediction import Predictions
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
+    from ..core.shapes import ShapeSet
+    from ..core.sine import SineLevelSet, SineSweepSpecification
 
-    held = objects.values() if isinstance(objects, Mapping) else [objects]
-    stamp = BASE_SCHEMA
-    for obj in held:
-        if isinstance(obj, RunLogExtract):
-            return RUN_LOG_SCHEMA
-        if isinstance(obj, Predictions) or (
-                isinstance(obj, Report) and any(
-                    block.get('kind') == 'prediction'
-                    for block in obj.blocks)):
-            stamp = PREDICTIONS_SCHEMA
-    return stamp
+#: the root attribute every file written here is stamped with
+STAMP = 'hertzforge_schema'
+
+#: the newest .hforge schema this build reads, and the one it writes.
+#: Schema 1 holds everything `.vdyn` schema 3 held. The schema grows by
+#: addition, and a file is stamped with the earliest version that holds
+#: everything in it, so an older build opens every file that does not
+#: need a later one.
+SCHEMA_VERSION = 1
+
+#: the stamp of a Visual Dynamics file
+VDYN_STAMP = 'visualdynamics_schema'
+
+#: the newest .vdyn schema there is. Visual Dynamics stopped at 3 (2
+#: added predictions, 3 the run log extract) when its core moved here.
+VDYN_SCHEMA = 3
+
+#: the suffix `save` adds
+SUFFIX = '.hforge'
 
 
 def _write_ragged(group: h5py.Group, name: str,
@@ -102,12 +88,31 @@ def _read_strings(group: h5py.Group, name: str) -> list[str]:
     return [s.decode('utf-8') for s in group[name][()]]
 
 
-#: a geometry's element-group arrays, by the names a file stores them
-#: under
-ON_DISK = {'elem_group': 'elem_block', 'group_id': 'block_id'}
+#: the names `.vdyn` keeps for a geometry's element-group fields, by
+#: the name `.hforge` and the code use. Visual Dynamics called element
+#: groups blocks when its format was set and kept the old names on disk
+#: after the rename (2026-10-08), so its files load the same.
+VDYN_NAMES = {'elem_group': 'elem_block', 'group_id': 'block_id',
+              'group_name': 'block_name',
+              'group_properties': 'block_properties'}
+
+
+def _on_disk(group: h5py.Group, name: str) -> str:
+    """The name `name` is stored under in the file `group` is in: its
+    `.vdyn` name in a Visual Dynamics file, itself otherwise."""
+    if VDYN_STAMP in group.file.attrs:
+        return VDYN_NAMES.get(name, name)
+    return name
 
 
 def save_geometry(geom: Geometry, group: h5py.Group) -> None:
+    """Write a geometry into `group`: nodes, coordinate systems and
+    elements as datasets, connectivity as a flat array plus offsets.
+
+    The rigid-body settings, view, solids, mates and element-group
+    properties are written only when set, so a file from before each
+    existed reads back the same.
+    """
     group.attrs['dimension'] = geom.dimension
     group.attrs['length_unit'] = geom.length_unit or ''
     # a deck's geometry, whose properties convert with its units, and the
@@ -116,17 +121,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     if getattr(geom, 'from_deck', False):
         group.attrs['from_deck'] = True
         group.attrs['mass_unit'] = geom.mass_unit or ''
-    # the element groups go to disk under the names they had when the
-    # file format was set, 'elem_block', 'block_id' and 'block_name'
-    # (2026-10-08: called element groups everywhere else), so every
-    # project saved before or since reads the same
     for name in ('node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
                  'cs_id', 'cs_type', 'cs_matrix',
                  'elem_id', 'elem_type', 'elem_color', 'elem_group',
                  'group_id'):
-        group.create_dataset(ON_DISK.get(name, name), data=getattr(geom, name))
+        group.create_dataset(name, data=getattr(geom, name))
     _write_strings(group, 'cs_name', geom.cs_name)
-    _write_strings(group, 'block_name', geom.group_name)
+    _write_strings(group, 'group_name', geom.group_name)
     _write_ragged(group, 'elem_conn', geom.elem_conn)
     # the rigid-body settings, when set — the point always, the mass
     # and inertia only when the set is to be mass-normalized, so an
@@ -165,7 +166,7 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     # point masses, the mass alone (2026-10-07)
     groups = getattr(geom, 'group_properties', None) or {}
     if groups:
-        holder = group.create_group('block_properties')
+        holder = group.create_group('group_properties')
         for group_id, props in groups.items():
             entry = holder.create_group(str(int(group_id)))
             if props.mass is not None:
@@ -208,13 +209,14 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
                                                        dtype=np.float64)
 
 
-def _load_block_properties(group) -> dict:
-    if 'block_properties' not in group:
+def _load_group_properties(group) -> dict:
+    held = _on_disk(group, 'group_properties')
+    if held not in group:
         return {}
     from ..core.fem import GroupProperties, Material, Section
 
     out = {}
-    for key, entry in group['block_properties'].items():
+    for key, entry in group[held].items():
         attrs = entry.attrs
         material = None
         if 'youngs_modulus' in attrs:
@@ -270,17 +272,24 @@ def _load_mass_properties(group):
 
 
 def load_geometry(group: h5py.Group) -> Geometry:
+    """Read a geometry written by `save_geometry`.
+
+    A file from before 2026-09-30, which kept tracelines apart from
+    elements, is converted on the way in: each traceline becomes an
+    element group of two-node lines, and element groups are split by
+    family.
+    """
     from ..core.geometry import Geometry
 
-    data = {name: group[ON_DISK.get(name, name)][()] for name in (
+    data = {name: group[_on_disk(group, name)][()] for name in (
         'node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
         'cs_id', 'cs_type', 'cs_matrix',
         'elem_id', 'elem_type', 'elem_color', 'elem_group', 'group_id')}
-    data['group_name'] = _read_strings(group, 'block_name')
+    data['group_name'] = _read_strings(group, _on_disk(group, 'group_name'))
     data['cs_name'] = _read_strings(group, 'cs_name')
     data['elem_conn'] = _read_ragged(group, 'elem_conn')
     data['length_unit'] = group.attrs.get('length_unit', '') or None
-    data['group_properties'] = _load_block_properties(group)
+    data['group_properties'] = _load_group_properties(group)
     data['from_deck'] = bool(group.attrs.get('from_deck', False))
     data['mass_unit'] = group.attrs.get('mass_unit', '') or None
     geometry = Geometry(**data)
@@ -323,6 +332,15 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
 
 def save_data(data: DataArray, group: h5py.Group) -> None:
+    """Write a data object into `group`: abscissa, ordinate and the
+    per-record strings as datasets, and what its kind carries (an SRS's
+    Q, a sine level's tone, interpolation, band constraints, averaging,
+    filtering, run identity and so on) beside them, each only when set.
+
+    The class name is stored as well as the function type, because a
+    `Specification` shares the PSD's and the code alone cannot say
+    which class to rebuild.
+    """
     from ..core.data import DataArray  # noqa: F401 (documented schema owner)
 
     group.attrs['function_type'] = data.function_type
@@ -538,6 +556,10 @@ def _load_averaging(group):
 
 
 def load_data(group: h5py.Group) -> DataArray:
+    """Read a data object written by `save_data`, as the class its name
+    was stored under, or by its function type in a file without one.
+    An attribute the file lacks leaves the object's default, so older
+    files load unchanged."""
     from ..core.data import NAMED_CLASSES, class_for_function_type
 
     cls = NAMED_CLASSES.get(group.attrs.get('data_class'))
@@ -645,6 +667,10 @@ def load_data(group: h5py.Group) -> DataArray:
 
 
 def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
+    """Write a channel table into `group`, one dataset per column in its
+    order, and its control loops as numbered subgroups: an environment
+    name is free text, and h5py reads a slash in a group name as a
+    path."""
     group.attrs['column_order'] = table.column_names
     for name in table.column_names:
         # the typed columns decide the storage: node joined channel as an
@@ -674,6 +700,10 @@ def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
 
 
 def load_channel_table(group: h5py.Group) -> ChannelTable:
+    """Read a channel table written by `save_channel_table`. Columns are
+    read by their stored type rather than the current column specs, so
+    a column the schema has since dropped still reads and the
+    constructor decides what is kept."""
     from ..core.channel_table import ChannelTable, Environment
 
     columns = {}
@@ -703,6 +733,9 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
 
 
 def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
+    """Write a shape set into `group`: frequencies, damping, shape matrix
+    and modal mass as datasets with its strings, mass unit and unscaled
+    flag; modal damping only when the set has it."""
     group.attrs['mass_unit'] = shapes.mass_unit or ''
     group.attrs['unscaled'] = bool(getattr(shapes, 'unscaled', False))
     group.create_dataset('frequency', data=shapes.frequency)
@@ -719,6 +752,8 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
 
 
 def load_shapes(group: h5py.Group) -> ShapeSet:
+    """Read a shape set written by `save_shapes`; an empty mass unit
+    reads back as None."""
     from ..core.shapes import ShapeSet
 
     return ShapeSet(
@@ -737,6 +772,10 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
 
 
 def save_report(report: Report, group: h5py.Group) -> None:
+    """Write a report into `group`: title and marking as attributes, its
+    blocks as one JSON string. Features and identity are written only
+    when entered, so a report with neither is stored as it was before
+    they existed."""
     import json
 
     import h5py
@@ -757,6 +796,8 @@ def save_report(report: Report, group: h5py.Group) -> None:
 
 
 def load_report(group: h5py.Group) -> Report:
+    """Read a report written by `save_report`; a file from before
+    features or identity loads with none."""
     import json
 
     from ..core.report import Report
@@ -779,7 +820,7 @@ def load_report(group: h5py.Group) -> Report:
                   features=features, identity=json.loads(identity))
 
 
-def save_predictions(predictions, group) -> None:
+def save_predictions(predictions: Predictions, group: h5py.Group) -> None:
     """Write a `Predictions` object into `group`: its comment, and one
     subgroup per prediction holding its values as JSON
     (`Prediction.as_record`) and its curve, when it has one."""
@@ -797,7 +838,9 @@ def save_predictions(predictions, group) -> None:
             sub.create_dataset('curve_values', data=prediction.curve[1])
 
 
-def load_predictions(group):
+def load_predictions(group: h5py.Group) -> Predictions:
+    """Read a `Predictions` object written by `save_predictions`, each
+    prediction rebuilt from its JSON record and its curve."""
     import json
 
     from ..core.prediction import Prediction, Predictions
@@ -815,6 +858,8 @@ def load_predictions(group):
 
 
 def save_photos(photos: Photos, group: h5py.Group) -> None:
+    """Write photos into `group`: names and formats as strings, and each
+    image as its file's own bytes, neither decoded nor re-encoded."""
     _write_strings(group, 'names', photos.names)
     _write_strings(group, 'formats', photos.formats)
     for i, image in enumerate(photos.images):
@@ -824,6 +869,8 @@ def save_photos(photos: Photos, group: h5py.Group) -> None:
 
 
 def load_photos(group: h5py.Group) -> Photos:
+    """Read photos written by `save_photos`, each image as the bytes it
+    was saved with."""
     from ..core.photos import Photos
 
     names = _read_strings(group, 'names')
@@ -868,6 +915,9 @@ def save_run_log_extract(extract: RunLogExtract, group: h5py.Group) -> None:
 
 
 def load_run_log_extract(group: h5py.Group) -> RunLogExtract:
+    """Read a `RunLogExtract` written by `save_run_log_extract`. A log
+    path stored relative to the project file is resolved against where
+    the file is now (`run_log_extract.resolved_path`)."""
     import json
 
     from ..core.run_log_extract import RunLogExtract, resolved_path
@@ -886,6 +936,9 @@ def load_run_log_extract(group: h5py.Group) -> RunLogExtract:
 
 
 def save_matches(matches: MatchedModes, group: h5py.Group) -> None:
+    """Write matched modes into `group`: the two shape sets' names and
+    geometries as attributes, the pairs as an (n, 2) integer array and
+    their MACs as committed."""
     group.attrs['first'] = matches.first
     group.attrs['second'] = matches.second
     group.attrs['first_geometry'] = matches.first_geometry or ''
@@ -897,6 +950,8 @@ def save_matches(matches: MatchedModes, group: h5py.Group) -> None:
 
 
 def load_matches(group: h5py.Group) -> MatchedModes:
+    """Read matched modes written by `save_matches`; an empty geometry
+    name reads back as None."""
     from ..core.matches import MatchedModes
 
     return MatchedModes(
@@ -907,7 +962,8 @@ def load_matches(group: h5py.Group) -> MatchedModes:
         second_geometry=group.attrs['second_geometry'] or None)
 
 
-def save_sine_specification(spec, group) -> None:
+def save_sine_specification(spec: SineSweepSpecification,
+                            group: h5py.Group) -> None:
     """Write a sine sweep specification into `group`, one subgroup per
     tone: its breakpoints with the sweep law of each segment, and its
     bands where it has them."""
@@ -933,7 +989,10 @@ def save_sine_specification(spec, group) -> None:
             sub.create_dataset(name, data=values)
 
 
-def load_sine_specification(group):
+def load_sine_specification(group: h5py.Group) -> SineSweepSpecification:
+    """Read a sine sweep specification written by
+    `save_sine_specification`, its tones in `tone_order`'s order; an
+    empty unit reads back as None, undeclared."""
     from ..core.sine import SineSweepSpecification, SineTone
 
     tones = []
@@ -954,7 +1013,7 @@ def load_sine_specification(group):
         comment=str(group.attrs['comment']))
 
 
-def save_sine_levels(levels, group) -> None:
+def save_sine_levels(levels: SineLevelSet, group: h5py.Group) -> None:
     """Write a sine level set into `group`, one subgroup per tone, each
     in the ordinary data layout, since the set only groups the levels."""
     _write_strings(group, 'tone_order',
@@ -966,7 +1025,9 @@ def save_sine_levels(levels, group) -> None:
         save_data(level, tones.create_group(str(k)))
 
 
-def load_sine_levels(group):
+def load_sine_levels(group: h5py.Group) -> SineLevelSet:
+    """Read a sine level set written by `save_sine_levels`, each tone's
+    level by `load_data`."""
     from ..core.sine import SineLevelSet
 
     return SineLevelSet([load_data(group['tones'][str(k)])
@@ -1022,22 +1083,29 @@ def _saver_for(obj):
     raise TypeError(f"Don't know how to save {type(obj).__name__}")
 
 
-def _visualdynamics_path(path: str | os.PathLike) -> str:
+def hforge_path(path: str | os.PathLike) -> str:
+    """`path` with `.hforge` added when it does not end in it. A `.vdyn`
+    path is refused: Visual Dynamics' files are opened, never written."""
     path = str(path)
-    return path if path.endswith('.vdyn') else path + '.vdyn'
+    if path.endswith('.vdyn'):
+        raise ValueError(
+            f'{path}: Hertzforge saves .hforge files. A .vdyn file opens, '
+            'and saving it again writes .hforge.')
+    return path if path.endswith(SUFFIX) else path + SUFFIX
 
 
 def save(obj: Any, path: str | os.PathLike) -> None:
-    """Save one Hertzforge object to a .vdyn (HDF5) file.
+    """Save one Hertzforge object to a .hforge (HDF5) file.
 
-    Raises TypeError for an object of a kind the format does not hold.
+    Raises TypeError for an object of a kind the format does not hold,
+    and ValueError for a `.vdyn` path.
 
     Parameters
     ----------
     obj : object
         The object to save.
     path : str or os.PathLike
-        Where; `.vdyn` is added when the suffix is not there.
+        Where; `.hforge` is added when the suffix is not there.
 
     Returns
     -------
@@ -1045,7 +1113,7 @@ def save(obj: Any, path: str | os.PathLike) -> None:
     """
     import h5py
 
-    with h5py.File(_visualdynamics_path(path), 'w') as f:
+    with h5py.File(hforge_path(path), 'w') as f:
         save_into(obj, f)
 
 
@@ -1057,7 +1125,7 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs['visualdynamics_schema'] = schema_for(obj)
+    f.attrs[STAMP] = SCHEMA_VERSION
     saver(obj, f.create_group(group_name))
 
 
@@ -1076,7 +1144,7 @@ def save_test(path: str | os.PathLike, name: str,
               object_groups: Sequence[Mapping[str, Any]] | None = None,
               provenance: Mapping[str, Any] | None = None,
               data_index: Sequence[Mapping[str, Any]] | None = None) -> None:
-    """Save a whole test, every named object, to one .vdyn file.
+    """Save a whole test, every named object, to one .hforge file.
 
     Objects go in numbered groups with the name as an attribute, so a
     name may contain anything h5py would read as a path. `objects` maps
@@ -1085,12 +1153,13 @@ def save_test(path: str | os.PathLike, name: str,
     `provenance` records how each derived object was computed. Both are
     stored as JSON. `data_index` is the project's data index, its
     entries as plain values (`DataIndex.records`), stored as JSON in a
-    `data_index` dataset at the root when there are any. `.vdyn` is
-    added to `path` when it is not there.
+    `data_index` dataset at the root when there are any. `.hforge` is
+    added to `path` when it is not there, and a `.vdyn` path raises
+    ValueError.
     """
     import h5py
 
-    with h5py.File(_visualdynamics_path(path), 'w') as f:
+    with h5py.File(hforge_path(path), 'w') as f:
         save_test_into(f, name, objects, active_geometry, project_type,
                        object_groups, provenance, data_index)
 
@@ -1103,12 +1172,12 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    data_index: Sequence[Mapping[str, Any]] | None = None
                    ) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`)."""
-    f.attrs['visualdynamics_schema'] = schema_for(objects)
+    f.attrs[STAMP] = SCHEMA_VERSION
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
     import json
-    f.attrs['links'] = json.dumps(object_groups or [])
+    f.attrs['object_groups'] = json.dumps(object_groups or [])
     # how each derived object was computed, for the staleness
     # badges — settings fingerprints, so they survive the file
     f.attrs['provenance'] = json.dumps(provenance or {})
@@ -1134,7 +1203,9 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
 
 def load(path: str | os.PathLike,
          progress: Callable[[int, int], None] | None = None) -> Any:
-    """Load a .vdyn file: the object it holds, or a whole test.
+    """Load a .hforge or .vdyn file: the object it holds, or a whole test.
+
+    The stamp inside the file decides how it is read, not the suffix.
 
     For a whole test, `progress` is called as (objects loaded, objects
     in the file), once at the start with 0 and once per object, because
@@ -1145,7 +1216,7 @@ def load(path: str | os.PathLike,
     Parameters
     ----------
     path : str or os.PathLike
-        The `.vdyn` file.
+        The `.hforge` or `.vdyn` file.
     progress : callable, optional
         Called as ``progress(loaded, total)``, once up front and once per
         object.
@@ -1158,9 +1229,9 @@ def load(path: str | os.PathLike,
     Raises
     ------
     ValueError
-        When the file has no schema stamp (it was not written by Visual
-        Dynamics), was written with a newer schema, or holds nothing
-        this reader recognizes.
+        When the file has neither stamp (it was not written by
+        Hertzforge or Visual Dynamics), was written with a newer schema,
+        or holds nothing this reader recognizes.
     """
     import h5py
 
@@ -1176,15 +1247,19 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
     # reader has no idea exist, and half-loading someone's project
     # quietly is worse than telling them to update. A missing stamp
     # means the file is not ours at all — every writer stamps.
-    if 'visualdynamics_schema' not in f.attrs:
-        raise ValueError(f'{path} is not a Visual Dynamics file '
-                         '(no schema stamp)')
-    written = int(f.attrs['visualdynamics_schema'])
-    if written > SCHEMA_VERSION:
+    if STAMP in f.attrs:
+        written, newest, writer = int(f.attrs[STAMP]), SCHEMA_VERSION, 'Hertzforge'
+    elif VDYN_STAMP in f.attrs:
+        written, newest, writer = (int(f.attrs[VDYN_STAMP]), VDYN_SCHEMA,
+                                   'Visual Dynamics')
+    else:
+        raise ValueError(f'{path} is not a Hertzforge or Visual Dynamics '
+                         'file (no schema stamp)')
+    if written > newest:
         raise ValueError(
-            f'{path} was written by a newer Hertzforge '
+            f'{path} was written by a newer {writer} '
             f'(schema {written}; this build reads up to '
-            f'{SCHEMA_VERSION}). Update to open it.')
+            f'{newest}). Update Hertzforge to open it.')
     if 'objects' in f:
         objects = {}
         keys = sorted(f['objects'])
@@ -1205,7 +1280,8 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
         return Project(f.attrs['test_name'], objects,
                        f.attrs['active_geometry'] or None,
                        f.attrs['project_type'] or None,
-                       json.loads(f.attrs['links']),
+                       json.loads(f.attrs['links' if VDYN_STAMP in f.attrs
+                                          else 'object_groups']),
                        provenance=json.loads(f.attrs['provenance']),
                        data_index=indexed)
     for group_name, loader in _LOADERS.items():

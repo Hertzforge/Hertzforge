@@ -275,7 +275,7 @@ def test_the_settings_survive_a_save_and_a_load(tmp_path):
     project['Run'].filtering = Filtering(high=300.0, order=6)
     filtered = project.filter_data('Run')
     velocity = project.integrate(filtered)
-    path = project.save(tmp_path / 'chain.vdyn')
+    path = project.save(tmp_path / 'chain.hforge')
     back = hertzforge.Project.open(path)
     assert back['Run'].filtering == Filtering(high=300.0, order=6)
     assert back[velocity].ordinate_dim == ['velocity']
@@ -361,7 +361,7 @@ def test_every_kind_survives_a_save_and_a_load(tmp_path):
                       Filtering(low=5.0, high=300.0, order=6)):
         project = _project()
         project['Run'].filtering = filtering
-        path = project.save(tmp_path / f'{filtering.kind}.vdyn')
+        path = project.save(tmp_path / f'{filtering.kind}.hforge')
         back = hertzforge.Project.open(path)
         assert back['Run'].filtering == filtering
 

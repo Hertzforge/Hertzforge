@@ -35,6 +35,7 @@ from .sniffing import npz_has
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for an `.npz` holding `node` and `coordinate_system`."""
     # the two a geometry cannot be without. Tracelines and elements are
     # each optional — a point cloud has neither, and asking for all
     # four turned a geometry that happened to lack one into a file no
@@ -99,6 +100,7 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
 
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry, the one object this layout holds."""
     return isinstance(obj, Geometry)
 
 

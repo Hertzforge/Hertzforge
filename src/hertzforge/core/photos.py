@@ -19,7 +19,7 @@ class Photos:
 
     Setup photos (where the accelerometers were placed, how the test
     article was supported) belong with the data they document, so they
-    are a project object like any other and are saved in the `.vdyn`
+    are a project object like any other and are saved in the `.hforge`
     file. The bytes are kept encoded as they were read, not decoded into
     arrays, because a report embeds them and re-encoding a JPEG to store
     it would reduce its quality.
@@ -49,6 +49,7 @@ class Photos:
 
     @property
     def num_photos(self) -> int:
+        """How many photos there are."""
         return len(self.names)
 
     def rename(self, index: int, name: str) -> None:

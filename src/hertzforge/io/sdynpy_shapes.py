@@ -30,6 +30,12 @@ _FIELDS = {'frequency', 'damping', 'coordinate', 'shape_matrix'}
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.npy` holding a structured array with at least the fields
+    `frequency`, `damping`, `coordinate` and `shape_matrix`.
+
+    The array is loaded to read its field names, and a file that fails to
+    load is not this format.
+    """
     if not str(path).endswith(EXTENSIONS):
         return False
     try:
@@ -40,6 +46,13 @@ def sniff(path: str | os.PathLike) -> bool:
 
 
 def load(path: str | os.PathLike, mass_unit: str | None = None) -> ShapeSet:
+    """Read an sdynpy mode shape file as a ShapeSet.
+
+    `modal_mass` may be absent from the file, and each mode's five comment
+    fields are joined with '; '. `mass_unit` declares the mass the shapes
+    were normalized against; without it they import unit-less. Raises
+    ValueError for a file with no modes or with modes over differing DOFs.
+    """
     array = np.load(path, allow_pickle=True).reshape(-1)
     if array.size == 0:
         raise ValueError(f'{path} contains no modes')
@@ -72,6 +85,8 @@ def load(path: str | os.PathLike, mass_unit: str | None = None) -> ShapeSet:
 
 
 def handles(obj: Any) -> bool:
+    """True for any ShapeSet, real or complex. `save` still refuses real
+    shapes with a complex modal mass."""
     return isinstance(obj, ShapeSet)
 
 

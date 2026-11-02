@@ -168,14 +168,14 @@ def test_ground_directions_ride_the_file_and_a39_reads_as_six(tmp_path):
     geometry = _beams_geometry(_whole_beam())
     pins = _group(geometry, 'pins', [[1]], POINT,
                   GroupProperties(ground=('X', 'Y', 'Z')))
-    path = tmp_path / 'g.vdyn'
+    path = tmp_path / 'g.hforge'
     hertzforge.save(geometry, path)
     assert hertzforge.load(path).group_properties[pins].ground == \
         ('X', 'Y', 'Z')
     with h5py.File(path, 'r+') as f:
         found = [g for name, g in f.items()
-                 if isinstance(g, h5py.Group) and 'block_properties' in g]
-        holder = (found[0] if found else f)['block_properties'][str(pins)]
+                 if isinstance(g, h5py.Group) and 'group_properties' in g]
+        holder = (found[0] if found else f)['group_properties'][str(pins)]
         holder.attrs['ground'] = True          # how a39 wrote it
     assert hertzforge.load(path).group_properties[pins].ground == AXES
 

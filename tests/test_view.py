@@ -63,8 +63,8 @@ def test_a_view_survives_the_project_file(tmp_path):
     project = hertzforge.Project('views')
     project.add('Turned', geometry)
     project.add('Bare', bare)
-    project.save(tmp_path / 'views.vdyn')
-    back = hertzforge.load(tmp_path / 'views.vdyn')
+    project.save(tmp_path / 'views.hforge')
+    back = hertzforge.load(tmp_path / 'views.hforge')
     assert back['Turned'].view == geometry.view
     assert back['Bare'].view is None, 'absent stays absent'
 

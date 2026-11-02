@@ -18,6 +18,7 @@ Shape = Literal['line', 'steps', 'law']
 
 
 def axis(label: str, unit: str | None, scale: Scale) -> dict[str, Any]:
+    """A view's axis: its label, unit (None when undefined) and scale."""
     return {'label': label, 'unit': unit, 'scale': scale}
 
 
@@ -78,6 +79,8 @@ def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
 
 def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
              link: str | None = None) -> dict[str, Any]:
+    """A `spectrum` view of `lines` on the axes `x` and `y`. Panes with
+    the same `link` share a cursor position on x."""
     out = {'view': 'spectrum', 'title': title, 'x': x, 'y': y,
            'series': list(lines)}
     if link is not None:
@@ -87,6 +90,9 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
 
 def row(label: str, value: float | str, unit: str | None,
         status: Status) -> dict[str, Any]:
+    """One row of a `reading` view. A non-finite float is a ValueError:
+    a value that could not be read is sent as words, never as NaN or
+    inf."""
     if isinstance(value, float) and not np.isfinite(value):
         raise ValueError(f'reading {label!r} is {value}; a value that was not '
                          'read is said in words, not sent as a number')
@@ -94,6 +100,7 @@ def row(label: str, value: float | str, unit: str | None,
 
 
 def reading(title: str, rows: Sequence[dict]) -> dict[str, Any]:
+    """A `reading` view: a titled table of `row`s."""
     return {'view': 'reading', 'title': title, 'rows': list(rows)}
 
 
@@ -118,6 +125,8 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
 
 def mode(index: int, frequency_hz: float, damping: float | None,
          shape: np.ndarray) -> dict[str, Any]:
+    """One mode of a `shape3d` view: its 1-based index, frequency,
+    damping (None when not stated) and its f32 [N, 3] shape."""
     return {'index': int(index), 'frequency_hz': float(frequency_hz),
             'damping': None if damping is None else float(damping),
             'shape': np.ascontiguousarray(shape, np.float32)}

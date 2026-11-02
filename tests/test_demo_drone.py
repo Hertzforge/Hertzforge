@@ -176,7 +176,7 @@ def test_a_saved_geometry_alone_rebuilds_the_model(model, tmp_path):
     from hertzforge.core import fem
     from hertzforge.io import load, save
 
-    path = tmp_path / 'drone.vdyn'
+    path = tmp_path / 'drone.hforge'
     save(model.geometry(beams=False), path)
     rebuilt = fem.Model.from_geometry(
         load(path), drone_model.FRAME, drone_model.MEMBER,

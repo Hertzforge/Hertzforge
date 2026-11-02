@@ -110,7 +110,7 @@ def test_the_specification_round_trips_through_native(tmp_path):
                        abort_upper=np.full((2, 3), 3.0)),
                  _tone('Log', 1.0, (200.0, 400.0), types=(LOG,),
                        rates=(10.0,)))
-    path = str(tmp_path / 'sine.vdyn')
+    path = str(tmp_path / 'sine.hforge')
     hertzforge.io.save(spec, path)
     back = hertzforge.io.load(path)
     assert back == spec
@@ -126,7 +126,7 @@ def test_a_project_carries_and_describes_it(tmp_path):
     assert project.sine_sweep_specification is not None
     assert describe(project['Sine Specification']) == \
         '1 tone, 100-800 Hz, 3 control channels'
-    path = str(tmp_path / 'sine_project.vdyn')
+    path = str(tmp_path / 'sine_project.hforge')
     project.save(path)
     back = hertzforge.Project.open(path)
     assert back.sine_sweep_specification == project.sine_sweep_specification

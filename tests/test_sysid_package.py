@@ -135,7 +135,7 @@ def test_the_package_survives_a_project_and_the_native_format(tmp_path):
     project.import_file(path)
     pair = [name for name in project.names if 'PSD' in name]
     assert len(pair) == 2, 'the driven and ambient densities'
-    saved = str(tmp_path / 'sysid.vdyn')
+    saved = str(tmp_path / 'sysid.hforge')
     project.save(saved)
     back = hertzforge.Project.open(saved)
     for name in pair:

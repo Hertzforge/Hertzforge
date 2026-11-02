@@ -86,9 +86,9 @@ def test_a_saved_geometry_solves_to_the_same_modes(tmp_path):
     project = Project()
     project.add('Skin', _plate_geometry())
     project.solve_modes('Skin', num_modes=8)
-    hertzforge.save(project['Skin'], tmp_path / 'skin.vdyn')
+    hertzforge.save(project['Skin'], tmp_path / 'skin.hforge')
     again = Project()
-    again.add('Skin', hertzforge.load(tmp_path / 'skin.vdyn'))
+    again.add('Skin', hertzforge.load(tmp_path / 'skin.hforge'))
     again.solve_modes('Skin', num_modes=8)
     assert np.allclose(again['Skin Modes'].frequency,
                        project['Skin Modes'].frequency)

@@ -166,6 +166,16 @@ def _spec_line(spec: Any, record: int, values: np.ndarray
 # ---- the operations -----------------------------------------------------------
 
 def psd_vs_spec(run: RandomRun, params: dict[str, Any]) -> list[dict]:
+    """`random.psd_vs_spec`: a channel's PSD against its specification
+    and limits as a `spectrum`, plus a `reading` of its rms, rms error,
+    worst line, share of lines within each limit, and the channel and run
+    verdicts.
+
+    When the specification has no limits, abort limits at
+    +/- `tolerance_db` stand in, and the run verdict is recomputed with
+    them instead of taken from the one made at open. A channel that is
+    not a control channel, or that shares no line with its
+    specification, is refused."""
     from hertzforge.core import compliance
 
     channel = run.channel(params['channel'])
@@ -263,6 +273,10 @@ def psd_vs_spec(run: RandomRun, params: dict[str, Any]) -> list[dict]:
 
 
 def error_db(run: RandomRun, params: dict[str, Any]) -> list[dict]:
+    """`random.error_db`: a channel's error against its specification in
+    dB, one stepped value per judged line, with the specification at
+    zero and each limit about it, as one `spectrum`. It refuses the same
+    channels `psd_vs_spec` does."""
     channel = run.channel(params['channel'])
     spec, _limits_text, from_param = _judged(run, channel,
                                              params['tolerance_db'])

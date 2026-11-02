@@ -173,6 +173,8 @@ class Specification:
         return [prop for props in merged.values() for prop in props]
 
     def all_enumerations(self) -> dict[str, list[str]]:
+        """Every enumeration this type can use, inherited ones included. One
+        this type redefines replaces the parent's of the same name."""
         out: dict[str, list[str]] = {}
         spec: Specification | None = self
         chain: list[Specification] = []
@@ -358,6 +360,8 @@ class Dataset:
 
     @property
     def specification(self) -> Specification | None:
+        """The included specification for `kind`, or None for a type no
+        included file defines, whose dataset keeps everything in `extras`."""
         return specifications().get(self.kind)
 
     def problems(self) -> list[str]:

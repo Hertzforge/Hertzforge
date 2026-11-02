@@ -178,8 +178,8 @@ def test_a_saved_deck_reopens_with_its_system(tmp_path):
     project.add('Plate', hertzforge.import_file(_mm(tmp_path),
                                                     length_unit='mm',
                                                     mass_unit='kg'))
-    project.save(tmp_path / 'deck.vdyn')
-    reopened = hertzforge.Project.open(tmp_path / 'deck.vdyn')['Plate']
+    project.save(tmp_path / 'deck.hforge')
+    reopened = hertzforge.Project.open(tmp_path / 'deck.hforge')['Plate']
     assert reopened.from_deck and reopened.mass_unit == 'kg'
     reopened.define_units('mm', 'tonne')
     shell, _springs, _mass = _props(reopened)

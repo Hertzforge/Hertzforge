@@ -388,13 +388,13 @@ def test_a_file_an_importer_reads_gives_its_channels(tmp_path):
 
     from hertzforge.core.data import TimeHistory
 
-    path = tmp_path / 'run2_m6dB.vdyn'
+    path = tmp_path / 'run2_m6dB.hforge'
     TimeHistory(np.arange(64) / 64.0, np.ones((2, 64)),
                 response_dof=['1X+', '2Y+'],
                 ordinate_dim=['acceleration'] * 2,
                 ordinate_unit=['g'] * 2).save(str(path))
     said = describe(path)
-    assert said.format == 'Visual Dynamics file (.vdyn)'
+    assert said.format == 'Hertzforge file (.hforge)'
     assert said.channels == ('1X+', '2Y+')
     assert 'channels 1X+ to 2Y+' in said.holds
     assert said.holds.endswith('run 2, -6 dB (from its name)')
@@ -408,10 +408,10 @@ def test_a_file_an_importer_reads_gives_its_channels(tmp_path):
 
 
 def test_a_reader_that_fails_is_a_note_not_a_refusal(tmp_path):
-    broken = tmp_path / 'broken.vdyn'
+    broken = tmp_path / 'broken.hforge'
     broken.write_bytes(b'not a project')
     said = describe(broken)
-    assert said.format == 'Visual Dynamics file (.vdyn)'
+    assert said.format == 'Hertzforge file (.hforge)'
     assert said.notes[0].startswith('its holdings could not be read')
     assert said.holds.startswith('not read: its holdings could not be read')
 

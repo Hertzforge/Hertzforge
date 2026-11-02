@@ -27,10 +27,13 @@ REQUIRED = object()
 
 @dataclass(frozen=True)
 class Option:
+    """One choice of an enum param: the value sent back and the label shown."""
+
     value: str | int | float
     label: str
 
     def to_json(self) -> dict[str, Any]:
+        """The option as the descriptor's `options` list carries it."""
         return {'value': self.value, 'label': self.label}
 
 
@@ -51,6 +54,9 @@ class Param:
     options_from: Literal['channels'] | None = None
 
     def to_json(self) -> dict[str, Any]:
+        """The param as the schema's descriptor writes it. Fields left unset
+        are omitted rather than sent as null, and so is a required param's
+        default."""
         out: dict[str, Any] = {'name': self.name, 'label': self.label,
                                'type': self.type}
         if self.unit is not None:
@@ -151,6 +157,8 @@ class Operation:
         repr=False, compare=False)
 
     def to_json(self) -> dict[str, Any]:
+        """The descriptor `catalog.list` sends for this operation; `run`
+        stays behind."""
         return {'id': self.id, 'title': self.title,
                 'workspace': self.workspace, 'accepts': self.accepts,
                 'summary': self.summary,

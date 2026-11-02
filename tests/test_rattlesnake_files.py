@@ -214,7 +214,7 @@ def test_a_specification_survives_the_native_format(tmp_path):
     from hertzforge.core.data import Specification
 
     spec = hertzforge.import_file(RANDOM)['Random_specification']
-    path = str(tmp_path / 'spec.vdyn')
+    path = str(tmp_path / 'spec.hforge')
     spec.save(path)
     back = hertzforge.load(path)
     assert isinstance(back, Specification)

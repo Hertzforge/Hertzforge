@@ -302,8 +302,8 @@ def test_features_round_trip_through_the_project_file(tmp_path):
 
     report = Report('R', [{'kind': 'text', 'text': 'x'}],
                     features=['plot_conventions', 'from_a_later_version'])
-    io.save(report, str(tmp_path / 'r.vdyn'))
-    back = io.load(str(tmp_path / 'r.vdyn'))
+    io.save(report, str(tmp_path / 'r.hforge'))
+    back = io.load(str(tmp_path / 'r.hforge'))
     assert back.features == ['plot_conventions', 'from_a_later_version'], \
         'a key this version does not know survives the round trip'
 
@@ -316,12 +316,12 @@ def test_a_report_with_none_is_stored_as_it_always_was(tmp_path):
 
     from hertzforge import io
 
-    io.save(Report('R'), str(tmp_path / 'r.vdyn'))
-    with h5py.File(tmp_path / 'r.vdyn') as handle:
+    io.save(Report('R'), str(tmp_path / 'r.hforge'))
+    with h5py.File(tmp_path / 'r.hforge') as handle:
         attributes = set()
         handle.visititems(lambda _n, item: attributes.update(item.attrs))
     assert 'features' not in attributes
-    assert io.load(str(tmp_path / 'r.vdyn')).features == []
+    assert io.load(str(tmp_path / 'r.hforge')).features == []
 
 
 def test_the_template_carries_the_choice(tmp_path):

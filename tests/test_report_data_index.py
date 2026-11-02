@@ -61,7 +61,7 @@ def _history(values=None, rate=1024.0):
                        ordinate_unit=['g'] * len(rows))
 
 
-def _imported(tmp_path, values=None, name='run1.vdyn'):
+def _imported(tmp_path, values=None, name='run1.hforge'):
     """A project with one time history imported from a file of its own."""
     path = str(tmp_path / name)
     _history(values).save(path)
@@ -324,8 +324,8 @@ def test_an_index_holds_entries_only():
 def test_the_format_is_named_from_the_file(tmp_path, monkeypatch):
     assert io.format_of(fixture_path('plate', 'random.nc4')) == \
         'Rattlesnake controller output (.nc4)'
-    assert io.format_of(str(tmp_path / 'p.vdyn')) == \
-        'Visual Dynamics file (.vdyn)'
+    assert io.format_of(str(tmp_path / 'p.hforge')) == \
+        'Hertzforge file (.hforge)'
     assert io.format_of(_file(tmp_path, 'Settings.CSV')) == \
         'comma-separated text (.csv)'
     assert io.format_of(_file(tmp_path, 'x.qqq')) == 'QQQ file (.qqq)'
@@ -358,10 +358,10 @@ def test_an_import_records_the_file_it_read(tmp_path):
     (entry,) = project.data_index
     with open(path, 'rb') as handle:
         data = handle.read()
-    assert (entry.name, entry.size) == ('run1.vdyn', len(data))
+    assert (entry.name, entry.size) == ('run1.hforge', len(data))
     assert entry.sha256 == hashlib.sha256(data).hexdigest()
     assert entry.objects == ('Time History',)
-    assert entry.format == 'Visual Dynamics file (.vdyn)'
+    assert entry.format == 'Hertzforge file (.hforge)'
     assert entry.holds.startswith('Time History: 2 records, 2048 samples')
     assert (entry.role, entry.source) == ('referenced', 'import')
     assert project.journal[-1] == f'project.import_file({path!r})'
@@ -370,16 +370,16 @@ def test_an_import_records_the_file_it_read(tmp_path):
 def test_dead_nan_and_empty_inputs(tmp_path):
     """A file of zeros or with one NaN is still a file: indexed with what
     it holds. An entry that says nothing is refused, naming the cause."""
-    dead, _ = _imported(tmp_path, np.zeros((2, 64)), 'dead.vdyn')
+    dead, _ = _imported(tmp_path, np.zeros((2, 64)), 'dead.hforge')
     assert dead.data_index[0].holds == ('Time History: 2 records, 64 '
                                         'samples, channels 1X+ to 2X+, '
                                         '1024 Hz')
-    constant, _ = _imported(tmp_path, np.full(64, 3.0), 'constant.vdyn')
+    constant, _ = _imported(tmp_path, np.full(64, 3.0), 'constant.hforge')
     assert constant.data_index[0].holds == ('Time History: 1 record, 64 '
                                             'samples, channel 1X+, 1024 Hz')
     spiked = np.ones(64)
     spiked[10] = np.nan
-    nan, _ = _imported(tmp_path, spiked, 'nan.vdyn')
+    nan, _ = _imported(tmp_path, spiked, 'nan.hforge')
     assert nan.data_index[0].holds.startswith('Time History: 1 record')
     with pytest.raises(ValueError, match='say what the file holds: give '
                                          'holds, or the objects'):
@@ -394,7 +394,7 @@ def test_an_import_that_cannot_be_hashed_adds_nothing(tmp_path, monkeypatch):
         raise FileNotFoundError('no file at it any more')
 
     monkeypatch.setattr(module, 'digest_file', gone)
-    path = str(tmp_path / 'run1.vdyn')
+    path = str(tmp_path / 'run1.hforge')
     _history().save(path)
     project = Project('P')
     with pytest.raises(FileNotFoundError, match='any more'):
@@ -404,16 +404,16 @@ def test_an_import_that_cannot_be_hashed_adds_nothing(tmp_path, monkeypatch):
 
 def test_a_project_file_brings_its_index(tmp_path):
     first, data_path = _imported(tmp_path)
-    saved = str(tmp_path / 'first.vdyn')
+    saved = str(tmp_path / 'first.hforge')
     first.save(saved)
     opened = Project('Empty')
     opened.import_file(saved)
-    assert [entry.name for entry in opened.data_index] == ['run1.vdyn'], \
+    assert [entry.name for entry in opened.data_index] == ['run1.hforge'], \
         'opening a project is not importing a file it rests on'
-    second, _ = _imported(tmp_path, name='run2.vdyn')
+    second, _ = _imported(tmp_path, name='run2.hforge')
     second.import_file(saved)
     assert [entry.name for entry in second.data_index] == [
-        'run2.vdyn', 'run1.vdyn', 'first.vdyn']
+        'run2.hforge', 'run1.hforge', 'first.hforge']
     # the clash renamed the imported time history, and its entry follows
     assert second.data_index[1].objects == ('Time History (2)',)
     assert second.data_index[2].holds == 'Hertzforge project: 1 objects'
@@ -430,7 +430,7 @@ def test_rename_and_remove_follow(tmp_path):
     assert project.data_index[0].objects == ()
     project.remove(psd)
     assert len(project.data_index) == 1, 'nothing named it any more'
-    other, _ = _imported(tmp_path, name='run3.vdyn')
+    other, _ = _imported(tmp_path, name='run3.hforge')
     other.remove('Time History')
     assert len(other.data_index) == 0, 'the last object went, and the file'
 
@@ -441,12 +441,12 @@ def test_a_merge_rests_on_every_file_of_its_parts(tmp_path):
     for k in (1, 2):
         history = _history()
         history.response_dof = [f'{k}{axis}+' for axis in 'XY']
-        paths.append(str(tmp_path / f'part{k}.vdyn'))
+        paths.append(str(tmp_path / f'part{k}.hforge'))
         history.save(paths[-1])
         project.import_file(paths[-1])
     merged = project.merge('Time History', 'Time History (2)', name='Run')
     assert [(entry.name, entry.objects) for entry in project.data_index] == [
-        ('part1.vdyn', (merged,)), ('part2.vdyn', (merged,))]
+        ('part1.hforge', (merged,)), ('part2.hforge', (merged,))]
 
 
 def test_index_file_and_unindex_file_are_journaled_and_refuse(tmp_path):
@@ -474,32 +474,32 @@ def test_index_file_and_unindex_file_are_journaled_and_refuse(tmp_path):
 
 def test_verify_data_index_reports_and_states_the_project_file(tmp_path):
     project, path = _imported(tmp_path)
-    assert project.verify_data_index() == ['run1.vdyn: matches']
+    assert project.verify_data_index() == ['run1.hforge: matches']
     assert project.journal[-1] == 'project.verify_data_index()'
     assert project.data_index.project_file is None, 'not saved yet'
     saved = str(tmp_path / 'p')
     project.save(saved)
-    assert project.file == str(tmp_path / 'p.vdyn')
+    assert project.file == str(tmp_path / 'p.hforge')
     # moved beside the project file: found by its name there
-    os.replace(path, tmp_path / 'moved.vdyn')
+    os.replace(path, tmp_path / 'moved.hforge')
     os.makedirs(tmp_path / 'kept')
-    os.replace(tmp_path / 'moved.vdyn', tmp_path / 'kept' / 'run1.vdyn')
-    assert project.verify_data_index() == ['run1.vdyn: not found']
+    os.replace(tmp_path / 'moved.hforge', tmp_path / 'kept' / 'run1.hforge')
+    assert project.verify_data_index() == ['run1.hforge: not found']
     assert project.verify_data_index(search=[str(tmp_path / 'kept')]) == [
-        'run1.vdyn: matches']
+        'run1.hforge: matches']
     name, size, sha, _when = project.data_index.project_file
     with open(project.file, 'rb') as handle:
         data = handle.read()
-    assert (name, size, sha) == ('p.vdyn', len(data),
+    assert (name, size, sha) == ('p.hforge', len(data),
                                  hashlib.sha256(data).hexdigest())
     assert Project.open(project.file).file == project.file
     # moved beside the project file: found there with no folder named
-    os.replace(tmp_path / 'kept' / 'run1.vdyn', tmp_path / 'run1.vdyn')
+    os.replace(tmp_path / 'kept' / 'run1.hforge', tmp_path / 'run1.hforge')
     project.data_index.entries[0] = di.IndexEntry.from_record(
         {**project.data_index[0].record(),
-         'path': str(tmp_path / 'gone' / 'run1.vdyn')})
-    assert project.verify_data_index() == ['run1.vdyn: matches']
-    assert project.data_index[0].found == str(tmp_path / 'run1.vdyn')
+         'path': str(tmp_path / 'gone' / 'run1.hforge')})
+    assert project.verify_data_index() == ['run1.hforge: matches']
+    assert project.data_index[0].found == str(tmp_path / 'run1.hforge')
 
 
 def test_the_index_rides_in_the_project_file(tmp_path):
@@ -509,16 +509,16 @@ def test_the_index_rides_in_the_project_file(tmp_path):
     project.index_file(_file(tmp_path, 'settings.csv', b'a,b\n'),
                        'settings list', role='attached')
     project.verify_data_index()
-    saved = str(tmp_path / 'p.vdyn')
+    saved = str(tmp_path / 'p.hforge')
     project.save(saved)
     back = Project.open(saved)
     assert list(back.data_index) == list(project.data_index)
     assert back.data_index[1].text == 'a,b\n'
     empty = Project('E')
-    empty.save(str(tmp_path / 'e.vdyn'))
-    with h5py.File(tmp_path / 'e.vdyn') as handle:
+    empty.save(str(tmp_path / 'e.hforge'))
+    with h5py.File(tmp_path / 'e.hforge') as handle:
         assert 'data_index' not in handle, 'none: stored as it always was'
-    assert len(Project.open(str(tmp_path / 'e.vdyn')).data_index) == 0
+    assert len(Project.open(str(tmp_path / 'e.hforge')).data_index) == 0
 
 
 @pytest.fixture(scope='module')
@@ -769,9 +769,9 @@ def test_the_analysis_line_names_the_project_file(tmp_path):
     index = di.DataIndex()
     assert rdi.analysis(index, True).endswith(
         'The project file has not been checked.')
-    index.project_file = ('p.vdyn', 1234, ABC, '2026-10-24T14:02:00+00:00')
+    index.project_file = ('p.hforge', 1234, ABC, '2026-10-24T14:02:00+00:00')
     assert rdi.analysis(index, True).endswith(
-        f'Project file: p.vdyn, 1,234 bytes, SHA-256 {ABC}, as it stood at '
+        f'Project file: p.hforge, 1,234 bytes, SHA-256 {ABC}, as it stood at '
         'the check; changes made since it was saved are not in it.')
     assert rdi.recipe({}, {'A': 1}) is None
     assert rdi.recipe({'B': {'verb': 'compute_psds', 'source': 'A'},

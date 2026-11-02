@@ -30,6 +30,7 @@ and is used instead (`brick_mesh`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -81,8 +82,9 @@ _HEX_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
               (0, 4), (1, 5), (2, 6), (3, 7))
 
 
-def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None,
-                 piece: bool = False, cuts_from=(), discard: Any = None) -> tuple[Any, dict]:
+def overlay_mesh(geometry: Any, ids: Sequence[int], size: float, progress: Any = None,
+                 piece: bool = False, cuts_from: Sequence[int] = (),
+                 discard: Any = None) -> tuple[Any, dict]:
     """The parts as eight-node bricks fitted to their shape, ready to
     join to a geometry (`mesh.join`).
 
@@ -212,7 +214,7 @@ ACROSS = 5.0
 THROUGH = 3.0
 
 
-def suggested_size(geometry: Any, ids, elements: str = 'hexes') -> float:
+def suggested_size(geometry: Any, ids: Sequence[int], elements: str = 'hexes') -> float:
     """An element size at which a mesh of the parts is likely to hold:
     for bricks fitted to a shape, the smallest radius over `ACROSS`
     (five bricks across it, where most fits measured have held and four
@@ -241,7 +243,7 @@ def suggested_size(geometry: Any, ids, elements: str = 'hexes') -> float:
     return float(size) if np.isfinite(size) else mesh_size(geometry, ids)
 
 
-def likely_to_fold(geometry: Any, ids, size: float) -> dict:
+def likely_to_fold(geometry: Any, ids: Sequence[int], size: float) -> dict:
     """Whether a fit at `size` is likely to fold, read before the minutes
     are spent: how many bricks the smallest round feature's radius is
     across, and how many pillow bricks are flat or inside out as soon
@@ -295,7 +297,7 @@ def likely_to_fold(geometry: Any, ids, size: float) -> dict:
             'suggested': suggested_size(geometry, ids)}
 
 
-def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
+def grid_cells(geometry: Any, ids: Sequence[int], size: float, piece: bool = False) -> int:
     """How many cells the grid `overlay_mesh` lays over these parts at
     `size` holds, voids included: the count before anything is asked
     of the shape, so a pane can decide whether to preview.

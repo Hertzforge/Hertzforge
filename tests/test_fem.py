@@ -712,7 +712,7 @@ def test_a_saved_geometry_alone_rebuilds_the_model(tmp_path):
     drawn = two_block_strip()
     built = fem.Model.from_geometry(drawn, MASSLESS, MEMBER, total_mass=1.0,
                                     sections={'prop': STIFF})
-    path = tmp_path / 'strip.vdyn'
+    path = tmp_path / 'strip.hforge'
     save(drawn, path)
     rebuilt = fem.Model.from_geometry(load(path), MASSLESS, MEMBER,
                                       total_mass=1.0,

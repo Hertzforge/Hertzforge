@@ -25,6 +25,12 @@ from ..core.solids import shape_triangles  # one rule, shared with solids
 EXTENSIONS = ('.step', '.stp', '.iges', '.igs')
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a path ending in `.step`, `.stp`, `.iges` or `.igs`, in any
+    case.
+
+    Only the suffix is checked, so the CAD kernel is not loaded until a file
+    is imported.
+    """
     return str(path).lower().endswith(EXTENSIONS)
 
 

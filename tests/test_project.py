@@ -225,9 +225,9 @@ def test_a_project_round_trips_through_the_vibe_file(tmp_path):
     project.add('Geometry', _geometry())
     project.add('Shapes', _shapes())
     project.set_basis('Geometry', 'Shapes')
-    project.save(tmp_path / 'p.vdyn')
+    project.save(tmp_path / 'p.hforge')
 
-    back = hertzforge.Project.open(tmp_path / 'p.vdyn')
+    back = hertzforge.Project.open(tmp_path / 'p.hforge')
     assert isinstance(back, hertzforge.Project)
     assert back.name == 'Scripted'
     assert back.project_type == 'Modal Test'
@@ -236,8 +236,8 @@ def test_a_project_round_trips_through_the_vibe_file(tmp_path):
     assert list(back) == ['Geometry', 'Shapes']
     # import_file and io.load give the same thing — a project is a
     # project however it is opened
-    assert isinstance(hertzforge.import_file(tmp_path / 'p.vdyn'), hertzforge.Project)
-    assert isinstance(io.load(str(tmp_path / 'p.vdyn')), hertzforge.Project)
+    assert isinstance(hertzforge.import_file(tmp_path / 'p.hforge'), hertzforge.Project)
+    assert isinstance(io.load(str(tmp_path / 'p.hforge')), hertzforge.Project)
 
 
 def test_a_project_prints_as_its_tree():
@@ -286,10 +286,10 @@ def test_importing_a_project_brings_its_structure(tmp_path):
     source.add('Geometry', _geometry())
     source.add('Shapes', _shapes())
     source.set_basis('Geometry', 'Shapes')
-    source.save(tmp_path / 'saved.vdyn')
+    source.save(tmp_path / 'saved.hforge')
 
     project = hertzforge.Project()
-    added = project.import_file(tmp_path / 'saved.vdyn')
+    added = project.import_file(tmp_path / 'saved.hforge')
     assert added == ['Geometry', 'Shapes']
     assert project.basis.names == ['Geometry', 'Shapes']
     assert project.name == 'Saved Test'
@@ -305,14 +305,14 @@ def test_importing_a_project_into_a_full_one_keeps_both(tmp_path):
     source.add('Shapes', _shapes())
     source.add('Matched', MatchedModes('Shapes', 'Shapes', [[0, 0]], [1.0]))
     source.set_basis('Geometry', 'Shapes')
-    source.save(tmp_path / 'second.vdyn')
+    source.save(tmp_path / 'second.hforge')
 
     project = hertzforge.Project('First Run')
     project.add('Geometry', _geometry())
     project.add('Shapes', _shapes())
     project.set_basis('Geometry', 'Shapes')
 
-    added = project.import_file(tmp_path / 'second.vdyn')
+    added = project.import_file(tmp_path / 'second.hforge')
     assert added == ['Geometry (2)', 'Shapes (2)', 'Matched']
     assert project.object_group_of('Geometry (2)') == ['Geometry (2)',
                                                 'Shapes (2)'], (
@@ -326,9 +326,9 @@ def test_importing_a_project_into_a_full_one_keeps_both(tmp_path):
 
 
 def test_a_single_object_file_is_not_a_project(tmp_path):
-    io.save(_geometry(), str(tmp_path / 'g.vdyn'))
+    io.save(_geometry(), str(tmp_path / 'g.hforge'))
     with pytest.raises(ValueError, match='not a project'):
-        hertzforge.Project.open(tmp_path / 'g.vdyn')
+        hertzforge.Project.open(tmp_path / 'g.hforge')
 
 
 def test_the_workflow_verbs_derive_and_link(survey, tmp_path):

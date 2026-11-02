@@ -23,6 +23,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from conftest import public_definitions
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 PACKAGE = ROOT / 'src' / 'hertzforge'
@@ -111,3 +113,77 @@ def test_the_check_can_actually_find_one(tmp_path):
     assert found == {'bare'}, (
         'the annotated one, the private one and the property must all be '
         f'left alone; found {found}')
+
+
+def _is_static(fn: ast.FunctionDef) -> bool:
+    return any(isinstance(d, ast.Name) and d.id == 'staticmethod'
+               for d in fn.decorator_list)
+
+
+def unannotated(path: pathlib.Path, package: pathlib.Path = PACKAGE) -> list[str]:
+    """'name: what is missing' for each public function or method whose
+    signature leaves a parameter or the return untyped. `self` and `cls`
+    are typed by where they sit, and `__init__` returns None by
+    definition, so neither is asked for."""
+    found = []
+    for name, node, owner in public_definitions(path, package):
+        if isinstance(node, ast.ClassDef):
+            continue
+        args = node.args
+        params = args.posonlyargs + args.args + args.kwonlyargs
+        if owner is not None and params and not _is_static(node):
+            params = params[1:]
+        missing = [a.arg for a in params if a.annotation is None]
+        if args.vararg is not None and args.vararg.annotation is None:
+            missing.append('*' + args.vararg.arg)
+        if args.kwarg is not None and args.kwarg.annotation is None:
+            missing.append('**' + args.kwarg.arg)
+        if node.returns is None and node.name != '__init__':
+            missing.append('the return')
+        if missing:
+            found.append(f'{name}:{node.lineno} {", ".join(missing)}')
+    return found
+
+
+def test_every_public_signature_is_typed():
+    """The attributes say what they are; so does every argument a caller
+    passes and every value a caller gets back. The docstring's Parameters
+    table says the same thing in words, for a reader; the annotation says
+    it to an editor and a type checker, which do not read prose."""
+    gaps = [f'{path.relative_to(ROOT)}:{gap}'
+            for path in sorted(PACKAGE.rglob('*.py'))
+            for gap in unannotated(path)]
+    assert not gaps, (
+        f'{len(gaps)} public signatures leave something untyped:\n  '
+        + '\n  '.join(gaps[:30]))
+
+
+def test_the_signature_check_can_actually_find_one(tmp_path):
+    """Each gap it claims to see, planted, and each thing it must leave
+    alone beside it."""
+    package = tmp_path / 'pkg'
+    package.mkdir()
+    module = package / 'sample.py'
+    module.write_text(
+        'def typed(a: int, *rest: int, **more: str) -> int: ...\n'
+        'def bare_param(a, b: int) -> int: ...\n'
+        'def bare_return(a: int): ...\n'
+        'def bare_star(*rest, **more) -> None: ...\n'
+        'def _private(a): ...\n'
+        'class Thing:\n'
+        '    def __init__(self, size): ...\n'
+        '    def method(self, x: int) -> int: ...\n'
+        '    @classmethod\n'
+        '    def make(cls) -> "Thing": ...\n'
+        '    @staticmethod\n'
+        '    def helper(value) -> int: ...\n'
+        '    def _hidden(self, y): ...\n'
+        'class _Private:\n'
+        '    def method(self, z): ...\n')
+    (package / '_inner.py').write_text('def exposed(a): ...\n')
+    found = [gap.split(':')[0] + ' ' + gap.split(' ', 1)[1]
+             for path in sorted(package.glob('*.py'))
+             for gap in unannotated(path, package)]
+    assert found == ['bare_param a', 'bare_return the return',
+                     'bare_star *rest, **more', 'Thing.__init__ size',
+                     'Thing.helper value'], found

@@ -31,6 +31,11 @@ TRI3 = 41
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a path ending in `.stl`, in any case.
+
+    The suffix is the only check: a binary STL opens with an arbitrary
+    80-byte header, so there is no signature to look for.
+    """
     return str(path).lower().endswith('.stl')
 
 
@@ -178,6 +183,8 @@ def faces_as_triangles(geometry: Geometry) -> list[tuple[int, np.ndarray]]:
 
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry. `save` refuses one with no face elements, which
+    this does not check."""
     return isinstance(obj, Geometry)
 
 
