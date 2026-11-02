@@ -63,6 +63,11 @@ EXTENSIONS = ('.exo', '.e', '.exo2', '.g', '.gen')
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a path ending in one of `EXTENSIONS`, in any case.
+
+    Only the suffix is checked; the file is not opened, so one that is not
+    Exodus is found out by `load`.
+    """
     return str(path).lower().endswith(EXTENSIONS)
 
 
@@ -706,6 +711,9 @@ def _read_results(path, node_ids, steps, nodes=None):
 
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry, ShapeSet, TimeHistory or Spectrum. Shapes and
+    data also need the `geometry` they are written on, which `save` asks for
+    and this cannot check."""
     from ..core.data import Spectrum, TimeHistory
     from ..core.shapes import ShapeSet
 

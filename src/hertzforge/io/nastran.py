@@ -111,6 +111,11 @@ _FLOAT_EXPONENT = re.compile(r'(?<=[0-9.])([+-]\d+)$')
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.bdf`, `.dat` or `.nas` file whose first 64 kB holds
+    BEGIN BULK or a line opening with GRID, CEND or SOL.
+
+    Many programs write `.dat`, so the suffix alone is not enough.
+    """
     path = str(path)
     if os.path.splitext(path)[1].lower() not in EXTENSIONS:
         return False
@@ -205,6 +210,13 @@ def _cs_matrix(a, b, c):
 
 def load(path: str | os.PathLike, length_unit: str | None = None,
          mass_unit: str | None = None) -> Any:
+    """Read a bulk data deck's mesh as a Geometry.
+
+    `length_unit` and `mass_unit` declare the consistent system the deck is
+    written in (see the module docstring); without them the values are read
+    as written, and a mass unit without a length unit is refused. Raises
+    ValueError for the cards the module docstring lists as refused.
+    """
     path = str(path)
     lines = _bulk_lines(path)
     cards = _cards(lines)
@@ -668,6 +680,7 @@ def _card(name: str, *fields) -> str:
 
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry, the only thing a deck is written from."""
     return isinstance(obj, Geometry)
 
 

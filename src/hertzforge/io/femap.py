@@ -85,6 +85,12 @@ _NODAL = 7          # entity type for nodal vectors
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.neu` file whose first six lines hold a `-1` line
+    followed by a numeric block ID.
+
+    Gambit writes `.neu` files too, and they open with words, so the suffix
+    alone would claim them.
+    """
     path = str(path)
     if os.path.splitext(path)[1].lower() != '.neu':
         return False
@@ -300,6 +306,13 @@ def _build_shapes(sets, path):
 
 def load(path: str | os.PathLike, length_unit: str | None = None,
          **_unused: Any) -> Any:
+    """Read a neutral file's nodes, elements and normal-modes output.
+
+    Returns a Geometry, a ShapeSet, or a dict keyed 'geometry' and 'shapes'
+    when the file has both. `length_unit` declares the unit of the
+    positions, since the file has none. Raises ValueError for a file with
+    neither, and for the records the module docstring lists as refused.
+    """
     from ..core.geometry import Geometry
 
     path = str(path)

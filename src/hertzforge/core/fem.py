@@ -328,6 +328,8 @@ class Material:
 
     @property
     def shear_modulus(self) -> float:
+        """The shear modulus in Pa: `modulus_of_rigidity` when it is stated,
+        otherwise E / (2 (1 + nu)), the isotropic relation."""
         if self.modulus_of_rigidity is not None:
             return float(self.modulus_of_rigidity)
         return self.youngs_modulus / (2.0 * (1.0 + self.poissons_ratio))
@@ -467,6 +469,9 @@ class Section:
 
     @property
     def polar(self) -> float:
+        """The polar second moment, iy + iz, in m^4: the rotary inertia
+        term. The torsional stiffness uses `j`, which is smaller for any
+        section but a circle."""
         return self.iy + self.iz
 
     @classmethod
@@ -1498,6 +1503,11 @@ class Model:
 
     def add_node(self, node_id: int, x: float, y: float, z: float,
                  group: str = '') -> int:
+        """Add a node at (x, y, z) in meters and return its id.
+
+        `group` names the part the node belongs to. An id already
+        in the model is refused with ValueError rather than moved.
+        """
         node_id = int(node_id)
         if node_id in self._nodes:
             raise ValueError(f'node {node_id} is already in the model')
@@ -1509,6 +1519,14 @@ class Model:
                  section: Section,
                  orientation: Sequence[float] | None = None,
                  color: int = 1, group: str = '') -> Beam:
+        """Add one beam element between two existing nodes and return it.
+
+        `orientation` names a direction the local x-y plane contains, which
+        sets which way the section's `iy` and `iz` act; without one, global
+        Z is used, or global Y for a nearly vertical member. Raises
+        ValueError for a node not in the model or a beam from a node to
+        itself.
+        """
         for node in (node_a, node_b):
             if int(node) not in self._nodes:
                 raise ValueError(f'beam names node {node}, which is not in the model')
@@ -1876,6 +1894,12 @@ class Model:
     def add_mass(self, node: int, mass: float,
                  inertia: Sequence[float] = (0.0, 0.0, 0.0),
                  name: str = '') -> LumpedMass:
+        """Add a lumped mass at an existing node and return it.
+
+        `mass` is in kg and `inertia` in kg m^2 about the global axes
+        through the node (`LumpedMass`). Raises ValueError for a node not in
+        the model.
+        """
         if int(node) not in self._nodes:
             raise ValueError(f'mass names node {node}, which is not in the model')
         item = LumpedMass(int(node), float(mass),
@@ -1885,6 +1909,12 @@ class Model:
 
     def add_face(self, nodes: Sequence[int], color: int = 1,
                  group: str = '') -> Face:
+        """Add a drawing face over three or four existing nodes and return
+        it.
+
+        A face adds no stiffness and no mass (`Face`). Raises ValueError for
+        any other node count or a node not in the model.
+        """
         nodes = tuple(int(n) for n in nodes)
         if len(nodes) not in (3, 4):
             raise ValueError('a face spans three or four nodes')
@@ -2213,13 +2243,17 @@ class Model:
 
     @property
     def num_nodes(self) -> int:
+        """How many nodes the model has."""
         return len(self._nodes)
 
     @property
     def num_dof(self) -> int:
+        """The degrees of freedom, six per node: the matrices' size."""
         return 6 * len(self._nodes)
 
     def position(self, node: int) -> np.ndarray:
+        """A node's position in meters. The array is the model's own, not a
+        copy."""
         return self._nodes[int(node)]
 
     def group(self, node: int) -> str:
@@ -2265,6 +2299,8 @@ class Model:
 
     @property
     def total_mass(self) -> float:
+        """What the model weighs in kg: `structural_mass` plus every lumped
+        mass."""
         return self.structural_mass + float(sum(m.mass for m in self.masses))
 
     def _length(self, beam: Beam) -> float:

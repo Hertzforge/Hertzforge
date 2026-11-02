@@ -919,7 +919,7 @@ class UnitSystem:
             f'{numerator}</td></tr>'
             f'<tr><td align="center">{denominator}</td></tr></table>')
 
-    def with_units(self, name: str | None = None, **overrides) -> UnitSystem:
+    def with_units(self, name: str | None = None, **overrides: str) -> UnitSystem:
         """A copy of this system with some dimensions' units replaced.
 
         `IN_LBF_S.with_units(acceleration='g')` shows acceleration in g

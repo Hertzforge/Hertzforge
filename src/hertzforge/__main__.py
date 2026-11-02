@@ -6,7 +6,13 @@ import argparse
 from hertzforge import __version__
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Run the ``hertzforge`` command line on `argv` (``sys.argv[1:]`` when
+    None) and return the exit status.
+
+    ``serve`` hands everything after it to the service's own parser, so
+    the service's options are not repeated here.
+    """
     parser = argparse.ArgumentParser(
         prog="hertzforge",
         description="Hertzforge: data acquisition and structural dynamics in one toolset.",

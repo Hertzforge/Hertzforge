@@ -30,9 +30,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
+    from ..core.prediction import Predictions
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
     from ..core.shapes import ShapeSet
+    from ..core.sine import SineLevelSet, SineSweepSpecification
 
 #: the newest schema this build reads. Version 2 adds response
 #: predictions (`core.prediction`): a `Predictions` object, and the
@@ -108,6 +110,15 @@ ON_DISK = {'elem_group': 'elem_block', 'group_id': 'block_id'}
 
 
 def save_geometry(geom: Geometry, group: h5py.Group) -> None:
+    """Write a geometry into `group`: nodes, coordinate systems and
+    elements as datasets, connectivity as a flat array plus offsets.
+
+    The rigid-body settings, view, solids, mates and element-group
+    properties are written only when set, so a file from before each
+    existed reads back the same. Element groups keep the on-disk names
+    they had when the format was set ('elem_block', 'block_id',
+    'block_name').
+    """
     group.attrs['dimension'] = geom.dimension
     group.attrs['length_unit'] = geom.length_unit or ''
     # a deck's geometry, whose properties convert with its units, and the
@@ -270,6 +281,13 @@ def _load_mass_properties(group):
 
 
 def load_geometry(group: h5py.Group) -> Geometry:
+    """Read a geometry written by `save_geometry`.
+
+    A file from before 2026-09-30, which kept tracelines apart from
+    elements, is converted on the way in: each traceline becomes an
+    element group of two-node lines, and element groups are split by
+    family.
+    """
     from ..core.geometry import Geometry
 
     data = {name: group[ON_DISK.get(name, name)][()] for name in (
@@ -323,6 +341,15 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
 
 def save_data(data: DataArray, group: h5py.Group) -> None:
+    """Write a data object into `group`: abscissa, ordinate and the
+    per-record strings as datasets, and what its kind carries (an SRS's
+    Q, a sine level's tone, interpolation, band constraints, averaging,
+    filtering, run identity and so on) beside them, each only when set.
+
+    The class name is stored as well as the function type, because a
+    `Specification` shares the PSD's and the code alone cannot say
+    which class to rebuild.
+    """
     from ..core.data import DataArray  # noqa: F401 (documented schema owner)
 
     group.attrs['function_type'] = data.function_type
@@ -538,6 +565,10 @@ def _load_averaging(group):
 
 
 def load_data(group: h5py.Group) -> DataArray:
+    """Read a data object written by `save_data`, as the class its name
+    was stored under, or by its function type in a file without one.
+    An attribute the file lacks leaves the object's default, so older
+    files load unchanged."""
     from ..core.data import NAMED_CLASSES, class_for_function_type
 
     cls = NAMED_CLASSES.get(group.attrs.get('data_class'))
@@ -645,6 +676,10 @@ def load_data(group: h5py.Group) -> DataArray:
 
 
 def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
+    """Write a channel table into `group`, one dataset per column in its
+    order, and its control loops as numbered subgroups: an environment
+    name is free text, and h5py reads a slash in a group name as a
+    path."""
     group.attrs['column_order'] = table.column_names
     for name in table.column_names:
         # the typed columns decide the storage: node joined channel as an
@@ -674,6 +709,10 @@ def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
 
 
 def load_channel_table(group: h5py.Group) -> ChannelTable:
+    """Read a channel table written by `save_channel_table`. Columns are
+    read by their stored type rather than the current column specs, so
+    a column the schema has since dropped still reads and the
+    constructor decides what is kept."""
     from ..core.channel_table import ChannelTable, Environment
 
     columns = {}
@@ -703,6 +742,9 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
 
 
 def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
+    """Write a shape set into `group`: frequencies, damping, shape matrix
+    and modal mass as datasets with its strings, mass unit and unscaled
+    flag; modal damping only when the set has it."""
     group.attrs['mass_unit'] = shapes.mass_unit or ''
     group.attrs['unscaled'] = bool(getattr(shapes, 'unscaled', False))
     group.create_dataset('frequency', data=shapes.frequency)
@@ -719,6 +761,8 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
 
 
 def load_shapes(group: h5py.Group) -> ShapeSet:
+    """Read a shape set written by `save_shapes`; an empty mass unit
+    reads back as None."""
     from ..core.shapes import ShapeSet
 
     return ShapeSet(
@@ -737,6 +781,10 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
 
 
 def save_report(report: Report, group: h5py.Group) -> None:
+    """Write a report into `group`: title and marking as attributes, its
+    blocks as one JSON string. Features and identity are written only
+    when entered, so a report with neither is stored as it was before
+    they existed."""
     import json
 
     import h5py
@@ -757,6 +805,8 @@ def save_report(report: Report, group: h5py.Group) -> None:
 
 
 def load_report(group: h5py.Group) -> Report:
+    """Read a report written by `save_report`; a file from before
+    features or identity loads with none."""
     import json
 
     from ..core.report import Report
@@ -779,7 +829,7 @@ def load_report(group: h5py.Group) -> Report:
                   features=features, identity=json.loads(identity))
 
 
-def save_predictions(predictions, group) -> None:
+def save_predictions(predictions: Predictions, group: h5py.Group) -> None:
     """Write a `Predictions` object into `group`: its comment, and one
     subgroup per prediction holding its values as JSON
     (`Prediction.as_record`) and its curve, when it has one."""
@@ -797,7 +847,9 @@ def save_predictions(predictions, group) -> None:
             sub.create_dataset('curve_values', data=prediction.curve[1])
 
 
-def load_predictions(group):
+def load_predictions(group: h5py.Group) -> Predictions:
+    """Read a `Predictions` object written by `save_predictions`, each
+    prediction rebuilt from its JSON record and its curve."""
     import json
 
     from ..core.prediction import Prediction, Predictions
@@ -815,6 +867,8 @@ def load_predictions(group):
 
 
 def save_photos(photos: Photos, group: h5py.Group) -> None:
+    """Write photos into `group`: names and formats as strings, and each
+    image as its file's own bytes, neither decoded nor re-encoded."""
     _write_strings(group, 'names', photos.names)
     _write_strings(group, 'formats', photos.formats)
     for i, image in enumerate(photos.images):
@@ -824,6 +878,8 @@ def save_photos(photos: Photos, group: h5py.Group) -> None:
 
 
 def load_photos(group: h5py.Group) -> Photos:
+    """Read photos written by `save_photos`, each image as the bytes it
+    was saved with."""
     from ..core.photos import Photos
 
     names = _read_strings(group, 'names')
@@ -868,6 +924,9 @@ def save_run_log_extract(extract: RunLogExtract, group: h5py.Group) -> None:
 
 
 def load_run_log_extract(group: h5py.Group) -> RunLogExtract:
+    """Read a `RunLogExtract` written by `save_run_log_extract`. A log
+    path stored relative to the project file is resolved against where
+    the file is now (`run_log_extract.resolved_path`)."""
     import json
 
     from ..core.run_log_extract import RunLogExtract, resolved_path
@@ -886,6 +945,9 @@ def load_run_log_extract(group: h5py.Group) -> RunLogExtract:
 
 
 def save_matches(matches: MatchedModes, group: h5py.Group) -> None:
+    """Write matched modes into `group`: the two shape sets' names and
+    geometries as attributes, the pairs as an (n, 2) integer array and
+    their MACs as committed."""
     group.attrs['first'] = matches.first
     group.attrs['second'] = matches.second
     group.attrs['first_geometry'] = matches.first_geometry or ''
@@ -897,6 +959,8 @@ def save_matches(matches: MatchedModes, group: h5py.Group) -> None:
 
 
 def load_matches(group: h5py.Group) -> MatchedModes:
+    """Read matched modes written by `save_matches`; an empty geometry
+    name reads back as None."""
     from ..core.matches import MatchedModes
 
     return MatchedModes(
@@ -907,7 +971,8 @@ def load_matches(group: h5py.Group) -> MatchedModes:
         second_geometry=group.attrs['second_geometry'] or None)
 
 
-def save_sine_specification(spec, group) -> None:
+def save_sine_specification(spec: SineSweepSpecification,
+                            group: h5py.Group) -> None:
     """Write a sine sweep specification into `group`, one subgroup per
     tone: its breakpoints with the sweep law of each segment, and its
     bands where it has them."""
@@ -933,7 +998,10 @@ def save_sine_specification(spec, group) -> None:
             sub.create_dataset(name, data=values)
 
 
-def load_sine_specification(group):
+def load_sine_specification(group: h5py.Group) -> SineSweepSpecification:
+    """Read a sine sweep specification written by
+    `save_sine_specification`, its tones in `tone_order`'s order; an
+    empty unit reads back as None, undeclared."""
     from ..core.sine import SineSweepSpecification, SineTone
 
     tones = []
@@ -954,7 +1022,7 @@ def load_sine_specification(group):
         comment=str(group.attrs['comment']))
 
 
-def save_sine_levels(levels, group) -> None:
+def save_sine_levels(levels: SineLevelSet, group: h5py.Group) -> None:
     """Write a sine level set into `group`, one subgroup per tone, each
     in the ordinary data layout, since the set only groups the levels."""
     _write_strings(group, 'tone_order',
@@ -966,7 +1034,9 @@ def save_sine_levels(levels, group) -> None:
         save_data(level, tones.create_group(str(k)))
 
 
-def load_sine_levels(group):
+def load_sine_levels(group: h5py.Group) -> SineLevelSet:
+    """Read a sine level set written by `save_sine_levels`, each tone's
+    level by `load_data`."""
     from ..core.sine import SineLevelSet
 
     return SineLevelSet([load_data(group['tones'][str(k)])

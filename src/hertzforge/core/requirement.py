@@ -232,6 +232,9 @@ class Band:
         return f'{self.db_text} {_range_text(self.low, self.high)}'
 
     def as_record(self) -> list[Any]:
+        """`[low, high, below_db, above_db]`, for
+        `TestRequirement.as_record`. An infinite dB edge is written 'down'
+        or 'up', because JSON holds no infinity."""
         return [self.low, self.high, _json_db(self.below_db),
                 _json_db(self.above_db)]
 
@@ -259,9 +262,11 @@ class CrossAxisLimit:
 
     @property
     def text(self) -> str:
+        """'10 % of in-axis from 20 to 500 Hz'."""
         return f'{self.percent:g} % of in-axis {_range_text(self.low, self.high)}'
 
     def as_record(self) -> list[Any]:
+        """`[low, high, percent]`, for `TestRequirement.as_record`."""
         return [self.low, self.high, self.percent]
 
 
@@ -283,6 +288,9 @@ class Source:
 
     @property
     def text(self) -> str:
+        """Where the number came from, in words, the owner in parentheses:
+        'from the laboratory (Vibration Lab)'. A customer's number adds that
+        the laboratory has not verified its derivation."""
         said = {'laboratory': 'from the laboratory',
                 'customer': 'supplied by the customer',
                 'derived': 'derived'}[self.origin]
@@ -343,6 +351,8 @@ class Contribution:
         return f'{self.name} {self.percent:g} % ({said})'
 
     def as_record(self) -> list[Any]:
+        """`[name, percent, coverage, source]`, for
+        `TestRequirement.as_record`."""
         return [self.name, self.percent, self.coverage, self.source]
 
 
@@ -508,6 +518,8 @@ class LimitChannel:
         return f'held at or under {profile}; {planned}'
 
     def as_record(self) -> list[Any]:
+        """`[channel, profile, notches]`, each notch a `[low, high]` list,
+        for `TestRequirement.as_record`."""
         return [self.channel, self.profile,
                 [list(notch) for notch in self.notches]]
 

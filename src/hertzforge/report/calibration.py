@@ -32,7 +32,7 @@ next test against the last one's date.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..core.calibration import (
     EXPIRED,
@@ -42,6 +42,9 @@ from ..core.calibration import (
     check,
     span_of,
 )
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..core.channel_table import ChannelTable
 
 #: the feature's key in `report.features`
 FEATURE = 'calibration_in_date'
@@ -59,7 +62,8 @@ MARK = 'over'
 
 
 def channel_table_of(block: Mapping[str, Any], objects: Mapping[str, Any],
-           object_groups: Sequence[Mapping[str, Any]] | None = None):
+                     object_groups: Sequence[Mapping[str, Any]] | None = None,
+                     ) -> ChannelTable | None:
     """The channel table a block shows, or None."""
     from ..core.channel_table import ChannelTable
     from ..core.report import resolve_binding

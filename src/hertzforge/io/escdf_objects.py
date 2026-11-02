@@ -165,6 +165,8 @@ def handles(obj: Any) -> bool:
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for an HDF5 file with an `activities` group and a `created_by`
+    attribute (`escdf.sniff`). The suffix is not looked at."""
     return escdf.sniff(path)
 
 

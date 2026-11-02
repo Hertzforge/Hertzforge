@@ -35,6 +35,7 @@ UNITS = {'micron': 1e-6, 'millimeter': 1e-3, 'centimeter': 1e-2,
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a zip archive whose name ends in `.3mf`, in any case."""
     return str(path).lower().endswith('.3mf') and zipfile.is_zipfile(path)
 
 
@@ -132,6 +133,7 @@ def _placed_corners(objects: dict, oid: str, transform: np.ndarray
 
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry. Only its face elements are written (`save`)."""
     return isinstance(obj, Geometry)
 
 

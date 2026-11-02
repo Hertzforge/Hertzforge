@@ -23,6 +23,13 @@ RIGID = Param('rigid', 'Include rigid-body modes', 'boolean', default=False)
 
 
 def modes(model: ModalModel, params: dict[str, Any]) -> list[dict]:
+    """`modal.modes`: the lowest `count` modes on the model's mesh as one
+    `shape3d` view, rigid-body modes left out unless `rigid` is set.
+
+    A mode the solver put at exactly 0 Hz counts as rigid. Shapes go out
+    mass-normalized and unscaled, with null damping where the solver
+    stated none. A model with no elastic mode is refused; fewer modes
+    than asked for come back with a note saying how many were solved."""
     shapes = model.shapes
     frequency = np.asarray(shapes.frequency, dtype=float)
     damping = np.asarray(shapes.damping, dtype=float)

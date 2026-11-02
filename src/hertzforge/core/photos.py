@@ -49,6 +49,7 @@ class Photos:
 
     @property
     def num_photos(self) -> int:
+        """How many photos there are."""
         return len(self.names)
 
     def rename(self, index: int, name: str) -> None:

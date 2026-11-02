@@ -50,6 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from ..units import SI, UnitSystem, si_factor
 from .channel_table import ChannelTable
@@ -103,7 +104,7 @@ class StateSpaceModel:
         units = ', '.join(dict.fromkeys(self.channel_unit))
         return f'{said}; written in {units}'
 
-    def frf(self, frequencies) -> np.ndarray:
+    def frf(self, frequencies: ArrayLike) -> np.ndarray:
         """C (iωI − A)⁻¹ B + D at each frequency, in Hz: `(lines,
         channels, inputs)`, in the rows' and inputs' units.
 

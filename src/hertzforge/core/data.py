@@ -42,7 +42,7 @@ is saved to a file as its own type.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -630,7 +630,8 @@ class DataArray:
         return self.dimension_hint[i] or UNKNOWN
 
     @classmethod
-    def units_for(cls, dimension, system=SI):
+    def units_for(cls, dimension: str,
+                  system: UnitSystem = SI) -> tuple[str, str | None]:
         """The (ordinate unit, reference unit) a unit system gives for a
         known dimension.
 
@@ -1193,7 +1194,8 @@ class DataArray:
 
     def display_blocks(self, unit_system: UnitSystem,
                        records: Iterable[int] | None = None,
-                       block_bytes: int | None = None):
+                       block_bytes: int | None = None,
+                       ) -> Iterator[tuple[int, int, np.ndarray]]:
         """`display_ordinate`, a block of records at a time.
 
         Yields `(start, stop, values)`: positions within `records` and the
@@ -3218,7 +3220,8 @@ class Frf(DataArray):
     needs_reference = True
 
     @classmethod
-    def units_for(cls, dimension, system=SI):
+    def units_for(cls, dimension: str,
+                  system: UnitSystem = SI) -> tuple[str, str]:
         """The (response unit, reference unit) a unit system gives for an
         FRF dimension: 'acceleration/force' in SI is ('m/s**2', 'N').
         See `DataArray.units_for`.
@@ -4491,7 +4494,8 @@ class Psd(_Bands, DataArray):
         return repaired
 
     @classmethod
-    def units_for(cls, dimension, system=SI):
+    def units_for(cls, dimension: str,
+                  system: UnitSystem = SI) -> tuple[str, str | None]:
         """The (unit, reference unit) a unit system gives for a PSD
         dimension: 'acceleration**2/frequency' in SI is ('m/s**2', None),
         and a cross term's 'acceleration*force/frequency' is ('m/s**2',

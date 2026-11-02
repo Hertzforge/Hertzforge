@@ -33,17 +33,24 @@ class ProtocolError(Exception):
 
 
 def bad_request(message: str) -> ProtocolError:
+    """An error for a request whose method exists but whose params are
+    wrong."""
     return ProtocolError('bad_request', message)
 
 
 def not_found(message: str) -> ProtocolError:
+    """An error for a dataset, handle, channel or operation that does not
+    exist."""
     return ProtocolError('not_found', message)
 
 
 def refused(message: str) -> ProtocolError:
+    """An error for a well-formed request the service will not carry out,
+    such as an operation run on the wrong kind of dataset."""
     return ProtocolError('refused', message)
 
 
 def hello() -> dict:
+    """The `hello` message the server sends first on every connection."""
     return {'type': 'hello', 'protocol': PROTOCOL, 'service': SERVICE,
             'version': VERSION}

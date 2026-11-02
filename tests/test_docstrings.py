@@ -21,10 +21,15 @@ spreads; the list only ever grows.
 from __future__ import annotations
 
 import inspect
+import pathlib
 
 import pytest
+from conftest import public_definitions
 
 import hertzforge
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+PACKAGE = ROOT / 'src' / 'hertzforge'
 
 #: Where NumPy sections are required today. Grows as they are written;
 #: nothing is ever removed, which is what makes it a ratchet.
@@ -190,3 +195,57 @@ def test_the_exported_functions_document_their_parameters_and_result():
                          'Returns:\n  ' + '\n  '.join(missing))
     assert not unnamed, ('a table that leaves a parameter out:\n  '
                          + '\n  '.join(unnamed))
+
+
+def undocumented(path, package=PACKAGE):
+    """'name:line' for each public function, class or method in the module
+    at `path` that has no docstring. A property's setter and deleter share
+    the getter's docstring, and `__init__` is documented by its class."""
+    import ast
+
+    found = []
+    for name, node, _owner in public_definitions(path, package):
+        if node.name == '__init__':
+            continue
+        if any(isinstance(d, ast.Attribute) and d.attr in ('setter', 'deleter')
+               for d in getattr(node, 'decorator_list', ())):
+            continue
+        if ast.get_docstring(node) is None:
+            found.append(f'{name}:{node.lineno}')
+    return found
+
+
+def test_every_public_definition_has_a_docstring():
+    """The floor above, walked over the whole package rather than the
+    scripting surface: every public function, class and method in every
+    public module, the service and the readers included. 114 had none when
+    this was written (2026-11-01), most of them the service's handlers and
+    the native format's helpers, where a reader arrives from a stack trace."""
+    gaps = [f'{path.relative_to(ROOT)}:{gap}'
+            for path in sorted(PACKAGE.rglob('*.py'))
+            for gap in undocumented(path)]
+    assert not gaps, (f'{len(gaps)} public definitions have no docstring:\n  '
+                      + '\n  '.join(gaps[:30]))
+
+
+def test_the_docstring_check_can_actually_find_one(tmp_path):
+    """Each kind of gap planted, beside each thing it must leave alone."""
+    package = tmp_path / 'pkg'
+    package.mkdir()
+    (package / 'sample.py').write_text(
+        'def bare(): ...\n'
+        'def told():\n    """Told."""\n'
+        'def _private(): ...\n'
+        'class Bare:\n'
+        '    def __init__(self): ...\n'
+        '    def method(self): ...\n'
+        '    @property\n'
+        '    def size(self):\n        """Size."""\n'
+        '    @size.setter\n'
+        '    def size(self, value): ...\n'
+        '    def _hidden(self): ...\n')
+    (package / '_inner.py').write_text('def exposed(): ...\n')
+    found = [gap.split(':')[0]
+             for path in sorted(package.glob('*.py'))
+             for gap in undocumented(path, package)]
+    assert found == ['bare', 'Bare', 'Bare.method'], found

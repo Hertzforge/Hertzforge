@@ -47,12 +47,22 @@ from .sniffing import npz_has
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for an `.npz` holding `data` and `function_type`, the two
+    entries every sdynpy data array file has."""
     return npz_has(path, {'data', 'function_type'})
 
 
 def load(path: str | os.PathLike, ordinate_unit: str | None = None,
          response_unit: str | None = None,
          reference_unit: str | None = None) -> DataArray:
+    """Read an sdynpy data array file as the DataArray subclass its function
+    type names.
+
+    Each record's five comment fields are joined with '; '. Units are
+    declared as the module docstring describes; an FRF needs both
+    `response_unit` and `reference_unit`, and with only one it imports
+    unit-less. Raises ValueError when the records do not share one abscissa.
+    """
     with np.load(path, allow_pickle=True) as d:
         function_type = int(d['function_type'])
         data = d['data']
@@ -94,6 +104,8 @@ def load(path: str | os.PathLike, ordinate_unit: str | None = None,
 
 
 def handles(obj: Any) -> bool:
+    """True for any DataArray: every kind is written under its function type
+    code."""
     return isinstance(obj, DataArray)
 
 

@@ -27,6 +27,36 @@ def fixture_path(*parts):
     return os.path.join(TESTDATA, *parts)
 
 
+def public_definitions(path, package):
+    """[(name, node, owner)] for what a reader of the module at `path` can
+    call: its public functions and classes, and the methods of those
+    classes, `owner` being the class node for a method and None otherwise.
+    Read from the source, so nothing is imported. A module whose path has
+    a part with a leading underscore is private, and so is everything in
+    it; `__init__` and `__main__` are not. A method named with a leading
+    underscore is private too, except `__init__`, which documents the
+    constructor's parameters."""
+    import ast
+
+    parts = path.relative_to(package).with_suffix('').parts
+    if any(part.startswith('_') and part not in ('__init__', '__main__')
+           for part in parts):
+        return []
+    found = []
+    for node in ast.parse(path.read_text(encoding='utf-8')).body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if node.name.startswith('_'):
+            continue
+        found.append((node.name, node, None))
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if (isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and (not item.name.startswith('_') or item.name == '__init__')):
+                    found.append((f'{node.name}.{item.name}', item, node))
+    return found
+
+
 def banded_pair_on_target(cut_at=1000.0, per_octave=6):
     """(banded specification, banded measurement sitting exactly on its
     target): the plate's target cut off above `cut_at`, mid-band, so the

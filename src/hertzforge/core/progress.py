@@ -54,10 +54,14 @@ class Ticker:
         self._told = -1.0
 
     def add(self, count: int) -> None:
+        """Add a stage's `count` to the total, once the stage knows it, and
+        report as `tick` does."""
         self.total += int(count)
         self._tell()
 
     def tick(self, count: int = 1) -> None:
+        """Count `count` more pieces done, and report when `interval` has
+        passed since the last report or the work is complete."""
         self.done += int(count)
         self._tell()
 

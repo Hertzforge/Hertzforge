@@ -41,12 +41,21 @@ _TEST_ONLY = ('test_date', 'test_end')
 
 
 def handles(obj: Any) -> bool:
+    """True for a Report, which is written as a template: its blocks and
+    bindings, no values."""
     from ..core.report import Report
 
     return isinstance(obj, Report)
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a path ending in `.vdreport`, or a `.json` file whose first
+    4096 characters hold the template marker.
+
+    A `.vdreport` is claimed without being opened, so a damaged one reaches
+    `load` and is refused with a reason rather than passed over. Other tools
+    write `.json`, so that suffix is opened and checked.
+    """
     path = str(path)
     if path.endswith(SUFFIX):
         return True
@@ -92,6 +101,12 @@ def save(report: Report, path: str | os.PathLike, unit_system: Any = None,
 
 
 def load(path: str | os.PathLike, **_ignored: Any) -> Report:
+    """Read a template as a Report, keeping only the laboratory's
+    identification fields.
+
+    Raises ValueError when the file has no template marker, when `features`
+    is not a list of keys, or when `identity` is not a mapping.
+    """
     from ..core.report import Report
 
     with open(path, encoding='utf-8') as handle:

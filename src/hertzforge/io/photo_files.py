@@ -33,6 +33,8 @@ UNSAFE = '/\\:*?"<>|'
 
 
 def handles(obj: Any) -> bool:
+    """True for a Photos object, the only thing written as a folder of
+    images."""
     from ..core.photos import Photos
 
     return isinstance(obj, Photos)
