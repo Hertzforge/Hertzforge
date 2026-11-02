@@ -3,7 +3,7 @@
 	 * Analyze: pick a random-run dataset, pick a tool that accepts it, set its parameters, Run.
 	 * Each run adds a result card; spectrum panes that share a `link` share a cursor.
 	 */
-	import type { AppState } from '$lib/app/state.svelte';
+	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
@@ -14,6 +14,14 @@
 	let { app }: Props = $props();
 
 	const a = $derived(app.analyze);
+
+	/**
+	 * The cell chosen in each result's MAC, by result id. A matrix that `selects` the result's
+	 * shape view shows that row's mode with that column's overlaid; the first cell to begin.
+	 */
+	let pairs = $state<Record<number, { row: number; column: number }>>({});
+	const pairOf = (r: AnalyzeResult) => pairs[r.id] ?? { row: 0, column: 0 };
+	const linked = (r: AnalyzeResult) => r.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d');
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	function onKey(e: KeyboardEvent) {
@@ -173,7 +181,17 @@
 						<div class="views">
 							{#each r.views as v, i (i)}
 								<div class="view {v.view}">
-									<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} onparams={(patch) => a.rerun(r.id, patch)} />
+									<ViewRenderer
+										view={v}
+										layout="strip"
+										showTitle={v.view === 'spectrum'}
+										minHeight={240}
+										onparams={(patch) => a.rerun(r.id, patch)}
+										selected={v.view === 'matrix' && v.selects ? pairOf(r) : null}
+										onselect={v.view === 'matrix' && v.selects ? (cell) => (pairs[r.id] = cell) : undefined}
+										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
+										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
+									/>
 								</div>
 							{/each}
 						</div>

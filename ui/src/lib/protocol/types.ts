@@ -176,6 +176,10 @@ export interface Shape3DView {
 	modes: Mode[];
 	/** Measured data to play back, with `modes` empty. */
 	motion?: Motion;
+	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
+	overlays?: Mode[];
+	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
+	overlay_phase?: Float32Array;
 	note?: string;
 }
 
@@ -220,6 +224,8 @@ export interface MatrixView {
 	value_label: string;
 	/** The color scale, pinned. */
 	value_range: [number, number];
+	/** Clicking cell (r, c) shows the result's shape3d view's mode r with overlay c. */
+	selects?: 'shape3d';
 }
 
 export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView;

@@ -181,7 +181,12 @@ def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     (`core.shapes.cross_mac`). The model's columns are its elastic modes
     from two thirds of the band's bottom to half again its top, so a mode
     the fit placed a little off its model partner still has one. A survey
-    with no FE model is refused when asked for one."""
+    with no FE model is refused when asked for one.
+
+    With the survey geometry, the matrix comes with a `shape3d` view of the
+    rows' modes and the columns' as `overlays`, both as translations of
+    the survey nodes, and the matrix `selects` it: clicking a cell shows
+    that row's mode with that column's overlaid (`_pairs`)."""
     from hertzforge.core.shapes import cross_mac
 
     low, high = float(params['low_hz']), float(params['high_hz'])
@@ -194,10 +199,12 @@ def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     if not shapes.num_shapes:
         raise refused(f'no mode found between {low:g} and {high:g} Hz')
     identified = {'label': 'Identified', 'ticks': [_hz(f) for f in shapes.frequency]}
+    rows = range(shapes.num_shapes)
     if params['against'] == 'self':
-        return [v.matrix(f'{run.title}: Auto-MAC of {shapes.num_shapes} '
-                         'Identified Modes', identified, identified,
-                         shapes.auto_mac(), 'MAC', (0.0, 1.0))]
+        title = f'{run.title}: Auto-MAC of {shapes.num_shapes} Identified Modes'
+        return _paired(run, v.matrix(title, identified, identified,
+                                     shapes.auto_mac(), 'MAC', (0.0, 1.0)),
+                       shapes, rows, shapes, rows)
     model = run.analysis_model()
     if model is None:
         raise refused(f'{run.title} has no FE model to compare against.')
@@ -209,9 +216,46 @@ def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{model.title} has no elastic mode between '
                       f'{low / 1.5:g} and {high * 1.5:g} Hz')
     values = cross_mac(shapes, model.shapes)[:, keep]
-    return [v.matrix(f'{run.title}: MAC Against {model.title}', identified,
-                     {'label': 'FE model', 'ticks': [_hz(f) for f in frequency[keep]]},
-                     values, 'MAC', (0.0, 1.0))]
+    return _paired(run, v.matrix(f'{run.title}: MAC Against {model.title}', identified,
+                                 {'label': 'FE model', 'ticks': [_hz(f) for f in frequency[keep]]},
+                                 values, 'MAC', (0.0, 1.0)),
+                   shapes, rows, model.shapes, keep)
+
+
+def _paired(run: ModalRun, matrix: dict, rows: Any, row_modes: Any,
+            columns: Any, column_modes: Any) -> list[dict]:
+    """The MAC `matrix` and, when the survey has a geometry, the `shape3d`
+    view it `selects`: the row set's modes as `modes` and the column set's
+    as `overlays`, each a translation per survey node, with each pair's
+    `overlay_phase`, the angle that aligns the column mode with the row
+    mode (`core.shapes.alignment_factor`: a real mode is defined only up to
+    its sign, a complex one up to a rotation). Without a geometry the
+    matrix comes alone."""
+    from hertzforge.core.shapes import alignment_factor
+
+    if 'Geometry' not in run.project:
+        return [matrix]
+    geometry = run.project['Geometry']
+    drawn, triangles, lines = _mesh(geometry)
+
+    def on_survey(shapes: Any, k: int) -> np.ndarray:
+        return _translations(geometry, shapes.coordinate, shapes.shape_matrix[k], drawn)
+
+    modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]),
+                    on_survey(rows, r)) for r in row_modes]
+    named = matrix['columns']['label']
+    overlays = [v.mode(int(c) + 1, float(columns.frequency[c]),
+                       float(columns.damping[c]) if columns.damping[c] > 0 else None,
+                       on_survey(columns, int(c)), label=f'{named} mode {int(c) + 1}')
+                for c in column_modes]
+    phase = np.array([[np.angle(alignment_factor(rows, r, columns, int(c)))
+                       for c in column_modes] for r in row_modes], dtype=np.float32)
+    matrix['selects'] = 'shape3d'
+    shape = v.shape3d(matrix['title'], 'm' if geometry.units_defined else 'undefined',
+                      np.asarray(geometry.node_xyz, dtype=float)[drawn], modes,
+                      triangles=triangles, lines=lines, overlays=overlays,
+                      overlay_phase=phase)
+    return [matrix, shape]
 
 
 def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:

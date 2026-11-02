@@ -3,7 +3,9 @@
 	 * One colored cell per value (a MAC, say), drawn on a 2-D canvas: a few thousand cells at most,
 	 * redrawn only on resize, theme change or hover. Color is the sequential colormap over the
 	 * view's pinned range, with a numeric legend; each cell writes its value when it is large
-	 * enough to hold the text. Hovering reads the cell's row, column and value.
+	 * enough to hold the text. Hovering reads the cell's row, column and value. A matrix that
+	 * `selects` a shape view marks the chosen cell in the overlay's orange; a click or the arrow
+	 * keys choose another.
 	 */
 	import { onDestroy, onMount } from 'svelte';
 	import type { MatrixView } from '$lib/protocol/types';
@@ -14,9 +16,12 @@
 	interface Props {
 		view: MatrixView;
 		showTitle?: boolean;
+		/** The cell whose pair the linked shape view shows. */
+		selected?: { row: number; column: number } | null;
+		onselect?: (cell: { row: number; column: number }) => void;
 	}
 
-	let { view, showTitle = true }: Props = $props();
+	let { view, showTitle = true, selected = null, onselect }: Props = $props();
 
 	const ROWS = $derived(view.rows.ticks.length);
 	const COLUMNS = $derived(view.columns.ticks.length);
@@ -84,6 +89,12 @@
 			ctx.lineWidth = 2;
 			ctx.strokeRect(l.x0 + hover.column * l.cellW + 1, l.y0 + hover.row * l.cellH + 1, l.cellW - 2, l.cellH - 2);
 		}
+		if (selected) {
+			// the overlay's orange, so the cell reads as the pair the shape view draws
+			ctx.strokeStyle = '#e69f00';
+			ctx.lineWidth = 3;
+			ctx.strokeRect(l.x0 + selected.column * l.cellW + 1.5, l.y0 + selected.row * l.cellH + 1.5, l.cellW - 3, l.cellH - 3);
+		}
 		// ticks, thinned to every nth where they would overlap
 		ctx.fillStyle = text2;
 		ctx.font = `10.5px ${mono}`;
@@ -138,11 +149,31 @@
 		resizeObs.observe(host);
 	});
 
+	function onClick(e: MouseEvent) {
+		if (!layout || !onselect) return;
+		const box = canvas.getBoundingClientRect();
+		const at = cellAt(e.clientX - box.left, e.clientY - box.top, layout);
+		if (at) onselect(at);
+	}
+
+	function onKey(e: KeyboardEvent) {
+		if (!onselect || !selected) return;
+		const step: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+		const d = step[e.key];
+		if (!d) return;
+		e.preventDefault();
+		onselect({
+			row: Math.min(ROWS - 1, Math.max(0, selected.row + d[0])),
+			column: Math.min(COLUMNS - 1, Math.max(0, selected.column + d[1]))
+		});
+	}
+
 	onDestroy(() => resizeObs?.disconnect());
 
 	$effect(() => {
 		void size;
 		void hover;
+		void selected;
 		void theme.version;
 		void view;
 		draw();
@@ -157,9 +188,15 @@
 			data-testid="matrix-canvas"
 			style:width="{size.width}px"
 			style:height="{size.height}px"
+			class:selectable={!!onselect}
 			onpointermove={onMove}
 			onpointerleave={() => (hover = null)}
-			aria-label="{view.value_label} of {ROWS} {view.rows.label} rows by {COLUMNS} {view.columns.label} columns"
+			onclick={onClick}
+			onkeydown={onKey}
+			tabindex={onselect ? 0 : undefined}
+			aria-label="{view.value_label} of {ROWS} {view.rows.label} rows by {COLUMNS} {view.columns.label} columns{onselect && selected
+				? `. Showing ${view.rows.ticks[selected.row]} against ${view.columns.ticks[selected.column]}; click a cell or use the arrow keys for another pair`
+				: ''}"
 		></canvas>
 	</div>
 	<div class="bottom">
@@ -207,6 +244,10 @@
 		position: absolute;
 		inset: 0;
 		display: block;
+	}
+
+	canvas.selectable {
+		cursor: pointer;
 	}
 
 	.bottom {

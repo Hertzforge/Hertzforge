@@ -123,6 +123,17 @@
         }
       }
     },
+    "mode": {
+      "type": "object", "required": ["index", "frequency_hz", "shape"],
+      "properties": {
+        "index": {"type": "integer"},
+        "frequency_hz": {"type": "number"},
+        "damping": {"type": ["number", "null"]},
+        "shape": {"$ref": "#/$defs/arrayRef"},
+        "shape_imag": {"$ref": "#/$defs/arrayRef"},
+        "label": {"type": "string"}
+      }
+    },
     "shape3dView": {
       "type": "object", "required": ["view", "title", "unit", "nodes", "modes"],
       "properties": {
@@ -132,20 +143,9 @@
         "nodes": {"$ref": "#/$defs/arrayRef"},
         "lines": {"$ref": "#/$defs/arrayRef"},
         "triangles": {"$ref": "#/$defs/arrayRef"},
-        "modes": {
-          "type": "array",
-          "items": {
-            "type": "object", "required": ["index", "frequency_hz", "shape"],
-            "properties": {
-              "index": {"type": "integer"},
-              "frequency_hz": {"type": "number"},
-              "damping": {"type": ["number", "null"]},
-              "shape": {"$ref": "#/$defs/arrayRef"},
-              "shape_imag": {"$ref": "#/$defs/arrayRef"},
-              "label": {"type": "string"}
-            }
-          }
-        },
+        "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
+        "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
+        "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "motion": {
           "type": "object",
           "required": ["label", "unit", "start", "step", "quantity", "value_unit", "node", "direction", "values", "peak"],
@@ -174,7 +174,8 @@
         "columns": {"$ref": "#/$defs/matrixAxis"},
         "values": {"$ref": "#/$defs/arrayRef"},
         "value_label": {"type": "string"},
-        "value_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+        "value_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "selects": {"const": "shape3d"}
       }
     },
     "matrixAxis": {
