@@ -127,6 +127,25 @@ complex mode, or an operating deflection shape read from FRFs at one line) carri
 a complex one shows its traveling part. `label`, when present, names the shape in place of
 "Mode <index>", for a shape that is not a mode.
 
+A `shape3d` may instead play measured data back on the mesh: `modes` is empty and `motion` says
+how each measured DOF moves, sample by sample.
+
+```
+"motion":{"label":"Time","unit":"s","start":0,"step":0.000244,   the abscissa: start + k step
+          "quantity":"Acceleration","value_unit":"m/s²",
+          "node":{"$array":.. u32 [D]},          the node of `nodes` each DOF moves
+          "direction":{"$array":.. f32 [D,3]},   the unit direction it moves in
+          "values":{"$array":.. f32 [D,S]},      DOF d at sample k
+          "peak":130.4}                          the furthest any node gets, in value_unit
+```
+
+At sample k each node is offset by the sum over its DOFs of `direction * values[d, k]`, scaled
+so that `peak` is the amplitude the person chose. Sending each DOF's samples rather than a frame
+of every node keeps a large mesh with a few sensors as small as the sensors' data; nodes with no
+DOF stay where they are. Several DOFs may move one node (X, Y and Z, say). The shell plays a
+record through in about 10 s at normal speed, from an eighth to eight times that, as Visual
+Dynamics does, and colors each node by how far it is from rest at that sample.
+
 **`waterfall`** (many records of one quantity, each at its own depth)
 
 ```

@@ -284,6 +284,57 @@ def test_an_empty_band_is_refused_a_mac(modal_run):
         run('modal_run.mac', modal_run, low_hz=900.0, high_hz=800.0)
 
 
+# ---- modal_run.motion -----------------------------------------------------------
+
+def test_a_capture_plays_back_its_accelerations(modal_run, validate):
+    """Capture 3: the eleven accelerometers, one record each, their samples as
+    the file has them; the two force gauges are left out and said so."""
+    (view,) = run('modal_run.motion', modal_run, capture=3)
+    wire_views([view], validate)
+    assert view['modes'] == [] and view['title'].endswith('Capture 3 of 20, Acceleration')
+    assert view['note'] == '2 records of another quantity are not shown'
+    motion = view['motion']
+    data = modal_run.project['Time History']
+    picked = [i for i in range(data.num_records)
+              if data.block[i] == 'avg 3' and data.known_dim(i) == 'acceleration']
+    assert motion['values'].shape == (11, 2048) and motion['values'].dtype == np.float32
+    np.testing.assert_array_equal(motion['values'], np.asarray(data.ordinate)[picked].astype(np.float32))
+    assert motion['quantity'] == 'Acceleration' and motion['value_unit'] == 'm/s²'
+    assert motion['step'] == pytest.approx(1 / 4096) and motion['start'] == 0.0
+    assert motion['node'].max() < len(view['nodes'])
+    np.testing.assert_allclose(np.linalg.norm(motion['direction'], axis=1), 1.0, rtol=1e-6)
+
+
+def test_each_dof_moves_the_node_at_its_own_position(modal_run):
+    """The drawn node a DOF moves is the geometry node its name gives."""
+    from hertzforge.deform import dof_directions
+    (view,) = run('modal_run.motion', modal_run)
+    data = modal_run.project['Time History']
+    geometry = modal_run.project['Geometry']
+    dofs = [data.response_dof[i] for i in range(data.num_records)
+            if data.block[i] == 'avg 1' and data.known_dim(i) == 'acceleration']
+    rows, _, _ = dof_directions(geometry, dofs)
+    xyz = np.asarray(geometry.node_xyz)[rows]
+    np.testing.assert_allclose(view['nodes'][view['motion']['node']], xyz, atol=1e-6)
+
+
+def test_the_motion_peak_is_the_furthest_a_node_gets(modal_run):
+    (view,) = run('modal_run.motion', modal_run)
+    motion = view['motion']
+    nodes = len(view['nodes'])
+    furthest = 0.0
+    for k in range(motion['values'].shape[1]):
+        offsets = np.zeros((nodes, 3))
+        np.add.at(offsets, motion['node'], motion['direction'] * motion['values'][:, k:k + 1])
+        furthest = max(furthest, np.linalg.norm(offsets, axis=1).max())
+    assert motion['peak'] == pytest.approx(furthest, rel=1e-5)
+
+
+def test_a_capture_the_survey_does_not_have_is_refused(modal_run):
+    with pytest.raises(ProtocolError, match='has 20 captures; there is no capture 21'):
+        run('modal_run.motion', modal_run, capture=21)
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

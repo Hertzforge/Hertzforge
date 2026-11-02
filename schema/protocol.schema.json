@@ -145,6 +145,22 @@
               "label": {"type": "string"}
             }
           }
+        },
+        "motion": {
+          "type": "object",
+          "required": ["label", "unit", "start", "step", "quantity", "value_unit", "node", "direction", "values", "peak"],
+          "properties": {
+            "label": {"type": "string"},
+            "unit": {"type": "string"},
+            "start": {"type": "number"},
+            "step": {"type": "number"},
+            "quantity": {"type": "string"},
+            "value_unit": {"type": "string"},
+            "node": {"$ref": "#/$defs/arrayRef"},
+            "direction": {"$ref": "#/$defs/arrayRef"},
+            "values": {"$ref": "#/$defs/arrayRef"},
+            "peak": {"type": "number", "minimum": 0}
+          }
         }
       }
     },

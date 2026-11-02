@@ -483,6 +483,25 @@ def main() -> None:
         'z': ('f32', [8], [0.5, 1.0, 0.25, 0.125, 2.0, 0.75, 1.0, 0.5]),
     })
 
+    # measured motion on a mesh: three DOFs of four samples, two on one node
+    write('response_motion', {
+        'type': 'response', 'id': 11,
+        'result': {'views': [
+            {'view': 'shape3d', 'title': 'Capture 1 of 2, Acceleration', 'unit': 'm',
+             'nodes': {'$array': 'n'}, 'lines': {'$array': 'l'}, 'modes': [],
+             'motion': {'label': 'Time', 'unit': 's', 'start': 0.0, 'step': 0.25,
+                        'quantity': 'Acceleration', 'value_unit': 'm/s²',
+                        'node': {'$array': 'd'}, 'direction': {'$array': 'u'},
+                        'values': {'$array': 'v'}, 'peak': 2.5}},
+        ]},
+    }, {
+        'n': ('f32', [3, 3], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0]),
+        'l': ('u32', [2, 2], [0, 1, 1, 2]),
+        'd': ('u32', [3], [1, 1, 2]),
+        'u': ('f32', [3, 3], [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]),
+        'v': ('f32', [3, 4], [0.0, 1.5, 0.0, -1.5, 0.0, 2.0, 0.0, -2.0, 0.5, 0.0, -0.5, 0.0]),
+    })
+
     # a matrix of three rows by two columns, f32
     write('response_matrix', {
         'type': 'response', 'id': 10,

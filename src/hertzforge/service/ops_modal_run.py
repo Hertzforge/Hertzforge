@@ -1,7 +1,8 @@
 """Operations on a modal survey from the controller: its FRFs, coherence
 and time captures as waterfalls, the modes fitted to its FRFs on the
-survey geometry, the operating deflection shape at one frequency, and the
-MAC of the fitted modes against each other or the survey's FE model.
+survey geometry, the operating deflection shape at one frequency, the
+MAC of the fitted modes against each other or the survey's FE model, and a
+time capture played back on the survey geometry.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from . import views as v
 from .datasets import ModalRun, _mesh
 from .descriptors import Operation, Option, Param
 from .protocol import refused
-from .waterfalls import COMPONENTS, waterfall_view
+from .waterfalls import COMPONENTS, unit_text, waterfall_view
 
 #: what a survey can be drawn as a waterfall of, by the name its project
 #: gives each
@@ -32,6 +33,7 @@ COUNT = Param('count', 'Modes, at most', 'integer', default=5, min=1, max=30, st
 AT = Param('frequency_hz', 'Frequency', 'number', default=440.0, unit='Hz', min=0.0,
            step=2.0)
 REFERENCE = Param('reference', 'Reference', 'integer', default=1, min=1, step=1)
+CAPTURE = Param('capture', 'Capture', 'integer', default=1, min=1, step=1)
 AGAINST = Param('against', 'Against', 'enum', default='model',
                 options=(Option('model', 'FE model'),
                          Option('self', 'Each other (auto-MAC)')))
@@ -211,6 +213,77 @@ def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
                      values, 'MAC', (0.0, 1.0))]
 
 
+def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
+    """`modal_run.motion`: one of the survey's time captures played back on
+    the survey geometry, as a `shape3d` view with no modes and a `motion`.
+    The records follow Visual Dynamics' animation rules
+    (`deform.quantity_records`, `deform.animation_records`): one quantity,
+    the one most records measure, and one record per DOF, the first; the
+    rest are named in the view's note. Each DOF is sent as its samples
+    with the drawn node it moves and its direction, not as a frame per
+    sample, so a large mesh with a few sensors travels as the sensors'
+    data. A capture past the survey's, and a survey with no time history
+    or geometry, are refused."""
+    from hertzforge.deform import (
+        TimeDeflection,
+        animation_records,
+        dof_directions,
+        quantity_records,
+    )
+
+    for needed in ('Time History', 'Geometry'):
+        if needed not in run.project:
+            raise refused(f'{run.title} has no {needed} to animate.')
+    data, geometry = run.project['Time History'], run.project['Geometry']
+    captures = (list(dict.fromkeys(data.block)) if data.block is not None
+                else [None])
+    number = params['capture']
+    if number > len(captures):
+        raise refused(f'{run.title} has {len(captures)} captures; there is no '
+                      f'capture {number}')
+    records = [i for i in range(data.num_records)
+               if captures[0] is None or data.block[i] == captures[number - 1]]
+    records, quantity, other = quantity_records(data, records)
+    records, repeated = animation_records(data, records)
+    dofs = [data.response_dof[i] for i in records]
+    rows, directions, used = dof_directions(geometry, dofs)
+    drawn_rows, triangles, lines = _mesh(geometry)
+    drawn = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    drawn[drawn_rows] = np.arange(drawn_rows.size)
+    shown = drawn[rows] >= 0
+    values = np.asarray(data.ordinate)[records][used][shown].real
+    if not values.shape[0]:
+        raise refused(f'none of {run.title}\'s {quantity} records lands on '
+                      'its geometry')
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    notes = []
+    if other:
+        notes.append(f'{other} records of another quantity are not shown')
+    if repeated:
+        notes.append(repeated.lstrip(' —'))
+    if not np.all(used) or not np.all(shown):
+        notes.append(f'{len(dofs) - values.shape[0]} records have no node on '
+                     'the geometry')
+    dimension = data.known_dim(records[0])
+    capture = (f'Capture {number} of {len(captures)}' if captures[0] is not None
+               else 'Time History')
+    extra: dict[str, Any] = {'motion': {
+        'label': 'Time', 'unit': 's', 'start': float(abscissa[0]),
+        'step': float(abscissa[1] - abscissa[0]) if abscissa.size > 1 else 0.0,
+        'quantity': quantity.capitalize(), 'value_unit': unit_text(dimension) or '',
+        'node': drawn[rows[shown]].astype(np.uint32),
+        'direction': np.asarray(directions, dtype=np.float32)[shown],
+        'values': np.ascontiguousarray(values, np.float32),
+        'peak': TimeDeflection(geometry, list(np.asarray(dofs)[used][shown]),
+                               values).peak_magnitude}}
+    if notes:
+        extra['note'] = '; '.join(notes)
+    return [v.shape3d(f'{run.title}: {capture}, {quantity.capitalize()}',
+                      'm' if geometry.units_defined else 'undefined',
+                      np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [],
+                      triangles=triangles, lines=lines, **extra)]
+
+
 OPERATIONS = (
     Operation(
         id='modal_run.waterfall', title='Waterfall', workspace='analyze',
@@ -236,4 +309,10 @@ OPERATIONS = (
         summary='The Modal Assurance Criterion of the modes fitted within a '
                 'band, against the FE model or against each other.',
         params=(LOW, HIGH, COUNT, AGAINST), outputs=('matrix',), run=mac),
+    Operation(
+        id='modal_run.motion', title='Time Animation', workspace='analyze',
+        accepts='modal_run',
+        summary='One time capture of the survey played back on the survey '
+                'geometry, one record per DOF.',
+        params=(CAPTURE,), outputs=('shape3d',), run=motion),
 )
