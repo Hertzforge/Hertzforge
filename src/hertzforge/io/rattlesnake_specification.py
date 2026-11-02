@@ -1,0 +1,223 @@
+"""Read and write Rattlesnake's random vibration specification file.
+
+The controller's target for a random test is a small file its Random
+environment loads before the test (its `.nc4` is the recording of a
+run, and is only read here). The file holds `f`, the frequency lines in
+Hz; `cpsd`, the full cross-spectral matrix of the control channels at
+each line, `(lines, n, n)` complex; optionally `warning_upper`,
+`warning_lower`, `abort_upper` and `abort_lower`, `(lines, n)` real
+bands on the autospectra; and optionally `coordinate`, `(n, n, 2)` node
+and direction pairs the controller uses to put the matrix in its own
+channel order. The controller reads it as NumPy `.npz` or MATLAB
+`.mat`; this module writes and reads the `.npz`.
+
+The controller reads a whole matrix, and a specification here usually
+holds autospectra alone, since that is how most random tests are run.
+So a pair the specification does not hold is written as a zero, the way
+the controller's own targets have it, and the file records which pairs
+were held in `held`, an `(n, n)` boolean mask. The controller ignores
+`held`; this reader uses it, so a zero that was never specified does not
+read back as a specified zero cross term. A missing Hermitian half is
+filled with the conjugate of the half that was held.
+
+The file has no place for units. Values are written in the unit system
+asked for, g included: the controller reads the target in the unit of
+each channel of its own channel table, which for an accelerometer is
+usually g, so the file holds what the plot shows. Reading takes the unit
+as a parameter.
+
+The file also has `dof`, the channel names as Hertzforge writes
+them, which the controller ignores and this reader prefers.
+`coordinate` is written only when every channel is a node and a
+direction, since a modal coordinate (`M3`) has neither; the names are
+what bring the specification back exactly.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from ..core.data import Specification, direction_code, dof_string, parse_dof
+from .sniffing import npz_has
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..units import UnitSystem
+
+# Brandon, 2026-09-05: a specification edited in Visual Dynamics should come
+# out as something Rattlesnake can read; and most random tests are run on
+# autospectra alone, which is why `held` exists.
+
+#: the band arrays the controller reads, by the name Hertzforge
+#: keeps them under
+BANDS = ('warning_lower', 'warning_upper', 'abort_lower', 'abort_upper')
+
+_COORDINATE = np.dtype([('node', '<u8'), ('direction', 'i1')])
+
+
+def sniff(path: str | os.PathLike) -> bool:
+    return npz_has(path, {'f', 'cpsd'}, allow_pickle=False)
+
+
+def handles(obj: Any) -> bool:
+    return isinstance(obj, Specification)
+
+
+def _channels(spec: Specification) -> list[str]:
+    """The channels, in the order of their autospectra."""
+    references = spec.reference_dof or list(spec.response_dof)
+    channels = [spec.response_dof[i] for i in range(spec.num_records)
+                if references[i] == spec.response_dof[i]]
+    if not channels:
+        raise ValueError('the specification holds no autospectrum; the '
+                         'controller reads a matrix with the autospectra '
+                         'on its diagonal')
+    return channels
+
+
+def save(spec: Specification, path: str | os.PathLike,
+         unit_system: UnitSystem | None = None) -> None:
+    """Write a specification as the controller's target file (`.npz`).
+
+    Values, bands included, are written in `unit_system` itself, g
+    included, or as stored when there is none or the units are not
+    defined; the file records no units. A pair the specification does
+    not hold is written as a zero, the controller's own placeholder, and
+    `held` records which pairs were held.
+
+    Raises ValueError when the specification holds no autospectrum, or
+    holds a cross term of a channel that has no autospectrum.
+    """
+    channels = _channels(spec)
+    references = spec.reference_dof or list(spec.response_dof)
+    index = {name: k for k, name in enumerate(channels)}
+    held = {}
+    for i in range(spec.num_records):
+        a, b = spec.response_dof[i], references[i]
+        if a not in index or b not in index:
+            raise ValueError(f'{a}/{b} is a cross term of a channel with no '
+                             'autospectrum in the specification')
+        held[(a, b)] = i
+    # The display system itself, not its coherent form: the band-average
+    # BARC's response specification, exported with in-slinch-lbf-s (g),
+    # went out in (in/s^2)^2/Hz, 149064 times g^2/Hz, and the controller
+    # reads it in its channels' g (2026-10-31). The coherent rule is for
+    # files whose units must agree with one another, a model's; a target
+    # is read channel by channel
+    converting = unit_system is not None and spec.units_defined
+    frequencies = (spec.display_abscissa(unit_system) if converting
+                   else spec.abscissa)
+    ordinate = (spec.display_ordinate(unit_system) if converting
+                else spec.ordinate)
+    n, lines = len(channels), len(frequencies)
+    cpsd = np.zeros((lines, n, n), dtype=np.complex128)
+    stated = np.eye(n, dtype=bool)
+    for (a, b), i in held.items():
+        cpsd[:, index[a], index[b]] = ordinate[i]
+        stated[index[a], index[b]] = True
+    for a in channels:
+        for b in channels:
+            if (a, b) not in held and (b, a) in held:
+                # the Hermitian half the file needs and the object did
+                # not hold: the conjugate of the one it did
+                cpsd[:, index[a], index[b]] = np.conj(cpsd[:, index[b], index[a]])
+                stated[index[a], index[b]] = True
+    out: dict[str, Any] = {'f': np.asarray(frequencies, dtype=np.float64),
+                           'cpsd': cpsd,
+                           'dof': np.asarray(channels, dtype=str),
+                           'held': stated}
+    for name in BANDS:
+        if name not in spec.limits:
+            continue
+        values = (spec.display_limit(name, unit_system) if converting
+                  else spec.limits[name])
+        out[name] = np.stack([np.real(values[held[(c, c)]])
+                              for c in channels], axis=1)
+    parsed = [parse_dof(c) for c in channels]
+    if all(node is not None and direction for node, direction in parsed):
+        coordinate = np.zeros((n, n, 2), dtype=_COORDINATE)
+        for i, (node_i, dir_i) in enumerate(parsed):
+            for j, (node_j, dir_j) in enumerate(parsed):
+                coordinate[i, j, 0] = (node_i, direction_code(dir_i))
+                coordinate[i, j, 1] = (node_j, direction_code(dir_j))
+        out['coordinate'] = coordinate
+    np.savez(str(path), **out)
+
+
+def load(path: str | os.PathLike,
+         ordinate_unit: str | None = None) -> Specification:
+    """Read the controller's target file as a Specification.
+
+    Channels come from `dof` when the file has it, otherwise from the
+    diagonal of `coordinate`. A file with neither, which is what the
+    controller itself writes, is matched to its channel table by order
+    alone, so its channels are named in that order, '1', '2' and so on,
+    as the sine specification reader names them and as a run through a
+    response transformation records them. A file with `held` was written by Hertzforge or Visual Dynamics, and
+    the mask says which cross terms were held: those come back, zeros
+    included, and the rest are left out. In a file without `held`, the
+    cross terms are kept only when at least one off-diagonal value is
+    finite and not zero, as the `.nc4` reader does, because an
+    off-diagonal that is all NaN or zero is how other writers mark a
+    specification of autospectra alone. `ordinate_unit` declares the unit
+    of the values, which the file cannot state.
+
+    Raises ValueError when `cpsd` is not `(lines, n, n)` over the
+    frequency lines, or the channel names do not match its size.
+    """
+    with np.load(path, allow_pickle=False) as d:
+        frequencies = np.asarray(d['f'], dtype=np.float64).reshape(-1)
+        cpsd = np.asarray(d['cpsd'])
+        if cpsd.ndim != 3 or cpsd.shape[1] != cpsd.shape[2] \
+                or cpsd.shape[0] != len(frequencies):
+            raise ValueError(f'{os.path.basename(str(path))}: cpsd is '
+                             f'{cpsd.shape}, not (lines, n, n) over '
+                             f'{len(frequencies)} lines')
+        n = cpsd.shape[1]
+        held = (np.asarray(d['held'], dtype=bool) if 'held' in d.files
+                else None)
+        if 'dof' in d.files:
+            channels = [str(c) for c in d['dof']]
+        elif 'coordinate' in d.files:
+            diagonal = np.asarray(d['coordinate'])
+            channels = [dof_string(int(diagonal[i, i, 0]['node']),
+                                   int(diagonal[i, i, 0]['direction']))
+                        for i in range(n)]
+        else:
+            # Refused until Brandon loaded one into a project
+            # (2026-10-16): the controller's own files name no channels,
+            # so the format's commonest file could not be read at all.
+            channels = [str(k + 1) for k in range(n)]
+        if len(channels) != n:
+            raise ValueError(f'{len(channels)} channel names for a '
+                             f'{n}-channel matrix')
+        bands = {name: np.asarray(d[name], dtype=np.float64)
+                 for name in BANDS if name in d.files}
+    off = ~np.eye(n, dtype=bool)
+    if held is None:
+        meaningful = bool(np.any(np.isfinite(cpsd[:, off])
+                                 & (cpsd[:, off] != 0)))
+        held = np.eye(n, dtype=bool) | (
+            meaningful & np.isfinite(cpsd).any(axis=0))
+    rows, resp, refs, limits = [], [], [], {name: [] for name in bands}
+    blank = np.full(len(frequencies), np.nan)
+    for i in range(n):
+        for j in range(n):
+            if not held[i, j]:
+                continue
+            rows.append(cpsd[:, i, j])
+            resp.append(channels[i])
+            refs.append(channels[j])
+            for name, values in bands.items():
+                limits[name].append(values[:, i] if i == j else blank)
+    spec = Specification(
+        frequencies, np.asarray(rows, dtype=np.complex128),
+        response_dof=resp, reference_dof=refs,
+        comment=f'Rattlesnake specification {os.path.basename(str(path))}',
+        **{name: np.asarray(values) for name, values in limits.items()})
+    if ordinate_unit is not None:
+        spec.define_units(ordinate_unit)
+    spec.interpolation = Specification.reading_of(frequencies)
+    return spec

@@ -1,0 +1,705 @@
+"""Scaling a measurement onto its 0 dB specification for comparison.
+
+Standard practice: a run captured at -6 dB is compared by scaling it up
+to the requirement. The scale is detected in whole decibels (or held by
+hand on the object), the data itself is never touched, and every reader
+of the comparison — the drawn curves, the error metrics, the report —
+resolves the same number through `comparison_scale_db`.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from hertzforge.core.compliance import (
+    compare_all,
+    comparison_scale_db,
+    detect_scale_db,
+    exceedances,
+)
+from hertzforge.core.data import Psd, Specification
+
+
+def _spec(channels=('101Z+',)):
+    """A flat-ish power-law specification, one record per channel."""
+    f = np.array([20.0, 100.0, 600.0, 2000.0])
+    return Specification(
+        f, np.tile([0.01, 0.04, 0.04, 0.01], (len(channels), 1)),
+        response_dof=list(channels),
+        ordinate_dim='acceleration**2/frequency',
+        ordinate_unit='m/s**2',
+        abort_upper=np.tile([0.02, 0.08, 0.08, 0.02], (len(channels), 1)),
+        abort_lower=np.tile([0.005, 0.02, 0.02, 0.005],
+                            (len(channels), 1)))
+
+
+def _measured(spec, offsets_db, wiggle=0.0, seed=0):
+    """PSDs on a fine grid: each channel its spec curve offset in dB,
+    optionally with a repeatable ripple so no two lines agree."""
+    from hertzforge.core.compliance import log_interpolate
+
+    f = np.linspace(20.0, 2000.0, 400)
+    rng = np.random.default_rng(seed)
+    rows = []
+    for offset in offsets_db:
+        base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+        ripple = 10.0 ** (wiggle * rng.standard_normal(f.size) / 10.0)
+        rows.append(base * 10.0 ** (-offset / 10.0) * ripple)
+    return Psd(f, np.array(rows),
+               response_dof=list(spec.response_dof[:len(offsets_db)]),
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m/s**2')
+
+
+def test_a_quiet_run_detects_its_commanded_level():
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    assert detect_scale_db(spec, psds) == 6
+
+
+def test_detection_snaps_to_the_three_decibel_ladder():
+    """Runs are commanded at +3, 0, -3, -6 … (Brandon, 2026-09-19,
+    from whole decibels): the detected offset lands on that ladder. A
+    level whose bands center within `DETECTION_RUNG_DB` of a rung reads
+    as that rung; one between rungs is a controller that held the wrong
+    level, not a commanded step, and reads zero (2026-09-26 — it used
+    to snap to the nearest rung, dividing out part of the control
+    error)."""
+    from hertzforge.core.compliance import DETECTION_RUNG_DB, SCALE_STEP_DB
+
+    assert (SCALE_STEP_DB, DETECTION_RUNG_DB) == (3, 0.75)
+    spec = _spec()
+    for offset, snapped in ((6.4, 6), (5.6, 6), (8.5, 9), (-3.5, -3),
+                            (7.4, 0), (7.6, 0), (4.2, 0), (1.6, 0),
+                            (-4.6, 0)):
+        assert detect_scale_db(spec, _measured(spec, [offset])) == snapped, offset
+
+
+def test_monitors_cannot_outvote_the_controls():
+    """A specification bounds monitors as well as controls, each monitor
+    its own distance under its envelope. The commanded level is the
+    smallest offset two channels agree on — the controls, sitting on
+    their specification — not the median of wherever the monitors pile
+    up. This is the shape of a real 36-channel run that detected +8
+    for a section commanded at -6."""
+    channels = tuple(f'{n}Z+' for n in range(101, 111))
+    spec = _spec(channels)
+    # two controls dead on the commanded -6; eight monitors scattered
+    # from 7 to 25 dB under their envelopes, some agreeing with each
+    # other well above the controls
+    offsets = [6.0, 6.0, 8.0, 8.0, 8.0, 12.0, 16.0, 20.0, 22.0, 25.0]
+    psds = _measured(spec, offsets, wiggle=1.0)
+    # read from the band levels (2026-09-26): monitors under their
+    # envelopes spread the bands, and spread bands are not a level, so
+    # unnamed the answer is zero — shown unscaled — never the monitors'
+    # rung; with the controls named, only they are counted
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=['101Z+', '102Z+']) == 6
+    # even with the controls the majority, a few monitors far under
+    # their envelopes spread the bands past the limit
+    majority = _measured(spec, [6.0] * 7 + [12.0, 16.0, 22.0], wiggle=1.0)
+    assert detect_scale_db(spec, majority) == 0
+    assert detect_scale_db(spec, majority, controls=channels[:7]) == 6
+
+
+def test_one_broken_channel_cannot_answer_alone():
+    """Smaller than the controls but alone: a single channel over its
+    limit does not drag the detected level to a hotter rung. Pooled
+    with two controls and two monitors it is no one controlled test,
+    so zero; with the controls named, their level."""
+    channels = tuple(f'{n}Z+' for n in range(101, 106))
+    spec = _spec(channels)
+    offsets = [-4.0, 6.0, 6.0, 9.0, 14.0]      # one channel 4 dB over
+    psds = _measured(spec, offsets, wiggle=1.0)
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=['102Z+', '103Z+']) == 6
+
+
+def test_the_held_scale_outranks_detection():
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    assert comparison_scale_db(spec, psds) == 6
+    psds.scale_db = 0
+    assert comparison_scale_db(spec, psds) == 0, '0 is "do not scale"'
+    psds.scale_db = 4
+    assert comparison_scale_db(spec, psds) == 4
+    psds.scale_db = None
+    assert comparison_scale_db(spec, psds) == 6, 'blank returns to auto'
+
+
+def test_the_error_metrics_judge_the_scaled_data():
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    rows = compare_all(spec, psds)
+    assert rows and rows[0][1]['lines'] > 0
+    assert rows[0][1]['scale_db'] == 6.0, 'the table can say what it did'
+    assert abs(rows[0][1]['difference_db']) < 0.1, (
+        'scaled up, the -6 dB run sits on its specification')
+    psds.scale_db = 0
+    unscaled = compare_all(spec, psds)
+    assert unscaled[0][1]['difference_db'] == pytest.approx(-6.0, abs=0.1)
+
+
+def test_exceedances_judge_the_scaled_data():
+    """A -6 dB run sits below abort_lower unscaled and inside scaled —
+    the marks must agree with the metrics about which data was read."""
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    _over, under = exceedances(spec, psds)
+    assert not under.any(), 'scaled onto the spec, nothing is under'
+    psds.scale_db = 0
+    _over, under = exceedances(spec, psds)
+    assert under.any(), 'unscaled, the quiet run is below abort_lower'
+
+
+def test_a_held_scale_rides_the_project_file(tmp_path):
+    import hertzforge
+
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    psds.scale_db = 3
+    project = hertzforge.Project('Scaled')
+    project.add('Spec', spec)
+    project.add('PSDs', psds)
+    project.save(tmp_path / 'scaled.vdyn')
+    back = hertzforge.Project.open(tmp_path / 'scaled.vdyn')
+    assert back['PSDs'].scale_db == 3, 'a held scale is a judgment'
+    assert back['Spec'].scale_db is None
+    psds.scale_db = None
+    project.save(tmp_path / 'auto.vdyn')
+    again = hertzforge.Project.open(tmp_path / 'auto.vdyn')
+    assert again['PSDs'].scale_db is None, 'auto stays auto, re-detected'
+
+
+def test_the_report_notes_the_scaling_prominently():
+    """A reader who misses the scaling reads the figure as a claim
+    about the raw run — so the caption says it, and so does the
+    measured curve's own label."""
+    import hertzforge
+    from hertzforge.report import _bars_block, _comparison_block
+
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    figure = _comparison_block({}, psds, spec, hertzforge.SI, 'Control')
+    assert 'measured data scaled +6 dB to the specification' in (
+        figure['caption'])
+    assert any(curve['label'] == 'measured (+6 dB)'
+               for curve in figure['curves'])
+
+    bars = _bars_block({'mode': 'error', 'caption': 'Levels'},
+                       spec, psds, hertzforge.SI)
+    assert 'measured data scaled +6 dB' in bars['caption']
+    assert max(abs(v) for v in bars['values']) < 0.2, (
+        'the bars judge the scaled data')
+
+
+def test_an_unscaled_comparison_claims_no_scaling():
+    import hertzforge
+    from hertzforge.report import _bars_block, _comparison_block
+
+    spec = _spec()
+    psds = _measured(spec, [0.0])
+    figure = _comparison_block({}, psds, spec, hertzforge.SI, 'Control')
+    assert 'scaled' not in figure['caption']
+    assert any(curve['label'] == 'measured' for curve in figure['curves'])
+    bars = _bars_block({'mode': 'error', 'caption': 'Levels'},
+                       spec, psds, hertzforge.SI)
+    assert 'scaled' not in bars['caption']
+
+
+def test_banding_carries_the_held_scale():
+    """The report bands the narrowband PSD itself, so a judgment held
+    on it has to ride into the octave comparison."""
+    spec = _spec()
+    psds = _measured(spec, [6.0])
+    psds.scale_db = 4
+    assert psds.to_octave(6).scale_db == 4
+    psds.scale_db = None
+    assert psds.to_octave(6).scale_db is None
+
+
+def _tilted(spec):
+    """A channel at +6.5 dB below 300 Hz and +6.2 above. It was built to
+    make the narrowband and octave gridings detect different levels (5
+    and 6 on the whole-decibel rule, until 2026-09-19; 9 and 6 on the
+    nearest rung, until 2026-09-26) — the disagreement one resolution
+    exists to kill. Detection now reads sixth-octave bands whatever it
+    is given, so the two cannot disagree; the fixture sits on the 6
+    rung and the test pins that the report's bands use the one level."""
+    from hertzforge.core.compliance import log_interpolate
+
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    offset = np.where(f < 300.0, 6.5, 6.2)
+    return Psd(f, np.array([base * 10.0 ** (-offset / 10.0)]),
+               response_dof=['101Z+'],
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m/s**2')
+
+
+def test_the_report_resolves_one_scale_for_every_grid():
+    """The report bands the narrowband PSD itself for its octave
+    figures. Detected again on the banded copy the offset rounded to a
+    different decibel, and one report claimed two scalings for one
+    run — seen live as +3 on the PSD figure and +2 on the octave bars."""
+    import hertzforge
+    from hertzforge.core.compliance import detect_scale_db
+    from hertzforge.report import _bars_block
+
+    spec = _spec()
+    psds = _tilted(spec)
+    assert detect_scale_db(spec, psds) == 6
+    # bands compare only with the same bands (2026-09-19): the banded
+    # pair is the specification banded too, and a curve against bands
+    # is not compared at all
+    assert detect_scale_db(spec, psds.to_octave(6)) == 0, 'refused, not detected'
+    # detection reads sixth-octave bands whatever it is given
+    # (2026-09-26), so the narrowband pair and the banded pair are read
+    # from the same bands and cannot disagree
+    on_bands = detect_scale_db(spec.to_octave(6), psds.to_octave(6))
+    assert on_bands == 6, 'the banded pair reads the same bands'
+    bars = _bars_block({'mode': 'error', 'octave': 6, 'caption': 'Bands'},
+                       spec, psds, hertzforge.SI)
+    assert 'scaled +6 dB' in bars['caption'], (
+        'the octave blocks use the scale resolved on the narrowband')
+
+
+def test_a_channel_on_spec_vetoes_a_coincidental_agreement():
+    """The plate run's shape: the drive point dead on the
+    specification, the rest scattered low because two shakers cannot
+    hold eight channels — two of which happen to agree. A commanded
+    level is a floor, and the on-spec channel sits under the
+    candidate, so this is a badly controlled full-level run and not a
+    well-controlled -4 dB one."""
+    spec = _spec(('101Z+', '113Z+', '1301Z+', '1313Z+',
+                  '404Z+', '410Z+'))
+    psds = _measured(spec, [0.0, 3.0, 4.0, 4.0, 9.0, 14.0])
+    assert detect_scale_db(spec, psds) == 0
+
+
+def test_the_plate_demonstration_run_detects_full_level():
+    """The real file that exposed the coincidence, kept as the pin."""
+    from conftest import fixture_path
+
+    import hertzforge
+
+    run = hertzforge.import_file(fixture_path('plate', 'random.nc4'))
+    spec = run['Random_specification']
+    psds = run['time_data'].compute_psds()
+    assert detect_scale_db(spec, psds) == 0
+
+
+def test_a_real_run_up_with_its_monitors_reads_its_level():
+    """A -6 run, three controls on the commanded level and three
+    monitors under their envelopes: half the pool on the rung is not a
+    majority, so unnamed it reads zero; named, the controls' -6. (This
+    was the floor veto's test until detection pooled, 2026-09-26.)"""
+    dofs = ('101Z+', '113Z+', '1301Z+', '1313Z+', '404Z+', '410Z+')
+    spec = _spec(dofs)
+    psds = _measured(spec, [6.0, 6.0, 6.0, 8.0, 11.0, 15.0])
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=dofs[:3]) == 6
+
+
+def test_a_force_record_stored_first_cannot_steal_the_pairing():
+    """matched_records paired by DOF name alone once, and only came out
+    right because acceleration records happened to be stored first. A
+    drive point's force PSD ahead of its acceleration in the file must
+    not be the record the specification is compared against."""
+    from hertzforge.core.compliance import matched_records
+
+    spec = _spec(('101Z+',))
+    f = np.linspace(20.0, 2000.0, 40)
+    both = Psd(f, np.ones((2, f.size)),
+               response_dof=['101Z+', '101Z+'],
+               ordinate_dim=['force**2/frequency',
+                             'acceleration**2/frequency'],
+               ordinate_unit=['N', 'm/s**2'])
+    rows = matched_records(spec, both)
+    assert rows == [('101Z+', 0, 1)], 'the acceleration record, stored second'
+
+
+def test_lines_the_specification_barely_occupies_cannot_set_the_level():
+    """Brandon found the drone transient detecting -26 dB where it
+    should read 0 (2026-08-25). Its specification is the PSD of a
+    target waveform that stops around 2 kHz, so above that the
+    requirement sits at 5e-15 against a measurement at its noise
+    floor — a 40 dB difference saying nothing about level, over 51%
+    of the frequency lines. The median went with the majority.
+
+    Built here at the same shape, so the mechanism is pinned rather
+    than the one file: content to 2 kHz, near-nothing above it, and a
+    measurement on level throughout.
+    """
+    import numpy as np
+
+    from hertzforge.core.compliance import log_interpolate
+
+    channels = tuple(f'{n}Z+' for n in range(101, 105))
+    spec_f = np.array([20.0, 100.0, 1000.0, 2000.0, 2100.0, 8000.0])
+    # flat to 2 kHz, then twelve decades down: a waveform's spectrum
+    # ending, not a requirement of quiet
+    level = np.array([0.04, 0.04, 0.04, 0.04, 4e-14, 4e-15])
+    spec = Specification(
+        spec_f, np.tile(level, (len(channels), 1)),
+        response_dof=list(channels),
+        ordinate_dim='acceleration**2/frequency', ordinate_unit='m/s**2')
+    # the measurement runs to 8 kHz — most of its lines above the band
+    # the specification occupies — and is dead on level inside it
+    f = np.linspace(20.0, 8000.0, 4000)
+    rows = []
+    for _ in channels:
+        row = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+        rows.append(np.where(f <= 2000.0, row, 5e-11))   # noise floor
+    psds = Psd(f, np.array(rows), response_dof=list(channels),
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m/s**2')
+    assert (f > 2000.0).mean() > 0.5, 'the fixture has the same majority'
+    assert detect_scale_db(spec, psds) == 0
+
+
+def test_a_run_that_merely_held_imperfectly_is_not_a_scaled_run():
+    """A level nobody commanded is not a level. Runs step in 3 dB and
+    6; a channel spread of a decibel or two around the specification
+    is a test that held imperfectly, and dividing it out would erase
+    the control error the comparison exists to show (Brandon,
+    2026-08-25 — the drone transient read -1 dB once its band was
+    right, on two channels happening to share that value)."""
+    channels = tuple(f'{n}Z+' for n in range(101, 109))
+    spec = _spec(channels)
+    psds = _measured(spec, [-1.0, -1.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0],
+                     wiggle=0.5)
+    assert detect_scale_db(spec, psds) == 0
+
+    # but a commanded step is still read, and is not swallowed — here
+    # two controls among six monitors, so named
+    stepped = _measured(spec, [3.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0, 14.0],
+                        wiggle=0.5)
+    assert detect_scale_db(spec, stepped, controls=channels[:2]) == 3
+    assert detect_scale_db(
+        spec, _measured(spec, [6.0] * 2 + [9.0, 12.0, 14.0, 18.0, 20.0,
+                                           25.0], wiggle=1.0),
+        controls=channels[:2]) == 6
+
+
+EIGHT = tuple(f'{n}Z+' for n in range(101, 109))
+
+
+def test_a_hot_failure_is_shown_not_scaled():
+    """Every channel ~52 dB over its specification and agreeing within
+    two: no channel is plausible, so the floor cannot veto, and two
+    agreeing is easy. No controller commands +52 dB."""
+    spec = _spec(EIGHT)
+    hot = _measured(spec, [-52.0, -51.0, -52.0, -53.0, -51.0, -52.0,
+                           -52.0, -51.0], wiggle=0.3)
+    assert detect_scale_db(spec, hot) == 0
+
+
+def _peaks_held(spec, channels):
+    """Over specification at five resonant peaks, 9 dB low between
+    them: the line median says +9, on its rung, and the RMS barely
+    moves — a control failure, which moves the two differently, where
+    a level moves both. On the rung on purpose, so only the energy
+    disagreement can refuse it."""
+    from hertzforge.core.compliance import log_interpolate
+
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    peaks = np.zeros(f.size, dtype=bool)
+    for center in (150.0, 300.0, 450.0, 900.0, 1500.0):
+        peaks |= np.abs(f - center) < 0.05 * center
+    rng = np.random.default_rng(0)
+    rows = [base * np.where(peaks, 10.0 ** 0.6, 10.0 ** -0.9)
+            * 10.0 ** (0.02 * rng.standard_normal(f.size))
+            for _ in channels]
+    return Psd(f, np.array(rows), response_dof=list(channels),
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m/s**2')
+
+
+def test_broad_under_drive_with_the_peaks_held_is_not_a_level():
+    channels = EIGHT[:4]
+    spec = _spec(channels)
+    measured = _peaks_held(spec, channels)
+    rows = compare_all(spec, measured, scale_db=0)
+    assert all(abs(r['difference_db']) < 3.0 for _label, r in rows), (
+        'as measured, every channel is within the RMS tolerance')
+    from hertzforge.core.compliance import judge
+
+    level = judge(spec, measured, 0, 0, None, True, scale_db=0)
+    median = float(np.median(10.0 * np.log10(level['asked'] / level['held'])))
+    assert abs(median - 9.0) < 0.75, 'the median alone would read +9'
+    assert detect_scale_db(spec, measured) == 0
+
+
+def test_a_genuine_reduced_level_run_is_still_detected():
+    """The rule must not be too strict: runs commanded at -3 through
+    -24 dB read their level — every channel a control, or the controls
+    named among as many monitors — and -27 is past the window."""
+    spec = _spec(EIGHT)
+    for level in (3.0, 6.0, 12.0, 24.0):
+        run = _measured(spec, [level] * 8, wiggle=0.5)
+        assert detect_scale_db(spec, run) == level, level
+        half = _measured(spec, [level] * 4 + [level + 3.0, level + 5.0,
+                                              level + 8.0, level + 11.0],
+                         wiggle=0.5)
+        assert detect_scale_db(spec, half, controls=EIGHT[:4]) == level, level
+    assert detect_scale_db(spec, _measured(spec, [27.0] * 8, wiggle=0.5)) == 0
+
+
+@pytest.mark.parametrize(('offset', 'expected'), [
+    (-9.0, 0),      # 9 dB hot: past the -6 edge, a fault
+    (-6.0, -6),     # a run at +6 dB, the hottest believed
+    (24.0, 24),     # a run-up from -24 dB
+    (27.0, 0),      # past the +24 edge
+])
+def test_the_window_of_commanded_levels(offset, expected):
+    spec = _spec(EIGHT)
+    assert detect_scale_db(spec, _measured(spec, [offset] * 8,
+                                           wiggle=0.3)) == expected
+
+
+def test_a_detected_scale_is_said_aloud_to_a_script():
+    """`channel_errors` drops the scale, so a script charting with it
+    could not see one: `compare_all` warns when it detected a level
+    itself, and not when the scale was given or held."""
+    import warnings
+
+    from hertzforge.core.compliance import ScaleWarning
+
+    spec = _spec(EIGHT)
+    run = _measured(spec, [6.0] * 8, wiggle=0.3)
+    with pytest.warns(ScaleWarning, match=r'scaled by \+6 dB, detected '
+                                          r'from the data as a run at -6 dB'):
+        compare_all(spec, run)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', ScaleWarning)
+        compare_all(spec, run, scale_db=0)
+        compare_all(spec, run, scale_db=6)
+        run.scale_db = 6
+        compare_all(spec, run)
+        run.scale_db = None
+        compare_all(spec, _measured(spec, [0.0] * 8, wiggle=0.3))
+
+
+TWENTY_FOUR = tuple(f'{n}Z+' for n in range(101, 125))
+
+
+def test_a_hot_minority_does_not_outvote_an_on_level_majority():
+    """21 controls on specification and 3 running 1.6 dB hot: their
+    medians snap to 0 and -3, the smallest agreed is -3, and every
+    on-spec channel "explains" a one-step shift within the 3 dB RMS
+    tolerance. A real level moves the majority to the candidate; this
+    candidate holds 3 channels within half a step against zero's 21."""
+    spec = _spec(TWENTY_FOUR)
+    run = _measured(spec, [0.0] * 21 + [-1.6] * 3, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_a_mixed_under_drive_is_not_a_level():
+    """Half the channels on specification, half 3 dB low: no level
+    could put both halves there. A uniform 3 dB under-drive, on the
+    other hand, is indistinguishable from a run at -3 dB and reads as
+    one — the limit no gate can remove, and why a detected scale is
+    always said."""
+    spec = _spec(TWENTY_FOUR)
+    assert detect_scale_db(spec, _measured(spec, [0.0] * 12 + [3.0] * 12,
+                                           wiggle=0.3)) == 0
+    assert detect_scale_db(spec, _measured(spec, [3.0] * 24,
+                                           wiggle=0.3)) == 3
+
+
+def test_a_hot_minority_run_at_minus_six_reads_minus_six():
+    """The per-channel vote read this +3 — a wrong level applied. Pooled,
+    the 21 controls on their level set the median, and the three hot
+    ones cannot move it."""
+    spec = _spec(TWENTY_FOUR)
+    run = _measured(spec, [6.0] * 21 + [4.4] * 3, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 6
+
+
+def test_monitors_in_the_majority_read_zero_never_their_rung():
+    """A specification bounding more monitors than controls, nothing
+    naming the controls: the pooled median is the monitors'. Pooling
+    everything, as first proposed, read a -12 dB run as +15 and a -6
+    as +9; the majority test reads zero, and the Scaling field says the
+    rest."""
+    spec = _spec(TWENTY_FOUR)
+    for run, controls in (
+            ([6.0] * 8 + [9.0, 11.0, 14.0, 8.5, 12.0, 10.0] * 2
+             + [7.5, 13.0, 9.5, 15.0], 6),
+            ([12.0] * 8 + [15.0] * 10 + [18.0] * 6, 12)):
+        measured = _measured(spec, run, wiggle=0.3)
+        assert detect_scale_db(spec, measured) == 0
+        assert detect_scale_db(spec, measured,
+                               controls=TWENTY_FOUR[:8]) == controls
+
+
+def test_the_level_is_read_in_sixth_octave_bands():
+    """Narrowband lines are noisy, weighted to the top decade and the
+    anti-resonances; detection bands both to sixth octaves first, so a
+    narrowband pair and its banded copy read the same level."""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [6.0] * 8, wiggle=1.0)
+    assert detect_scale_db(spec, run) == 6
+    assert detect_scale_db(spec.to_octave(6), run.to_octave(6)) == 6
+
+
+def test_tight_bands_between_rungs_are_not_a_level():
+    """A full-level test the controller held 1.6 dB low: every band
+    within half a step of +3 and a tiny spread — only the bands'
+    median, 1.4 dB off the rung, says it is not a commanded -3."""
+    spec = _spec(EIGHT)
+    assert detect_scale_db(spec, _measured(spec, [1.6] * 8, wiggle=0.3)) == 0
+
+
+def test_bands_that_split_between_two_rungs_are_not_a_level():
+    """Five channels 3 dB low and three on level at full level: the mode
+    is +3, the spread small, the median on the rung — but only 5 in 8
+    bands agree with it."""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [0.0] * 3 + [3.0] * 5, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_the_top_decade_cannot_outvote_the_band():
+    """A full-level run whose controller lost 3 dB above 400 Hz — where
+    authority runs out first. Lines are evenly spaced in hertz, so four
+    in five lie above 400 Hz and a narrowband reading has them agree,
+    tightly, on a run at -3 dB; sixth-octave bands are evenly spaced as
+    the specification is written, a third of them lie up there, and the
+    level they agree on is full level."""
+    from hertzforge.core.compliance import log_interpolate
+
+    spec = _spec(EIGHT)
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    rng = np.random.default_rng(1)
+    rows = [base * np.where(f > 400.0, 10.0 ** -0.3, 1.0)
+            * 10.0 ** (0.02 * rng.standard_normal(f.size)) for _ in EIGHT]
+    run = Psd(f, np.array(rows), response_dof=list(EIGHT),
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='m/s**2')
+    high = float(np.mean(f > 400.0))
+    assert high > 0.75, 'most narrowband lines are in the top decade'
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_a_few_deep_bands_do_not_hide_a_level():
+    """Real control has tails (the other session's 22 runs, 2026-09-26):
+    runs held on level with 89% of their bands within 1.5 dB had σ of
+    4.3 dB from a few deep bands of under-driven out-of-plane channels,
+    and a σ test showed them unscaled. The share of agreeing bands reads
+    the bulk, and the level stands."""
+    from hertzforge.core.compliance import judge, log_interpolate
+
+    spec = _spec(EIGHT)
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    rng = np.random.default_rng(2)
+    rows = []
+    for k, _dof in enumerate(EIGHT):
+        # a run at -6 dB; two out-of-plane channels 15 dB under above
+        # 1.2 kHz, where the shakers could not reach them
+        deep = (k >= 6) & (f > 1200.0)
+        rows.append(base * 10.0 ** (-(6.0 + 15.0 * deep) / 10.0)
+                    * 10.0 ** (0.03 * rng.standard_normal(f.size)))
+    run = Psd(f, np.array(rows), response_dof=list(EIGHT),
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='m/s**2')
+    s, m = spec.to_octave(6), run.to_octave(6)
+    d = np.concatenate([10.0 * np.log10(judge(s, m, i, i, None, True,
+                                              scale_db=0)['asked']
+                                        / judge(s, m, i, i, None, True,
+                                                scale_db=0)['held'])
+                        for i in range(8)])
+    assert np.std(d) > 2.0, 'a σ test at 2 dB would refuse it'
+    assert detect_scale_db(spec, run) == 6
+
+
+def test_two_groups_straddling_a_rung_are_not_one_level():
+    """Half the channels 1.4 dB over the -6 rung and half 1.4 under:
+    every band is within half a step of +6, but the bulk is spread
+    across a whole step — two levels, not one — and the median lands on
+    one of the two groups, off the rung. (The robust spread tried here,
+    2026-09-26, could only have caught this, and the rung test does.)"""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [4.6] * 4 + [7.4] * 4, wiggle=0.05)
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_a_script_holds_and_reads_the_familys_scale():
+    import hertzforge
+
+    spec = _spec()
+    project = hertzforge.Project('Scale')
+    project.add('Spec', spec)
+    project.add('PSDs', _measured(spec, [6.0]))
+    octave = project.compute_octave('PSDs', 6)
+    detected = project.comparison_scale('Spec', 'PSDs')
+    assert project.comparison_scale('Spec', octave) == detected, \
+        'detected once, on the narrowband, for the whole family'
+    assert sorted(project.set_comparison_scale(octave, 3)) == sorted(
+        ['PSDs', octave])
+    assert project['PSDs'].scale_db == 3
+    assert project.comparison_scale('Spec', 'PSDs') == 3
+    project.set_comparison_scale('PSDs', None)
+    assert project.comparison_scale('Spec', octave) == detected
+    with pytest.raises(ValueError, match='whole decibels'):
+        project.set_comparison_scale('PSDs', 2.5)
+
+
+def test_a_pair_with_no_bands_to_read_is_never_scaled():
+    """An SRS against its shock specification has no octave reading to
+    detect a level from — a shock run is judged at the level it was
+    run — so a measurement 6 dB under reads zero, not +6 (mutation
+    testing, 2026-10-10: the branch was never reached)."""
+    from hertzforge.core.data import ShockSpecification, Srs
+
+    f = np.geomspace(10.0, 2000.0, 30)
+    spec = ShockSpecification(f, np.full((1, 30), 50.0), response_dof=['101Z+'],
+                              ordinate_dim='acceleration', ordinate_unit='g')
+    srs = Srs(f, np.full((1, 30), 25.0), response_dof=['101Z+'],
+              ordinate_dim='acceleration', ordinate_unit='g')
+    assert detect_scale_db(spec, srs) == 0
+
+
+def test_a_measurement_with_no_power_is_not_a_level():
+    """Nothing measured is a dead channel, not a run at minus infinity
+    decibels — no rung, no scale."""
+    spec = _spec()
+    silent = _measured(spec, [0.0])
+    silent.ordinate[:] = 0.0
+    assert detect_scale_db(spec, silent) == 0
+
+
+def test_a_record_of_undeclared_units_pairs_only_when_nothing_matches_exactly():
+    """'unknown' has made no claim to contradict, so it pairs when it
+    is all there is — and loses to a record whose quantity matches,
+    wherever that is stored (mutation testing, 2026-10-10: neither
+    half was tested)."""
+    from hertzforge.core.compliance import matched_records
+
+    spec = _spec(('101Z+',))
+    f = np.linspace(20.0, 2000.0, 40)
+    undeclared = Psd(f, np.ones((1, f.size)), response_dof=['101Z+'])
+    assert matched_records(spec, undeclared) == [('101Z+', 0, 0)]
+    both = Psd(f, np.ones((2, f.size)), response_dof=['101Z+', '101Z+'],
+               ordinate_dim=['unknown', 'acceleration**2/frequency'],
+               ordinate_unit=[None, 'm/s**2'])
+    assert matched_records(spec, both) == [('101Z+', 0, 1)]
+
+
+def test_a_cross_term_is_labelled_by_both_its_dofs():
+    from hertzforge.core.compliance import matched_records
+
+    f = np.linspace(20.0, 2000.0, 40)
+
+    def cross(kind):
+        return kind(f, np.ones((2, f.size)), response_dof=['101Z+', '102Z+'],
+                    reference_dof=['101Z+', '101Z+'],
+                    ordinate_dim='acceleration**2/frequency')
+
+    rows = matched_records(cross(Specification), cross(Psd))
+    assert [label for label, _s, _m in rows] == ['101Z+', '102Z+/101Z+']

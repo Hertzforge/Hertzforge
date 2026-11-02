@@ -527,13 +527,20 @@ fn h_the_auto_ladder_paces_on_the_real_clock() {
         "the first rung waited {first:.4} s; it must not"
     );
 
-    // The SECOND does.
+    // The SECOND does. The floor spaces pulse STARTS, so the outside bound is
+    // taken from before the first call: the second pulse starts at least 0.5 s
+    // after the first did, which is no earlier than t0. Timed from the end of
+    // the first call instead, the bound compared the two fires' own durations
+    // and failed whenever the first ran longer than the second, with the pacer
+    // correct (0.4995 s on a loaded runner; 1 run in 40 on an idle one).
     let t1 = std::time::Instant::now();
     assert!(s.fire_next_pulse().unwrap());
+    let both = t0.elapsed().as_secs_f64();
     let second = t1.elapsed().as_secs_f64();
     assert!(
-        second >= 0.5,
-        "the second ladder rung fired {second:.4} s after the first, inside the 0.5 s          rate-model floor - the AUTO ladder is not paced and the floor bounds nothing"
+        both >= 0.5,
+        "the second ladder rung returned {both:.4} s after the first was called, inside \
+         the 0.5 s rate-model floor - the AUTO ladder is not paced and the floor bounds nothing"
     );
     assert!(second < 2.0, "the wait overshot badly: {second:.4} s");
 
@@ -545,6 +552,12 @@ fn h_the_auto_ladder_paces_on_the_real_clock() {
         .map(|r| r.at_wall_time_s)
         .collect();
     assert_eq!(w.len(), 2);
+    // Start to start, which is what the floor spaces: never inside it.
+    assert!(
+        w[1] >= w[0] + 0.5,
+        "the second rung started {:.4} s after the first, inside the 0.5 s floor: {w:?}",
+        w[1] - w[0]
+    );
     assert!(
         ((w[1] - w[0]) - 0.5).abs() < 0.100,
         "pacer timeline {w:?} vs the 0.5 s floor"

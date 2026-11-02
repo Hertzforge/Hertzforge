@@ -1,0 +1,116 @@
+# The Rust timing tests: run by `scripts/rust_tests.sh timing`, one at a time,
+# after `scripts/rust_tests.sh parallel` has run everything else.
+#
+# Why. These tests pass or fail on the wall clock. On a shared CI runner the
+# other tests of the same binary (153 in hertzforge-backendd's library) hold
+# the cores, the clock keeps moving while a test's own threads wait for one,
+# and a correct build fails: a Sim stop ramp that takes about 40 s alone ran
+# past its 180 s deadline on a three-core runner. One at a time, they get the
+# cores they were written for. Nothing in them is loosened.
+#
+# What belongs here: a test whose verdict depends on the wall clock, not just
+# its running time. It
+#   - asserts an elapsed-time bound, or a rate against real time;
+#   - sleeps a fixed real-time window, then asserts what happened inside it;
+#   - samples another thread's transient state on a real-time poll;
+#   - drives a Sim run, a daemon or a socket session on background threads and
+#     waits for an outcome against a wall-clock deadline; or
+#   - runs the engine with the hardware scheduling guard armed (a hardware
+#     station class, or the engine's default compute budget and period-jitter
+#     check with a per-tick cost that load can push past them).
+# A test that only takes long, or whose timeout only guards against a hang,
+# stays in the parallel pass.
+#
+# Format: package, target (lib, test:NAME or bin:NAME) and the test's name as
+# `cargo test -- --list` prints it, one test per line. Each pass checks its
+# count against this list, so an entry that no longer names exactly one test
+# fails the run.
+
+# Sim runs on the daemon's module hosts, waited on against wall-clock deadlines
+hertzforge-backendd  lib  core::tests::a_live_explorer_is_stopped_not_answered_with_nothing_is_running
+hertzforge-backendd  lib  core::tests::explorer_and_random_refuse_each_other_by_name_in_both_directions
+hertzforge-backendd  lib  core::tests::a_parked_stopped_explorer_no_longer_steals_the_sine_start
+hertzforge-backendd  lib  core::tests::a_parked_stopped_explorer_no_longer_steals_the_shock_start
+hertzforge-backendd  lib  core::tests::a_live_module_still_refuses_set_profile_and_keeps_its_config
+hertzforge-backendd  lib  core::tests::a_parked_sine_config_is_released_when_the_shock_family_configures
+hertzforge-backendd  lib  explorer::tests::the_sim_station_runs_publishes_the_explorer_block_and_ramps_to_a_stop
+hertzforge-backendd  lib  explorer::tests::reconfigure_refuses_while_this_modules_own_run_is_live
+hertzforge-backendd  lib  explorer::tests::an_abort_ends_the_run_immediately_and_names_itself
+hertzforge-backendd  lib  explorer::tests::the_time_domain_streams_reach_the_display_bus_with_an_advancing_clock
+hertzforge-backendd  lib  explorer::tests::the_peak_profile_rides_its_reserved_id_on_the_spectra_grid
+hertzforge-backendd  lib  explorer::tests::the_display_rings_drop_count_reaches_the_status_report
+hertzforge-backendd  lib  random::tests::the_sim_station_runs_and_publishes_the_overlay_traces
+hertzforge-backendd  lib  random::tests::level_intents_follow_the_ladder
+hertzforge-backendd  lib  recorder::tests::the_sim_station_pump_publishes_spectra
+hertzforge-backendd  lib  recorder::tests::the_pump_never_outruns_real_time_on_an_unpaced_station
+hertzforge-backendd  lib  sine::tests::the_sim_station_walks_the_bringup_phases_and_engages
+hertzforge-backendd  lib  sine::tests::a_passing_gate_parks_at_awaiting_review_and_proceed_releases_it
+hertzforge-backendd  lib  sine::tests::an_aborted_run_carries_its_reason_in_module_state
+hertzforge-backendd  lib  sine::tests::the_sysid_pair_reaches_the_bus_on_its_reserved_ids
+hertzforge-backendd  lib  sine::tests::the_sweep_overlays_and_time_streams_reach_the_bus
+hertzforge-backendd  lib  sine::tests::reconfigure_refuses_while_this_modules_own_run_is_live
+hertzforge-backendd  lib  sine::tests::a_stop_during_sysid_is_seen_without_the_service_mutex
+hertzforge-backendd  lib  twr::tests::a_passing_sysid_parks_at_the_review_hold_and_proceed_releases_it
+hertzforge-backendd  lib  twr::tests::review_after_sysid_false_walks_straight_past_the_park
+hertzforge-backendd  lib  twr::tests::safe_stop_leaves_the_review_park_standing_and_operator_stop_ends_it
+hertzforge-backendd  lib  twr::tests::the_status_stops_reporting_the_park_the_moment_the_run_leaves_it
+hertzforge-backendd  lib  twr::tests::an_upload_during_a_live_run_is_refused_with_the_contract_string
+hertzforge-backendd  lib  twr::tests::release_idle_refuses_a_live_run
+
+# The daemon end to end over its socket: session heartbeat, lease clock and
+# every exchange run on the wall clock
+hertzforge-backendd  test:wire  a_foreign_protocol_version_is_refused_and_the_connection_closes
+hertzforge-backendd  test:wire  a_bad_or_absent_token_is_refused_without_echoing_it
+hertzforge-backendd  test:wire  a_second_controller_is_refused_and_downgraded_only_on_request
+hertzforge-backendd  test:wire  an_observer_is_refused_every_mutating_command_and_served_every_read_only_one
+hertzforge-backendd  test:wire  the_capture_list_verb_answers_over_the_wire
+hertzforge-backendd  test:wire  the_channel_table_etag_gate_holds_across_two_connections
+hertzforge-backendd  test:wire  an_uncovered_module_is_a_named_local_only_refusal_over_the_wire
+hertzforge-backendd  test:wire  a_remote_controller_runs_random_end_to_end
+hertzforge-backendd  test:wire  a_malformed_command_is_diagnosed_and_the_connection_survives
+hertzforge-backendd  test:wire  a_vanished_controller_leaves_the_run_up_then_the_timeout_safe_stops_it
+hertzforge-backendd  test:wire  the_starting_controller_receives_run_provenance
+hertzforge-backendd  test:wire  a_live_controller_is_never_timed_out
+hertzforge-backendd  test:wire  a_selected_subscription_receives_only_the_channels_it_asked_for
+
+# The capture writer's flush cadence, inside a fixed real-time window
+hertzforge-capture  lib  tests::a_running_capture_flushes_and_syncs_on_the_cadence
+hertzforge-capture  lib  tests::a_killed_capture_leaves_a_readable_provisional_sidecar
+hertzforge-capture  lib  tests::a_faulted_writer_keeps_counting_and_records_the_reason
+
+# The engine's real-time gates: the blanking window, the stall deadman, and the
+# 400-channel run under the default scheduling guard and a 30 s budget
+hertzforge-engine  test:safety_gates  blanking_suppresses_a_trip_inside_the_window_and_arms_after_it
+hertzforge-engine  test:safety_gates  an_intermittent_but_delivering_stream_is_not_a_stall
+hertzforge-engine  test:scale_400ch  four_hundred_channels_run_clean_at_the_derived_block_and_ring
+
+# A job that must still be running when the second start arrives, and a cancel
+# inside a real-time window
+hertzforge-insight  lib  jobs::tests::single_job_policy_and_lifecycle
+hertzforge-insight  lib  jobs::tests::cancel_reaches_the_worker_and_marks_failed
+
+# The shock pacer on the real clock
+hertzforge-shock-host  lib  service::pacer::tests::the_real_pacer_treats_pulse_start_as_an_ordinary_read
+hertzforge-shock-host  test:service_sim  g_the_default_pacer_is_the_real_clock
+hertzforge-shock-host  test:service_sim  h_the_auto_ladder_paces_on_the_real_clock
+
+# A watcher thread sampling the notch state every 200 us
+hertzforge-sine  test:notch_liveness  notch_engages_at_least_once_under_a_limiting_profile
+hertzforge-sine  test:notch_liveness  the_notch_measurably_reduces_the_drive_versus_no_notch
+
+# The sine service on a hardware station class: the tick-period compute budget
+# and the period-jitter check are armed
+hertzforge-sine  test:stop_paths  an_operator_stop_stops_the_backend
+hertzforge-sine  test:stop_paths  the_stop_waits_for_the_cola_aux_too
+hertzforge-sine  test:stop_paths  a_control_tick_trip_reaches_the_backend
+hertzforge-sine  test:stop_paths  a_batch_budget_exit_continues_the_run
+hertzforge-sine  test:stop_paths  the_raw_ring_carries_acquired_blocks_to_the_tap
+hertzforge-sine  test:stop_paths  periodic_save_honors_its_interval
+hertzforge-sine  test:stop_ramp_protections  a_commanded_ramp_down_on_a_unity_plant_lands_stopped_with_no_trip
+hertzforge-sine  test:stop_ramp_protections  the_ramp_walks_the_drive_down_rather_than_cliffing_it
+hertzforge-sine  test:stop_ramp_protections  a_genuine_hazard_during_the_ramp_still_aborts
+
+# The control service: a run paced to real time, and the server streaming it
+sds-control  test:sim_run  a_paced_run_tracks_wall_time_and_stops_on_request_with_a_reason
+sds-control  test:ws_server  hello_methods_errors_and_a_live_display_stream
+sds-control  test:ws_server  malformed_frames_get_bad_request_not_silence

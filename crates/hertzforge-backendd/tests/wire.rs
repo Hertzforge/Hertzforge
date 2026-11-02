@@ -751,9 +751,16 @@ async fn a_remote_controller_runs_random_end_to_end() {
     // thread (their duration scales with the acquisition settings and must not
     // sit inside the front end's 60 s command window). Give the priming a
     // bounded moment before asserting on a DRIVING status.
+    // Past PRIMING, not merely past Idle: until the run thread takes the service
+    // lock, a poll reads the armed SysId snapshot, level included, and the next
+    // poll then gets the priming answer, which carries no level.
     for _ in 0..200 {
         if let Response::Status(st) = cmd(&mut ws, 30, Command::GetStatus).await {
-            if !matches!(st.run, hertzforge_protocol::RunState::Idle) && st.level_db.is_some() {
+            if matches!(
+                st.run,
+                hertzforge_protocol::RunState::Running | hertzforge_protocol::RunState::Stopped
+            ) && st.level_db.is_some()
+            {
                 break;
             }
         }

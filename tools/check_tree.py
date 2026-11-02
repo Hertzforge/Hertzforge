@@ -4,13 +4,19 @@
    any tracked file. The names are held as truncated SHA-256 hashes of the
    normalized phrase (lower case, punctuation as spaces), so the list that
    keeps them out does not publish them. Every one-, two- and three-word
-   run of every line is hashed and looked up.
-2. **No copyleft code.** No tracked Python file imports a copyleft package,
-   by statement or by name.
+   run of every line is hashed and looked up. A third-party license
+   notice that must be redistributed word for word is listed in
+   NOTICES and not read.
+2. **Every Python file checked.** Every tracked Python file is in a scope of
+   `check_licenses.SCOPES`, so `check_licenses.py`, run in each scope's
+   installed environment, checks its imports and every package installed
+   for it. That check refuses GPL packages by their license metadata.
 3. **Permissive npm licenses.** Every package in every tracked npm
    lockfile (the shell's, and any tool's) carries a license on the
-   allowlist. The SPDX expression is parsed with its parentheses and
-   precedence: an `OR` needs one allowed side, an `AND` needs all of them.
+   allowlist, read as an SPDX expression by `check_licenses.parse`, with
+   its parentheses and precedence: an `OR` needs one allowed side, an
+   `AND` needs all of them. LGPL is not on this list: the shell bundles
+   its packages rather than loading them as separate libraries.
 
     python tools/check_tree.py                # exit 0 clean, 1 with findings
     python tools/check_tree.py --hash "a name"  # the line to add to NAMES
@@ -21,7 +27,6 @@ Rust crate licenses, bans and sources are checked by cargo-deny
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import pathlib
@@ -29,6 +34,8 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
+
+import check_licenses
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -46,10 +53,6 @@ NAMES = frozenset({
     '5bd79a8938028958', '3e4d26effdc5f34d', 'fce9f2383131cd07',
 })
 
-#: Copyleft packages this project is closest to, never imported here
-#: (the same set Visual Dynamics guards).
-COPYLEFT = frozenset({'sdynpy', 'rattlesnake', 'forcefinder'})
-
 #: Licenses a shipped or build-time npm package may carry.
 ALLOWED_LICENSES = frozenset({
     'MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', '0BSD', 'Zlib',
@@ -58,6 +61,14 @@ ALLOWED_LICENSES = frozenset({
 
 #: Lockfiles name third-party packages, not this project's words.
 SKIPPED = frozenset({'package-lock.json', 'uv.lock', 'Cargo.lock'})
+
+#: Third-party license notices the name check does not read, by path from
+#: the root. Each is a license whose terms require its copyright line to
+#: travel with the files it covers, so it cannot be reworded.
+NOTICES = frozenset({
+    # BSD-3-Clause, for the ESCDF specification files the reader parses
+    'src/hertzforge/io/escdf_specifications/LICENSE',
+})
 
 _WORD = re.compile(r'[a-z0-9]+')
 
@@ -87,12 +98,13 @@ def _text(path: pathlib.Path) -> str | None:
 
 
 def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
-                names: frozenset[str] = NAMES) -> list[str]:
+                names: frozenset[str] = NAMES,
+                notices: frozenset[str] = NOTICES) -> list[str]:
     """Every line where a run of one to three words hashes to a listed name.
     The finding gives the place, never the word."""
     found = []
     for path in files:
-        if path.name in SKIPPED:
+        if path.name in SKIPPED or path.relative_to(root).as_posix() in notices:
             continue
         text = _text(path)
         if text is None:
@@ -110,106 +122,6 @@ def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
     return found
 
 
-def _copyleft_imports(source: str) -> list[str]:
-    tree = ast.parse(source)
-    hits = []
-    for node in ast.walk(tree):
-        modules: list[str] = []
-        if isinstance(node, ast.Import):
-            modules = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            modules = [node.module]
-        elif (isinstance(node, ast.Call) and node.args
-              and isinstance(node.args[0], ast.Constant)
-              and isinstance(node.args[0].value, str)
-              and getattr(node.func, 'id', getattr(node.func, 'attr', None))
-              in {'__import__', 'import_module'}):
-            modules = [node.args[0].value]
-        hits += [m for m in modules if m.split('.')[0] in COPYLEFT]
-    return hits
-
-
-def check_copyleft(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT) -> list[str]:
-    """Every tracked Python file that reaches a copyleft package."""
-    found = []
-    for path in files:
-        if path.suffix != '.py':
-            continue
-        for module in _copyleft_imports(path.read_text(encoding='utf-8')):
-            found.append(f'{path.relative_to(root)}: imports {module}, which is '
-                         'copyleft')
-    return found
-
-
-_SPDX_TOKEN = re.compile(r'[()]|[^\s()]+')
-_SPDX_OPERATORS = frozenset({'AND', 'OR', 'WITH', '(', ')'})
-
-
-class _NotAnExpression(ValueError):
-    pass
-
-
-def license_allowed(expression: str | None) -> bool:
-    """Whether an SPDX license expression is on the allowlist.
-
-    Parsed as SPDX defines it: parentheses first, then `WITH`, then `AND`,
-    then `OR`, so `MIT OR Apache-2.0 AND GPL-3.0` is `MIT OR (Apache-2.0 AND
-    GPL-3.0)`. An `OR` needs one allowed side, an `AND` needs every side.
-    `X WITH exception` counts as `X`: an exception only adds permissions.
-    Operators are upper case, as SPDX writes them. Anything that does not
-    parse is refused."""
-    if not expression:
-        return False
-    tokens = _SPDX_TOKEN.findall(expression)
-    position = 0
-
-    def peek() -> str | None:
-        return tokens[position] if position < len(tokens) else None
-
-    def take() -> str:
-        nonlocal position
-        token = peek()
-        if token is None:
-            raise _NotAnExpression(expression)
-        position += 1
-        return token
-
-    def either() -> bool:                    # a OR b OR ...
-        sides = [every()]
-        while peek() == 'OR':
-            take()
-            sides.append(every())
-        return any(sides)
-
-    def every() -> bool:                     # a AND b AND ...
-        sides = [one()]
-        while peek() == 'AND':
-            take()
-            sides.append(one())
-        return all(sides)
-
-    def one() -> bool:                       # (expression), or a license
-        token = take()
-        if token == '(':
-            allowed = either()
-            if take() != ')':
-                raise _NotAnExpression(expression)
-            return allowed
-        if token in _SPDX_OPERATORS:
-            raise _NotAnExpression(expression)
-        if peek() == 'WITH':
-            take()
-            if take() in _SPDX_OPERATORS:
-                raise _NotAnExpression(expression)
-        return token in ALLOWED_LICENSES
-
-    try:
-        allowed = either()
-    except _NotAnExpression:
-        return False
-    return allowed and position == len(tokens)
-
-
 def check_npm_licenses(lockfile: pathlib.Path, root: pathlib.Path = ROOT) -> list[str]:
     """Every package in an npm lockfile whose license is missing or not allowed."""
     packages = json.loads(lockfile.read_text(encoding='utf-8')).get('packages', {})
@@ -219,7 +131,7 @@ def check_npm_licenses(lockfile: pathlib.Path, root: pathlib.Path = ROOT) -> lis
             continue
         name = key.split('node_modules/')[-1]
         license_ = package.get('license')
-        if not license_allowed(license_):
+        if check_licenses.judge_text(license_, ALLOWED_LICENSES) != check_licenses.ALLOWED:
             found.append(f'{lockfile.relative_to(root)}: {name} is licensed '
                          f'{license_ or "with no license stated"}, which is not '
                          'on the allowlist')
@@ -233,7 +145,8 @@ def main(argv: Sequence[str] = (), root: pathlib.Path = ROOT) -> int:
     files = tracked_files(root)
     # every npm lockfile in the tree, the shell's and any tool's
     lockfiles = [path for path in files if path.name == 'package-lock.json']
-    findings = check_names(files, root) + check_copyleft(files, root)
+    findings = (check_names(files, root)
+                + check_licenses.check_scopes([f for f in files if f.suffix == '.py'], root))
     for lockfile in lockfiles:
         findings += check_npm_licenses(lockfile, root)
     for finding in findings:

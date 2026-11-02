@@ -10,6 +10,31 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+dependencies = [
+    # BSD-3-Clause
+    "numpy",
+    # BSD-3-Clause
+    "scipy",
+    # BSD-3-Clause
+    "h5py",
+    # MIT
+    "netCDF4",
+    # BSD-3-Clause
+    "pint",
+    # MIT
+    "openpyxl",
+    # BSD-3-Clause
+    "pandas",
+    # BSD-3-Clause
+    "threadpoolctl",
+    # Apache-2.0 bindings over the OpenCASCADE kernel (LGPL-2.1 with an
+    # exception): the solids' booleans, areas, volumes and surfaces, and
+    # STEP and IGES import. The build without VTK: cadquery-ocp requires
+    # vtk (about 600 MB) and nothing here draws with it.
+    "cadquery-ocp-novtk",
+    # BSD-3-Clause: the analysis service's WebSocket server
+    "websockets",
+]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [
     "Development Status :: 1 - Planning",
@@ -25,16 +50,30 @@ Source = "https://github.com/hertzforge/hertzforge"
 [project.scripts]
 hertzforge = "hertzforge.__main__:main"
 
+[tool.setuptools.package-data]
+hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE"]
+
 [tool.ruff]
 # The same settings as Visual Dynamics: ruff's own rule set, 100 columns.
 # One configuration for every Python file in the repository.
 line-length = 100
-# Where this repository's own packages live, so import sorting files them
-# as first party: hertzforge under src/, the analysis service under
-# python/src/.
-src = ["src", "python/src"]
+# Where this repository's own package lives, so import sorting files it as
+# first party.
+src = ["src"]
 
 [tool.pytest.ini_options]
-# The package's own tests. The analysis service under python/ has its own
-# environment and test suite (uv run --project python pytest python).
+# The package's tests, the analysis service's under tests/service.
 testpaths = ["tests"]
+addopts = '-m "not slow"'
+markers = [
+    "slow: the demonstration models, built for the website and the docs; run on demand rather than on every edit",
+    "guide: the guide's mesh table, minutes of meshing a shape; checked on main and weekly, not on every pull request",
+    # CI runs these alone, after the rest (`-m timing`, without xdist): a test
+    # that asserts a wall-clock bound fails when other workers share its cores.
+    "timing: asserts a wall-clock bound, such as event-loop latency; run serially",
+]
+filterwarnings = [
+    # netCDF4's published wheel is built against an older numpy C API; the
+    # warning is harmless and goes when upstream rebuilds.
+    "ignore:numpy.ndarray size changed:RuntimeWarning",
+]

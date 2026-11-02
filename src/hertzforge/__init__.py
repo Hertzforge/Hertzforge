@@ -1,3 +1,117 @@
-"""Hertzforge: data acquisition and structural dynamics in one toolset."""
+"""Hertzforge: data acquisition and structural dynamics in one toolset.
+
+`import hertzforge` gives the `Project` and the one-call report functions,
+the data objects (`TimeHistory`, `Frf`, `Psd`, `ShapeSet`, `Geometry` and the
+rest), the readers and writers (`import_file`, `export_file`, `load`,
+`save`), and the unit systems and `convert`.
+"""
+
+from .compatibility import Issue, Report, check_compatibility
+from .core import (
+    ChannelTable,
+    DataArray,
+    Frf,
+    Geometry,
+    Psd,
+    ShapeSet,
+    ShockSpecification,
+    Specification,
+    Spectrum,
+    Srs,
+    TimeHistory,
+    TransientSpecification,
+    View,
+    fem,
+    mesh,
+)
+from .core.data import frequency_axis
+from .io import (
+    export_file,
+    from_sep005,
+    import_file,
+    importers,
+    load,
+    register_importer,
+    save,
+)
+from .project import (
+    ASK,
+    Project,
+    mixed_run,
+    random_vibration_report,
+    random_vibration_run,
+    report_kind,
+    run_report,
+    sine_report,
+    sine_run,
+    system_id_report,
+    system_id_run,
+)
+from .report import export_figure, export_html
+from .units import (
+    DEFAULT_SYSTEM,
+    FT_LBF_S,
+    IN_LBF_S,
+    MMKS,
+    SI,
+    SYSTEMS,
+    UnitsRequired,
+    UnitSystem,
+    convert,
+    si_factor,
+)
 
 __version__ = "0.0.1"
+
+__all__ = [
+    'ASK',
+    'DEFAULT_SYSTEM',
+    'FT_LBF_S',
+    'IN_LBF_S',
+    'MMKS',
+    'SI',
+    'SYSTEMS',
+    'ChannelTable',
+    'DataArray',
+    'Frf',
+    'Geometry',
+    'Issue',
+    'Project',
+    'Psd',
+    'Report',
+    'ShapeSet',
+    'ShockSpecification',
+    'Specification',
+    'Spectrum',
+    'Srs',
+    'TimeHistory',
+    'TransientSpecification',
+    'UnitSystem',
+    'UnitsRequired',
+    'View',
+    '__version__',
+    'check_compatibility',
+    'convert',
+    'export_figure',
+    'export_file',
+    'export_html',
+    'fem',
+    'frequency_axis',
+    'from_sep005',
+    'import_file',
+    'importers',
+    'load',
+    'mesh',
+    'mixed_run',
+    'random_vibration_report',
+    'random_vibration_run',
+    'register_importer',
+    'report_kind',
+    'run_report',
+    'save',
+    'si_factor',
+    'sine_report',
+    'sine_run',
+    'system_id_report',
+    'system_id_run',
+]
