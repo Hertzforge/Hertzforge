@@ -144,6 +144,25 @@ export interface Mode {
 	label?: string;
 }
 
+/** Measured data played back on the mesh (schema/PROTOCOL.md, `shape3d` `motion`). */
+export interface Motion {
+	/** The abscissa: sample k is at start + k * step, in `unit`. */
+	label: string;
+	unit: string;
+	start: number;
+	step: number;
+	quantity: string;
+	value_unit: string;
+	/** u32 [D]: the node of `nodes` each DOF moves. */
+	node: Uint32Array;
+	/** f32 [D, 3]: the unit direction each DOF moves in. */
+	direction: Float32Array;
+	/** f32 [D, S]: DOF d at sample k is values[d * S + k]. */
+	values: Float32Array;
+	/** The furthest any node gets, in value_unit. */
+	peak: number;
+}
+
 export interface Shape3DView {
 	view: 'shape3d';
 	title: string;
@@ -155,6 +174,9 @@ export interface Shape3DView {
 	/** u32 [T, 3]. */
 	triangles?: Uint32Array;
 	modes: Mode[];
+	/** Measured data to play back, with `modes` empty. */
+	motion?: Motion;
+	note?: string;
 }
 
 /**

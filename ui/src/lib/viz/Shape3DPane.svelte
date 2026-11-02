@@ -4,7 +4,9 @@
 	 *
 	 * Deformation x0 + a * Re((shape + i shape_imag) exp(i theta)) runs in the vertex shader, so a
 	 * frame costs two uniform updates however large the mesh is. A real shape is a standing wave; a
-	 * complex one (a complex mode, an operating shape) shows its traveling part. Normals come from screen-space derivatives (flat
+	 * complex one (a complex mode, an operating shape) shows its traveling part. Measured motion
+	 * (`view.motion`, with no modes) is played back sample by sample instead: a frame writes the
+	 * moved nodes' offsets and colors, and nothing else. Normals come from screen-space derivatives (flat
 	 * shading), which keeps lighting correct on the deformed surface. Color is the mode shape
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
@@ -33,6 +35,7 @@
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
+	import { advance, movedNodes, NORMAL_SPEED, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { nodeTravel } from './shape';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
@@ -63,6 +66,11 @@
 	const nodeCount = $derived(view.nodes.length / 3);
 	const triCount = $derived((view.triangles?.length ?? 0) / 3);
 	const current = $derived(view.modes[Math.min(Math.max(0, mode), view.modes.length - 1)]);
+	const motion = $derived(view.motion);
+	const samples = $derived(motion ? sampleCount(motion) : 0);
+	let speedIndex = $state(NORMAL_SPEED);
+	/** The sample shown, for the scrubber and the time readout. */
+	let sample = $state(0);
 
 	/** Model diagonal, from the undeformed nodes. */
 	const diagonal = $derived.by(() => {
@@ -111,6 +119,10 @@
 	let fpsWindowStart = 0;
 	let resizeObs: ResizeObserver | null = null;
 	let homeDistance = 1;
+	/** Playback position in samples, fractional so a slow speed still advances. */
+	let position = 0;
+	let shownSample = -1;
+	let moved = new Uint32Array(0);
 
 	/** Inject the deformation into a built-in material's vertex shader. */
 	function displaced<M extends Material>(material: M): M {
@@ -159,6 +171,50 @@
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		dirty = true;
+	}
+
+	/** Ready the buffers for measured motion: every node at rest and colored as such. */
+	function loadMotion() {
+		if (!renderer || !motion) return;
+		maxMag = motion.peak || 1;
+		moved = movedNodes(motion);
+		(shapeAttr.array as Float32Array).fill(0);
+		(shapeImagAttr.array as Float32Array).fill(0);
+		const colors = colorAttr.array as Float32Array;
+		const rgb = colormap(0);
+		for (let i = 0; i < colors.length; i += 3) {
+			colors[i] = srgbToLinear(rgb[0]);
+			colors[i + 1] = srgbToLinear(rgb[1]);
+			colors[i + 2] = srgbToLinear(rgb[2]);
+		}
+		shapeImagAttr.needsUpdate = true;
+		shownSample = -1;
+		showSample(Math.floor(position));
+	}
+
+	/** Write sample k's offsets and the moved nodes' colors. */
+	function showSample(k: number) {
+		if (!motion) return;
+		const offsets = shapeAttr.array as Float32Array;
+		writeFrame(motion, k, moved, offsets);
+		const colors = colorAttr.array as Float32Array;
+		const rgb: [number, number, number] = [0, 0, 0];
+		for (const n of moved) {
+			colormap(Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
+			colors[3 * n] = srgbToLinear(rgb[0]);
+			colors[3 * n + 1] = srgbToLinear(rgb[1]);
+			colors[3 * n + 2] = srgbToLinear(rgb[2]);
+		}
+		shapeAttr.needsUpdate = true;
+		colorAttr.needsUpdate = true;
+		shownSample = k;
+		sample = k;
+		dirty = true;
+	}
+
+	/** Move playback to sample k, as the scrubber does. */
+	function seek(k: number) {
+		position = Math.min(Math.max(0, k), samples - 1);
 	}
 
 	function applyTheme() {
@@ -271,6 +327,7 @@
 		resetView();
 		applyTheme();
 		loadMode();
+		loadMotion();
 
 		resizeObs = new ResizeObserver(resize);
 		resizeObs.observe(canvasHost);
@@ -322,15 +379,25 @@
 		const dt = Math.min(0.1, (now - lastTime) / 1000);
 		lastTime = now;
 		const moved = controls.update();
-		if (playing) {
-			phase = (phase + dt / CYCLE_S) % 1;
-			dirty = true;
+		let re: number;
+		let im: number;
+		if (motion) {
+			if (playing && samples) position = (position + advance(samples, dt, SPEEDS[speedIndex])) % samples;
+			const k = Math.floor(position);
+			if (k !== shownSample) showSample(k);
+			re = peak / maxMag;
+			im = 0;
+		} else {
+			if (playing) {
+				phase = (phase + dt / CYCLE_S) % 1;
+				dirty = true;
+			}
+			// Re(shape exp(i (theta - pi/2))): a real shape starts at rest and swings as sin(theta)
+			const scale = peak / maxMag;
+			const theta = 2 * Math.PI * phase;
+			re = scale * Math.sin(theta);
+			im = scale * Math.cos(theta);
 		}
-		// Re(shape exp(i (theta - pi/2))): a real shape starts at rest and swings as sin(theta)
-		const scale = peak / maxMag;
-		const theta = 2 * Math.PI * phase;
-		const re = scale * Math.sin(theta);
-		const im = scale * Math.cos(theta);
 		if (uniforms.uRe.value !== re || uniforms.uIm.value !== im) {
 			uniforms.uRe.value = re;
 			uniforms.uIm.value = im;
@@ -410,7 +477,9 @@
 		e.preventDefault();
 	}
 
-	const legendTicks = $derived([0, 0.5, 1].map((t) => formatNumber(t * peak * display.factor, 3)));
+	const legendTicks = $derived(
+		[0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
+	);
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -461,7 +530,36 @@
 			<button class="btn icon sm" data-testid="shape3d-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
 				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
+			{#if motion}
+				<span class="speed">
+					<button class="btn icon sm" data-testid="shape3d-slower" disabled={speedIndex <= 0} onclick={() => speedIndex--} title="Slower" aria-label="Slower">
+						<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+					</button>
+					<span class="speedval num" data-testid="shape3d-speed" aria-live="polite">{SPEEDS[speedIndex]}x</span>
+					<button class="btn icon sm" data-testid="shape3d-faster" disabled={speedIndex >= SPEEDS.length - 1} onclick={() => speedIndex++} title="Faster" aria-label="Faster">
+						<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+					</button>
+				</span>
+			{/if}
 		</div>
+
+		{#if motion && samples}
+			<div class="scrub">
+				<input
+					type="range"
+					data-testid="shape3d-time"
+					min="0"
+					max={samples - 1}
+					step="1"
+					value={sample}
+					oninput={(e) => seek(Number(e.currentTarget.value))}
+					aria-label={motion.label}
+					aria-valuetext="{formatFixed(motion.start + sample * motion.step, 4)} {motion.unit}"
+				/>
+				<span class="num">{motion.label} {formatFixed(motion.start + sample * motion.step, 4)} {motion.unit}</span>
+			</div>
+			{#if view.note}<div class="note">{view.note}</div>{/if}
+		{/if}
 
 		{#if current}
 			<div class="modetag">
@@ -485,7 +583,9 @@
 
 	<div class="bottom">
 		<div class="legend" aria-label="Color legend">
-			<div class="ltitle">Peak displacement ({display.unit})</div>
+			<div class="ltitle">
+				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
+			</div>
 			<div class="bar" style:background={colormapGradient()}></div>
 			<div class="ticks num">
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
@@ -621,6 +721,43 @@
 		color: var(--text-1);
 		background: var(--blue-weak);
 		border-color: var(--blue-line);
+	}
+
+	.speed {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+	}
+
+	.speedval {
+		min-width: 4.5ch;
+		font-size: var(--text-xs);
+		color: var(--text-1);
+		text-align: center;
+	}
+
+	.scrub {
+		pointer-events: auto;
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		margin-top: 6px;
+		padding: 4px var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-1);
+		background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-md);
+	}
+
+	.scrub input {
+		width: 220px;
+	}
+
+	.note {
+		padding-top: 6px;
+		font-size: var(--text-xs);
+		color: var(--text-3);
 	}
 
 	.modetag {

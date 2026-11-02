@@ -1,0 +1,104 @@
+{
+ "type": "response",
+ "id": 11,
+ "result": {
+  "views": [
+   {
+    "view": "shape3d",
+    "title": "Capture 1 of 2, Acceleration",
+    "unit": "m",
+    "nodes": {
+     "dtype": "f32",
+     "shape": [
+      3,
+      3
+     ],
+     "values": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      0.0,
+      0.0,
+      2.0,
+      0.0,
+      0.0
+     ]
+    },
+    "lines": {
+     "dtype": "u32",
+     "shape": [
+      2,
+      2
+     ],
+     "values": [
+      0,
+      1,
+      1,
+      2
+     ]
+    },
+    "modes": [],
+    "motion": {
+     "label": "Time",
+     "unit": "s",
+     "start": 0.0,
+     "step": 0.25,
+     "quantity": "Acceleration",
+     "value_unit": "m/s²",
+     "node": {
+      "dtype": "u32",
+      "shape": [
+       3
+      ],
+      "values": [
+       1,
+       1,
+       2
+      ]
+     },
+     "direction": {
+      "dtype": "f32",
+      "shape": [
+       3,
+       3
+      ],
+      "values": [
+       0.0,
+       0.0,
+       1.0,
+       0.0,
+       1.0,
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       3,
+       4
+      ],
+      "values": [
+       0.0,
+       1.5,
+       0.0,
+       -1.5,
+       0.0,
+       2.0,
+       0.0,
+       -2.0,
+       0.5,
+       0.0,
+       -0.5,
+       0.0
+      ]
+     },
+     "peak": 2.5
+    }
+   }
+  ]
+ }
+}
