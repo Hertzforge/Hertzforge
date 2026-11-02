@@ -940,6 +940,22 @@ pub mod cola {
             self.nfft
         }
 
+        /// Scale the overlap carried into the next frame by `gain`.
+        ///
+        /// The carry is the not-yet-emitted second part of earlier frames,
+        /// synthesized at the PSD those frames were given. A caller that scales
+        /// its emitted stream (a drive level ramp) and then synthesizes the next
+        /// frames at a NEW PSD level calls this with the ratio between the two, so
+        /// the next frame's crossfade starts from the level the stream is really
+        /// at instead of the old PSD's. A gain of 1 changes nothing.
+        pub fn scale_tail(&mut self, gain: f64) {
+            if gain.is_finite() && gain >= 0.0 && (gain - 1.0).abs() > 0.0 {
+                for t in self.tail.iter_mut() {
+                    *t *= gain;
+                }
+            }
+        }
+
         /// Produce the next `hop` gap-free output samples for the given one-sided
         /// target PSD (`EU^2/Hz`, length `nfft/2 + 1`, indexed by bin `k` at
         /// frequency `k*fs/nfft`).

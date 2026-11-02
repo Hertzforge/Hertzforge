@@ -39,11 +39,16 @@ impl ErrorCode {
     }
 }
 
-/// An error a method returns: the code plus a message a user can act on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An error a method returns: the code plus a message a user can act on, and for the
+/// hardware and Random methods a stable `reason` a client branches on and the
+/// `detail` facts behind it (schema/PROTOCOL.md, "Refusals").
+#[derive(Debug, Clone, PartialEq)]
 pub struct MethodError {
     pub code: ErrorCode,
     pub message: String,
+    pub reason: Option<&'static str>,
+    /// Boxed: a refusal travels in every `Result` a method returns.
+    pub detail: Option<Box<Value>>,
 }
 
 impl MethodError {
@@ -51,7 +56,32 @@ impl MethodError {
         MethodError {
             code,
             message: message.into(),
+            reason: None,
+            detail: None,
         }
+    }
+
+    /// A named refusal: `code`, the `reason` name and the words for a person.
+    pub fn named(code: ErrorCode, reason: &'static str, message: impl Into<String>) -> MethodError {
+        MethodError {
+            code,
+            message: message.into(),
+            reason: Some(reason),
+            detail: None,
+        }
+    }
+
+    /// Attach the `detail` facts.
+    pub fn with_detail(mut self, detail: Value) -> MethodError {
+        self.detail = Some(Box::new(detail));
+        self
+    }
+
+    /// `bad_params`: a parameter is missing, of the wrong type, or not one of its
+    /// stated values. `param` names it.
+    pub fn bad_params(param: &str, message: impl Into<String>) -> MethodError {
+        MethodError::named(ErrorCode::BadRequest, "bad_params", message)
+            .with_detail(json!({"param": param}))
     }
 
     pub fn bad_request(message: impl Into<String>) -> MethodError {
@@ -81,10 +111,19 @@ pub fn response(id: i64, result: Value) -> Value {
     json!({"type": "response", "id": id, "result": result})
 }
 
-/// An error response.
+/// An error response. Keys in the golden frames' order: `code`, `reason`, `message`,
+/// `detail` (the last two optional).
 pub fn error_response(id: i64, error: &MethodError) -> Value {
-    json!({"type": "response", "id": id,
-           "error": {"code": error.code.as_str(), "message": error.message}})
+    let mut e = Map::new();
+    e.insert("code".into(), Value::from(error.code.as_str()));
+    if let Some(reason) = error.reason {
+        e.insert("reason".into(), Value::from(reason));
+    }
+    e.insert("message".into(), Value::from(error.message.as_str()));
+    if let Some(detail) = &error.detail {
+        e.insert("detail".into(), (**detail).clone());
+    }
+    json!({"type": "response", "id": id, "error": Value::Object(e)})
 }
 
 /// An event.
@@ -163,6 +202,67 @@ pub fn param_str<'a>(
     }
 }
 
+/// A number for the wire: whole values as integers, so every language's JSON
+/// writer gives the same text (the golden frames write `100`, not `100.0`), and a
+/// non-finite value as null.
+pub fn num(x: f64) -> Value {
+    if !x.is_finite() {
+        return Value::Null;
+    }
+    if x.fract() == 0.0 && x.abs() < 9.0e15 {
+        return Value::from(x as i64);
+    }
+    serde_json::Number::from_f64(x).map_or(Value::Null, Value::Number)
+}
+
+/// [`num`] for an optional number (`None` is null).
+pub fn opt_num(x: Option<f64>) -> Value {
+    x.map_or(Value::Null, num)
+}
+
+/// Read an optional boolean parameter (`bad_params` on any other type).
+pub fn param_bool(params: &Map<String, Value>, name: &str) -> Result<Option<bool>, MethodError> {
+    match params.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(MethodError::bad_params(
+            name,
+            format!("\"{name}\" must be true or false"),
+        )),
+    }
+}
+
+/// Read an optional string parameter for the hardware and Random methods
+/// (`bad_params` on any other type).
+pub fn named_str<'a>(
+    params: &'a Map<String, Value>,
+    name: &str,
+) -> Result<Option<&'a str>, MethodError> {
+    match params.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(MethodError::bad_params(
+            name,
+            format!("\"{name}\" must be a string"),
+        )),
+    }
+}
+
+/// Read an optional finite number parameter for the hardware and Random methods
+/// (`bad_params` on any other type).
+pub fn named_f64(params: &Map<String, Value>, name: &str) -> Result<Option<f64>, MethodError> {
+    match params.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite())
+            .map(Some)
+            .ok_or_else(|| {
+                MethodError::bad_params(name, format!("\"{name}\" must be a finite number"))
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +291,26 @@ mod tests {
         let golden: Value = serde_json::from_str(&golden).unwrap();
         assert_eq!(
             serde_json::to_string(&error_response(8, &e)).unwrap(),
+            serde_json::to_string(&golden).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_named_refusal_matches_the_golden_layout() {
+        let golden = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../schema/golden/response_error_controller_held.json"
+        ))
+        .unwrap();
+        let golden: Value = serde_json::from_str(&golden).unwrap();
+        let e = MethodError::named(
+            ErrorCode::Refused,
+            "controller_held",
+            golden["error"]["message"].as_str().unwrap(),
+        )
+        .with_detail(json!({"holder": "Shell on bench-pc"}));
+        assert_eq!(
+            serde_json::to_string(&error_response(2, &e)).unwrap(),
             serde_json::to_string(&golden).unwrap()
         );
     }

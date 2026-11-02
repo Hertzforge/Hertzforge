@@ -4,9 +4,13 @@
  * is lost on the way back.
  */
 
+import { DisplayState } from '$lib/acquire/display/display.svelte';
+import { AcquireState } from '$lib/acquire/store.svelte';
+import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
+import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type {
 	Catalog,
@@ -385,16 +389,88 @@ export class AppState {
 	readonly analyze: AnalyzeState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
+	readonly acquire: AcquireState;
+	/** Acquire & Control's test types and which screen it shows. */
+	readonly tests: TestTypeView;
+	/** The Random run's display: its pages and plots, and the data this window asks for. */
+	readonly display: DisplayState;
+	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
+	railCollapsed = $state(false);
+	private windows = 0;
 
 	constructor(config: ShellConfig) {
 		this.config = config;
 		const analysisFactory = config.mock ? mockSocketFactory(createAnalysisServer(), 80) : undefined;
-		const controlFactory = config.mock ? mockSocketFactory(createControlServer(), 110) : undefined;
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
-		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: controlFactory });
+		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
 		this.analyze = new AnalyzeState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
+		// A display window observes: it never takes the main window's lease or edits a setup.
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
+		this.tests = new TestTypeView(() => this.liveTest);
+		this.display = new DisplayState(this.control, {
+			testType: 'random',
+			// The layout belongs to the setup the service holds, else to the one being edited here.
+			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),
+			showing: () => config.popout || (this.workspace === 'acquire' && this.tests.screen === 'random' && this.acquire.tab === 'live'),
+			page: config.page
+		});
+		this.railCollapsed = readSession(RAIL_KEY) === '1';
+	}
+
+	/** In mock mode, a display window shares the main window's mock service. */
+	private controlFactory(config: ShellConfig) {
+		if (!config.mock) return undefined;
+		if (config.popout) {
+			const shared = openerMock();
+			if (shared) return shared;
+		}
+		const server = createControlServer(config.mockControl);
+		shareMock(server, 110);
+		return mockSocketFactory(server, 110);
+	}
+
+	toggleRail(): void {
+		this.railCollapsed = !this.railCollapsed;
+		writeSession(RAIL_KEY, this.railCollapsed ? '1' : null);
+	}
+
+	/**
+	 * Open a display page in a window of its own, for another monitor: the same shell, showing that
+	 * page, observing the run with a subscription of its own. Every window shows the run's state and
+	 * keeps Stop and Abort. False when the browser refused to open it.
+	 */
+	openDisplayWindow(pageId: string): boolean {
+		const q = new URLSearchParams(location.search);
+		q.set('popout', '1');
+		q.set('page', pageId);
+		this.windows += 1;
+		const w = window.open(`${location.pathname}?${q.toString()}#acquire`, `hertzforge-display-${Date.now()}-${this.windows}`, 'popup,width=1280,height=820');
+		return w !== null;
+	}
+
+	/** A display window: the control service only, the run's state and one page. */
+	startDisplayWindow(): void {
+		this.workspace = 'acquire';
+		$effect.root(() => {
+			$effect(() => {
+				if (this.control.status === 'open') void this.acquire.sync();
+			});
+		});
+		this.display.watch();
+		this.control.connect();
+	}
+
+	/** The test type whose run is live; null when none is; undefined until the control service has said. */
+	get liveTest(): LiveTest {
+		return liveTestOf(this.acquire, this.control.status);
+	}
+
+	/** The live run is the screen on show, so the top bar need not offer it. */
+	get runOnScreen(): boolean {
+		const live = this.tests.live;
+		return live !== null && this.workspace === 'acquire' && this.tests.screen === live;
 	}
 
 	/** The SIM badge rule: simulated control data is on screen. */
@@ -402,12 +478,22 @@ export class AppState {
 		return this.workspace === 'simulate' && this.sim.display?.source === 'SIM';
 	}
 
+	/** Where the control data on screen comes from, for the top bar's badge, or null. */
+	get provenance(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
+		if (this.workspace === 'simulate') return this.simOnScreen ? { source: 'SIM', cls: 'sim' } : null;
+		// A live run is shown from every workspace (the top bar's run pill), so its source is too.
+		// The test-type chooser shows no control data of its own.
+		const onRandom = this.workspace === 'acquire' && this.tests.screen === 'random';
+		if (onRandom || this.acquire.isLive) return this.acquire.source;
+		return null;
+	}
+
 	start(): void {
 		const fromHash = location.hash.replace(/^#\/?/, '');
-		if (isWorkspace(fromHash)) this.workspace = fromHash;
+		if (isWorkspace(fromHash)) this.go(fromHash);
 		window.addEventListener('hashchange', () => {
 			const h = location.hash.replace(/^#\/?/, '');
-			if (isWorkspace(h)) this.workspace = h;
+			if (isWorkspace(h)) this.go(h);
 		});
 
 		$effect.root(() => {
@@ -419,17 +505,37 @@ export class AppState {
 				if (this.control.status === 'open') void this.sim.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.acquire.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
 		});
 
+		this.acquire.watch();
+		this.tests.watch();
+		this.display.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}
 
 	go(workspace: Workspace): void {
+		const entering = workspace === 'acquire' && this.workspace !== 'acquire';
 		this.workspace = workspace;
+		if (entering) this.tests.open();
+	}
+
+	/** A test type's screen in Acquire & Control, if it can be chosen now. */
+	openTest(id: TestTypeId): boolean {
+		this.go('acquire');
+		return this.tests.choose(id);
+	}
+
+	/** The live run's screen, from anywhere in the shell (the top bar's run pill). */
+	showRun(): void {
+		this.tests.showRun();
+		this.go('acquire');
 	}
 
 	async loadCatalog(): Promise<void> {
@@ -439,6 +545,26 @@ export class AppState {
 		} catch (err) {
 			this.catalogError = message(err);
 		}
+	}
+}
+
+const RAIL_KEY = 'hertzforge.rail.collapsed';
+
+function readSession(key: string): string | null {
+	try {
+		return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(key);
+	} catch {
+		return null;
+	}
+}
+
+function writeSession(key: string, value: string | null): void {
+	try {
+		if (typeof sessionStorage === 'undefined') return;
+		if (value === null) sessionStorage.removeItem(key);
+		else sessionStorage.setItem(key, value);
+	} catch {
+		/* storage refused; the rail just does not stay minimized across reloads */
 	}
 }
 

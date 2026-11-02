@@ -32,6 +32,10 @@ pub const DEFAULT_LEVEL_TABLE_DB: [f64; 5] = [-12.0, -9.0, -6.0, -3.0, 0.0];
 /// range_max` latches the overload indicator.
 pub const DEFAULT_OVERLOAD_FRACTION: f64 = 0.9;
 
+/// How close the referenced identification must bring the control response to
+/// its target, dB either side (see [`RandomTestConfig::pretest_reference_db`]).
+pub const PRETEST_LEVEL_TOLERANCE_DB: f64 = 1.0;
+
 /// The default sysID band-coherence floor: below this the coherence gate
 /// HOLDs and never engages.
 pub const DEFAULT_COHERENCE_FLOOR: f64 = 0.5;
@@ -330,6 +334,29 @@ pub struct RandomTestConfig {
     /// Shape the pretest PSD like the reference instead of flat-in-band: a
     /// resonant article is excited where the test will actually drive it.
     pub shaped_pretest: bool,
+    /// The identification level RELATIVE TO THE REFERENCE, dB (`None`: the
+    /// absolute level of [`Self::sysid_level_db`]).
+    ///
+    /// Why it exists (first Random bench run on NI, 2026-11-01): the absolute
+    /// level is `sysid_level_db` of a fixed 0.05 base, so "-20 dB" says nothing
+    /// about the article. On a 1 g/V loopback it asked for 0.2229 V rms, the
+    /// pretest ceiling held it at 0.200 V rms, and that was the FULL test level:
+    /// the identification excited at test level while it said -20 dB.
+    ///
+    /// With `Some(db)` the identification starts at [`Self::pretest_start_vrms`]
+    /// and steps the drive until the control response's in-band rms is the
+    /// reference's in-band rms plus `db` (within [`PRETEST_LEVEL_TOLERANCE_DB`]),
+    /// never above [`Self::pretest_max_vrms`] or [`Self::drive_ceiling_vrms`].
+    /// A target the ceiling cannot reach is refused by name
+    /// ([`crate::ServiceError::SysIdLevelUnreachable`]). `#[serde(default)]` so
+    /// a stored configuration from before the field keeps its absolute meaning.
+    #[serde(default)]
+    pub pretest_reference_db: Option<f64>,
+    /// The drive the referenced identification starts from, V rms (`None`: the
+    /// identification ceiling less 40 dB). Used only with
+    /// [`Self::pretest_reference_db`]; it is a starting point, not a floor.
+    #[serde(default)]
+    pub pretest_start_vrms: Option<f64>,
     /// SOFT-START depth, dB below the lowest scheduled level (operator, 2026-08-03;
     /// default 9). The run engages this far down and ramps UP to the start
     /// level, so a big article - a slip table especially - sees the loop take
@@ -384,6 +411,8 @@ impl RandomTestConfig {
             pretest_max_vrms: None,
             pretest_min_vrms: None,
             shaped_pretest: false,
+            pretest_reference_db: None,
+            pretest_start_vrms: None,
             soft_start_db: 9.0,
             soft_start_relax_db: 6.0,
             control_dof: 120.0,
@@ -494,6 +523,27 @@ impl RandomTestConfig {
             return Err(ConfigError::BadConfig(
                 "divergence_loops must be >= 1".into(),
             ));
+        }
+        if let Some(db) = self.pretest_reference_db {
+            if !db.is_finite() || db > 0.0 {
+                return Err(ConfigError::BadConfig(
+                    "pretest_reference_db must be a finite level at or below 0 dB".into(),
+                ));
+            }
+        }
+        if let Some(v) = self.pretest_start_vrms {
+            if !(v.is_finite() && v > 0.0) {
+                return Err(ConfigError::BadConfig(
+                    "pretest_start_vrms must be > 0 when set".into(),
+                ));
+            }
+            if let Some(mx) = self.pretest_max_vrms {
+                if v > mx {
+                    return Err(ConfigError::BadConfig(
+                        "pretest_start_vrms must not exceed pretest_max_vrms".into(),
+                    ));
+                }
+            }
         }
         if self.full_level_duration_s < 0.0 || self.full_level_duration_s.is_nan() {
             return Err(ConfigError::BadConfig(

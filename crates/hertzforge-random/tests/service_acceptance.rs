@@ -540,7 +540,10 @@ fn acceptance_e_kinematic_abort_on_tight_monitor_limit() {
     ctrl.units = Units::AccelG;
     ctrl.range_max = 100.0;
     ctrl.abort = AbortLimits {
-        accel_g: Some(0.05), // tight: the converged in-band response blows past this
+        // Tight for full level (2.7 g rms, peaks near 10 g) but above the
+        // identification's peaks (about 0.27 g rms): identification runs under
+        // the same abort since 2026-11-01, and this test is about the loop.
+        accel_g: Some(3.0),
         ..Default::default()
     };
     let mut drv = Channel::new(2);
@@ -846,7 +849,9 @@ fn acceptance_i_drive_vrms_abort() {
     let mut cfg = RandomTestConfig::siso(demo_profile(), 1);
     cfg.schedule = LevelSchedule::manual_default();
     cfg.drive_ceiling_vrms = 1_000.0; // high: not the clamp under test
-    cfg.drive_abort_vrms = Some(1.0e-4); // tiny: the engage drive Vrms blows past this
+                                      // Above the identification's 0.135 V rms (identification runs under the
+                                      // same abort since 2026-11-01) and below the engage drive, which blows past it.
+    cfg.drive_abort_vrms = Some(0.25);
     cfg.abort_db = (48.0, 48.0); // disable the envelope
     cfg.divergence_loops = 1_000; // do not let divergence pre-empt the drive abort
 
@@ -1317,4 +1322,60 @@ fn acceptance_n_soft_start_walks_up_with_relaxed_enforcement() {
         arrived,
         "soft start never reached the start level (at {prev})"
     );
+}
+
+/// `commanded_level_db` is the level last commanded, not the level the ramp has
+/// walked to: after a ramped manual step the walking level lags the command until
+/// the ramp arrives, and then the two agree.
+///
+/// RED-MUTATION: return `schedule_level_db` from `commanded_level_db` and the
+/// first assertion after the step reds.
+#[test]
+fn the_commanded_level_leads_the_walking_level_through_a_ramp() {
+    let plant = demo_plant();
+    let table = siso_table(500.0);
+    let mut cfg = RandomTestConfig::siso(demo_profile(), 1);
+    cfg.schedule = LevelSchedule {
+        mode: RunMode::Manual,
+        start_db: -12.0,
+        table_db: vec![-12.0, -6.0, 0.0],
+        dwell_s: vec![1.0],
+    };
+    cfg.drive_ceiling_vrms = 1_000.0;
+    cfg.abort_db = (24.0, 24.0);
+    cfg.soft_start_db = 0.0;
+    // A ramp several segments long, so the walk is observable between ticks.
+    cfg.level_ramp_s = 4.0 * plant.cfg.segment_seconds();
+
+    let mut svc = build_service(
+        cfg,
+        table,
+        plant,
+        Some(std::env::temp_dir().join("hertzforge-commanded-level")),
+    )
+    .expect("service builds");
+    svc.assess_feasibility().expect("feasibility");
+    svc.arm().expect("arm");
+    svc.run_sysid(3).expect("sysid");
+    assert!(svc.coherence_gate().expect("gate"));
+    svc.loop_tick().expect("tick");
+    assert!((svc.commanded_level_db() - (-12.0)).abs() < 1e-9);
+
+    svc.step_level(6.0).expect("step to -6");
+    assert!(
+        (svc.commanded_level_db() - (-6.0)).abs() < 1e-9,
+        "the command is -6 dB at once, got {}",
+        svc.commanded_level_db()
+    );
+    svc.loop_tick().expect("tick");
+    assert!(
+        svc.schedule_level_db() < -6.0 + 1e-6,
+        "the walk has not arrived after one tick: {}",
+        svc.schedule_level_db()
+    );
+    for _ in 0..12 {
+        svc.loop_tick().expect("tick");
+    }
+    assert!((svc.schedule_level_db() - (-6.0)).abs() < 1e-9);
+    assert!((svc.commanded_level_db() - (-6.0)).abs() < 1e-9);
 }

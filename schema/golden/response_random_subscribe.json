@@ -1,0 +1,36 @@
+{
+ "type": "response",
+ "id": 21,
+ "result": {
+  "default": false,
+  "rate_hz": 5,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control"
+   },
+   {
+    "id": "lim",
+    "quantity": "response",
+    "channels": "limited"
+   },
+   {
+    "id": "t2",
+    "quantity": "time",
+    "channels": [
+     2,
+     3
+    ],
+    "points": 1024
+   }
+  ],
+  "quantities": [
+   "control",
+   "drive",
+   "response",
+   "time",
+   "coherence",
+   "readings"
+  ]
+ }
+}

@@ -31,6 +31,7 @@
 //! | [`timing`] | timing families: which devices can share one DAQmx task |
 //! | [`backend`] | [`NiBackend`], the `hertzforge_hal::Backend` implementation |
 //! | `timer_resolution` | Windows only: the 1 ms timer hold the host loop needs there |
+//! | `control_thread` | Windows only: the reading thread's MMCSS registration for a run |
 //!
 //! ## Where the driver is actually required
 //!
@@ -64,9 +65,15 @@ pub mod timing;
 // system timer the backend holds while its tasks are armed or running.
 #[cfg(any(windows, test))]
 mod timer_resolution;
+// Windows only (and tests, which prove its pairing rule and the backend's wiring on
+// every host): the MMCSS "Pro Audio" registration of the thread that reads a run.
+#[cfg(any(windows, test))]
+mod control_thread;
 
 pub use backend::{DeviceIdentity, NiBackend};
-pub use clock::{resolve_clock, ClockKey, ProvenClockConfig, PROVEN_SHARED_CLOCK};
+pub use clock::{
+    resolve_clock, selftest_clock_row, ClockKey, ClockRow, ProvenClockConfig, PROVEN_SHARED_CLOCK,
+};
 pub use config::{plan_from_table, plan_from_table_on, AiAssign, AiInterface, AoAssign, NiConfig};
 pub use enumerate::{enumerate, enumerate_with, SysQuery};
 pub use error::NiError;

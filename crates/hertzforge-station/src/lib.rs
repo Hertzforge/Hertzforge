@@ -456,6 +456,42 @@ pub fn scan_ni() -> Result<Vec<DiscoveredDevice>, StationBuildError> {
     }
 }
 
+/// The DAQmx timing family of every device in a scan, as `(device id, family id)` in
+/// the scan's own order.
+///
+/// A front end that lists devices or checks a selection before anything is built
+/// needs the same grouping the factory refuses on, and may not name the NI backend
+/// crate. This is that grouping, passed through from the backend's own
+/// `TimingFamilyMap`: every module in a chassis the scan contains is the chassis'
+/// family; anything else is its own.
+pub fn timing_families(devices: &[DiscoveredDevice]) -> Vec<(String, String)> {
+    let map = TimingFamilyMap::from_devices(devices);
+    devices
+        .iter()
+        .map(|d| {
+            let family = map
+                .family_of_device(&d.id)
+                .map(|f| f.id.clone())
+                .unwrap_or_else(|| d.id.clone());
+            (d.id.clone(), family)
+        })
+        .collect()
+}
+
+/// The NI station from a scan the caller already holds.
+///
+/// The same classification [`try_build_station_backend`] performs after its own
+/// scan (driver-simulated or physical, the operator's device set, channel counts,
+/// timing families), for a front end that scanned once and must decide against
+/// that scan, and for tests on a host with no NI runtime. Nothing is opened.
+pub fn ni_station_from_scan(
+    scan: Vec<DiscoveredDevice>,
+    sel: &NiSelection,
+    block_frames: usize,
+) -> Result<StationBackend, StationBuildError> {
+    build_ni(Ok(scan), sel, block_frames)
+}
+
 // =====================================================================================
 // The factory
 // =====================================================================================
@@ -511,6 +547,12 @@ pub fn open_station_count() -> usize {
 /// counting wrapper answers it automatically and cannot drift, because the
 /// answer is a consequence of the value's lifetime rather than a flag someone
 /// remembers to clear.
+///
+/// "Pure delegation" includes every DEFAULTED trait method: a default this impl
+/// does not override wins over the inner backend's real one (the rule stated on
+/// `hertzforge_hal`'s `impl Backend for Box<T>`). `take_warnings` was missing here,
+/// so every station the factory built answered "no warnings" while the NI backend
+/// inside it was collecting the driver's underruns and coercions.
 struct TrackedBackend {
     inner: Box<dyn Backend>,
 }
@@ -537,6 +579,9 @@ impl Backend for TrackedBackend {
     }
     fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
         self.inner.close()
+    }
+    fn take_warnings(&mut self) -> Vec<String> {
+        self.inner.take_warnings()
     }
     fn configure(
         &mut self,
@@ -565,6 +610,9 @@ impl Backend for TrackedBackend {
     }
     fn output_space(&mut self) -> Option<usize> {
         self.inner.output_space()
+    }
+    fn input_overloads(&mut self) -> Vec<bool> {
+        self.inner.input_overloads()
     }
     fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
         self.inner.poll_status()
@@ -956,6 +1004,99 @@ mod tests {
         assert_eq!(caps.clock, hertzforge_hal::ClockDomain::Shared);
     }
 
+    /// The counting wrapper every station is handed out in forwards the trait's
+    /// DEFAULTED methods, so a service holding the station's `Box<dyn Backend>`
+    /// sees what the backend inside it reports.
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete `take_warnings` from
+    /// `impl Backend for TrackedBackend` and the first assertion reds (an empty
+    /// list against one warning). The wrapper shipped that way, so no NI driver
+    /// warning reached a module through a station the factory built.
+    #[test]
+    fn the_station_wrapper_forwards_the_defaulted_backend_methods() {
+        use hertzforge_hal::{
+            AcquisitionConfig, BackendStatus, Caps, ClockDomain, ConfiguredActual, HalError,
+            InputRead, LoopOwner,
+        };
+        struct Reporting;
+        impl Backend for Reporting {
+            fn caps(&self) -> Caps {
+                Caps {
+                    loop_owner: LoopOwner::HostClosesLoop,
+                    native_modes: vec![],
+                    clock: ClockDomain::Unknown,
+                    max_input_channels: 1,
+                    max_output_channels: 1,
+                    abort_latency_bound: None,
+                    output_buffer: None,
+                    sample_rate_hz: 1000.0,
+                    delegated_response_observable: false,
+                    clock_groups: vec![],
+                }
+            }
+            fn open(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn take_warnings(&mut self) -> Vec<String> {
+                vec!["onboard AO buffer underflowed".into()]
+            }
+            fn configure(
+                &mut self,
+                _t: &hertzforge_channel_table::ChannelTable,
+                _a: &AcquisitionConfig,
+            ) -> Result<ConfiguredActual, HalError> {
+                Err(HalError::NotConnected)
+            }
+            fn arm(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn start(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn stop(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+            fn read_input(&mut self, _o: &mut [f32]) -> Result<InputRead, HalError> {
+                Ok(InputRead::NoDataYet)
+            }
+            fn write_drive(&mut self, _d: &[f32]) -> Result<usize, HalError> {
+                Ok(0)
+            }
+            fn output_space(&mut self) -> Option<usize> {
+                Some(4096)
+            }
+            fn input_overloads(&mut self) -> Vec<bool> {
+                vec![true]
+            }
+            fn poll_status(&mut self) -> BackendStatus {
+                BackendStatus::default()
+            }
+            fn emergency_stop(&mut self) -> Result<(), HalError> {
+                Ok(())
+            }
+        }
+
+        let mut wrapped = TrackedBackend::wrap(Box::new(Reporting));
+        assert_eq!(
+            wrapped.input_overloads(),
+            vec![true],
+            "the station wrapper swallowed the backend's overload flags"
+        );
+        assert_eq!(
+            wrapped.take_warnings(),
+            vec!["onboard AO buffer underflowed".to_string()],
+            "the station wrapper swallowed the backend's warnings"
+        );
+        assert_eq!(
+            wrapped.output_space(),
+            Some(4096),
+            "the station wrapper swallowed the backend's output space"
+        );
+    }
+
     /// `SimPlantSpec::default()` is field-for-field `SimConfig::default()`, INCLUDING
     /// the conservative `shared_clock: false`.
     ///
@@ -1240,6 +1381,58 @@ mod tests {
              family (the chassis row is retained as evidence): {:?}",
             ok.err()
         );
+    }
+
+    /// `timing_families` is the backend's grouping, passed through: modules of a
+    /// scanned chassis share the chassis' family, a standalone card is its own, and a
+    /// module whose chassis the scan does not contain is not folded into a phantom.
+    ///
+    /// RED-MUTATION: return each device's own id as its family and the chassis
+    /// assertions red.
+    #[test]
+    fn timing_families_group_modules_under_their_scanned_chassis() {
+        let chassis = dev("cDAQ1", "0A", false, 0, 0);
+        let mut ai = dev("cDAQ1Mod1", "0B", false, 4, 0);
+        ai.parent = Some("cDAQ1".into());
+        let mut ao = dev("cDAQ1Mod2", "0C", false, 0, 4);
+        ao.parent = Some("cDAQ1".into());
+        let card = dev("PCIe6363", "0D", false, 16, 2);
+        let mut orphan = dev("cDAQ9Mod1", "0E", false, 4, 0);
+        orphan.parent = Some("cDAQ9".into());
+        let fam = timing_families(&[chassis, ai, ao, card, orphan]);
+        let of = |id: &str| fam.iter().find(|(d, _)| d == id).map(|(_, f)| f.as_str());
+        assert_eq!(of("cDAQ1"), Some("cDAQ1"));
+        assert_eq!(of("cDAQ1Mod1"), Some("cDAQ1"));
+        assert_eq!(of("cDAQ1Mod2"), Some("cDAQ1"));
+        assert_eq!(of("PCIe6363"), Some("PCIe6363"));
+        assert_eq!(of("cDAQ9Mod1"), Some("cDAQ9Mod1"), "no phantom chassis");
+    }
+
+    /// `ni_station_from_scan` is the factory's own classification on a held scan:
+    /// the driver's flag decides the class and the operator's device set is a hard
+    /// filter.
+    #[test]
+    fn a_held_scan_classifies_exactly_as_the_factory_does() {
+        let real = ni_station_from_scan(
+            vec![dev("Dev1", "01", false, 4, 2)],
+            &NiSelection::default(),
+            1024,
+        )
+        .expect("a physical device builds");
+        assert_eq!(real.station, StationClass::NiReal);
+        let err = ni_station_from_scan(
+            vec![dev("Dev1", "01", false, 4, 2)],
+            &NiSelection {
+                restrict_devices: vec!["Dev2".into()],
+                ..NiSelection::default()
+            },
+            1024,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            StationBuildError::SelectedDevicesAbsent { .. }
+        ));
     }
 
     // -------------------------------------------------------------------------

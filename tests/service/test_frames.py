@@ -12,7 +12,15 @@ from hertzforge.service import frames
 
 from .conftest import GOLDEN
 
-BINARY = ('response_spectrum', 'event_shape')
+BINARY = ('response_spectrum', 'event_shape', 'event_random_live', 'event_random_data')
+#: Binary goldens whose arrays are named a0, a1, ... in traversal order
+TRAVERSAL_NAMED = ('response_spectrum', 'event_random_live', 'event_random_data')
+#: Text goldens of the hardware and Random control messages
+CONTROL_TEXT = ('request_random_configure', 'response_random_configure',
+                'request_random_subscribe', 'response_random_subscribe',
+                'response_station_list', 'response_channels_get', 'event_random_state',
+                'event_session_changed', 'response_error_controller_held',
+                'response_error_table_invalid')
 
 
 def _as_expected(node):
@@ -73,10 +81,11 @@ def test_decode_matches_expected(name):
     assert 'arrays' not in decoded
 
 
-def test_pack_names_arrays_in_traversal_order():
-    # response_spectrum's ids are a0..a4 in traversal order, so packing the
+@pytest.mark.parametrize('name', TRAVERSAL_NAMED)
+def test_pack_names_arrays_in_traversal_order(name):
+    # these goldens' ids are a0, a1, ... in traversal order, so packing the
     # decoded message must give the same frame back
-    raw = (GOLDEN / 'response_spectrum.bin').read_bytes()
+    raw = (GOLDEN / f'{name}.bin').read_bytes()
     assert frames.pack(frames.decode(raw)) == raw
 
 
@@ -89,6 +98,47 @@ def test_text_golden_round_trip(name):
     assert isinstance(again, str)
     assert json.loads(again) == message
     assert ': ' not in again and ', ' not in again.replace('", "', '')
+
+
+@pytest.mark.parametrize('name', CONTROL_TEXT)
+def test_control_text_goldens_round_trip_compactly(name):
+    text = (GOLDEN / f'{name}.json').read_text(encoding='utf-8')
+    message = frames.decode(text)
+    assert message == json.loads(text)
+    again = frames.pack(message)
+    assert isinstance(again, str), 'a message without arrays is a text frame'
+    assert again == json.dumps(message, separators=(',', ':'), ensure_ascii=False)
+
+
+def test_random_live_decodes_to_stepped_series_on_shared_lines():
+    message = frames.decode((GOLDEN / 'event_random_live.bin').read_bytes())
+    control, drive, reading = message['data']['views']
+    assert [s['role'] for s in control['series']] == [
+        'measured', 'reference', 'tolerance', 'tolerance', 'abort', 'abort']
+    assert drive['y']['unit'] == 'V²/Hz' and reading['view'] == 'reading'
+    lines = control['series'][0]['x']
+    for series in control['series'] + drive['series']:
+        assert series['shape'] == 'steps'
+        assert np.array_equal(series['x'], lines)
+        assert series['edges'].shape == (len(lines) + 1,)
+        assert series['x'].dtype == np.float64
+
+
+def test_random_data_carries_each_plot_with_its_own_views():
+    message = frames.decode((GOLDEN / 'event_random_data.bin').read_bytes())
+    data = message['data']
+    assert 'views' not in data
+    assert [p['id'] for p in data['plots']] == ['ctl', 'lim', 't1']
+    ctl, lim, t1 = data['plots']
+    assert ctl['channels'] is None and len(ctl['views']) == 1
+    assert lim['channels'] == [1, 2] and len(lim['views']) == 2
+    measured, limit = lim['views'][1]['series']
+    assert limit['role'] == 'limit' and limit['shape'] == 'steps'
+    assert limit['edges'].shape == (len(limit['x']) + 1,)
+    # the limit spans its own lines' bins, the same edges the measured line has there
+    assert np.array_equal(limit['edges'], measured['edges'][1:4])
+    series = t1['views'][0]['series'][0]
+    assert t1['views'][0]['x']['scale'] == 'linear' and 'shape' not in series
 
 
 def test_header_padding_and_alignment():

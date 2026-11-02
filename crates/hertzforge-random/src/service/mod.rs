@@ -35,6 +35,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod ramp;
 pub mod report;
 
 use crate::control::{composite_psd, ControlLaw, HinvLaw, LoopInputs, NotchReport, NotchSet};
@@ -46,6 +47,7 @@ use hertzforge_capture::{
 };
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_shaker_db::{FeasibilityCalculator, FeasibilityReport};
+use ramp::DriveRamp;
 use report::{
     ChannelRow, CompositeModeRecord, EventKind, EventLog, FeasibilityDigest, Honesty,
     LevelHistoryEntry, LimitProfileRow, ReportData, RunSettings, RunState, Status, TripKind,
@@ -53,6 +55,7 @@ use report::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The mode payload for a periodic-save [`Snapshot`] (the report spectra).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +86,24 @@ pub enum ServiceError {
     Plant(String),
     /// A capture/snapshot IO error.
     Io(String),
+    /// The referenced system identification could not bring the control
+    /// response to its level (`RandomTestConfig::pretest_reference_db`) within
+    /// its drive ceiling, or the response did not settle onto it. Nothing was
+    /// driven above the ceiling; the run never reached test level.
+    SysIdLevelUnreachable {
+        /// The identification level asked for, dB relative to the reference.
+        level_db: f64,
+        /// The control response's in-band rms the level asks for (EU).
+        target_rms: f64,
+        /// The control response's in-band rms at the last drive tried (EU).
+        reached_rms: f64,
+        /// The last drive tried, V rms.
+        drive_vrms: f64,
+        /// The identification's drive ceiling, V rms.
+        ceiling_vrms: f64,
+        /// Drives tried.
+        probes: usize,
+    },
 }
 
 impl std::fmt::Display for ServiceError {
@@ -92,6 +113,32 @@ impl std::fmt::Display for ServiceError {
             ServiceError::BadState(s) => write!(f, "bad state: {s}"),
             ServiceError::Plant(s) => write!(f, "plant error: {s}"),
             ServiceError::Io(s) => write!(f, "io error: {s}"),
+            ServiceError::SysIdLevelUnreachable {
+                level_db,
+                target_rms,
+                reached_rms,
+                drive_vrms,
+                ceiling_vrms,
+                probes,
+            } => {
+                let below = -level_db;
+                if *drive_vrms >= *ceiling_vrms * (1.0 - 1e-9) && reached_rms < target_rms {
+                    write!(
+                        f,
+                        "system identification could not reach its level: at the {ceiling_vrms:.4} \
+                         V rms drive ceiling the control response was {reached_rms:.4} rms, short \
+                         of the {target_rms:.4} rms that {below:.1} dB below the reference asks for"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "system identification did not settle on its level: after {probes} \
+                         drives the control response was {reached_rms:.4} rms at {drive_vrms:.4} \
+                         V rms, against the {target_rms:.4} rms that {below:.1} dB below the \
+                         reference asks for"
+                    )
+                }
+            }
         }
     }
 }
@@ -144,6 +191,18 @@ pub struct FrfPairResult {
 
 /// Soft-start climb duration when the operator set no explicit level ramp.
 const DEFAULT_SOFT_START_S: f64 = 5.0;
+
+/// How far the controlled stop ramps the level down before the run stops, dB.
+pub const STOP_RAMP_DEPTH_DB: f64 = 40.0;
+
+/// The fewest statistical degrees of freedom an envelope judgment rests on.
+///
+/// A Welch line at `DOF` degrees of freedom is a chi-squared variate: at 4 (two
+/// averages) one line in eleven reads below a -6 dB abort floor by chance, at 16
+/// (eight averages) about one in nine hundred. Judging the envelope on fewer than
+/// 16 turns estimator scatter into aborts (2026-11-01, finding 5); at eight or
+/// more averages per loop every loop qualifies and nothing waits.
+pub const MIN_ENVELOPE_DOF: f64 = 16.0;
 
 /// The host-side Random run service (Path B). Owns the control law + the plant
 /// loop + the protection engines + capture + the event log.
@@ -225,14 +284,25 @@ pub struct RandomService {
     /// quadruples the effective DOF within a second. Scaled in place on level
     /// change (the estimate is level-proportional power), cleared at engage.
     control_est: Option<Vec<f64>>,
-    /// The level the operator COMMANDED (the ramp walks `schedule_level_db`
-    /// toward it; equal when no ramp is in flight).
+    /// Loops folded into `control_est` since it last started (its warm-up count:
+    /// the accumulator is a plain mean until it reaches its configured depth).
+    est_loops: u32,
+    /// The estimate of the level the run is at since the last level change, from
+    /// loops measured at rest, with its loop count (2026-11-01, finding 5). The
+    /// carried `control_est` keeps its depth across a change; this one sees a
+    /// real excursion at the new level in full, and is judged for the abort once
+    /// it holds [`MIN_ENVELOPE_DOF`], until it reaches the carried estimate's
+    /// depth.
+    fresh_est: Option<(Vec<f64>, u32)>,
+    /// The level the operator COMMANDED (the ramp walks toward it; equal to
+    /// `schedule_level_db` when no ramp is in flight).
     level_target_db: f64,
-    /// The in-flight ramp rate, dB/s (set per transition from `level_ramp_s`).
-    level_ramp_db_per_s: f64,
-    /// A controlled stop is pending: when the ramp-down reaches its target,
-    /// the run stops. Aborts NEVER take this path - they stay immediate.
-    stop_after_ramp: bool,
+    /// The drive level ramp, walked per OUTPUT BLOCK by the playback step
+    /// (2026-11-01, bench finding 2). `schedule_level_db` is the level the
+    /// control loop works at and follows it at every segment boundary. A
+    /// controlled stop is pending once `ramp.stop_requested()` is set; when the
+    /// ramp-down arrives, the run stops. Aborts NEVER take this path.
+    ramp: Arc<DriveRamp>,
     /// The soft-start floor this run engaged at, while the climb to the start
     /// level is still in progress (`None` = no soft start / already arrived).
     soft_start_floor_db: Option<f64>,
@@ -424,6 +494,7 @@ impl RandomService {
             .collect();
 
         let data_root = data_root.unwrap_or_else(default_data_root);
+        let shutdown_ramp_s = cfg.shutdown_ramp_s;
 
         Ok(RandomService {
             cfg,
@@ -456,9 +527,10 @@ impl RandomService {
             loop_count: 0,
             engage_settle_loops: 0,
             control_est: None,
+            est_loops: 0,
+            fresh_est: None,
             level_target_db: 0.0,
-            level_ramp_db_per_s: 0.0,
-            stop_after_ramp: false,
+            ramp: Arc::new(DriveRamp::new(STOP_RAMP_DEPTH_DB, shutdown_ramp_s)),
             soft_start_floor_db: None,
             frf_pairs: Vec::new(),
             frf_results: Vec::new(),
@@ -544,6 +616,28 @@ impl RandomService {
 
     pub fn schedule_level_db(&self) -> f64 {
         self.schedule_level_db
+    }
+    /// The level the operator or the ladder last COMMANDED, dB. While a level ramp
+    /// is in flight [`Self::schedule_level_db`] walks toward this; once it arrives
+    /// the two are equal. A controlled stop's ramp-down target is reported here too.
+    pub fn commanded_level_db(&self) -> f64 {
+        self.level_target_db
+    }
+
+    /// The drive level ramp. A front end reads the level the drive is at now
+    /// from it (the control loop's own level moves at segment boundaries), and
+    /// may start the controlled stop from another thread with
+    /// [`DriveRamp::request_stop`]: the ramp-down then starts at the next output
+    /// block rather than the next control loop. Follow it with
+    /// [`Self::request_stop`] on the run thread.
+    pub fn drive_ramp(&self) -> Arc<DriveRamp> {
+        self.ramp.clone()
+    }
+
+    /// The level the drive was at when the controlled stop was requested, once
+    /// it has been.
+    pub fn stop_requested_db(&self) -> Option<f64> {
+        self.ramp.stop_requested()
     }
     /// The in-band gRMS of the FULL (0 dB) shaped target.
     pub fn full_target_grms(&self) -> f64 {
@@ -777,14 +871,8 @@ impl RandomService {
         }
 
         // Build the kinematic monitor (reactive tri-field) from the channel table.
-        let kin = KinematicMonitor::new(
-            &self.table,
-            self.loop_cfg.fs_hz,
-            5.0, // HP corner, decade below typical bands
-            1,   // sustain (spike-sensitive; the settle window suppresses derived-axis)
-            5.0, // settle HP constants
-        );
-        self.kinematic = if kin.is_active() { Some(kin) } else { None };
+        // It is fed from the first identification segment on.
+        self.kinematic = self.build_kinematic();
 
         self.notch_mask = vec![false; self.loop_cfg.nbins()];
         self.transition(RunState::SysId);
@@ -793,11 +881,28 @@ impl RandomService {
 
     // --- sysID + coherence gate ------------------------------------------------
 
-    /// Run the pre-test system-ID at the sysID level (default -20 dB
-    /// amplitude of full). Drives a low-level flat band-limited excitation for a few
+    /// Run the pre-test system-ID. Drives a band-limited excitation for a few
     /// segments, estimates `|H|^2` + coherence, seeds the control law, and computes the
     /// band coherence. Transitions `SysId -> CoherenceGate`. `pretest_segments` bounds
     /// the sysID length (>= 1).
+    ///
+    /// The LEVEL: with `pretest_reference_db` set, the drive is stepped from
+    /// `pretest_start_vrms` until the control response sits at the reference rms
+    /// plus that many dB, then held there for the identification record (see
+    /// [`RandomTestConfig::pretest_reference_db`]); a level the ceiling cannot
+    /// reach is refused with [`ServiceError::SysIdLevelUnreachable`]. Without
+    /// it, the legacy absolute level: `sysid_level_db` of a 0.05 base, bounded by
+    /// the pretest Vrms floor and ceiling.
+    ///
+    /// PROTECTION (2026-11-01, bench finding 1): every identification segment,
+    /// the level steps included, runs under the same absolute aborts as a control
+    /// loop: the drive-Vrms abort, the engine's raw-ring watchdog and the
+    /// kinematic monitor. A trip ends the identification with the run
+    /// `Aborted` and the trip recorded, and this returns `Ok(())`; the caller
+    /// reads the state. Before, a watchdog trip only shortened a segment and the
+    /// monitor was not fed at all: on the bench a 0.4 g abort sat under 48
+    /// blocks peaking at 0.608 g for the whole identification and nothing
+    /// tripped.
     pub fn run_sysid(&mut self, pretest_segments: usize) -> Result<(), ServiceError> {
         if !matches!(self.state, RunState::SysId) {
             return Err(ServiceError::BadState(format!(
@@ -806,18 +911,16 @@ impl RandomService {
             )));
         }
         let (band, nbins, df) = (self.band, self.loop_cfg.nbins(), self.df_hz);
-        // sysID excitation: a flat band-limited PSD at the sysID amplitude relative to a
-        // small pretest reference. Amplitude scale is 10^(sysid_level_db/20) of a modest
-        // pretest base (kept low so the plant is gently excited).
-        let base = 0.05f64; // pretest drive amplitude base (matches the demo)
-        let amp = base * 10f64.powf(self.cfg.sysid_level_db / 20.0);
-        let lvl = amp * amp;
+        // The level the identification is said to run at, for a trip's record.
+        self.schedule_level_db = self
+            .cfg
+            .pretest_reference_db
+            .unwrap_or(self.cfg.sysid_level_db);
+        // The excitation's SHAPE: flat in band, or (operator knob) proportional to
+        // the reference in band so a resonant article gets its energy where the
+        // run will put it. Normalized to 1 V rms; the level is set below.
         let mut pretest_psd = vec![0.0f64; nbins];
         if self.cfg.shaped_pretest {
-            // SHAPED pretest (operator knob): excite the plant the way the
-            // test will - proportional to the reference in band, normalized
-            // so the band-mean power matches the flat pretest level. A
-            // resonant article gets its energy where the run will put it.
             let mean = {
                 let sl = &self.full_target[band.0..band.1.min(self.full_target.len())];
                 let m = sl.iter().sum::<f64>() / sl.len().max(1) as f64;
@@ -831,41 +934,29 @@ impl RandomService {
                 .iter_mut()
                 .zip(self.full_target[band.0..].iter())
             {
-                *p = lvl * (t / mean).max(0.0);
+                *p = (t / mean).max(0.0);
             }
         } else {
             for p in pretest_psd[band.0..band.1].iter_mut() {
-                *p = lvl;
+                *p = 1.0;
             }
         }
-        // Operator Vrms bounds on the pretest drive. The FLOOR raises a
-        // too-quiet pretest into the coherent range; the CEILING is the
-        // safety bound and is applied LAST so it always wins.
-        let vrms = (pretest_psd.iter().sum::<f64>() * df).sqrt();
-        if vrms > 0.0 {
-            let mut scale2 = 1.0f64;
-            if let Some(mn) = self.cfg.pretest_min_vrms {
-                if vrms * scale2.sqrt() < mn {
-                    scale2 = (mn / vrms).powi(2);
-                }
+        let unit_vrms = Self::psd_vrms(&pretest_psd, df);
+        if unit_vrms > 0.0 {
+            let k = 1.0 / (unit_vrms * unit_vrms);
+            for p in pretest_psd.iter_mut() {
+                *p *= k;
             }
-            if let Some(mx) = self.cfg.pretest_max_vrms {
-                if vrms * scale2.sqrt() > mx {
-                    scale2 = (mx / vrms).powi(2);
-                }
-            }
-            if (scale2 - 1.0).abs() > 1e-12 {
-                for p in pretest_psd.iter_mut() {
-                    *p *= scale2;
-                }
-                self.log.push(EventKind::Note {
-                    text: format!(
-                        "pretest drive scaled to Vrms bounds: {:.4} -> {:.4} Vrms",
-                        vrms,
-                        vrms * scale2.sqrt()
-                    ),
-                });
-            }
+        }
+        let drive_vrms = match self.cfg.pretest_reference_db {
+            Some(level_db) => match self.sysid_drive_for_level(&pretest_psd, level_db)? {
+                Some(v) => v,
+                None => return Ok(()), // a protection tripped; the run is Aborted
+            },
+            None => self.legacy_sysid_drive_vrms(unit_vrms),
+        };
+        for p in pretest_psd.iter_mut() {
+            *p *= drive_vrms * drive_vrms;
         }
 
         // The FULL pretest record, not the last segment (the 2026-08-03 arm-refused
@@ -905,25 +996,9 @@ impl RandomService {
             // that scales with nfft and happens while the AO is running on a
             // finite buffer - and synthesis is exactly that. Nothing writes AO
             // during it, so a synth longer than the committed AO queue starves
-            // the output before the segment's first tick.
-            let t_synth = std::time::Instant::now();
-            let (mut leadin, mut drive) = self.synth_segment(&pretest_psd)?;
-            let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
-            // eprintln, not a log Note: in the failing case the pretest aborts on
-            // segment 0, and the abort path's event tail did not carry the note
-            // through. A diagnostic that only survives the HEALTHY path is no
-            // diagnostic at all - it is absent from exactly the run you need it for.
-            eprintln!(
-                "pretest segment {ran}: synth {synth_ms:.1} ms for {} frames (nfft {})",
-                self.loop_cfg.window_len(),
-                self.loop_cfg.nfft
-            );
-            if let Some(sig) = self.cfg.drive_clip_sigma {
-                Self::clip_sigma(&mut leadin, sig);
-                Self::clip_sigma(&mut drive, sig);
-            }
-            let seg = self.run_plant_segment(leadin, drive.clone())?;
-            let r = self.composite_control_signal(&seg);
+            // the output before the segment's first tick. (The synthesis is timed
+            // inside `sysid_segment`.)
+            //
             // STEP 4. Drive and response are each CORRECT (ratio 1.0076,
             // in-band fraction 0.9991 at nfft 32768) yet do not correlate, so
             // the fault is in the PAIRING. The concatenated records only line
@@ -944,28 +1019,16 @@ impl RandomService {
             // tick, so the pretest was hitting the same AO stall already fixed
             // for the control loop - but here it truncated instead of
             // faulting, because nothing checked.
-            // ...but ONLY when the segment offers no reason of its own. A
-            // kinematic trip or an engine fault legitimately ends a segment
-            // early, and reporting THAT as a pairing fault would bury the real
-            // cause behind a length complaint (caught by the (e) kinematic-
-            // abort acceptance test, which trips a tight monitor limit during
-            // the pretest on purpose).
-            // A FAULTED engine stop is an ERROR here too. `loop_tick` already says
-            // so (see its step 5.0), but the PRETEST path never got the
-            // rule, and `run_plant_segment` deliberately returns the segment
-            // rather than judging it. So an engine fault mid-pretest arrived
-            // here as nothing more than a short record - and the length guard
-            // below then EXCUSED it, because a fault counts as a reason. Two
-            // correct-looking pieces of caution composed into silence: the
-            // record was truncated at the staging cap, concatenated, and paired
-            // sample-for-sample with a full drive (2026-08-03).
-            if let Some(msg) = seg.faulted.clone() {
-                return Err(ServiceError::Plant(format!(
-                    "pretest segment {ran} faulted: {msg}"
-                )));
-            }
-            let unexplained = seg.watchdog_trip.is_none();
-            if r.len() != drive.len() && unexplained {
+            // A kinematic trip ends a segment early for a reason of its own; it now
+            // ends the identification (`sysid_segment` returns `None`), so the
+            // length guard below only ever sees segments that ran to their budget.
+            // A FAULTED engine stop is an ERROR (`sysid_segment` returns it), never
+            // a short record the length guard could excuse (2026-08-03).
+            let Some((drive, seg)) = self.sysid_segment(&pretest_psd, ran)? else {
+                return Ok(()); // a protection tripped; the run is Aborted
+            };
+            let r = self.composite_control_signal(&seg);
+            if r.len() != drive.len() {
                 return Err(ServiceError::Plant(format!(
                     "pretest segment {ran} returned {} response samples against a {} \
                      sample drive (nfft {}). A truncated acquisition cannot be paired \
@@ -1185,11 +1248,226 @@ impl RandomService {
         Ok(())
     }
 
+    /// The legacy ABSOLUTE identification drive, V rms: `sysid_level_db` of a
+    /// fixed 0.05 base over a shape whose 1-per-line form is `unit_vrms` V rms,
+    /// then the operator's Vrms floor and ceiling (the ceiling applied last, so
+    /// it always wins). Unchanged arithmetic from before the referenced mode.
+    fn legacy_sysid_drive_vrms(&mut self, unit_vrms: f64) -> f64 {
+        let base = 0.05f64; // pretest drive amplitude base (matches the demo)
+        let amp = base * 10f64.powf(self.cfg.sysid_level_db / 20.0);
+        let vrms = amp * unit_vrms;
+        if vrms <= 0.0 {
+            return vrms;
+        }
+        let mut out = vrms;
+        if let Some(mn) = self.cfg.pretest_min_vrms {
+            if out < mn {
+                out = mn;
+            }
+        }
+        if let Some(mx) = self.cfg.pretest_max_vrms {
+            if out > mx {
+                out = mx;
+            }
+        }
+        if (out / vrms - 1.0).abs() > 1e-12 {
+            self.log.push(EventKind::Note {
+                text: format!("pretest drive scaled to Vrms bounds: {vrms:.4} -> {out:.4} Vrms"),
+            });
+        }
+        out
+    }
+
+    /// The referenced identification's drive, V rms: step from the start drive
+    /// until the control response's in-band rms is the reference's in-band rms
+    /// plus `level_db`, within [`config::PRETEST_LEVEL_TOLERANCE_DB`]. `unit_psd`
+    /// is the excitation shape at 1 V rms.
+    ///
+    /// Each step is one protected identification segment. The next drive is the
+    /// linear prediction `v * target / measured`, held within 20 dB of the last
+    /// drive (a noise-dominated first reading can only under-predict the gain,
+    /// so the walk comes up from below) and never above the ceiling:
+    /// `pretest_max_vrms` and the test's own `drive_ceiling_vrms`, whichever is
+    /// lower. Returns `Ok(None)` when a protection aborted the run, and
+    /// [`ServiceError::SysIdLevelUnreachable`] when the ceiling cannot reach the
+    /// level or the response does not settle within the probe budget.
+    fn sysid_drive_for_level(
+        &mut self,
+        unit_psd: &[f64],
+        level_db: f64,
+    ) -> Result<Option<f64>, ServiceError> {
+        const MAX_PROBES: usize = 16;
+        const MAX_STEP_DB: f64 = 20.0;
+        let tol = config::PRETEST_LEVEL_TOLERANCE_DB;
+        let step = 10f64.powf(MAX_STEP_DB / 20.0);
+        let (band, df) = (self.band, self.df_hz);
+        let target = self.full_target_grms() * 10f64.powf(level_db / 20.0);
+        let ceiling = self
+            .cfg
+            .pretest_max_vrms
+            .unwrap_or(f64::INFINITY)
+            .min(self.cfg.drive_ceiling_vrms);
+        let mut v = self
+            .cfg
+            .pretest_start_vrms
+            .unwrap_or(ceiling * 0.01)
+            .min(ceiling);
+        let mut reached = 0.0f64;
+        let mut probes = 0usize;
+        while probes < MAX_PROBES {
+            let psd: Vec<f64> = unit_psd.iter().map(|p| p * v * v).collect();
+            let Some((_drive, seg)) = self.sysid_segment(&psd, probes)? else {
+                return Ok(None);
+            };
+            probes += 1;
+            let per_channel = self.measure_per_channel(&seg);
+            let composite = self.composite_of(&per_channel)?;
+            reached = Self::inband_rms(&composite, band, df);
+            let err_db = if reached > 0.0 && target > 0.0 {
+                20.0 * (reached / target).log10()
+            } else {
+                f64::NEG_INFINITY
+            };
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "identification level step {probes}: drive {v:.4} V rms, control \
+                     {reached:.4} rms against {target:.4} rms ({err_db:+.1} dB)"
+                ),
+            });
+            if err_db.abs() <= tol {
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "identification at {v:.4} V rms: the control response is \
+                         {reached:.4} rms, {:+.1} dB against the reference \
+                         ({level_db:+.1} dB asked)",
+                        level_db + err_db
+                    ),
+                });
+                return Ok(Some(v));
+            }
+            if err_db < 0.0 && v >= ceiling * (1.0 - 1e-9) {
+                break; // at the ceiling and still short: refuse
+            }
+            let want = if reached > 0.0 {
+                v * target / reached
+            } else {
+                v * step
+            };
+            v = want.clamp(v / step, v * step).min(ceiling);
+        }
+        Err(ServiceError::SysIdLevelUnreachable {
+            level_db,
+            target_rms: target,
+            reached_rms: reached,
+            drive_vrms: v,
+            ceiling_vrms: ceiling,
+            probes,
+        })
+    }
+
+    /// Drive ONE identification segment of `psd` under every absolute
+    /// protection a control loop has (2026-11-01, bench finding 1): the
+    /// drive-Vrms abort on the segment's drive, the engine's raw-ring watchdog
+    /// and the service's kinematic monitor on its response, and the overload
+    /// latch. `Ok(None)` means a protection aborted the run (state `Aborted`, the
+    /// trip recorded); a faulted engine stop is an error, as in the control loop.
+    fn sysid_segment(
+        &mut self,
+        psd: &[f64],
+        index: usize,
+    ) -> Result<Option<(Vec<f64>, engine::SegmentResult)>, ServiceError> {
+        let vrms = Self::psd_vrms(psd, self.df_hz);
+        if let Some(abort_v) = self.cfg.drive_abort_vrms {
+            if vrms >= abort_v {
+                self.abort(TripKind::DriveVrms {
+                    realized_vrms: vrms,
+                    limit_vrms: abort_v,
+                });
+                return Ok(None);
+            }
+        }
+        let t_synth = std::time::Instant::now();
+        let (mut leadin, mut drive) = self.synth_segment(psd)?;
+        let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
+        if let Some(p) = self.plant_loop.as_mut() {
+            p.set_drive_ramp(None); // identification records play as synthesized
+        }
+        // eprintln, not a log Note: in the failing case the pretest aborts on
+        // segment 0, and the abort path's event tail did not carry the note
+        // through. A diagnostic that only survives the HEALTHY path is no
+        // diagnostic at all - it is absent from exactly the run you need it for.
+        eprintln!(
+            "pretest segment {index}: synth {synth_ms:.1} ms for {} frames (nfft {})",
+            self.loop_cfg.window_len(),
+            self.loop_cfg.nfft
+        );
+        if let Some(sig) = self.cfg.drive_clip_sigma {
+            Self::clip_sigma(&mut leadin, sig);
+            Self::clip_sigma(&mut drive, sig);
+        }
+        let seg = self.run_plant_segment(leadin, drive.clone())?;
+        if let Some(msg) = seg.faulted.clone() {
+            return Err(ServiceError::Plant(format!(
+                "pretest segment {index} faulted: {msg}"
+            )));
+        }
+        if let Some(t) = seg.watchdog_trip {
+            let ktrip = KinematicTrip {
+                channel_index: t.channel_index,
+                axis: format!("{:?}", t.axis),
+                value: t.value,
+                limit: t.limit,
+                at_frame: t.at_frame,
+                at_level_db: self.schedule_level_db,
+                at_loop: self.loop_count,
+            };
+            self.abort(TripKind::from_kinematic(ktrip));
+            return Ok(None);
+        }
+        if let Some(kin) = self.kinematic.as_mut() {
+            if let Some(t) = kin.feed(&seg.interleaved) {
+                let ktrip = KinematicTrip {
+                    channel_index: t.channel_index,
+                    axis: format!("{:?}", t.axis),
+                    value: t.value,
+                    limit: t.limit,
+                    at_frame: t.at_frame,
+                    at_level_db: self.schedule_level_db,
+                    at_loop: self.loop_count,
+                };
+                self.abort(TripKind::from_kinematic(ktrip));
+                return Ok(None);
+            }
+        }
+        self.check_overloads(&seg);
+        Ok(Some((drive, seg)))
+    }
+
+    /// A fresh kinematic monitor from the channel table, or `None` when no
+    /// channel carries a limit. Built at arm for the identification and again at
+    /// engage, so the control loop starts with its own settle window exactly as
+    /// it did before the identification was protected.
+    fn build_kinematic(&self) -> Option<KinematicMonitor> {
+        let kin = KinematicMonitor::new(
+            &self.table,
+            self.loop_cfg.fs_hz,
+            5.0, // HP corner, decade below typical bands
+            1,   // sustain (spike-sensitive; the settle window suppresses derived-axis)
+            5.0, // settle HP constants
+        );
+        kin.is_active().then_some(kin)
+    }
+
     /// The coherence gate. If the band coherence is at or above the floor,
     /// engage the loop at the START level and transition `CoherenceGate -> Engaged`.
     /// If below, PARK at `CoherenceHold` (report + event, NEVER auto-raise). Returns
     /// `true` if the gate passed (engaged), `false` if it held.
     pub fn coherence_gate(&mut self) -> Result<bool, ServiceError> {
+        // A protection that tripped during the identification left the run
+        // Aborted with its trip: there is nothing to gate and nothing to engage.
+        if matches!(self.state, RunState::Aborted) {
+            return Ok(false);
+        }
         if !matches!(self.state, RunState::CoherenceGate) {
             return Err(ServiceError::BadState(format!(
                 "coherence_gate from {:?}",
@@ -1275,6 +1553,12 @@ impl RandomService {
         // the second may straddle it (the estimator's overlap reaches back).
         self.engage_settle_loops = 2;
         self.control_est = None;
+        self.est_loops = 0;
+        self.fresh_est = None;
+        // The control loop's own kinematic monitor, with its own settle window:
+        // the identification's monitor saw the identification's turn-on, and the
+        // engage is a task restart.
+        self.kinematic = self.build_kinematic();
         // SOFT START (operator, 2026-08-03): engage `soft_start_db` below the
         // LOWEST scheduled level and walk up to the start level, so a big
         // article - a slip table especially - is taken hold of gently rather
@@ -1296,18 +1580,20 @@ impl RandomService {
             // is the operator's level-ramp when they set one; otherwise a
             // deliberate default so the soft start is a RAMP, never a step.
             self.apply_level_now(floor);
-            self.schedule_level_db = floor;
+            self.ramp.set(floor);
             self.level_target_db = self.cfg.schedule.start_db;
             let ramp_s = if self.cfg.level_ramp_s > f64::EPSILON {
                 self.cfg.level_ramp_s
             } else {
                 DEFAULT_SOFT_START_S
             };
-            self.level_ramp_db_per_s =
-                ((self.cfg.schedule.start_db - floor).abs() / ramp_s).max(0.1);
+            let rate = ((self.cfg.schedule.start_db - floor).abs() / ramp_s).max(0.1);
+            self.ramp.ramp_to(self.cfg.schedule.start_db, rate);
             self.log.push(EventKind::Note {
                 text: format!(
-                    "SOFT START: engaging at {floor:.1} dB ({soft:.0} dB below the lowest                      scheduled level) and ramping to {:.1} dB over {ramp_s:.0} s; envelope                      enforcement relaxed by {:.0} dB until the start level is reached",
+                    "SOFT START: engaging at {floor:.1} dB ({soft:.0} dB below the lowest \
+                     scheduled level) and ramping to {:.1} dB over {ramp_s:.0} s; envelope \
+                     enforcement relaxed by {:.0} dB until the start level is reached",
                     self.cfg.schedule.start_db, self.cfg.soft_start_relax_db
                 ),
             });
@@ -1396,6 +1682,10 @@ impl RandomService {
                     *p *= pow_ratio;
                 }
             }
+            // The new level gets its own estimate, from its first loop at rest.
+            if self.control_est.is_some() {
+                self.fresh_est = Some((Vec::new(), 0));
+            }
         }
         let full_rms = self.full_target_grms();
         if let Some(law) = self.law.as_mut() {
@@ -1414,16 +1704,19 @@ impl RandomService {
         let from = self.schedule_level_db;
         self.level_target_db = level_db;
         // RAMPED when the operator configured a ramp and the loop is driving:
-        // the level WALKS to the target in per-segment steps (see loop_tick).
-        // Instant otherwise - including every non-driving state, where there
-        // is no loop to walk it.
+        // the drive WALKS to the target block by block (`ramp`), and the loop's
+        // level follows at each segment boundary (see loop_tick). Instant
+        // otherwise - including every non-driving state, where there is no loop
+        // to walk it.
         let ramping = self.cfg.level_ramp_s > f64::EPSILON
             && matches!(self.state, RunState::Engaged | RunState::FullLevel)
             && (level_db - from).abs() > 1e-9;
         if ramping {
-            self.level_ramp_db_per_s = ((level_db - from).abs() / self.cfg.level_ramp_s).max(0.1);
+            let rate = ((level_db - from).abs() / self.cfg.level_ramp_s).max(0.1);
+            self.ramp.ramp_to(level_db, rate);
         } else {
             self.apply_level_now(level_db);
+            self.ramp.set(level_db);
         }
         self.elapsed_at_level_s = 0.0;
         self.level_history.push(LevelHistoryEntry {
@@ -1449,23 +1742,23 @@ impl RandomService {
     /// nothing is driving. Aborts NEVER come through here - a protection trip
     /// stops now, and softening it would trade the article for politeness.
     pub fn request_stop(&mut self) -> Result<(), ServiceError> {
-        if self.cfg.shutdown_ramp_s > f64::EPSILON
-            && matches!(self.state, RunState::Engaged | RunState::FullLevel)
-        {
-            let down_db = self.schedule_level_db - 40.0;
-            self.level_target_db = down_db;
-            self.level_ramp_db_per_s = (40.0 / self.cfg.shutdown_ramp_s).max(0.1);
-            self.stop_after_ramp = true;
-            self.log.push(EventKind::Note {
-                text: format!(
-                    "controlled stop: ramping down over {:.1} s, then stopping",
-                    self.cfg.shutdown_ramp_s
-                ),
-            });
-            Ok(())
-        } else {
-            self.stop()
+        if matches!(self.state, RunState::Engaged | RunState::FullLevel) {
+            // Idempotent: a front end may already have started the ramp-down
+            // from another thread (`drive_ramp().request_stop()`), and the level
+            // it started from is kept.
+            if let Some(from) = self.ramp.request_stop() {
+                self.level_target_db = self.ramp.target_db();
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "controlled stop: ramping down over {:.1} s, then stopping (from {from:+.1} \
+                         dB)",
+                        self.cfg.shutdown_ramp_s
+                    ),
+                });
+                return Ok(());
+            }
         }
+        self.stop()
     }
 
     /// Advance the AUTO ladder one rung if the current level's dwell has elapsed. When
@@ -1722,8 +2015,18 @@ impl RandomService {
         // 3. Drive-Vrms ceiling clamp: clamp the drive PSD so its
         //    realized Vrms does not exceed the ceiling; a hard breach beyond the abort
         //    threshold aborts. The Vrms is sqrt(sum(psd)*df) over the whole grid.
-        self.clamp_drive_vrms(&mut drive_psd);
-        let realized_vrms = Self::psd_vrms(&drive_psd, df);
+        //    The segment's drive is synthesized at the level it starts at and the
+        //    level ramp scales it block by block from there, so both judge the
+        //    HIGHEST level the ramp can reach in this segment (only this thread
+        //    raises a target; a stop from another thread only lowers it).
+        let base_db = self.schedule_level_db;
+        let peak_db = self
+            .ramp
+            .projected(self.loop_cfg.segment_seconds())
+            .max(base_db);
+        let lift = 10f64.powf((peak_db - base_db) / 20.0);
+        self.clamp_drive_vrms_at(&mut drive_psd, lift);
+        let realized_vrms = Self::psd_vrms(&drive_psd, df) * lift;
         if let Some(abort_v) = self.cfg.drive_abort_vrms {
             if realized_vrms >= abort_v {
                 self.abort(TripKind::DriveVrms {
@@ -1738,37 +2041,11 @@ impl RandomService {
         // 4. Synthesize the drive stream + run one plant segment.
         // Phase timing: synthesis is the LAST thing before acquisition
         // resumes, so it sits squarely inside the AO-unfed window.
-        // LEVEL RAMP walker: one bounded step per segment toward the
-        // commanded target, feedforward-retargeted each step - smooth by
-        // construction, never stepwise (a step into an armature is a
-        // broadband impulse). When a controlled stop armed the ramp-down,
-        // reaching the floor stops the run.
-        if (self.schedule_level_db - self.level_target_db).abs() > 1e-9 {
-            let step = (self.level_ramp_db_per_s * self.loop_cfg.segment_seconds()).max(1e-3);
-            let delta = self.level_target_db - self.schedule_level_db;
-            let next = if delta.abs() <= step {
-                self.level_target_db
-            } else {
-                self.schedule_level_db + step.copysign(delta)
-            };
-            self.apply_level_now(next);
-            // A moving level re-arms a short judgment settle: the estimate is
-            // being rescaled every segment and the envelope must not chase it.
-            self.engage_settle_loops = self.engage_settle_loops.max(1);
-        } else if self.soft_start_floor_db.is_some()
-            && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
-        {
-            // Arrived: full enforcement from here on.
-            self.soft_start_floor_db = None;
-            self.log.push(EventKind::Note {
-                text: "soft start complete: at the start level, full envelope enforcement".into(),
-            });
-        } else if self.stop_after_ramp {
-            self.stop_after_ramp = false;
-            self.stop()?;
-            return Ok(false);
-        }
-
+        // LEVEL RAMP: the segment's drive is synthesized at `base_db`, and the
+        // playback step scales every output block by the ramp's walk from it -
+        // smooth by construction, never stepwise (a step into an armature is a
+        // broadband impulse). The loop's own level follows the ramp at the end
+        // of the segment.
         let t_synth = std::time::Instant::now();
         let (mut leadin, mut drive) = self.synth_segment(&drive_psd)?;
         // Sigma clip (operator "max sigma"): bound the crest factor delivered
@@ -1784,7 +2061,38 @@ impl RandomService {
         }
         let synth_ms = t_synth.elapsed().as_secs_f64() * 1e3;
         let t_pre = self.pre_segment_start.take();
+        if let Some(p) = self.plant_loop.as_mut() {
+            p.set_drive_ramp(Some((self.ramp.clone(), base_db)));
+        }
         let seg = self.run_plant_segment(leadin, drive)?;
+        // The level the drive reached by the end of this segment is the level
+        // the loop works at from here: rescale the estimate, retarget the law.
+        let end_db = self.ramp.level_db();
+        let moved = (end_db - base_db).abs() > 1e-9;
+        if moved {
+            // The synthesis overlap still carries the end of this segment at its
+            // synthesis level; the next segment is synthesized at `end_db`, so the
+            // carry is brought to the level the ramp reached (without this, every
+            // ramped segment boundary crossfaded in from the old level: one
+            // window up to 20 dB high in the middle of a stop).
+            if let Some(synth) = self.synth.as_mut() {
+                synth.scale_carry(10f64.powf((end_db - base_db) / 20.0));
+            }
+            self.apply_level_now(end_db);
+            // A segment measured while the level moved is not judged and does not
+            // steer the law (below); it is folded into the estimate at the level
+            // the ramp reached. It no longer CLEARS the estimate: that left the
+            // first loop judged after every ramp with one loop's scatter, which at
+            // two averages tripped the envelope abort (2026-11-01, finding 5).
+        } else if self.soft_start_floor_db.is_some()
+            && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
+        {
+            // Arrived: full enforcement from here on.
+            self.soft_start_floor_db = None;
+            self.log.push(EventKind::Note {
+                text: "soft start complete: at the start level, full envelope enforcement".into(),
+            });
+        }
         if let Some(t) = self.last_segment_timing.as_mut() {
             t.synth_ms = synth_ms;
             t.pre_ms = t_pre
@@ -1854,10 +2162,29 @@ impl RandomService {
         //    latches the per-channel indicator (NOT an abort).
         self.check_overloads(&seg);
 
+        // 7a. A controlled stop whose ramp-down has arrived stops the run at the
+        //     end of this segment (the protections above judged it first).
+        if self.ramp.stop_requested().is_some() && !self.ramp.moving() {
+            self.stop()?;
+            return Ok(false);
+        }
+
         // 8. Measure per-channel PSDs + composite, then iterate the law.
         let per_channel = self.measure_per_channel(&seg);
-        let raw_composite = self.composite_of(&per_channel)?;
+        let mut raw_composite = self.composite_of(&per_channel)?;
         self.last_per_channel_psds = per_channel;
+        // A segment measured while the level moved holds a mixture of levels:
+        // bring it to the level the ramp reached, by the drive power the ramp
+        // actually applied over it (the response lags the drive by the pipeline,
+        // a fraction of a segment, so this is close rather than exact).
+        if moved {
+            let g_end2 = 10f64.powf((end_db - base_db) / 10.0);
+            let mean_g2 = seg.drive_power_gain.max(1e-12);
+            let k = g_end2 / mean_g2;
+            for p in raw_composite.iter_mut() {
+                *p *= k;
+            }
+        }
         // Fold this loop's raw estimate into the ACCUMULATOR; everything
         // downstream (law, envelope, display, gRMS) consumes the accumulated
         // estimate. See the `control_est` field doc for why raw was wrong.
@@ -1868,15 +2195,24 @@ impl RandomService {
         // raw loop, nor so deep that the loop stops adapting.
         let per_loop_dof = (2 * self.loop_cfg.blocks_per_window).max(1) as f64;
         let windows = (self.cfg.control_dof / per_loop_dof).clamp(1.0, 64.0);
-        let est_alpha = 2.0 / (windows + 1.0);
+        // WARM-UP (2026-11-01): until the accumulator holds its configured depth
+        // it is a plain mean of the loops it has seen, so a young estimate's
+        // degrees of freedom grow with every loop instead of staying dominated by
+        // its first one (an EMA started from one raw loop keeps most of that
+        // loop's scatter for many loops at a small alpha).
+        let est_alpha = (2.0 / (windows + 1.0)).max(1.0 / f64::from(self.est_loops + 1));
         let composite: Vec<f64> = match self.control_est.take() {
             Some(mut est) if est.len() == raw_composite.len() => {
                 for (e, &m) in est.iter_mut().zip(raw_composite.iter()) {
                     *e += est_alpha * (m - *e);
                 }
+                self.est_loops = self.est_loops.saturating_add(1);
                 est
             }
-            _ => raw_composite.clone(),
+            _ => {
+                self.est_loops = 1;
+                raw_composite.clone()
+            }
         };
         self.control_est = Some(composite.clone());
         self.last_composite_psd = Some(composite.clone());
@@ -1902,9 +2238,44 @@ impl RandomService {
             // estimate still mostly made of the transient. The accumulator
             // starts from the first clean window instead.
             self.control_est = None;
+            self.est_loops = 0;
+            self.fresh_est = None;
             self.advance_capture_clocks();
             return Ok(true);
         }
+
+        // A segment measured while the level moved: folded into the estimate
+        // above, but not judged and not steering the law (as before 2026-11-01;
+        // only the clearing went).
+        if moved {
+            self.alarm_active = false;
+            self.advance_capture_clocks();
+            return Ok(true);
+        }
+
+        // The new level's own estimate, from its loops at rest (see `fresh_est`).
+        // Retired once it holds as much as the carried estimate.
+        let fresh_judged: Option<Vec<f64>> = match self.fresh_est.take() {
+            Some((mut f, n)) => {
+                if f.len() == raw_composite.len() {
+                    let w = 1.0 / f64::from(n + 1);
+                    for (e, &m) in f.iter_mut().zip(raw_composite.iter()) {
+                        *e += w * (m - *e);
+                    }
+                } else {
+                    f = raw_composite.clone();
+                }
+                let n = n + 1;
+                let dof = per_loop_dof * f64::from(n);
+                let judged = (dof >= MIN_ENVELOPE_DOF).then(|| f.clone());
+                if dof < self.cfg.control_dof {
+                    self.fresh_est = Some((f, n));
+                }
+                judged
+            }
+            None => None,
+        };
+        let est_dof = per_loop_dof * f64::from(self.est_loops);
 
         // The operator's FRF pairs, measured from the SAME segment the
         // control loop just consumed - so what the pane shows and what the
@@ -1979,7 +2350,7 @@ impl RandomService {
 
         // 10. Envelope alarm/abort: check the composite measured PSD
         //     against the frequency-domain envelope.
-        if !self.check_envelope(&composite) {
+        if !self.check_envelope(&composite, est_dof, fresh_judged.as_deref()) {
             return Ok(false); // aborted inside check_envelope
         }
 
@@ -2014,6 +2385,9 @@ impl RandomService {
         }
         self.arm()?;
         self.run_sysid(pretest_segments)?;
+        if matches!(self.state, RunState::Aborted) {
+            return Ok(self.state); // a protection tripped during identification
+        }
         if !self.coherence_gate()? {
             return Ok(self.state); // parked at CoherenceHold
         }
@@ -2054,8 +2428,8 @@ impl RandomService {
     /// Scales the whole PSD down uniformly if over-ceiling (a per-bin clamp would distort
     /// the shape; a uniform scale preserves it, which is the physical drive-limit
     /// behavior).
-    fn clamp_drive_vrms(&self, drive_psd: &mut [f64]) {
-        let vrms = Self::psd_vrms(drive_psd, self.df_hz);
+    fn clamp_drive_vrms_at(&self, drive_psd: &mut [f64], lift: f64) {
+        let vrms = Self::psd_vrms(drive_psd, self.df_hz) * lift.max(1.0);
         let ceiling = self.cfg.drive_ceiling_vrms;
         if vrms > ceiling && vrms > 0.0 {
             let scale2 = (ceiling / vrms).powi(2);
@@ -2075,11 +2449,69 @@ impl RandomService {
     /// track the scheduled level, which is the standard random-controller behavior (a
     /// -12 dB engage does not spuriously breach the -3 dB abort floor of the full
     /// envelope). At full level the scale is 1 and this is a no-op.
-    fn check_envelope(&mut self, composite: &[f64]) -> bool {
-        let Some(env) = self.envelope.as_ref() else {
+    ///
+    /// `composite` is the carried estimate, judged (alarm and abort) once it rests
+    /// on [`MIN_ENVELOPE_DOF`] (`est_dof`). `fresh`, when given, is the new level's
+    /// own estimate (already at the floor); it is judged for the ABORT only, so a
+    /// real excursion at a new level aborts as soon as it did when every level
+    /// change restarted the estimate (2026-11-01, finding 5).
+    fn check_envelope(&mut self, composite: &[f64], est_dof: f64, fresh: Option<&[f64]>) -> bool {
+        if self.envelope.is_none() {
             self.alarm_active = false;
             return true;
-        };
+        }
+        if est_dof >= MIN_ENVELOPE_DOF {
+            let Some(report) = self.envelope_report(composite) else {
+                return true;
+            };
+            self.last_alarm_lines = report.alarm_bins.len();
+            self.last_abort_lines = report.abort_bins.len();
+            // The abort fires at the operator's line budget (`max_lines_out`),
+            // not on the first breached bin: per-line Welch scatter at small nAvg
+            // statistically breaches a -6 dB floor on a perfect plant (see the
+            // config field's doc for the 2026-08-03 measurement). Below the
+            // budget, breaches ride the ALARM indicator instead.
+            if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
+                let worst = report.worst_abort_db.unwrap_or(0.0);
+                self.abort(TripKind::Envelope {
+                    abort_lines: report.abort_bins.len(),
+                    worst_db: worst,
+                });
+                return false;
+            }
+            self.alarm_active = report.alarmed();
+            if report.alarmed() {
+                self.log.push(EventKind::EnvelopeAlarm {
+                    lines: report.alarm_bins.len(),
+                    worst_db: report.worst_alarm_db.unwrap_or(0.0),
+                });
+            }
+        } else {
+            // Too few degrees of freedom to tell a line out of band from scatter.
+            self.alarm_active = false;
+            self.last_alarm_lines = 0;
+            self.last_abort_lines = 0;
+        }
+        if let Some(f) = fresh {
+            if let Some(report) = self.envelope_report(f) {
+                if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
+                    let worst = report.worst_abort_db.unwrap_or(0.0);
+                    self.last_abort_lines = report.abort_bins.len();
+                    self.abort(TripKind::Envelope {
+                        abort_lines: report.abort_bins.len(),
+                        worst_db: worst,
+                    });
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// The envelope's judgment of `composite` at the scheduled level, with the
+    /// soft-start relaxation in force (see [`Self::check_envelope`]).
+    fn envelope_report(&self, composite: &[f64]) -> Option<hertzforge_breakpoints::EnvelopeReport> {
+        let env = self.envelope.as_ref()?;
         let level_scale2 = 10f64.powf(self.schedule_level_db / 10.0);
         let inv = if level_scale2 > 0.0 {
             1.0 / level_scale2
@@ -2095,7 +2527,7 @@ impl RandomService {
         // Soft-start relaxation: widen the authored bands while the run is
         // still climbing to the start level (see `envelope_relax_db`).
         let relax = self.envelope_relax_db();
-        let report = if relax > 0.0 {
+        Some(if relax > 0.0 {
             let scale = 10f64.powf(relax / 10.0);
             let widened: Vec<f64> = measured.psd.iter().map(|&p| p / scale).collect();
             let lo = LineSpectrum {
@@ -2120,35 +2552,30 @@ impl RandomService {
             r
         } else {
             env.check(&measured)
-        };
-        self.last_alarm_lines = report.alarm_bins.len();
-        self.last_abort_lines = report.abort_bins.len();
-        // The abort fires at the operator's line budget (`max_lines_out`),
-        // not on the first breached bin: per-line Welch scatter at small nAvg
-        // statistically breaches a -6 dB floor on a perfect plant (see the
-        // config field's doc for the 2026-08-03 measurement). Below the
-        // budget, breaches ride the ALARM indicator instead.
-        if report.abort_bins.len() >= self.cfg.max_lines_out.max(1) {
-            let worst = report.worst_abort_db.unwrap_or(0.0);
-            self.abort(TripKind::Envelope {
-                abort_lines: report.abort_bins.len(),
-                worst_db: worst,
-            });
-            return false;
-        }
-        self.alarm_active = report.alarmed();
-        if report.alarmed() {
-            self.log.push(EventKind::EnvelopeAlarm {
-                lines: report.alarm_bins.len(),
-                worst_db: report.worst_alarm_db.unwrap_or(0.0),
-            });
-        }
-        true
+        })
     }
 
     /// Overload proxy per channel: if any raw sample on a channel reaches
     /// `fraction * range_max` in EU, latch that channel's indicator. NOT an abort.
+    ///
+    /// The station's own report feeds the same indicator: every backend checks
+    /// its inputs in software against each channel's configured range
+    /// (`Backend::input_overloads`, 98 %), which on the NI 9234 is the only
+    /// overload check there is (the driver's flag is unsupported there).
     fn check_overloads(&mut self, seg: &engine::SegmentResult) {
+        let station = self
+            .plant_loop
+            .as_mut()
+            .map(|p| p.input_overloads())
+            .unwrap_or_default();
+        for (slot, latch) in self.overloads.iter_mut().enumerate() {
+            if !latch.latched && station.get(slot).copied().unwrap_or(false) {
+                latch.latched = true;
+                self.log.push(EventKind::OverloadLatch {
+                    channel_index: latch.channel_index,
+                });
+            }
+        }
         let frac = self.cfg.overload_fraction;
         // The interleave order matches the enabled-non-drive channel order the latches
         // were built in.
@@ -2537,14 +2964,16 @@ impl RandomService {
 
     /// The control interleave slot for a channel index (position among enabled non-drive
     /// channels). `None` if the channel is not an enabled input.
+    ///
+    /// A drive row is an OUTPUT and has no place in the acquired frame. This used
+    /// to count an enabled drive row as a slot, so an input listed after a drive
+    /// row read its neighbour's samples (found by the control service, which
+    /// worked around it by handing the controller its table with drive rows
+    /// last; the engine's watchdog had the same defect and was fixed 2026-07-16).
     fn slot_of(&self, channel_index: u32) -> Option<usize> {
         let mut slot = 0usize;
         for ch in &self.table.channels {
-            if !ch.enabled {
-                continue;
-            }
-            if ch.role == ChannelRole::Drive {
-                slot += 1;
+            if !ch.enabled || ch.role == ChannelRole::Drive {
                 continue;
             }
             if ch.index == channel_index {

@@ -114,3 +114,27 @@ hertzforge-sine  test:stop_ramp_protections  a_genuine_hazard_during_the_ramp_st
 sds-control  test:sim_run  a_paced_run_tracks_wall_time_and_stops_on_request_with_a_reason
 sds-control  test:ws_server  hello_methods_errors_and_a_live_display_stream
 sds-control  test:ws_server  malformed_frames_get_bad_request_not_silence
+
+# The Random service end to end over its socket: runs on the simulator, paced
+# to real time or unpaced, waited on against wall-clock deadlines, with the
+# session heartbeat, the orphan timeout and the abort bounds on the real clock
+sds-control  test:random_protocol  random_on_the_simulator_runs_end_to_end_through_the_protocol
+sds-control  test:random_protocol  manual_levels_mode_and_the_controlled_stop
+sds-control  test:random_protocol  the_controlled_stop_starts_at_once_and_walks_down_smoothly
+sds-control  test:random_protocol  the_end_gives_the_level_where_the_stop_began
+sds-control  test:random_protocol  a_table_with_the_drive_row_first_controls_the_control_row
+sds-control  test:random_protocol  two_averages_run_the_ladder_without_an_envelope_trip
+sds-control  test:random_protocol  an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended
+sds-control  test:random_protocol  an_abort_during_system_identification_ends_it_at_the_next_block
+sds-control  test:random_protocol  a_kinematic_abort_trips_during_system_identification
+sds-control  test:random_protocol  an_identification_level_the_ceiling_cannot_reach_ends_the_run_by_name
+sds-control  test:random_protocol  observers_read_stop_and_abort_and_nothing_else
+sds-control  test:random_protocol  a_dropped_controller_resumes_with_its_lease_and_the_run_goes_on
+sds-control  test:random_protocol  an_unattended_run_ends_with_the_safe_stop_and_its_ramp
+sds-control  test:random_protocol  a_goodbye_frees_control_at_once_and_keeps_the_run_for_the_timeout
+sds-control  test:random_protocol  a_silent_connection_is_gone_after_three_heartbeats
+sds-control  test:random_protocol  sim_and_random_share_the_one_run_slot
+sds-control  test:random_protocol  ni_selection_binding_and_arm_are_refused_by_name_and_never_simulated
+sds-control  test:random_protocol  driver_simulated_ni_is_never_hardware
+sds-control  test:random_protocol  each_screen_receives_only_the_plots_it_subscribed_to
+sds-control  test:random_protocol  full_level_waits_for_the_level_to_arrive

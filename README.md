@@ -28,10 +28,11 @@ layout is a mechanical change that comes next.
 | `src/hertzforge/` | Python | The `hertzforge` package: the analysis core from Visual Dynamics, its readers and writers, reports, and the `hertzforge` command |
 | `src/hertzforge/service/` | Python | The analysis service: the core behind the protocol, started by `hertzforge serve` |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
-| `crates/sds-control/` | Rust | The control service. Runs the controller's Random control law on its Sim backend |
+| `crates/sds-control/` | Rust | The control service. Runs closed-loop Random on the simulator or on NI-DAQmx hardware, on loopback |
 | `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
+| `tools/e2e-sim/` | JavaScript | Closed-loop Random on the simulator, end to end through the real control service and the shell |
 | `scripts/` | shell | Developer entry points |
 | `site/` | HTML | The hertzforge.com page, deployed by `.github/workflows/site.yml` when it changes on `main` |
 
@@ -68,6 +69,15 @@ The first line installs the package with the analysis service into the active
 environment, the second fetches the plate data its demonstration datasets read.
 `scripts/dev.sh` then starts the analysis service on 8791, the control service on 8792 and the shell on
 http://127.0.0.1:5191/. `?mock=1` runs the shell alone on synthetic data.
+
+The end-to-end check drives Random on the simulator through the real control service, in the
+installed Chrome. It starts both services itself on free ports, takes about three minutes, and is not
+part of `npm --prefix ui test`:
+
+```bash
+npm --prefix tools/e2e-sim ci
+node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
+```
 
 ## License
 

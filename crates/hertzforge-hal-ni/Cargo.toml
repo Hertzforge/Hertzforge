@@ -17,7 +17,9 @@ libloading = "0.8"
 # WINDOWS ONLY: the per-process 1 ms timer request (winmm timeBeginPeriod /
 # timeEndPeriod) and the power-throttling opt-out (kernel32 SetProcessInformation)
 # that keep DAQmx's default Sleep read wait from rounding up to the 15.6 ms Windows
-# timer. See src/timer_resolution.rs for the measurement. Raw-dylib bindings with
+# timer (src/timer_resolution.rs), and the reading thread's MMCSS registration
+# (avrt AvSetMmThreadCharacteristicsW / AvRevertMmThreadCharacteristics, in the
+# Threading feature already listed; src/control_thread.rs). Raw-dylib bindings with
 # no import library, so the cross-build still needs no SDK. MIT OR Apache-2.0;
 # the version already in Cargo.lock (tokio and mio pull it in on Windows).
 [target.'cfg(windows)'.dependencies]

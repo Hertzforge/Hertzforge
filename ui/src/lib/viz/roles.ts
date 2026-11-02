@@ -1,6 +1,7 @@
 /**
  * Series roles: line style first, color second, so no meaning rests on hue alone.
- * measured solid, reference dashed, tolerance dotted, abort dash-dot, drive thin solid.
+ * measured solid, reference dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot (a
+ * ceiling the controller holds a channel under; it never aborts), drive thin solid.
  */
 
 import type { Role } from '$lib/protocol/types';
@@ -22,6 +23,7 @@ export const ROLE_STYLES: Record<Role, RoleStyle> = {
 	reference: { dash: [7, 4], width: 1.6, colorVar: '--series-reference', styleName: 'dashed', z: 4 },
 	tolerance: { dash: [1.5, 3.5], width: 1.6, colorVar: '--series-tolerance', styleName: 'dotted', z: 2 },
 	abort: { dash: [9, 3.5, 1.5, 3.5], width: 1.5, colorVar: '--series-abort', styleName: 'dash-dot', z: 3 },
+	limit: { dash: [10, 3, 1.5, 3, 1.5, 3], width: 1.7, colorVar: '--series-limit', styleName: 'dash-dot-dot', z: 3 },
 	drive: { dash: [], width: 1, colorVar: '--series-drive', styleName: 'thin solid', z: 1 },
 	other: { dash: [], width: 1.4, colorVar: '--series-other', styleName: 'solid', z: 1 }
 };

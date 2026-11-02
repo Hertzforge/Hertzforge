@@ -45,6 +45,11 @@
 //! owning thread rather than calling into a handle from elsewhere. Enumeration
 //! ([`crate::enumerate`]) opens its own short-lived driver handle and touches no
 //! task, so a scan can run while a backend exists.
+//!
+//! On Windows the thread that READS a running task is the run's control thread,
+//! and it is registered with the multimedia scheduler ("Pro Audio") for the run;
+//! that registration belongs to the thread, not to the backend
+//! (`crate::control_thread`).
 
 use crate::clock::{provisional_abort_latency, resolve_clock, ClockKey, ProvisionalAbortLatency};
 use crate::config::{AiInterface, NiConfig};
@@ -149,6 +154,8 @@ pub struct NiBackend {
     actual_rate_hz: f64,
     clock: ClockDomain,
     clock_evidence: String,
+    /// The task set's identity for the clock rule, once the tasks are built.
+    clock_key: Option<ClockKey>,
     /// The provisional `[H]` abort-latency bound for the CURRENT actual rate and
     /// block size, recomputed with the tasks. `None` before the tasks are built
     /// (nothing is known yet) and on any set whose formula inputs are missing.
@@ -167,8 +174,15 @@ pub struct NiBackend {
 
     /// Has any channel reported ADC overload since the last `start()`?
     overload_latched: bool,
-    /// Set false once the overload attribute is proven absent, so a DAQmx
-    /// generation without it costs one lookup, not one per block.
+    /// Per input, in task order: a sample reached
+    /// `hertzforge_hal::INPUT_OVERLOAD_FRACTION` of the channel's configured range
+    /// since the tasks were built. The software check every read makes, because
+    /// the driver's own overloaded-channels flag is not on every device: the NI
+    /// 9234 refuses the query with -200452 (2026-11-01).
+    input_overloaded: Vec<bool>,
+    /// Set false once the driver's overload attribute is proven absent, so a DAQmx
+    /// generation without it costs one lookup, not one per block. The software
+    /// check runs either way.
     overload_pollable: bool,
 
     read_scratch: Vec<f64>,
@@ -213,6 +227,14 @@ pub struct NiBackend {
     /// successful `timeBeginPeriod`, on every path including `Drop`.
     #[cfg(windows)]
     host_loop_timer: Option<crate::timer_resolution::SystemTimerHold>,
+    /// WINDOWS ONLY (compiled in this crate's tests, which prove the wiring): the
+    /// run's MMCSS "Pro Audio" registration of the thread that READS it. Taken at
+    /// the run's first running read, ended by stop, the abort, a rebuild, close or
+    /// Drop. The registration itself lives on the reading thread, never in the
+    /// backend, because only that thread may revert it (why, and the measurement:
+    /// `crate::control_thread`). A refusal is a warning, never a refused run.
+    #[cfg(any(windows, test))]
+    control_thread: crate::control_thread::RunPriority,
 }
 
 impl std::fmt::Debug for NiBackend {
@@ -275,6 +297,7 @@ impl NiBackend {
             state: State::Closed,
             clock: ClockDomain::Unknown,
             clock_evidence: "not determined: the backend has not been opened".into(),
+            clock_key: None,
             abort_latency: None,
             ao_routing: String::new(),
             devices: Vec::new(),
@@ -285,6 +308,7 @@ impl NiBackend {
             epoch: 0,
             faulted: false,
             overload_latched: false,
+            input_overloaded: Vec::new(),
             overload_pollable: true,
             read_scratch: Vec::new(),
             write_scratch: Vec::new(),
@@ -298,6 +322,8 @@ impl NiBackend {
             warnings: WarningLog::new(),
             #[cfg(windows)]
             host_loop_timer: None,
+            #[cfg(any(windows, test))]
+            control_thread: crate::control_thread::RunPriority::system(),
         }
     }
 
@@ -331,6 +357,13 @@ impl NiBackend {
     /// closed-loop refusal reaches an operator.
     pub fn clock_evidence(&self) -> &str {
         &self.clock_evidence
+    }
+
+    /// The task set's identity as the clock rule looks it up (chassis, modules,
+    /// name-normalized routing); `None` before [`Backend::open`]. The selftest
+    /// checks [`Caps::clock`] against the proven set with it.
+    pub fn clock_key(&self) -> Option<&ClockKey> {
+        self.clock_key.as_ref()
     }
 
     /// The AO sample-clock routing string actually used (`""` = the AO task's
@@ -379,11 +412,59 @@ impl NiBackend {
         self.overload_latched
     }
 
-    /// Whether the ADC-overload attribute exists on this driver at all. When
-    /// false, overload is NOT being checked - which is a gap to report, not a
-    /// clean bill of health.
+    /// Whether the driver's own overloaded-channels attribute answers on this
+    /// device. When false, overload is checked in software only (every read,
+    /// against each channel's configured range).
     pub fn overload_pollable(&self) -> bool {
         self.overload_pollable
+    }
+
+    /// The `+/-` volts each input task channel is configured with, in task order.
+    pub fn ai_ranges_volts(&self) -> Vec<f64> {
+        self.cfg
+            .ai_assignments
+            .iter()
+            .map(|a| a.range_volts())
+            .collect()
+    }
+
+    /// The physical channels whose samples have reached
+    /// `hertzforge_hal::INPUT_OVERLOAD_FRACTION` of their configured range since the
+    /// tasks were built.
+    pub fn overloaded_channels(&self) -> Vec<String> {
+        self.cfg
+            .ai_assignments
+            .iter()
+            .zip(self.input_overloaded.iter())
+            .filter(|(_, o)| **o)
+            .map(|(a, _)| a.physical.clone())
+            .collect()
+    }
+
+    /// The software overload check on one block of samples in engineering units
+    /// (interleaved in task order): `|eu| >= 98 %` of the row's full scale, which
+    /// is the same point as 98 % of the `+/-` volts handed to DAQmx (`max_eu`
+    /// through the row's own sensitivity). A channel that newly reaches it is
+    /// latched, named in one warning, and sets [`Self::overload_latched`].
+    fn latch_input_overloads(&mut self, block: &[f32]) {
+        let full_scale: Vec<f64> = self.cfg.ai_assignments.iter().map(|a| a.max_eu).collect();
+        if self.input_overloaded.len() != full_scale.len() {
+            self.input_overloaded = vec![false; full_scale.len()];
+        }
+        let before = self.input_overloaded.clone();
+        if hertzforge_hal::mark_overloads(block, &full_scale, &mut self.input_overloaded) {
+            self.overload_latched = true;
+            for (i, a) in self.cfg.ai_assignments.iter().enumerate() {
+                if self.input_overloaded[i] && !before[i] {
+                    self.warnings.push(format!(
+                        "input overload on {}: a sample reached {:.0} % of its +/-{} V range",
+                        a.physical,
+                        hertzforge_hal::INPUT_OVERLOAD_FRACTION * 100.0,
+                        a.range_volts()
+                    ));
+                }
+            }
+        }
     }
 
     /// Every warning recorded so far (driver warnings plus this backend's own),
@@ -450,6 +531,10 @@ impl NiBackend {
         {
             self.host_loop_timer = None;
         }
+        // ...and end the run's control-thread registration: reverted now when this
+        // is the reading thread, at that thread's exit otherwise.
+        #[cfg(any(windows, test))]
+        self.control_thread.end_run();
     }
 
     /// WINDOWS ONLY: hold the 1 ms system timer for the armed/running life of the
@@ -548,6 +633,7 @@ impl NiBackend {
             .collect();
         self.regen_mode_readback = None;
         self.overload_latched = false;
+        self.input_overloaded = vec![false; self.cfg.ai_assignments.len()];
         self.overload_pollable = true;
 
         // --- AI task ---------------------------------------------------------
@@ -780,6 +866,7 @@ impl NiBackend {
         let (clock, evidence) = resolve_clock(self.all_simulated, &key);
         self.clock = clock;
         self.clock_evidence = evidence;
+        self.clock_key = Some(key);
 
         // --- provisional [H] abort-latency bound -----------------------------
         // Derived from the ACTUAL rate (the delta-sigma delay is fixed in
@@ -1013,8 +1100,10 @@ impl NiBackend {
         self.drv()?.write_space_avail(ao)
     }
 
-    /// Poll ADC overload once. Absence of the attribute degrades to "not
-    /// checked" - recorded, never treated as "no overload".
+    /// Poll the driver's own ADC-overload flag once. Its absence (the NI 9234
+    /// answers -200452) leaves the software check in `read_input` as the check,
+    /// and says nothing: it is not a gap, and a warning per task was noise every
+    /// driver-warning reader had to filter (2026-11-01).
     fn poll_overload(&mut self) {
         if !self.overload_pollable {
             return;
@@ -1030,17 +1119,8 @@ impl NiBackend {
                 self.overload_latched = true;
             }
             Ok(false) => {}
-            Err(NiError::MissingSymbol { symbol, .. }) => {
+            Err(_) => {
                 self.overload_pollable = false;
-                self.warnings.push(format!(
-                    "ADC overload is NOT being checked: this DAQmx runtime does not export \
-                     {symbol}. Overrange on a delta-sigma input will not be reported."
-                ));
-            }
-            Err(e) => {
-                self.overload_pollable = false;
-                self.warnings
-                    .push(format!("ADC overload is NOT being checked: {e}"));
             }
         }
     }
@@ -1589,6 +1669,10 @@ impl Backend for NiBackend {
         {
             self.host_loop_timer = None;
         }
+        // The run is over: revert the reading thread's registration (now, when
+        // this is that thread; at its exit, when the stop came from elsewhere).
+        #[cfg(any(windows, test))]
+        self.control_thread.end_run();
         self.absorb_driver_warnings();
         Ok(())
     }
@@ -1601,6 +1685,16 @@ impl Backend for NiBackend {
         let ai = self.require_ai().map_err(HalError::from)?;
         if !matches!(self.state, State::Running | State::Stopped) {
             return Err(HalError::NotConnected);
+        }
+        // The thread reading a RUNNING task is the run's control thread: register
+        // it on the run's first read (one attempt per run per thread; a refusal
+        // is one warning and the read proceeds). A drain read after stop() does
+        // not. Why and how it pairs: `crate::control_thread`.
+        #[cfg(any(windows, test))]
+        if self.state == State::Running {
+            if let Some(w) = self.control_thread.on_running_read() {
+                self.warnings.push(w);
+            }
         }
         // Fixed-N. Never "read all available": a nondeterministic frame count
         // trips the engine's scratch guard.
@@ -1664,6 +1758,7 @@ impl Backend for NiBackend {
             }
         }
         self.frames_read += got as u64;
+        self.latch_input_overloads(&out[..got * n_ch]);
         self.poll_overload();
         Ok(InputRead::Frames(got))
     }
@@ -1772,6 +1867,10 @@ impl Backend for NiBackend {
     /// logs a warning, while [`Backend::write_drive`] falls back to offering the
     /// whole block. The asymmetry is deliberate: the conservative answer belongs
     /// in the planner, and the driver's own accept count belongs in the writer.
+    fn input_overloads(&mut self) -> Vec<bool> {
+        self.input_overloaded.clone()
+    }
+
     fn output_space(&mut self) -> Option<usize> {
         // No output task means no independent output buffer, which is exactly
         // what `None` says in this trait.
@@ -1882,12 +1981,13 @@ impl Backend for NiBackend {
         self.absorb_driver_warnings();
         let warn_n = self.warnings.len();
         let recent = self.warnings.snapshot().last().cloned().unwrap_or_default();
-        let overload = if !self.overload_pollable {
-            "; ADC overload NOT CHECKED"
+        let overloaded = self.overloaded_channels();
+        let overload = if !overloaded.is_empty() {
+            format!("; INPUT OVERLOAD on {}", overloaded.join(", "))
         } else if self.overload_latched {
-            "; ADC OVERLOAD"
+            "; ADC OVERLOAD".to_owned()
         } else {
-            ""
+            String::new()
         };
         let sim = if self.all_simulated {
             "; DRIVER-SIMULATED"
@@ -2028,6 +2128,39 @@ mod tests {
 
     fn backend(n_in: usize, n_out: usize) -> NiBackend {
         NiBackend::new(cfg(n_in, n_out), acq())
+    }
+
+    /// The software overload check (the NI 9234 refuses DAQmx's own query with
+    /// -200452): a channel is latched when a sample in engineering units reaches
+    /// 98 % of its row's full scale, which is 98 % of the volts the task was
+    /// given. The read path calls this on every block it delivers.
+    ///
+    /// RED-MUTATION: drop the `latch_input_overloads` call from `read_input` and
+    /// nothing on hardware would ever flag; drop the threshold (`mark_overloads`
+    /// returning false) and this test reds at the first latch.
+    #[test]
+    fn a_sample_at_98_percent_of_a_channels_range_latches_that_channel() {
+        let mut b = backend(2, 1); // 10 EU full scale at 100 mV/EU: +/-1 V each
+        assert_eq!(b.ai_ranges_volts(), [1.0, 1.0]);
+        b.latch_input_overloads(&[9.79, -5.0, 0.0, 9.0]);
+        assert!(b.input_overloads().iter().all(|o| !o), "below 98 %");
+        assert!(!b.overload_latched());
+        b.latch_input_overloads(&[1.0, -9.8, 0.0, 0.0]);
+        assert_eq!(b.input_overloads(), vec![false, true]);
+        assert!(b.overload_latched());
+        assert_eq!(b.overloaded_channels(), ["Mod1/ai1"]);
+        let w = b.warnings();
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(
+            w[0].contains("input overload on Mod1/ai1") && w[0].contains("1 V"),
+            "{w:?}"
+        );
+        b.latch_input_overloads(&[0.0, 10.0]);
+        assert_eq!(b.warnings().len(), 1, "a latched channel warns once");
+        assert!(b
+            .poll_status()
+            .message
+            .contains("INPUT OVERLOAD on Mod1/ai1"));
     }
 
     #[test]
@@ -2208,6 +2341,139 @@ mod tests {
         // ...and it satisfies the object-safe trait the engine holds.
         let b: Box<dyn Backend> = Box::new(backend(1, 0));
         assert_eq!(b.caps().max_input_channels, 1);
+    }
+
+    // --- the reading thread's MMCSS registration (`crate::control_thread`) -----
+
+    /// A backend whose AI task looks RUNNING to the read path, with a counting
+    /// MMCSS API installed. There is no driver, so each read fails NotConnected,
+    /// AFTER the point where the run's control thread is registered.
+    fn running_with(api: &'static crate::control_thread::fake::Counting) -> NiBackend {
+        let mut b = backend(1, 1);
+        b.control_thread = crate::control_thread::RunPriority::with_api(api);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        b.state = State::Running;
+        b
+    }
+
+    /// One registration per run, on the first RUNNING read, and one revert, at
+    /// stop. Nothing before the tasks run, nothing for a drain read after stop,
+    /// nothing again at Drop.
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete the registration block in
+    /// `read_input` and the first count is (0, 0); delete `end_run` from `stop()`
+    /// and the count after stop is (1, 0).
+    #[test]
+    fn a_run_registers_its_reading_thread_once_and_stop_reverts_it() {
+        let api = crate::control_thread::fake::Counting::leak(0);
+        let mut b = running_with(api);
+        let mut out = vec![0.0f32; 2048];
+
+        b.state = State::Armed;
+        assert!(matches!(
+            b.read_input(&mut out),
+            Err(HalError::NotConnected)
+        ));
+        assert_eq!(api.counts(), (0, 0), "nothing before the tasks run");
+
+        b.state = State::Running;
+        for _ in 0..10 {
+            assert!(matches!(
+                b.read_input(&mut out),
+                Err(HalError::NotConnected)
+            ));
+        }
+        assert_eq!(api.counts(), (1, 0));
+        b.stop().unwrap();
+        assert_eq!(api.counts(), (1, 1));
+
+        assert_eq!(b.state, State::Stopped);
+        let _ = b.read_input(&mut out);
+        drop(b);
+        assert_eq!(api.counts(), (1, 1), "a drain read and Drop add nothing");
+    }
+
+    /// The other ends of a run revert on the reading thread too: the abort, close
+    /// and Drop (all through `clear_tasks`).
+    ///
+    /// RED-MUTATION (run 2026-11-01): delete `end_run` from `clear_tasks` and
+    /// every row's count after its end is (1, 0).
+    #[test]
+    fn an_abort_close_or_drop_on_the_reading_thread_reverts_it() {
+        type End = fn(&mut Option<NiBackend>);
+        let ends: [(&str, End); 3] = [
+            ("emergency_stop", |b| {
+                b.as_mut().unwrap().emergency_stop().unwrap();
+            }),
+            ("close", |b| {
+                b.as_mut().unwrap().close().unwrap();
+            }),
+            ("drop", |b| {
+                *b = None;
+            }),
+        ];
+        let mut out = vec![0.0f32; 2048];
+        for (name, end) in ends {
+            let api = crate::control_thread::fake::Counting::leak(0);
+            let mut b = Some(running_with(api));
+            let _ = b.as_mut().unwrap().read_input(&mut out);
+            assert_eq!(api.counts(), (1, 0), "{name}");
+            end(&mut b);
+            assert_eq!(api.counts(), (1, 1), "{name}");
+        }
+    }
+
+    /// A refused registration is ONE warning for the run and never stops the read:
+    /// each read still goes on to the driver (absent here, hence NotConnected).
+    ///
+    /// RED-MUTATION (run 2026-11-01): make `ThreadSlot::enter` retry a run it
+    /// already refused and the warning count is 5.
+    #[test]
+    fn a_refused_registration_is_one_warning_and_the_reads_go_on() {
+        let api = crate::control_thread::fake::Counting::leak(1552);
+        let mut b = running_with(api);
+        let mut out = vec![0.0f32; 2048];
+        for _ in 0..5 {
+            assert!(matches!(
+                b.read_input(&mut out),
+                Err(HalError::NotConnected)
+            ));
+        }
+        let w = b.drain_warnings();
+        assert_eq!(
+            w.iter().filter(|w| w.contains("\"Pro Audio\"")).count(),
+            1,
+            "{w:?}"
+        );
+        b.stop().unwrap();
+        assert_eq!(api.counts(), (1, 0), "a refusal is never reverted");
+    }
+
+    /// The backend is `Send` and a stop may come from a command thread. The revert
+    /// is only valid on the reading thread, so a stop and Drop elsewhere revert
+    /// nothing there, and the reading thread reverts on its way out.
+    #[test]
+    fn a_stop_from_another_thread_leaves_the_revert_to_the_reading_thread() {
+        let api = crate::control_thread::fake::Counting::leak(0);
+        let (backend_tx, backend_rx) = std::sync::mpsc::channel();
+        let (exit_tx, exit_rx) = std::sync::mpsc::channel::<()>();
+        let reader = std::thread::spawn(move || {
+            let mut b = running_with(api);
+            let mut out = vec![0.0f32; 2048];
+            let _ = b.read_input(&mut out);
+            backend_tx.send(b).unwrap();
+            exit_rx.recv().unwrap();
+            std::thread::current().id()
+        });
+        let mut b = backend_rx.recv().unwrap();
+        assert_eq!(api.counts(), (1, 0));
+        b.stop().unwrap();
+        drop(b);
+        assert_eq!(api.counts(), (1, 0), "no revert off the reading thread");
+        exit_tx.send(()).unwrap();
+        let reader_id = reader.join().unwrap();
+        assert_eq!(api.counts(), (1, 1));
+        assert_eq!(*api.reverted_on.lock().unwrap(), vec![reader_id]);
     }
 
     #[test]

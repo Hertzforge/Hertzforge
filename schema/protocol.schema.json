@@ -53,7 +53,9 @@
           "type": "object", "required": ["code", "message"],
           "properties": {
             "code": {"enum": ["bad_request", "unknown_method", "not_found", "refused", "internal"]},
-            "message": {"type": "string", "minLength": 1}
+            "message": {"type": "string", "minLength": 1},
+            "reason": {"$ref": "#/$defs/reason"},
+            "detail": {"type": "object"}
           }
         },
         "arrays": {"$ref": "#/$defs/arrays"}
@@ -82,7 +84,7 @@
       "type": "object", "required": ["name", "role", "x", "y"],
       "properties": {
         "name": {"type": "string"},
-        "role": {"enum": ["measured", "reference", "tolerance", "abort", "drive", "other"]},
+        "role": {"enum": ["measured", "reference", "tolerance", "abort", "limit", "drive", "other"]},
         "x": {"$ref": "#/$defs/arrayRef"},
         "y": {"$ref": "#/$defs/arrayRef"},
         "shape": {"enum": ["line", "steps", "law"]},
@@ -205,6 +207,734 @@
         "phase": {"type": "string"},
         "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", null]},
         "reason": {"type": ["string", "null"]}
+      }
+    },
+    "reason": {
+      "enum": ["bad_params", "not_controller", "controller_held", "run_active", "not_configured",
+               "run_finished", "wrong_state", "manual_mode_required", "not_a_rung",
+               "feasibility_exceeded", "override_not_needed", "arm_refused",
+               "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
+               "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
+               "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
+               "shaker_record_invalid"]
+    },
+    "itemReason": {
+      "enum": ["duplicate_index", "no_channel_enabled", "zero_sensitivity", "non_positive_range",
+               "control_group_gap", "reference_without_control", "unsupported_schema",
+               "channel_unbound", "physical_channel_unknown", "physical_channel_wrong_direction",
+               "physical_channel_shared", "mixed_timing_families",
+               "iepe_without_bias", "bias_on_single_ended", "reference_count_mismatch",
+               "drive_channel_present",
+               "profile_empty", "first_row_not_anchor", "row_level_ambiguous",
+               "frequency_not_positive", "frequency_not_ascending", "psd_negative",
+               "alarm_wider_than_abort",
+               "n_pts_not_power_of_two", "band_above_grid", "too_few_lines",
+               "levels_empty", "levels_not_ascending", "dwell_missing",
+               "no_control_channel", "weight_unknown_channel", "weights_sum_not_positive",
+               "limit_unknown_channel", "limit_rows_not_ascending",
+               "out_of_range"]
+    },
+    "reportItem": {
+      "type": "object", "required": ["reason", "message"], "additionalProperties": false,
+      "properties": {
+        "reason": {"$ref": "#/$defs/itemReason"},
+        "message": {"type": "string", "minLength": 1},
+        "channel": {"type": ["integer", "null"], "minimum": 0},
+        "row": {"type": "integer", "minimum": 0},
+        "field": {"type": "string", "minLength": 1}
+      }
+    },
+    "report": {
+      "type": "object", "required": ["errors", "warnings"], "additionalProperties": false,
+      "properties": {
+        "errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}
+      }
+    },
+    "source": {"enum": ["SIM", "HARDWARE"]},
+    "stationClass": {"enum": ["sim", "ni_simulated", "ni_real"]},
+    "controllerSeat": {
+      "type": ["object", "null"], "required": ["name", "present"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}, "present": {"type": "boolean"}}
+    },
+    "sessionState": {
+      "type": "object", "required": ["role", "controller", "orphan_s", "heartbeat_s", "timeout_s"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"enum": ["controller", "observer"]},
+        "controller": {"$ref": "#/$defs/controllerSeat"},
+        "orphan_s": {"type": ["number", "null"], "minimum": 0},
+        "heartbeat_s": {"type": "number", "exclusiveMinimum": 0},
+        "timeout_s": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "sessionClaimParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}, "lease": {"type": "string", "minLength": 1}}
+    },
+    "sessionClaimResult": {
+      "type": "object", "required": ["role", "lease", "resumed", "heartbeat_s", "timeout_s"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"const": "controller"},
+        "lease": {"type": "string", "minLength": 1},
+        "resumed": {"type": "boolean"},
+        "heartbeat_s": {"type": "number", "exclusiveMinimum": 0},
+        "timeout_s": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "sessionReleaseResult": {
+      "type": "object", "required": ["role", "orphan_s"], "additionalProperties": false,
+      "properties": {"role": {"const": "observer"}, "orphan_s": {"type": ["number", "null"], "minimum": 0}}
+    },
+    "sessionChanged": {
+      "type": "object", "required": ["role", "controller", "orphan_s"], "additionalProperties": false,
+      "properties": {
+        "role": {"enum": ["controller", "observer"]},
+        "controller": {"$ref": "#/$defs/controllerSeat"},
+        "orphan_s": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "discoveredChannel": {
+      "type": "object", "required": ["id", "label"], "additionalProperties": false,
+      "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string"}}
+    },
+    "niDevice": {
+      "type": "object",
+      "required": ["id", "product", "serial", "simulated", "parent", "slot", "timing_family", "inputs", "outputs"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "product": {"type": "string"},
+        "serial": {"type": "string"},
+        "simulated": {"type": "boolean"},
+        "parent": {"type": ["string", "null"]},
+        "slot": {"type": ["integer", "null"], "minimum": 0},
+        "timing_family": {"type": ["string", "null"]},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/discoveredChannel"}},
+        "outputs": {"type": "array", "items": {"$ref": "#/$defs/discoveredChannel"}}
+      }
+    },
+    "simStation": {
+      "type": "object", "required": ["kind", "title", "available", "class", "inputs", "outputs", "clock"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "sim"},
+        "title": {"type": "string"},
+        "available": {"const": true},
+        "class": {"const": "sim"},
+        "inputs": {"type": "integer", "minimum": 1},
+        "outputs": {"type": "integer", "minimum": 1},
+        "clock": {"const": "shared"}
+      }
+    },
+    "niStation": {
+      "type": "object", "required": ["kind", "title", "available", "unavailable", "scanned_unix", "devices"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "ni"},
+        "title": {"type": "string"},
+        "available": {"type": "boolean"},
+        "unavailable": {
+          "type": ["object", "null"], "required": ["reason", "message"], "additionalProperties": false,
+          "properties": {
+            "reason": {"enum": ["ni_driver_unavailable", "no_ni_devices", "scan_failed"]},
+            "message": {"type": "string", "minLength": 1}
+          }
+        },
+        "scanned_unix": {"type": ["number", "null"]},
+        "devices": {"type": "array", "items": {"$ref": "#/$defs/niDevice"}}
+      },
+      "if": {"properties": {"available": {"const": false}}},
+      "then": {"properties": {"unavailable": {"type": "object"}}},
+      "else": {"properties": {"unavailable": {"type": "null"}}}
+    },
+    "stationSelected": {
+      "type": "object",
+      "required": ["kind", "devices", "class", "source", "inputs", "outputs", "timing_family"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["sim", "ni"]},
+        "devices": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "class": {"$ref": "#/$defs/stationClass"},
+        "source": {"$ref": "#/$defs/source"},
+        "inputs": {"type": "integer", "minimum": 0},
+        "outputs": {"type": "integer", "minimum": 0},
+        "timing_family": {"type": ["string", "null"]}
+      },
+      "allOf": [{"$ref": "#/$defs/sourceFollowsClass"}]
+    },
+    "sourceFollowsClass": {
+      "if": {"required": ["class"], "properties": {"class": {"const": "ni_real"}}},
+      "then": {"properties": {"source": {"const": "HARDWARE"}}},
+      "else": {"properties": {"source": {"const": "SIM"}}}
+    },
+    "stationList": {
+      "type": "object", "required": ["stations", "selected"], "additionalProperties": false,
+      "properties": {
+        "stations": {
+          "type": "array", "minItems": 2,
+          "prefixItems": [{"$ref": "#/$defs/simStation"}, {"$ref": "#/$defs/niStation"}],
+          "items": false
+        },
+        "selected": {"$ref": "#/$defs/stationSelected"}
+      }
+    },
+    "stationSelectParams": {
+      "type": "object", "required": ["kind"], "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["sim", "ni"]},
+        "devices": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      },
+      "if": {"properties": {"kind": {"const": "ni"}}},
+      "then": {"required": ["devices"]}
+    },
+    "physicalRef": {
+      "type": ["object", "null"], "required": ["device", "channel"], "additionalProperties": false,
+      "properties": {"device": {"type": "string", "minLength": 1}, "channel": {"type": "string", "minLength": 1}}
+    },
+    "channelRow": {
+      "type": "object",
+      "required": ["index", "enabled", "description", "role", "physical", "interface", "iepe_bias_v",
+                   "units", "sensitivity_mv_per_eu", "range_max", "polarity", "control_group", "abort"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "enabled": {"type": "boolean"},
+        "description": {"type": "string"},
+        "role": {"enum": ["control", "monitor", "drive", "reference"]},
+        "physical": {"$ref": "#/$defs/physicalRef"},
+        "interface": {"enum": ["single_ended", "iepe"]},
+        "iepe_bias_v": {"type": ["number", "null"]},
+        "units": {"type": "string", "minLength": 1},
+        "sensitivity_mv_per_eu": {"type": "number"},
+        "range_max": {"type": "number"},
+        "polarity": {"enum": ["positive", "negative"]},
+        "control_group": {"type": ["integer", "null"], "minimum": 0},
+        "abort": {
+          "type": "object", "required": ["accel_g", "velocity_ips", "displacement_mil"],
+          "additionalProperties": false,
+          "properties": {
+            "accel_g": {"type": ["number", "null"], "exclusiveMinimum": 0},
+            "velocity_ips": {"type": ["number", "null"], "exclusiveMinimum": 0},
+            "displacement_mil": {"type": ["number", "null"], "exclusiveMinimum": 0}
+          }
+        }
+      }
+    },
+    "channelTable": {
+      "type": "object", "required": ["revision", "channels", "report"], "additionalProperties": false,
+      "properties": {
+        "revision": {"type": "integer", "minimum": 0},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "report": {"$ref": "#/$defs/report"}
+      }
+    },
+    "channelsSetParams": {
+      "type": "object", "required": ["revision", "channels"], "additionalProperties": false,
+      "properties": {
+        "revision": {"type": "integer", "minimum": 0},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "dry_run": {"type": "boolean"}
+      }
+    },
+    "channelsSetResult": {
+      "type": "object", "required": ["revision", "report"], "additionalProperties": false,
+      "properties": {"revision": {"type": "integer", "minimum": 0}, "report": {"$ref": "#/$defs/report"}}
+    },
+    "bandDb": {
+      "type": "array", "minItems": 2,
+      "prefixItems": [{"type": "number", "minimum": 0}, {"type": "number", "minimum": 0}],
+      "items": false
+    },
+    "breakpoint": {
+      "type": "object", "required": ["freq_hz"], "additionalProperties": false,
+      "properties": {
+        "freq_hz": {"type": "number"},
+        "psd_g2_hz": {"type": "number"},
+        "slope_db_oct": {"type": "number"},
+        "alarm_db": {"$ref": "#/$defs/bandDb"},
+        "abort_db": {"$ref": "#/$defs/bandDb"}
+      },
+      "oneOf": [{"required": ["psd_g2_hz"]}, {"required": ["slope_db_oct"]}]
+    },
+    "profile": {
+      "type": "object", "required": ["breakpoints"], "additionalProperties": false,
+      "properties": {
+        "breakpoints": {"type": "array", "items": {"$ref": "#/$defs/breakpoint"}},
+        "alarm_db": {"$ref": "#/$defs/bandDb"},
+        "abort_db": {"$ref": "#/$defs/bandDb"}
+      }
+    },
+    "acquisition": {
+      "type": "object", "required": ["fs_hz", "n_pts", "n_avg"], "additionalProperties": false,
+      "properties": {
+        "fs_hz": {"type": "number", "exclusiveMinimum": 0},
+        "n_pts": {"type": "integer", "minimum": 1},
+        "n_avg": {"type": "integer", "minimum": 1}
+      }
+    },
+    "schedule": {
+      "type": "object", "required": ["mode", "levels", "full_level_s"], "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["auto", "manual"]},
+        "levels": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["db"], "additionalProperties": false,
+            "properties": {"db": {"type": "number"}, "dwell_s": {"type": "number", "minimum": 0}}
+          }
+        },
+        "full_level_s": {"type": "number", "minimum": 0}
+      }
+    },
+    "controlParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "composite": {"enum": ["weighted_avg", "min", "max"]},
+        "weights": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["channel", "weight"], "additionalProperties": false,
+            "properties": {"channel": {"type": "integer", "minimum": 0}, "weight": {"type": "number"}}
+          }
+        },
+        "control_dof": {"type": "number"},
+        "damping": {"type": "number"},
+        "max_lines_out": {"type": "integer"},
+        "max_loops_out": {"type": "integer"},
+        "max_sigma": {"type": ["number", "null"]},
+        "drive_ceiling_vrms": {"type": "number"},
+        "drive_abort_vrms": {"type": ["number", "null"]},
+        "coherence_floor": {"type": "number"},
+        "review_after_sysid": {"type": "boolean"},
+        "pretest": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "averages": {"type": "integer"},
+            "level_db": {"type": "number"},
+            "max_vrms": {"type": ["number", "null"]},
+            "start_vrms": {"type": "number"},
+            "shaped": {"type": "boolean"}
+          }
+        },
+        "soft_start_db": {"type": "number"},
+        "soft_start_relax_db": {"type": "number"},
+        "level_ramp_s": {"type": "number"},
+        "shutdown_ramp_s": {"type": "number"}
+      }
+    },
+    "limitProfile": {
+      "type": "object", "required": ["channel", "kind", "rows"], "additionalProperties": false,
+      "properties": {
+        "channel": {"type": "integer", "minimum": 0},
+        "kind": {"enum": ["response", "force"]},
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["freq_hz", "ceiling"], "additionalProperties": false,
+            "properties": {"freq_hz": {"type": "number"}, "ceiling": {"type": "number"}}
+          }
+        }
+      }
+    },
+    "feasibilityInputs": {
+      "type": ["object", "null"], "required": ["shaker", "moving_mass_lb"], "additionalProperties": false,
+      "properties": {
+        "shaker": {"type": "object"},
+        "moving_mass_lb": {
+          "type": "object",
+          "required": ["armature", "slip_table", "drive_adapter", "fixturing", "test_article"],
+          "additionalProperties": false,
+          "properties": {
+            "armature": {"type": "number", "minimum": 0},
+            "slip_table": {"type": "number", "minimum": 0},
+            "drive_adapter": {"type": "number", "minimum": 0},
+            "fixturing": {"type": "number", "minimum": 0},
+            "test_article": {"type": "number", "minimum": 0}
+          }
+        },
+        "crest_factor": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "randomConfig": {
+      "type": "object", "required": ["title", "profile", "acquisition", "schedule"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"type": "string"},
+        "profile": {"$ref": "#/$defs/profile"},
+        "acquisition": {"$ref": "#/$defs/acquisition"},
+        "schedule": {"$ref": "#/$defs/schedule"},
+        "control": {"$ref": "#/$defs/controlParams"},
+        "limits": {"type": "array", "items": {"$ref": "#/$defs/limitProfile"}},
+        "feasibility": {"$ref": "#/$defs/feasibilityInputs"}
+      }
+    },
+    "randomConfigureParams": {
+      "type": "object", "required": ["config"], "additionalProperties": false,
+      "properties": {"config": {"$ref": "#/$defs/randomConfig"}, "dry_run": {"type": "boolean"}}
+    },
+    "grid": {
+      "type": ["object", "null"], "required": ["fs_hz", "n_pts", "df_hz", "lines", "loop_s", "actual"],
+      "additionalProperties": false,
+      "properties": {
+        "fs_hz": {"type": "number", "exclusiveMinimum": 0},
+        "n_pts": {"type": "integer", "minimum": 1},
+        "df_hz": {"type": "number", "exclusiveMinimum": 0},
+        "lines": {"type": "integer", "minimum": 0},
+        "loop_s": {"type": "number", "exclusiveMinimum": 0},
+        "actual": {"type": "boolean"}
+      }
+    },
+    "derived": {
+      "type": "object",
+      "required": ["grms_g", "velocity_rms_ips", "displacement_rms_mil", "band_hz", "grid", "control_channels"],
+      "additionalProperties": false,
+      "properties": {
+        "grms_g": {"type": "number", "minimum": 0},
+        "velocity_rms_ips": {"type": "number", "minimum": 0},
+        "displacement_rms_mil": {"type": "number", "minimum": 0},
+        "band_hz": {
+          "type": "array", "minItems": 2,
+          "prefixItems": [{"type": "number"}, {"type": "number"}], "items": false
+        },
+        "grid": {"$ref": "#/$defs/grid", "type": "object"},
+        "control_channels": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "randomConfigureResult": {
+      "type": "object", "required": ["state", "derived", "warnings"], "additionalProperties": false,
+      "properties": {
+        "state": {"$ref": "#/$defs/randomState"},
+        "derived": {"$ref": "#/$defs/derived"},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}
+      }
+    },
+    "randomDryRunResult": {
+      "type": "object", "required": ["errors", "warnings", "derived", "views"], "additionalProperties": false,
+      "properties": {
+        "errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "derived": {"oneOf": [{"$ref": "#/$defs/derived"}, {"type": "null"}]},
+        "views": {"$ref": "#/$defs/referenceViews"}
+      }
+    },
+    "referenceViews": {
+      "type": "array", "items": {"$ref": "#/$defs/spectrumView"}
+    },
+    "randomConfigResult": {
+      "type": "object", "required": ["run_id", "config", "derived", "views"], "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": ["string", "null"]},
+        "config": {"oneOf": [{"$ref": "#/$defs/randomConfig"}, {"type": "null"}]},
+        "derived": {"oneOf": [{"$ref": "#/$defs/derived"}, {"type": "null"}]},
+        "views": {"$ref": "#/$defs/referenceViews"}
+      }
+    },
+    "randomArmParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"override_ack": {"type": "string", "minLength": 1}}
+    },
+    "randomLevelParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"delta_db": {"type": "number"}, "to_db": {"type": "number"}},
+      "oneOf": [{"required": ["delta_db"]}, {"required": ["to_db"]}]
+    },
+    "randomLevelResult": {
+      "type": "object", "required": ["level_db"], "additionalProperties": false,
+      "properties": {"level_db": {"type": "number"}}
+    },
+    "randomModeParams": {
+      "type": "object", "required": ["mode"], "additionalProperties": false,
+      "properties": {"mode": {"enum": ["auto", "manual"]}}
+    },
+    "randomLogParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"since": {"type": "integer", "minimum": 0}}
+    },
+    "runState": {"enum": ["unconfigured", "configured", "blocked", "armed", "running", "review", "stopping", "finished"]},
+    "runPhase": {
+      "enum": ["idle", "feasibility_blocked", "armed", "sysid", "coherence_gate", "engaged", "full_level",
+               "awaiting_review", "ramping_down", "stopped", "aborted", "coherence_hold"]
+    },
+    "stationRef": {
+      "type": ["object", "null"], "required": ["kind", "class", "devices"], "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["sim", "ni"]},
+        "class": {"$ref": "#/$defs/stationClass"},
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["id", "serial"], "additionalProperties": false,
+            "properties": {"id": {"type": "string", "minLength": 1}, "serial": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "trip": {
+      "type": "object", "required": ["kind", "at_level_db", "at_loop"],
+      "properties": {
+        "kind": {"enum": ["envelope", "kinematic", "drive_vrms", "divergence"]},
+        "at_level_db": {"type": "number"},
+        "at_loop": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "envelope"}, "abort_lines": {"type": "integer", "minimum": 0}, "worst_db": {"type": "number"}},
+         "required": ["abort_lines", "worst_db"]},
+        {"properties": {"kind": {"const": "kinematic"}, "channel": {"type": "integer", "minimum": 0},
+                        "axis": {"enum": ["accel", "velocity", "displacement"]},
+                        "value": {"type": "number"}, "limit": {"type": "number"}},
+         "required": ["channel", "axis", "value", "limit"]},
+        {"properties": {"kind": {"const": "drive_vrms"}, "realized_vrms": {"type": "number"}, "limit_vrms": {"type": "number"}},
+         "required": ["realized_vrms", "limit_vrms"]},
+        {"properties": {"kind": {"const": "divergence"}, "consecutive_loops": {"type": "integer", "minimum": 0},
+                        "divergent_bins": {"type": "integer", "minimum": 0}},
+         "required": ["consecutive_loops", "divergent_bins"]}
+      ]
+    },
+    "runEnd": {
+      "type": ["object", "null"], "required": ["outcome", "message", "at_s", "level_db", "trip"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault"]},
+        "message": {"type": "string", "minLength": 1},
+        "at_s": {"type": ["number", "null"], "minimum": 0},
+        "level_db": {"type": ["number", "null"]},
+        "trip": {"oneOf": [{"$ref": "#/$defs/trip"}, {"type": "null"}]}
+      },
+      "if": {"type": "object", "properties": {"outcome": {"const": "aborted"}}},
+      "then": {"properties": {"trip": {"type": "object"}}},
+      "else": {"properties": {"trip": {"type": "null"}}}
+    },
+    "feasibilityVerdict": {
+      "type": ["object", "null"], "required": ["verdict", "message"], "additionalProperties": false,
+      "properties": {
+        "verdict": {"enum": ["pass", "advisory", "exceeded", "not_evaluated"]},
+        "message": {"type": "string", "minLength": 1}
+      }
+    },
+    "randomState": {
+      "type": "object",
+      "required": ["run_id", "state", "phase", "title", "source", "station", "grid", "clock", "mode",
+                   "levels_db", "level_db", "full_level_s", "elapsed_s", "at_level_s",
+                   "remaining_at_level_s", "alarm", "feasibility", "end"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": ["string", "null"]},
+        "state": {"$ref": "#/$defs/runState"},
+        "phase": {"$ref": "#/$defs/runPhase"},
+        "title": {"type": ["string", "null"]},
+        "source": {"oneOf": [{"$ref": "#/$defs/source"}, {"type": "null"}]},
+        "station": {"$ref": "#/$defs/stationRef"},
+        "grid": {"$ref": "#/$defs/grid"},
+        "clock": {"enum": ["shared", "independent", "unknown", null]},
+        "mode": {"enum": ["auto", "manual", null]},
+        "levels_db": {"type": ["array", "null"], "items": {"type": "number"}},
+        "level_db": {"type": ["number", "null"]},
+        "full_level_s": {"type": ["number", "null"], "minimum": 0},
+        "elapsed_s": {"type": ["number", "null"], "minimum": 0},
+        "at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "alarm": {"type": "boolean"},
+        "feasibility": {"$ref": "#/$defs/feasibilityVerdict"},
+        "end": {"$ref": "#/$defs/runEnd"}
+      },
+      "allOf": [
+        {"if": {"properties": {"state": {"const": "finished"}}},
+         "then": {"properties": {"end": {"type": "object"}}},
+         "else": {"properties": {"end": {"type": "null"}}}},
+        {"if": {"properties": {"state": {"const": "unconfigured"}}},
+         "then": {"properties": {"run_id": {"type": "null"}}},
+         "else": {"properties": {"run_id": {"type": "string"}, "source": {"$ref": "#/$defs/source"}}}},
+        {"if": {"required": ["station"], "properties": {"station": {"type": "object", "required": ["class"],
+                                                                   "properties": {"class": {"const": "ni_real"}}}}},
+         "then": {"properties": {"source": {"const": "HARDWARE"}}},
+         "else": {"properties": {"source": {"enum": ["SIM", null]}}}}
+      ]
+    },
+    "liveChannel": {
+      "type": "object", "required": ["index", "description", "role", "rms", "unit", "overload"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "description": {"type": "string"},
+        "role": {"enum": ["control", "monitor", "reference"]},
+        "rms": {"type": ["number", "null"], "minimum": 0},
+        "unit": {"type": "string", "minLength": 1},
+        "overload": {"type": "boolean"}
+      }
+    },
+    "alarm": {
+      "oneOf": [
+        {"type": "object", "required": ["kind", "lines", "worst_db"], "additionalProperties": false,
+         "properties": {"kind": {"const": "envelope"}, "lines": {"type": "integer", "minimum": 1}, "worst_db": {"type": "number"}}},
+        {"type": "object", "required": ["kind", "channel"], "additionalProperties": false,
+         "properties": {"kind": {"const": "overload"}, "channel": {"type": "integer", "minimum": 0}}}
+      ]
+    },
+    "randomLive": {
+      "type": "object",
+      "required": ["run_id", "source", "class", "state", "phase", "mode", "elapsed_s", "level_db",
+                   "commanded_db", "at_level_s", "remaining_at_level_s", "level_s", "loop",
+                   "control_rms_g", "reference_rms_g", "control_error_db", "drive_rms_v", "lines",
+                   "channels", "alarms", "views"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "class": {"$ref": "#/$defs/stationClass"},
+        "state": {"enum": ["running", "review", "stopping", "finished"]},
+        "phase": {"$ref": "#/$defs/runPhase"},
+        "mode": {"enum": ["auto", "manual"]},
+        "elapsed_s": {"type": "number", "minimum": 0},
+        "level_db": {"type": ["number", "null"]},
+        "commanded_db": {"type": ["number", "null"]},
+        "at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "level_s": {"type": ["number", "null"], "minimum": 0},
+        "loop": {"type": "integer", "minimum": 0},
+        "control_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "reference_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "control_error_db": {"type": ["number", "null"]},
+        "drive_rms_v": {"type": ["number", "null"], "minimum": 0},
+        "lines": {
+          "type": "object", "required": ["in_band", "alarm", "abort"], "additionalProperties": false,
+          "properties": {
+            "in_band": {"type": "integer", "minimum": 0},
+            "alarm": {"type": "integer", "minimum": 0},
+            "abort": {"type": "integer", "minimum": 0}
+          }
+        },
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/liveChannel"}},
+        "alarms": {"type": "array", "items": {"$ref": "#/$defs/alarm"}},
+        "views": {
+          "type": "array", "minItems": 3,
+          "prefixItems": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/spectrumView"},
+                          {"$ref": "#/$defs/readingView"}],
+          "items": false
+        }
+      },
+      "allOf": [{"$ref": "#/$defs/sourceFollowsClass"}]
+    },
+    "quantity": {"enum": ["control", "drive", "response", "time", "coherence", "readings"]},
+    "channelSelector": {
+      "oneOf": [{"enum": ["all", "control", "limited"]},
+                {"type": "array", "items": {"type": "integer", "minimum": 0}}]
+    },
+    "subscribePlot": {
+      "type": "object", "required": ["id", "quantity"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/quantity"},
+        "channels": {"oneOf": [{"$ref": "#/$defs/channelSelector"}, {"type": "null"}]},
+        "points": {"type": ["integer", "null"], "minimum": 64, "maximum": 8192}
+      },
+      "allOf": [
+        {"if": {"properties": {"quantity": {"enum": ["control", "drive", "coherence", "readings"]}}},
+         "then": {"properties": {"channels": {"type": "null"}, "points": {"type": "null"}}}},
+        {"if": {"properties": {"quantity": {"const": "response"}}},
+         "then": {"properties": {"points": {"type": "null"}}}}
+      ]
+    },
+    "randomSubscribeParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "default": {"type": ["boolean", "null"]},
+        "rate_hz": {"type": ["number", "null"], "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/subscribePlot"}},
+                            {"type": "null"}]}
+      },
+      "oneOf": [
+        {"required": ["default"], "properties": {"default": {"const": true}, "plots": {"type": "null"}}},
+        {"required": ["plots"], "properties": {"default": {"enum": [false, null]}, "plots": {"type": "array"}}}
+      ]
+    },
+    "randomSubscribeResult": {
+      "type": "object", "required": ["default", "rate_hz", "plots", "quantities"],
+      "additionalProperties": false,
+      "properties": {
+        "default": {"type": "boolean"},
+        "rate_hz": {"type": "number", "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "items": {"$ref": "#/$defs/subscribePlot"}}, {"type": "null"}]},
+        "quantities": {"type": "array", "items": {"$ref": "#/$defs/quantity"}}
+      },
+      "if": {"properties": {"default": {"const": true}}},
+      "then": {"properties": {"plots": {"type": "null"}}},
+      "else": {"properties": {"plots": {"type": "array"}}}
+    },
+    "dataPlot": {
+      "type": "object", "required": ["id", "quantity", "channels", "views"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/quantity"},
+        "channels": {"oneOf": [{"type": "array", "items": {"type": "integer", "minimum": 0}}, {"type": "null"}]},
+        "views": {"type": "array", "items": {"$ref": "#/$defs/view"}}
+      },
+      "if": {"properties": {"quantity": {"enum": ["response", "time"]}}},
+      "then": {"properties": {"channels": {"type": "array"}}},
+      "else": {"properties": {"channels": {"type": "null"}, "views": {"minItems": 1, "maxItems": 1}}}
+    },
+    "randomData": {
+      "type": "object",
+      "required": ["run_id", "source", "class", "state", "phase", "mode", "elapsed_s", "level_db",
+                   "commanded_db", "at_level_s", "remaining_at_level_s", "level_s", "loop",
+                   "control_rms_g", "reference_rms_g", "control_error_db", "drive_rms_v", "lines",
+                   "channels", "alarms", "plots"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "class": {"$ref": "#/$defs/stationClass"},
+        "state": {"enum": ["running", "review", "stopping", "finished"]},
+        "phase": {"$ref": "#/$defs/runPhase"},
+        "mode": {"enum": ["auto", "manual"]},
+        "elapsed_s": {"type": "number", "minimum": 0},
+        "level_db": {"type": ["number", "null"]},
+        "commanded_db": {"type": ["number", "null"]},
+        "at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
+        "level_s": {"type": ["number", "null"], "minimum": 0},
+        "loop": {"type": "integer", "minimum": 0},
+        "control_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "reference_rms_g": {"type": ["number", "null"], "minimum": 0},
+        "control_error_db": {"type": ["number", "null"]},
+        "drive_rms_v": {"type": ["number", "null"], "minimum": 0},
+        "lines": {
+          "type": "object", "required": ["in_band", "alarm", "abort"], "additionalProperties": false,
+          "properties": {
+            "in_band": {"type": "integer", "minimum": 0},
+            "alarm": {"type": "integer", "minimum": 0},
+            "abort": {"type": "integer", "minimum": 0}
+          }
+        },
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/liveChannel"}},
+        "alarms": {"type": "array", "items": {"$ref": "#/$defs/alarm"}},
+        "plots": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/dataPlot"}}
+      },
+      "allOf": [{"$ref": "#/$defs/sourceFollowsClass"}]
+    },
+    "logEntry": {
+      "type": "object", "required": ["seq", "at_unix", "kind", "text"], "additionalProperties": false,
+      "properties": {
+        "seq": {"type": "integer", "minimum": 0},
+        "at_unix": {"type": "number"},
+        "kind": {"enum": ["state", "feasibility", "override", "station", "gate", "level", "alarm",
+                          "overload", "trip", "note"]},
+        "text": {"type": "string"}
+      }
+    },
+    "randomLogResult": {
+      "type": "object", "required": ["entries", "next"], "additionalProperties": false,
+      "properties": {
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/logEntry"}},
+        "next": {"type": "integer", "minimum": 0}
+      }
+    },
+    "randomLogEvent": {
+      "type": "object", "required": ["run_id", "entries"], "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/logEntry"}}
       }
     }
   }

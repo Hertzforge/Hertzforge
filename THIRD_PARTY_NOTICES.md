@@ -11,8 +11,6 @@ binaries.
 | Crate | License | Use |
 |---|---|---|
 | serde / serde_json | MIT OR Apache-2.0 | serialization throughout |
-| dirs | MIT OR Apache-2.0 | data-root resolution (hertzforge-capture) |
-| option-ext | MPL-2.0 | reached only through `dirs`; used unmodified |
 | libloading | ISC | NI-DAQmx dynamic loading |
 | tracing family | MIT | logging |
 | tokio / tokio-tungstenite / futures-util | MIT | hertzforge-backendd daemon and the control service |

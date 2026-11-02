@@ -8,13 +8,15 @@
 
 import { decodeFrame, encodeFrame } from '../codec';
 import type { SocketFactory, SocketLike } from '../client.svelte';
-import type { ErrorCode, Hello } from '../types';
+import type { ErrorCode, Hello, RefusalReason } from '../types';
 
 /** Throw from a mock method to answer with a protocol error. */
 export class MockError extends Error {
 	constructor(
 		readonly code: ErrorCode,
-		message: string
+		message: string,
+		readonly reason?: RefusalReason,
+		readonly detail?: Record<string, unknown>
 	) {
 		super(message);
 	}
@@ -92,7 +94,10 @@ export class MockSocket implements SocketLike {
 				(result) => respond({ type: 'response', id, result: (result ?? {}) as Record<string, unknown> }),
 				(err: unknown) => {
 					const code: ErrorCode = err instanceof MockError ? err.code : 'internal';
-					respond({ type: 'response', id, error: { code, message: (err as Error).message || 'Mock method failed.' } });
+					const error: Record<string, unknown> = { code, message: (err as Error).message || 'Mock method failed.' };
+					if (err instanceof MockError && err.reason) error.reason = err.reason;
+					if (err instanceof MockError && err.detail) error.detail = err.detail;
+					respond({ type: 'response', id, error });
 				}
 			);
 	}

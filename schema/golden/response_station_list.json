@@ -1,0 +1,105 @@
+{
+ "type": "response",
+ "id": 3,
+ "result": {
+  "stations": [
+   {
+    "kind": "sim",
+    "title": "Simulator",
+    "available": true,
+    "class": "sim",
+    "inputs": 8,
+    "outputs": 1,
+    "clock": "shared"
+   },
+   {
+    "kind": "ni",
+    "title": "NI-DAQmx",
+    "available": true,
+    "unavailable": null,
+    "scanned_unix": 1793577600,
+    "devices": [
+     {
+      "id": "cDAQ1",
+      "product": "cDAQ-9178",
+      "serial": "01C2D3E4",
+      "simulated": false,
+      "parent": null,
+      "slot": null,
+      "timing_family": "cDAQ1",
+      "inputs": [],
+      "outputs": []
+     },
+     {
+      "id": "cDAQ1Mod1",
+      "product": "NI 9234",
+      "serial": "01A2B3C4",
+      "simulated": false,
+      "parent": "cDAQ1",
+      "slot": 1,
+      "timing_family": "cDAQ1",
+      "inputs": [
+       {
+        "id": "ai0",
+        "label": "ai0"
+       },
+       {
+        "id": "ai1",
+        "label": "ai1"
+       },
+       {
+        "id": "ai2",
+        "label": "ai2"
+       },
+       {
+        "id": "ai3",
+        "label": "ai3"
+       }
+      ],
+      "outputs": []
+     },
+     {
+      "id": "cDAQ1Mod2",
+      "product": "NI 9263",
+      "serial": "01A2B3C5",
+      "simulated": false,
+      "parent": "cDAQ1",
+      "slot": 2,
+      "timing_family": "cDAQ1",
+      "inputs": [],
+      "outputs": [
+       {
+        "id": "ao0",
+        "label": "ao0"
+       },
+       {
+        "id": "ao1",
+        "label": "ao1"
+       },
+       {
+        "id": "ao2",
+        "label": "ao2"
+       },
+       {
+        "id": "ao3",
+        "label": "ao3"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "selected": {
+   "kind": "ni",
+   "devices": [
+    "cDAQ1Mod1",
+    "cDAQ1Mod2"
+   ],
+   "class": "ni_real",
+   "source": "HARDWARE",
+   "inputs": 4,
+   "outputs": 4,
+   "timing_family": "cDAQ1"
+  }
+ }
+}

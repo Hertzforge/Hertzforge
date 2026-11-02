@@ -28,10 +28,12 @@
 //! ```
 
 use hertzforge_hal::discovery::{DiscoveredChannel, DiscoveredDevice};
-use hertzforge_hal::{Backend, ClockDomain, InputRead};
+use hertzforge_hal::{Backend, InputRead};
 use hertzforge_hal_ni::config::{AiAssign, AiInterface, AoAssign, NiConfig};
 use hertzforge_hal_ni::ffi::{code, val, Driver};
-use hertzforge_hal_ni::{enumerate_with, NiBackend, NiError};
+use hertzforge_hal_ni::{
+    enumerate_with, selftest_clock_row, NiBackend, NiError, PROVEN_SHARED_CLOCK,
+};
 use std::time::{Duration, Instant};
 
 const EXIT_ASSERT: i32 = 1;
@@ -588,24 +590,16 @@ fn stream(args: &Args, devices: &[DiscoveredDevice], c: &mut Checks) {
         );
     }
 
-    // The clock rule, asserted rather than assumed.
-    if b.all_simulated() {
-        c.check(
-            caps.clock == ClockDomain::Shared,
-            "a fully driver-simulated device set resolves to Shared",
-            format!("{:?}", caps.clock),
-        );
-    } else {
-        c.check(
-            caps.clock == ClockDomain::Unknown,
-            "a REAL device set resolves to Unknown until a bench capture adds a proven-set entry",
-            format!(
-                "{:?} -- if this says Shared on real hardware with no entry in \
-                 clock::PROVEN_SHARED_CLOCK, the gate has been deleted",
-                caps.clock
-            ),
-        );
-    }
+    // The clock rule, asserted rather than assumed: a driver-simulated set is
+    // Shared; a real set is Shared exactly when the proven set holds its entry
+    // (looked up by the row itself, field by field), and Unknown otherwise.
+    let row = selftest_clock_row(
+        PROVEN_SHARED_CLOCK,
+        b.all_simulated(),
+        b.clock_key(),
+        caps.clock,
+    );
+    c.check(row.pass, row.label, row.detail);
     c.check(
         caps.native_modes.is_empty(),
         "caps claims no native modes",
@@ -847,18 +841,32 @@ fn stream(args: &Args, devices: &[DiscoveredDevice], c: &mut Checks) {
         );
     }
 
-    if !b.overload_pollable() {
-        c.skip(
-            "ADC overload polling",
-            "this DAQmx runtime does not expose the overload attribute",
+    // Overload is checked in software on every read (98 % of each channel's
+    // configured range), and by the driver's own flag where the device has one
+    // (the NI 9234 does not: -200452).
+    let driver_flag = if b.overload_pollable() {
+        "the driver's flag also polled"
+    } else {
+        "the driver's flag is unsupported on this device"
+    };
+    let overloaded = b.overloaded_channels();
+    if !overloaded.is_empty() {
+        c.fail(
+            "input overload",
+            format!(
+                "a sample reached 98 % of the configured range on {} ({driver_flag})",
+                overloaded.join(", ")
+            ),
         );
     } else if b.overload_latched() {
         c.fail(
             "ADC overload",
-            "at least one input channel reported overload during the run",
+            "the driver reported overload on at least one input channel during the run",
         );
     } else {
-        c.pass("no ADC overload reported");
+        c.pass(format!(
+            "no input overload (software check at 98 % of each range; {driver_flag})"
+        ));
     }
 
     // --- warnings, verbatim (this is where the rate-coercion text lands) ---
