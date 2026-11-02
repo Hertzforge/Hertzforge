@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Waterfall view, drawn with three.js: every record a polyline at its own depth, colored by
-	 * level on the sequential colormap, the way Visual Dynamics' 3-D data view draws time
+	 * level on the sequential colormap (viridis), the way Visual Dynamics' 3-D data view draws time
 	 * histories, FRFs and PSDs.
 	 *
 	 * All records are one geometry and one draw call, whatever their number. The raw values go to
