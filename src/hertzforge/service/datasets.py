@@ -427,6 +427,9 @@ class ModalRun:
     notes: list[str] = field(default_factory=list)
     from_cache: bool = False
     seconds: float = 0.0
+    #: fitted shape sets by (low Hz, high Hz, count), so a second view of
+    #: the same fit does not fit again
+    fits: dict[tuple[float, float, int], Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         """The `summary` object `dataset.open` returns for the survey: what
@@ -448,26 +451,35 @@ class ModalRun:
         return out
 
 
-def open_modal_run(path: Path, title: str, cache_name: str) -> ModalRun:
-    """Read the modal survey at `path` (through the cache) into a project.
-    A missing file is a not_found that names the fetch script and
-    `HERTZFORGE_TESTDATA`."""
+def open_modal_run(path: Path, title: str, cache_name: str,
+                   geometry: Path | None = None) -> ModalRun:
+    """Read the modal survey at `path` (through the cache) into a project,
+    with the test geometry at `geometry`, in meters, as its 'Geometry'
+    when one is given. A missing file is a not_found that names the fetch
+    script and `HERTZFORGE_TESTDATA`."""
     import hertzforge as hz
 
     started = time.perf_counter()
-    if not path.is_file():
-        raise not_found(
-            f'The test data for "{title}" is missing: {path} does not exist. '
-            f'Run {FETCH_COMMAND} from the repository root, or set '
-            f'HERTZFORGE_TESTDATA to a directory that holds plate/{path.name}.')
+    for needed in (path, geometry):
+        if needed is not None and not needed.is_file():
+            raise not_found(
+                f'The test data for "{title}" is missing: {needed} does not '
+                f'exist. Run {FETCH_COMMAND} from the repository root, or set '
+                'HERTZFORGE_TESTDATA to a directory that holds '
+                f'plate/{needed.name}.')
     notes: list[str] = []
-    stat = path.stat()
-    name = (f'{cache_name}-hz{core_version()}-{stat.st_size}-'
-            f'{stat.st_mtime_ns}.hforge')
+    stamps = [f'{s.st_size}-{s.st_mtime_ns}'
+              for s in (p.stat() for p in (path, geometry) if p is not None)]
+    # the geometry is part of what was read, so it is part of the name
+    name = f'{cache_name}-hz{core_version()}-{"-".join(stamps)}.hforge'
 
     def read() -> Any:
         project = hz.Project(title)
         project.import_file(str(path))
+        if geometry is not None:
+            survey = hz.import_file(str(geometry))
+            survey.define_units('m')
+            project.add('Geometry', survey)
         return project
 
     project, hit = _cached(name, read, notes)
@@ -482,7 +494,8 @@ def _plate_random() -> RandomRun:
 
 def _plate_modal() -> ModalRun:
     return open_modal_run(testdata_root() / 'plate' / 'modal_spectra.nc4',
-                          'Plate Modal Run', 'plate-modal')
+                          'Plate Modal Run', 'plate-modal',
+                          testdata_root() / 'plate' / 'test_geometry.npz')
 
 
 def _drone() -> ModalModel:
@@ -509,7 +522,8 @@ CATALOG: tuple[Entry, ...] = (
     Entry('plate-modal', 'modal_run', 'Plate Modal Run',
           'A modal survey of the free plate from the controller, on a '
           'simulated plant: FRFs of eleven responses to two references, '
-          'their multiple coherence and the time captures.', _plate_modal),
+          'their multiple coherence and the time captures, on the survey '
+          'geometry.', _plate_modal),
     Entry('drone-fem', 'modal_model', 'Quadcopter FE Model',
           'A quadcopter of shells and beams, 1,422 nodes, its 30 lowest '
           'normal modes (six rigid). Solves in about a second.', _drone),

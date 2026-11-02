@@ -133,6 +133,43 @@ def test_the_modal_run_says_its_values_are_simulated(modal_run):
     assert modal_run.summary()['source_of_values'] == 'SIM'
 
 
+# ---- modal_run.modes ------------------------------------------------------------
+
+def test_identified_modes_validate_and_match_the_plate(modal_run, validate):
+    """The plate project's own worked fit (300 to 1300 Hz, five modes): the
+    four distinct modes and the repeated pair at 1142 Hz, on the ten survey
+    nodes, moving out of plane only."""
+    (view,) = run('modal_run.modes', modal_run)
+    wire_views([view], validate)
+    frequencies = [m['frequency_hz'] for m in view['modes']]
+    np.testing.assert_allclose(frequencies, [439.2, 647.2, 823.5, 1142.3, 1142.4],
+                               atol=0.15)
+    assert all(0.0 < m['damping'] < 0.05 for m in view['modes'])
+    assert view['nodes'].shape == (10, 3) and len(view['lines'])
+    shape = view['modes'][0]['shape']
+    assert np.abs(shape[:, :2]).max() < 1e-9 * np.abs(shape[:, 2]).max()
+
+
+def test_identified_modes_are_fitted_once_per_band(modal_run, monkeypatch):
+    run('modal_run.modes', modal_run)
+    calls = []
+    monkeypatch.setattr(modal_run.project, 'fit_modes',
+                        lambda *a, **k: calls.append(1))
+    run('modal_run.modes', modal_run)
+    assert calls == []
+    assert 'Identified Modes' not in modal_run.project
+
+
+def test_an_empty_band_is_refused(modal_run):
+    with pytest.raises(ProtocolError, match='empty'):
+        run('modal_run.modes', modal_run, low_hz=900.0, high_hz=800.0)
+
+
+def test_a_band_above_the_data_is_refused(modal_run):
+    with pytest.raises(ProtocolError, match='no mode found between 5000 and 6000 Hz'):
+        run('modal_run.modes', modal_run, low_hz=5000.0, high_hz=6000.0)
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

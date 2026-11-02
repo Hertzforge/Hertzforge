@@ -70,6 +70,8 @@ PRELOAD = (
     # forming its octave and coherence products
     'hertzforge.core.detect',
     'hertzforge.core.octave',
+    # fitting a modal survey's FRFs
+    'hertzforge.core.modal_fit',
     'hertzforge.core.partial_coherence',
     # solving a model's modes
     'hertzforge.core.sparse_solve',

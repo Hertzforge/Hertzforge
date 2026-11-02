@@ -510,6 +510,10 @@
 		height: 480px;
 	}
 
+	.view.shape3d {
+		height: 440px;
+	}
+
 	.spin {
 		animation: spin 0.9s linear infinite;
 	}
