@@ -1,0 +1,24 @@
+[package]
+name = "hertzforge-law-host"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# Loads control-law files (WebAssembly components implementing the
+# `hertzforge:control-law` interface in `wit/control-law/`) and runs them
+# contained: compiled once at load, a deadline on every call, a memory cap,
+# and a WASI context that grants nothing. Depends on no controller crate; a
+# thin adapter elsewhere implements the controller's law trait over it.
+[dependencies]
+wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "runtime", "std"] }
+wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
+# The deterministic generator behind the guest's random sources; the version
+# wasmtime-wasi itself builds on.
+rand = { version = "0.10", default-features = false, features = ["std_rng"] }
+# The bounded capture of the guest's stdout and stderr implements the WASI
+# stream traits, which are written with these.
+async-trait = "0.1"
+bytes = "1"
+tokio = { version = "1", default-features = false }
+sha2 = "0.10"

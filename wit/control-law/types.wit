@@ -1,0 +1,212 @@
+package hertzforge:control-law@0.1.0;
+
+/// Types shared by every control-law world.
+///
+/// Spectra are on one line grid: `n` lines spaced `df-hz` apart, line `k` at
+/// frequency `k * df-hz`. Power spectral densities are in the control
+/// channel's units squared per hertz.
+interface types {
+    /// A real number the operator enters in a box.
+    record number-spec {
+        /// Unit shown next to the box, such as "dB" or "Hz". May be empty.
+        unit: string,
+        /// Smallest accepted value.
+        min: f64,
+        /// Largest accepted value.
+        max: f64,
+        /// How far one step of the box moves the value. A hint for the form:
+        /// values between steps are accepted.
+        step: f64,
+        /// The value used when the operator enters none.
+        default: f64,
+    }
+
+    /// A whole number the operator enters in a box.
+    record integer-spec {
+        unit: string,
+        min: s64,
+        max: s64,
+        step: s64,
+        default: s64,
+    }
+
+    /// One of a fixed set of named options.
+    record choice-spec {
+        /// The options, in the order the form lists them. Each is unique.
+        options: list<string>,
+        /// One of `options`.
+        default: string,
+    }
+
+    /// One point of a curve: a value at a frequency.
+    record breakpoint {
+        frequency-hz: f64,
+        value: f64,
+    }
+
+    /// A value against frequency, entered as a table of breakpoints with
+    /// strictly increasing frequencies. How the law interpolates between
+    /// breakpoints is the law's choice; its help text should say.
+    record curve-spec {
+        /// Unit of the value, such as "dB".
+        unit: string,
+        /// Smallest accepted value at any breakpoint.
+        min: f64,
+        /// Largest accepted value at any breakpoint.
+        max: f64,
+        /// The curve used when the operator enters none. At least one point.
+        default: list<breakpoint>,
+    }
+
+    /// What kind of input a parameter is, with its limits and default.
+    variant param-kind {
+        number(number-spec),
+        integer(integer-spec),
+        /// The default state of an on/off switch.
+        toggle(bool),
+        choice(choice-spec),
+        curve(curve-spec),
+        /// One number per control channel, each within the same limits.
+        per-channel(number-spec),
+    }
+
+    /// One parameter a law declares. The host draws its input from this and
+    /// checks every value against it before the law sees the value.
+    record param-spec {
+        /// Stable identifier: lower-case letters, digits and underscores,
+        /// starting with a letter. Saved test setups refer to it.
+        key: string,
+        /// Name shown on the form.
+        label: string,
+        /// One or two sentences for the form's help text.
+        help: string,
+        kind: param-kind,
+    }
+
+    /// One named number a law reports each loop, for display and records.
+    record diagnostic-spec {
+        /// Same rules as a parameter key.
+        key: string,
+        label: string,
+        unit: string,
+        help: string,
+    }
+
+    /// What a law says about itself. Read once, when the law file is loaded.
+    record manifest {
+        /// Short name of the law. Not empty.
+        name: string,
+        /// The law's own version, such as "1.0.0". Not empty.
+        version: string,
+        author: string,
+        /// One paragraph on what the law does.
+        summary: string,
+        params: list<param-spec>,
+        diagnostics: list<diagnostic-spec>,
+    }
+
+    /// A value for one parameter. Its case must match the parameter's kind.
+    variant param-value {
+        number(f64),
+        integer(s64),
+        toggle(bool),
+        /// One of the declared options, by name.
+        choice(string),
+        curve(list<breakpoint>),
+        /// One value per control channel, in channel order.
+        per-channel(list<f64>),
+    }
+
+    /// A parameter value with the key it belongs to.
+    record param {
+        key: string,
+        value: param-value,
+    }
+
+    /// The half-open in-band window `[lo, hi)` in lines. Lines outside it
+    /// carry no drive.
+    record band {
+        lo: u32,
+        hi: u32,
+    }
+
+    /// What a single-output Random law is built for: fixed for the run.
+    record setup {
+        /// The full-level target control spectral density on the line grid.
+        /// Zero out of band.
+        target-psd: list<f64>,
+        /// Line spacing, Hz.
+        df-hz: f64,
+        band: band,
+        /// How many control channels the composite is built from. Every
+        /// per-channel parameter carries this many values.
+        control-channels: u32,
+    }
+
+    /// Everything a single-output Random law sees on one loop. The fields up
+    /// to `band` match the controller's own loop boundary one for one.
+    record loop-inputs {
+        /// The full-level target, as in the setup.
+        target-psd: list<f64>,
+        /// The measured composite control spectral density, at the level the
+        /// loop is running.
+        measured-psd: list<f64>,
+        /// Estimated plant power gain, drive to control response, per line.
+        h-mag2: list<f64>,
+        /// Ordinary coherence per line, 0 to 1.
+        coherence: list<f64>,
+        /// The scheduled level in dB (0 dB is the full target).
+        current-level-db: f64,
+        /// Line spacing, Hz.
+        df-hz: f64,
+        /// Lines the limiter is holding down this loop: the law must not try
+        /// to raise them. Empty means none; otherwise one entry per line.
+        notched-bins: list<bool>,
+        band: band,
+        /// Statistical degrees of freedom of the spectral estimate behind
+        /// `measured-psd`.
+        dof: f64,
+        /// Loops since the law was seeded: 0 for the seed, 1 for the first
+        /// iteration.
+        loop-index: u64,
+    }
+
+    /// One named number for this loop. The key must be one the manifest
+    /// declares.
+    record diagnostic-value {
+        key: string,
+        value: f64,
+    }
+
+    /// What the law reports about a loop besides its drive. Reports are
+    /// shown and recorded; the controller never relies on them for
+    /// protection, which it computes itself.
+    record loop-diagnostics {
+        /// Lines whose update was skipped this loop because the measurement
+        /// there was not trusted.
+        untrusted-bins: list<u32>,
+        /// Lines whose update was limited by the law's own step limit.
+        clamped-bins: list<u32>,
+        /// Lines the law itself judges divergent.
+        divergent-bins: list<u32>,
+        /// In-band error between measured and target, dB, when known.
+        inband-err-db: option<f64>,
+        /// In-band root-mean-square of the measurement, when known.
+        inband-rms-g: option<f64>,
+        /// Whether the law's level loop is holding on a fault.
+        servo-faulted: bool,
+        /// The law's declared diagnostics, by key.
+        values: list<diagnostic-value>,
+    }
+
+    /// One loop's result: the drive to synthesize, before the controller's
+    /// limits are applied.
+    record loop-outputs {
+        /// Drive spectral density per line: one finite, non-negative value
+        /// per line. Zero out of band.
+        drive-psd: list<f64>,
+        /// The level the law is commanding, dB (0 dB is the full target).
+        level-cmd-db: f64,
+        diagnostics: loop-diagnostics,
+    }
+}

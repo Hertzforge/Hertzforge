@@ -1,0 +1,16 @@
+[package]
+name = "hertzforge-law-ratio"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# Per-line ratio correction: the worked example of the law SDK, and the second
+# built-in single-output Random law. Built to a law file with
+# `cargo build --target wasm32-wasip2 --release -p hertzforge-law-ratio`
+# (`scripts/build_laws.sh` builds every law this way).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
