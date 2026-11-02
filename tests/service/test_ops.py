@@ -314,8 +314,11 @@ def test_a_survey_with_no_model_is_refused_a_model_mac(modal_run):
 
 
 def test_a_survey_with_no_geometry_gets_the_matrix_alone(modal_run):
+    from hertzforge.service.ops_modal_run import fitted
+    # the fit made on the whole survey, so the copy without a geometry need not fit
+    shapes = fitted(modal_run, 300.0, 1300.0, 5)
     project = {name: obj for name, obj in modal_run.project.items() if name != 'Geometry'}
-    bare = dataclasses.replace(modal_run, project=project)
+    bare = dataclasses.replace(modal_run, project=project, fits={(300.0, 1300.0, 5): shapes})
     (view,) = run('modal_run.mac', bare, against='self')
     assert view['view'] == 'matrix' and 'selects' not in view
 
