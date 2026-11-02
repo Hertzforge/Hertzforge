@@ -171,6 +171,64 @@ def test_a_band_above_the_data_is_refused(modal_run):
         run('modal_run.modes', modal_run, low_hz=5000.0, high_hz=6000.0)
 
 
+def test_identified_modes_are_real(modal_run):
+    """The fitter fits real normal modes, so no imaginary part travels."""
+    (view,) = run('modal_run.modes', modal_run)
+    assert not any('shape_imag' in m for m in view['modes'])
+
+
+# ---- modal_run.ods --------------------------------------------------------------
+
+def test_an_operating_shape_is_the_frfs_at_one_line(modal_run, validate):
+    """At the line nearest the asked frequency, each node's response is its FRF
+    to that reference, scaled so the largest is 1 and rotated by one common
+    phase: the ratios between nodes are the FRFs' own."""
+    (view,) = run('modal_run.ods', modal_run, frequency_hz=441.0, reference=2)
+    wire_views([view], validate)
+    (mode,) = view['modes']
+    frf = modal_run.project['FRF']
+    lines = np.asarray(frf.abscissa)
+    line = int(np.argmin(np.abs(lines - 441.0)))
+    assert mode['frequency_hz'] == lines[line] and mode['damping'] is None
+    assert mode['label'] == 'Operating shape'
+    assert view['title'].endswith(f'Operating Shape at {lines[line]:g} Hz, Reference 1310Z+')
+    shape = mode['shape'] + 1j * mode['shape_imag']
+    assert np.abs(shape[:, :2]).max() < 1e-9 * np.abs(shape[:, 2]).max()
+    from hertzforge.deform import dof_directions
+    geometry = modal_run.project['Geometry']
+    picked = [k for k, dof in enumerate(frf.reference_dof) if dof == '1310Z+']
+    rows, _, used = dof_directions(geometry, [frf.response_dof[k] for k in picked])
+    measured = np.asarray(frf.ordinate)[picked][used, line]
+    xyz = np.asarray(geometry.node_xyz)
+    ratios = []
+    for row in np.unique(rows):
+        if np.count_nonzero(rows == row) > 1:
+            continue   # a node measured twice draws the sum of its records
+        (drawn,) = np.flatnonzero(np.all(np.isclose(view['nodes'], xyz[row]), axis=1))
+        ratios.append(shape[drawn, 2] / measured[rows == row][0])
+    assert len(ratios) >= 8
+    np.testing.assert_allclose(ratios, ratios[0], rtol=1e-4)
+    assert np.abs(shape[:, 2]).max() == pytest.approx(1.0, abs=1e-6)
+
+
+def test_an_operating_shape_off_resonance_is_complex(modal_run):
+    """Between modes the FRFs are not in phase, so the shape has an imaginary
+    part that no common rotation removes."""
+    (view,) = run('modal_run.ods', modal_run, frequency_hz=550.0)
+    assert np.abs(view['modes'][0]['shape_imag']).max() > 1e-3
+
+
+def test_an_operating_shape_outside_the_frfs_is_refused(modal_run):
+    with pytest.raises(ProtocolError, match='5000 Hz is outside the FRFs, which span 0 to 2048 Hz'):
+        run('modal_run.ods', modal_run, frequency_hz=5000.0)
+
+
+def test_a_reference_the_survey_does_not_have_is_refused(modal_run):
+    with pytest.raises(ProtocolError, match=r'has 2 references, 101Z\+, 1310Z\+; there is no '
+                       'reference 3'):
+        run('modal_run.ods', modal_run, reference=3)
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

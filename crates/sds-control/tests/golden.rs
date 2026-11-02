@@ -122,12 +122,35 @@ fn event_shape() -> (Value, Arrays) {
         )
         .unwrap(),
     );
+    // a complex mode: its real and imaginary parts
+    let r = arrays.insert(
+        "r",
+        Array::new(
+            vec![4, 3],
+            ArrayData::F32(vec![
+                0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0,
+            ]),
+        )
+        .unwrap(),
+    );
+    let i = arrays.insert(
+        "i",
+        Array::new(
+            vec![4, 3],
+            ArrayData::F32(vec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0,
+            ]),
+        )
+        .unwrap(),
+    );
     let message = json!({
         "type": "event", "topic": "demo.shape", "seq": 42,
         "data": {"views": [
             {"view": "shape3d", "title": "Two Triangles", "unit": "m",
              "nodes": n, "triangles": t,
-             "modes": [{"index": 1, "frequency_hz": 12.5, "damping": null, "shape": s}]},
+             "modes": [{"index": 1, "frequency_hz": 12.5, "damping": null, "shape": s},
+                       {"index": 2, "frequency_hz": 31.0, "damping": 0.02, "shape": r,
+                        "shape_imag": i}]},
         ]},
     });
     (message, arrays)
