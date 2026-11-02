@@ -83,8 +83,8 @@ def test_an_empty_table_reads_back(tmp_path, suffix, fmt):
 def test_an_empty_table_saves_and_opens(tmp_path):
     project = hertzforge.Project('p')
     project.new_channel_table()
-    project.save(tmp_path / 'p.vdyn')
-    opened = hertzforge.Project.open(tmp_path / 'p.vdyn')
+    project.save(tmp_path / 'p.hforge')
+    opened = hertzforge.Project.open(tmp_path / 'p.hforge')
     assert opened['Channel Table'] == project['Channel Table']
     assert opened['Channel Table'].num_channels == 0
 

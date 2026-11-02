@@ -237,7 +237,7 @@ def test_a_signed_component_is_never_a_density():
 
 
 def test_a_stepped_spectrum_keeps_every_tread_past_the_budget():
-    """The bug Brandon found in transient.vdyn: the step outline is two
+    """The bug Brandon found in transient.hforge: the step outline is two
     points per bin, so it crosses the point budget at half the line
     count a plain curve would — and peak decimation keeps each slice's
     *extremes*, not its bin edges, so the treads were exactly what got

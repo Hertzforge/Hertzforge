@@ -767,7 +767,7 @@ def test_the_register_rides_in_the_project_file_and_the_template(tmp_path):
     report = _report()
     fd.add(report, 'deviation', band=(617.5, 660), fact='F.')
     fd.offer(report, 'D-1', fd.FactDraft('D.', 's', band=(1.0, 2.0)))
-    path = str(tmp_path / 'r.vdyn')
+    path = str(tmp_path / 'r.hforge')
     io.save(report, path)
     back = io.load(path)
     assert back.blocks == report.blocks and fd.register(back) == \

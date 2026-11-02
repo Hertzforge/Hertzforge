@@ -151,8 +151,8 @@ def test_springs_and_ground_ride_the_native_file(tmp_path):
                                                 None)))
     ground = _group(geometry, 'ground', [[9]], POINT,
                     GroupProperties(ground=True))
-    hertzforge.save(geometry, tmp_path / 'g.vdyn')
-    back = hertzforge.load(tmp_path / 'g.vdyn')
+    hertzforge.save(geometry, tmp_path / 'g.hforge')
+    back = hertzforge.load(tmp_path / 'g.hforge')
     assert back.group_properties[springs] == geometry.group_properties[springs]
     assert back.group_properties[ground] == GroupProperties(ground=True)
     assert back.group_properties[ground].kind == 'ground'

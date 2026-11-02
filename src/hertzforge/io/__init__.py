@@ -4,8 +4,9 @@ Each importer and exporter is added to a registry here, so a new format
 is added without changing existing code.
 
 Every object that can be imported can also be saved, though not always
-in the format it came from. `.vdyn` (HDF5) is the native format and the
-one Save and Load use; it keeps everything, including units, and so
+in the format it came from. `.hforge` (HDF5) is the native format and
+the one Save and Load use, and Visual Dynamics' `.vdyn` files open the
+same way; it keeps everything, including units, and so
 does `.mat`, which is the same layout in MATLAB's container. The other
 formats are for exchanging data with other tools, and each loses
 whatever it has no field for; see each module.
@@ -148,7 +149,7 @@ def known_format(path: str | os.PathLike) -> str | None:
     """The name of a file's format when Hertzforge knows it, or
     None.
 
-    Known are a Visual Dynamics file, a document the record carries
+    Known are a Hertzforge file, a Visual Dynamics file, a document the record carries
     beside its data, named by its kind from its suffix, and any file an
     importer recognizes, named by that importer's description. A sniffer
     that trips over the file is not its format, so this does not raise
@@ -156,6 +157,8 @@ def known_format(path: str | os.PathLike) -> str | None:
     """
     path = str(path)
     suffix = os.path.splitext(path)[1].lower()
+    if suffix == '.hforge':
+        return 'Hertzforge file (.hforge)'
     if suffix == '.vdyn':
         return 'Visual Dynamics file (.vdyn)'
     if suffix in _DOCUMENT_FORMATS:
@@ -172,7 +175,8 @@ def known_format(path: str | os.PathLike) -> str | None:
 def format_of(path: str | os.PathLike) -> str:
     """The name of a file's format, as a data index prints it.
 
-    A Visual Dynamics file is named as one. A document the record carries
+    A Hertzforge or Visual Dynamics file is named as one. A document the
+    record carries
     beside its data (a settings list, a log, a scanned procedure) is
     named by its kind, from its suffix. Any other file an importer
     recognizes is named by that importer's description ('Rattlesnake
@@ -254,8 +258,8 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     sources that do not record them; without a declaration the object
     imports without units, holding the file's values as they are until
     `define_units()` is called. `format` chooses an importer by name
-    instead of by recognizing the file; a `.vdyn` file is always read
-    by the native loader. `progress` is a (done, total) callable, used
+    instead of by recognizing the file; a `.hforge` or `.vdyn` file is
+    always read by the native loader. `progress` is a (done, total) callable, used
     where the reader can count (a project file's objects, a Rattlesnake
     run's samples) and ignored where it cannot: a UFF file is read in
     one parse with no partial progress to report. A leading `~` in the
@@ -306,7 +310,7 @@ def import_file(path: str | os.PathLike, format: str | None = None,
         raise FileNotFoundError(f'no file at {path}')
     if os.path.isdir(path):
         raise IsADirectoryError(f'{path} is a folder, not a file')
-    if path.endswith('.vdyn'):
+    if path.endswith(('.hforge', '.vdyn')):
         return load(path, progress=progress)
     if format is not None:
         for imp in _IMPORTERS:
@@ -435,7 +439,7 @@ register_exporter('report_template', 'Report template (.vdreport)',
                   report_template.save)
 # the project file in MATLAB's container: every object and a whole
 # project, with the units named. With no display system the values are
-# SI, exactly as .vdyn holds them; exported in a display system they
+# SI, exactly as .hforge holds them; exported in a display system they
 # are in that system's units (matlab's module docstring)
 register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)

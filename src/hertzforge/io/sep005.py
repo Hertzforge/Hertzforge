@@ -14,7 +14,7 @@ converts the other way.
 This module imports nothing from sdypy; the standard is the dict.
 
 The standard covers timeseries only, so only `TimeHistory` converts.
-FRFs, PSDs and geometry are exchanged as ``.vdyn`` or universal files.
+FRFs, PSDs and geometry are exchanged as ``.hforge`` or universal files.
 """
 
 from __future__ import annotations

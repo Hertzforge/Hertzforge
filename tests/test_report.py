@@ -37,7 +37,7 @@ def test_blocks_move_the_way_a_drag_drops():
 def test_a_report_round_trips_through_vibe(tmp_path, project):
     report = modal_template(project)
     report.blocks[0]['text'] = 'Custom prose survives.'
-    path = tmp_path / 'report.vdyn'
+    path = tmp_path / 'report.hforge'
     io.save(report, str(path))
     back = io.load(str(path))
     assert isinstance(back, Report)
@@ -496,8 +496,8 @@ def test_the_marking_round_trips(tmp_path):
     report = Report('R', marking='SECRET//NOFORN', marking_color='red')
     project = hertzforge.Project('P')
     project.add('Report', report)
-    project.save(str(tmp_path / 'p.vdyn'))
-    back = hertzforge.Project.open(str(tmp_path / 'p.vdyn'))['Report']
+    project.save(str(tmp_path / 'p.hforge'))
+    back = hertzforge.Project.open(str(tmp_path / 'p.hforge'))['Report']
     assert back.marking == 'SECRET//NOFORN'
     assert back.marking_color == 'red'
 

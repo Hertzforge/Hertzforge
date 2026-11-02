@@ -178,7 +178,7 @@ def test_a_spectrum_with_no_positive_frequency_is_refused():
 def test_it_round_trips_through_visualdynamics(tmp_path):
     banded = flat().to_octave(6)
     hertzforge.save(banded, tmp_path / 'banded')
-    back = hertzforge.load(tmp_path / 'banded.vdyn')
+    back = hertzforge.load(tmp_path / 'banded.hforge')
     assert back.bandwidth is not None
     assert np.allclose(back.bandwidth, banded.bandwidth)
 

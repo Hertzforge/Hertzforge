@@ -10,7 +10,7 @@ The standard has no fields for much of what a project holds: element
 blocks and their properties, coordinate systems, the processing record
 and provenance, reports, matched modes, sine and random specifications,
 and a geometry's view. Those are kept in the `attachments` every group
-has, one attachment per object, holding the object in its `.vdyn`
+has, one attachment per object, holding the object in its `.hforge`
 layout (written by `io.native` into memory). A file written here
 therefore reads back complete, and a reader that does not know the
 attachment can ignore it. A report is attached twice: rendered as a
@@ -99,7 +99,10 @@ SUFFIX = '.h5'
 #: spellings, and `.escdf`, which this writer gave until 0.1.0a33
 SUFFIXES = ('.h5', '.hdf5', '.escdf')
 #: the attachment that holds an object whole, in its own layout
-WHOLE = 'hertzforge.vdyn'
+WHOLE = 'hertzforge.hforge'
+#: the same attachment in a file Visual Dynamics wrote, in the `.vdyn`
+#: layout, which the native reader reads by its stamp
+VDYN_WHOLE = 'visualdynamics.vdyn'
 #: the root metadata group carrying what belongs to the project itself
 PROJECT_RECORD = 'visualdynamics_project'
 
@@ -598,7 +601,7 @@ def _attached(dataset: escdf.Dataset, name: str) -> bytes | None:
 
 
 def _whole_object(dataset: escdf.Dataset) -> Any | None:
-    blob = _attached(dataset, WHOLE)
+    blob = _attached(dataset, WHOLE) or _attached(dataset, VDYN_WHOLE)
     if blob is None:
         return None
     try:

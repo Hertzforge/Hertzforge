@@ -134,14 +134,14 @@ def test_the_solids_ride_the_project_file_and_its_journal(tmp_path):
     project.combine_solids(name, 'subtract', [a, b], 'plate with a hole')
     assert project.journal[-1] == (
         "project.combine_solids('Part', 'subtract', [1, 2], 'plate with a hole')")
-    project.save(tmp_path / 'p.vdyn')
-    back = hertzforge.load(tmp_path / 'p.vdyn')[name]
+    project.save(tmp_path / 'p.hforge')
+    back = hertzforge.load(tmp_path / 'p.hforge')[name]
     assert back.solids == project[name].solids
     # a geometry with none writes none, and reads back with none
     plain = hertzforge.Project('q')
     plain.new_geometry('Empty', unit='in')
-    plain.save(tmp_path / 'q.vdyn')
-    assert hertzforge.load(tmp_path / 'q.vdyn')['Empty'].solids == []
+    plain.save(tmp_path / 'q.hforge')
+    assert hertzforge.load(tmp_path / 'q.hforge')['Empty'].solids == []
 
 
 def test_the_frame_wings_frame_is_a_plate_less_its_windows_and_holes():
@@ -287,8 +287,8 @@ def test_a_rounded_block_is_a_block_less_its_corners():
 def test_a_rounded_corner_rides_the_file(tmp_path):
     project, name, _geometry = _project()
     project.add_solid_block(name, (0, 0, 0), (2, 2, 1), corner=0.25, unit='in')
-    project.save(tmp_path / 'r.vdyn')
-    (back,) = hertzforge.load(tmp_path / 'r.vdyn')[name].solids
+    project.save(tmp_path / 'r.hforge')
+    (back,) = hertzforge.load(tmp_path / 'r.hforge')[name].solids
     assert back.corner == pytest.approx(0.25 * INCH)
 
 
@@ -376,8 +376,8 @@ def test_a_pattern_rides_the_file(tmp_path):
     project, name, geometry = _project()
     hole = project.add_solid_cylinder(name, (0, 0, 0), 0.1, 1.0, unit='in')
     made = project.pattern_solids(name, [hole], (3, 2, 1), (0.5, 0.75, 0), unit='in')
-    project.save(tmp_path / 'p.vdyn')
-    back = hertzforge.load(tmp_path / 'p.vdyn')[name]
+    project.save(tmp_path / 'p.hforge')
+    back = hertzforge.load(tmp_path / 'p.hforge')[name]
     assert back.solids == geometry.solids
     assert solids.solid(back, made).counts == (3, 2, 1)
     record = solids.solid(geometry, hole).as_record()

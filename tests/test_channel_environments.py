@@ -156,15 +156,15 @@ def test_the_environments_pass_through_the_constructor_and_ride_the_file(tmp_pat
     table = ChannelTable(_table().frame, environments={'Sine': SINE,
                                                        'Random': RANDOM})
     assert list(table.environments) == ['Sine', 'Random']
-    path = tmp_path / 'loops.vdyn'
+    path = tmp_path / 'loops.hforge'
     table.save(path)
     back = hertzforge.load(path)
     assert back == table
     assert back.environments['Sine'] == SINE
     assert back.environments['Random'].response_transformation is None
     plain = _table()
-    plain.save(tmp_path / 'plain.vdyn')
-    assert not hertzforge.load(tmp_path / 'plain.vdyn').environments
+    plain.save(tmp_path / 'plain.hforge')
+    assert not hertzforge.load(tmp_path / 'plain.hforge').environments
 
 
 def test_a_merged_table_carries_no_loops():

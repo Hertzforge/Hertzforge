@@ -164,7 +164,7 @@ def test_shapes_survive_a_file_and_are_held_in_meters(tmp_path):
                                      unit='in')
     hole = project.add_solid_hole(name, (0, 0, 2), 0.5, 1.0, counterbore=(1.0, 0.25),
                                   unit='in')
-    path = tmp_path / 'frame.vdyn'
+    path = tmp_path / 'frame.hforge'
     project.save(path)
     again = hertzforge.Project.open(path)
     assert again[name].solids == project[name].solids

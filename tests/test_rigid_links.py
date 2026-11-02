@@ -167,8 +167,8 @@ def test_a_rigid_block_builds_links_and_the_file_keeps_it(tmp_path):
     assert np.allclose(rebuilt.eigensolution(num_modes=10).frequency,
                        model.eigensolution(num_modes=10).frequency,
                        rtol=1e-9, atol=1e-6)
-    hertzforge.save(geometry, tmp_path / 'stack.vdyn')
-    back = hertzforge.load(tmp_path / 'stack.vdyn')
+    hertzforge.save(geometry, tmp_path / 'stack.hforge')
+    back = hertzforge.load(tmp_path / 'stack.hforge')
     assert back.group_properties[ids['bolts']].material.is_rigid
     geometry.group_properties[ids['lower']] = GroupProperties(RIGID)
     with pytest.raises(ValueError, match=r'a rigid \(massless\) element group holds '

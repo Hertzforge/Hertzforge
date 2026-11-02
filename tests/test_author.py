@@ -344,7 +344,7 @@ def test_the_verb_links_journals_and_refreshes(tmp_path):
     assert 'author_specification' in dict(project.verbs(name))
     assert 'author_specification' not in dict(project.verbs('Plate'))
 
-    back = hertzforge.Project.open(project.save(tmp_path / 'a.vdyn'))
+    back = hertzforge.Project.open(project.save(tmp_path / 'a.hforge'))
     assert back[name] == project[name]
     back.refresh(name)
     assert back[name] == project[name], 'the recipe rebuilds it exactly'

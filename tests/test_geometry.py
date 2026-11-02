@@ -86,7 +86,7 @@ def test_survey_display_import():
 
 def test_save_load_round_trip(tmp_path):
     geo = hertzforge.import_file(PLATE_EXO, length_unit='m')
-    path = str(tmp_path / 'plate.vdyn')
+    path = str(tmp_path / 'plate.hforge')
     geo.save(path)
     again = hertzforge.Geometry.load(path)
     assert again == geo
@@ -94,7 +94,7 @@ def test_save_load_round_trip(tmp_path):
 
 def test_native_import_dispatch(tmp_path):
     geo = hertzforge.import_file(PLATE_NPZ, length_unit='m')
-    path = str(tmp_path / 'plate.vdyn')
+    path = str(tmp_path / 'plate.hforge')
     hertzforge.save(geo, path)
     assert hertzforge.import_file(path) == geo
 

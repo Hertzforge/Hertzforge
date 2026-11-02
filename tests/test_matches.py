@@ -34,7 +34,7 @@ def test_matches_ride_the_project_file(tmp_path):
     b = ShapeSet([10.5], [0.015], ['1X+', '2X+'], [[1.0, -1.0]])
     matched = MatchedModes('First', 'Second',
                            pairs=[[0, 0], [1, 0]], macs=[0.98, 0.42])
-    path = tmp_path / 'matched.vdyn'
+    path = tmp_path / 'matched.hforge'
     io.save_test(str(path), 'Matched', {'First': a, 'Second': b,
                                         'Matched Modes': matched})
     contents = io.load(str(path))

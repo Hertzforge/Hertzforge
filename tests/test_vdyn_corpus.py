@@ -168,8 +168,8 @@ def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     newer = tmp_path / 'from_the_future.vdyn'
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), newer)
     with h5py.File(newer, 'r+') as f:
-        f.attrs['visualdynamics_schema'] = native.SCHEMA_VERSION + 1
-    with pytest.raises(ValueError, match='newer Hertzforge'):
+        f.attrs['visualdynamics_schema'] = native.VDYN_SCHEMA + 1
+    with pytest.raises(ValueError, match='newer Visual Dynamics'):
         native.load(newer)
 
 
@@ -180,5 +180,5 @@ def test_a_missing_stamp_is_not_our_file(tmp_path):
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), foreign)
     with h5py.File(foreign, 'r+') as f:
         del f.attrs['visualdynamics_schema']
-    with pytest.raises(ValueError, match='not a Visual Dynamics file'):
+    with pytest.raises(ValueError, match='not a Hertzforge or Visual Dynamics file'):
         native.load(foreign)

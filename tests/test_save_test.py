@@ -1,4 +1,4 @@
-"""Saving the whole test as one .vdyn file, and getting it back.
+"""Saving the whole test as one .hforge file, and getting it back.
 
 A test file holds every object under the user's own name, in order, plus
 what the test itself carried: its name and the active geometry. Loading
@@ -14,7 +14,7 @@ from hertzforge import io
 
 
 def test_a_single_object_file_still_loads_as_itself(tmp_path):
-    """The container is additive: one-object .vdyn files are untouched."""
+    """The container is additive: one-object .hforge files are untouched."""
     from hertzforge.core.channel_table import ChannelTable
 
     table = io.load(fixture_path('plate', 'channel_table.vdyn'))

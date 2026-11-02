@@ -86,6 +86,6 @@ def test_a_filtering_fingerprint_survives_the_same_treatment():
 def test_a_saved_project_opens_with_nothing_stale(tmp_path, project):
     """End to end, because that is how it was found: opening a file and
     seeing badges on work nobody had touched."""
-    path = tmp_path / 'fingerprints.vdyn'
+    path = tmp_path / 'fingerprints.hforge'
     project.save(str(path))
     assert hertzforge.Project.open(str(path)).stale() == {}

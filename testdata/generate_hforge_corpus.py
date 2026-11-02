@@ -1,22 +1,21 @@
-"""Freeze one .vdyn per schema era, so no release can orphan a file.
+"""Freeze one .hforge per schema, so no release can orphan a file.
 
-Run when SCHEMA_VERSION bumps to write that era's file.
-`tests/test_vdyn_corpus.py` opens every file here and pins values that
-would drift if a loader regressed. Until the first public release the
-freeze is soft: the format may drop its past deliberately (Brandon,
-2026-08-23 — no released file exists to orphan), and when it does, the
-orphaned era's file is deleted and regenerated rather than kept
-half-readable. After release the files are what the docstring says:
-written once, never refreshed. The project is authored small on
+Run when `io.native.SCHEMA_VERSION` bumps, to write that schema's file
+under `hforge_corpus/`. `tests/test_hforge_corpus.py` opens every file
+there and pins values that would drift if a loader regressed. A frozen
+file is written once and never refreshed. The project is small on
 purpose (a few KB): it is a schema exercise, not a dataset, but it
-touches every object kind and the optional fields (averaging,
-scale_db, complex modal mass and damping, links, roles, project type)
-whose absent-with-a-default handling is what future readers must keep.
-Schema 2 adds the predictions and the report block that reads them.
-Schema 3 adds a run log extract, taken from the frozen run log of
-`vdlog_corpus/` and stored as if the log sat beside the project file,
-so the frozen file holds a relative path and the log is not found
-beside it, which is a case a reader must keep too.
+holds every object kind and the optional fields (averaging, scale_db,
+complex modal mass and damping, element-group properties, object groups,
+roles, project type, predictions, a run log extract) whose handling
+when absent is what future readers must keep. The run log extract is
+taken from the frozen run log in `vdlog_corpus/` and stored as if the
+log sat beside the project file, so the file holds a relative path and
+the log is not found beside it, a case a reader must keep too.
+
+This script began as Visual Dynamics' `generate_vdyn_corpus.py`, which
+wrote the three files in `vdyn_corpus/`. Those stay as Visual Dynamics
+wrote them, since Hertzforge reads `.vdyn` and no longer writes it.
 """
 
 import os
@@ -28,6 +27,7 @@ import hertzforge
 from hertzforge.core.averaging import Averaging
 from hertzforge.core.channel_table import ChannelTable
 from hertzforge.core.data import Frf, TimeHistory
+from hertzforge.core.fem import GroupProperties, Material, Section
 from hertzforge.core.geometry import Geometry
 from hertzforge.core.matches import MatchedModes
 from hertzforge.core.photos import Photos
@@ -42,7 +42,7 @@ from hertzforge.core.sine import (
     SineSweepSpecification,
     SineTone,
 )
-from hertzforge.io.native import SCHEMA_VERSION
+from hertzforge.io.native import SCHEMA_VERSION, SUFFIX
 
 #: the smallest legal PNG: 1x1, opaque. The corpus needs image *bytes*
 #: that survive verbatim, not a picture.
@@ -60,7 +60,7 @@ def run_log_extract() -> RunLogExtract:
     corpus file, taken at a fixed time."""
     taken = take(os.path.join(HERE, 'vdlog_corpus', 'v1.vdlog'), test=1)
     return RunLogExtract(
-        taken.text, path=os.path.join(HERE, 'vdyn_corpus', 'v1.vdlog'),
+        taken.text, path=os.path.join(HERE, 'hforge_corpus', 'v1.vdlog'),
         test=taken.test, upto=taken.upto,
         taken=datetime(2026, 10, 30, 12, 0,
                        tzinfo=timezone(timedelta(hours=-6))),
@@ -75,6 +75,11 @@ def build_project() -> hertzforge.Project:
                   [1.0, 0.0, 0.0], [1.0, 0.5, 0.0]])
     geometry.add_beams([1, 2, 3, 4])
     geometry.length_unit = 'm'
+    # what the element group is made of, so the file holds
+    # `group_properties`, one of the names `.vdyn` kept as a block
+    geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(
+        Material('6061-T6', 68.9e9, 2700.0, 0.33),
+        section=Section('tube', 1.2e-4, 3.1e-9, 3.1e-9, 6.2e-9))}
 
     t = np.arange(256) / 256.0
     history = TimeHistory(
@@ -135,7 +140,7 @@ def build_project() -> hertzforge.Project:
     photos = Photos(names=['setup'], formats=['png'],
                     images=[ONE_PIXEL_PNG])
 
-    # schema 2: predictions, one of peaks and one of a curve
+    # predictions, one of peaks and one of a curve
     peaked = np.abs(1.0 / (1.0 - (frequency / 48.0) ** 2
                            + 1j * frequency / 480.0))
     predictions = Predictions([
@@ -161,7 +166,7 @@ def build_project() -> hertzforge.Project:
     project.add('Matches', matches)
     project.add('Photos', photos)
     project.add('Predictions', predictions)
-    # schema 3: the run log brought in
+    # the run log brought in
     project.add('Run Log, Test 1', run_log_extract())
     # through the project's own verbs, so the file carries provenance
     # — the staleness fingerprints have to survive a save too
@@ -179,9 +184,9 @@ def build_project() -> hertzforge.Project:
 
 if __name__ == '__main__':
     import os
-    root = os.path.join(os.path.dirname(__file__), 'vdyn_corpus')
+    root = os.path.join(os.path.dirname(__file__), 'hforge_corpus')
     os.makedirs(root, exist_ok=True)
-    path = os.path.join(root, f'schema{SCHEMA_VERSION}.vdyn')
+    path = os.path.join(root, f'schema{SCHEMA_VERSION}{SUFFIX}')
     if os.path.exists(path):
         raise SystemExit(f'{path} is frozen; a schema bump writes a '
                          'new file, never this one again')

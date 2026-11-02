@@ -499,7 +499,7 @@ def test_a_project_with_predictions_saves_and_reads_back_stamped_schema_2(
                     frequency_uncertainty=5.0)
     project.predict('Predictions', '301Z+', 'transmissibility',
                     [(560.0, 8.0, 8.0, (380.0, 600.0))], reference='1Z+')
-    path = tmp_path / 'bracket.vdyn'
+    path = tmp_path / 'bracket.hforge'
     native.save_test(path, project.name, project)
     back = native.load(path)
     held, again = project['Predictions'], back['Predictions']
@@ -510,30 +510,7 @@ def test_a_project_with_predictions_saves_and_reads_back_stamped_schema_2(
     import h5py
 
     with h5py.File(path, 'r') as file:
-        assert file.attrs['visualdynamics_schema'] == 2
-    # a file with nothing version 2 added is stamped 1, as before
-    del project['Predictions']
-    plain = tmp_path / 'plain.vdyn'
-    native.save_test(plain, project.name, project)
-    with h5py.File(plain, 'r') as file:
-        assert file.attrs['visualdynamics_schema'] == 1
-
-
-def test_a_build_reading_only_schema_1_refuses_a_file_with_predictions(
-        tmp_path, monkeypatch):
-    held = Predictions([asd_prediction()])
-    path = tmp_path / 'held.vdyn'
-    native.save(held, path)
-    assert len(native.load(path)) == 1
-    monkeypatch.setattr(native, 'SCHEMA_VERSION', 1)
-    with pytest.raises(ValueError, match='newer Hertzforge.*schema 2.*'
-                       'Update to open it'):
-        native.load(path)
-    # and a report reading predictions, saved alone, is stamped 2 too
-    report = Report('R', [{'kind': 'prediction', 'source': 'P',
-                           'measured': 'M', 'level': -12.0}])
-    assert native.schema_for(report) == 2
-    assert native.schema_for(Report('R')) == 1
+        assert file.attrs['hertzforge_schema'] == 1
 
 
 def test_the_verbs_are_journaled_replay_and_refuse_in_the_core():

@@ -359,8 +359,8 @@ def test_the_identity_and_record_round_trip_through_the_project_file(
 
     project, name = _project(_report(**COMPLETE))
     _issue(project, name)
-    io.save(project[name], str(tmp_path / 'r.vdyn'))
-    back = io.load(str(tmp_path / 'r.vdyn'))
+    io.save(project[name], str(tmp_path / 'r.hforge'))
+    back = io.load(str(tmp_path / 'r.hforge'))
     assert back.identity == project[name].identity
 
 
@@ -369,12 +369,12 @@ def test_a_report_with_no_identity_is_stored_as_it_always_was(tmp_path):
 
     from hertzforge import io
 
-    io.save(Report('R'), str(tmp_path / 'r.vdyn'))
-    with h5py.File(tmp_path / 'r.vdyn') as handle:
+    io.save(Report('R'), str(tmp_path / 'r.hforge'))
+    with h5py.File(tmp_path / 'r.hforge') as handle:
         attributes = set()
         handle.visititems(lambda _n, item: attributes.update(item.attrs))
     assert 'identity' not in attributes
-    assert io.load(str(tmp_path / 'r.vdyn')).identity == {}
+    assert io.load(str(tmp_path / 'r.hforge')).identity == {}
 
 
 def test_a_template_carries_the_laboratory_and_never_the_issue(tmp_path):

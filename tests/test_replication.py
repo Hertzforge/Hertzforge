@@ -760,7 +760,7 @@ def test_whether_it_is_a_density_survives_the_project_file(tmp_path):
                   if isinstance(o, TransientSpecification))
     added = project.compute_psds(target)
     assert project[added].interpolation == 'bin'
-    saved = project.save(tmp_path / 'p.vdyn')
+    saved = project.save(tmp_path / 'p.hforge')
     assert hertzforge.Project.open(saved)[added].interpolation == 'bin'
 
 

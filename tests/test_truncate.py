@@ -128,7 +128,7 @@ def test_the_settings_survive_a_save_and_a_load(tmp_path):
     name = project.truncate_data('Run')
     project['Run'].truncation = Truncation(0.25, 2.0)
     back = hertzforge.Project.open(
-        project.save(tmp_path / 'cut.vdyn'))
+        project.save(tmp_path / 'cut.hforge'))
     assert back['Run'].truncation == Truncation(0.25, 2.0)
     assert name in back.stale(), \
         'the fingerprint survived the file, so the badge still works'

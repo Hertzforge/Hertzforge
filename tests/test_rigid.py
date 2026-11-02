@@ -320,7 +320,7 @@ def test_the_settings_survive_a_save_and_a_load(tmp_path):
                             inertia=(1.0, 2.0, 3.0, 0.1, 0.0, -0.2))
     project['Plate'].mass_properties = scaled
     name = project.generate_rigid_body_modes('Plate')
-    back = hertzforge.Project.open(project.save(tmp_path / 'r.vdyn'))
+    back = hertzforge.Project.open(project.save(tmp_path / 'r.hforge'))
     assert back['Plate'].mass_properties == scaled, \
         'the point, the mass and all six inertia terms read back'
     assert back.stale() == {}, 'and compare equal to the recorded ones'
@@ -328,7 +328,7 @@ def test_the_settings_survive_a_save_and_a_load(tmp_path):
     back['Plate'].mass_properties = MassProperties((0.1, 0.2, 0.3))
     assert name in back.stale(), \
         'the fingerprint survived the file, so the badge still works'
-    again = hertzforge.Project.open(back.save(tmp_path / 'u.vdyn'))
+    again = hertzforge.Project.open(back.save(tmp_path / 'u.hforge'))
     assert again['Plate'].mass_properties == MassProperties((0.1, 0.2, 0.3)), \
         'an unscaled setting saves without mass attrs and reads back unscaled'
 

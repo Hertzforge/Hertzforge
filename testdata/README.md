@@ -225,6 +225,16 @@ Define Units step.
 The `.npz` files are saved compressed — the arrays are smooth enough
 to shrink by nearly half, and they live in the repository.
 
+## Frozen files
+
+`vdyn_corpus/` holds one `.vdyn` for each Visual Dynamics schema (1 to
+3), as Visual Dynamics wrote them. Hertzforge reads `.vdyn` and never
+writes it, so these are never regenerated. `hforge_corpus/` holds one
+`.hforge` for each Hertzforge schema, written by
+`generate_hforge_corpus.py` when the schema changes and never refreshed
+after. `tests/test_vdyn_corpus.py` and `tests/test_hforge_corpus.py`
+open every file in both.
+
 ## Regenerating
 
 Everything but the controller runs regenerates in the project's own

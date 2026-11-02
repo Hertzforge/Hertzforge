@@ -63,13 +63,13 @@ def test_the_project_builds_with_no_gray_slots(builders, name,
 
 
 def test_a_saved_project_reloads_complete(builders, tmp_path):
-    """What the app will actually open: the .vdyn round trip keeps the
+    """What the app will actually open: the .hforge round trip keeps the
     skeleton full, links and roles included."""
     from hertzforge import load
     from hertzforge.core.report import missing_expectations
 
     project = builders.shock_project()
-    path = tmp_path / 'shock.vdyn'
+    path = tmp_path / 'shock.hforge'
     project.save(str(path))
     back = load(str(path))
     assert back.project_type == 'Shock'

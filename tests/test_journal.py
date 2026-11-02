@@ -63,7 +63,7 @@ def test_a_refusal_records_nothing():
 
 def test_opening_a_file_is_the_whole_genesis(tmp_path):
     project = _worked_up()
-    path = project.save(tmp_path / 'j.vdyn')
+    path = project.save(tmp_path / 'j.hforge')
     back = hertzforge.Project.open(path)
     assert back.journal == [
         f'project = hertzforge.Project.open({path!r})'], \
@@ -73,7 +73,7 @@ def test_opening_a_file_is_the_whole_genesis(tmp_path):
 def test_the_script_replays_the_session(tmp_path):
     """The anchor: exec the script, get the same project."""
     project = _worked_up()
-    project.save(tmp_path / 'out.vdyn')
+    project.save(tmp_path / 'out.hforge')
     script = project.session_script()
     assert script.startswith('import hertzforge\n')
 
@@ -87,7 +87,7 @@ def test_the_script_replays_the_session(tmp_path):
         if hasattr(ours, 'ordinate'):
             assert np.allclose(np.asarray(ours.ordinate),
                                np.asarray(theirs.ordinate)), name
-    assert (tmp_path / 'out.vdyn').exists(), \
+    assert (tmp_path / 'out.hforge').exists(), \
         'the save replayed too — the script writes what the session wrote'
 
 

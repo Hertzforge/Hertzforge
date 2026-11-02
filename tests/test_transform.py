@@ -377,14 +377,14 @@ def test_a_changed_set_or_record_badges_the_modal_responses():
 
 def test_the_session_script_replays(tmp_path):
     rigid = rigid_body_shapes(_geometry(), MassProperties((0, 0, 0)))
-    saved = tmp_path / 'run.vdyn'
+    saved = tmp_path / 'run.hforge'
     _history(rigid, _rigid_motion()).save(saved)
 
     project = hertzforge.Project('Replay')
     project.import_file(fixture_path('plate', 'geometry.unv'))
     # the rigid set of this five-node cloud, not the plate's: the
     # record was made from it, and a script can rebuild it exactly
-    cloud = tmp_path / 'cloud.vdyn'
+    cloud = tmp_path / 'cloud.hforge'
     _geometry().save(cloud)
     project.import_file(cloud)
     geometry = next(n for n in project.names
@@ -417,9 +417,9 @@ def test_node_numbered_formats_refuse_modal_coordinates(tmp_path):
     # the native file keeps them, and the physical expansion writes
     back, _report = to_physical(modal, rigid)
     hertzforge.export_file(back, str(tmp_path / 'back.unv'))
-    modal.save(tmp_path / 'modal.vdyn')
+    modal.save(tmp_path / 'modal.hforge')
     assert hertzforge.import_file(
-        tmp_path / 'modal.vdyn').response_dof == modal.response_dof
+        tmp_path / 'modal.hforge').response_dof == modal.response_dof
 
 
 def test_a_modal_object_answers_to_the_shape_set_it_came_through():

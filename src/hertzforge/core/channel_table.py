@@ -384,7 +384,7 @@ class ChannelTable:
     #: different words. Every source goes through it, which is what
     #: makes "everything parses into these columns" true of a
     #: controller save, a calibration lab's spreadsheet and an older
-    #: .vdyn alike, rather than of whichever importer remembered.
+    #: .hforge alike, rather than of whichever importer remembered.
     ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
         'channel': ('channel_number', 'ch', 'chan', 'channel_index'),
         'node': ('node_number', 'node_id', 'point', 'point_number', 'grid'),
@@ -1353,12 +1353,12 @@ class ChannelTable:
                 f'columns: {", ".join(self.column_names)})')
 
     def save(self, path: str | os.PathLike) -> None:
-        """Write the table to a file of its own, in the `.vdyn` format.
+        """Write the table to a file of its own, in the `.hforge` format.
 
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write it; `.vdyn` is added when the suffix is not
+            Where to write it; `.hforge` is added when the suffix is not
             there.
 
         Returns

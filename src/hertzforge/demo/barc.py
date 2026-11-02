@@ -257,7 +257,7 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
     element groups given their properties, so Solve Modes on it gives its
     modes.
 
-        barc.project().save('barc.vdyn')
+        barc.project().save('barc.hforge')
 
     With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz).
     That is the example project the downloads page offers.
@@ -510,7 +510,7 @@ def solid_project(size: float = SIZE, solved: bool = False) -> Any:
     """A project to open in the app: the BARC and its removable
     component, both of bricks, so Solve Modes on either gives its modes.
 
-        barc.solid_project().save('barc-bricks.vdyn')
+        barc.solid_project().save('barc-bricks.hforge')
 
     With `solved`, the BARC's modes are already solved to `SOLVE_TO`
     (2000 Hz) and the removable component's to `PART_SOLVE_TO`

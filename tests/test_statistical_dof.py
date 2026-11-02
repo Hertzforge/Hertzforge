@@ -333,8 +333,8 @@ def test_the_line_correlation_travels_with_the_psd(tmp_path):
     psd = history.compute_psds()
     project = hertzforge.Project('Lines')
     project.add('PSD', psd)
-    project.save(tmp_path / 'lines.vdyn')
-    back = hertzforge.Project.open(tmp_path / 'lines.vdyn')['PSD']
+    project.save(tmp_path / 'lines.hforge')
+    back = hertzforge.Project.open(tmp_path / 'lines.hforge')['PSD']
     assert np.array_equal(back.line_correlation, psd.line_correlation)
     other = history.compute_psds()
     other.response_dof = ['3X+', '4X+']
@@ -412,7 +412,7 @@ def test_deleting_records_keeps_each_count_with_its_channel():
 def test_the_count_survives_a_save(tmp_path):
     history, _averaging = _white(frames=10, overlap=0.75)
     psd = history.compute_psds()
-    path = tmp_path / 'psd.vdyn'
+    path = tmp_path / 'psd.hforge'
     hertzforge.save(psd, path)
     back = hertzforge.load(path)
     assert np.allclose(back.statistical_dof, psd.statistical_dof)

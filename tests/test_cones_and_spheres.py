@@ -140,7 +140,7 @@ def test_cones_and_spheres_edit_and_save(tmp_path):
     assert solids.solid(geometry, ball).radius == pytest.approx(0.75 * INCH)
     with pytest.raises(ValueError, match='a sphere has no angles'):
         project.edit_solid(name, ball, angles=(10, 0, 0))
-    path = tmp_path / 'g.vdyn'
+    path = tmp_path / 'g.hforge'
     geometry.save(path)
     back = Geometry.load(path)
     assert back.solids == geometry.solids

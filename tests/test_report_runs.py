@@ -346,19 +346,19 @@ def test_the_identity_travels_in_the_project_file(tmp_path, two_runs):
 
     project, _name, first, other = two_runs
     project.set_run_identity(other, comment='restarted after the stop')
-    project.save(str(tmp_path / 'p.vdyn'))
-    back = io.load(str(tmp_path / 'p.vdyn'))
+    project.save(str(tmp_path / 'p.hforge'))
+    back = io.load(str(tmp_path / 'p.hforge'))
     assert back[first].run_identity == project[first].run_identity
     assert back[other].run_identity.comment == 'restarted after the stop'
     assert back[other].run_identity.source('comment') == cr.ENTERED
     # a history with no identity is stored as it always was
     bare = TimeHistory(np.arange(4.0), np.ones((1, 4)), '1X+')
-    io.save(bare, str(tmp_path / 'bare.vdyn'))
-    with h5py.File(tmp_path / 'bare.vdyn') as handle:
+    io.save(bare, str(tmp_path / 'bare.hforge'))
+    with h5py.File(tmp_path / 'bare.hforge') as handle:
         attributes = set()
         handle.visititems(lambda _n, item: attributes.update(item.attrs))
     assert 'run_identity' not in attributes
-    assert io.load(str(tmp_path / 'bare.vdyn')).run_identity is None
+    assert io.load(str(tmp_path / 'bare.hforge')).run_identity is None
 
 
 def test_an_entry_stands_over_what_was_read_and_is_refused_by_name(two_runs):

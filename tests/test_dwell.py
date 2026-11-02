@@ -137,7 +137,7 @@ def test_a_dwell_round_trips_through_native_as_an_ordinary_segment(tmp_path):
     spec = SineSweepSpecification(
         [SineTone.dwell('Hold', 20.0, [2.0], 4.5, warning_upper=[2.5])],
         [CONTROL], ordinate_unit='m/s**2')
-    path = str(tmp_path / 'dwell.vdyn')
+    path = str(tmp_path / 'dwell.hforge')
     hertzforge.io.save(spec, path)
     back = hertzforge.io.load(path)
     assert back == spec
