@@ -10,6 +10,10 @@
 	 * colormap, so orbiting and switching an axis between linear and log move no data. Only the
 	 * segment index is rebuilt on a scale change, because a level at or below zero is a gap on a
 	 * log axis. Frames are drawn on demand: a still scene costs nothing.
+	 *
+	 * Hovering reads the point under the cursor by drawing the curves once more, into a few pixels
+	 * around it, with each vertex writing its own index as its color; one small draw however many
+	 * points there are, where a search on the CPU would visit every segment.
 	 */
 	import { onDestroy, onMount } from 'svelte';
 	import {
@@ -21,26 +25,34 @@
 		LinearFilter,
 		LineBasicMaterial,
 		LineSegments,
+		NoBlending,
 		PerspectiveCamera,
 		RawShaderMaterial,
 		RGBAFormat,
 		Scene,
 		Vector3,
 		WebGLRenderer,
+		WebGLRenderTarget,
 		type Material
 	} from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import type { ParamValues } from '$lib/forms/params';
 	import type { WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
 	import { formatCount, formatNumber, formatTick, withUnit } from './format';
-	import { STAGE, axisTicks, fraction, levelRange, namedRecords, recordOf, segmentIndex } from './waterfall';
+	import { STAGE, axisTicks, fraction, levelRange, namedRecords, pickedPoint, recordOf, segmentIndex } from './waterfall';
 
 	interface Props {
 		view: WaterfallView;
+		/** Run the view's operation again with these params: a quantity chosen here. */
+		onparams?: (patch: ParamValues) => void;
 	}
 
-	let { view }: Props = $props();
+	let { view, onparams }: Props = $props();
+
+	/** Side of the square read back around the cursor, in pixels: lines are one pixel wide. */
+	const PICK = 9;
 
 	type Facing = 'perspective' | 'top' | 'front';
 
@@ -51,6 +63,8 @@
 	let logZ = $state(false);
 	let facing = $state<Facing>('perspective');
 	let failure = $state<string | null>(null);
+	/** The point under the cursor and where it stands on screen, or null. */
+	let hover = $state<{ point: number; record: number; sx: number; sy: number } | null>(null);
 
 	// The service says how each axis reads; the viewer may change it afterward.
 	$effect.pre(() => {
@@ -95,10 +109,20 @@
 	};
 	let raf = 0;
 	let dirty = true;
+	let curveMaterial: RawShaderMaterial;
+	let pickMaterial: RawShaderMaterial;
+	let pickTarget: WebGLRenderTarget;
+	const pickPixels = new Uint8Array(4 * PICK * PICK);
+	/** A cursor position waiting to be picked at the next frame, in canvas pixels. */
+	let pendingPick: [number, number] | null = null;
+	let records = new Float32Array(0);
 	let resizeObs: ResizeObserver | null = null;
 	const centre = new Vector3(STAGE.x / 2, STAGE.y / 2, STAGE.z / 2);
 
 	const vertexShader = /* glsl */ `
+		#ifdef PICKING
+		flat out uint vId;
+		#endif
 		in float ax;
 		in float az;
 		in float arec;
@@ -118,6 +142,9 @@
 			float tz = clamp((z - uZ.x) / (uZ.y - uZ.x), 0.0, 1.0);
 			float depth = uDepth > 0.0 ? arec / uDepth : 0.0;
 			vLevel = tz;
+			#ifdef PICKING
+			vId = uint(gl_VertexID) + 1u;
+			#endif
 			gl_Position = projectionMatrix * modelViewMatrix * vec4(tx * S.x, depth * S.y, tz * S.z, 1.0);
 		}`;
 
@@ -129,6 +156,15 @@
 		out vec4 outColor;
 		void main() {
 			outColor = vec4(texture(uMap, vec2(vLevel, 0.5)).rgb, 1.0);
+		}`;
+
+	// a vertex's index, plus one so that zero is "nothing here", in four bytes
+	const pickFragmentShader = /* glsl */ `
+		precision highp float;
+		flat in uint vId;
+		out vec4 outColor;
+		void main() {
+			outColor = vec4(uvec4(vId, vId >> 8u, vId >> 16u, vId >> 24u) & 255u) / 255.0;
 		}`;
 
 	function mapTexture(): DataTexture {
@@ -253,15 +289,26 @@
 		geometry = new BufferGeometry();
 		geometry.setAttribute('ax', new BufferAttribute(view.x_values, 1));
 		geometry.setAttribute('az', new BufferAttribute(view.z_values, 1));
-		geometry.setAttribute('arec', new BufferAttribute(recordOf(view.offsets, view.x_values.length), 1));
+		records = recordOf(view.offsets, view.x_values.length);
+		geometry.setAttribute('arec', new BufferAttribute(records, 1));
 		colorTexture = mapTexture();
 		uniforms.uMap.value = colorTexture;
 		uniforms.uDepth.value = Math.max(0, recordCount - 1);
-		const material = new RawShaderMaterial({ glslVersion: GLSL3, vertexShader, fragmentShader, uniforms });
-		materials.push(material);
-		curves = new LineSegments(geometry, material);
+		curveMaterial = new RawShaderMaterial({ glslVersion: GLSL3, vertexShader, fragmentShader, uniforms });
+		materials.push(curveMaterial);
+		curves = new LineSegments(geometry, curveMaterial);
 		curves.frustumCulled = false;
 		scene.add(curves);
+		pickMaterial = new RawShaderMaterial({
+			glslVersion: GLSL3,
+			vertexShader,
+			fragmentShader: pickFragmentShader,
+			uniforms,
+			defines: { PICKING: 1 },
+			blending: NoBlending
+		});
+		materials.push(pickMaterial);
+		pickTarget = new WebGLRenderTarget(PICK, PICK);
 
 		frameMaterial = new LineBasicMaterial({ transparent: true, opacity: 0.8 });
 		materials.push(frameMaterial);
@@ -326,10 +373,58 @@
 		}
 	}
 
+	/** Draw the curves alone around (px, py) with the picking material and read back what is there. */
+	function pick(px: number, py: number) {
+		if (!renderer) return;
+		const w = canvasHost.clientWidth;
+		const h = canvasHost.clientHeight;
+		const half = (PICK - 1) / 2;
+		camera.setViewOffset(w, h, px - half, py - half, PICK, PICK);
+		curves.material = pickMaterial;
+		if (frame) frame.visible = false;
+		renderer.setRenderTarget(pickTarget);
+		renderer.clear();
+		renderer.render(scene, camera);
+		renderer.setRenderTarget(null);
+		renderer.readRenderTargetPixels(pickTarget, 0, 0, PICK, PICK, pickPixels);
+		curves.material = curveMaterial;
+		if (frame) frame.visible = true;
+		camera.clearViewOffset();
+		const point = pickedPoint(pickPixels, PICK);
+		if (point === null || point >= records.length) {
+			hover = null;
+			return;
+		}
+		const record = records[point];
+		probe
+			.set(
+				fraction(view.x_values[point], xRange, logX) * STAGE.x,
+				recordCount > 1 ? (record / (recordCount - 1)) * STAGE.y : 0,
+				Math.min(1, Math.max(0, fraction(view.z_values[point], zRange, logZ))) * STAGE.z
+			)
+			.project(camera);
+		hover = { point, record, sx: ((probe.x + 1) / 2) * w, sy: ((1 - probe.y) / 2) * h };
+	}
+
+	function onPointerMove(e: PointerEvent) {
+		// not while orbiting, when the point under the cursor changes every frame anyway
+		if (e.buttons) {
+			hover = null;
+			return;
+		}
+		const box = canvasHost.getBoundingClientRect();
+		pendingPick = [e.clientX - box.left, e.clientY - box.top];
+	}
+
 	function loop() {
 		raf = requestAnimationFrame(loop);
 		if (!renderer) return;
 		const moved = controls.update();
+		if (moved && hover) hover = null;
+		if (pendingPick && !moved) {
+			pick(...pendingPick);
+			pendingPick = null;
+		}
 		if (!dirty && !moved) return;
 		dirty = false;
 		renderer.render(scene, camera);
@@ -369,6 +464,7 @@
 		geometry.dispose();
 		frame?.geometry.dispose();
 		colorTexture.dispose();
+		pickTarget.dispose();
 		for (const m of materials) m.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
@@ -414,7 +510,23 @@
 	aria-label="{view.title}. {recordCount} records. R resets the view, T looks from the top, F from the front, X and L switch the abscissa and the level between linear and log."
 	onkeydown={onKey}
 >
-	<div class="canvas" data-testid="waterfall-canvas" bind:this={canvasHost}></div>
+	<!-- svelte-ignore a11y_no_static_element_interactions (hovering only reads; the keyboard has the view's own keys) -->
+	<div
+		class="canvas"
+		data-testid="waterfall-canvas"
+		bind:this={canvasHost}
+		onpointermove={onPointerMove}
+		onpointerleave={() => ((pendingPick = null), (hover = null))}
+	></div>
+
+	{#if hover}
+		<div class="marker" style:transform="translate({hover.sx}px, {hover.sy}px)" aria-hidden="true"></div>
+		<div class="readout num" data-testid="waterfall-readout" style:transform="translate({hover.sx + 12}px, {hover.sy - 30}px)">
+			<span class="rname">{view.records[hover.record]}</span>
+			<span>{formatNumber(view.x_values[hover.point], 5)}{view.x.unit ? ` ${view.x.unit}` : ''}</span>
+			<span>{formatNumber(view.z_values[hover.point], 4)}{view.z.unit ? ` ${view.z.unit}` : ''}</span>
+		</div>
+	{/if}
 
 	<div class="overlay" bind:this={overlay} aria-hidden="true">
 		{#each xTicks as t (t)}
@@ -453,6 +565,21 @@
 				<button role="radio" data-testid="waterfall-z-linear" aria-checked={!logZ} class:on={!logZ} onclick={() => (logZ = false)} title="Linear (L)">Lin</button>
 				<button role="radio" data-testid="waterfall-z-log" aria-checked={logZ} class:on={logZ} onclick={() => (logZ = true)} title="Log (L)">Log</button>
 			</div>
+			{#if view.quantities && onparams}
+				<div class="seg" role="radiogroup" aria-label="Quantity">
+					<span class="lbl">Quantity</span>
+					{#each view.quantities as q (q.value)}
+						<button
+							role="radio"
+							data-testid="waterfall-quantity"
+							aria-checked={q.value === view.quantity}
+							class:on={q.value === view.quantity}
+							onclick={() => q.value !== view.quantity && onparams({ quantity: q.value, page: 1 })}
+							title="{formatCount(q.records)} records">{q.label}</button
+						>
+					{/each}
+				</div>
+			{/if}
 		</div>
 		{#if view.note}<div class="note">{view.note}</div>{/if}
 	</div>
@@ -642,6 +769,38 @@
 		gap: var(--sp-3);
 		font-size: var(--text-2xs);
 		color: var(--text-3);
+	}
+
+	.marker {
+		position: absolute;
+		top: -4px;
+		left: -4px;
+		width: 8px;
+		height: 8px;
+		border: 1.5px solid var(--text-1);
+		border-radius: 50%;
+		pointer-events: none;
+	}
+
+	.readout {
+		position: absolute;
+		top: 0;
+		left: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		padding: 4px 6px;
+		font-size: var(--text-2xs);
+		color: var(--text-1);
+		white-space: nowrap;
+		background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+		border: 1px solid var(--line-2);
+		border-radius: 4px;
+		pointer-events: none;
+	}
+
+	.rname {
+		color: var(--text-2);
 	}
 
 	.failure {

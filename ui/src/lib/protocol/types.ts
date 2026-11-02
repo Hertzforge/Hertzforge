@@ -202,6 +202,10 @@ export interface WaterfallView {
 	z_range?: [number, number];
 	/** Which page of how many, of how many records. */
 	page?: { number: number; count: number; records: number };
+	/** The quantities the object holds, two or more; choosing one reruns with `quantity` set. */
+	quantities?: { value: string; label: string; records: number }[];
+	/** The value of the quantity drawn. */
+	quantity?: string;
 	note?: string;
 }
 
@@ -246,6 +250,8 @@ export interface ParamDescriptor {
 	step?: number;
 	options?: ParamOption[];
 	options_from?: 'channels';
+	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
+	in_view?: boolean;
 }
 
 export interface OperationDescriptor {

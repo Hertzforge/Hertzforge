@@ -3,6 +3,7 @@
 	 * The one way the shell draws a view: dispatch on `view.view`. No workspace draws its own
 	 * charts. Unknown kinds render a short note instead of failing the page.
 	 */
+	import type { ParamValues } from '$lib/forms/params';
 	import type { View } from '$lib/protocol/types';
 	import MatrixPane from './MatrixPane.svelte';
 	import ReadingPane from './ReadingPane.svelte';
@@ -18,9 +19,11 @@
 		minHeight?: number;
 		/** Selected mode for shape3d views. */
 		mode?: number;
+		/** Run the view's operation again with these params (an `in_view` choice made in the view). */
+		onparams?: (patch: ParamValues) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0) }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -46,7 +49,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: WaterfallPane }}
 		{#key view}
-			<WaterfallPane {view} />
+			<WaterfallPane {view} {onparams} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>

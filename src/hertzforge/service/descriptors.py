@@ -52,6 +52,9 @@ class Param:
     options: Sequence[Option] = ()
     #: an enum whose options are the opened dataset's channels
     options_from: Literal['channels'] | None = None
+    #: set from the result's view rather than the panel, which does not
+    #: show it (a waterfall's quantity, chosen among the groups it drew)
+    in_view: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The param as the schema's descriptor writes it. Fields left unset
@@ -71,6 +74,8 @@ class Param:
             out['options'] = [option.to_json() for option in self.options]
         if self.options_from is not None:
             out['options_from'] = self.options_from
+        if self.in_view:
+            out['in_view'] = True
         return out
 
     def check(self, value: Any, choices: Sequence[Any] | None) -> Any:

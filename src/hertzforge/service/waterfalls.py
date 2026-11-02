@@ -11,12 +11,34 @@ from __future__ import annotations
 from typing import Any
 
 from . import views as v
+from .descriptors import Param
 from .protocol import refused
 
 #: the components a complex frequency object can be drawn as, and their
 #: labels; real data ignores the choice
 COMPONENTS = {'magnitude': 'Magnitude', 'real': 'Real part',
               'imag': 'Imaginary part', 'phase': 'Phase'}
+#: the waterfall's quantity, chosen in the view among the groups it lists;
+#: empty is the largest group
+QUANTITY = Param('quantity', 'Quantity', 'string', default='', in_view=True)
+
+
+def quantity_key(key: tuple[str, str | None]) -> str:
+    """A (dimension, hint) group as the `quantity` param names it."""
+    dimension, hint = key
+    return f'{dimension}|{hint or ""}'
+
+
+def _group(data: Any, value: str) -> tuple[str, str | None] | None:
+    """The group `value` names among `data`'s, or None for the largest:
+    an empty value, or one the object does not have, which is a choice
+    kept from another object and not a statement about this one."""
+    from hertzforge.drawing.viz.waterfall import waterfall_groups
+
+    for key, _records in waterfall_groups(data):
+        if quantity_key(key) == value:
+            return key
+    return None
 
 
 def unit_text(dimension: str) -> str | None:
@@ -33,27 +55,32 @@ def unit_text(dimension: str) -> str | None:
 
 
 def waterfall_view(title: str, data: Any, page: int = 1,
-                   component: str = 'magnitude') -> dict[str, Any]:
+                   component: str = 'magnitude',
+                   quantity: str = '') -> dict[str, Any]:
     """`data`'s records at their own depths, as one `waterfall` view.
 
     `page` is 1-based and lands on the last page when past it. A time
     history is peak-decimated to the point budget, a PSD keeps every tread
     of its steps, and a specification fills in along its power law.
     `component` applies to complex frequency data: a signed part or the
-    phase reads on a linear axis, as in VD. Records of another quantity
-    than the largest group are left out with a note. An object with no
-    records is refused."""
+    phase reads on a linear axis, as in VD. One quantity is drawn, the
+    group `quantity` names (`quantity_key`) or else the largest; when the
+    object has more than one, the view lists them as `quantities` for the
+    shell to offer, as Visual Dynamics' quantity box does. An object with
+    no records is refused."""
     import hertzforge as hz
     from hertzforge.core.data import TimeHistory
     from hertzforge.drawing.viz.waterfall import (
         drawn_span,
         quantity_label,
         waterfall_arrays,
+        waterfall_groups,
     )
     from hertzforge.names import display_name
 
     arrays = waterfall_arrays(data, unit_system=hz.SI, exponents=False,
-                              component=component, page=int(page) - 1)
+                              component=component, page=int(page) - 1,
+                              quantity=_group(data, quantity))
     if not arrays['drawn']:
         raise refused(f'{title} has no records to draw.')
     first = arrays['drawn'][0]
@@ -80,7 +107,11 @@ def waterfall_view(title: str, data: Any, page: int = 1,
         else limits,
         page={'number': arrays['page'] + 1, 'count': pages,
               'records': arrays['of_quantity']} if pages > 1 else None)
-    if arrays['left_out']:
-        view['note'] = (f'{len(arrays["left_out"])} records of another '
-                        'quantity are not drawn on this stage')
+    groups = waterfall_groups(data)
+    if len(groups) > 1:
+        view['quantities'] = [
+            {'value': quantity_key(key), 'label': quantity_label(key).capitalize(),
+             'records': len(records)} for key, records in groups]
+        view['quantity'] = quantity_key((data.ordinate_dim[first],
+                                         data.dimension_hint[first]))
     return view

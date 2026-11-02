@@ -125,3 +125,27 @@ export function namedRecords(count: number, limit = LABEL_LIMIT): number[] {
 	if (out[out.length - 1] !== count - 1) out.push(count - 1);
 	return out;
 }
+
+/**
+ * The point under the cursor from a GPU pick: `pixels` is a `size` x `size` RGBA8 read back
+ * around the cursor, each covered pixel holding its point's index plus one in little-endian
+ * bytes and an empty one zero. Returns the point nearest the center, or null when none is.
+ */
+export function pickedPoint(pixels: Uint8Array, size: number): number | null {
+	const c = (size - 1) / 2;
+	let best: number | null = null;
+	let bestDistance = Infinity;
+	for (let j = 0; j < size; j++) {
+		for (let i = 0; i < size; i++) {
+			const k = 4 * (j * size + i);
+			const id = pixels[k] + pixels[k + 1] * 256 + pixels[k + 2] * 65536 + pixels[k + 3] * 16777216;
+			if (!id) continue;
+			const distance = (i - c) ** 2 + (j - c) ** 2;
+			if (distance < bestDistance) {
+				bestDistance = distance;
+				best = id - 1;
+			}
+		}
+	}
+	return best;
+}

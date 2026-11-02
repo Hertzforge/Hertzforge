@@ -48,6 +48,11 @@ export interface AnalyzeResult {
 	paramSummary: string;
 	views: View[];
 	at: Date;
+	/** What it ran with, so a choice made in its view can run it again. */
+	params: ParamValues;
+	handle: string;
+	/** A rerun from the view is under way. */
+	busy?: boolean;
 }
 
 class AnalyzeState {
@@ -152,7 +157,9 @@ class AnalyzeState {
 					datasetTitle: opened.title,
 					paramSummary: summarize(op.params, params, opened.channels),
 					views: res.views,
-					at: new Date()
+					at: new Date(),
+					params,
+					handle: opened.handle
 				},
 				...this.results
 			];
@@ -161,6 +168,27 @@ class AnalyzeState {
 			this.runError = message(err);
 		} finally {
 			this.running = false;
+		}
+	}
+
+	/**
+	 * Run a result's operation again with `patch` over the params it ran with, as a choice made in
+	 * its view asks (an `in_view` param), and show the new views in the same card.
+	 */
+	async rerun(id: number, patch: ParamValues): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		const op = this.app.catalog?.operations.find((o) => o.id === result?.opId);
+		if (!result || !op || result.busy) return;
+		const params = { ...result.params, ...patch };
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, handle: result.handle, params }, { timeoutMs: 30_000 });
+			replace({ views: res.views, params, paramSummary: summarize(op.params, params, this.opened?.channels ?? []), busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
 		}
 	}
 
@@ -175,6 +203,7 @@ class AnalyzeState {
 
 function summarize(params: ParamDescriptor[], values: ParamValues, channels: { value: string | number; label: string }[]): string {
 	return params
+		.filter((p) => !p.in_view)
 		.map((p) => {
 			const v = values[p.name];
 			let text: string;
