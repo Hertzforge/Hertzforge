@@ -260,7 +260,10 @@ def _paired(run: ModalRun, matrix: dict, rows: Any, row_modes: Any,
 
 def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     """`modal_run.motion`: one of the survey's time captures played back on
-    the survey geometry, as a `shape3d` view with no modes and a `motion`.
+    the survey geometry, as a `shape3d` view with no modes and a `motion`,
+    and the records it plays as a time plot under it. The two share the
+    `link` `time`, so the plot marks the sample the geometry shows and
+    dragging the mark moves playback there.
     The records follow Visual Dynamics' animation rules
     (`deform.quantity_records`, `deform.animation_records`): one quantity,
     the one most records measure, and one record per DOF, the first; the
@@ -296,7 +299,8 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     drawn = np.full(geometry.num_nodes, -1, dtype=np.int64)
     drawn[drawn_rows] = np.arange(drawn_rows.size)
     shown = drawn[rows] >= 0
-    values = np.asarray(data.ordinate)[records][used][shown].real
+    played = np.asarray(records)[used][shown]
+    values = np.asarray(data.ordinate)[played].real
     if not values.shape[0]:
         raise refused(f'none of {run.title}\'s {quantity} records lands on '
                       'its geometry')
@@ -312,10 +316,11 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     dimension = data.known_dim(records[0])
     capture = (f'Capture {number} of {len(captures)}' if captures[0] is not None
                else 'Time History')
-    extra: dict[str, Any] = {'motion': {
+    value_unit = unit_text(dimension) or ''
+    extra: dict[str, Any] = {'link': 'time', 'motion': {
         'label': 'Time', 'unit': 's', 'start': float(abscissa[0]),
         'step': float(abscissa[1] - abscissa[0]) if abscissa.size > 1 else 0.0,
-        'quantity': quantity.capitalize(), 'value_unit': unit_text(dimension) or '',
+        'quantity': quantity.capitalize(), 'value_unit': value_unit,
         'node': drawn[rows[shown]].astype(np.uint32),
         'direction': np.asarray(directions, dtype=np.float32)[shown],
         'values': np.ascontiguousarray(values, np.float32),
@@ -323,10 +328,16 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
                                values).peak_magnitude}}
     if notes:
         extra['note'] = '; '.join(notes)
-    return [v.shape3d(f'{run.title}: {capture}, {quantity.capitalize()}',
-                      'm' if geometry.units_defined else 'undefined',
+    title = f'{run.title}: {capture}, {quantity.capitalize()}'
+    plot = v.spectrum(
+        title, v.axis('Time', 's', 'linear'),
+        v.axis(quantity.capitalize(), value_unit or None, 'linear'),
+        [v.series(data.record_label(i), 'measured', abscissa, values[d])
+         for d, i in enumerate(played)], link='time')
+    return [v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [],
-                      triangles=triangles, lines=lines, **extra)]
+                      triangles=triangles, lines=lines, **extra),
+            plot]
 
 
 OPERATIONS = (
@@ -359,6 +370,6 @@ OPERATIONS = (
         id='modal_run.motion', title='Time Animation', workspace='analyze',
         accepts='modal_run',
         summary='One time capture of the survey played back on the survey '
-                'geometry, one record per DOF.',
-        params=(CAPTURE,), outputs=('shape3d',), run=motion),
+                'geometry, one record per DOF, with its time plot.',
+        params=(CAPTURE,), outputs=('shape3d', 'spectrum'), run=motion),
 )

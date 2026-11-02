@@ -489,6 +489,7 @@ def main() -> None:
         'result': {'views': [
             {'view': 'shape3d', 'title': 'Capture 1 of 2, Acceleration', 'unit': 'm',
              'nodes': {'$array': 'n'}, 'lines': {'$array': 'l'}, 'modes': [],
+             'link': 'time',
              'motion': {'label': 'Time', 'unit': 's', 'start': 0.0, 'step': 0.25,
                         'quantity': 'Acceleration', 'value_unit': 'm/s²',
                         'node': {'$array': 'd'}, 'direction': {'$array': 'u'},

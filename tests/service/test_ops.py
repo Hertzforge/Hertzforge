@@ -360,7 +360,7 @@ def test_an_empty_band_is_refused_a_mac(modal_run):
 def test_a_capture_plays_back_its_accelerations(modal_run, validate):
     """Capture 3: the eleven accelerometers, one record each, their samples as
     the file has them; the two force gauges are left out and said so."""
-    (view,) = run('modal_run.motion', modal_run, capture=3)
+    view, _ = run('modal_run.motion', modal_run, capture=3)
     wire_views([view], validate)
     assert view['modes'] == [] and view['title'].endswith('Capture 3 of 20, Acceleration')
     assert view['note'] == '2 records of another quantity are not shown'
@@ -379,7 +379,7 @@ def test_a_capture_plays_back_its_accelerations(modal_run, validate):
 def test_each_dof_moves_the_node_at_its_own_position(modal_run):
     """The drawn node a DOF moves is the geometry node its name gives."""
     from hertzforge.deform import dof_directions
-    (view,) = run('modal_run.motion', modal_run)
+    view, _ = run('modal_run.motion', modal_run)
     data = modal_run.project['Time History']
     geometry = modal_run.project['Geometry']
     dofs = [data.response_dof[i] for i in range(data.num_records)
@@ -390,7 +390,7 @@ def test_each_dof_moves_the_node_at_its_own_position(modal_run):
 
 
 def test_the_motion_peak_is_the_furthest_a_node_gets(modal_run):
-    (view,) = run('modal_run.motion', modal_run)
+    view, _ = run('modal_run.motion', modal_run)
     motion = view['motion']
     nodes = len(view['nodes'])
     furthest = 0.0
@@ -399,6 +399,25 @@ def test_the_motion_peak_is_the_furthest_a_node_gets(modal_run):
         np.add.at(offsets, motion['node'], motion['direction'] * motion['values'][:, k:k + 1])
         furthest = max(furthest, np.linalg.norm(offsets, axis=1).max())
     assert motion['peak'] == pytest.approx(furthest, rel=1e-5)
+
+
+def test_the_time_plot_draws_the_records_the_geometry_plays(modal_run, validate):
+    """The plot under the geometry has each played record against time,
+    named as the file names it, and shares the geometry's link."""
+    shape, plot = run('modal_run.motion', modal_run, capture=3)
+    wire_views([shape, plot], validate)
+    assert plot['view'] == 'spectrum' and plot['link'] == shape['link'] == 'time'
+    assert plot['title'] == shape['title']
+    assert (plot['x']['label'], plot['x']['unit'], plot['x']['scale']) == ('Time', 's', 'linear')
+    assert (plot['y']['label'], plot['y']['unit']) == ('Acceleration', 'm/s²')
+    motion = shape['motion']
+    data = modal_run.project['Time History']
+    picked = [i for i in range(data.num_records)
+              if data.block[i] == 'avg 3' and data.known_dim(i) == 'acceleration']
+    assert [line['name'] for line in plot['series']] == [data.record_label(i) for i in picked]
+    for d, line in enumerate(plot['series']):
+        np.testing.assert_allclose(line['y'], motion['values'][d], rtol=1e-6)
+        np.testing.assert_allclose(line['x'], motion['start'] + motion['step'] * np.arange(line['x'].size))
 
 
 def test_a_capture_the_survey_does_not_have_is_refused(modal_run):

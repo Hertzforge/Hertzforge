@@ -146,6 +146,7 @@
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
+        "link": {"type": "string"},
         "motion": {
           "type": "object",
           "required": ["label", "unit", "start", "step", "quantity", "value_unit", "node", "direction", "values", "peak"],

@@ -149,6 +149,10 @@ DOF stay where they are. Several DOFs may move one node (X, Y and Z, say). The s
 record through in about 10 s at normal speed, from an eighth to eight times that, as Visual
 Dynamics does, and colors each node by how far it is from rest at that sample.
 
+`link` (optional) ties playback to a `spectrum` of the same result with the same `link`: the
+spectrum marks the time the mesh shows with a line, and dragging that line moves playback there.
+The tie holds within one result; the hover cursor `link` names is shared as for any spectrum.
+
 **`waterfall`** (many records of one quantity, each at its own depth)
 
 ```

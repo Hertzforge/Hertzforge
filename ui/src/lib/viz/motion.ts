@@ -37,3 +37,9 @@ export function writeFrame(motion: Motion, k: number, moved: Uint32Array, out: F
 export function advance(samples: number, dt: number, speed: number): number {
 	return (samples / SECONDS_PER_RECORD) * dt * speed;
 }
+
+/** The sample nearest time `t`, held to the record. */
+export function sampleAt(motion: Motion, t: number): number {
+	const k = motion.step > 0 ? Math.round((t - motion.start) / motion.step) : 0;
+	return Math.min(Math.max(0, k), sampleCount(motion) - 1);
+}
