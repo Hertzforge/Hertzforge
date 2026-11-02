@@ -5208,7 +5208,9 @@ class Project(dict):
             The FRF set to fit.
         bounds : tuple of float, optional
             (low, high) frequency limits to fit within, in Hz. Defaults
-            to the whole band.
+            to the whole band. Bounds that hold none of the FRF set's
+            lines raise ValueError, rather than fitting the whole band
+            as the screen does with a view scrolled off the data.
         limit : int, default 30
             The most modes to accept.
         name : str, optional
@@ -5248,6 +5250,20 @@ class Project(dict):
         from .core.modal_fit import ModalFitSession
 
         source = self.name_of(source)
+        if at is None and bounds is not None:
+            # The session reads its range as the plot's view, and a view
+            # scrolled off the data, or narrower than a line, searches the
+            # whole range rather than nothing, which suits the screen. A
+            # script's bounds are a statement of where the modes are, and
+            # bounds past the data came back fitted over all of it
+            # (2026-11-02, found in Hertzforge's analysis service).
+            low, high = sorted(float(edge) for edge in bounds)
+            lines = np.asarray(self[source].abscissa, dtype=float)
+            if not np.any((lines >= low) & (lines <= high)):
+                raise ValueError(
+                    f'the bounds {low:g} to {high:g} Hz hold none of '
+                    f'{source}\'s lines, which span {lines[0]:g} to '
+                    f'{lines[-1]:g} Hz at {np.median(np.diff(lines)):g} Hz')
         if isinstance(coherence, str):
             coherence = self[self.name_of(coherence)]
         session = ModalFitSession(self[source], records, coherence)
