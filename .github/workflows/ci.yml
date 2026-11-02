@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its test tools
-        run: pip install -e . pytest pytest-xdist jsonschema ruff
+        run: pip install -e . pytest pytest-xdist pytest-cov jsonschema ruff
       # The ESCDF reference implementation, which io/escdf.py and
       # io/escdf_objects.py are tested against both ways. It is not on PyPI,
       # so it is installed here rather than declared in pyproject, and its
@@ -55,8 +55,29 @@ jobs:
       - name: Fetch the plate test data at the release the core came from
         run: bash scripts/fetch_testdata.sh
       - name: Test
-        # the analysis service's tests run in the `analysis` job, on every platform
-        run: python -m pytest tests -q -n auto --durations=20 --ignore=tests/service
+        # The analysis service's tests run in the `analysis` job, on every
+        # platform. On 3.14 they run here as well, a few seconds, so that the
+        # coverage measured here counts the service too. The timing tests
+        # run alone in the `analysis` job.
+        env:
+          SCOPE: ${{ matrix.python-version == '3.14'
+                     && '--cov=hertzforge --cov-report=' || '--ignore=tests/service' }}
+        run: python -m pytest tests -q -n auto --durations=20 -m "not slow and not timing" $SCOPE
+      - name: Coverage
+        if: matrix.python-version == '3.14'
+        run: |
+          {
+            echo "## Coverage: $(python -m coverage report --format=total)%"
+            echo
+            echo "Statements the suite reaches, on Python 3.14, without the slow"
+            echo "demonstration models (demo/ reads low for that reason)."
+            echo
+            python -m coverage report --format=markdown --sort=cover
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The floor Visual Dynamics kept: a change that adds code without
+          # tests fails the way a license finding does. Measured at 95% on
+          # 2026-11-01; raise it when the number rises, never lower it to pass.
+          python -m coverage report --fail-under=90 > /dev/null
 
   # The analysis service (hertzforge.service) on every platform a desktop
   # build targets, in the package's own environment.
