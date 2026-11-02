@@ -127,6 +127,9 @@ complex mode, or an operating deflection shape read from FRFs at one line) carri
 a complex one shows its traveling part. `label`, when present, names the shape in place of
 "Mode <index>", for a shape that is not a mode.
 
+`overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
+`matrix` view that `selects` this one (below).
+
 A `shape3d` may instead play measured data back on the mesh: `modes` is empty and `motion` says
 how each measured DOF moves, sample by sample.
 
@@ -193,6 +196,14 @@ The shell draws one cell per value, colored on the sequential colormap over `val
 numeric legend, the first row at the top and the first column at the left, and writes each value
 in its cell when the cells are large enough to hold it. Hovering a cell reads its row, column and
 value. A pinned range makes two matrices of the same quantity read alike.
+
+A matrix that compares two sets of shapes (a MAC) may come with the `shape3d` view of those shapes
+in the same result, and then says `"selects":"shape3d"`. That view's `modes` are the rows' shapes
+and its `overlays` the columns', and `overlay_phase` (f32 [R,C]) is the angle that aligns column
+c's shape with row r's, since a real mode is defined only up to its sign and a complex one up to a
+rotation. Clicking cell (r, c) shows mode r with overlay c drawn over it, rotated by that angle and
+in one flat color, scaled to the same amplitude; the playback and the camera carry on through a
+click. Visual Dynamics draws a MAC pair the same way.
 
 ## Operations: Declarative Panels
 

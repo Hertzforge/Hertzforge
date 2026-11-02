@@ -6,7 +6,9 @@
 	 * frame costs two uniform updates however large the mesh is. A real shape is a standing wave; a
 	 * complex one (a complex mode, an operating shape) shows its traveling part. Measured motion
 	 * (`view.motion`, with no modes) is played back sample by sample instead: a frame writes the
-	 * moved nodes' offsets and colors, and nothing else. Normals come from screen-space derivatives (flat
+	 * moved nodes' offsets and colors, and nothing else. A view with `overlays` draws one of them
+	 * over the mode in flat orange, aligned by `overlay_phase` and scaled to the mode's amplitude,
+	 * through the same shader and uniforms, so the two move together; this is a MAC pair. Normals come from screen-space derivatives (flat
 	 * shading), which keeps lighting correct on the deformed surface. Color is the mode shape
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
@@ -36,16 +38,21 @@
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
 	import { advance, movedNodes, NORMAL_SPEED, sampleCount, SPEEDS, writeFrame } from './motion';
-	import { nodeTravel } from './shape';
+	import { alignedShape, nodeTravel } from './shape';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
 		view: Shape3DView;
 		/** Index into `view.modes`. */
 		mode?: number;
+		/** Index into `view.overlays`, drawn over the mode; none when null. */
+		overlay?: number | null;
 	}
 
-	let { view, mode = $bindable(0) }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null }: Props = $props();
+
+	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
+	const OVERLAY_COLOR = 0xe69f00;
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
@@ -67,6 +74,7 @@
 	const triCount = $derived((view.triangles?.length ?? 0) / 3);
 	const current = $derived(view.modes[Math.min(Math.max(0, mode), view.modes.length - 1)]);
 	const motion = $derived(view.motion);
+	const shown = $derived(overlay !== null && view.overlays ? view.overlays[overlay] : undefined);
 	const samples = $derived(motion ? sampleCount(motion) : 0);
 	let speedIndex = $state(NORMAL_SPEED);
 	/** The sample shown, for the scrubber and the time readout. */
@@ -108,6 +116,12 @@
 	let outline: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
+	let overlayGeometry: BufferGeometry | null = null;
+	let overlayLineGeometry: BufferGeometry | null = null;
+	let overlayAttr: BufferAttribute;
+	let overlayImagAttr: BufferAttribute;
+	let overlaySurface: Mesh | null = null;
+	let overlayOutline: LineSegments | null = null;
 	const materials: Material[] = [];
 	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
 	let maxMag = 1;
@@ -171,6 +185,25 @@
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		dirty = true;
+	}
+
+	/**
+	 * Load the chosen overlay, rotated by its pair's phase and scaled so its largest travel is the
+	 * mode's, or hide it when none is chosen.
+	 */
+	function loadOverlay() {
+		if (!renderer || !overlaySurface) return;
+		const o = shown;
+		const visible = !!o && !!current;
+		overlaySurface.visible = visible;
+		if (overlayOutline) overlayOutline.visible = visible;
+		dirty = true;
+		if (!o || !current) return;
+		const columns = view.overlays!.length;
+		const phi = view.overlay_phase ? view.overlay_phase[Math.min(mode, view.modes.length - 1) * columns + overlay!] : 0;
+		alignedShape(o.shape, o.shape_imag, phi, maxMag, overlayAttr.array as Float32Array, overlayImagAttr.array as Float32Array);
+		overlayAttr.needsUpdate = true;
+		overlayImagAttr.needsUpdate = true;
 	}
 
 	/** Ready the buffers for measured motion: every node at rest and colored as such. */
@@ -293,6 +326,36 @@
 		ghostSurface.renderOrder = 2;
 		scene.add(ghostSurface);
 
+		if (view.overlays?.length) {
+			// the same nodes and faces, moved by the overlay's own shape attributes
+			overlayAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
+			overlayImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
+			overlayGeometry = new BufferGeometry();
+			overlayGeometry.setAttribute('position', position);
+			overlayGeometry.setAttribute('shape', overlayAttr);
+			overlayGeometry.setAttribute('shapeImag', overlayImagAttr);
+			if (view.triangles) overlayGeometry.setIndex(new BufferAttribute(view.triangles, 1));
+			overlaySurface = new Mesh(
+				overlayGeometry,
+				displaced(new MeshBasicMaterial({ color: OVERLAY_COLOR, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }))
+			);
+			overlaySurface.frustumCulled = false;
+			overlaySurface.renderOrder = 3;
+			overlaySurface.visible = false;
+			scene.add(overlaySurface);
+			if (view.lines && view.lines.length) {
+				overlayLineGeometry = new BufferGeometry();
+				overlayLineGeometry.setAttribute('position', position);
+				overlayLineGeometry.setAttribute('shape', overlayAttr);
+				overlayLineGeometry.setAttribute('shapeImag', overlayImagAttr);
+				overlayLineGeometry.setIndex(new BufferAttribute(view.lines, 1));
+				overlayOutline = new LineSegments(overlayLineGeometry, displaced(new LineBasicMaterial({ color: OVERLAY_COLOR })));
+				overlayOutline.frustumCulled = false;
+				overlayOutline.visible = false;
+				scene.add(overlayOutline);
+			}
+		}
+
 		if (view.lines && view.lines.length) {
 			lineGeometry = new BufferGeometry();
 			lineGeometry.setAttribute('position', position);
@@ -327,6 +390,7 @@
 		resetView();
 		applyTheme();
 		loadMode();
+		loadOverlay();
 		loadMotion();
 
 		resizeObs = new ResizeObserver(resize);
@@ -421,10 +485,12 @@
 
 	onMount(init);
 
-	// Mode or view changes: reload the shape buffer.
+	// Mode or view changes: reload the shape buffer, and the overlay scaled to it.
 	$effect(() => {
 		void current;
 		loadMode();
+		void shown;
+		loadOverlay();
 	});
 
 	$effect(() => {
@@ -452,6 +518,8 @@
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
+		overlayGeometry?.dispose();
+		overlayLineGeometry?.dispose();
 		for (const m of materials) m.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
@@ -563,8 +631,8 @@
 
 		{#if current}
 			<div class="modetag">
-				{#if view.modes.length > 1}
-					<!-- a view shown outside a workspace with a mode table steps here -->
+				{#if view.modes.length > 1 && !view.overlays}
+					<!-- a view shown outside a workspace with a mode table steps here; a MAC pair is chosen in its matrix -->
 					<span class="stepper">
 						<button class="btn icon sm" data-testid="shape3d-previous" disabled={mode <= 0} onclick={() => step(-1)} title="Previous mode (Up)" aria-label="Previous mode">
 							<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -577,6 +645,12 @@
 				<span class="m">{current.label ?? `Mode ${current.index}`}</span>
 				<span class="num">{formatFixed(current.frequency_hz, 4)} Hz</span>
 				{#if current.damping != null}<span class="num dim">{formatFixed(current.damping * 100, 3)} % damping</span>{/if}
+				{#if shown}
+					<span class="ov" data-testid="shape3d-overlay"
+						><span class="swatch" aria-hidden="true"></span>{shown.label ?? `Mode ${shown.index}`}
+						<span class="num">{formatFixed(shown.frequency_hz, 4)} Hz</span></span
+					>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -774,6 +848,21 @@
 		display: inline-flex;
 		gap: 2px;
 		pointer-events: auto;
+	}
+
+	.ov {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 6px;
+		color: var(--text-1);
+	}
+
+	.swatch {
+		align-self: center;
+		width: 10px;
+		height: 10px;
+		background: #e69f00;
+		border-radius: 2px;
 	}
 
 	.modetag .m {

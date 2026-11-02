@@ -270,7 +270,7 @@ def test_the_mac_against_the_model_pairs_each_mode_with_its_own(modal_run, valid
     mode's MAC with the model mode at its frequency is near 1 and the rest
     near 0. The repeated pair at 1142 Hz is any rotation within its plane, so
     the fit's pair and the model's agree less, and are not held to 0.99."""
-    (view,) = run('modal_run.mac', modal_run)
+    view, _shapes = run('modal_run.mac', modal_run)
     wire_views([view], validate)
     values = view['values']
     assert values.shape == (5, 5) and values.dtype == np.float32
@@ -289,7 +289,7 @@ def test_the_mac_against_the_model_pairs_each_mode_with_its_own(modal_run, valid
 def test_the_mac_against_the_model_is_the_core_cross_mac(modal_run):
     """The service only picks the columns: its values are `cross_mac`'s."""
     from hertzforge.core.shapes import cross_mac
-    (view,) = run('modal_run.mac', modal_run)
+    view, _shapes = run('modal_run.mac', modal_run)
     shapes = modal_run.fits[(300.0, 1300.0, 5)]
     model = modal_run.analysis_model().shapes
     frequency = np.asarray(model.frequency)
@@ -298,7 +298,7 @@ def test_the_mac_against_the_model_is_the_core_cross_mac(modal_run):
 
 
 def test_the_auto_mac_has_a_unit_diagonal(modal_run, validate):
-    (view,) = run('modal_run.mac', modal_run, against='self')
+    view, _shapes = run('modal_run.mac', modal_run, against='self')
     wire_views([view], validate)
     assert view['rows'] == view['columns']
     np.testing.assert_allclose(np.diag(view['values']), 1.0, rtol=1e-6)
@@ -309,8 +309,45 @@ def test_a_survey_with_no_model_is_refused_a_model_mac(modal_run):
     bare = dataclasses.replace(modal_run, model=None, _opened_model=[])
     with pytest.raises(ProtocolError, match='has no FE model to compare against'):
         run('modal_run.mac', bare)
-    (view,) = run('modal_run.mac', bare, against='self')
+    view, _shapes = run('modal_run.mac', bare, against='self')
     assert view['view'] == 'matrix'
+
+
+def test_a_survey_with_no_geometry_gets_the_matrix_alone(modal_run):
+    from hertzforge.service.ops_modal_run import fitted
+    # the fit made on the whole survey, so the copy without a geometry need not fit
+    shapes = fitted(modal_run, 300.0, 1300.0, 5)
+    project = {name: obj for name, obj in modal_run.project.items() if name != 'Geometry'}
+    bare = dataclasses.replace(modal_run, project=project, fits={(300.0, 1300.0, 5): shapes})
+    (view,) = run('modal_run.mac', bare, against='self')
+    assert view['view'] == 'matrix' and 'selects' not in view
+
+
+def test_the_mac_selects_its_pairs_on_the_survey_nodes(modal_run, validate):
+    """Rows are the identified modes and overlays the model's, each on the
+    survey nodes, with the MAC's own column choice."""
+    matrix, shapes = run('modal_run.mac', modal_run)
+    wire_views([matrix, shapes], validate)
+    assert matrix['selects'] == 'shape3d' and shapes['view'] == 'shape3d'
+    assert [m['frequency_hz'] for m in shapes['modes']] == pytest.approx(
+        [float(t.split()[0]) for t in matrix['rows']['ticks']], abs=0.05)
+    assert [m['frequency_hz'] for m in shapes['overlays']] == pytest.approx(
+        [float(t.split()[0]) for t in matrix['columns']['ticks']], abs=0.05)
+    assert all(m['damping'] is None for m in shapes['overlays'])
+    assert shapes['overlays'][0]['label'] == f'FE model mode {shapes["overlays"][0]["index"]}'
+    assert shapes['overlay_phase'].shape == (5, 5)
+    assert all(len(m['shape']) == len(shapes['nodes']) for m in shapes['overlays'])
+
+
+def test_an_aligned_pair_points_the_same_way(modal_run):
+    """Rotated by its phase, each overlay's inner product with its row mode
+    is real and positive, which is what aligning means."""
+    _matrix, shapes = run('modal_run.mac', modal_run)
+    for r, mode in enumerate(shapes['modes']):
+        for c, overlay in enumerate(shapes['overlays']):
+            rotated = overlay['shape'] * np.exp(1j * shapes['overlay_phase'][r, c])
+            inner = np.vdot(mode['shape'].ravel(), rotated.ravel())
+            assert inner.real >= -1e-9 and abs(inner.imag) <= 1e-6 * max(abs(inner), 1e-12)
 
 
 def test_an_empty_band_is_refused_a_mac(modal_run):

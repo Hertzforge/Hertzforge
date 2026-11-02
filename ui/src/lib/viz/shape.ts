@@ -22,3 +22,31 @@ export function nodeTravel(re: Float32Array, im: Float32Array | undefined, out: 
 	}
 	return largest;
 }
+
+/**
+ * A shape rotated by `phi` and scaled so the furthest any node travels is `peak`, written into
+ * `re` and `im`: an overlay aligned with the mode it is drawn over, at the mode's amplitude.
+ */
+export function alignedShape(
+	shape: Float32Array,
+	shapeImag: Float32Array | undefined,
+	phi: number,
+	peak: number,
+	re: Float32Array,
+	im: Float32Array
+): void {
+	const c = Math.cos(phi);
+	const s = Math.sin(phi);
+	for (let i = 0; i < re.length; i++) {
+		const a = shape[i];
+		const b = shapeImag ? shapeImag[i] : 0;
+		re[i] = a * c - b * s;
+		im[i] = a * s + b * c;
+	}
+	const largest = nodeTravel(re, im, new Float32Array(re.length / 3)) || 1;
+	const k = peak / largest;
+	for (let i = 0; i < re.length; i++) {
+		re[i] *= k;
+		im[i] *= k;
+	}
+}

@@ -21,9 +21,14 @@
 		mode?: number;
 		/** Run the view's operation again with these params (an `in_view` choice made in the view). */
 		onparams?: (patch: ParamValues) => void;
+		/** A matrix that selects a shape view: the cell chosen, and how to choose another. */
+		selected?: { row: number; column: number } | null;
+		onselect?: (cell: { row: number; column: number }) => void;
+		/** Index into a shape3d view's overlays, drawn over its mode. */
+		overlay?: number | null;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -39,7 +44,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: Shape3DPane }}
 		{#key view}
-			<Shape3DPane {view} bind:mode />
+			<Shape3DPane {view} bind:mode {overlay} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>
@@ -55,7 +60,7 @@
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>
 	{/await}
 {:else if view.view === 'matrix'}
-	<MatrixPane {view} {showTitle} />
+	<MatrixPane {view} {showTitle} {selected} {onselect} />
 {:else}
 	<p class="unknown" data-testid="view-unknown">This shell has no renderer for the view "{(view as { view: string }).view}".</p>
 {/if}
