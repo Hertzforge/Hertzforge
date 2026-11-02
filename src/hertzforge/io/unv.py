@@ -211,6 +211,8 @@ def iter_datasets(
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.unv`, `.uff` or `.uf` file whose first text is a `-1`
+    line, the separator every dataset opens with."""
     if not str(path).lower().endswith(EXTENSIONS):
         return False
     head = text_head(path, 2048)
@@ -631,6 +633,16 @@ def _build_one(out, name, code, entries, factors, ordinate_unit):
 
 def load(path: str | os.PathLike, length_unit: str | None = None,
          ordinate_unit: str | None = None) -> Any:
+    """Read the supported datasets of a universal file (see the module
+    docstring).
+
+    Returns the one object the file holds, or a dict keyed 'geometry',
+    'shapes' and the function names when it holds several. With a dataset
+    164 the values are converted to SI by its factors; without one,
+    `length_unit` declares the unit of the positions and `ordinate_unit`
+    that of the functions, and without those they import unit-less. Raises
+    ValueError when no supported dataset is found.
+    """
     from ..units import si_factor
 
     # bytes, because a 58b dataset holds raw floats that are not text
@@ -742,6 +754,8 @@ def _build_geometry(nodes, tracelines, elements, scale, length_unit,
 # ---- writing --------------------------------------------------------------
 
 def handles(obj: Any) -> bool:
+    """True for a Geometry, any DataArray or a ShapeSet: everything `save`
+    writes as ASCII datasets."""
     from ..core.data import DataArray
     from ..core.geometry import Geometry
     from ..core.shapes import ShapeSet

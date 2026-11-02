@@ -790,7 +790,7 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
 
 
 def record_statistics(history: TimeHistory, record: int = 0,
-                      **options) -> TimeStatistics:
+                      **options: float | Sequence[float] | None) -> TimeStatistics:
     """Read one channel of a time history in the time domain.
 
     Over the span `core.kurtosis.analyzed_span` names (the frames the

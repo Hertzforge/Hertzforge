@@ -11,6 +11,9 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse the `hertzforge serve` arguments, set up logging to stderr and
+    serve until interrupted. Ctrl-C ends it quietly; the return value is
+    the exit status, always 0."""
     parser = argparse.ArgumentParser(
         prog='hertzforge serve',
         description='The analysis service of the structural dynamics suite '

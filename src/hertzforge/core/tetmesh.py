@@ -29,6 +29,7 @@ wall moved onto it. Four-node ones (type 111) are made on request.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -82,7 +83,7 @@ TET_CODES = {4: 111, 10: 118}
 TET10_EDGES = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
 
 
-def tet_count(geometry: Any, ids, size: float) -> int:
+def tet_count(geometry: Any, ids: Sequence[int], size: float) -> int:
     """About how many tetrahedra `tet_mesh` would make for these parts
     at `size`: their volume, read by sampling, over the cube of the
     size, times what a relaxed lattice packs into that. Within a
@@ -110,7 +111,7 @@ def tet_count(geometry: Any, ids, size: float) -> int:
     return round(TETS_PER_CELL * volume / float(size) ** 3)
 
 
-def tet_mesh(geometry: Any, ids, size: float, quadratic: bool = True,
+def tet_mesh(geometry: Any, ids: Sequence[int], size: float, quadratic: bool = True,
              progress: Any = None, keep_slivers: bool = False) -> tuple[Any, dict]:
     """The parts as tetrahedra, ready to join to a geometry
     (`mesh.join`).
@@ -216,7 +217,7 @@ def tet_mesh(geometry: Any, ids, size: float, quadratic: bool = True,
                   'shortest': shortest}
 
 
-def sharp_edges(geometry: Any, ids, size: float) -> np.ndarray:
+def sharp_edges(geometry: Any, ids: Sequence[int], size: float) -> np.ndarray:
     """The points `tet_mesh` holds fixed: the parts' corners, and points
     about `size` apart along every sharp edge of their surface.
 

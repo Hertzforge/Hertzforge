@@ -92,7 +92,8 @@ def _subtracted(driven: np.ndarray, ambient: np.ndarray) -> np.ndarray:
                         (driven - ambient) / ambient, np.nan)
 
 
-def signal_to_noise(signal: Any, floor: Any):
+def signal_to_noise(signal: Any, floor: Any,
+                    ) -> tuple[np.ndarray, np.ndarray, list[str], list[str]]:
     """The signal-to-noise ratio of a driven density over its ambient
     density, channel by channel and line by line, as a power ratio
     (take 10 log10 for decibels).

@@ -30,6 +30,7 @@ Run it directly to print the three:
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -98,7 +99,7 @@ def v_block() -> Project:
 SHAPES = {'shaft': shaft, 'wye': wye, 'v_block': v_block}
 
 
-def recipe_volume(geometry: Any, ids, samples: int = 2_000_000) -> float:
+def recipe_volume(geometry: Any, ids: Sequence[int], samples: int = 2_000_000) -> float:
     """The parts' volume by sampling their recipe, in the geometry's
     length unit cubed: random points over the parts' extent, the share
     inside. Within about 0.1 percent at two million points."""

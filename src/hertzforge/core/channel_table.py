@@ -32,6 +32,8 @@ from .validate import DIRECTIONS
 if TYPE_CHECKING:                                    # pragma: no cover
     import pandas as pd
 
+    from .transform import MatrixAt
+
 # One fixed set of columns rather than whatever a source carried: the
 # table used to be a pandas frame that took anything, and a Rattlesnake
 # import arrived with thirteen columns of controller settings behind the
@@ -1264,7 +1266,7 @@ class ChannelTable:
             held.controls.remove(number)
         self._sync_controls()
 
-    def transformation(self, environment: str, form: str = 'response'):
+    def transformation(self, environment: str, form: str = 'response') -> MatrixAt:
         """A control loop's transformation as a labeled matrix.
 
         Parameters

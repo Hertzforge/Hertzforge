@@ -155,7 +155,7 @@ def cmif_curves(data: Any, records: Sequence[int] | None = None,
     return singular.T, data.display_abscissa(us)
 
 
-def display_factor(shown, raw):
+def display_factor(shown: ArrayLike, raw: ArrayLike) -> float:
     """The factor that converts one curve's SI values to displayed ones.
 
     A unit conversion is one factor, so it is read from the first point

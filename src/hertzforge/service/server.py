@@ -107,6 +107,10 @@ SWITCH_INTERVAL = 0.001
 
 @dataclass
 class Handle:
+    """An opened dataset as one connection holds it: the name the client
+    uses in `op.run`, its catalog entry and the opened data, which is
+    shared with every other handle on the same dataset."""
+
     name: str
     entry: Entry
     data: Any
@@ -127,15 +131,21 @@ class Service:
         self._handles = itertools.count(1)
 
     def close(self) -> None:
+        """Stop the worker threads without waiting; work not yet started is
+        cancelled."""
         self.executor.shutdown(wait=False, cancel_futures=True)
 
     async def in_worker(self, call: Callable[..., Any], *args: Any) -> Any:
+        """`call(*args)` run on a worker thread, awaited without blocking the
+        event loop."""
         return await asyncio.get_running_loop().run_in_executor(
             self.executor, call, *args)
 
     # ---- methods --------------------------------------------------------------
 
     def catalog_list(self) -> dict[str, Any]:
+        """The `catalog.list` result: every operation's descriptor and every
+        dataset in the catalog."""
         return {'operations': [op.to_json() for op in self.operations.values()],
                 'datasets': [item.to_json() for item in self.catalog]}
 
@@ -155,6 +165,10 @@ class Service:
 
     async def dataset_open(self, params: Mapping[str, Any],
                            handles: dict[str, Handle]) -> dict[str, Any]:
+        """Answer `dataset.open`: open the dataset (once per process), give
+        this connection a new handle on it, and return the handle with the
+        dataset's summary and channels. A missing or unknown `id` is an
+        error response."""
         _only(params, ('id',), 'dataset.open')
         if 'id' not in params:
             raise bad_request('dataset.open needs "id", a dataset id from '
@@ -216,10 +230,16 @@ class Connection:
         self.sending: asyncio.Lock = asyncio.Lock()
 
     async def send(self, frame: str | bytes) -> None:
+        """Send one frame, under the lock, so concurrent responses never
+        interleave on the socket."""
         async with self.sending:
             await self.socket.send(frame)
 
     async def serve(self) -> None:
+        """Send `hello`, then answer each request in its own task until the
+        client goes. A frame that will not decode closes the connection with
+        1007, a message that is not a request with an integer id with 1008;
+        requests still running when it ends are cancelled."""
         await self.send(frames.encode_text(hello()))
         try:
             async for frame in self.socket:
@@ -246,6 +266,9 @@ class Connection:
                 task.cancel()
 
     async def answer(self, request: dict[str, Any]) -> None:
+        """Run one request and send its response. A ProtocolError becomes an
+        error response with its code; any other exception is logged and sent
+        as `internal`, so one failing request never ends the connection."""
         ident, method = request['id'], request.get('method')
         params = request.get('params', {})
         started = time.perf_counter()

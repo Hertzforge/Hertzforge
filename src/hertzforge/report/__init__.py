@@ -1588,7 +1588,9 @@ def _scalogram_candidates(block, source):
             == wanted_dim]
 
 
-def scalogram_channel_options(block, objects, object_groups=()):
+def scalogram_channel_options(block: Mapping[str, Any], objects: Mapping[str, Any],
+                              object_groups: Sequence[Mapping[str, Any]] = (),
+                              ) -> list[str]:
     """The DOF names a scalogram block can draw, for the editor's
     drop-down list. The figure shows one channel, so the person editing
     the report chooses which.

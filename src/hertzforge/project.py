@@ -354,6 +354,7 @@ class Selection:
 
     @property
     def objects(self) -> list[Any]:
+        """The objects in scope, in the order the tree shows them."""
         return [self._project[name] for name in self.names]
 
     def of_type(self, cls: type) -> list[str]:
@@ -8331,7 +8332,7 @@ class Project(dict):
             return repr(value)
 
     @contextlib.contextmanager
-    def journal_as(self, line: str | None):
+    def journal_as(self, line: str | None) -> Iterator[None]:
         """Record a stretch of front-end work as the one line that
         replays it.
 

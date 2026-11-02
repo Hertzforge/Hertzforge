@@ -2437,7 +2437,7 @@ class Geometry:
                 kept.append([mover, target])
         return kept
 
-    def align_folds(self, moves) -> str | None:
+    def align_folds(self, moves: Sequence[Sequence[int]]) -> str | None:
         """Why these moves would be refused, or None.
 
         Returns the message `align_meshes` raises when a move would turn

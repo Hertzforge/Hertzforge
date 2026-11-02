@@ -58,10 +58,14 @@ _COORDINATE = np.dtype([('node', '<u8'), ('direction', 'i1')])
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for an `.npz` holding `f` and `cpsd`, opened with pickles
+    refused, since the file is plain arrays."""
     return npz_has(path, {'f', 'cpsd'}, allow_pickle=False)
 
 
 def handles(obj: Any) -> bool:
+    """True for a random vibration Specification, the target the
+    controller's Random environment loads."""
     return isinstance(obj, Specification)
 
 

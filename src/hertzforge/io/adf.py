@@ -27,11 +27,16 @@ objects.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from .unv import _58_DATA_TYPES, _build_data_objects
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..core.data import DataArray
+    from ..core.shapes import ShapeSet
+    from ..units import UnitSystem
 
 # Written from samples and documentation, never from anyone's source code.
 
@@ -46,6 +51,8 @@ CS_TYPES = {0: 'Displacement', 1: 'Basic', 2: 'Other'}
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """True for an `.afu`, `.ati` or `.ash` file that is a whole number of
+    512-byte blocks, at least three, starting with four 0xFF bytes."""
     path = str(path)
     if os.path.splitext(path)[1].lower() not in ('.afu', '.ati', '.ash'):
         return False
@@ -599,23 +606,28 @@ def _write_data_code(dim):
     return _58_CODES.get(dim, 0)
 
 
-def handles_functions(obj):
+def handles_functions(obj: object) -> bool:
+    """Whether `obj` writes to an `.afu`: an FRF, coherence, PSD or
+    spectrum; a time history goes to `.ati` instead."""
     from ..core.data import TimeHistory
     return (type(obj).__name__ in _WRITE_TYPES
             and not isinstance(obj, TimeHistory))
 
 
-def handles_time(obj):
+def handles_time(obj: object) -> bool:
+    """Whether `obj` writes to an `.ati`: a time history."""
     from ..core.data import TimeHistory
     return isinstance(obj, TimeHistory)
 
 
-def handles_shapes(obj):
+def handles_shapes(obj: object) -> bool:
+    """Whether `obj` writes to an `.ash`: a shape set."""
     from ..core.shapes import ShapeSet
     return isinstance(obj, ShapeSet)
 
 
-def save(obj, path, unit_system=None):
+def save(obj: DataArray | ShapeSet, path: str | os.PathLike,
+         unit_system: UnitSystem | None = None) -> None:
     """Write an ADF file, chosen by the suffix of `path`.
 
     A ShapeSet is written to `.ash`; a time history to `.ati`; an FRF,

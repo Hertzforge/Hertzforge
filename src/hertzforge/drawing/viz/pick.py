@@ -4,9 +4,11 @@ to know, with none of the code that draws it."""
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 
-def segment_distances(point, starts, ends):
+def segment_distances(point: ArrayLike, starts: NDArray[np.floating],
+                      ends: NDArray[np.floating]) -> NDArray[np.float64]:
     """Distance from a 2-D point to each of many 2-D segments, given as
     arrays of `starts` and `ends`."""
     segment = ends - starts

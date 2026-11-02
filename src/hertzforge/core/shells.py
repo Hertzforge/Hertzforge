@@ -18,6 +18,7 @@ dimple where one would have been removed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -33,7 +34,7 @@ QUAD = 44
 TRIANGLE = 41
 
 
-def shell_mesh(geometry: Any, ids, size: float, triangles: bool = False,
+def shell_mesh(geometry: Any, ids: Sequence[int], size: float, triangles: bool = False,
                progress: Any = None) -> tuple[Any, dict]:
     """The parts as plates, ready to join to a geometry (`mesh.join`).
 
@@ -85,7 +86,7 @@ def shell_mesh(geometry: Any, ids, size: float, triangles: bool = False,
                   'surfaces': len(solid)}
 
 
-def mesh_size(geometry: Any, ids) -> float:
+def mesh_size(geometry: Any, ids: Sequence[int]) -> float:
     """The element size the parts are meshed into shells at by default:
     `solids.mesh_size`, with a flat part measured across its plane, its
     own lack of thickness left out.

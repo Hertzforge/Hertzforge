@@ -55,6 +55,9 @@ def cache_root() -> Path:
 
 
 def core_version() -> str:
+    """The installed hertzforge version. It is part of every cache file's
+    name, so an upgraded core solves and reads again rather than trusting
+    a cache an older one wrote."""
     import hertzforge
     return hertzforge.__version__
 
@@ -102,11 +105,16 @@ class Channel:
     spec_record: int | None
 
     def to_json(self) -> dict[str, str]:
+        """The channel as `dataset.open` lists it: its value and label only."""
         return {'value': self.value, 'label': self.label}
 
 
 @dataclass
 class RandomRun:
+    """An opened `random_run`: the run's PSDs and specification, its
+    channels, and every control channel compared once at open, at the
+    one scale the whole run is judged at."""
+
     kind = 'random_run'
     title: str
     source: Path
@@ -123,6 +131,8 @@ class RandomRun:
     seconds: float = 0.0
 
     def channel(self, value: str) -> Channel:
+        """The channel whose value is `value`, or a not_found that points
+        the shell back at the list `dataset.open` sent."""
         for channel in self.channels:
             if channel.value == value:
                 return channel
@@ -130,6 +140,10 @@ class RandomRun:
                         'lists its channels')
 
     def summary(self) -> dict[str, Any]:
+        """The `summary` object `dataset.open` returns for the run: record
+        and line counts, the specification's limits, the comparison scale,
+        the run's verdict when it has one, and where the data came from
+        (cache or not, seconds to open, any notes)."""
         psds, spec = self.psds, self.specification
         spacing = np.diff(psds.abscissa)
         out: dict[str, Any] = {
@@ -156,6 +170,12 @@ class RandomRun:
 
 @dataclass
 class ModalModel:
+    """An opened `modal_model`: the geometry and its solved shapes, the
+    mesh as the viz kit draws it (drawn nodes, triangles, lines), and
+    the DOF directions `translations` needs, read once at open. It has
+    no channels; the empty list is there because `dataset.open` sends
+    one for every kind."""
+
     kind = 'modal_model'
     title: str
     geometry: Any
@@ -193,6 +213,10 @@ class ModalModel:
         return moved[self.node_rows]
 
     def summary(self) -> dict[str, Any]:
+        """The `summary` object `dataset.open` returns for the model: mesh
+        and DOF counts, how many modes were solved and how many are rigid,
+        the first elastic and the highest frequency, and where the data
+        came from (cache or not, seconds to open, any notes)."""
         frequency = np.asarray(self.shapes.frequency, dtype=float)
         elastic = frequency[frequency > 0.0]
         out: dict[str, Any] = {
@@ -226,6 +250,7 @@ class Entry:
     open: Callable[[], Any] = field(repr=False, compare=False)
 
     def to_json(self) -> dict[str, str]:
+        """The entry as `catalog.list` lists it, without its open function."""
         return {'id': self.id, 'kind': self.kind, 'title': self.title,
                 'description': self.description}
 
@@ -258,6 +283,13 @@ def _channels(psds: Any, pairs: list[tuple[str, int, int]]) -> list[Channel]:
 
 
 def open_random_run(path: Path, title: str, cache_name: str) -> RandomRun:
+    """Read the run at `path` (through the cache) and compare every
+    control channel against its specification.
+
+    A missing file is a not_found that names the fetch script and
+    `HERTZFORGE_TESTDATA`. A run with no specification still opens, with
+    nothing judged and a note saying so; a scale detected from the data
+    is noted too, since it shifts every number the shell shows."""
     import hertzforge as hz
     from hertzforge.core import compliance
 
@@ -417,6 +449,8 @@ CATALOG: tuple[Entry, ...] = (
 
 
 def entry(dataset_id: Any) -> Entry:
+    """The catalog entry named `dataset_id`, or a not_found that points
+    at `catalog.list`."""
     for item in CATALOG:
         if item.id == dataset_id:
             return item

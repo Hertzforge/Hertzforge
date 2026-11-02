@@ -869,7 +869,7 @@ def find_tone(records: np.ndarray, dt: float, tone: SineTone,
 
 
 def find_environment(records: np.ndarray, dt: float,
-                     tones: Sequence[SineTone], ticker=None) -> float:
+                     tones: Sequence[SineTone], ticker: Ticker | None = None) -> float:
     """Where the tones' shared clock starts in a recording, by joint
     matched filter.
 

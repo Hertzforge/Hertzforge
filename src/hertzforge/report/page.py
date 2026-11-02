@@ -14,6 +14,7 @@ element of its own and loads its data as a JSON file.
 
 import json
 import re
+from collections.abc import Iterable
 
 _PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -3113,7 +3114,7 @@ FEATURE_PAGE = {
 }
 
 
-def page_parts(features=()):
+def page_parts(features: Iterable[str] = ()) -> tuple[str, str]:
     """(CSS, JS) for a report page with `features` enabled.
 
     With no feature that adds page code, `_CSS` and `_JS` themselves,
