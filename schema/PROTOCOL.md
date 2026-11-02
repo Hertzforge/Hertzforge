@@ -158,7 +158,10 @@ Dynamics does, and colors each node by how far it is from rest at that sample.
  "z_values":{"$array":.. f32 [P]},          NaN is a gap: the line breaks there
  "x_range":[low, high],                     where something is drawn
  "z_range":[low, high],                     optional: a level range the data pins
- "page":{"number":1,"count":3,"records":905}}   optional: which page of how many
+ "page":{"number":1,"count":3,"records":905},   optional: which page of how many
+ "quantities":[{"value":"acceleration|","label":"Acceleration","records":220},
+               {"value":"force|","label":"Force","records":40}],   optional: two or more
+ "quantity":"acceleration|"}                optional: the one drawn
 ```
 
 Values are in display units and never logged: the shell takes log10 of an axis whose `scale` is
@@ -167,7 +170,11 @@ is calculated, the same rule as `spectrum`'s `shape`: a time history arrives pea
 few thousand points that keep every extreme, a PSD as its step outline (two points per bin, never
 thinned, so the area under it is its mean square), and a breakpoint specification filled in along
 its power law. The shell colors every point by its level on the sequential colormap, with a
-numeric legend, and names at most 40 records, every nth past that. Records that do not fit one
+numeric legend, and names at most 40 records, every nth past that. One quantity is drawn on a
+stage, since one level axis cannot hold accelerations and newtons at once; an object holding more
+than one lists them in `quantities`, and choosing another reruns the operation with its `quantity`
+param set to that `value`, starting again at page 1. Hovering a curve reads its record, abscissa
+and level. Records that do not fit one
 scene are on later pages, never drawn coarser. This is Visual Dynamics' 3-D data view
 (`hertzforge.drawing.viz.waterfall`).
 
@@ -205,6 +212,11 @@ A feature that fits this pattern needs no TypeScript.
 Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose options depend
 on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
 `channels` list returned by `dataset.open`.
+
+A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
+the operation again with the panel's values and the view's choice, and shows the new result in
+place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
+the person picks one there.
 
 `workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
 `accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when

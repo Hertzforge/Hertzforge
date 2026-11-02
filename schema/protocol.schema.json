@@ -198,6 +198,18 @@
         "z_values": {"$ref": "#/$defs/arrayRef"},
         "x_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
         "z_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "quantities": {
+          "type": "array", "minItems": 2,
+          "items": {
+            "type": "object", "required": ["value", "label", "records"],
+            "properties": {
+              "value": {"type": "string"},
+              "label": {"type": "string"},
+              "records": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "quantity": {"type": "string"},
         "page": {
           "type": "object", "required": ["number", "count", "records"],
           "properties": {
@@ -226,7 +238,8 @@
           "items": {"type": "object", "required": ["value", "label"],
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
-        "options_from": {"enum": ["channels"]}
+        "options_from": {"enum": ["channels"]},
+        "in_view": {"type": "boolean"}
       }
     },
     "operation": {

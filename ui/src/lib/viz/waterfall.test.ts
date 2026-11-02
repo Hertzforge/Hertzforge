@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { axisTicks, fraction, levelRange, linearTicks, namedRecords, recordOf, segmentIndex } from './waterfall';
+import { axisTicks, fraction, levelRange, linearTicks, namedRecords, pickedPoint, recordOf, segmentIndex } from './waterfall';
 
 describe('segmentIndex', () => {
 	const offsets = [0, 4, 8];
@@ -87,5 +87,33 @@ describe('namedRecords', () => {
 		expect(named.length).toBeLessThanOrEqual(41);
 		expect(named[0]).toBe(0);
 		expect(named[named.length - 1]).toBe(899);
+	});
+});
+
+describe('pickedPoint', () => {
+	/** A 5 x 5 read-back with point ids (plus one) at the given pixels. */
+	function pixels(hits: [number, number, number][]): Uint8Array {
+		const out = new Uint8Array(4 * 25);
+		for (const [i, j, id] of hits) {
+			const k = 4 * (j * 5 + i);
+			out[k] = id & 255;
+			out[k + 1] = (id >> 8) & 255;
+			out[k + 2] = (id >> 16) & 255;
+			out[k + 3] = (id >>> 24) & 255;
+		}
+		return out;
+	}
+
+	it('is null when nothing is under the cursor', () => {
+		expect(pickedPoint(pixels([]), 5)).toBeNull();
+	});
+
+	it('takes the hit nearest the center, less one', () => {
+		expect(pickedPoint(pixels([[0, 0, 7], [3, 2, 12], [4, 4, 9]]), 5)).toBe(11);
+	});
+
+	it('reads all four bytes, for scenes of millions of points', () => {
+		expect(pickedPoint(pixels([[2, 2, 9_876_543 + 1]]), 5)).toBe(9_876_543);
+		expect(pickedPoint(pixels([[2, 2, 2 ** 31 + 5]]), 5)).toBe(2 ** 31 + 4);
 	});
 });

@@ -78,10 +78,44 @@ def test_a_coherence_waterfall_pins_its_level_range(random_run):
     assert view['z']['unit'] is None
 
 
-def test_records_of_another_quantity_are_left_out_with_a_note(random_run):
+def test_the_largest_quantity_is_drawn_and_the_others_are_offered(random_run, validate):
+    """The PSDs hold eight accelerations and four forces: the accelerations
+    are drawn and both are listed for the view to choose between."""
     (view,) = run('random.waterfall', random_run, of='psd')
-    assert len(view['records']) == 8
-    assert view['note'] == '4 records of another quantity are not drawn on this stage'
+    wire_views([view], validate)
+    assert len(view['records']) == 8 and 'note' not in view
+    assert view['quantities'] == [
+        {'value': 'acceleration**2/frequency|', 'label': 'Acceleration', 'records': 8},
+        {'value': 'force**2/frequency|', 'label': 'Force', 'records': 4}]
+    assert view['quantity'] == 'acceleration**2/frequency|'
+
+
+def test_the_quantity_chosen_is_the_one_drawn(random_run):
+    (view,) = run('random.waterfall', random_run, of='psd', quantity='force**2/frequency|')
+    assert len(view['records']) == 4 and view['z']['unit'] == 'N²/Hz'
+    assert view['quantity'] == 'force**2/frequency|'
+    psds = random_run.project['Time History PSDs']
+    forces = [i for i in range(psds.num_records) if psds.ordinate_dim[i] == 'force**2/frequency']
+    assert view['records'] == [psds.record_label(i) for i in forces]
+
+
+def test_a_quantity_the_object_lacks_draws_the_largest(random_run):
+    """A choice kept from another object is not an error about this one."""
+    (view,) = run('random.waterfall', random_run, of='psd', quantity='voltage|')
+    assert view['quantity'] == 'acceleration**2/frequency|'
+
+
+def test_an_object_of_one_quantity_offers_no_choice(modal_run):
+    (view,) = run('modal_run.waterfall', modal_run)
+    assert 'quantities' not in view and 'quantity' not in view
+
+
+def test_the_quantity_param_is_set_in_the_view_not_the_panel():
+    waterfalls = [op.to_json() for op in OPERATIONS if op.outputs == ('waterfall',)]
+    assert len(waterfalls) == 2
+    for op in waterfalls:
+        (param,) = [p for p in op['params'] if p['name'] == 'quantity']
+        assert param['in_view'] is True and param['default'] == ''
 
 
 def test_a_page_past_the_end_lands_on_the_last(random_run, monkeypatch):

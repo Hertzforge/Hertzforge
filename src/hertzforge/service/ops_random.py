@@ -18,7 +18,7 @@ from . import views as v
 from .datasets import Channel, RandomRun, quantity_of
 from .descriptors import Operation, Option, Param
 from .protocol import refused
-from .waterfalls import waterfall_view
+from .waterfalls import QUANTITY, waterfall_view
 
 #: limit curve -> the line role the viz kit styles it with
 ROLES = {'warning_lower': 'tolerance', 'warning_upper': 'tolerance',
@@ -326,7 +326,7 @@ def waterfall(run: RandomRun, params: dict[str, Any]) -> list[dict]:
     if run.project is None or name not in run.project:
         raise refused(f'{run.title} has no {name}.')
     return [waterfall_view(f'{run.title}: {name}', run.project[name],
-                           params['page'])]
+                           params['page'], quantity=params['quantity'])]
 
 
 OPERATIONS = (
@@ -348,5 +348,5 @@ OPERATIONS = (
         accepts='random_run',
         summary='Every record of the run\'s PSDs, time histories or '
                 'coherence at its own depth, colored by level.',
-        params=(OF, PAGE), outputs=('waterfall',), run=waterfall),
+        params=(OF, PAGE, QUANTITY), outputs=('waterfall',), run=waterfall),
 )

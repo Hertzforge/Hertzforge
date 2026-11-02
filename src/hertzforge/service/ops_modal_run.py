@@ -15,7 +15,7 @@ from . import views as v
 from .datasets import ModalRun, _mesh
 from .descriptors import Operation, Option, Param
 from .protocol import refused
-from .waterfalls import COMPONENTS, unit_text, waterfall_view
+from .waterfalls import COMPONENTS, QUANTITY, unit_text, waterfall_view
 
 #: what a survey can be drawn as a waterfall of, by the name its project
 #: gives each
@@ -68,7 +68,8 @@ def waterfall(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     if name not in run.project:
         raise refused(f'{run.title} has no {name}.')
     return [waterfall_view(f'{run.title}: {name}', run.project[name],
-                           params['page'], params['component'])]
+                           params['page'], params['component'],
+                           params['quantity'])]
 
 
 def fitted(run: ModalRun, low: float, high: float, count: int) -> Any:
@@ -290,7 +291,8 @@ OPERATIONS = (
         accepts='modal_run',
         summary='Every FRF, coherence or time capture of the survey at its own '
                 'depth, colored by level; an FRF as magnitude, a part or phase.',
-        params=(OF, COMPONENT, PAGE), outputs=('waterfall',), run=waterfall),
+        params=(OF, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
+        run=waterfall),
     Operation(
         id='modal_run.modes', title='Identified Modes', workspace='analyze',
         accepts='modal_run',

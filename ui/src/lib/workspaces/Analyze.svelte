@@ -106,7 +106,7 @@
 				</div>
 				{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
 				<ParamForm
-					params={a.op.params}
+					params={a.op.params.filter((p) => !p.in_view)}
 					bind:values={a.values[a.op.id]}
 					channels={a.opened.channels}
 					showAllErrors={a.triedRun}
@@ -173,7 +173,7 @@
 						<div class="views">
 							{#each r.views as v, i (i)}
 								<div class="view {v.view}">
-									<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} />
+									<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} onparams={(patch) => a.rerun(r.id, patch)} />
 								</div>
 							{/each}
 						</div>
