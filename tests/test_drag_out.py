@@ -1,4 +1,4 @@
-"""Dragging an object out of the window writes it as `.vdyn`.
+"""Dragging an object out of the window writes it as `.hforge`.
 
 The tree's drag already carried its own mime type so objects could be
 moved between object groups. It now carries a second reading of the same

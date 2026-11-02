@@ -360,8 +360,8 @@ def test_the_typed_parts_round_trip_and_never_reach_a_template(tmp_path):
     project, name = _project()
     project.report_identity(name, **COMPLETE)
     project.report_flash(name, **TYPED)
-    io.save(project[name], str(tmp_path / 'r.vdyn'))
-    assert io.load(str(tmp_path / 'r.vdyn')).identity == project[name].identity
+    io.save(project[name], str(tmp_path / 'r.hforge'))
+    assert io.load(str(tmp_path / 'r.hforge')).identity == project[name].identity
     report_template.save(project[name], tmp_path / 'house.vdreport')
     back = report_template.load(tmp_path / 'house.vdreport')
     assert fl.held(back) == {}, "one test's page never passes to the next"

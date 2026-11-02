@@ -1,9 +1,9 @@
 """MATLAB `.mat` files are the project file in MATLAB's container.
 
-A `.mat` written here holds exactly what a `.vdyn` holds, so the test
+A `.mat` written here holds exactly what a `.hforge` holds, so the test
 that matters is the one below: the frozen corpus, which exercises
 every object kind and every optional field, goes out as `.mat`, comes
-back, and the two projects write byte-for-byte the same `.vdyn` tree.
+back, and the two projects write byte-for-byte the same `.hforge` tree.
 The rest pins what MATLAB sees, the refusals, and the doors.
 """
 
@@ -21,8 +21,8 @@ from hertzforge.io import export_file, import_file, matlab, native
 CORPUS = str(fixture_path('vdyn_corpus', 'schema1.vdyn'))
 
 
-def vdyn_tree(path):
-    """Every attribute and dataset in a .vdyn, keyed by path."""
+def file_tree(path):
+    """Every attribute and dataset in a .hforge, keyed by path."""
     out = {}
     with h5py.File(path) as f:
         def visit(name, obj):
@@ -55,7 +55,7 @@ def same(a, b):
 
 def test_the_whole_corpus_survives_matlab_exactly(tmp_path):
     """Every object kind and every optional field the schema has: the
-    project that comes back writes the identical .vdyn tree — names,
+    project that comes back writes the identical .hforge tree — names,
     kinds, attributes, datasets, dtypes, shapes, strings and all. This
     is the claim that the .mat *is* the project file."""
     project = native.load(CORPUS)
@@ -67,9 +67,9 @@ def test_the_whole_corpus_survives_matlab_exactly(tmp_path):
     assert back.project_type == project.project_type
     assert back.active_geometry == project.active_geometry
     assert list(back) == list(project)
-    project.save(str(tmp_path / 'a.vdyn'))
-    back.save(str(tmp_path / 'b.vdyn'))
-    a, b = vdyn_tree(tmp_path / 'a.vdyn'), vdyn_tree(tmp_path / 'b.vdyn')
+    project.save(str(tmp_path / 'a.hforge'))
+    back.save(str(tmp_path / 'b.hforge'))
+    a, b = file_tree(tmp_path / 'a.hforge'), file_tree(tmp_path / 'b.hforge')
     assert set(a) == set(b), (set(a) ^ set(b))
     differing = [key for key in a if not same(a[key], b[key])]
     assert not differing, differing
@@ -77,14 +77,14 @@ def test_the_whole_corpus_survives_matlab_exactly(tmp_path):
 
 def test_a_single_object_goes_out_and_comes_back(tmp_path):
     """One object saved alone is one struct named for its kind — the
-    same rule the .vdyn loader recognises a file by."""
+    same rule the .hforge loader recognises a file by."""
     frf = hertzforge.import_file(fixture_path('plate', 'frfs.npz'),
                                      response_unit='m/s**2',
                                      reference_unit='N')
     path = str(tmp_path / 'frf.mat')
     export_file(frf, path)
     variables = loadmat(path, squeeze_me=True, struct_as_record=False)
-    assert 'data' in variables and 'visualdynamics_schema' in variables
+    assert 'data' in variables and 'hertzforge_schema' in variables
     back = import_file(path)
     assert type(back).__name__ == 'Frf'
     assert np.array_equal(back.ordinate, frf.ordinate)
@@ -131,7 +131,7 @@ def test_matlab_sees_structs_cells_and_columns(tmp_path):
     export_file(project, path)
     variables = loadmat(path, squeeze_me=True, struct_as_record=False,
                         chars_as_strings=True)
-    assert variables['visualdynamics_schema'] == native.schema_for(project)
+    assert variables['hertzforge_schema'] == native.SCHEMA_VERSION
     assert variables['test_name'] == project.name
     objects = variables['objects']
     assert len(objects) == len(project)
@@ -216,9 +216,9 @@ def test_the_whole_corpus_comes_back_from_a_display_system(tmp_path, system):
     mat = str(tmp_path / 'corpus.mat')
     export_file(project, mat, unit_system=SYSTEMS[system])
     back = import_file(mat)
-    project.save(str(tmp_path / 'a.vdyn'))
-    back.save(str(tmp_path / 'b.vdyn'))
-    a, b = vdyn_tree(tmp_path / 'a.vdyn'), vdyn_tree(tmp_path / 'b.vdyn')
+    project.save(str(tmp_path / 'a.hforge'))
+    back.save(str(tmp_path / 'b.hforge'))
+    a, b = file_tree(tmp_path / 'a.hforge'), file_tree(tmp_path / 'b.hforge')
     assert set(a) == set(b), (set(a) ^ set(b))
     labels = ('ordinate_unit', 'reference_unit', 'length_unit', 'mass_unit')
     moved = [key for key in a if not same(a[key], b[key])]
@@ -233,7 +233,7 @@ def test_the_whole_corpus_comes_back_from_a_display_system(tmp_path, system):
 def test_a_strangers_mat_is_refused_by_name(tmp_path):
     path = str(tmp_path / 'workspace.mat')
     savemat(path, {'x': np.arange(3), 'y': np.eye(2)})
-    with pytest.raises(ValueError, match='not a Visual Dynamics file.*x, y'):
+    with pytest.raises(ValueError, match='not a Hertzforge file.*x, y'):
         import_file(path)
 
 
@@ -260,10 +260,29 @@ def test_a_struct_built_to_the_layout_is_read_without_the_stamp(tmp_path):
 
 def test_a_newer_stamp_is_refused(tmp_path):
     path = str(tmp_path / 'future.mat')
-    savemat(path, {'visualdynamics_schema': native.SCHEMA_VERSION + 1,
+    savemat(path, {'hertzforge_schema': native.SCHEMA_VERSION + 1,
                    'data': {'abscissa': np.zeros((2, 1))}})
     with pytest.raises(ValueError, match='newer Hertzforge'):
         import_file(path)
+
+
+def test_a_mat_visual_dynamics_wrote_reads_by_its_stamp(tmp_path):
+    """Visual Dynamics stamped its `.mat` files `visualdynamics_schema`
+    and kept the element groups under their block names, as its `.vdyn`
+    files do; such a file reads with its groups intact."""
+    project = native.load(CORPUS)
+    geometry = project['Geometry']
+    path = str(tmp_path / 'from_vd.mat')
+    export_file(geometry, path)
+    variables = loadmat(path, squeeze_me=False, struct_as_record=False)
+    fields = {name: getattr(variables['geometry'][0, 0], name)
+              for name in variables['geometry'][0, 0]._fieldnames}
+    renamed = {native.VDYN_NAMES.get(name, name): value
+               for name, value in fields.items()}
+    savemat(path, {'visualdynamics_schema': 3, 'geometry': renamed})
+    back = import_file(path)
+    assert back == geometry
+    assert back.group_name == geometry.group_name
 
 
 def test_a_record_too_big_for_the_format_is_refused_first(tmp_path,

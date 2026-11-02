@@ -240,7 +240,7 @@ def test_the_amplification_belongs_to_the_curve():
 def test_an_srs_round_trips_through_vibe(tmp_path):
     spectra = history(half_sine()).compute_srs(q=25.0, kind='positive')
     hertzforge.save(spectra, tmp_path / 'shock')
-    back = hertzforge.load(tmp_path / 'shock.vdyn')
+    back = hertzforge.load(tmp_path / 'shock.hforge')
     assert isinstance(back, Srs)
     assert back.q == 25.0 and back.kind == 'positive'
     assert back == spectra
@@ -289,7 +289,7 @@ def test_a_shock_targets_limit_comes_back_as_an_srs():
 def test_a_shock_target_round_trips_with_its_limits(tmp_path):
     spec = target()
     hertzforge.save(spec, tmp_path / 'target')
-    back = hertzforge.load(tmp_path / 'target.vdyn')
+    back = hertzforge.load(tmp_path / 'target.hforge')
     assert isinstance(back, ShockSpecification)
     assert back == spec
     assert set(back.limits) == set(spec.limits)

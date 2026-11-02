@@ -1264,12 +1264,12 @@ class DataArray:
                 f'{len(self.abscissa)} samples, {", ".join(dims)})')
 
     def save(self, path: str | os.PathLike) -> None:
-        """Write this object to a `.vdyn` file of its own.
+        """Write this object to a `.hforge` file of its own.
 
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write it; `.vdyn` is added when the suffix is not
+            Where to write it; `.hforge` is added when the suffix is not
             there.
 
         Returns

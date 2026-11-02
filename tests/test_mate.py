@@ -310,7 +310,7 @@ def test_a_set_is_saved_and_read_back_and_an_older_one_reads(tmp_path):
     project.add_mated_surfaces(name, patch['groups'], patch['nodes_a'], patch['nodes_b'],
                                normal_mode='stiffness', shear_mode='free',
                                normal_stiffness=3e6)
-    path = tmp_path / 'g.vdyn'
+    path = tmp_path / 'g.hforge'
     geometry.save(path)
     assert Geometry.load(path).mates == geometry.mates
     # written the night before the normal and the shear were set apart

@@ -35,8 +35,8 @@ def line_geometry():
 def test_storage_and_vdyn_round_trip(tmp_path):
     shapes = traveling()
     assert np.iscomplexobj(shapes.shape_matrix)
-    hertzforge.save(shapes, tmp_path / 'complex.vdyn')
-    back = hertzforge.load(tmp_path / 'complex.vdyn')
+    hertzforge.save(shapes, tmp_path / 'complex.hforge')
+    back = hertzforge.load(tmp_path / 'complex.hforge')
     assert np.allclose(back.shape_matrix, shapes.shape_matrix), (
         'the native file keeps the phases exactly')
 

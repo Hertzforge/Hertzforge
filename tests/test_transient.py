@@ -58,7 +58,7 @@ def test_it_survives_a_project_file(tmp_path):
     project = hertzforge.Project('Transient')
     project.add('Target', _target())
     project.project_type = 'Transient'
-    path = project.save(tmp_path / 'transient.vdyn')
+    path = project.save(tmp_path / 'transient.hforge')
     back = hertzforge.Project.open(path)
     assert back.project_type == 'Transient'
     assert isinstance(back['Target'], TransientSpecification)

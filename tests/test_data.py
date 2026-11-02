@@ -136,7 +136,7 @@ def test_data_save_load_round_trip(tmp_path):
         hertzforge.import_file(TIME_NPZ, ordinate_unit='m/s**2'),
         hertzforge.import_file(PSD_NPZ, ordinate_unit='m/s**2'),
     ]:
-        path = str(tmp_path / f'{type(obj).__name__}.vdyn')
+        path = str(tmp_path / f'{type(obj).__name__}.hforge')
         obj.save(path)
         assert hertzforge.load(path) == obj
 
@@ -153,7 +153,7 @@ def test_channel_table_round_trip(tmp_path):
         'direction': ['X+', 'Z-'], 'unit': ['m/s^2', 'N'],
         'serial_number': ['A1', 'B2']})
     assert table.dof_strings() == ['101X+', '102Z-']
-    path = str(tmp_path / 'table.vdyn')
+    path = str(tmp_path / 'table.hforge')
     table.save(path)
     assert hertzforge.load(path) == table
 
@@ -218,7 +218,7 @@ def test_the_hint_survives_a_native_round_trip(tmp_path):
     data = hertzforge.TimeHistory([0.0, 1.0], [[1.0, 2.0], [3.0, 4.0]],
                             ['101X+', '102X+'],
                             dimension_hint=['acceleration', None])
-    path = str(tmp_path / 'hint.vdyn')
+    path = str(tmp_path / 'hint.hforge')
     data.save(path)
     assert hertzforge.load(path) == data
     assert hertzforge.load(path).dimension_hint == ['acceleration', None]

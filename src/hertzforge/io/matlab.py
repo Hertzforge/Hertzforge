@@ -1,14 +1,14 @@
 """MATLAB `.mat` files: the project file in MATLAB's container.
 
-A `.mat` written here has the `.vdyn` schema and names
-(`docs/vdyn-format.md`), so a MATLAB user gets `load('modal.mat')` and
+A `.mat` written here has the `.hforge` schema and names
+(`docs/hforge-format.md`), so a MATLAB user gets `load('modal.mat')` and
 structs with the right shapes and complex numbers assembled, rather
 than HDF5 datasets to read one at a time with `h5read` (which a
-`.vdyn` already allows). Everything a project holds has a MATLAB form,
+`.hforge` already allows). Everything a project holds has a MATLAB form,
 so the reader reads its own files back completely.
 
 The layout is implemented once, and not in this module. The writer
-runs the native `.vdyn` writer into an HDF5 file held in memory and
+runs the native `.hforge` writer into an HDF5 file held in memory and
 converts that tree into `.mat` variables; the reader rebuilds an
 in-memory HDF5 tree from the `.mat` and passes it to the native
 loader. A field added to the schema is carried with no change here,
@@ -66,9 +66,10 @@ to it, the inverse of how a declaration converts a file's numbers to
 SI; the reader clears the labels and declares them again
 (`_in_display`, `_from_display`).
 
-The stamp `visualdynamics_schema` is written as a variable, and the
-reader follows the `.vdyn` rule: a newer stamp is refused, and an
-older one always loads. A `.mat` with no stamp is accepted in one case
+The stamp `hertzforge_schema` is written as a variable, and the
+reader follows the `.hforge` rule: a newer stamp is refused, and an
+older one always loads. A `.mat` Visual Dynamics wrote carries
+`visualdynamics_schema` instead and reads the way its `.vdyn` files do. A `.mat` with no stamp is accepted in one case
 only, a single struct in the documented layout of one object (a data
 array with `abscissa`, `ordinate` and `data_class` or `function_type`,
 a geometry with `node_xyz`, a shape set with `shape_matrix`, a channel
@@ -104,7 +105,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
     import h5py
 
 SUFFIX = '.mat'
-STAMP = 'visualdynamics_schema'
+STAMP = native.STAMP
 #: the display system a file's values are in, by name; absent, SI
 SYSTEM = 'unit_system'
 MATRIX_FIELDS = 'matrix_fields'
@@ -237,7 +238,7 @@ def _check_size(tree: dict[str, Any], where: str = '') -> None:
             raise ValueError(
                 f'{label} is {value.nbytes / 2 ** 30:.1f} GB, and a MATLAB '
                 'version 5 file holds at most 4 GB per variable; save the '
-                'project as .vdyn, which MATLAB reads with h5read')
+                'project as .hforge, which MATLAB reads with h5read')
 
 
 def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
@@ -495,8 +496,8 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Any:
     project. Values written in a display system are converted
     back to SI. Raises ValueError for a version 7.3 file, for a schema
     stamp newer than this version reads, and for a file that has no
-    `visualdynamics_schema` stamp and is not a single struct in the
-    documented layout."""
+    `hertzforge_schema` or `visualdynamics_schema` stamp and is not a
+    single struct in the documented layout."""
     from scipy.io import loadmat
 
     path = str(path)
@@ -506,15 +507,15 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Any:
     except NotImplementedError:
         raise ValueError(
             f'{path} is a MATLAB version 7.3 file, which is HDF5; save it '
-            "with '-v7', or save the data as .vdyn") from None
+            "with '-v7', or save the data as .hforge") from None
     variables = {name: _value_in(value) for name, value in raw.items()
                  if not name.startswith('__')}
-    if STAMP not in variables:
+    if STAMP not in variables and native.VDYN_STAMP not in variables:
         bare = _bare_kind(variables)
         if bare is None:
             found = ', '.join(sorted(variables)) or 'nothing'
             raise ValueError(
-                f'{path} is not a Visual Dynamics file (no {STAMP} '
+                f'{path} is not a Hertzforge file (no {STAMP} '
                 f'variable; it holds {found}). A struct built to the '
                 'documented layout of one object is read too.')
         kind, fields = bare

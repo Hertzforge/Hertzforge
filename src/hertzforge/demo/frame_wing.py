@@ -349,7 +349,7 @@ def project(solved: bool = False, size: float = SIZE,
     journal is the workflow, and their element groups are given their
     properties, so Solve Modes on any of them gives its modes.
 
-        frame_wing.project().save('frame-wing.vdyn')
+        frame_wing.project().save('frame-wing.hforge')
 
     With `solved`, every model's modes are already solved to `SOLVE_TO`
     (1500 Hz). That is the example project the downloads page offers.

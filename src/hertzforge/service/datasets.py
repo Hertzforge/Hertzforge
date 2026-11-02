@@ -80,7 +80,7 @@ def _cached(name: str, build: Callable[[], Any],
             notes.append(f'cache {path.name} could not be read ({error}); '
                          'rebuilt')
     built = build()
-    partial = path.with_name(f'.{path.stem}.{os.getpid()}.partial.vdyn')
+    partial = path.with_name(f'.{path.stem}.{os.getpid()}.partial.hforge')
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         built.save(partial)
@@ -302,7 +302,7 @@ def open_random_run(path: Path, title: str, cache_name: str) -> RandomRun:
     notes: list[str] = []
     stat = path.stat()
     name = (f'{cache_name}-hz{core_version()}-{stat.st_size}-'
-            f'{stat.st_mtime_ns}.vdyn')
+            f'{stat.st_mtime_ns}.hforge')
     project, hit = _cached(name, lambda: hz.random_vibration_run(path), notes)
     psds, _octave = project.psds
     spec = project.specification
@@ -383,10 +383,10 @@ def open_fem_model(cache_name: str, title: str,
         return model[0]
 
     stem = f'{cache_name}-hz{core_version()}-{MODES_SOLVED}modes'
-    geometry, hit_g = _cached(f'{stem}-geometry.vdyn',
+    geometry, hit_g = _cached(f'{stem}-geometry.hforge',
                               lambda: fem_model().geometry(), notes)
     shapes, hit_s = _cached(
-        f'{stem}-shapes.vdyn',
+        f'{stem}-shapes.hforge',
         lambda: fem_model().eigensolution(num_modes=MODES_SOLVED), notes)
     from hertzforge.deform import dof_directions
 

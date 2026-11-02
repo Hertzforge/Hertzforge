@@ -82,14 +82,14 @@ def test_mode_label():
 
 def test_save_load_round_trip(tmp_path):
     shapes = hertzforge.import_file(SHAPES, mass_unit='kg')
-    path = str(tmp_path / 'modes.vdyn')
+    path = str(tmp_path / 'modes.hforge')
     shapes.save(path)
     assert hertzforge.load(path) == shapes
 
 
 def test_round_trip_keeps_unit_less_state(tmp_path):
     shapes = hertzforge.import_file(SHAPES)
-    path = str(tmp_path / 'modes.vdyn')
+    path = str(tmp_path / 'modes.hforge')
     shapes.save(path)
     again = hertzforge.load(path)
     assert not again.units_defined
@@ -188,7 +188,7 @@ def test_an_imported_set_is_sorted_even_when_the_file_is_not(tmp_path):
     jumbled = ShapeSet(frequency=[70.0, 20.0], damping=[0.02, 0.01],
                        coordinate=['1X+'], shape_matrix=[[7.0], [2.0]])
     assert list(jumbled.frequency) == [20.0, 70.0], 'sorted on the way in'
-    path = tmp_path / 'shapes.vdyn'
+    path = tmp_path / 'shapes.hforge'
     save(jumbled, path)
     back = load(path)
     assert list(back.frequency) == [20.0, 70.0], 'and stays sorted'

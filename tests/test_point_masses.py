@@ -81,8 +81,8 @@ def test_a_mass_on_a_node_nothing_holds_is_refused_by_node():
 
 def test_a_mass_block_rides_the_native_file(tmp_path):
     _bar, geometry, group = _bar_with_masses(mass=0.0125)
-    hertzforge.save(geometry, tmp_path / 'bar.vdyn')
-    back = hertzforge.load(tmp_path / 'bar.vdyn')
+    hertzforge.save(geometry, tmp_path / 'bar.hforge')
+    back = hertzforge.load(tmp_path / 'bar.hforge')
     assert back.group_properties[group] == GroupProperties(mass=0.0125)
     assert back.group_properties[int(back.group_id[0])].material == ALUMINUM
     assert [m.mass for m in Model.from_geometry(back).masses] == [0.0125] * 2

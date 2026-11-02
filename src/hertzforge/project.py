@@ -3,7 +3,7 @@
 The desktop app's window holds the same things a `Project` holds: the
 named objects, the object groups, which group is the Basis, the project
 type and the active geometry. A project built in the app and one built
-in a script are therefore the same, and both save to the same `.vdyn`
+in a script are therefore the same, and both save to the same `.hforge`
 file. A script uses the app's own verbs (`add`, `link`, `set_basis`,
 `rename`, `save`) instead of building dicts and lists by hand.
 
@@ -465,7 +465,7 @@ class Project(dict):
             empty slots the tree shows.
         active_geometry: The name of the geometry data is drawn on when
             nothing else is named.
-        name: The project's name, used as the title of a saved `.vdyn`
+        name: The project's name, used as the title of a saved `.hforge`
             and of a rendered report.
     """
 
@@ -547,7 +547,7 @@ class Project(dict):
         self.provenance: dict[str, dict[str, Any]] = dict(provenance or {})
         #: every file the project rests on, by name, size and SHA-256:
         #: each file imported, and each document attached (`index_file`).
-        #: One index, whatever adds to it; saved in the `.vdyn`, and
+        #: One index, whatever adds to it; saved in the `.hforge`, and
         #: printed by the report feature `data_index`
         self.data_index: DataIndex = (
             data_index if isinstance(data_index, DataIndex)
@@ -559,7 +559,7 @@ class Project(dict):
         #: this sitting's acts, each a runnable line of Python — what
         #: the console shows and `session_script` exports (Brandon,
         #: 2026-08-30). In memory only, and deliberately so: the
-        #: journal is a record of *this session*, where the `.vdyn`
+        #: journal is a record of *this session*, where the `.hforge`
         #: file's provenance records tell the durable story. Guarded
         #: by `_journal_depth` so a verb calling other verbs — merge
         #: adds and links, refresh recomputes — records once, as the
@@ -8247,7 +8247,7 @@ class Project(dict):
     # ---- the file ----------------------------------------------------------
 
     def save(self, path: str | os.PathLike, **options: Any) -> str:
-        """Write the whole project to one file: `.vdyn`, `.mat` for the
+        """Write the whole project to one file: `.hforge`, `.mat` for the
         same layout in a MATLAB file, or `.h5` for the Engineering
         Sciences Common Data Format.
 
@@ -8258,10 +8258,12 @@ class Project(dict):
             as MATLAB structs (`io.matlab`), and `.h5`, `.hdf5` or
             `.escdf` writes the standard's types with each object stored
             whole in an attachment (`io.escdf_objects`). Any other
-            suffix writes a `.vdyn` file.
+            suffix writes a `.hforge` file, with `.hforge` added when the
+            path does not end in it. A `.vdyn` path raises ValueError:
+            Visual Dynamics' files are opened, never written.
         **options
             Passed to the MATLAB or ESCDF writer, for example an ESCDF
-            file's `created_by`. Not used for a `.vdyn` file.
+            file's `created_by`. Not used for a `.hforge` file.
 
         Returns
         -------
@@ -8270,6 +8272,7 @@ class Project(dict):
         """
         from .io import export_file, save_test
         from .io.escdf_objects import SUFFIXES
+        from .io.native import hforge_path
 
         if str(path).endswith('.mat'):
             export_file(self, str(path), **options)
@@ -8284,14 +8287,14 @@ class Project(dict):
                   project_type=self.project_type, object_groups=self.object_groups,
                   provenance=self.provenance,
                   data_index=self.data_index.records())
-        written = str(path) if str(path).endswith('.vdyn') else f'{path}.vdyn'
+        written = hforge_path(str(path))
         self.file = os.path.abspath(os.path.expanduser(written))
-        return str(path)
+        return written
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project from a `.vdyn`, `.mat` or ESCDF `.h5` (`.hdf5`,
-        `.escdf`) file.
+        """Read a project from a `.hforge`, a Visual Dynamics `.vdyn`, a
+        `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file.
 
         The journal starts over with the one line that opens the file. A
         file holding a single object rather than a project raises
@@ -9176,7 +9179,7 @@ def _named_state(kind, value):
     Names fix it, and an absent field reads as the class's own default,
     which is right rather than merely convenient: a project saved before
     padding existed was computed unpadded, and `pad=1` is exactly what
-    it meant. It is also the rule the `.vdyn` format already states for
+    it meant. It is also the rule the `.hforge` format already states for
     optional fields — absent, not sentinel-valued.
 
     The values then go through the class itself, because a *rename* is
@@ -10119,7 +10122,7 @@ def random_vibration_report(run: Any = ASK,
 
     It is `random_vibration_run` followed by `generate_report` and
     `export_report`. Use those instead when the project is wanted
-    afterwards, to write the test summary or to save it as `.vdyn`.
+    afterwards, to write the test summary or to save it as `.hforge`.
 
     Parameters
     ----------

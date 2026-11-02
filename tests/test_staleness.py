@@ -99,7 +99,7 @@ def test_staleness_survives_the_file(worked_up, tmp_path):
     project, psds = worked_up
     history = project['Time History']
     history.averaging = replace(history.averaging, frames=3)
-    path = str(tmp_path / 't.vdyn')
+    path = str(tmp_path / 't.hforge')
     project.save(path)
     back = hertzforge.Project.open(path)
     stale = back.stale()
@@ -146,7 +146,7 @@ def test_a_fingerprint_from_before_a_rename_compares_clean(worked_up):
     loader normalizes the object's averaging through the class, and
     every project saved before the rename opened with a refresh badge
     whose story named the same window twice (Brandon, 2026-08-30 —
-    modal.vdyn did exactly this). Legacy fingerprints go through the
+    modal.hforge did exactly this). Legacy fingerprints go through the
     class's own normalization, positional shape and old spelling both."""
     project, psds = worked_up
     averaging = project['Time History'].averaging

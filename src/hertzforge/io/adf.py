@@ -510,7 +510,7 @@ def _function_record(data_obj, index, record_number):
     kind = _WRITE_TYPES.get(type(data_obj).__name__)
     if kind is None:
         raise ValueError(f'{type(data_obj).__name__} has no ADF function '
-                         'type; UNV or .vdyn carries it instead')
+                         'type; UNV or .hforge carries it instead')
 
     abscissa = np.asarray(data_obj.abscissa, dtype=float)
     values = np.asarray(data_obj.ordinate[index])

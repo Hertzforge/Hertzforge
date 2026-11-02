@@ -240,8 +240,8 @@ def test_a_check_block_is_saved_with_the_report_and_its_template(tmp_path):
     report = Report('R', features=[cb.FEATURE])
     cb.add(report, 'pulse', None, {'shape': 'half-sine', 'peak': 490.0,
                                    'duration': 0.011, 'band': 0.15})
-    io.save(report, str(tmp_path / 'r.vdyn'))
-    assert io.load(str(tmp_path / 'r.vdyn')).blocks == report.blocks
+    io.save(report, str(tmp_path / 'r.hforge'))
+    assert io.load(str(tmp_path / 'r.hforge')).blocks == report.blocks
     report_template.save(report, tmp_path / 'house.vdreport')
     back = report_template.load(tmp_path / 'house.vdreport')
     assert back.blocks == report.blocks and back.features == [cb.FEATURE]

@@ -538,8 +538,8 @@ def test_the_dates_ride_in_the_project_file_but_not_the_template(
     project, name, report = calibrating
     project.report_test_date(name, '2026-10-24', '2026-10-26')
     index = rc.table_blocks(report, project, project.object_groups)[0]
-    io.save(report, str(tmp_path / 'r.vdyn'))
-    back = io.load(str(tmp_path / 'r.vdyn'))
+    io.save(report, str(tmp_path / 'r.hforge'))
+    back = io.load(str(tmp_path / 'r.hforge'))
     assert back.blocks[index][rc.START] == '2026-10-24'
     assert back.blocks[index][rc.END] == '2026-10-26'
     report_template.save(report, tmp_path / 'house.vdreport')

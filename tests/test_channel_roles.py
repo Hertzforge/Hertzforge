@@ -171,12 +171,12 @@ def test_the_roles_ride_the_native_file(tmp_path):
     history = _drive_point()
     history.roles = {('1Z+', 'acceleration'): 'reference',
                      ('3Z+', 'acceleration'): 'monitor'}
-    hertzforge.save(history, tmp_path / 'run.vdyn')
-    back = hertzforge.load(tmp_path / 'run.vdyn')
+    hertzforge.save(history, tmp_path / 'run.hforge')
+    back = hertzforge.load(tmp_path / 'run.hforge')
     assert back.roles == history.roles
     history.roles = None
-    hertzforge.save(history, tmp_path / 'guess.vdyn')
-    assert hertzforge.load(tmp_path / 'guess.vdyn').roles is None
+    hertzforge.save(history, tmp_path / 'guess.hforge')
+    assert hertzforge.load(tmp_path / 'guess.hforge').roles is None
 
 
 def test_changing_a_role_badges_the_frfs_and_the_coherence():

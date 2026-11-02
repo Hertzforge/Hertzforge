@@ -513,10 +513,10 @@ def test_the_project_saves_and_reopens_with_the_extract(tmp_path):
     two_tests(path)
     project = Project('t')
     name = project.attach_run_log(path, test=1)
-    saved = tmp_path / 'project.vdyn'
+    saved = tmp_path / 'project.hforge'
     project.save(saved)
     with h5py.File(saved, 'r') as f:
-        assert f.attrs['visualdynamics_schema'] == 3
+        assert f.attrs['hertzforge_schema'] == 1
         group = next(f['objects'][key] for key in f['objects'])
         assert group.attrs['kind'] == 'run_log_extract'
         assert group.attrs['path'] == 'a.vdlog', 'beside the project: relative'
@@ -537,7 +537,7 @@ def test_the_path_is_relative_beside_the_project_and_absolute_otherwise(
     for folder in (inner, away):
         one_test(folder / 'a.vdlog')
         project.attach_run_log(folder / 'a.vdlog', name=folder.name)
-    saved = tmp_path / 'job' / 'project.vdyn'
+    saved = tmp_path / 'job' / 'project.hforge'
     project.save(saved)
     with h5py.File(saved, 'r') as f:
         stored = {group.attrs['name']: group.attrs['path']
@@ -547,7 +547,7 @@ def test_the_path_is_relative_beside_the_project_and_absolute_otherwise(
     # moved with its log, the project still finds it; the other stays
     moved = tmp_path / 'moved'
     os.replace(tmp_path / 'job', moved)
-    reopened = Project.open(moved / 'project.vdyn')
+    reopened = Project.open(moved / 'project.hforge')
     assert reopened['logs'].path == str(moved / 'logs' / 'a.vdlog')
     assert reopened['logs'].status().state == 'current'
     assert reopened['share'].path == str(away / 'a.vdlog')
@@ -558,56 +558,26 @@ def test_a_missing_log_still_opens_the_project_and_says_so(tmp_path):
     one_test(path)
     project = Project('t')
     name = project.attach_run_log(path)
-    project.save(tmp_path / 'p.vdyn')
+    project.save(tmp_path / 'p.hforge')
     path.unlink()
-    reopened = Project.open(tmp_path / 'p.vdyn')
+    reopened = Project.open(tmp_path / 'p.hforge')
     extract = reopened[name]
     assert extract.status().state == 'missing'
     assert len(extract.runs()) == 1, 'the snapshot reads without the log'
     assert extract.draft_chronology()
 
 
-def test_a_file_without_an_extract_keeps_its_old_stamp(tmp_path):
-    """Only a file holding an extract needs schema 3, so a build that
-    reads schema 2 still opens every other file this build writes."""
-    from hertzforge.core.report import Report
-
-    project = Project('t')
-    project.add('Report', Report('R'))
-    project.save(tmp_path / 'plain.vdyn')
-    with h5py.File(tmp_path / 'plain.vdyn', 'r') as f:
-        assert f.attrs['visualdynamics_schema'] == 1
-
-
-def test_a_build_reading_schema_2_refuses_a_file_with_an_extract(
-        tmp_path, monkeypatch):
-    """What an older Visual Dynamics does with a project holding a log:
-    it refuses the whole file with its message to update, and loads
-    nothing of it."""
-    path = tmp_path / 'a.vdlog'
-    one_test(path)
-    project = Project('t')
-    project.attach_run_log(path)
-    project.save(tmp_path / 'held.vdyn')
-    monkeypatch.setattr(native, 'SCHEMA_VERSION', 2)
-    with pytest.raises(ValueError, match=(
-            r'held\.vdyn was written by a newer Hertzforge \(schema 3; '
-            r'this build reads up to 2\)\. Update to open it\.')):
-        Project.open(tmp_path / 'held.vdyn')
-
-
 def test_an_extract_saved_alone_round_trips(tmp_path):
     path = tmp_path / 'a.vdlog'
     one_test(path)
     extract = take(path, taken=TAKEN)
-    native.save(extract, tmp_path / 'alone.vdyn')
-    again = native.load(tmp_path / 'alone.vdyn')
+    native.save(extract, tmp_path / 'alone.hforge')
+    again = native.load(tmp_path / 'alone.hforge')
     assert again == extract
-    assert native.schema_for(extract) == 3
 
 
 def test_stored_and_resolved_paths(tmp_path):
-    project = tmp_path / 'p.vdyn'
+    project = tmp_path / 'p.hforge'
     beside = tmp_path / 'logs' / 'a.vdlog'
     assert stored_path(str(beside), str(project)) == 'logs/a.vdlog'
     assert resolved_path('logs/a.vdlog', str(project)) == str(beside)
@@ -757,10 +727,10 @@ def test_a_project_saved_before_schema_3_opens_and_takes_a_log(tmp_path):
     path = tmp_path / 'a.vdlog'
     one_test(path)
     name = project.attach_run_log(path)
-    project.save(tmp_path / 'later.vdyn')
-    with h5py.File(tmp_path / 'later.vdyn', 'r') as f:
-        assert f.attrs['visualdynamics_schema'] == 3
-    again = Project.open(tmp_path / 'later.vdyn')
+    project.save(tmp_path / 'later.hforge')
+    with h5py.File(tmp_path / 'later.hforge', 'r') as f:
+        assert f.attrs['hertzforge_schema'] == 1
+    again = Project.open(tmp_path / 'later.hforge')
     assert again[name] == project[name]
     assert again['Predictions'].comment == 'schema exercise predictions'
 

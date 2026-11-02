@@ -78,7 +78,7 @@ def _refuse_modal(exporter: Exporter, obj: Any) -> None:
             f'{exporter.name} writes DOFs as node numbers, and '
             f'{len(modal)} of {len(dofs)} records are modal coordinates '
             f'({modal[0]} …) with no node to write — expand them to '
-            'physical responses first, or save the project as .vdyn')
+            'physical responses first, or save the project as .hforge')
 
 
 def register_exporter(name: str, description: str, suffix: str,

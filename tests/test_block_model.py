@@ -188,8 +188,8 @@ def test_block_properties_survive_the_native_file(tmp_path):
     original = plate.build()
     geometry = _with_properties(original, GroupProperties(plate.ALUMINUM,
                                                           plate.THICKNESS))
-    hertzforge.save(geometry, tmp_path / 'plate.vdyn')
-    back = hertzforge.load(tmp_path / 'plate.vdyn')
+    hertzforge.save(geometry, tmp_path / 'plate.hforge')
+    back = hertzforge.load(tmp_path / 'plate.hforge')
     props = back.group_properties[int(back.group_id[0])]
     assert props.thickness == plate.THICKNESS
     assert props.material.youngs_modulus == plate.ALUMINUM.youngs_modulus
@@ -203,8 +203,8 @@ def test_block_properties_survive_the_native_file(tmp_path):
     geometry = frame.geometry(beams=True)
     geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(
         steel, section=tube, orientation=orientation)}
-    hertzforge.save(geometry, tmp_path / 'frame.vdyn')
-    back = hertzforge.load(tmp_path / 'frame.vdyn')
+    hertzforge.save(geometry, tmp_path / 'frame.hforge')
+    back = hertzforge.load(tmp_path / 'frame.hforge')
     props = back.group_properties[int(back.group_id[0])]
     assert props.section == tube and props.orientation == orientation
     assert props.thickness is None

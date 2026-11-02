@@ -139,7 +139,7 @@ def test_the_imported_table_carries_into_a_project(tmp_path):
     project = hertzforge.Project('T')
     project.add('Channels', hertzforge.import_file(path))
     assert project.channel_table.dof_strings() == ['101Z+', '101X+']
-    saved = str(tmp_path / 'p.vdyn')
+    saved = str(tmp_path / 'p.hforge')
     project.save(saved)
     assert hertzforge.Project.open(saved)['Channels'].num_channels == 2
     assert np.all(

@@ -283,14 +283,14 @@ def test_the_windows_survive_a_round_trip(run, tmp_path):
     history = run['time_data']
     history.shocks = shocks.find(history)
     hertzforge.save(history, tmp_path / 'run')
-    back = hertzforge.load(tmp_path / 'run.vdyn')
+    back = hertzforge.load(tmp_path / 'run.hforge')
     assert back.shocks == history.shocks
 
 
 def test_a_history_that_was_never_looked_at_has_no_shocks(run, tmp_path):
     history = run['time_data']
     hertzforge.save(history, tmp_path / 'run')
-    assert hertzforge.load(tmp_path / 'run.vdyn').shocks is None
+    assert hertzforge.load(tmp_path / 'run.hforge').shocks is None
 
 
 def _leveled(peaks=(0.25, 0.55, 1.0)):

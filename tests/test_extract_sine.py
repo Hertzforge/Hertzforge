@@ -194,7 +194,7 @@ def test_the_level_set_round_trips_through_native(tmp_path):
 
     spec = _spec()
     levels = extract_sine(_recording(spec), spec)
-    path = str(tmp_path / 'levels.vdyn')
+    path = str(tmp_path / 'levels.hforge')
     hertzforge.io.save(levels, path)
     back = hertzforge.io.load(path)
     assert isinstance(back, SineLevelSet)
@@ -636,7 +636,7 @@ def test_the_floor_and_the_smoothing_travel_through_native(tmp_path):
 
     loud, spec = _flat_sweep(noise=12.0)
     levels = extract_sine(loud, spec, cycles=10.0)
-    path = str(tmp_path / 'levels.vdyn')
+    path = str(tmp_path / 'levels.hforge')
     hertzforge.io.save(levels, path)
     back = hertzforge.io.load(path)
     assert isinstance(back, SineLevelSet) and back == levels
@@ -668,7 +668,7 @@ def test_the_setting_rides_the_history_through_the_project(tmp_path):
     assert name in project.stale(), 'a moved smoothing badges the levels'
     project.refresh(name)
     assert project[name].cycles == 20.0 and not project.stale()
-    path = str(tmp_path / 'sweep.vdyn')
+    path = str(tmp_path / 'sweep.hforge')
     project.save(path)
     back = hertzforge.Project.open(path)
     assert back['Time History'].sine_extraction == SineExtraction(cycles=20.0)

@@ -162,13 +162,13 @@ def test_a_held_scale_rides_the_project_file(tmp_path):
     project = hertzforge.Project('Scaled')
     project.add('Spec', spec)
     project.add('PSDs', psds)
-    project.save(tmp_path / 'scaled.vdyn')
-    back = hertzforge.Project.open(tmp_path / 'scaled.vdyn')
+    project.save(tmp_path / 'scaled.hforge')
+    back = hertzforge.Project.open(tmp_path / 'scaled.hforge')
     assert back['PSDs'].scale_db == 3, 'a held scale is a judgment'
     assert back['Spec'].scale_db is None
     psds.scale_db = None
-    project.save(tmp_path / 'auto.vdyn')
-    again = hertzforge.Project.open(tmp_path / 'auto.vdyn')
+    project.save(tmp_path / 'auto.hforge')
+    again = hertzforge.Project.open(tmp_path / 'auto.hforge')
     assert again['PSDs'].scale_db is None, 'auto stays auto, re-detected'
 
 

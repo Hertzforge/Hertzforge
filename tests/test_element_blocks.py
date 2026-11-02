@@ -91,7 +91,7 @@ def test_deleting_an_element_takes_its_block_entry_with_it(two_blocks):
 
 
 def test_blocks_ride_the_native_file(two_blocks, tmp_path):
-    path = tmp_path / 'element groups.vdyn'
+    path = tmp_path / 'element groups.hforge'
     save(two_blocks, path)
     back = load(path)
     assert list(back.elem_group) == [7, 9]

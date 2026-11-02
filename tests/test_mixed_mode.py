@@ -550,7 +550,7 @@ def test_the_narrowbands_and_the_width_travel_with_the_floor(tmp_path):
              Narrowband(56.0, 0.5, width=4.0, sweep_to=93.0, rate=2.0,
                         mode=LOG)]
     spec = MixedSpecification(_floor(), None, bands, 2.5)
-    path = tmp_path / 'floor.vdyn'
+    path = tmp_path / 'floor.hforge'
     native.save(spec.floor, path)
     back = native.load(path)
     assert isinstance(back, Specification)
@@ -562,8 +562,8 @@ def test_the_narrowbands_and_the_width_travel_with_the_floor(tmp_path):
         f.visit(groups.append)
     assert not any('narrow' in name for name in groups)
     # a floor that never had them reads as a plain random specification
-    native.save(_floor(), tmp_path / 'plain.vdyn')
-    plain = native.load(tmp_path / 'plain.vdyn')
+    native.save(_floor(), tmp_path / 'plain.hforge')
+    plain = native.load(tmp_path / 'plain.hforge')
     assert plain.narrowbands == () and plain.tone_exclusion is None
 
 

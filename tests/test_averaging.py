@@ -320,7 +320,7 @@ def test_an_averaging_survives_the_round_trip(tmp_path):
     history = noisy_tone()
     history.averaging = Averaging(frame_length=512, overlap=0.25,
                                   window='flattop', frames=3, start=0.5)
-    path = tmp_path / 'history.vdyn'
+    path = tmp_path / 'history.hforge'
     io.save(history, str(path))
     back = io.load(str(path))
     assert back.averaging == history.averaging
@@ -411,7 +411,7 @@ def test_a_chosen_start_survives_the_project_file(tmp_path):
                                   window='boxcar', frames=4, start_set=True)
     project = Project()
     project.add('Bare', history)
-    path = tmp_path / 'chosen.vdyn'
+    path = tmp_path / 'chosen.hforge'
     project.save(path)
     assert Project.open(path)['Bare'].averaging.start_set
     for start, expected in ((0.0, False), (0.5, True)):
@@ -494,7 +494,7 @@ def test_detrend_survives_the_file(tmp_path):
     project = hertzforge.Project('D')
     project.add('Run', history)
     back = hertzforge.Project.open(
-        project.save(tmp_path / 'detrend.vdyn'))
+        project.save(tmp_path / 'detrend.hforge'))
     assert back['Run'].averaging.detrend == 'linear'
 
 
@@ -534,6 +534,6 @@ def test_the_window_parameter_survives_the_file(tmp_path):
     project = hertzforge.Project('W')
     project.add('Run', history)
     back = hertzforge.Project.open(
-        project.save(tmp_path / 'tukey.vdyn'))
+        project.save(tmp_path / 'tukey.hforge'))
     assert back['Run'].averaging.window == 'tukey'
     assert back['Run'].averaging.window_parameter == 0.3
