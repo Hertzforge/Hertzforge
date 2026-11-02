@@ -217,6 +217,33 @@ def test_no_drive_point_still_resynthesizes():
     assert np.abs(session.residual_matrix()).max() < 1e-2 * scale
 
 
+def _fit_project():
+    import hertzforge
+
+    project = hertzforge.Project('bounds')
+    project.add('FRF', synthetic_frf())
+    return project
+
+
+@pytest.mark.parametrize('bounds', [(900.0, 1000.0), (-30.0, -10.0),
+                                    (20.1, 20.2), (1000.0, 900.0)])
+def test_fit_modes_refuses_bounds_that_hold_no_line(bounds):
+    """A script's bounds say where the modes are, unlike the screen's view,
+    so bounds past the data, before it, or between two lines (0.25 Hz
+    apart here) are refused, not fitted over the whole band."""
+    project = _fit_project()
+    with pytest.raises(ValueError, match=r"hold none of FRF's lines, which "
+                       r'span 0 to 50 Hz at 0\.25 Hz'):
+        project.fit_modes('FRF', bounds=bounds, limit=1)
+    assert list(project) == ['FRF'], 'nothing added'
+
+
+def test_fit_modes_within_bounds_that_reach_the_data_still_fits():
+    project = _fit_project()
+    found = project[project.fit_modes('FRF', bounds=(10.0, 900.0), limit=1)]
+    assert found.frequency[0] == pytest.approx(20.0, rel=1e-3)
+
+
 def test_a_view_beyond_the_data_falls_back_to_everything():
     """Scrolled off the end of the record there is no mode to find, and
     an empty answer is worse than the whole range."""
