@@ -101,6 +101,33 @@ def test_every_listed_notice_is_in_the_tree():
     assert check_tree.NOTICES <= tracked
 
 
+def test_a_listed_reference_is_taken_out_and_the_rest_still_read(tmp_path):
+    address = 'git+https://example.org/quokka-foundry/specs.git'
+    references = frozenset({check_tree.reference_hash(address)})
+    path = tmp_path / 'ci.yml'
+    path.write_text(
+        f"run: pip install 'specs @ {address}'\n"
+        f"run: pip install 'specs @ {address}'  # from Quokka Foundry\n"
+        "run: pip install 'other @ git+https://example.org/quokka-foundry/other.git'\n",
+        encoding='utf-8')
+    found = check_tree.check_names([path], tmp_path, names=PLANTED, references=references)
+    assert found == ['ci.yml: line 2 names a listed organization',
+                     'ci.yml: line 3 names a listed organization']
+
+
+def test_every_listed_reference_is_in_the_tree():
+    # a reference left listed after its address goes would exempt that
+    # address wherever it was written later
+    seen = set()
+    for path in check_tree.tracked_files():
+        text = check_tree._text(path)
+        if text is None:
+            continue
+        seen.update(check_tree.reference_hash(address)
+                    for address in check_tree._ADDRESS.findall(text))
+    assert check_tree.REFERENCES <= seen
+
+
 @pytest.mark.parametrize('expression,allowed', [
     ('MIT', True), ('(MIT OR GPL-3.0)', True), ('MIT AND OFL-1.1', True),
     ('GPL-3.0', False), ('MIT AND GPL-3.0', False), ('LGPL-3.0', False),
