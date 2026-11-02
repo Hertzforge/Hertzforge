@@ -41,6 +41,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its test tools
         run: pip install -e . pytest pytest-xdist jsonschema ruff
+      # The ESCDF reference implementation, which io/escdf.py and
+      # io/escdf_objects.py are tested against both ways. It is not on PyPI,
+      # so it is installed here rather than declared in pyproject, and its
+      # address is the one listed in check_tree.REFERENCES. The tests that
+      # need it skip without it.
+      - name: Install the ESCDF reference implementation
+        run: pip install 'escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git'
       - name: Lint every Python file in the repository
         run: ruff check .
       - name: No GPL package installed, every import accounted for
