@@ -1,20 +1,23 @@
 /**
- * Sequential colormap for magnitude: a cividis-like ramp, dark blue through gray to yellow.
+ * Sequential colormap for magnitude: viridis, dark purple through blue and green to yellow, as
+ * matplotlib and Visual Dynamics draw it (Brandon, 2026-11-02, over the cividis the shell had).
  * Designed to read the same with red-green color vision deficiency, and monotonic in lightness,
  * so the order of values survives in grayscale too.
  */
 
+// matplotlib's viridis at eleven even steps
 const STOPS: [number, number, number][] = [
-	[0, 34, 78],
-	[24, 55, 111],
-	[61, 77, 110],
-	[90, 97, 111],
-	[117, 117, 117],
-	[143, 138, 120],
-	[171, 160, 114],
-	[201, 184, 98],
-	[234, 211, 72],
-	[254, 232, 56]
+	[68, 1, 84],
+	[72, 36, 117],
+	[65, 68, 135],
+	[53, 95, 141],
+	[42, 120, 142],
+	[33, 145, 140],
+	[34, 168, 132],
+	[68, 191, 112],
+	[122, 209, 81],
+	[189, 223, 38],
+	[253, 231, 37]
 ];
 
 /** RGB in 0..1 for t in 0..1 (clamped). */

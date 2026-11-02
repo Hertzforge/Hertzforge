@@ -12,7 +12,8 @@ from hertzforge.service import frames
 
 from .conftest import GOLDEN
 
-BINARY = ('response_spectrum', 'event_shape', 'event_random_live', 'event_random_data')
+BINARY = ('response_spectrum', 'event_shape', 'event_random_live', 'event_random_data',
+          'response_waterfall')
 #: Binary goldens whose arrays are named a0, a1, ... in traversal order
 TRAVERSAL_NAMED = ('response_spectrum', 'event_random_live', 'event_random_data')
 #: Text goldens of the hardware and Random control messages

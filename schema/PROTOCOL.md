@@ -120,6 +120,31 @@ service takes it from there rather than restating it.
 
 Shapes are real, one translation vector per node, in the same node order as `nodes`.
 
+**`waterfall`** (many records of one quantity, each at its own depth)
+
+```
+{"view":"waterfall","title":"...",
+ "x":{"label":"Frequency","unit":"Hz","scale":"linear"|"log"},
+ "z":{"label":"PSD","unit":"(m/s²)²/Hz","scale":"log"|"linear"},
+ "records":["101Z+","102Z+",...],           one label per record, front to back
+ "offsets":{"$array":.. u32 [R+1]},         record r is points offsets[r] .. offsets[r+1]
+ "x_values":{"$array":.. f32 [P]},
+ "z_values":{"$array":.. f32 [P]},          NaN is a gap: the line breaks there
+ "x_range":[low, high],                     where something is drawn
+ "z_range":[low, high],                     optional: a level range the data pins
+ "page":{"number":1,"count":3,"records":905}}   optional: which page of how many
+```
+
+Values are in display units and never logged: the shell takes log10 of an axis whose `scale` is
+`log`, so a value at or below zero is a gap there. The service has already drawn each record as it
+is calculated, the same rule as `spectrum`'s `shape`: a time history arrives peak-decimated to a
+few thousand points that keep every extreme, a PSD as its step outline (two points per bin, never
+thinned, so the area under it is its mean square), and a breakpoint specification filled in along
+its power law. The shell colors every point by its level on the sequential colormap, with a
+numeric legend, and names at most 40 records, every nth past that. Records that do not fit one
+scene are on later pages, never drawn coarser. This is Visual Dynamics' 3-D data view
+(`hertzforge.drawing.viz.waterfall`).
+
 ## Operations: Declarative Panels
 
 The analysis service describes each operation; the shell builds the panel from the description.

@@ -127,6 +127,28 @@ def records_per_page(data: DataArray, drawn_count: int,
     return max(1, min(drawn_count or 1, budget // max(per_record, 1)))
 
 
+def quantity_label(key: tuple[str, str | None]) -> str:
+    """The word the quantity box shows for one (dimension, hint) group.
+
+    It is the response quantity of the dimension, in the words the
+    interface uses: a PSD group of acceleration**2/frequency shows
+    'acceleration', and an FRF group shows what it measures. A group
+    whose units are undefined is named the same way from its hint, with
+    '[units undefined]' after it as the axes show, or is
+    'units undefined' when it has no hint.
+    """
+    from ...core.data import channel_quantities
+    from ...core.unit_choices import shown_dimension
+
+    dim, hint = key
+    named = dim if dim != UNKNOWN else (hint or UNKNOWN)
+    if named == UNKNOWN:
+        return 'units undefined'
+    response, _reference = channel_quantities(named)
+    word = shown_dimension(response)
+    return word if dim != UNKNOWN else f'{word} [units undefined]'
+
+
 def _component_values(data: DataArray, y: np.ndarray,
                       component: str) -> tuple[np.ndarray, bool, bool]:
     """(values, log reading, signed component applied).
@@ -156,7 +178,8 @@ def waterfall_arrays(data: DataArray,
                      budget: int = POINT_BUDGET,
                      quantity: tuple[str, str | None] | None = None,
                      page: int = 0,
-                     scene_budget: int | None = None) -> dict[str, Any]:
+                     scene_budget: int | None = None,
+                     exponents: bool = True) -> dict[str, Any]:
     """The waterfall's numbers, before VTK is involved.
 
     Everything the scene draws, in a form a test can check without a
@@ -181,6 +204,13 @@ def waterfall_arrays(data: DataArray,
     - ``page``, ``pages``, ``per_page``: the page drawn, how many there
       are, and the records on each
     - ``of_quantity``: how many records the group has over all pages
+
+    With `exponents` False, ``x`` and ``z`` are the values themselves,
+    in display units, for a renderer that takes the log itself (the
+    shell does, so its scale can change without asking again); a
+    non-positive value on a log reading is still a NaN gap, and the
+    flags still say how the object reads, while the titles drop the
+    log10 that only exponents need.
     """
     us = unit_system or DEFAULT_SYSTEM
     chosen, left_out = waterfall_group(data, records, quantity)
@@ -199,6 +229,9 @@ def waterfall_arrays(data: DataArray,
     def decades(coords):
         if not log_abscissa:
             return coords
+        if not exponents:
+            coords = np.asarray(coords, dtype=float)
+            return np.where(coords > 0, coords, np.nan)
         coords = np.asarray(coords, dtype=float)
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.where(coords > 0,
@@ -233,6 +266,8 @@ def waterfall_arrays(data: DataArray,
         # zero is a gap on a log axis, not a value 300 decades down —
         # the report's axis learned this the hard way
         rows = np.where(rows > 0, rows, np.nan)
+        if not exponents:
+            return rows
         with np.errstate(invalid='ignore'):
             return np.log10(rows)
 
@@ -309,11 +344,11 @@ def waterfall_arrays(data: DataArray,
             from ...names import display_name
 
             zlabel = display_name(type(data).__name__).lower()
-    if log_scaled:
+    if log_scaled and exponents:
         zlabel = f'log10 {zlabel}'.rstrip()
     xlabel = (f'{data.abscissa_dim.capitalize()} '
               f'({us.label_ascii(data.abscissa_dim)})')
-    if log_abscissa:
+    if log_abscissa and exponents:
         # the same honesty as the vertical axis: the coordinates are
         # exponents, and the title says so for the VTK stage, whose
         # axis prints them as they are. The report's canvas prints

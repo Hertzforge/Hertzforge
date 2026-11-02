@@ -459,6 +459,25 @@ def main() -> None:
     # one connection's subscribed data: a control, a response and a time plot
     write('event_random_data', random_data(), random_data_arrays())
 
+    # a waterfall of two records; f32 values with u32 offsets. No NaN gap:
+    # the expected JSON must parse in JavaScript, which has no NaN literal
+    write('response_waterfall', {
+        'type': 'response', 'id': 9,
+        'result': {'views': [
+            {'view': 'waterfall', 'title': 'Two PSDs',
+             'x': {'label': 'Frequency', 'unit': 'Hz', 'scale': 'linear'},
+             'z': {'label': 'PSD', 'unit': '(m/s²)²/Hz', 'scale': 'log'},
+             'records': ['101Z+', '102Z+'],
+             'offsets': {'$array': 'o'}, 'x_values': {'$array': 'x'},
+             'z_values': {'$array': 'z'}, 'x_range': [10.0, 40.0],
+             'page': {'number': 1, 'count': 2, 'records': 4}},
+        ]},
+    }, {
+        'o': ('u32', [3], [0, 4, 8]),
+        'x': ('f32', [8], [10.0, 20.0, 30.0, 40.0, 10.0, 20.0, 30.0, 40.0]),
+        'z': ('f32', [8], [0.5, 1.0, 0.25, 0.125, 2.0, 0.75, 1.0, 0.5]),
+    })
+
     # text frames: a hello and an error response, no arrays
     (HERE / 'hello.json').write_text(json.dumps(
         {'type': 'hello', 'protocol': 'sds/1', 'service': 'analysis', 'version': '0.1.0'}) + '\n')

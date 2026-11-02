@@ -26,17 +26,21 @@ def test_catalog_validates(catalog, validate):
 
 def test_catalog_names_every_operation_and_dataset(catalog):
     ids = {op['id'] for op in catalog['operations']}
-    assert ids == {'random.psd_vs_spec', 'random.error_db', 'modal.modes'}
+    assert ids == {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
+                   'modal.modes'}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}
 
 
 def test_channel_param_comes_from_the_dataset(catalog):
+    taking = [op['id'] for op in catalog['operations']
+              if any(p['name'] == 'channel' for p in op['params'])]
+    assert taking == ['random.psd_vs_spec', 'random.error_db']
     for op in catalog['operations']:
-        if op['accepts'] != 'random_run':
+        channel = next((p for p in op['params'] if p['name'] == 'channel'), None)
+        if channel is None:
             continue
-        channel = next(p for p in op['params'] if p['name'] == 'channel')
         assert channel['type'] == 'enum'
         assert channel['options_from'] == 'channels'
         assert 'options' not in channel

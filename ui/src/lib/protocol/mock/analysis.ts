@@ -140,6 +140,18 @@ const OPERATIONS: OperationDescriptor[] = [
 		outputs: ['spectrum', 'reading']
 	},
 	{
+		id: 'random.waterfall',
+		title: 'Waterfall',
+		workspace: 'analyze',
+		accepts: 'random_run',
+		summary: 'Many synthetic PSDs at their own depths, colored by level: a load test of the 3-D data view.',
+		params: [
+			{ name: 'records', label: 'Records', type: 'integer', default: 64, min: 1, max: 4000, step: 1 },
+			{ name: 'lines', label: 'Lines per record', type: 'integer', default: 2001, min: 2, max: 16385, step: 1 }
+		],
+		outputs: ['waterfall']
+	},
+	{
 		id: 'modal.modes',
 		title: 'Mode Shapes',
 		workspace: 'modal',
@@ -354,6 +366,51 @@ export function createAnalysisServer(): MockServer {
 		];
 	}
 
+	/** Synthetic PSDs, one per record, each a few resonances over a floor that drifts with depth. */
+	function waterfall(ds: RunDataset, p: Record<string, unknown>): View[] {
+		const records = requireNumber(p, 'records', 1, 4000);
+		const lines = requireNumber(p, 'lines', 2, 16385);
+		if (!Number.isInteger(records) || !Number.isInteger(lines)) {
+			throw new MockError('bad_request', 'records and lines must be whole numbers.');
+		}
+		const next = rng(hashSeed(ds.id, records, lines, 'w'));
+		const x = new Float32Array(records * lines);
+		const z = new Float32Array(records * lines);
+		const offsets = new Uint32Array(records + 1);
+		const df = 2000 / (lines - 1);
+		for (let r = 0; r < records; r++) {
+			offsets[r] = r * lines;
+			const shift = 1 + 0.25 * (r / Math.max(1, records - 1));
+			const modes = [
+				{ fn: 180 * shift, q: 18 },
+				{ fn: 520 * shift, q: 25 },
+				{ fn: 1240 * shift, q: 30 }
+			];
+			for (let i = 0; i < lines; i++) {
+				const f = i * df;
+				let level = 1e-4;
+				for (const m of modes) level += 2e-4 * sdofT2(f, m.fn, m.q);
+				const k = r * lines + i;
+				x[k] = f;
+				z[k] = level * (1 + 0.35 * Math.abs(gauss(next)));
+			}
+		}
+		offsets[records] = records * lines;
+		return [
+			{
+				view: 'waterfall',
+				title: `${records} Synthetic PSDs`,
+				x: { label: 'Frequency', unit: 'Hz', scale: 'linear' },
+				z: { label: 'PSD', unit: 'g²/Hz', scale: 'log' },
+				records: Array.from({ length: records }, (_, r) => `${101 + r}Z+`),
+				offsets,
+				x_values: x,
+				z_values: z,
+				x_range: [0, 2000]
+			}
+		];
+	}
+
 	function modes(h: Handle, p: Record<string, unknown>): View[] {
 		const ds = h.dataset as ModelDataset;
 		const count = requireNumber(p, 'count', 1, 12);
@@ -430,6 +487,8 @@ export function createAnalysisServer(): MockServer {
 						return { views: transmissibility(ds, p) };
 					case 'random.coherence':
 						return { views: coherence(ds, p) };
+					case 'random.waterfall':
+						return { views: waterfall(ds, p) };
 					case 'modal.modes':
 						return { views: modes(h, p) };
 				}

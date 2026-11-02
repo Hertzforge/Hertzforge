@@ -153,7 +153,33 @@ export interface Shape3DView {
 	modes: Mode[];
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView;
+/**
+ * Many records of one quantity, each a polyline at its own depth (schema/PROTOCOL.md, `waterfall`).
+ * Values are in display units and never logged; the shell takes log10 of a `log` axis.
+ */
+export interface WaterfallView {
+	view: 'waterfall';
+	title: string;
+	x: Axis;
+	z: Axis;
+	/** One label per record, front to back. */
+	records: string[];
+	/** u32 [R + 1]: record r is points offsets[r] .. offsets[r + 1]. */
+	offsets: Uint32Array;
+	/** f32 [P]. */
+	x_values: Float32Array;
+	/** f32 [P]; NaN is a gap. */
+	z_values: Float32Array;
+	/** Where something is drawn on x. */
+	x_range: [number, number];
+	/** A level range the data pins (a coherence's 0 to 1.05). */
+	z_range?: [number, number];
+	/** Which page of how many, of how many records. */
+	page?: { number: number; count: number; records: number };
+	note?: string;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------

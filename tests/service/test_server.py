@@ -174,7 +174,7 @@ async def serve():
                 if op.accepts != kind:
                     continue
                 params = ({'channel': opened['channels'][1]['value']}
-                          if opened['channels'] else {})
+                          if any(p.name == 'channel' for p in op.params) else {})
                 result = await service.op_run({'op': op.id, 'handle': opened['handle'],
                                                'params': params}, handles)
                 await service.in_worker(frames.pack, {'type': 'response', 'id': 1,
@@ -354,7 +354,7 @@ def test_console_entry_point_starts_headless_and_answers():
 
         hello, catalog = asyncio.run(ask())
         assert hello['protocol'] == 'sds/1'
-        assert len(catalog['result']['operations']) == 3
+        assert len(catalog['result']['operations']) == 4
     finally:
         process.terminate()
         process.wait(timeout=20)

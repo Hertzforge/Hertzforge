@@ -363,3 +363,22 @@ def test_the_stage_spans_what_is_drawn_not_every_line():
               ordinate_unit='(m/s**2)**2/Hz')
     x0, x1, _z0, _z1 = stage_curves(waterfall_arrays(psd))['extents']
     assert 15.0 <= x0 <= 20.0 and 400.0 <= x1 <= 410.0, (x0, x1)
+
+
+def test_values_rather_than_exponents_for_a_renderer_that_takes_the_log():
+    """The shell takes the log itself, so the service asks for values:
+    the same points, 10 to the exponent, a gap still a gap, and the
+    titles without the log10 the exponents needed."""
+    f = np.linspace(0.0, 100.0, 129)
+    values = np.ones((1, 129))
+    values[0, 40:60] = 0.0
+    data = Psd(f, values, response_dof=['1Z+'],
+               ordinate_dim=[PSD_DIM], ordinate_unit=[PSD_UNIT])
+    logged = waterfall_arrays(data)
+    plain = waterfall_arrays(data, exponents=False)
+    (lx, lz), (px, pz) = logged['curves'][0], plain['curves'][0]
+    assert np.array_equal(lx, px)
+    assert np.array_equal(np.isnan(lz), np.isnan(pz))
+    assert np.allclose(10.0 ** lz[np.isfinite(lz)], pz[np.isfinite(pz)])
+    assert plain['log_scaled'] is True
+    assert not plain['zlabel'].startswith('log10')

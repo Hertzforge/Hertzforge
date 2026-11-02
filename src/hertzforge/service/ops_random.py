@@ -1,5 +1,5 @@
 """Operations on a random vibration run: a channel's PSD against its
-specification, and its error in dB.
+specification, its error in dB, and the run's records as a waterfall.
 
 The judgment is `hertzforge.core.compliance`'s, called as the
 application calls it: `compare` for the channel's numbers, `judge` for its
@@ -16,7 +16,7 @@ import numpy as np
 
 from . import views as v
 from .datasets import Channel, RandomRun, quantity_of
-from .descriptors import Operation, Param
+from .descriptors import Operation, Option, Param
 from .protocol import refused
 
 #: limit curve -> the line role the viz kit styles it with
@@ -31,6 +31,18 @@ TOLERANCE = Param('tolerance_db', 'Tolerance (if the specification has no '
                   max=12.0, step=0.5)
 
 FREQUENCY = v.axis('Frequency', 'Hz', 'log')
+
+#: what a run can be drawn as a waterfall of, by the name its project
+#: gives each
+WATERFALL_OF = {'psd': 'Time History PSDs',
+                'octave': 'Time History PSDs 1/6 Octave',
+                'time': 'Time History',
+                'coherence': 'Time History Multiple Coherence'}
+OF = Param('of', 'Records', 'enum', default='psd',
+           options=(Option('psd', 'PSDs'), Option('octave', '1/6-octave PSDs'),
+                    Option('time', 'Time histories'),
+                    Option('coherence', 'Multiple coherence')))
+PAGE = Param('page', 'Page', 'integer', default=1, min=1, step=1)
 
 
 def _sig(value: float, digits: int = 4) -> float:
@@ -304,6 +316,58 @@ def error_db(run: RandomRun, params: dict[str, Any]) -> list[dict]:
                        link='frequency')]
 
 
+def waterfall(run: RandomRun, params: dict[str, Any]) -> list[dict]:
+    """`random.waterfall`: one of the run's objects with every record at
+    its own depth, colored by level, as Visual Dynamics' 3-D data view
+    draws it (`hertzforge.drawing.viz.waterfall`).
+
+    Values are SI, as the run's other views are. A time history is
+    peak-decimated to the point budget; a PSD keeps every tread of its
+    steps, so its area is its rms squared. Records that do not fit one
+    scene go to later pages, and `page` past the last lands on the last.
+    Records of another quantity than the largest group are left out
+    with a note. An object the run does not have is refused."""
+    import hertzforge as hz
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.drawing.viz.waterfall import (
+        drawn_span,
+        quantity_label,
+        waterfall_arrays,
+    )
+    from hertzforge.names import display_name
+
+    name = WATERFALL_OF[params['of']]
+    if run.project is None or name not in run.project:
+        raise refused(f'{run.title} has no {name}.')
+    data = run.project[name]
+    arrays = waterfall_arrays(data, unit_system=hz.SI, exponents=False,
+                              page=int(params['page']) - 1)
+    if not arrays['drawn']:
+        raise refused(f'{name} in {run.title} has no records to draw.')
+    first = arrays['drawn'][0]
+    key = (data.ordinate_dim[first], data.dimension_hint[first])
+    label = (quantity_label(key).capitalize() if isinstance(data, TimeHistory)
+             else display_name(type(data).__name__))
+    x = v.axis(data.abscissa_dim.capitalize(), _unit_text(data.abscissa_dim),
+               'log' if arrays['log_abscissa'] else 'linear')
+    unit = _unit_text(data.ordinate_dim[first])
+    # a ratio's unit is the bare '1', which says nothing on an axis
+    z = v.axis(label, None if unit == '1' else unit,
+               'log' if arrays['log_scaled'] else 'linear')
+    limits = getattr(data, 'ordinate_limits', None)
+    pages = arrays['pages']
+    view = v.waterfall(
+        f'{run.title}: {name}', x, z, arrays['labels'], arrays['curves'],
+        drawn_span(arrays['curves']),
+        z_range=None if limits is None or arrays['log_scaled'] else limits,
+        page={'number': arrays['page'] + 1, 'count': pages,
+              'records': arrays['of_quantity']} if pages > 1 else None)
+    if arrays['left_out']:
+        view['note'] = (f'{len(arrays["left_out"])} records of another '
+                        'quantity are not drawn on this stage')
+    return [view]
+
+
 OPERATIONS = (
     Operation(
         id='random.psd_vs_spec', title='PSD Against Specification',
@@ -318,4 +382,10 @@ OPERATIONS = (
         summary='A channel\'s departure from its specification in dB, line '
                 'by line, with its limits about zero.',
         params=(CHANNEL, TOLERANCE), outputs=('spectrum',), run=error_db),
+    Operation(
+        id='random.waterfall', title='Waterfall', workspace='analyze',
+        accepts='random_run',
+        summary='Every record of the run\'s PSDs, time histories or '
+                'coherence at its own depth, colored by level.',
+        params=(OF, PAGE), outputs=('waterfall',), run=waterfall),
 )

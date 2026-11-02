@@ -57,7 +57,7 @@ function toTyped(node: unknown): unknown {
 }
 
 describe('decodeFrame against golden frames', () => {
-	for (const name of ['response_spectrum', 'event_shape']) {
+	for (const name of ['response_spectrum', 'event_shape', 'response_waterfall']) {
 		it(`decodes ${name}.bin to ${name}.expected.json`, () => {
 			const decoded = decodeFrame(readBin(`${name}.bin`));
 			expect('arrays' in decoded).toBe(false);

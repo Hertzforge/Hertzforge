@@ -59,6 +59,7 @@ PRELOAD = (
     'hertzforge',
     'hertzforge.drawing.plot',
     'hertzforge.drawing.viz.geometry',
+    'hertzforge.drawing.viz.waterfall',
     'hertzforge.deform',
     'hertzforge.demo.drone',
     'hertzforge.demo.plate',
