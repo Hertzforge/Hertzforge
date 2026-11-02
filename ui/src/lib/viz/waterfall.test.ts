@@ -49,6 +49,11 @@ describe('levelRange', () => {
 		expect(levelRange([0.9, 0.95], true, [0, 1.05])).toEqual([0.9, 0.95]);
 	});
 
+	it('spans at most LOG_DECADES on a log axis, below the highest level', () => {
+		expect(levelRange([1e-14, 1e-3, 125], true)).toEqual([125e-8, 125]);
+		expect(levelRange([1e-14, 125], false)).toEqual([1e-14, 125]);
+	});
+
 	it('widens a flat record so it still stands on the stage', () => {
 		const [lo, hi] = levelRange([2, 2], true);
 		expect(lo).toBeLessThan(2);

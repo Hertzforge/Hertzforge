@@ -196,7 +196,7 @@ def test_the_preload_leaves_nothing_heavy_to_import_while_serving(tmp_path):
     tests import modules first and would hide a module the list misses.
     The frame-wing model is left out, as `PRELOAD` leaves out its first
     build (about 30 s)."""
-    datasets = ['plate-random', 'drone-fem', 'plate-fem']
+    datasets = ['plate-random', 'plate-modal', 'drone-fem', 'plate-fem']
     env = {**os.environ, 'HERTZFORGE_CACHE_DIR': str(tmp_path / 'cache')}
     for cache in ('empty', 'full'):
         done = subprocess.run(
@@ -354,7 +354,7 @@ def test_console_entry_point_starts_headless_and_answers():
 
         hello, catalog = asyncio.run(ask())
         assert hello['protocol'] == 'sds/1'
-        assert len(catalog['result']['operations']) == 4
+        assert len(catalog['result']['operations']) == 5
     finally:
         process.terminate()
         process.wait(timeout=20)

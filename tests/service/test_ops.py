@@ -94,6 +94,45 @@ def test_a_page_past_the_end_lands_on_the_last(random_run, monkeypatch):
     assert len(view['records']) == 2
 
 
+# ---- modal_run.waterfall --------------------------------------------------------
+
+@pytest.mark.parametrize('of', ('frf', 'coherence', 'time'))
+def test_modal_run_waterfall_validates(modal_run, validate, of):
+    (view,) = run('modal_run.waterfall', modal_run, of=of)
+    wire_views([view], validate)
+    assert len(view['records']) == view['offsets'].size - 1
+
+
+def test_an_frf_waterfall_is_its_magnitude_on_a_log_axis_by_default(modal_run):
+    (view,) = run('modal_run.waterfall', modal_run, of='frf')
+    frf = modal_run.project['FRF']
+    assert len(view['records']) == frf.num_records
+    assert view['z'] == {'label': 'FRF', 'unit': '(m/s²)/N', 'scale': 'log'}
+    i0, i1 = int(view['offsets'][0]), int(view['offsets'][1])
+    drawn = view['z_values'][i0:i1]
+    assert np.nanmax(drawn) == pytest.approx(float(np.abs(frf.ordinate[0]).max()), rel=1e-6)
+
+
+def test_an_frf_phase_reads_linear_in_degrees(modal_run):
+    (view,) = run('modal_run.waterfall', modal_run, of='frf', component='phase')
+    assert view['z'] == {'label': 'FRF phase', 'unit': 'deg', 'scale': 'linear'}
+    finite = view['z_values'][np.isfinite(view['z_values'])]
+    assert finite.min() >= -180.0 and finite.max() <= 180.0
+    (real,) = run('modal_run.waterfall', modal_run, of='frf', component='real')
+    assert real['z']['scale'] == 'linear' and real['z']['label'] == 'FRF, real part'
+
+
+def test_a_component_does_nothing_to_real_data(modal_run):
+    (plain,) = run('modal_run.waterfall', modal_run, of='coherence')
+    (phased,) = run('modal_run.waterfall', modal_run, of='coherence', component='phase')
+    assert np.array_equal(plain['z_values'], phased['z_values'], equal_nan=True)
+    assert plain['z'] == phased['z'] and plain['z_range'] == [0.0, 1.05]
+
+
+def test_the_modal_run_says_its_values_are_simulated(modal_run):
+    assert modal_run.summary()['source_of_values'] == 'SIM'
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

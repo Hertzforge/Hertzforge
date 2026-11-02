@@ -18,6 +18,7 @@ from . import views as v
 from .datasets import Channel, RandomRun, quantity_of
 from .descriptors import Operation, Option, Param
 from .protocol import refused
+from .waterfalls import waterfall_view
 
 #: limit curve -> the line role the viz kit styles it with
 ROLES = {'warning_lower': 'tolerance', 'warning_upper': 'tolerance',
@@ -319,53 +320,13 @@ def error_db(run: RandomRun, params: dict[str, Any]) -> list[dict]:
 def waterfall(run: RandomRun, params: dict[str, Any]) -> list[dict]:
     """`random.waterfall`: one of the run's objects with every record at
     its own depth, colored by level, as Visual Dynamics' 3-D data view
-    draws it (`hertzforge.drawing.viz.waterfall`).
-
-    Values are SI, as the run's other views are. A time history is
-    peak-decimated to the point budget; a PSD keeps every tread of its
-    steps, so its area is its rms squared. Records that do not fit one
-    scene go to later pages, and `page` past the last lands on the last.
-    Records of another quantity than the largest group are left out
-    with a note. An object the run does not have is refused."""
-    import hertzforge as hz
-    from hertzforge.core.data import TimeHistory
-    from hertzforge.drawing.viz.waterfall import (
-        drawn_span,
-        quantity_label,
-        waterfall_arrays,
-    )
-    from hertzforge.names import display_name
-
+    draws it (`waterfalls.waterfall_view`). An object the run does not
+    have is refused."""
     name = WATERFALL_OF[params['of']]
     if run.project is None or name not in run.project:
         raise refused(f'{run.title} has no {name}.')
-    data = run.project[name]
-    arrays = waterfall_arrays(data, unit_system=hz.SI, exponents=False,
-                              page=int(params['page']) - 1)
-    if not arrays['drawn']:
-        raise refused(f'{name} in {run.title} has no records to draw.')
-    first = arrays['drawn'][0]
-    key = (data.ordinate_dim[first], data.dimension_hint[first])
-    label = (quantity_label(key).capitalize() if isinstance(data, TimeHistory)
-             else display_name(type(data).__name__))
-    x = v.axis(data.abscissa_dim.capitalize(), _unit_text(data.abscissa_dim),
-               'log' if arrays['log_abscissa'] else 'linear')
-    unit = _unit_text(data.ordinate_dim[first])
-    # a ratio's unit is the bare '1', which says nothing on an axis
-    z = v.axis(label, None if unit == '1' else unit,
-               'log' if arrays['log_scaled'] else 'linear')
-    limits = getattr(data, 'ordinate_limits', None)
-    pages = arrays['pages']
-    view = v.waterfall(
-        f'{run.title}: {name}', x, z, arrays['labels'], arrays['curves'],
-        drawn_span(arrays['curves']),
-        z_range=None if limits is None or arrays['log_scaled'] else limits,
-        page={'number': arrays['page'] + 1, 'count': pages,
-              'records': arrays['of_quantity']} if pages > 1 else None)
-    if arrays['left_out']:
-        view['note'] = (f'{len(arrays["left_out"])} records of another '
-                        'quantity are not drawn on this stage')
-    return [view]
+    return [waterfall_view(f'{run.title}: {name}', run.project[name],
+                           params['page'])]
 
 
 OPERATIONS = (

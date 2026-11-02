@@ -18,7 +18,7 @@ from .protocol import bad_request
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 Workspace = Literal['acquire', 'analyze', 'modal', 'model', 'specify',
                     'simulate', 'report']
-DatasetKind = Literal['random_run', 'modal_model']
+DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall']
 
 #: marks a param with no default: the request must give it

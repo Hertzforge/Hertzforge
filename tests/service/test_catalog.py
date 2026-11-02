@@ -27,9 +27,9 @@ def test_catalog_validates(catalog, validate):
 def test_catalog_names_every_operation_and_dataset(catalog):
     ids = {op['id'] for op in catalog['operations']}
     assert ids == {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
-                   'modal.modes'}
+                   'modal.modes', 'modal_run.waterfall'}
     kinds = {d['kind'] for d in catalog['datasets']}
-    assert kinds == {'random_run', 'modal_model'}
+    assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}
 
 

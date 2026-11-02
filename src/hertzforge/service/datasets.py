@@ -412,9 +412,77 @@ def open_fem_model(cache_name: str, title: str,
                       seconds=time.perf_counter() - started)
 
 
+@dataclass
+class ModalRun:
+    """An opened `modal_run`: a controller's modal survey read as a
+    project, its FRFs, coherence and time captures by name. It has no
+    channel list for a param to choose from; its operations take the
+    whole object."""
+
+    kind = 'modal_run'
+    title: str
+    source: Path
+    project: Any
+    channels: list[Channel] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    from_cache: bool = False
+    seconds: float = 0.0
+
+    def summary(self) -> dict[str, Any]:
+        """The `summary` object `dataset.open` returns for the survey: what
+        each object holds, whether it was simulated, and where the data
+        came from (cache or not, seconds to open, any notes)."""
+        out: dict[str, Any] = {'source': self.source.name}
+        for name, obj in self.project.items():
+            records = getattr(obj, 'num_records', None)
+            if records is not None:
+                out[name.lower()] = f'{records} records'
+        sources = {getattr(obj, 'source', None) for obj in self.project.values()}
+        sources.discard(None)
+        if sources:
+            out['source_of_values'] = ', '.join(sorted(sources))
+        out['from_cache'] = self.from_cache
+        out['open_seconds'] = round(self.seconds, 3)
+        if self.notes:
+            out['notes'] = '; '.join(self.notes)
+        return out
+
+
+def open_modal_run(path: Path, title: str, cache_name: str) -> ModalRun:
+    """Read the modal survey at `path` (through the cache) into a project.
+    A missing file is a not_found that names the fetch script and
+    `HERTZFORGE_TESTDATA`."""
+    import hertzforge as hz
+
+    started = time.perf_counter()
+    if not path.is_file():
+        raise not_found(
+            f'The test data for "{title}" is missing: {path} does not exist. '
+            f'Run {FETCH_COMMAND} from the repository root, or set '
+            f'HERTZFORGE_TESTDATA to a directory that holds plate/{path.name}.')
+    notes: list[str] = []
+    stat = path.stat()
+    name = (f'{cache_name}-hz{core_version()}-{stat.st_size}-'
+            f'{stat.st_mtime_ns}.hforge')
+
+    def read() -> Any:
+        project = hz.Project(title)
+        project.import_file(str(path))
+        return project
+
+    project, hit = _cached(name, read, notes)
+    return ModalRun(title=title, source=path, project=project, notes=notes,
+                    from_cache=hit, seconds=time.perf_counter() - started)
+
+
 def _plate_random() -> RandomRun:
     return open_random_run(testdata_root() / 'plate' / 'random.nc4',
                            'Plate Random Run', 'plate-random')
+
+
+def _plate_modal() -> ModalRun:
+    return open_modal_run(testdata_root() / 'plate' / 'modal_spectra.nc4',
+                          'Plate Modal Run', 'plate-modal')
 
 
 def _drone() -> ModalModel:
@@ -438,6 +506,10 @@ CATALOG: tuple[Entry, ...] = (
           'A random vibration controller run on a free plate: eight control '
           'channels against a specification with warning and abort limits, '
           'plus four force channels.', _plate_random),
+    Entry('plate-modal', 'modal_run', 'Plate Modal Run',
+          'A modal survey of the free plate from the controller, on a '
+          'simulated plant: FRFs of eleven responses to two references, '
+          'their multiple coherence and the time captures.', _plate_modal),
     Entry('drone-fem', 'modal_model', 'Quadcopter FE Model',
           'A quadcopter of shells and beams, 1,422 nodes, its 30 lowest '
           'normal modes (six rigid). Solves in about a second.', _drone),

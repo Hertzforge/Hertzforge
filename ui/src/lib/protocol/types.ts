@@ -187,7 +187,7 @@ export type ViewKind = View['view'];
 
 export type Workspace = 'acquire' | 'analyze' | 'modal' | 'model' | 'specify' | 'simulate' | 'report';
 
-export type DatasetKind = 'random_run' | 'modal_model';
+export type DatasetKind = 'random_run' | 'modal_model' | 'modal_run';
 
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 

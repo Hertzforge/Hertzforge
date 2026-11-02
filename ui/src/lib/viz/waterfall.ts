@@ -13,6 +13,13 @@ export const LABEL_LIMIT = 40;
 /** Stage size: abscissa across, records receding, level up. Wide and shallow, as in VD. */
 export const STAGE = { x: 1.6, y: 0.9, z: 0.5 } as const;
 
+/**
+ * Decades a log level axis spans at most, below its highest value. A simulated plant's FRF falls
+ * to 1e-14 at 0 Hz, and spanning that would press every resonance flat; anything lower than the
+ * floor is drawn at the floor.
+ */
+export const LOG_DECADES = 8;
+
 /** Whether a value can be drawn on an axis: finite, and positive when the axis is log. */
 export function drawable(v: number, log: boolean): boolean {
 	return Number.isFinite(v) && (!log || v > 0);
@@ -59,8 +66,8 @@ export function recordOf(offsets: ArrayLike<number>, points: number): Float32Arr
 
 /**
  * The level range the stage and the colors span: the pinned range when the data pins one (and the
- * axis is linear), else the drawable values' own range. On a log axis the range is in decades'
- * real values, never below the smallest positive level.
+ * axis is linear), else the drawable values' own range. On a log axis the range is in real
+ * values, never below the smallest positive level, and at most `LOG_DECADES` deep.
  */
 export function levelRange(z: ArrayLike<number>, log: boolean, pinned?: [number, number]): [number, number] {
 	if (pinned && !log) return pinned;
@@ -73,6 +80,7 @@ export function levelRange(z: ArrayLike<number>, log: boolean, pinned?: [number,
 		if (v > hi) hi = v;
 	}
 	if (!(hi >= lo)) return log ? [1, 10] : [0, 1];
+	if (log) lo = Math.max(lo, hi / 10 ** LOG_DECADES);
 	if (hi === lo) return log ? [lo / 10 ** 0.5, hi * 10 ** 0.5] : [lo - 0.5 || -0.5, hi + 0.5];
 	return [lo, hi];
 }
