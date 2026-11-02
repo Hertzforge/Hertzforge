@@ -4,6 +4,7 @@
 	 * charts. Unknown kinds render a short note instead of failing the page.
 	 */
 	import type { View } from '$lib/protocol/types';
+	import MatrixPane from './MatrixPane.svelte';
 	import ReadingPane from './ReadingPane.svelte';
 	import SpectrumPane from './SpectrumPane.svelte';
 
@@ -50,6 +51,8 @@
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>
 	{/await}
+{:else if view.view === 'matrix'}
+	<MatrixPane {view} {showTitle} />
 {:else}
 	<p class="unknown" data-testid="view-unknown">This shell has no renderer for the view "{(view as { view: string }).view}".</p>
 {/if}

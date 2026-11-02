@@ -148,6 +148,26 @@
         }
       }
     },
+    "matrixView": {
+      "type": "object",
+      "required": ["view", "title", "rows", "columns", "values", "value_label", "value_range"],
+      "properties": {
+        "view": {"const": "matrix"},
+        "title": {"type": "string"},
+        "rows": {"$ref": "#/$defs/matrixAxis"},
+        "columns": {"$ref": "#/$defs/matrixAxis"},
+        "values": {"$ref": "#/$defs/arrayRef"},
+        "value_label": {"type": "string"},
+        "value_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+      }
+    },
+    "matrixAxis": {
+      "type": "object", "required": ["label", "ticks"],
+      "properties": {
+        "label": {"type": "string"},
+        "ticks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
     "waterfallView": {
       "type": "object",
       "required": ["view", "title", "x", "z", "records", "offsets", "x_values", "z_values", "x_range"],
@@ -172,7 +192,7 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}]},
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}]},
     "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},
     "param": {
       "type": "object", "required": ["name", "label", "type"],
@@ -202,7 +222,7 @@
         "accepts": {"enum": ["random_run", "modal_model", "modal_run"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
-        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall"]}}
+        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix"]}}
       }
     },
     "dataset": {

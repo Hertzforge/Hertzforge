@@ -1,0 +1,47 @@
+{
+ "type": "response",
+ "id": 10,
+ "result": {
+  "views": [
+   {
+    "view": "matrix",
+    "title": "Two Sets",
+    "rows": {
+     "label": "Identified",
+     "ticks": [
+      "10.0 Hz",
+      "20.0 Hz",
+      "31.0 Hz"
+     ]
+    },
+    "columns": {
+     "label": "FE model",
+     "ticks": [
+      "10.1 Hz",
+      "30.5 Hz"
+     ]
+    },
+    "values": {
+     "dtype": "f32",
+     "shape": [
+      3,
+      2
+     ],
+     "values": [
+      0.75,
+      0.125,
+      0.0,
+      0.25,
+      0.0625,
+      0.5
+     ]
+    },
+    "value_label": "MAC",
+    "value_range": [
+     0.0,
+     1.0
+    ]
+   }
+  ]
+ }
+}

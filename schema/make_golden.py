@@ -483,6 +483,19 @@ def main() -> None:
         'z': ('f32', [8], [0.5, 1.0, 0.25, 0.125, 2.0, 0.75, 1.0, 0.5]),
     })
 
+    # a matrix of three rows by two columns, f32
+    write('response_matrix', {
+        'type': 'response', 'id': 10,
+        'result': {'views': [
+            {'view': 'matrix', 'title': 'Two Sets',
+             'rows': {'label': 'Identified', 'ticks': ['10.0 Hz', '20.0 Hz', '31.0 Hz']},
+             'columns': {'label': 'FE model', 'ticks': ['10.1 Hz', '30.5 Hz']},
+             'values': {'$array': 'm'}, 'value_label': 'MAC', 'value_range': [0.0, 1.0]},
+        ]},
+    }, {
+        'm': ('f32', [3, 2], [0.75, 0.125, 0.0, 0.25, 0.0625, 0.5]),
+    })
+
     # text frames: a hello and an error response, no arrays
     (HERE / 'hello.json').write_text(json.dumps(
         {'type': 'hello', 'protocol': 'sds/1', 'service': 'analysis', 'version': '0.1.0'}) + '\n')

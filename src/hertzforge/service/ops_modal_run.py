@@ -1,6 +1,7 @@
 """Operations on a modal survey from the controller: its FRFs, coherence
 and time captures as waterfalls, the modes fitted to its FRFs on the
-survey geometry, and the operating deflection shape at one frequency.
+survey geometry, the operating deflection shape at one frequency, and the
+MAC of the fitted modes against each other or the survey's FE model.
 """
 
 from __future__ import annotations
@@ -31,6 +32,9 @@ COUNT = Param('count', 'Modes, at most', 'integer', default=5, min=1, max=30, st
 AT = Param('frequency_hz', 'Frequency', 'number', default=440.0, unit='Hz', min=0.0,
            step=2.0)
 REFERENCE = Param('reference', 'Reference', 'integer', default=1, min=1, step=1)
+AGAINST = Param('against', 'Against', 'enum', default='model',
+                options=(Option('model', 'FE model'),
+                         Option('self', 'Each other (auto-MAC)')))
 
 
 def _translations(geometry: Any, dofs: Any, values: np.ndarray,
@@ -163,6 +167,50 @@ def ods(run: ModalRun, params: dict[str, Any]) -> list[dict]:
                       triangles=triangles, lines=lines_drawn)]
 
 
+def _hz(frequency: float) -> str:
+    return f'{frequency:.1f} Hz'
+
+
+def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
+    """`modal_run.mac`: the Modal Assurance Criterion of the modes fitted
+    within a band (the same fit as `modal_run.modes`) against each other,
+    or against the survey's FE model on the DOFs both have
+    (`core.shapes.cross_mac`). The model's columns are its elastic modes
+    from two thirds of the band's bottom to half again its top, so a mode
+    the fit placed a little off its model partner still has one. A survey
+    with no FE model is refused when asked for one."""
+    from hertzforge.core.shapes import cross_mac
+
+    low, high = float(params['low_hz']), float(params['high_hz'])
+    if not high > low:
+        raise refused(f'the band {low:g} to {high:g} Hz is empty; To must be '
+                      'above From')
+    if 'FRF' not in run.project:
+        raise refused(f'{run.title} has no FRF to fit modes on.')
+    shapes = fitted(run, low, high, params['count'])
+    if not shapes.num_shapes:
+        raise refused(f'no mode found between {low:g} and {high:g} Hz')
+    identified = {'label': 'Identified', 'ticks': [_hz(f) for f in shapes.frequency]}
+    if params['against'] == 'self':
+        return [v.matrix(f'{run.title}: Auto-MAC of {shapes.num_shapes} '
+                         'Identified Modes', identified, identified,
+                         shapes.auto_mac(), 'MAC', (0.0, 1.0))]
+    model = run.analysis_model()
+    if model is None:
+        raise refused(f'{run.title} has no FE model to compare against.')
+    frequency = np.asarray(model.shapes.frequency, dtype=float)
+    # a mode that strains no element is given exactly 0 Hz by the solver
+    keep = np.flatnonzero((frequency > 0.0) & (frequency >= low / 1.5)
+                          & (frequency <= high * 1.5))
+    if not keep.size:
+        raise refused(f'{model.title} has no elastic mode between '
+                      f'{low / 1.5:g} and {high * 1.5:g} Hz')
+    values = cross_mac(shapes, model.shapes)[:, keep]
+    return [v.matrix(f'{run.title}: MAC Against {model.title}', identified,
+                     {'label': 'FE model', 'ticks': [_hz(f) for f in frequency[keep]]},
+                     values, 'MAC', (0.0, 1.0))]
+
+
 OPERATIONS = (
     Operation(
         id='modal_run.waterfall', title='Waterfall', workspace='analyze',
@@ -182,4 +230,10 @@ OPERATIONS = (
         summary='The survey\'s FRFs to one reference at one frequency line, '
                 'a magnitude and phase per node, animated through a cycle.',
         params=(AT, REFERENCE), outputs=('shape3d',), run=ods),
+    Operation(
+        id='modal_run.mac', title='MAC', workspace='analyze',
+        accepts='modal_run',
+        summary='The Modal Assurance Criterion of the modes fitted within a '
+                'band, against the FE model or against each other.',
+        params=(LOW, HIGH, COUNT, AGAINST), outputs=('matrix',), run=mac),
 )
