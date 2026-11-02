@@ -852,7 +852,7 @@ def test_without_a_run_log_the_chronology_and_page_are_as_before(two_runs,
     assert 'run log' not in text.lower()
     assert text.endswith('for the author to enter.')
     # attached and taken out again: the draft and the page byte for byte
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _random_log(path)
     attached = project.attach_run_log(path)
     project.detach_run_log(attached)
@@ -865,7 +865,7 @@ def test_the_run_log_gives_outcomes_causes_and_the_credited_time(two_runs,
                                                                  tmp_path):
     project, name, first, other = two_runs
     report = project[name]
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     abort = _random_log(path)
     attached = project.attach_run_log(path)
     extract = project[attached]
@@ -899,7 +899,7 @@ def test_the_run_log_gives_outcomes_causes_and_the_credited_time(two_runs,
 def test_the_badge_shows_when_the_log_grew_after_the_draft(two_runs,
                                                            tmp_path):
     project, name, _first, _other = two_runs
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _random_log(path)
     attached = project.attach_run_log(path)
     project.report_chronology(name)
@@ -917,7 +917,7 @@ def test_the_badge_shows_when_the_log_grew_after_the_draft(two_runs,
 
 def test_a_record_the_log_cannot_answer_for_is_named(two_runs, tmp_path):
     project, name, first, other = two_runs
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _random_log(path)
     project.attach_run_log(path)
     project.set_run_identity(other, run=3)
@@ -948,7 +948,7 @@ def test_a_record_the_log_cannot_answer_for_is_named(two_runs, tmp_path):
 def test_the_logged_causes_stay_off_a_record_that_counts_otherwise(
         two_runs, tmp_path):
     project, _name, first, _other = two_runs
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)
@@ -969,7 +969,7 @@ def test_the_logged_causes_stay_off_a_record_that_counts_otherwise(
 
 def test_a_log_with_no_abort_offers_no_none(two_runs, tmp_path):
     project, name, _first, _other = two_runs
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _random_log(path, abort=False)
     project.attach_run_log(path)
     text = project.report_chronology(name)
@@ -984,7 +984,7 @@ def test_a_log_and_no_record_offers_the_log_chronology(tmp_path):
 
     project = hertzforge.Project()
     name = project.add('Report', Report('Report', [], features=FEATURES))
-    empty = tmp_path / 'empty.vdlog'
+    empty = tmp_path / 'empty.hflog'
     with writer(empty) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)
@@ -994,7 +994,7 @@ def test_a_log_and_no_record_offers_the_log_chronology(tmp_path):
         project.report_chronology(name)
     assert rr.drafted(project[name]) == ''
     project.detach_run_log(held)
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _random_log(path)
     attached = project.attach_run_log(path)
     text = project.report_chronology(name)
@@ -1006,7 +1006,7 @@ def test_a_log_and_no_record_offers_the_log_chronology(tmp_path):
 def test_two_logged_stops_against_one_found_stay_in_the_log_table(two_runs,
                                                                    tmp_path):
     project, _name, _first, other = two_runs
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)
@@ -1033,7 +1033,7 @@ def test_a_record_not_read_keeps_the_logged_stops_in_the_log_table(
     project.import_file(fixture_path('plate', 'shock.nc4'))
     history = rr.histories(project)[0]
     project.set_run_identity(history, run=1)
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Shock',
                         header={'title': 'Release shock'})

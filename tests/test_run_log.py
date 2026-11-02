@@ -10,6 +10,7 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -50,7 +51,7 @@ class Clock:
         return self.now
 
 
-def new_log(tmp_path, name='a.vdlog', clock=None, **kwargs):
+def new_log(tmp_path, name='a.hflog', clock=None, **kwargs):
     return RunLog.create(tmp_path / name, clock=clock or Clock(), who=WHO,
                          **kwargs)
 
@@ -76,16 +77,16 @@ def three_entries(tmp_path):
                fields={'level_db': -12.0, 'current': 63.0})
     log.append('note', author='AB', text='between tests')
     log.close()
-    return tmp_path / 'a.vdlog'
+    return tmp_path / 'a.hflog'
 
 
 def test_a_new_log_is_one_header_line_stamped_with_format_and_version(tmp_path):
     with new_log(tmp_path, title='Article 7') as log:
         assert log.entries == ()
-    lines = lines_of(tmp_path / 'a.vdlog')
+    lines = lines_of(tmp_path / 'a.hflog')
     assert lines[1:] == [b'']
     header = json.loads(lines[0])
-    assert header['format'] == FORMAT == 'visualdynamics-run-log'
+    assert header['format'] == FORMAT == 'hertzforge-run-log'
     assert header['version'] == FORMAT_VERSION == 1
     assert header['created'] == '2026-10-30T08:00:00.000-06:00'
     assert (header['title'], header['login'], header['computer']) == (
@@ -95,7 +96,7 @@ def test_a_new_log_is_one_header_line_stamped_with_format_and_version(tmp_path):
 def test_each_entry_is_on_the_disk_and_synced_before_append_returns(
         tmp_path, monkeypatch):
     log = new_log(tmp_path)
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     synced = []
     real = os.fsync
 
@@ -124,7 +125,7 @@ def test_the_file_round_trips_every_value_it_holds(tmp_path):
                    files=[FileRef('run2.csv', 'a' * 64, 120)])
         log.append('clock_check', author='AB', fields={'offset_s': -0.75})
         written = log.entries
-    read = RunLog.read(tmp_path / 'a.vdlog')
+    read = RunLog.read(tmp_path / 'a.hflog')
     assert read.entries == written
     assert read.problems == ()
     level = read.entry(2)
@@ -141,7 +142,7 @@ def test_the_file_round_trips_every_value_it_holds(tmp_path):
 
 def test_every_entry_records_the_login_and_machine_beside_the_initials(
         tmp_path):
-    with RunLog.create(tmp_path / 'a.vdlog', who=('alice', 'bench-2')) as log:
+    with RunLog.create(tmp_path / 'a.hflog', who=('alice', 'bench-2')) as log:
         entry = log.append('note', author=' KC ')
     assert (entry.author, entry.login, entry.computer) == (
         'KC', 'alice', 'bench-2')
@@ -162,17 +163,17 @@ def test_a_file_is_named_by_its_sha256(tmp_path):
         FileRef('run.csv', '0' * 64, -1)
     with pytest.raises(RunLogError, match='its name'):
         FileRef(' ', '0' * 64)
-    with new_log(tmp_path, 'b.vdlog') as log, pytest.raises(
+    with new_log(tmp_path, 'b.hflog') as log, pytest.raises(
             RunLogError, match='path or a FileRef'):
         log.append('note', author='AB', files=[3])
 
 
 def test_a_log_is_never_created_over_a_file(tmp_path):
-    (tmp_path / 'a.vdlog').write_text('kept')
+    (tmp_path / 'a.hflog').write_text('kept')
     with pytest.raises(RunLogError, match='already at'):
         new_log(tmp_path)
-    assert (tmp_path / 'a.vdlog').read_text() == 'kept'
-    assert not os.path.exists(tmp_path / 'a.vdlog.lock')
+    assert (tmp_path / 'a.hflog').read_text() == 'kept'
+    assert not os.path.exists(tmp_path / 'a.hflog.lock')
 
 
 def test_a_torn_last_line_is_named_and_the_rest_is_read(tmp_path):
@@ -216,7 +217,7 @@ def test_a_complete_last_line_without_its_line_end_is_read(tmp_path):
 
 
 def test_a_process_killed_while_writing_leaves_a_log_that_opens(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     new_log(tmp_path).close()
     child = textwrap.dedent('''
         import sys
@@ -280,7 +281,7 @@ def test_a_write_that_fails_part_way_is_not_taken_and_the_next_is(
     log.close()
     assert [e.text for e in log.entries] == ['first', 'second']
     assert entry.id == 2
-    read = RunLog.read(tmp_path / 'a.vdlog')
+    read = RunLog.read(tmp_path / 'a.hflog')
     assert [e.text for e in read.entries] == ['first', 'second']
     assert len(read.problems) == 1
     assert read.verify().ok
@@ -317,23 +318,24 @@ def test_a_second_entry_with_an_id_already_read_is_named(tmp_path):
 
 
 def test_a_file_that_is_not_a_run_log_is_refused(tmp_path):
-    other = tmp_path / 'other.vdlog'
+    other = tmp_path / 'other.hflog'
     other.write_text('time,a\n0,1\n')
-    with pytest.raises(RunLogError, match='not a Visual Dynamics run log'):
+    with pytest.raises(RunLogError, match='not a run log'):
         RunLog.read(other)
     other.write_text('{"format": "something else"}\n')
-    with pytest.raises(RunLogError, match="no 'visualdynamics-run-log' stamp"):
+    with pytest.raises(RunLogError,
+                       match="no 'hertzforge-run-log' or 'visualdynamics-run-log' stamp"):
         RunLog.read(other)
-    other.write_text('{"format": "visualdynamics-run-log", "ver')
+    other.write_text('{"format": "hertzforge-run-log", "ver')
     with pytest.raises(RunLogError, match='first line is torn'):
         RunLog.read(other)
-    other.write_text('{"format": "visualdynamics-run-log"}\n')
+    other.write_text('{"format": "hertzforge-run-log"}\n')
     with pytest.raises(RunLogError, match='no format version'):
         RunLog.read(other)
     with pytest.raises(FileNotFoundError):
-        RunLog.read(tmp_path / 'missing.vdlog')
+        RunLog.read(tmp_path / 'missing.hflog')
     with pytest.raises(FileNotFoundError):
-        RunLog.open(tmp_path / 'missing.vdlog')
+        RunLog.open(tmp_path / 'missing.hflog')
 
 
 def test_an_empty_log_has_no_entries_and_checks(tmp_path):
@@ -345,14 +347,14 @@ def test_an_empty_log_has_no_entries_and_checks(tmp_path):
                                         'chains')
     assert log.recorder_time(START) is None
     log.close()
-    read = RunLog.read(tmp_path / 'a.vdlog')
+    read = RunLog.read(tmp_path / 'a.hflog')
     assert read.entries == () and read.problems == ()
     assert read.head() == log.head()
 
 
 def test_a_zero_byte_log_is_refused_read_only_and_given_its_header_to_write(
         tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     path.write_bytes(b'')
     with pytest.raises(RunLogError, match='is empty'):
         RunLog.read(path)
@@ -493,7 +495,7 @@ def test_one_tests_chain_checks_alone(tmp_path):
         log.append('note', author='AB', test=2)
         log.append('note', author='AB', test=1)
     lines = lines_of(path)
-    extract = tmp_path / 'test1.vdlog'
+    extract = tmp_path / 'test1.hflog'
     kept = [line for line in lines[1:]
             if line and json.loads(line)['test'] == 1]
     write_lines(extract, [lines[0], *kept, b''])
@@ -512,18 +514,18 @@ def test_verify_says_what_the_check_is_and_is_not(tmp_path):
 
 
 def test_a_second_writer_is_refused_naming_who_holds_the_log(tmp_path):
-    first = RunLog.create(tmp_path / 'a.vdlog', who=('alice', 'bench-2'))
+    first = RunLog.create(tmp_path / 'a.hflog', who=('alice', 'bench-2'))
     first.append('note', author='AL')
     with pytest.raises(RunLogLocked, match='open for writing by alice on '
                        'bench-2'):
-        RunLog.open(tmp_path / 'a.vdlog', who=WHO)
-    reader = RunLog.read(tmp_path / 'a.vdlog')
+        RunLog.open(tmp_path / 'a.hflog', who=WHO)
+    reader = RunLog.read(tmp_path / 'a.hflog')
     assert [entry.author for entry in reader.entries] == ['AL']
     with pytest.raises(RunLogError, match='not open for writing'):
         reader.append('note', author='AB')
     first.close()
-    assert not os.path.exists(tmp_path / 'a.vdlog.lock')
-    with RunLog.open(tmp_path / 'a.vdlog', who=WHO) as second:
+    assert not os.path.exists(tmp_path / 'a.hflog.lock')
+    with RunLog.open(tmp_path / 'a.hflog', who=WHO) as second:
         second.append('note', author='AB')
     with pytest.raises(RunLogError, match='not open for writing'):
         second.append('note', author='AB')
@@ -531,7 +533,7 @@ def test_a_second_writer_is_refused_naming_who_holds_the_log(tmp_path):
 
 def test_a_lock_file_left_by_a_crash_does_not_hold_the_log(tmp_path):
     path = three_entries(tmp_path)
-    (tmp_path / 'a.vdlog.lock').write_text(
+    (tmp_path / 'a.hflog.lock').write_text(
         '{"login": "gone", "computer": "x", "pid": 1, "since": "then"}')
     with RunLog.open(path, who=WHO) as log:
         assert len(log.entries) == 3
@@ -539,42 +541,42 @@ def test_a_lock_file_left_by_a_crash_does_not_hold_the_log(tmp_path):
 
 def test_a_lock_that_does_not_say_who_holds_it_is_still_refused(tmp_path):
     with new_log(tmp_path):
-        held = tmp_path / 'a.vdlog.lock'
+        held = tmp_path / 'a.hflog.lock'
         with open(held, 'r+b') as handle:
             handle.write(b'not json')
         with pytest.raises(RunLogLocked, match='does not say who'):
-            RunLog.open(tmp_path / 'a.vdlog', who=WHO)
+            RunLog.open(tmp_path / 'a.hflog', who=WHO)
 
 
 def test_every_entry_is_mirrored_to_the_second_path(tmp_path):
-    mirror = tmp_path / 'share' / 'a.vdlog'
+    mirror = tmp_path / 'share' / 'a.hflog'
     mirror.parent.mkdir()
     with new_log(tmp_path, mirror=mirror) as log:
-        assert mirror.read_bytes() == (tmp_path / 'a.vdlog').read_bytes()
+        assert mirror.read_bytes() == (tmp_path / 'a.hflog').read_bytes()
         log.append('note', author='AB', text='one')
         log.append('note', author='AB', text='two')
         assert log.mirror_problem == ''
-    assert mirror.read_bytes() == (tmp_path / 'a.vdlog').read_bytes()
+    assert mirror.read_bytes() == (tmp_path / 'a.hflog').read_bytes()
     assert RunLog.read(mirror).verify().ok
 
 
 def test_a_mirror_that_fails_is_reported_and_the_entry_is_kept(tmp_path):
-    mirror = tmp_path / 'share' / 'a.vdlog'
+    mirror = tmp_path / 'share' / 'a.hflog'
     log = new_log(tmp_path, mirror=mirror)
     assert 'was not written' in log.mirror_problem
     entry = log.append('note', author='AB', text='kept')
     assert str(mirror) in log.mirror_problem
-    assert str(tmp_path / 'a.vdlog') in log.mirror_problem
-    assert RunLog.read(tmp_path / 'a.vdlog').entries == (entry,)
+    assert str(tmp_path / 'a.hflog') in log.mirror_problem
+    assert RunLog.read(tmp_path / 'a.hflog').entries == (entry,)
     mirror.parent.mkdir()                            # the share comes back
     log.append('note', author='AB', text='caught up')
     assert log.mirror_problem == ''
-    assert mirror.read_bytes() == (tmp_path / 'a.vdlog').read_bytes()
+    assert mirror.read_bytes() == (tmp_path / 'a.hflog').read_bytes()
     log.close()
 
 
 def test_a_mirror_that_drops_out_between_entries_catches_up(tmp_path):
-    mirror = tmp_path / 'share' / 'a.vdlog'
+    mirror = tmp_path / 'share' / 'a.hflog'
     mirror.parent.mkdir()
     log = new_log(tmp_path, mirror=mirror)
     log.append('note', author='AB', text='one')
@@ -591,24 +593,27 @@ def test_a_mirror_that_drops_out_between_entries_catches_up(tmp_path):
     with open(mirror, 'ab') as handle:
         handle.write(b'junk\n')
     log.append('note', author='AB', text='four')
-    assert mirror.read_bytes() == (tmp_path / 'a.vdlog').read_bytes()
+    assert mirror.read_bytes() == (tmp_path / 'a.hflog').read_bytes()
     log.close()
 
 
 def test_a_mirror_is_never_the_log_itself(tmp_path):
     with pytest.raises(RunLogError, match='second path'):
-        new_log(tmp_path, mirror=tmp_path / 'a.vdlog')
-    assert not os.path.exists(tmp_path / 'a.vdlog.lock')
+        new_log(tmp_path, mirror=tmp_path / 'a.hflog')
+    assert not os.path.exists(tmp_path / 'a.hflog.lock')
 
 
-CORPUS = fixture_path('vdlog_corpus')
+CORPUS = fixture_path('hflog_corpus')
+#: the run log Visual Dynamics froze, which this build reads too
+VDLOG_CORPUS = fixture_path('vdlog_corpus')
+FROZEN = sorted(glob.glob(str(CORPUS) + '/*.hflog')
+                + glob.glob(str(VDLOG_CORPUS) + '/*.vdlog'))
 
 
-@pytest.mark.parametrize('name', sorted(
-    os.path.basename(p) for p in glob.glob(str(CORPUS) + '/*.vdlog')))
-def test_every_frozen_version_still_opens_and_checks(name):
-    log = RunLog.read(os.path.join(str(CORPUS), name))
-    assert log.version == int(name[1:-len('.vdlog')])
+@pytest.mark.parametrize('path', FROZEN, ids=os.path.basename)
+def test_every_frozen_version_still_opens_and_checks(path):
+    log = RunLog.read(path)
+    assert log.version == int(os.path.basename(path)[1:].split('.')[0])
     assert len(log.entries) > 0
     assert log.problems == ()
     assert log.verify().ok
@@ -618,11 +623,16 @@ def test_every_version_has_a_reader_and_a_frozen_file():
     versions = range(1, FORMAT_VERSION + 1)
     assert sorted(run_log._READERS) == list(versions)
     for version in versions:
-        assert os.path.isfile(os.path.join(str(CORPUS), f'v{version}.vdlog'))
+        assert os.path.isfile(os.path.join(str(CORPUS), f'v{version}.hflog'))
 
 
-def test_version_1_values_are_intact():
-    log = RunLog.read(os.path.join(str(CORPUS), 'v1.vdlog'))
+@pytest.mark.parametrize('path', [os.path.join(str(CORPUS), 'v1.hflog'),
+                                  os.path.join(str(VDLOG_CORPUS), 'v1.vdlog')],
+                         ids=os.path.basename)
+def test_version_1_values_are_intact(path):
+    log = RunLog.read(path)
+    assert log.header.format == (run_log.FORMAT if path.endswith('.hflog')
+                                 else run_log.VDLOG_FORMAT)
     assert log.header.title == 'Corpus article'
     assert log.header.created == datetime(2026, 10, 30, 8, 0,
                                           tzinfo=MOUNTAIN)
@@ -644,6 +654,21 @@ def test_version_1_values_are_intact():
         log.entry(4).event_time + timedelta(seconds=1.25))
     assert (log.entry(1).login, log.entry(1).computer) == ('tester', 'bench')
     assert log.chains() == ['log', 'test 1', 'test 2']
+
+
+def test_a_visual_dynamics_log_takes_entries_under_its_own_stamp(tmp_path):
+    """A log Visual Dynamics started stays one file: entries added here go
+    on its chains, its header is not rewritten, and it still verifies."""
+    path = tmp_path / 'started.vdlog'
+    shutil.copy(os.path.join(str(VDLOG_CORPUS), 'v1.vdlog'), path)
+    first = lines_of(path)[0]
+    with RunLog.open(path, who=WHO) as log:
+        log.append('note', author='AB', text='after the move')
+    again = RunLog.read(path)
+    assert lines_of(path)[0] == first
+    assert again.header.format == run_log.VDLOG_FORMAT
+    assert again.entries[-1].text == 'after the move'
+    assert again.verify().ok
 
 
 def test_a_log_from_a_newer_version_is_refused_with_a_message_to_update(
@@ -809,7 +834,7 @@ def test_a_correction_leaves_the_entry_and_the_view_shows_it_corrected(
         assert fix.prev == abort.hash                 # in test 1's chain
         assert [entry.id for entry in log.view()] == [abort.id]
         assert log.corrections_of(abort.id) == (fix,)
-    read = RunLog.read(tmp_path / 'a.vdlog')
+    read = RunLog.read(tmp_path / 'a.hflog')
     assert read.current(abort.id).fields == current.fields
     assert read.entry(abort.id).fields == {'stop': 'amplifier trip',
                                            'heard': 'bang'}
@@ -872,7 +897,7 @@ def test_what_a_correction_cannot_do_is_refused(tmp_path):
 
 
 def test_a_correction_with_an_unreadable_value_leaves_the_stored_one(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     with new_log(tmp_path) as log:
         entry = log.append('note', author='AB', run=2)
         log.correct(entry, author='AB', fields={'run': 3})
@@ -915,7 +940,7 @@ def test_deviations_and_anomalies_are_numbered_across_the_log(tmp_path):
 
 
 def test_a_number_spoiled_in_the_file_is_passed_over_when_numbering(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     with new_log(tmp_path) as log:
         log.append('deviation', author='AB')
         log.append('deviation', author='AB')
@@ -937,7 +962,7 @@ def test_event_times_keep_their_offset_across_a_daylight_saving_change(
                    fields={'offset_s': 2.0})
         first = log.append('note', author='AB', event_time=before)
         second = log.append('note', author='AB', event_time=after)
-    read = RunLog.read(tmp_path / 'a.vdlog')
+    read = RunLog.read(tmp_path / 'a.hflog')
     first, second = read.entry(first.id), read.entry(second.id)
     assert first.event_time.utcoffset() == timedelta(hours=-6)
     assert second.event_time.utcoffset() == timedelta(hours=-7)
@@ -1017,7 +1042,7 @@ def test_entries_written_in_a_session_carry_their_lines_in_the_file(tmp_path):
         written = [log.append('note', author='AB') for _ in range(3)]
     assert [entry.line for entry in written] == [2, 3, 4]
     assert repr(log).endswith(', 3 entries)')
-    with new_log(tmp_path, 'b.vdlog') as one:
+    with new_log(tmp_path, 'b.hflog') as one:
         one.append('note', author='AB')
         assert repr(one).endswith(', 1 entry)')
 
@@ -1042,8 +1067,8 @@ def test_a_write_that_fails_before_writing_leaves_no_blank_line(
     entry = log.append('note', author='AB', text='second')
     log.close()
     assert entry.line == 3
-    assert lines_of(tmp_path / 'a.vdlog')[3] == b''
-    assert len(lines_of(tmp_path / 'a.vdlog')) == 4
+    assert lines_of(tmp_path / 'a.hflog')[3] == b''
+    assert len(lines_of(tmp_path / 'a.hflog')) == 4
 
 
 def test_after_a_torn_write_the_next_entry_has_its_true_line(
@@ -1068,7 +1093,7 @@ def test_after_a_torn_write_the_next_entry_has_its_true_line(
     entry = log.append('note', author='AB')
     log.close()
     assert entry.line == 4
-    assert RunLog.read(tmp_path / 'a.vdlog').entry(entry.id).line == 4
+    assert RunLog.read(tmp_path / 'a.hflog').entry(entry.id).line == 4
 
 
 def test_a_closed_log_lets_go_of_its_file(tmp_path):
@@ -1078,8 +1103,8 @@ def test_a_closed_log_lets_go_of_its_file(tmp_path):
     log.close()
     log.close()                                       # twice does nothing
     assert not log.writable
-    os.remove(tmp_path / 'a.vdlog')                  # no handle holds it
-    assert not os.path.exists(tmp_path / 'a.vdlog')
+    os.remove(tmp_path / 'a.hflog')                  # no handle holds it
+    assert not os.path.exists(tmp_path / 'a.hflog')
 
 
 def test_an_entry_ten_and_a_half_minutes_late_is_late_by_default(tmp_path):
@@ -1142,9 +1167,9 @@ def test_a_header_with_a_blank_id_is_refused(tmp_path):
 
 
 def test_a_one_line_file_that_is_not_a_header_is_not_called_torn(tmp_path):
-    other = tmp_path / 'other.vdlog'
+    other = tmp_path / 'other.hflog'
     other.write_text('garbage\n')
-    with pytest.raises(RunLogError, match='not a Visual Dynamics run log'):
+    with pytest.raises(RunLogError, match='not a run log'):
         RunLog.read(other)
 
 
@@ -1168,7 +1193,7 @@ def test_a_log_opened_again_records_who_opened_it(tmp_path):
 
 
 def test_a_zero_byte_log_is_named_on_its_first_line(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     path.write_bytes(b'')
     with RunLog.open(path, who=WHO) as log:
         assert log.problems[0].line == 1

@@ -284,7 +284,7 @@ it was run at (`level`, dB relative to full level, or null).
                       dset log (one UTF-8 string: the snapshot, the
                       run log's own JSON Lines)
 
-One test of a run log (`.vdlog`, Visual Dynamics' run log), frozen at
+One test of a run log (`.hflog`, or a Visual Dynamics `.vdlog`), frozen at
 entry `upto`: `log` holds the log's header line and the lines of the
 entries kept, exactly as the log file had them, so it reads with the run
 log's own reader for its version and its chains verify. `path` is where

@@ -3,7 +3,7 @@
 A report holds references to project objects, never data that can move
 under it, and a run log keeps growing while the test runs. So a log is
 not referenced from a project; it is brought in as a snapshot, the way
-`Photos` brings image files in. `take` reads one test of a `.vdlog` up
+`Photos` brings image files in. `take` reads one test of a `.hflog` up
 to a stated entry and keeps the lines of the file that test's views
 read, exactly as written: the log's header, every entry of the test's
 chain and of the chain between tests up to that entry, and the few
@@ -179,7 +179,7 @@ def take(path: str | os.PathLike, test: int | None = None,
     Parameters
     ----------
     path : str or os.PathLike
-        The `.vdlog`.
+        The run log (`.hflog`, or a Visual Dynamics `.vdlog`).
     test : int, optional
         The test, by number. May be left out when the log holds one
         test.

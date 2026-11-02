@@ -891,7 +891,7 @@ def _logged(tmp_path, *features):
     """A project holding a report with `features` (the register's by
     default) and one run log extract of a random test with a deviation
     (D-1) and an anomaly (A-1) whose disposition the next test logged."""
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     ids = two_tests(path)
     project = hertzforge.Project('Article 7')
     name = project.add('R', _report(*features))
@@ -1009,7 +1009,7 @@ def test_an_accepted_finding_takes_the_logged_number_only_when_free(
 
 
 def test_a_logged_finding_with_no_fact_is_not_offered(tmp_path):
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)
@@ -1031,7 +1031,7 @@ def test_a_logged_finding_with_no_fact_is_not_offered(tmp_path):
 
 
 def test_a_log_with_no_finding_offers_no_none(tmp_path):
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)

@@ -74,7 +74,7 @@ from typing import Any, NamedTuple
 from . import data_index
 from .data_index import DataIndex, IndexEntry
 from .progress import Cancelled
-from .run_log import SUFFIX, Entry, FileRef, RunLog
+from .run_log import FORMAT, SUFFIX, VDLOG_SUFFIX, Entry, FileRef, RunLog
 
 # One module for watching, describing, accepting and indexing, all on
 # plain values: the front end's worker only runs
@@ -86,8 +86,10 @@ SOURCE = 'run log'
 #: the format recorded for a file no importer recognizes
 UNKNOWN = 'unknown'
 
-#: the format a run log is recorded under in the data index
-LOG_FORMAT = f'Visual Dynamics run log ({SUFFIX})'
+#: the format a run log is recorded under in the data index, and one
+#: Visual Dynamics started
+LOG_FORMAT = f'Hertzforge run log ({SUFFIX})'
+VDLOG_FORMAT = f'Visual Dynamics run log ({VDLOG_SUFFIX})'
 
 #: seconds a file's size and modification time must stay the same
 #: before it is hashed
@@ -110,7 +112,8 @@ STREAM_TOLERANCE_S = 30.0
 
 #: names in a watched folder that are never proposed: a run log, its
 #: lock and its mirror's staging copy, should the log sit in the folder
-_IGNORED = (SUFFIX, f'{SUFFIX}.lock', f'{SUFFIX}.partial')
+_IGNORED = tuple(name for suffix in (SUFFIX, VDLOG_SUFFIX)
+                 for name in (suffix, f'{suffix}.lock', f'{suffix}.partial'))
 
 
 class ControllerFilesError(ValueError):
@@ -1133,6 +1136,7 @@ def index_run_log(index: DataIndex, log: RunLog, *,
     index.entries = [item for item in index.entries
                      if not (item.source == SOURCE and os.path.normcase(
                          item.path) == os.path.normcase(own))]
-    entry = index.add(own, _heads(log, chosen), format=LOG_FORMAT,
+    entry = index.add(own, _heads(log, chosen),
+                      format=LOG_FORMAT if log.header.format == FORMAT else VDLOG_FORMAT,
                       source=SOURCE)
     return IndexedLog(entry, tuple(added), tuple(missing))

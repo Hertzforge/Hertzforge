@@ -834,7 +834,7 @@ def _logged(tmp_path):
     the extract's name and the log's path."""
     data = _file(tmp_path, 'run1.csv', b'1,2,3\n')
     settings = _file(tmp_path, 'settings.txt', b'limits as planned\n')
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER, files=[settings])
@@ -859,7 +859,7 @@ def test_without_a_run_log_the_index_page_is_as_before(tmp_path):
     assert rdi.run_logs(project, project.data_index) == []
     with pytest.raises(ValueError, match='holds no run log extract'):
         project.index_run_log_files()
-    project.attach_run_log(tmp_path / 'article.vdlog')
+    project.attach_run_log(tmp_path / 'article.hflog')
     project.detach_run_log('Run Log, Test 1')
     assert _render(project, name) == before
 
@@ -871,12 +871,12 @@ def test_the_extract_and_its_head_hash_are_listed_and_its_files_named(
     page_text = _render(project, name)
     found = _log_table(page_text)
     assert found['headers'] == list(rdi.LOG_HEADERS)
-    assert found['rows'] == [['article.vdlog', '1, Random, Z',
+    assert found['rows'] == [['article.hflog', '1, Random, Z',
                               f'entry #{extract.upto}', extract.head,
                               'current']]
     assert found['marks'] == [['', '', '', 'hash', '']]
     # the head hash, never the log file's own checksum
-    assert digest_of(tmp_path / 'article.vdlog') not in page_text
+    assert digest_of(tmp_path / 'article.hflog') not in page_text
     assert ('The run log names 2 files not in the data index: settings.txt '
             '(entry #1), run1.csv (entry #2).') in page_text
     assert project.index_run_log_files() == ['settings.txt: indexed.',
@@ -946,7 +946,7 @@ def test_a_missing_or_different_file_is_said_and_not_indexed(tmp_path):
 
 
 def test_the_log_itself_is_never_indexed(tmp_path):
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER, files=[str(path)])
@@ -954,7 +954,7 @@ def test_the_log_itself_is_never_indexed(tmp_path):
     name = project.add('Report', Report('Report', [], features=['data_index']))
     project.attach_run_log(path)
     assert project.index_run_log_files() == [
-        ("article.vdlog: the run log itself, whose checksum changes with "
+        ("article.hflog: the run log itself, whose checksum changes with "
          "every entry; the test's head hash stands for it, so it is not "
          'indexed.')]
     assert len(project.data_index) == 0
@@ -962,7 +962,7 @@ def test_the_log_itself_is_never_indexed(tmp_path):
 
 
 def test_an_empty_test_is_listed_and_names_no_file(tmp_path):
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Random Vibration',
                         header=HEADER)
