@@ -12,7 +12,7 @@ from hertzforge.service import frames
 
 from .conftest import GOLDEN
 
-BINARY = ('response_spectrum', 'event_shape')
+BINARY = ('response_spectrum', 'event_shape', 'response_waterfall')
 
 
 def _as_expected(node):

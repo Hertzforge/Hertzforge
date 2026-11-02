@@ -144,7 +144,31 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}]},
+    "waterfallView": {
+      "type": "object",
+      "required": ["view", "title", "x", "z", "records", "offsets", "x_values", "z_values", "x_range"],
+      "properties": {
+        "view": {"const": "waterfall"},
+        "title": {"type": "string"},
+        "x": {"$ref": "#/$defs/axis"},
+        "z": {"$ref": "#/$defs/axis"},
+        "records": {"type": "array", "items": {"type": "string"}},
+        "offsets": {"$ref": "#/$defs/arrayRef"},
+        "x_values": {"$ref": "#/$defs/arrayRef"},
+        "z_values": {"$ref": "#/$defs/arrayRef"},
+        "x_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "z_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "page": {
+          "type": "object", "required": ["number", "count", "records"],
+          "properties": {
+            "number": {"type": "integer", "minimum": 1},
+            "count": {"type": "integer", "minimum": 1},
+            "records": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}]},
     "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},
     "param": {
       "type": "object", "required": ["name", "label", "type"],
@@ -174,7 +198,7 @@
         "accepts": {"enum": ["random_run", "modal_model"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
-        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d"]}}
+        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall"]}}
       }
     },
     "dataset": {

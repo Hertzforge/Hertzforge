@@ -129,6 +129,9 @@ class RandomRun:
     notes: list[str] = field(default_factory=list)
     from_cache: bool = False
     seconds: float = 0.0
+    #: the run read as a project: the time history and everything
+    #: derived from it, by name
+    project: Any = None
 
     def channel(self, value: str) -> Channel:
         """The channel whose value is `value`, or a not_found that points
@@ -323,7 +326,7 @@ def open_random_run(path: Path, title: str, cache_name: str) -> RandomRun:
     return RandomRun(title=title, source=path, psds=psds, specification=spec,
                      channels=_channels(psds, pairs), scale_db=scale,
                      rows=rows, verdict=verdict, notes=notes, from_cache=hit,
-                     seconds=time.perf_counter() - started)
+                     seconds=time.perf_counter() - started, project=project)
 
 
 # ---- modal models ------------------------------------------------------------

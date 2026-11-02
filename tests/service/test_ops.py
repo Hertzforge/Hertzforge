@@ -31,6 +31,69 @@ def by_label(reading):
     return {row['label'].split(' (')[0]: row for row in reading['rows']}
 
 
+# ---- random.waterfall -----------------------------------------------------------
+
+@pytest.mark.parametrize('of', ('psd', 'octave', 'time', 'coherence'))
+def test_waterfall_validates_and_its_offsets_cut_its_points(random_run, validate, of):
+    (view,) = run('random.waterfall', random_run, of=of)
+    wire_views([view], validate)
+    offsets = view['offsets']
+    assert offsets[0] == 0 and offsets[-1] == view['x_values'].size == view['z_values'].size
+    assert len(view['records']) == offsets.size - 1
+    assert np.all(np.diff(offsets.astype(int)) > 0)
+    assert view['x_values'].dtype == np.float32 and offsets.dtype == np.uint32
+
+
+def test_a_psd_waterfall_keeps_every_tread_and_its_values(random_run):
+    """A PSD arrives as its step outline, two points per line and never
+    thinned, in SI and not logged: the shell takes the log."""
+    (view,) = run('random.waterfall', random_run, of='psd')
+    psds = random_run.project['Time History PSDs']
+    lines = psds.abscissa.size
+    assert np.all(np.diff(view['offsets'].astype(int)) == 2 * lines)
+    assert view['z'] == {'label': 'PSD', 'unit': '(m/s²)²/Hz', 'scale': 'log'}
+    first = psds.record_label(0)
+    assert view['records'][0] == first
+    z = view['z_values'][:2 * lines]
+    np.testing.assert_allclose(z[::2], psds.ordinate[0].real.astype(np.float32), rtol=1e-6)
+
+
+def test_a_time_waterfall_is_decimated_to_the_point_budget(random_run):
+    from hertzforge.drawing.viz.waterfall import POINT_BUDGET
+
+    (view,) = run('random.waterfall', random_run, of='time')
+    history = random_run.project['Time History']
+    assert history.abscissa.size > POINT_BUDGET
+    assert np.all(np.diff(view['offsets'].astype(int)) <= POINT_BUDGET)
+    assert view['z']['scale'] == 'linear' and view['x']['unit'] == 's'
+    # every record's own extremes survive the thinning
+    k = 0
+    i0, i1 = int(view['offsets'][k]), int(view['offsets'][k + 1])
+    assert np.isclose(view['z_values'][i0:i1].max(), history.ordinate[k].max(), rtol=1e-6)
+
+
+def test_a_coherence_waterfall_pins_its_level_range(random_run):
+    (view,) = run('random.waterfall', random_run, of='coherence')
+    assert view['z_range'] == [0.0, 1.05]
+    assert view['z']['unit'] is None
+
+
+def test_records_of_another_quantity_are_left_out_with_a_note(random_run):
+    (view,) = run('random.waterfall', random_run, of='psd')
+    assert len(view['records']) == 8
+    assert view['note'] == '4 records of another quantity are not drawn on this stage'
+
+
+def test_a_page_past_the_end_lands_on_the_last(random_run, monkeypatch):
+    from hertzforge.drawing.viz import waterfall as wf
+
+    lines = random_run.project['Time History PSDs'].abscissa.size
+    monkeypatch.setattr(wf, 'SCENE_BUDGET', 3 * 2 * lines)
+    (view,) = run('random.waterfall', random_run, of='psd', page=99)
+    assert view['page'] == {'number': 3, 'count': 3, 'records': 8}
+    assert len(view['records']) == 2
+
+
 # ---- random.psd_vs_spec ---------------------------------------------------------
 
 def test_psd_vs_spec_validates(random_run, validate):

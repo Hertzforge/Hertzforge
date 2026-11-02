@@ -506,6 +506,10 @@
 		height: 340px;
 	}
 
+	.view.waterfall {
+		height: 480px;
+	}
+
 	.spin {
 		animation: spin 0.9s linear infinite;
 	}

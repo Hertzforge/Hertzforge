@@ -19,7 +19,7 @@ ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 Workspace = Literal['acquire', 'analyze', 'modal', 'model', 'specify',
                     'simulate', 'report']
 DatasetKind = Literal['random_run', 'modal_model']
-ViewKind = Literal['spectrum', 'reading', 'shape3d']
+ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall']
 
 #: marks a param with no default: the request must give it
 REQUIRED = object()

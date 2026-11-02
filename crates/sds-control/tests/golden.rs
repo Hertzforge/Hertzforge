@@ -151,7 +151,7 @@ fn encoding_reproduces_the_golden_bytes() {
 
 #[test]
 fn decoding_matches_the_expected_json() {
-    for name in ["response_spectrum", "event_shape"] {
+    for name in ["response_spectrum", "event_shape", "response_waterfall"] {
         let decoded = codec::decode(&read_bin(&format!("{name}.bin"))).unwrap();
         assert!(
             decoded.message.get("arrays").is_none(),
@@ -179,7 +179,7 @@ fn decoding_matches_the_expected_json() {
 
 #[test]
 fn decode_then_encode_round_trips_byte_for_byte() {
-    for name in ["response_spectrum", "event_shape"] {
+    for name in ["response_spectrum", "event_shape", "response_waterfall"] {
         let bytes = read_bin(&format!("{name}.bin"));
         let order = codec::header_array_order(&bytes).unwrap();
         let order: Vec<&str> = order.iter().map(String::as_str).collect();

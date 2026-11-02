@@ -23,6 +23,7 @@
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
+	const waterfall = () => import('./WaterfallPane.svelte');
 </script>
 
 {#if view.view === 'spectrum'}
@@ -35,6 +36,16 @@
 	{:then { default: Shape3DPane }}
 		{#key view}
 			<Shape3DPane {view} bind:mode />
+		{/key}
+	{:catch err}
+		<p class="unknown">The 3-D view failed to load: {err.message}</p>
+	{/await}
+{:else if view.view === 'waterfall'}
+	{#await waterfall()}
+		<div class="loading">Loading the 3-D view.</div>
+	{:then { default: WaterfallPane }}
+		{#key view}
+			<WaterfallPane {view} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>

@@ -1,0 +1,78 @@
+{
+ "type": "response",
+ "id": 9,
+ "result": {
+  "views": [
+   {
+    "view": "waterfall",
+    "title": "Two PSDs",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "linear"
+    },
+    "z": {
+     "label": "PSD",
+     "unit": "(m/s²)²/Hz",
+     "scale": "log"
+    },
+    "records": [
+     "101Z+",
+     "102Z+"
+    ],
+    "offsets": {
+     "dtype": "u32",
+     "shape": [
+      3
+     ],
+     "values": [
+      0,
+      4,
+      8
+     ]
+    },
+    "x_values": {
+     "dtype": "f32",
+     "shape": [
+      8
+     ],
+     "values": [
+      10.0,
+      20.0,
+      30.0,
+      40.0,
+      10.0,
+      20.0,
+      30.0,
+      40.0
+     ]
+    },
+    "z_values": {
+     "dtype": "f32",
+     "shape": [
+      8
+     ],
+     "values": [
+      0.5,
+      1.0,
+      0.25,
+      0.125,
+      2.0,
+      0.75,
+      1.0,
+      0.5
+     ]
+    },
+    "x_range": [
+     10.0,
+     40.0
+    ],
+    "page": {
+     "number": 1,
+     "count": 2,
+     "records": 4
+    }
+   }
+  ]
+ }
+}

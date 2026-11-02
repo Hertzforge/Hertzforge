@@ -123,6 +123,39 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
     return out
 
 
+def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
+              curves: Sequence[tuple[Any, Any]], x_range: tuple[float, float],
+              z_range: tuple[float, float] | None = None,
+              page: dict[str, int] | None = None) -> dict[str, Any]:
+    """A `waterfall` view: each record a polyline at its own depth.
+
+    `curves` is one (x, z) pair per record, front to back, in display
+    units and not logged (the shell takes the log when an axis reads
+    log); a NaN is a gap. They go out as two flat f32 arrays and the u32
+    offsets where each record starts, which is what the shell uploads
+    to the GPU as one geometry. `x_range` is the span where something
+    is drawn, `z_range` a level range the object pins (a coherence's 0
+    to 1.05), and `page` which page of how many this is, of how many
+    records."""
+    counts = [len(cx) for cx, _cz in curves]
+    offsets = np.concatenate([[0], np.cumsum(counts)]).astype(np.uint32)
+    xs = [np.asarray(cx, dtype=np.float32) for cx, _cz in curves]
+    zs = [np.asarray(cz, dtype=np.float32) for _cx, cz in curves]
+    out: dict[str, Any] = {
+        'view': 'waterfall', 'title': title, 'x': x, 'z': z,
+        'records': [str(label) for label in records],
+        'offsets': offsets,
+        'x_values': np.concatenate(xs) if xs else np.empty(0, np.float32),
+        'z_values': np.concatenate(zs) if zs else np.empty(0, np.float32),
+        'x_range': [float(x_range[0]), float(x_range[1])],
+    }
+    if z_range is not None:
+        out['z_range'] = [float(z_range[0]), float(z_range[1])]
+    if page is not None:
+        out['page'] = dict(page)
+    return out
+
+
 def mode(index: int, frequency_hz: float, damping: float | None,
          shape: np.ndarray) -> dict[str, Any]:
     """One mode of a `shape3d` view: its 1-based index, frequency,
