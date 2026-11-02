@@ -155,12 +155,21 @@ def test_finished_runs_say_how_they_ended(validate):
     running = {**state, 'state': 'running', 'phase': 'full_level', 'end': None}
     validate(running, 'randomState')
     _refused(validate, {**running, 'end': state['end']}, 'randomState')
-    # only a protection abort carries a trip, and a trip carries its kind's facts
+    # only a protection abort or a law-fault stop carries a trip, and a trip carries
+    # its kind's facts
     end = state['end']
     _refused(validate, {**end, 'outcome': 'operator_abort'}, 'runEnd')
     validate({**end, 'outcome': 'operator_abort', 'trip': None}, 'runEnd')
     trip = {k: v for k, v in end['trip'].items() if k != 'worst_db'}
     _refused(validate, {**end, 'trip': trip}, 'runEnd')
+    law = {'kind': 'law_fault', 'reason': 'non_finite', 'consecutive': 3,
+           'at_level_db': -6, 'at_loop': 14}
+    law_end = {**end, 'outcome': 'law_fault', 'trip': law}
+    validate(law_end, 'runEnd')
+    _refused(validate, {**law_end, 'trip': None}, 'runEnd')
+    _refused(validate, {**law_end, 'trip': {k: v for k, v in law.items() if k != 'reason'}},
+             'runEnd')
+    _refused(validate, {**law_end, 'trip': {**law, 'reason': 'tired'}}, 'runEnd')
 
 
 def test_an_unconfigured_run_has_no_run_id(validate):

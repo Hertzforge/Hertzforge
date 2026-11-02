@@ -775,16 +775,20 @@ export type Trip = { at_level_db: number; at_loop: number } & (
 	| { kind: 'kinematic'; channel: number; axis: 'accel' | 'velocity' | 'displacement'; value: number; limit: number }
 	| { kind: 'drive_vrms'; realized_vrms: number; limit_vrms: number }
 	| { kind: 'divergence'; consecutive_loops: number; divergent_bins: number }
+	| { kind: 'law_fault'; reason: LawFaultReason; consecutive: number }
 );
 
-export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault';
+/** What was wrong with the control law's last unusable output. */
+export type LawFaultReason = 'error' | 'panicked' | 'over_budget' | 'wrong_length' | 'non_finite' | 'negative' | 'non_finite_level';
+
+export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault' | 'law_fault';
 
 export interface RunEnd {
 	outcome: RandomOutcome;
 	message: string;
 	at_s: number | null;
 	level_db: number | null;
-	/** Present when `outcome` is `aborted`. */
+	/** Present when `outcome` is `aborted` or `law_fault`. */
 	trip: Trip | null;
 }
 

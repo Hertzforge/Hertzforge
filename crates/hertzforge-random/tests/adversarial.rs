@@ -320,7 +320,7 @@ fn run_loop(
         notched_bins: &empty_notch,
         band,
     };
-    let seed_out = law.init(&seed_inputs);
+    let seed_out = law.init(&seed_inputs).expect("seed inputs are valid");
     let mut drive_psd = seed_out.drive_psd;
 
     // Notch the seed drive too (limit-down beats control-up from the very first loop).
@@ -364,7 +364,7 @@ fn run_loop(
             notched_bins: &notched_mask,
             band,
         };
-        let out = law.iterate(&inputs);
+        let out = law.iterate(&inputs).expect("loop inputs are valid");
         drive_psd = out.drive_psd;
 
         // Apply the notch AFTER the law, feed the mask back next loop.

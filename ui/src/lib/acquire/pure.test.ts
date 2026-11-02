@@ -187,9 +187,15 @@ describe('words', () => {
 			{ label: 'Value', value: '41.2 mil' },
 			{ label: 'Limit', value: '40 mil' }
 		]);
+		expect(tripFacts({ kind: 'law_fault', reason: 'over_budget', consecutive: 3, at_level_db: -6, at_loop: 14 })).toEqual([
+			{ label: 'Loops in a row', value: '3' },
+			{ label: 'Last problem', value: 'The control law took longer than its time budget' },
+			{ label: 'At level', value: '-6.0 dB' },
+			{ label: 'At loop', value: '14' }
+		]);
 		expect(outcomeTone('completed')).toBe('pass');
 		expect(outcomeTone('operator_stop')).toBe('info');
-		for (const o of ['operator_abort', 'safe_stop', 'aborted', 'held', 'fault'] as const) expect(outcomeTone(o)).toBe('fail');
+		for (const o of ['operator_abort', 'safe_stop', 'aborted', 'held', 'fault', 'law_fault'] as const) expect(outcomeTone(o)).toBe('fail');
 		expect(db(-6)).toBe('-6.0 dB');
 		expect(db(0)).toBe('0.0 dB');
 		expect(db(3.04)).toBe('+3.0 dB');

@@ -267,8 +267,8 @@ The service runs one test at a time. `sim.start` is refused with reason `run_act
 Event topic `random.display`, about 4 to 10 per second while running:
 `{"run_id","source":"SIM","state","elapsed_s","level_db","views":[spectrum, reading],
 "phase","outcome","reason"}`. `phase` is the controller's own phase name. Once `state` is
-`stopped`, `outcome` is one of `completed`, `operator_stop`, `aborted`, `held`, `fault`, and
-`reason` says why in words; the shell shows any outcome other than `completed` or
+`stopped`, `outcome` is one of `completed`, `operator_stop`, `aborted`, `held`, `fault`,
+`law_fault`, and `reason` says why in words; the shell shows any outcome other than `completed` or
 `operator_stop` as an abort with that reason.
 `source` is always present on control data; the shell shows it as a badge. A simulated run is
 never presented as a hardware result.
@@ -732,10 +732,11 @@ or abort was asked for (a controlled stop's ramp-down starts there), or where th
 | `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
 | `sysid_level_unreachable` | System identification could not bring the control response to `pretest.level_db` within its drive ceiling, or the response did not settle on it; the run never drove at test level |
 | `fault` | The loop or the station failed; `message` is the controller's words |
+| `law_fault` | The control law did not produce a usable drive for several loops in a row (3 by default); the run took its controlled stop, with its shutdown ramp. `trip` says why |
 
 The shell shows every outcome but `completed` and `operator_stop` as an abort with `message`.
-`trip` is null unless `outcome` is `aborted`, and then has `at_level_db`, `at_loop` and its
-`kind`'s facts. A trip during system identification has `at_loop` 0 and `at_level_db`
+`trip` is null unless `outcome` is `aborted` or `law_fault`, and then has `at_level_db`, `at_loop`
+and its `kind`'s facts. A trip during system identification has `at_loop` 0 and `at_level_db`
 `pretest.level_db`, and `message` says it came during system identification:
 
 | `kind` | Facts |
@@ -744,6 +745,13 @@ The shell shows every outcome but `completed` and `operator_stop` as an abort wi
 | `kinematic` | `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
 | `drive_vrms` | `realized_vrms`, `limit_vrms` |
 | `divergence` | `consecutive_loops`, `divergent_bins` |
+| `law_fault` | `reason`, `consecutive` (unusable law calls in a row) |
+
+A `law_fault` trip's `reason` is what was wrong with the last unusable law output: `error` (the
+law reported one), `panicked`, `over_budget` (the call took longer than its budget, by default a
+quarter of one loop's acquisition time), `wrong_length`, `non_finite`, `negative` (a drive line), or
+`non_finite_level`. Its `outcome` is always `law_fault`, never `aborted`: the drive in force was
+held through every miss, so the run stops the way an operator stop does.
 
 ### Live Display
 

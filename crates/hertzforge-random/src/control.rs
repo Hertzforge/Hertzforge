@@ -206,29 +206,95 @@ pub struct LoopOutputs {
     pub diagnostics: LoopDiagnostics,
 }
 
-/// A pluggable random control law.
+/// Why a law could not produce a drive on one call, in the law's own terms.
+///
+/// A law returns this from its per-loop calls instead of panicking or making up a
+/// drive. The run core treats it like any other unusable output: it holds the drive
+/// already in force, counts the miss, and stops the run under control when misses
+/// keep coming (see the run service). A law never decides what happens next.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LawFault {
+    /// The loop inputs failed the law's own checks (a ragged grid, a bad band).
+    BadInputs(String),
+    /// The law could not compute a drive this call.
+    Failed(String),
+}
+
+impl std::fmt::Display for LawFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LawFault::BadInputs(s) => write!(f, "control law input error: {s}"),
+            LawFault::Failed(s) => write!(f, "control law failed: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for LawFault {}
+
+/// A commanded level change, handed to a law by [`ControlLaw::retarget_level`].
+///
+/// The run's SCHEDULE owns the level (the ladder rung, a ramp step, the operator's
+/// step); the law owns how it holds the response there. `level_db` is relative to
+/// the full shaped target (0 dB = full level); `target_rms` is the in-band RMS the
+/// target has at that level, in the control channel's units.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelCommand {
+    /// The commanded level, dB relative to the full shaped target.
+    pub level_db: f64,
+    /// The in-band target RMS at `level_db`.
+    pub target_rms: f64,
+}
+
+impl LevelCommand {
+    /// The commanded level as an amplitude scale, `10^(level_db/20)`.
+    pub fn scale(&self) -> f64 {
+        10f64.powf(self.level_db / 20.0)
+    }
+}
+
+/// A random control law: the per-loop math that turns a measurement into the next
+/// drive spectrum.
 ///
 /// The law owns BOTH the scalar level servo and the per-bin shape trim; it reports
 /// the level command separately in [`LoopOutputs::level_cmd_db`]. [`Self::init`]
 /// seeds the shape from the plant inverse (the low-level system-ID handoff);
-/// [`Self::iterate`] advances one loop given a fresh measurement.
+/// [`Self::iterate`] advances one loop given a fresh measurement;
+/// [`Self::retarget_level`] moves the level the law works at when the run's
+/// schedule commands it.
 ///
-/// # This trait is NOT the frozen module ABI
+/// # The law proposes, the core disposes
+///
+/// Every call returns a PROPOSED drive. The run service never takes it on trust: it
+/// rejects malformed output (wrong length, non-finite or negative values, a
+/// non-finite level), caps how far any line may move per loop, counts its own
+/// divergence from that cap, times each call against a budget, catches a panic, and
+/// applies every protection (notch, drive ceiling and abort, envelope, kinematic)
+/// after the law. A law's own `divergent_bins` report can ADD to the divergence
+/// abort, never remove from it. So a law can be wrong without being dangerous.
+///
+/// # This trait is NOT the frozen plug-in interface
 ///
 /// This is the internal loop boundary, chosen so a MIMO law (matrix-valued `H`,
 /// cross-channel drive) can slot in without a signature break. The user-supplied
-/// pluggable-law ABI - the stable, versioned boundary a third party compiles
-/// against - is DEFERRED until MIMO informs its shape. Do not treat
-/// this trait as that ABI; it will move as the internal design learns from MIMO.
+/// law interface - the stable, versioned boundary a third party compiles against -
+/// is separate and versioned on its own; it is adapted onto this trait. Do not
+/// treat this trait as that interface; it will move as the internal design learns
+/// from MIMO.
 pub trait ControlLaw {
     /// Seed the law from the first (low-level, system-ID) measurement: estimate the
     /// plant, seed the drive shape from its regularized inverse so the RESPONSE (not
-    /// the drive) matches the target, and return the initial drive.
-    fn init(&mut self, inputs: &LoopInputs) -> LoopOutputs;
+    /// the drive) matches the target, and return the initial drive at full level
+    /// (`inputs.current_level_db` is 0 dB).
+    fn init(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, LawFault>;
 
     /// Advance one control loop: update the level servo and the shape trim from the
     /// latest measurement, and return the next drive.
-    fn iterate(&mut self, inputs: &LoopInputs) -> LoopOutputs;
+    fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, LawFault>;
+
+    /// The run's schedule moved the level to `cmd`: return the drive at the new
+    /// level. The core scales its own reference by the commanded change, so a
+    /// commanded step is never mistaken for the law moving the drive.
+    fn retarget_level(&mut self, cmd: LevelCommand) -> Result<LoopOutputs, LawFault>;
 
     /// A short stable identifier for the law (for run logs / UI selection).
     fn name(&self) -> &str;
@@ -550,7 +616,9 @@ pub struct HinvConfig {
     /// takes).
     pub damping: f64,
     /// Consecutive iterations a bin must clamp at the max correction before it is
-    /// reported divergent. Default 10.
+    /// reported divergent. Default 10. The run core uses the same count for its own
+    /// divergence: a line its per-loop change cap holds back this many law outputs
+    /// running is divergent whatever the law reports.
     pub divergence_n: u32,
     /// Scalar level servo: maximum drive slew, dB/s
     /// ([`hertzforge_dsp::sine::AmplitudeServo`]). Default 1.0.
@@ -705,7 +773,7 @@ pub struct HinvLaw {
     band: (usize, usize),
     initialized: bool,
     /// The scheduled level as an AMPLITUDE scale (1.0 = full level), mirrored
-    /// from `retarget_level`'s feedforward scale. THE SHAPE TRIM'S REFERENCE:
+    /// from `retarget_servo`'s feedforward scale. THE SHAPE TRIM'S REFERENCE:
     /// `self.target` is the FULL-LEVEL line, the measurement is at the
     /// SCHEDULED level, and comparing them raw reads a healthy -12 dB rung as
     /// "+12 dB low on every bin" - which matured one-directional clamp streaks
@@ -793,17 +861,18 @@ impl HinvLaw {
         self.servo.drive_scale()
     }
 
-    /// The current drive PSD (`shape[k] * drive_scale^2`) - the run service reads this
-    /// each loop to synthesize the drive stream before applying the notch (notch seam).
-    /// Additive accessor over the private [`Self::drive_from_shape`]; behavior identical.
+    /// The current drive PSD (`shape[k] * drive_scale^2`): what the law's last call
+    /// returned. The run service uses the drive each call returns (through its own
+    /// checks); this accessor is for tests and display.
     pub fn drive_psd(&self) -> Vec<f64> {
         self.drive_from_shape()
     }
 
     /// Re-target the scalar level servo to a NEW in-band RMS target and seed its
     /// feedforward scale (the schedule/level split). The SERVICE owns the schedule
-    /// level (the ladder rung); it calls this to move
-    /// the rung. The law keeps owning the servo TRIM around that target and the shape.
+    /// level (the ladder rung); it moves the rung through
+    /// [`ControlLaw::retarget_level`], which lands here. The law keeps owning the
+    /// servo TRIM around that target and the shape.
     ///
     /// This rebuilds the internal [`hertzforge_dsp::sine::AmplitudeServo`] at `target_rms`
     /// with the SAME configured gains / drive ceiling / fault fraction as construction
@@ -812,7 +881,7 @@ impl HinvLaw {
     /// applies `feedforward_scale` so the drive starts AT the rung and the servo only
     /// trims residual plant-estimate error. The per-bin shape (the H-inverse
     /// feedforward) is preserved - only the overall level target moves.
-    pub fn retarget_level(&mut self, target_rms: f64, feedforward_scale: f64) {
+    fn retarget_servo(&mut self, target_rms: f64, feedforward_scale: f64) {
         if target_rms <= 0.0 || target_rms.is_nan() {
             return;
         }
@@ -1017,38 +1086,31 @@ impl HinvLaw {
 }
 
 impl ControlLaw for HinvLaw {
-    fn init(&mut self, inputs: &LoopInputs) -> LoopOutputs {
-        // A malformed grid cannot advance the loop; return a zero drive with an
-        // error surfaced as an empty measurement (the caller validates upstream in
-        // the service, but the law must not panic).
-        if inputs.validate().is_err() {
-            return LoopOutputs {
-                drive_psd: vec![0.0; self.shape.len()],
-                level_cmd_db: self.level_db(),
-                diagnostics: LoopDiagnostics::default(),
-            };
-        }
+    fn init(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, LawFault> {
+        // A malformed grid cannot seed the loop. The law reports it rather than
+        // inventing a drive; the run refuses to engage on a law that cannot seed.
+        inputs
+            .validate()
+            .map_err(|e| LawFault::BadInputs(e.to_string()))?;
         self.seed_shape(inputs);
         // Seed the servo at unit level (0 dB = full shaped target); the shape already
         // carries the H-inverse feedforward, so the level starts at the answer and
         // the servo only trims residual plant-estimate error (hertzforge-demo handoff).
         self.servo.set_feedforward_scale(1.0);
         self.initialized = true;
-        LoopOutputs {
+        Ok(LoopOutputs {
             drive_psd: self.drive_from_shape(),
             level_cmd_db: self.level_db(),
             diagnostics: LoopDiagnostics::default(),
-        }
+        })
     }
 
-    fn iterate(&mut self, inputs: &LoopInputs) -> LoopOutputs {
-        if inputs.validate().is_err() {
-            return LoopOutputs {
-                drive_psd: self.drive_from_shape(),
-                level_cmd_db: self.level_db(),
-                diagnostics: LoopDiagnostics::default(),
-            };
-        }
+    fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, LawFault> {
+        // A malformed grid cannot advance the loop. The law's state is untouched,
+        // and the core holds the drive already in force.
+        inputs
+            .validate()
+            .map_err(|e| LawFault::BadInputs(e.to_string()))?;
         // Compute the measurement trust mask first: it gates BOTH the
         // shape trim AND the level servo's RMS. A sub-band whose coherence has
         // dropped out is UNTRUSTED, and an untrusted measurement must not drive the
@@ -1076,7 +1138,7 @@ impl ControlLaw for HinvLaw {
         // Shape trim over trusted, non-notched bins.
         let (untrusted_bins, clamped_bins, divergent_bins) = self.trim_shape(inputs, &untrusted);
 
-        LoopOutputs {
+        Ok(LoopOutputs {
             drive_psd: self.drive_from_shape(),
             level_cmd_db: self.level_db(),
             diagnostics: LoopDiagnostics {
@@ -1087,7 +1149,18 @@ impl ControlLaw for HinvLaw {
                 inband_rms_g: Some(inband_rms_g),
                 servo_faulted,
             },
-        }
+        })
+    }
+
+    fn retarget_level(&mut self, cmd: LevelCommand) -> Result<LoopOutputs, LawFault> {
+        // The servo's new target and its feedforward: the drive starts AT the
+        // commanded level and the servo trims residual plant-estimate error.
+        self.retarget_servo(cmd.target_rms, cmd.scale());
+        Ok(LoopOutputs {
+            drive_psd: self.drive_from_shape(),
+            level_cmd_db: self.level_db(),
+            diagnostics: LoopDiagnostics::default(),
+        })
     }
 
     fn name(&self) -> &str {

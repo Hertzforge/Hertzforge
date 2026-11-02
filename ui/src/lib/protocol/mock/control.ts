@@ -1138,6 +1138,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				return `Coherence gate held: band coherence ${r.coherence.toFixed(2)} is below the floor ${r.ctl.coherence_floor.toFixed(2)}; the run never drove at test level.`;
 			case 'fault':
 				return 'The control loop stopped on a fault.';
+			case 'law_fault':
+				return trip?.kind === 'law_fault'
+					? `The control law did not produce a usable drive for ${trip.consecutive} loops in a row; the run stopped, at ${fmt(trip.at_level_db)} dB.`
+					: 'The control law did not produce a usable drive; the run stopped.';
 			case 'aborted':
 				if (!trip) return 'Aborted.';
 				switch (trip.kind) {
@@ -1149,6 +1153,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 						return `Drive abort: ${trip.realized_vrms.toFixed(3)} V rms at or above the ${trip.limit_vrms} V limit, at ${fmt(trip.at_level_db)} dB.`;
 					case 'divergence':
 						return `Divergence abort: ${trip.divergent_bins} lines diverged for ${trip.consecutive_loops} loops in a row.`;
+					case 'law_fault':
+						return `The control law did not produce a usable drive for ${trip.consecutive} loops in a row; the run stopped.`;
 				}
 		}
 		return 'Ended.';

@@ -20,7 +20,11 @@
 //! duration -> stop), the alarm/abort envelope engine, the reactive kinematic monitor,
 //! the drive-Vrms clamp/abort, the divergence abort, the overload proxy, the capture
 //! rules, periodic save, and the serde report + status surface. It closes the loop
-//! around the control core exactly as the adversarial fixtures do.
+//! around the control core exactly as the adversarial fixtures do. It holds the law
+//! as a `Box<dyn ControlLaw + Send>` built by a [`service::law::LawFactory`] and
+//! guards every call to it the same way: output checks, a per-loop change cap, its
+//! own divergence count, a time budget, panic containment and a controlled stop
+//! (see [`service`]).
 //!
 //! # Two hardware paths - which one this crate serves
 //!
@@ -49,16 +53,17 @@ pub mod control;
 pub mod service;
 
 pub use control::{
-    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvLaw, LoopDiagnostics,
-    LoopInputs, LoopOutputs, NotchReport, NotchSet,
+    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvLaw, LawFault,
+    LevelCommand, LoopDiagnostics, LoopInputs, LoopOutputs, NotchReport, NotchSet,
 };
 
 pub use service::config::{
-    CaptureRules, CaptureTrigger, ConfigError, ControlChannel, ControlSet, LevelSchedule,
-    LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
+    CaptureRules, CaptureTrigger, ConfigError, ControlChannel, ControlSet, LawGuards,
+    LevelSchedule, LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
 };
 pub use service::engine::{
     GridRefusal, GridSnapshot, KinematicMonitor, LoopConfig, StationAdoption, MIN_CONTROL_LINES,
 };
-pub use service::report::{ReportData, RunState, Status, TripKind, TripRecord};
-pub use service::{RandomService, RandomSnapshotPayload, ServiceError};
+pub use service::law::{HinvLawFactory, LawClock, LawFactory, LawSetup, MonotonicClock};
+pub use service::report::{LawFaultReason, ReportData, RunState, Status, TripKind, TripRecord};
+pub use service::{LawGuardStats, RandomService, RandomSnapshotPayload, ServiceError};

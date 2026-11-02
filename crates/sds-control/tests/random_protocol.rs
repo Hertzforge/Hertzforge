@@ -1526,3 +1526,29 @@ async fn full_level_waits_for_the_level_to_arrive() {
         .count();
     assert!(ramping >= 1, "no frame caught the ramp to full level");
 }
+
+/// The law-fault end: a controlled stop that carries its trip. The schema takes it
+/// with a trip and refuses it without one, and refuses a trip kind it does not name.
+#[test]
+fn a_law_fault_end_carries_its_trip_and_validates() {
+    let schema = Schema::load();
+    let end = json!({
+        "outcome": "law_fault",
+        "message": "The control law did not produce a usable drive for 3 loops in a row (its \
+                    drive was not a number); the run stopped at -6.0 dB.",
+        "at_s": 31.5,
+        "level_db": -6,
+        "trip": {"kind": "law_fault", "reason": "non_finite", "consecutive": 3,
+                 "at_level_db": -6, "at_loop": 14}
+    });
+    schema.assert_valid(&end, Some("runEnd"));
+    let mut no_trip = end.clone();
+    no_trip["trip"] = Value::Null;
+    assert!(
+        schema.check(&no_trip, Some("runEnd")).is_err(),
+        "a law-fault end must carry its trip"
+    );
+    let mut bad_reason = end.clone();
+    bad_reason["trip"]["reason"] = json!("tired");
+    assert!(schema.check(&bad_reason, Some("runEnd")).is_err());
+}
