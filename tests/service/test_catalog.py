@@ -28,7 +28,8 @@ def test_catalog_names_every_operation_and_dataset(catalog):
     ids = {op['id'] for op in catalog['operations']}
     assert ids == {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
                    'modal.modes', 'modal_run.waterfall', 'modal_run.modes',
-                   'modal_run.ods', 'modal_run.mac', 'modal_run.motion'}
+                   'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
+                   'modal_run.resynthesis'}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}

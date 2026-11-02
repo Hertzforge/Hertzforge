@@ -104,6 +104,8 @@ export interface Series {
 	shape?: SeriesShape;
 	/** Bin edges for `steps`: one more than there are y values, ascending. */
 	edges?: NumericArray;
+	/** Index of the series this one follows: a model's prediction of that measurement. */
+	follows?: number;
 }
 
 export type SeriesShape = 'line' | 'steps' | 'law';

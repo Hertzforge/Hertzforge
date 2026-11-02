@@ -4,7 +4,7 @@
  * ceiling the controller holds a channel under; it never aborts), drive thin solid.
  */
 
-import type { Role } from '$lib/protocol/types';
+import type { Role, Series } from '$lib/protocol/types';
 
 export interface RoleStyle {
 	/** Canvas dash pattern in CSS pixels; empty for solid. */
@@ -40,4 +40,37 @@ export function roleColorVar(role: Role, nthOfRole: number): string {
 export function dashArray(role: Role): string {
 	const d = ROLE_STYLES[role].dash;
 	return d.length ? d.join(' ') : 'none';
+}
+
+/** How one series of a view is drawn. */
+export interface SeriesLook {
+	style: RoleStyle;
+	colorVar: string;
+	/** A follower: drawn, but not listed in the legend. */
+	follows: boolean;
+}
+
+/** A follower's dash: the reference role's, so it reads as dashed beside its solid measurement. */
+const FOLLOWER_DASH = ROLE_STYLES.reference.dash;
+
+/**
+ * The look of each of a view's series. Series step through their role's colors in order; a
+ * follower (`follows`, an earlier series that is not itself a follower) takes its measurement's
+ * color dashed and draws just above it, as Visual Dynamics draws a synthesized FRF. A `follows`
+ * that names no such series is ignored.
+ */
+export function seriesLooks(series: Pick<Series, 'role' | 'follows'>[]): SeriesLook[] {
+	const counts: Partial<Record<Role, number>> = {};
+	const looks: SeriesLook[] = [];
+	series.forEach((s, i) => {
+		const followed = s.follows !== undefined && s.follows < i ? looks[s.follows] : undefined;
+		if (followed && !followed.follows) {
+			const style = { ...followed.style, dash: FOLLOWER_DASH, styleName: 'dashed', z: followed.style.z + 0.5 };
+			looks.push({ style, colorVar: followed.colorVar, follows: true });
+			return;
+		}
+		const nth = (counts[s.role] = (counts[s.role] ?? -1) + 1);
+		looks.push({ style: ROLE_STYLES[s.role] ?? ROLE_STYLES.other, colorVar: roleColorVar(s.role, nth), follows: false });
+	});
+	return looks;
 }
