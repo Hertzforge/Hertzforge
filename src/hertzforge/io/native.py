@@ -20,8 +20,10 @@ never written: saving it again writes `.hforge`.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -62,14 +64,55 @@ VDYN_SCHEMA = 3
 #: the suffix `save` adds
 SUFFIX = '.hforge'
 
+#: the smallest array a compressed save compresses; below it gzip saves
+#: too little to pay for the chunk index
+COMPRESS_FROM_BYTES = 64 * 1024
+
+#: the bytes in one chunk of a compressed array, the size HDF5's own
+#: guidance puts between 10 KB and 1 MB
+CHUNK_BYTES = 1024 * 1024
+
+#: whether the save in progress compresses its large arrays (`compressed`)
+_compressing: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    'compressing', default=False)
+
+
+@contextlib.contextmanager
+def compressed(on: bool = True) -> Iterator[None]:
+    """Within the block, saves write each array of `COMPRESS_FROM_BYTES`
+    or more with gzip and the shuffle filter, chunked along its last axis
+    (time, for a time history). Arrays are uncompressed otherwise: gzip
+    saved 12% on a random-vibration run and wrote at 58 MB/s, so it is
+    for archiving, not for every save (FILE_FORMAT_PLAN.md, section 3).
+    Every HDF5 reader reads the file either way."""
+    token = _compressing.set(on)
+    try:
+        yield
+    finally:
+        _compressing.reset(token)
+
+
+def _write_array(group: h5py.Group, name: str, data: Any) -> None:
+    """A numeric dataset, compressed when the save asks and the array is
+    large enough (`compressed`)."""
+    array = np.asarray(data)
+    if (not _compressing.get() or array.nbytes < COMPRESS_FROM_BYTES
+            or array.dtype.kind not in 'biufc'):
+        group.create_dataset(name, data=array)
+        return
+    run = max(1, CHUNK_BYTES // array.itemsize)
+    chunks = (*(1,) * (array.ndim - 1), min(array.shape[-1], run))
+    group.create_dataset(name, data=array, chunks=chunks, compression='gzip',
+                         compression_opts=1, shuffle=True)
+
 
 def _write_ragged(group: h5py.Group, name: str,
                   arrays: Sequence[np.ndarray]) -> None:
     flat = (np.concatenate(arrays) if arrays
             else np.empty(0, dtype=np.int64))
     offsets = np.cumsum([0] + [len(a) for a in arrays])
-    group.create_dataset(f'{name}_flat', data=flat)
-    group.create_dataset(f'{name}_offsets', data=offsets)
+    _write_array(group, f'{name}_flat', flat)
+    _write_array(group, f'{name}_offsets', offsets)
 
 
 def _read_ragged(group: h5py.Group, name: str) -> list[np.ndarray]:
@@ -125,7 +168,7 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
                  'cs_id', 'cs_type', 'cs_matrix',
                  'elem_id', 'elem_type', 'elem_color', 'elem_group',
                  'group_id'):
-        group.create_dataset(name, data=getattr(geom, name))
+        _write_array(group, name, getattr(geom, name))
     _write_strings(group, 'cs_name', geom.cs_name)
     _write_strings(group, 'group_name', geom.group_name)
     _write_ragged(group, 'elem_conn', geom.elem_conn)
@@ -344,8 +387,8 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     from ..core.data import DataArray  # noqa: F401 (documented schema owner)
 
     group.attrs['function_type'] = data.function_type
-    group.create_dataset('abscissa', data=data.abscissa)
-    group.create_dataset('ordinate', data=data.ordinate)
+    _write_array(group, 'abscissa', data.abscissa)
+    _write_array(group, 'ordinate', data.ordinate)
     _write_strings(group, 'response_dof', data.response_dof)
     if data.reference_dof is not None:
         _write_strings(group, 'reference_dof', data.reference_dof)
@@ -740,7 +783,7 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     group.attrs['unscaled'] = bool(getattr(shapes, 'unscaled', False))
     group.create_dataset('frequency', data=shapes.frequency)
     group.create_dataset('damping', data=shapes.damping)
-    group.create_dataset('shape_matrix', data=shapes.shape_matrix)
+    _write_array(group, 'shape_matrix', shapes.shape_matrix)
     group.create_dataset('modal_mass', data=shapes.modal_mass)
     # written only when a source carried one, so an old file and a set
     # that never had it read back identically
@@ -1094,7 +1137,7 @@ def hforge_path(path: str | os.PathLike) -> str:
     return path if path.endswith(SUFFIX) else path + SUFFIX
 
 
-def save(obj: Any, path: str | os.PathLike) -> None:
+def save(obj: Any, path: str | os.PathLike, compress: bool = False) -> None:
     """Save one Hertzforge object to a .hforge (HDF5) file.
 
     Raises TypeError for an object of a kind the format does not hold,
@@ -1106,6 +1149,8 @@ def save(obj: Any, path: str | os.PathLike) -> None:
         The object to save.
     path : str or os.PathLike
         Where; `.hforge` is added when the suffix is not there.
+    compress : bool, optional
+        Write the large arrays with gzip (`compressed`), for archiving.
 
     Returns
     -------
@@ -1113,7 +1158,7 @@ def save(obj: Any, path: str | os.PathLike) -> None:
     """
     import h5py
 
-    with h5py.File(hforge_path(path), 'w') as f:
+    with h5py.File(hforge_path(path), 'w') as f, compressed(compress):
         save_into(obj, f)
 
 
@@ -1143,7 +1188,8 @@ def save_test(path: str | os.PathLike, name: str,
               project_type: str | None = None,
               object_groups: Sequence[Mapping[str, Any]] | None = None,
               provenance: Mapping[str, Any] | None = None,
-              data_index: Sequence[Mapping[str, Any]] | None = None) -> None:
+              data_index: Sequence[Mapping[str, Any]] | None = None,
+              compress: bool = False) -> None:
     """Save a whole test, every named object, to one .hforge file.
 
     Objects go in numbered groups with the name as an attribute, so a
@@ -1155,11 +1201,12 @@ def save_test(path: str | os.PathLike, name: str,
     entries as plain values (`DataIndex.records`), stored as JSON in a
     `data_index` dataset at the root when there are any. `.hforge` is
     added to `path` when it is not there, and a `.vdyn` path raises
-    ValueError.
+    ValueError. `compress` writes the large arrays with gzip
+    (`compressed`), for archiving.
     """
     import h5py
 
-    with h5py.File(hforge_path(path), 'w') as f:
+    with h5py.File(hforge_path(path), 'w') as f, compressed(compress):
         save_test_into(f, name, objects, active_geometry, project_type,
                        object_groups, provenance, data_index)
 

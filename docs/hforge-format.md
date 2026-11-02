@@ -97,6 +97,11 @@ root (absent otherwise):
   modal damping has no `modal_damping` dataset.
 - Numeric datasets are whatever numpy held (float64, complex128,
   int64) at full precision. Nothing is narrowed.
+- Arrays are stored uncompressed unless the save asked for compression
+  (`Project.save(path, compress=True)`). Then each numeric array of 64 KB
+  or more is chunked along its last axis (time, for a time history) and
+  stored with gzip at level 1 and the shuffle filter. Every HDF5 build
+  reads both, so nothing about reading the file changes.
 
 ## `geometry/`
 
