@@ -8246,7 +8246,8 @@ class Project(dict):
 
     # ---- the file ----------------------------------------------------------
 
-    def save(self, path: str | os.PathLike, **options: Any) -> str:
+    def save(self, path: str | os.PathLike, compress: bool = False,
+             **options: Any) -> str:
         """Write the whole project to one file: `.hforge`, `.mat` for the
         same layout in a MATLAB file, or `.h5` for the Engineering
         Sciences Common Data Format.
@@ -8261,6 +8262,12 @@ class Project(dict):
             suffix writes a `.hforge` file, with `.hforge` added when the
             path does not end in it. A `.vdyn` path raises ValueError:
             Visual Dynamics' files are opened, never written.
+        compress : bool, optional
+            For a `.hforge` file, write the large arrays with gzip, for
+            archiving: a file with quiet stretches shrinks by most of its
+            size, a continuous random record by about a tenth, and the
+            save takes longer (`io.native.compressed`). ValueError for
+            any other format.
         **options
             Passed to the MATLAB or ESCDF writer, for example an ESCDF
             file's `created_by`. Not used for a `.hforge` file.
@@ -8274,6 +8281,9 @@ class Project(dict):
         from .io.escdf_objects import SUFFIXES
         from .io.native import hforge_path
 
+        if compress and str(path).endswith(('.mat', *SUFFIXES)):
+            raise ValueError('compress applies to a .hforge file; the .mat and '
+                             'ESCDF writers do not compress')
         if str(path).endswith('.mat'):
             export_file(self, str(path), **options)
             return str(path)
@@ -8286,7 +8296,7 @@ class Project(dict):
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
                   provenance=self.provenance,
-                  data_index=self.data_index.records())
+                  data_index=self.data_index.records(), compress=compress)
         written = hforge_path(str(path))
         self.file = os.path.abspath(os.path.expanduser(written))
         return written

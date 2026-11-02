@@ -202,3 +202,47 @@ def test_an_escdf_file_visual_dynamics_wrote_keeps_its_whole_objects(tmp_path):
     back = Project.open(path)['Geometry']
     assert back.group_properties.keys() == geometry.group_properties.keys()
     assert back == geometry
+
+
+def test_a_compressed_save_holds_the_same_project(tmp_path):
+    """gzip on request: the large arrays are chunked along time and
+    compressed, the small ones are left as they are, and the file reads
+    back to the same tree as an uncompressed save. A plain save
+    compresses nothing."""
+    from hertzforge.core.data import TimeHistory
+
+    t = np.arange(65536) / 8192.0
+    quiet = np.where(t < 1.0, np.sin(2 * np.pi * 40 * t) * np.exp(-8 * t), 0.0)
+    project = native.load(os.path.join(CORPUS, 'schema1.hforge'))
+    project.add('Hits', TimeHistory(t, [quiet, 0.5 * quiet], response_dof=['1X+', '2Y+']))
+    plain = project.save(tmp_path / 'plain')
+    packed = project.save(tmp_path / 'packed', compress=True)
+
+    with h5py.File(plain) as f:
+        filters = []
+        f.visititems(lambda name, obj: filters.append(name) if isinstance(
+            obj, h5py.Dataset) and obj.compression else None)
+        assert filters == []
+    with h5py.File(packed) as f:
+        hits = next(f['objects'][k] for k in f['objects']
+                    if f['objects'][k].attrs['name'] == 'Hits')
+        ordinate = hits['ordinate']
+        assert (ordinate.compression, ordinate.shuffle) == ('gzip', True)
+        assert ordinate.chunks == (1, 65536)
+        assert hits['abscissa'].compression == 'gzip'
+        assert hits['response_dof'].compression is None
+        geometry = f['objects/0000/node_xyz']
+        assert geometry.nbytes < native.COMPRESS_FROM_BYTES
+        assert geometry.compression is None
+    assert os.path.getsize(packed) < 0.7 * os.path.getsize(plain)
+    a, b = file_tree(plain), file_tree(packed)
+    assert set(a) == set(b)
+    assert not [key for key in a if not same(a[key], b[key])]
+
+
+def test_compress_is_refused_where_it_does_nothing(tmp_path):
+    project = native.load(os.path.join(CORPUS, 'schema1.hforge'))
+    for name in ('p.mat', 'p.h5'):
+        with pytest.raises(ValueError, match='compress applies to a .hforge file'):
+            project.save(tmp_path / name, compress=True)
+    assert not list(tmp_path.iterdir())
