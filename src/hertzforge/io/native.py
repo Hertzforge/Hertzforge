@@ -92,6 +92,55 @@ def compressed(on: bool = True) -> Iterator[None]:
         _compressing.reset(token)
 
 
+#: the smallest array the reader maps from the file instead of reading
+#: (`_read_array`); below it the bytes are read, which costs less than a
+#: mapping kept open
+MAP_FROM_BYTES = 64 * 2**20
+
+
+def _read_array(dataset: h5py.Dataset) -> np.ndarray:
+    """A numeric dataset as an array, mapped from the file when it is
+    large, or read.
+
+    A mapped array is an ordinary numpy array whose bytes stay in the
+    file until something touches them, so opening a 23 GB run reads none
+    of its samples, and a span read pages in only that span. It is mapped
+    copy-on-write: an edit in memory never reaches the file. Mapping
+    needs the bytes laid out plainly in a file on disk, so an array that
+    is compressed or chunked (a compressed save), one in a file held in
+    memory (the `.mat` and ESCDF readers), and every array on Windows,
+    where a mapped file cannot be replaced by the next save, are read
+    as before. `save` and `save_test` replace a file whole
+    (`_replaced`), so saving over a file an open project maps leaves
+    the mapping on the bytes it had."""
+    if (os.name != 'nt' and dataset.nbytes >= MAP_FROM_BYTES
+            and dataset.chunks is None and dataset.compression is None
+            and dataset.dtype.kind in 'biufc'
+            and dataset.file.driver == 'sec2'):
+        offset = dataset.id.get_offset()
+        if offset is not None:
+            return np.memmap(dataset.file.filename, dtype=dataset.dtype,
+                             mode='c', offset=offset, shape=dataset.shape)
+    return dataset[()]
+
+
+@contextlib.contextmanager
+def _replaced(path: str) -> Iterator[str]:
+    """A path beside `path` to write the file to; on success it replaces
+    `path` in one rename, and on failure it is removed and `path` is left
+    as it was. A crash mid-save therefore never costs the last saved
+    file, and an open project whose arrays are mapped from `path` keeps
+    reading the bytes it mapped, which the rename does not touch."""
+    folder, name = os.path.split(os.path.abspath(path))
+    partial = os.path.join(folder, f'.{name}.{os.getpid()}.partial')
+    try:
+        yield partial
+        os.replace(partial, path)
+    finally:
+        if os.path.exists(partial):
+            os.remove(partial)
+
+
 def _write_array(group: h5py.Group, name: str, data: Any) -> None:
     """A numeric dataset, compressed when the save asks and the array is
     large enough (`compressed`)."""
@@ -631,8 +680,8 @@ def load_data(group: h5py.Group) -> DataArray:
             limits['below_floor'] = group['sine_below_floor'][()].astype(bool)
     data = cls(
         **limits,
-        abscissa=group['abscissa'][()],
-        ordinate=group['ordinate'][()],
+        abscissa=_read_array(group['abscissa']),
+        ordinate=_read_array(group['ordinate']),
         response_dof=_read_strings(group, 'response_dof'),
         reference_dof=(_read_strings(group, 'reference_dof')
                        if 'reference_dof' in group else None),
@@ -810,7 +859,7 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
         frequency=group['frequency'][()],
         damping=group['damping'][()],
         coordinate=_read_strings(group, 'coordinate'),
-        shape_matrix=group['shape_matrix'][()],
+        shape_matrix=_read_array(group['shape_matrix']),
         modal_mass=group['modal_mass'][()],
         comment=_read_strings(group, 'comment'),
         description=_read_strings(group, 'description'),
@@ -1165,7 +1214,8 @@ def save(obj: Any, path: str | os.PathLike, compress: bool = False) -> None:
     """
     import h5py
 
-    with h5py.File(hforge_path(path), 'w') as f, compressed(compress):
+    with (_replaced(hforge_path(path)) as partial,
+          h5py.File(partial, 'w') as f, compressed(compress)):
         save_into(obj, f)
 
 
@@ -1213,7 +1263,8 @@ def save_test(path: str | os.PathLike, name: str,
     """
     import h5py
 
-    with h5py.File(hforge_path(path), 'w') as f, compressed(compress):
+    with (_replaced(hforge_path(path)) as partial,
+          h5py.File(partial, 'w') as f, compressed(compress)):
         save_test_into(f, name, objects, active_geometry, project_type,
                        object_groups, provenance, data_index)
 
