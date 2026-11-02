@@ -445,12 +445,17 @@ def main() -> None:
         'data': {'views': [
             {'view': 'shape3d', 'title': 'Two Triangles', 'unit': 'm',
              'nodes': {'$array': 'n'}, 'triangles': {'$array': 't'},
-             'modes': [{'index': 1, 'frequency_hz': 12.5, 'damping': None, 'shape': {'$array': 's'}}]},
+             'modes': [{'index': 1, 'frequency_hz': 12.5, 'damping': None, 'shape': {'$array': 's'}},
+                       {'index': 2, 'frequency_hz': 31.0, 'damping': 0.02, 'shape': {'$array': 'r'},
+                        'shape_imag': {'$array': 'i'}}]},
         ]},
     }, {
         'n': ('f32', [4, 3], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]),
         't': ('u32', [2, 3], [0, 1, 2, 0, 2, 3]),
         's': ('f32', [4, 3], [0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.25]),
+        # a complex mode: the second has an imaginary part, so it travels
+        'r': ('f32', [4, 3], [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0]),
+        'i': ('f32', [4, 3], [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]),
     })
 
     # the Random live display: three views, every series stepped on the run's lines

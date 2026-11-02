@@ -140,7 +140,9 @@
               "index": {"type": "integer"},
               "frequency_hz": {"type": "number"},
               "damping": {"type": ["number", "null"]},
-              "shape": {"$ref": "#/$defs/arrayRef"}
+              "shape": {"$ref": "#/$defs/arrayRef"},
+              "shape_imag": {"$ref": "#/$defs/arrayRef"},
+              "label": {"type": "string"}
             }
           }
         }

@@ -2,10 +2,11 @@
 	/**
 	 * Mode shape view, drawn with three.js.
 	 *
-	 * Deformation x0 + a * shape * sin(2 pi t / T) runs in the vertex shader, so a frame costs one
-	 * uniform update however large the mesh is. Normals come from screen-space derivatives (flat
+	 * Deformation x0 + a * Re((shape + i shape_imag) exp(i theta)) runs in the vertex shader, so a
+	 * frame costs two uniform updates however large the mesh is. A real shape is a standing wave; a
+	 * complex one (a complex mode, an operating shape) shows its traveling part. Normals come from screen-space derivatives (flat
 	 * shading), which keeps lighting correct on the deformed surface. Color is the mode shape
-	 * magnitude on a colorblind-safe sequential map with a numeric legend. GPU resources are
+	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
 	 */
 	import { onDestroy, onMount } from 'svelte';
@@ -32,6 +33,7 @@
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
+	import { nodeTravel } from './shape';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -92,13 +94,14 @@
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
 	let shapeAttr: BufferAttribute;
+	let shapeImagAttr: BufferAttribute;
 	let colorAttr: BufferAttribute;
 	let surface: Mesh;
 	let outline: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
 	const materials: Material[] = [];
-	const uniforms = { uScale: { value: 0 } };
+	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
 	let maxMag = 1;
 	let raf = 0;
 	let phase = 0;
@@ -112,10 +115,14 @@
 	/** Inject the deformation into a built-in material's vertex shader. */
 	function displaced<M extends Material>(material: M): M {
 		material.onBeforeCompile = (shader) => {
-			shader.uniforms.uScale = uniforms.uScale;
+			shader.uniforms.uRe = uniforms.uRe;
+			shader.uniforms.uIm = uniforms.uIm;
 			shader.vertexShader = shader.vertexShader
-				.replace('#include <common>', '#include <common>\nattribute vec3 shape;\nuniform float uScale;')
-				.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += shape * uScale;');
+				.replace(
+					'#include <common>',
+					'#include <common>\nattribute vec3 shape;\nattribute vec3 shapeImag;\nuniform float uRe;\nuniform float uIm;'
+				)
+				.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += shape * uRe + shapeImag * uIm;');
 		};
 		material.customProgramCacheKey = () => 'sds-displaced';
 		materials.push(material);
@@ -133,26 +140,23 @@
 
 	function loadMode() {
 		if (!renderer || !current) return;
-		const src = current.shape;
-		const dst = shapeAttr.array as Float32Array;
+		const re = current.shape;
+		const im = current.shape_imag;
+		(shapeAttr.array as Float32Array).set(re);
+		if (im) (shapeImagAttr.array as Float32Array).set(im);
+		else (shapeImagAttr.array as Float32Array).fill(0);
+		const travel = new Float32Array(re.length / 3);
+		maxMag = nodeTravel(re, im, travel) || 1;
 		const colors = colorAttr.array as Float32Array;
-		let m = 0;
-		for (let i = 0; i < src.length; i += 3) {
-			const mag = Math.hypot(src[i], src[i + 1], src[i + 2]);
-			if (mag > m) m = mag;
-		}
-		maxMag = m || 1;
 		const rgb: [number, number, number] = [0, 0, 0];
-		for (let i = 0; i < src.length; i += 3) {
-			dst[i] = src[i];
-			dst[i + 1] = src[i + 1];
-			dst[i + 2] = src[i + 2];
-			colormap(Math.hypot(src[i], src[i + 1], src[i + 2]) / maxMag, rgb);
-			colors[i] = srgbToLinear(rgb[0]);
-			colors[i + 1] = srgbToLinear(rgb[1]);
-			colors[i + 2] = srgbToLinear(rgb[2]);
+		for (let n = 0; n < travel.length; n++) {
+			colormap(travel[n] / maxMag, rgb);
+			colors[3 * n] = srgbToLinear(rgb[0]);
+			colors[3 * n + 1] = srgbToLinear(rgb[1]);
+			colors[3 * n + 2] = srgbToLinear(rgb[2]);
 		}
 		shapeAttr.needsUpdate = true;
+		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		dirty = true;
 	}
@@ -202,9 +206,11 @@
 		geometry = new BufferGeometry();
 		const position = new BufferAttribute(view.nodes, 3);
 		shapeAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
+		shapeImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 		colorAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 		geometry.setAttribute('position', position);
 		geometry.setAttribute('shape', shapeAttr);
+		geometry.setAttribute('shapeImag', shapeImagAttr);
 		geometry.setAttribute('color', colorAttr);
 		if (view.triangles) geometry.setIndex(new BufferAttribute(view.triangles, 1));
 		geometry.computeBoundingSphere();
@@ -235,6 +241,7 @@
 			lineGeometry = new BufferGeometry();
 			lineGeometry.setAttribute('position', position);
 			lineGeometry.setAttribute('shape', shapeAttr);
+			lineGeometry.setAttribute('shapeImag', shapeImagAttr);
 			lineGeometry.setIndex(new BufferAttribute(view.lines, 1));
 			outline = new LineSegments(lineGeometry, displaced(new LineBasicMaterial({ transparent: true, opacity: 0.9 })));
 			outline.frustumCulled = false;
@@ -319,9 +326,14 @@
 			phase = (phase + dt / CYCLE_S) % 1;
 			dirty = true;
 		}
-		const scale = (peak / maxMag) * Math.sin(2 * Math.PI * phase);
-		if (uniforms.uScale.value !== scale) {
-			uniforms.uScale.value = scale;
+		// Re(shape exp(i (theta - pi/2))): a real shape starts at rest and swings as sin(theta)
+		const scale = peak / maxMag;
+		const theta = 2 * Math.PI * phase;
+		const re = scale * Math.sin(theta);
+		const im = scale * Math.cos(theta);
+		if (uniforms.uRe.value !== re || uniforms.uIm.value !== im) {
+			uniforms.uRe.value = re;
+			uniforms.uIm.value = im;
 			dirty = true;
 		}
 		if (!dirty && !moved) {
@@ -464,7 +476,7 @@
 						</button>
 					</span>
 				{/if}
-				<span class="m">Mode {current.index}</span>
+				<span class="m">{current.label ?? `Mode ${current.index}`}</span>
 				<span class="num">{formatFixed(current.frequency_hz, 4)} Hz</span>
 				{#if current.damping != null}<span class="num dim">{formatFixed(current.damping * 100, 3)} % damping</span>{/if}
 			</div>

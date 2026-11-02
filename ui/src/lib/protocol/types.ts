@@ -136,8 +136,12 @@ export interface Mode {
 	index: number;
 	frequency_hz: number;
 	damping?: number | null;
-	/** f32 [N, 3], same node order as `nodes`. */
+	/** f32 [N, 3], same node order as `nodes`; the real part of a complex shape. */
 	shape: Float32Array;
+	/** f32 [N, 3], the imaginary part of a complex shape; absent for a real one. */
+	shape_imag?: Float32Array;
+	/** Names a shape that is not a mode, in place of "Mode <index>". */
+	label?: string;
 }
 
 export interface Shape3DView {

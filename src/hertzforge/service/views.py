@@ -157,9 +157,18 @@ def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
 
 
 def mode(index: int, frequency_hz: float, damping: float | None,
-         shape: np.ndarray) -> dict[str, Any]:
+         shape: np.ndarray, label: str | None = None) -> dict[str, Any]:
     """One mode of a `shape3d` view: its 1-based index, frequency,
-    damping (None when not stated) and its f32 [N, 3] shape."""
-    return {'index': int(index), 'frequency_hz': float(frequency_hz),
-            'damping': None if damping is None else float(damping),
-            'shape': np.ascontiguousarray(shape, np.float32)}
+    damping (None when not stated) and its [N, 3] shape. A complex shape
+    travels as its real part in `shape` and its imaginary part in
+    `shape_imag`, both f32; a real one, or a complex one whose imaginary
+    part is all zero, carries `shape` alone. `label` names a shape that is
+    not a mode, shown in place of "Mode <index>"."""
+    out = {'index': int(index), 'frequency_hz': float(frequency_hz),
+           'damping': None if damping is None else float(damping),
+           'shape': np.ascontiguousarray(np.real(shape), np.float32)}
+    if np.iscomplexobj(shape) and np.any(np.imag(shape)):
+        out['shape_imag'] = np.ascontiguousarray(np.imag(shape), np.float32)
+    if label is not None:
+        out['label'] = label
+    return out

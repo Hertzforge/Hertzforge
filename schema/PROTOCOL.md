@@ -115,10 +115,17 @@ service takes it from there rather than restating it.
  "nodes":{"$array":.. f32 [N,3]},
  "lines":{"$array":.. u32 [L,2]},          optional
  "triangles":{"$array":.. u32 [T,3]},      optional
- "modes":[{"index":1,"frequency_hz":12.3,"damping":0.01|null,"shape":{"$array":.. f32 [N,3]}}]}
+ "modes":[{"index":1,"frequency_hz":12.3,"damping":0.01|null,"shape":{"$array":.. f32 [N,3]},
+            "shape_imag":{"$array":.. f32 [N,3]},   optional
+            "label":"Operating shape"}]}             optional
 ```
 
-Shapes are real, one translation vector per node, in the same node order as `nodes`.
+A shape is one translation vector per node, in the same node order as `nodes`. A complex shape (a
+complex mode, or an operating deflection shape read from FRFs at one line) carries its real part in
+`shape` and its imaginary part in `shape_imag`; a real shape has no `shape_imag`. The shell animates
+`Re((shape + i shape_imag) exp(i theta))` over a cycle, so a real shape moves as a standing wave and
+a complex one shows its traveling part. `label`, when present, names the shape in place of
+"Mode <index>", for a shape that is not a mode.
 
 **`waterfall`** (many records of one quantity, each at its own depth)
 
