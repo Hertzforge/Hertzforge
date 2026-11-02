@@ -59,7 +59,7 @@ class Ticking:
         return self.now
 
 
-def new_log(tmp_path, name='a.vdlog'):
+def new_log(tmp_path, name='a.hflog'):
     return RunLog.create(tmp_path / name, clock=Ticking(), who=WHO)
 
 
@@ -526,7 +526,7 @@ def test_a_test_is_closed_to_runs_by_whichever_comes_first(tmp_path):
 
 
 def test_a_hand_edited_header_change_or_notch_list_is_read_past(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     with new_log(tmp_path) as log:
         random_test(log, {'notches_planned': [{'band': '100-110 Hz'},
                                               {'band': '180-220 Hz'}]})

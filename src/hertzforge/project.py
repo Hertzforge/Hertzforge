@@ -6949,7 +6949,7 @@ class Project(dict):
         Parameters
         ----------
         path : str or os.PathLike
-            The `.vdlog`.
+            The run log (`.hflog`, or a Visual Dynamics `.vdlog`).
         test : int, optional
             The test, by number; may be left out when the log holds one.
         upto : int, optional

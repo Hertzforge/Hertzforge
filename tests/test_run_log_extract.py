@@ -144,7 +144,7 @@ def test_the_extract_reads_as_the_model_read_the_log_when_it_was_taken(
     including what was written under the next test and answers this one:
     the trip's cause, the anomaly's disposition, and the next test's
     opening, which closed this one to runs."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     ids = two_tests(path)
     extract = take(path, test=1, taken=TAKEN)
     live = model.RunLogModel(RunLog.read(path))
@@ -167,7 +167,7 @@ def test_the_extract_holds_one_test_not_the_others(tmp_path):
     """Of the shock test only the entries that answer the random test
     are kept: the cause and the disposition, not its shot, the shot's
     correction, or its own anomaly and that anomaly's disposition."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     with writer(path) as log:
         shot = next(entry for entry in log.entries if entry.kind == 'shot')
@@ -186,7 +186,7 @@ def test_the_extract_holds_one_test_not_the_others(tmp_path):
 def test_a_test_closed_by_the_next_opening_reads_closed(tmp_path):
     """A test opened while another was open (written past the model's
     refusal) closes the first to runs; the opening comes with it."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     with writer(path) as log:
         log.append('test_opened', author='AB', test=2,
@@ -201,7 +201,7 @@ def test_a_test_closed_by_the_next_opening_reads_closed(tmp_path):
 def test_a_report_never_changes_because_the_log_grew(tmp_path):
     """The views and the drafts stay as taken; the badge says the log
     holds newer entries, and how many are of the test."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     extract = take(path, test=1)
     before = (views(extract, None), extract.draft_chronology().text,
@@ -223,7 +223,7 @@ def test_a_report_never_changes_because_the_log_grew(tmp_path):
 def test_an_extract_to_an_earlier_entry_knows_the_entries_after_it(tmp_path):
     """Taken short of the log's end, the file's length is unchanged, and
     the badge still counts what was after the cut."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     ids = two_tests(path)
     extract = take(path, test=1, upto=ids['anomaly'])
     assert extract.upto == ids['anomaly']
@@ -236,7 +236,7 @@ def test_an_extract_to_an_earlier_entry_knows_the_entries_after_it(tmp_path):
 
 
 def test_an_entry_moved_into_the_test_by_correction_comes_with_it(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     with writer(path) as log:
         stray = log.append('note', author='AB', test=2, text='of the random')
@@ -248,7 +248,7 @@ def test_an_entry_moved_into_the_test_by_correction_comes_with_it(tmp_path):
 
 
 def test_a_test_with_nothing_but_its_opening(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     with writer(path) as log:
         model.open_test(log, author='AB', test_kind='Functional',
                         header={'title': 'Baseline'})
@@ -265,20 +265,20 @@ def test_a_test_with_nothing_but_its_opening(tmp_path):
 
 
 def test_a_file_that_is_not_a_run_log_is_refused(tmp_path):
-    other = tmp_path / 'notes.vdlog'
+    other = tmp_path / 'notes.hflog'
     other.write_text('{"hello": 1}\n', encoding='utf-8')
-    with pytest.raises(RunLogError, match='not a Visual Dynamics run log'):
+    with pytest.raises(RunLogError, match='not a run log'):
         take(other)
     with pytest.raises(FileNotFoundError, match='no run log at'):
-        take(tmp_path / 'absent.vdlog')
-    empty = tmp_path / 'empty.vdlog'
+        take(tmp_path / 'absent.hflog')
+    empty = tmp_path / 'empty.hflog'
     RunLog.create(empty, who=WHO).close()
     with pytest.raises(RunLogError, match='holds no entries yet'):
         take(empty)
 
 
 def test_no_such_test_or_entry_is_refused_by_name(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     ids = two_tests(path)
     with pytest.raises(RunLogError, match=r'no test 3 by entry #\d+; its '
                        r'tests are 1, 2'):
@@ -300,7 +300,7 @@ def test_no_such_test_or_entry_is_refused_by_name(tmp_path):
 def test_a_broken_chain_is_refused_with_where(tmp_path):
     """An entry of the test edited in the file: the refusal names the
     chain, the entry and the line."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     lines = path.read_bytes().split(b'\n')
     number = next(k for k, line in enumerate(lines)
@@ -319,7 +319,7 @@ def test_a_broken_chain_is_refused_with_where(tmp_path):
 
 
 def test_a_broken_chain_of_another_test_does_not_refuse_this_one(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     lines = path.read_bytes().split(b'\n')
     number = next(k for k, line in enumerate(lines) if b'"shot"' in line)
@@ -331,7 +331,7 @@ def test_a_broken_chain_of_another_test_does_not_refuse_this_one(tmp_path):
 
 
 def test_a_torn_last_line_is_refused_until_an_entry_is_named(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     with open(path, 'ab') as handle:
         handle.write(b'{"id": 3, "kind": "no')
@@ -345,7 +345,7 @@ def test_a_torn_last_line_is_refused_until_an_entry_is_named(tmp_path):
 def test_a_fragment_the_writer_ended_is_skipped_and_named(tmp_path):
     """A crash fragment ended by the next writer is not an entry: the log
     skips it, the chain checks across it, and the extract says so."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     with open(path, 'ab') as handle:
         handle.write(b'{"id": 3, "kind": "no')
@@ -357,7 +357,7 @@ def test_a_fragment_the_writer_ended_is_skipped_and_named(tmp_path):
 
 
 def test_an_entry_the_log_cannot_read_before_the_cut_is_refused(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     append_note(path)
     lines = path.read_bytes().split(b'\n')
@@ -370,15 +370,15 @@ def test_an_entry_the_log_cannot_read_before_the_cut_is_refused(tmp_path):
 
 
 def test_a_missing_or_changed_log_is_said_not_raised(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     extract = take(path)
-    os.replace(path, tmp_path / 'moved.vdlog')
+    os.replace(path, tmp_path / 'moved.hflog')
     status = extract.status()
     assert (status.state, status.badge) == ('missing', 'log not found')
     assert (status.newer, status.newer_in_test) == (0, 0)
     assert str(path) in status.message
-    assert extract.status(tmp_path / 'moved.vdlog').state == 'current'
+    assert extract.status(tmp_path / 'moved.hflog').state == 'current'
     # another log at the same path
     one_test(path)
     append_note(path)
@@ -386,7 +386,7 @@ def test_a_missing_or_changed_log_is_said_not_raised(tmp_path):
             extract.status().newer_in_test) == ('changed', 0, 0)
     assert 'another run log' in extract.status().message
     # the same log cut short: its head is gone
-    os.replace(tmp_path / 'moved.vdlog', path)
+    os.replace(tmp_path / 'moved.hflog', path)
     append_note(path)
     whole = path.read_bytes()
     lines = whole.split(b'\n')
@@ -402,7 +402,7 @@ def test_a_missing_or_changed_log_is_said_not_raised(tmp_path):
 
 
 def test_the_drafts_are_marked_and_offer_only_the_fact(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     extract = take(path, test=1)
     chronology = extract.draft_chronology()
@@ -434,7 +434,7 @@ def test_the_drafts_are_marked_and_offer_only_the_fact(tmp_path):
 
 
 def test_a_run_with_no_interruption_offers_no_none(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     draft = take(path).draft_chronology()
     assert draft
@@ -445,7 +445,7 @@ def test_a_run_with_no_interruption_offers_no_none(tmp_path):
 
 
 def test_attach_detach_and_refresh_are_journaled_and_undone(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     ids = two_tests(path)
     project = Project('t')
     name = project.attach_run_log(path, test=1, upto=ids['anomaly'])
@@ -476,7 +476,7 @@ def test_attach_detach_and_refresh_are_journaled_and_undone(tmp_path):
 def test_the_verbs_refuse_what_is_not_an_extract_and_record_nothing(tmp_path):
     from hertzforge.core.report import Report
 
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     project = Project('t')
     project.add('Report', Report('R'))
@@ -493,7 +493,7 @@ def test_the_verbs_refuse_what_is_not_an_extract_and_record_nothing(tmp_path):
 
 
 def test_a_refresh_refuses_a_log_that_changed_under_it(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     project = Project('t')
     name = project.attach_run_log(path)
@@ -509,7 +509,7 @@ def test_a_refresh_refuses_a_log_that_changed_under_it(tmp_path):
 
 
 def test_the_project_saves_and_reopens_with_the_extract(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     project = Project('t')
     name = project.attach_run_log(path, test=1)
@@ -519,7 +519,7 @@ def test_the_project_saves_and_reopens_with_the_extract(tmp_path):
         assert f.attrs['hertzforge_schema'] == 1
         group = next(f['objects'][key] for key in f['objects'])
         assert group.attrs['kind'] == 'run_log_extract'
-        assert group.attrs['path'] == 'a.vdlog', 'beside the project: relative'
+        assert group.attrs['path'] == 'a.hflog', 'beside the project: relative'
     reopened = Project.open(saved)
     assert reopened[name] == project[name]
     assert reopened[name].path == str(path)
@@ -535,26 +535,26 @@ def test_the_path_is_relative_beside_the_project_and_absolute_otherwise(
     away.mkdir()
     project = Project('t')
     for folder in (inner, away):
-        one_test(folder / 'a.vdlog')
-        project.attach_run_log(folder / 'a.vdlog', name=folder.name)
+        one_test(folder / 'a.hflog')
+        project.attach_run_log(folder / 'a.hflog', name=folder.name)
     saved = tmp_path / 'job' / 'project.hforge'
     project.save(saved)
     with h5py.File(saved, 'r') as f:
         stored = {group.attrs['name']: group.attrs['path']
                   for group in f['objects'].values()}
-    assert stored == {'logs': 'logs/a.vdlog',
-                      'share': str(away / 'a.vdlog')}
+    assert stored == {'logs': 'logs/a.hflog',
+                      'share': str(away / 'a.hflog')}
     # moved with its log, the project still finds it; the other stays
     moved = tmp_path / 'moved'
     os.replace(tmp_path / 'job', moved)
     reopened = Project.open(moved / 'project.hforge')
-    assert reopened['logs'].path == str(moved / 'logs' / 'a.vdlog')
+    assert reopened['logs'].path == str(moved / 'logs' / 'a.hflog')
     assert reopened['logs'].status().state == 'current'
-    assert reopened['share'].path == str(away / 'a.vdlog')
+    assert reopened['share'].path == str(away / 'a.hflog')
 
 
 def test_a_missing_log_still_opens_the_project_and_says_so(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     project = Project('t')
     name = project.attach_run_log(path)
@@ -568,7 +568,7 @@ def test_a_missing_log_still_opens_the_project_and_says_so(tmp_path):
 
 
 def test_an_extract_saved_alone_round_trips(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     extract = take(path, taken=TAKEN)
     native.save(extract, tmp_path / 'alone.hforge')
@@ -578,17 +578,17 @@ def test_an_extract_saved_alone_round_trips(tmp_path):
 
 def test_stored_and_resolved_paths(tmp_path):
     project = tmp_path / 'p.hforge'
-    beside = tmp_path / 'logs' / 'a.vdlog'
-    assert stored_path(str(beside), str(project)) == 'logs/a.vdlog'
-    assert resolved_path('logs/a.vdlog', str(project)) == str(beside)
-    above = tmp_path.parent / 'a.vdlog'
+    beside = tmp_path / 'logs' / 'a.hflog'
+    assert stored_path(str(beside), str(project)) == 'logs/a.hflog'
+    assert resolved_path('logs/a.hflog', str(project)) == str(beside)
+    above = tmp_path.parent / 'a.hflog'
     assert stored_path(str(above), str(project)) == str(above)
     assert stored_path(str(beside), None) == str(beside)
-    assert resolved_path('logs/a.vdlog', None) == 'logs/a.vdlog'
+    assert resolved_path('logs/a.hflog', None) == 'logs/a.hflog'
     # an absolute path from either platform is never joined to a folder
-    for absolute in ('C:\\logs\\a.vdlog', '/srv/logs/a.vdlog'):
+    for absolute in ('C:\\logs\\a.hflog', '/srv/logs/a.hflog'):
         assert resolved_path(absolute, str(project)) == absolute
-    assert stored_path('logs/a.vdlog', str(project)) == 'logs/a.vdlog'
+    assert stored_path('logs/a.hflog', str(project)) == 'logs/a.hflog'
 
 
 def test_a_report_feature_can_require_the_extract():
@@ -601,7 +601,7 @@ def test_a_report_feature_can_require_the_extract():
 
 def test_an_extract_refuses_a_snapshot_that_does_not_hold_what_it_says(
         tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     extract = take(path, taken=TAKEN)
     fields = {'path': extract.path, 'taken': TAKEN, 'log_size': 1}
@@ -613,12 +613,12 @@ def test_an_extract_refuses_a_snapshot_that_does_not_hold_what_it_says(
     with pytest.raises(RunLogError, match='with its zone'):
         RunLogExtract(extract.text, test=1, upto=2, path=extract.path,
                       taken=datetime(2026, 10, 30), log_size=1)
-    with pytest.raises(RunLogError, match='not a Visual Dynamics run log'):
+    with pytest.raises(RunLogError, match='not a run log'):
         RunLogExtract('{}\n', test=1, upto=2, **fields)
 
 
 def test_a_refresh_refuses_a_log_cut_short_under_it(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     append_note(path)
     project = Project('t')
@@ -634,7 +634,7 @@ def test_a_refresh_refuses_a_log_cut_short_under_it(tmp_path):
 
 def test_the_file_is_read_only_when_its_length_changed(tmp_path,
                                                        monkeypatch):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     extract = take(path)
     read = []
@@ -645,7 +645,7 @@ def test_the_file_is_read_only_when_its_length_changed(tmp_path,
 
 
 def test_a_last_line_with_no_line_end_that_was_read_is_kept(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     path.write_bytes(path.read_bytes().rstrip(b'\n'))
     extract = take(path)
@@ -656,7 +656,7 @@ def test_a_damaged_entry_of_another_test_that_answers_this_one_refuses(
         tmp_path):
     """The cause written under the shock test is kept in the random
     test's extract, so it is checked too, though its chain is another."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     two_tests(path)
     lines = path.read_bytes().split(b'\n')
     number = next(k for k, line in enumerate(lines)
@@ -669,7 +669,7 @@ def test_a_damaged_entry_of_another_test_that_answers_this_one_refuses(
 
 
 def test_what_an_extract_says_of_itself(tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     extract = take(path, taken=TAKEN)
     assert repr(extract) == "RunLogExtract(test 1 of 'Article 7', to entry #2)"
@@ -677,16 +677,16 @@ def test_what_an_extract_says_of_itself(tmp_path):
                           taken=TAKEN.isoformat(), log_size=extract.log_size)
     assert (plain.after, plain.after_in_test, plain.problems) == (0, 0, ())
     assert plain.taken == TAKEN
-    untitled = tmp_path / 'untitled.vdlog'
+    untitled = tmp_path / 'untitled.hflog'
     with RunLog.create(untitled, clock=Ticking(), who=WHO) as log:
         model.open_test(log, author='AB', test_kind='Other')
     assert repr(take(untitled)) == ("RunLogExtract(test 1 of "
-                                    "'untitled.vdlog', to entry #1)")
+                                    "'untitled.hflog', to entry #1)")
 
 
 def test_the_chronology_draft_says_what_each_run_held(tmp_path):
     """Shots counted, and each restart worded by whether it resumed."""
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     with writer(path) as log:
         log.append('clock_check', author='AB', fields={'offset_s': 0.0})
         model.open_test(log, author='AB', test_kind='Shock',
@@ -724,7 +724,7 @@ def test_a_project_saved_before_schema_3_opens_and_takes_a_log(tmp_path):
 
     project = Project.open(fixture_path('vdyn_corpus', 'schema2.vdyn'))
     assert 'Predictions' in project
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     one_test(path)
     name = project.attach_run_log(path)
     project.save(tmp_path / 'later.hforge')
@@ -736,7 +736,7 @@ def test_a_project_saved_before_schema_3_opens_and_takes_a_log(tmp_path):
 
 
 def test_a_report_cites_the_extract_with_its_badge(tmp_path):
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     two_tests(path)
     project = Project('Article 7')
     name = project.attach_run_log(path, test=1)

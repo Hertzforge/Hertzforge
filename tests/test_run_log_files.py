@@ -90,7 +90,7 @@ def sha(data):
 def new_log(tmp_path, start=None, stop='0:02'):
     """A log holding test 1, run 1 on axis Z, started with counter `start`
     and stopped with counter `stop`."""
-    log = RunLog.create(tmp_path / 'a.vdlog', clock=lambda: START
+    log = RunLog.create(tmp_path / 'a.hflog', clock=lambda: START
                         + timedelta(minutes=30), who=WHO)
     log.append('test_opened', author='AB', test=1, event_time=START,
                fields={'title': 'Shock'})
@@ -142,9 +142,9 @@ def test_a_file_appears_settles_is_proposed_and_accepted(tmp_path):
     ref = entry.files[0]
     assert (ref.name, ref.sha256, ref.size) == ('run1.dat', sha(b'abc'), 3)
     assert ref.format == UNKNOWN and ref.path == proposal.path
-    back = RunLog.read(tmp_path / 'a.vdlog').entry(entry.id).files[0]
+    back = RunLog.read(tmp_path / 'a.hflog').entry(entry.id).files[0]
     assert back == ref, 'format, holdings and path are read back'
-    assert RunLog.read(tmp_path / 'a.vdlog').verify().ok
+    assert RunLog.read(tmp_path / 'a.hflog').verify().ok
 
 
 def test_nothing_is_attached_without_acceptance(tmp_path):
@@ -237,7 +237,7 @@ def test_two_folders_and_the_log_itself_ignored(tmp_path):
     assert watch.folders == (str(first), str(second))
     (first / 'a.dat').write_bytes(b'a')
     (second / 'b.dat').write_bytes(b'b')
-    for name in ('a.vdlog', 'a.vdlog.lock', 'a.vdlog.partial'):
+    for name in ('a.hflog', 'a.hflog.lock', 'a.hflog.partial'):
         (first / name).write_bytes(b'{}')
     (first / 'sub').mkdir()
     found = settled(watch, ticks)
@@ -453,7 +453,7 @@ def test_the_tolerance_is_the_edge(tmp_path):
             run_log_files.STREAM_TOLERANCE_S
         with pytest.raises(ControllerFilesError, match='tolerance'):
             check_stream(log, proposal, tolerance_s=-1)
-    os.remove(tmp_path / 'a.vdlog')
+    os.remove(tmp_path / 'a.hflog')
     with new_log(tmp_path, stop='10') as log:
         short = 10.0 - proposal.stream.seconds
         assert check_stream(log, proposal, tolerance_s=short).ok is True
@@ -466,7 +466,7 @@ def test_nothing_compared_is_never_a_pass(tmp_path):
         assert spectra.stream is None
         found = check_stream(log, spectra)
         assert found.ok is None and 'holds no time stream' in found.message
-    os.remove(tmp_path / 'a.vdlog')
+    os.remove(tmp_path / 'a.hflog')
     shutil.rmtree(tmp_path / 'controller')
     shock = stream_proposal(tmp_path)
     with new_log(tmp_path, stop=None) as log:
@@ -573,10 +573,10 @@ def test_a_file_ref_carries_format_holdings_and_path(tmp_path):
     assert FileRef('a', 'a' * 64).to_dict() == {'name': 'a', 'sha256': 'a' * 64}
     with pytest.raises(RunLogError, match='its holds is text'):
         FileRef('a', 'a' * 64, holds=7)
-    log = RunLog.create(tmp_path / 'b.vdlog', who=WHO)
+    log = RunLog.create(tmp_path / 'b.hflog', who=WHO)
     log.append('note', author='AB', files=[ref])
     log.close()
-    assert RunLog.read(tmp_path / 'b.vdlog').entries[0].files == (ref,)
+    assert RunLog.read(tmp_path / 'b.hflog').entries[0].files == (ref,)
 
 
 def test_the_index_holds_the_logs_files_and_its_head(tmp_path):
@@ -602,16 +602,30 @@ def test_the_index_holds_the_logs_files_and_its_head(tmp_path):
     assert log_entry.format == LOG_FORMAT and log_entry.source == SOURCE
     assert log_entry.holds == (f'run log; test 1 head {head}; between tests '
                                f'head {between}')
-    assert log_entry.sha256 == sha((tmp_path / 'a.vdlog').read_bytes())
+    assert log_entry.sha256 == sha((tmp_path / 'a.hflog').read_bytes())
     checked = index.verify()
     assert [entry.status for entry in checked] == [MATCHES, MATCHES]
+
+
+def test_a_visual_dynamics_log_is_indexed_as_one(tmp_path):
+    """The data index names the format a log is in, so a log Visual
+    Dynamics started is recorded as a `.vdlog`, not as a Hertzforge log."""
+    import shutil
+
+    path = tmp_path / 'started.vdlog'
+    shutil.copy(fixture_path('vdlog_corpus', 'v1.vdlog'), path)
+    index = DataIndex()
+    indexed = index_run_log(index, RunLog.read(path))
+    assert indexed.log.format == run_log_files.VDLOG_FORMAT == (
+        'Visual Dynamics run log (.vdlog)')
+    assert LOG_FORMAT == 'Hertzforge run log (.hflog)'
 
 
 def test_the_index_takes_the_logs_checksum_not_a_second_hash(
         tmp_path, monkeypatch):
     target = tmp_path / 'kept.dat'
     target.write_bytes(b'abc')
-    log = RunLog.create(tmp_path / 'a.vdlog', who=WHO, title='Article 7')
+    log = RunLog.create(tmp_path / 'a.hflog', who=WHO, title='Article 7')
     log.append('test_opened', author='AB', test=1)
     log.append('note', author='AB', test=1, files=[FileRef(
         'kept.dat', sha(b'abc'), 3, path=str(target))])
@@ -634,7 +648,7 @@ def test_a_file_is_found_by_name_and_one_found_nowhere_is_listed(tmp_path):
     archive.mkdir()
     (archive / 'moved.dat').write_bytes(b'm')
     (tmp_path / 'beside.dat').write_bytes(b'b')
-    with RunLog.create(tmp_path / 'a.vdlog', who=WHO) as log:
+    with RunLog.create(tmp_path / 'a.hflog', who=WHO) as log:
         log.append('test_opened', author='AB', test=1)
         log.append('note', author='AB', test=1, files=[
             FileRef('moved.dat', sha(b'm'), 1, path=str(tmp_path / 'gone')),
@@ -656,7 +670,7 @@ def test_a_file_is_found_by_name_and_one_found_nowhere_is_listed(tmp_path):
 
 def test_indexing_again_replaces_the_logs_entry(tmp_path):
     index = DataIndex()
-    with RunLog.create(tmp_path / 'a.vdlog', who=WHO) as log:
+    with RunLog.create(tmp_path / 'a.hflog', who=WHO) as log:
         log.append('test_opened', author='AB', test=1)
         first = index_run_log(index, log)
         log.append('note', author='AB', test=1)
@@ -675,7 +689,7 @@ def test_a_test_not_in_the_log_is_refused(tmp_path):
     with new_log(tmp_path) as log:
         with pytest.raises(ControllerFilesError, match='holds no test 4'):
             index_run_log(DataIndex(), log, tests=[4])
-        empty = RunLog.create(tmp_path / 'e.vdlog', who=WHO)
+        empty = RunLog.create(tmp_path / 'e.hflog', who=WHO)
         assert index_run_log(DataIndex(), empty).log.holds == \
             'run log; no test yet'
         empty.close()
@@ -696,7 +710,7 @@ def test_a_reports_data_index_lists_them(tmp_path):
                        unit_system=hertzforge.SI,
                        object_groups=project.object_groups)
     assert f'test 1 head {head}' in html
-    assert 'a.vdlog' in html
+    assert 'a.hflog' in html
 
 
 def wait_for(condition, seconds=20.0):

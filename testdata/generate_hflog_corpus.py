@@ -1,12 +1,16 @@
 """Freeze one run log per format version, so no release can orphan a log.
 
 Run when `run_log.FORMAT_VERSION` moves to write that version's file
-(`vdlog_corpus/v<N>.vdlog`); every earlier file stays as it is.
-`tests/test_run_log.py` opens every file here with the current build,
+(`hflog_corpus/v<N>.hflog`); every earlier file stays as it is.
+`tests/test_run_log.py` opens every file there with the current build,
 verifies its chains and pins values a reader that regressed would
 lose. The log is small on purpose: one entry of most kinds, two tests
 and the entries between them, a correction, a clock check and a file,
 written on a fixed clock and under a fixed login and machine name.
+
+This script began as Visual Dynamics' `generate_vdlog_corpus.py`, which
+wrote `vdlog_corpus/v1.vdlog`. That file stays as Visual Dynamics wrote
+it, and the tests read it too.
 """
 
 import os
@@ -55,7 +59,7 @@ def write(path: str) -> None:
 
 if __name__ == '__main__':
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       'vdlog_corpus', f'v{run_log.FORMAT_VERSION}.vdlog')
+                       'hflog_corpus', f'v{run_log.FORMAT_VERSION}{run_log.SUFFIX}')
     if os.path.exists(out):
         sys.exit(f'{out} is frozen; it is never written again')
     os.makedirs(os.path.dirname(out), exist_ok=True)

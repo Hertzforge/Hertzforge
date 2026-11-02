@@ -1,7 +1,7 @@
 """Views of a run log for other readers: plain text, CSV, and the
 machine log.
 
-The `.vdlog` file is its own JSON export, and it is the one format the
+The `.hflog` file is its own JSON export, and it is the one format the
 log is read back from. These views are written out only:
 
 - **Plain text** (`to_text`): every entry in the order written, for

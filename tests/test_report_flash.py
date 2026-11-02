@@ -395,7 +395,7 @@ def _floor_log(path):
 
 def _flash_with_log(tmp_path, log=_floor_log):
     project, name = _project()
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     log(path)
     held = project.attach_run_log(path)
     return project, name, held, path
@@ -410,7 +410,7 @@ def test_without_a_run_log_the_flash_page_is_as_before(tmp_path):
     project, name = _project()
     _complete(project, name)
     before = _render(project, name)
-    path = tmp_path / 'article.vdlog'
+    path = tmp_path / 'article.hflog'
     _floor_log(path)
     held = project.attach_run_log(path)
     with_log = _render(project, name)

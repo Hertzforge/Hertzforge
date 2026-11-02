@@ -235,6 +235,11 @@ writes it, so these are never regenerated. `hforge_corpus/` holds one
 after. `tests/test_vdyn_corpus.py` and `tests/test_hforge_corpus.py`
 open every file in both.
 
+The run logs follow the same rule. `vdlog_corpus/v1.vdlog` is the run log
+Visual Dynamics froze, and `hflog_corpus/` holds one `.hflog` for each
+run log format version, written by `generate_hflog_corpus.py`.
+`tests/test_run_log.py` opens and verifies every file in both.
+
 ## Regenerating
 
 Everything but the controller runs regenerates in the project's own

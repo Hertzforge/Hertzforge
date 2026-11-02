@@ -34,7 +34,7 @@ def log(tmp_path):
     later corrected, a late note between tests with a file, a setting
     changed, a person in, and a second test."""
     clock = Clock()
-    log = RunLog.create(tmp_path / 'a.vdlog', title='Article 7', clock=clock,
+    log = RunLog.create(tmp_path / 'a.hflog', title='Article 7', clock=clock,
                         who=WHO)
     log.append('clock_check', author='AB',
                fields={'offset_s': 1.5, 'recorder': 'rack'})
@@ -126,7 +126,7 @@ def test_the_text_closes_with_the_heads_and_what_verifying_found(log):
 
 
 def test_the_text_of_a_damaged_log_says_where_it_broke(log, tmp_path):
-    path = tmp_path / 'a.vdlog'
+    path = tmp_path / 'a.hflog'
     lines = path.read_bytes().split(b'\n')
     lines[2] = lines[2].replace(b'Random, Z', b'Random, X')
     lines[-1] = b'{"id": 10, "kin'
@@ -141,7 +141,7 @@ def test_the_text_of_a_damaged_log_says_where_it_broke(log, tmp_path):
 
 
 def test_a_correction_of_an_entry_not_in_the_log_is_still_shown(tmp_path):
-    path = tmp_path / 'b.vdlog'
+    path = tmp_path / 'b.hflog'
     with RunLog.create(path, clock=Clock(), who=WHO) as log:
         log.append('note', author='AB', run=1)
         log.correct(1, author='AB', fields={'run': 2})
@@ -220,7 +220,7 @@ def test_the_machine_log_keeps_each_events_own_offset_across_a_change(
         tmp_path):
     before = datetime(2026, 11, 1, 1, 30, tzinfo=MOUNTAIN)
     after = datetime(2026, 11, 1, 1, 10, tzinfo=STANDARD)
-    with RunLog.create(tmp_path / 'b.vdlog', clock=Clock(after), who=WHO) \
+    with RunLog.create(tmp_path / 'b.hflog', clock=Clock(after), who=WHO) \
             as log:
         log.append('abort', author='AB', event_time=before,
                    fields={'stop': 'stop word'})
@@ -233,7 +233,7 @@ def test_the_machine_log_keeps_each_events_own_offset_across_a_change(
 
 
 def test_an_empty_log_exports_its_headings_and_nothing_else(tmp_path):
-    with RunLog.create(tmp_path / 'b.vdlog', clock=Clock(), who=WHO) as log:
+    with RunLog.create(tmp_path / 'b.hflog', clock=Clock(), who=WHO) as log:
         text = export.to_text(log)
         assert text.splitlines()[2] == '0 entries'
         assert 'Chain heads' not in text
@@ -261,5 +261,5 @@ def test_each_view_is_written_to_a_file_beside_the_log(log, tmp_path):
     with pytest.raises(RunLogError, match="'pdf' is not a view"):
         export.export(log, tmp_path / 'out', 'pdf')
     with pytest.raises(RunLogError, match='never over it'):
-        export.export(log, tmp_path / 'a.vdlog', 'csv')
-    assert RunLog.read(tmp_path / 'a.vdlog').verify().ok
+        export.export(log, tmp_path / 'a.hflog', 'csv')
+    assert RunLog.read(tmp_path / 'a.hflog').verify().ok
