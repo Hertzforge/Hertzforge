@@ -194,6 +194,12 @@ Present only where they mean something:
                                      sweep began
             sine_cycles (when set), sine_target_db, sine_refine,
             sine_chosen (when set)   the sine extraction setting
+            source                   'SIM' for values from a simulated
+                                     plant, 'HARDWARE' for values measured
+                                     on real hardware; absent when not
+                                     known. A Rattlesnake run sets it from
+                                     its hardware, and what a project
+                                     derives from it carries the same
             scale_db                 a comparison scale set by hand only;
                                      automatic scaling is never saved
             narrowbands              JSON, the narrow bands of random a

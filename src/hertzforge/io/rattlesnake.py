@@ -72,6 +72,9 @@ import numpy as np
 
 from ..core.channel_table import ChannelTable, Environment
 from ..core.data import (
+    HARDWARE,
+    SIM,
+    DataArray,
     Frf,
     MultipleCoherence,
     Psd,
@@ -1351,6 +1354,27 @@ def _load_sysid_package(ds, path):
     return out
 
 
+#: Rattlesnake's `hardware` attribute, by what it drove: NI-DAQmx,
+#: LAN-XI and the two Data Physics units are real hardware; Exodus, state
+#: space and the two SDynPy plants are simulated. Any other value (none,
+#: the skeleton template, or one added later) leaves the source unknown.
+HARDWARE_TYPES = {0: HARDWARE, 1: HARDWARE, 2: HARDWARE, 3: HARDWARE,
+                  4: SIM, 5: SIM, 6: SIM, 7: SIM}
+
+
+def _labeled(hardware: Any, out: dict[str, Any]) -> dict[str, Any]:
+    """`out` with each measured object's `source` set from the file's
+    `hardware` attribute. A specification is the test's target, not
+    something the run measured, so it is left unlabeled."""
+    source = HARDWARE_TYPES.get(int(hardware)) if hardware is not None else None
+    if source is not None:
+        for obj in out.values():
+            if isinstance(obj, DataArray) and not isinstance(
+                    obj, (Specification, TransientSpecification)):
+                obj.source = source
+    return out
+
+
 def load(path: str | os.PathLike, full_cpsd: bool = False,
          start: float | None = None, stop: float | None = None,
          channels: Iterable[int | str] | None = None,
@@ -1400,8 +1424,9 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
 
     out = {}
     with netCDF4.Dataset(path) as ds:
+        hardware = getattr(ds, 'hardware', None)
         if 'channels' not in ds.groups:
-            return _load_sysid_package(ds, path)
+            return _labeled(hardware, _load_sysid_package(ds, path))
         table, dofs, units, columns = _channel_table(ds)
         num_channels = len(dofs)
         out['channel_table'] = table
@@ -1712,7 +1737,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                 ordinate_unit=units,
                 comment='transient control signal')
 
-    return out
+    return _labeled(hardware, out)
 
 
 def _record_environments(ds, table, drive_channels, scales_dims):

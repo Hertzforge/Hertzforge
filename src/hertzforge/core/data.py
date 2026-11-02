@@ -393,6 +393,14 @@ def frequency_axis(mode: str | bool | None = ...) -> str:
     return {None: 'default', True: 'log', False: 'linear'}[_FREQUENCY_AXIS]
 
 
+#: `DataArray.source` for values from a simulated plant (the control
+#: service's Sim backend, or a Rattlesnake run on virtual hardware)
+SIM = 'SIM'
+
+#: `DataArray.source` for values measured on real hardware
+HARDWARE = 'HARDWARE'
+
+
 class _LogAbscissa:
     """`log_abscissa` on a class or an instance: the viewer's choice
     when one is made and the data is over frequency, else the class's
@@ -521,6 +529,12 @@ class DataArray:
     _log_abscissa_default = False
     log_abscissa = _LogAbscissa()
     ordinate_limits = None     # (low, high) to pin the axis to
+    #: where the values came from: `SIM` from a simulated plant,
+    #: `HARDWARE` from real hardware, None when nothing has said. Set by a
+    #: reader that knows (a Rattlesnake run's hardware) and passed on to
+    #: what a project derives from it, so a PSD of a simulated run is
+    #: simulated too; saved with the object, so it never drops off.
+    source: str | None = None
 
     def __init__(self, abscissa: ArrayLike, ordinate: ArrayLike,
                  response_dof: str | Sequence[str],
