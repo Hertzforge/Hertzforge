@@ -458,6 +458,14 @@ pub type BlockObserver = std::sync::Arc<dyn Fn(&[f32], usize) + Send + Sync>;
 
 struct PlaybackStep {
     drive: Vec<f64>,
+    /// The drive level ramp and the level this segment's drive was synthesized
+    /// at: each output block is scaled by the ramp's walk from that level
+    /// (`super::ramp`). `None`: the record plays as synthesized.
+    ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64, f64)>,
+    /// Sum over the emitted samples of the ramp's power gain (gain squared)
+    /// relative to the synthesis level, for [`SegmentResult::drive_power_gain`].
+    gain2_sum: f64,
+    gain2_n: usize,
     pos: usize,
     n_ch: usize,
     /// Interleaved recorded response: `n_ch` samples per frame.
@@ -476,6 +484,9 @@ impl PlaybackStep {
     fn new(drive: Vec<f64>, n_ch: usize) -> Self {
         PlaybackStep {
             drive,
+            ramp: None,
+            gain2_sum: 0.0,
+            gain2_n: 0,
             pos: 0,
             n_ch: n_ch.max(1),
             interleaved: Vec::new(),
@@ -487,6 +498,23 @@ impl PlaybackStep {
 
     fn with_observer(mut self, o: Option<BlockObserver>) -> Self {
         self.observer = o;
+        self
+    }
+
+    fn power_gain(&self) -> f64 {
+        if self.gain2_n == 0 {
+            1.0
+        } else {
+            self.gain2_sum / self.gain2_n as f64
+        }
+    }
+
+    fn with_ramp(
+        mut self,
+        ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>,
+        fs_hz: f64,
+    ) -> Self {
+        self.ramp = ramp.map(|(r, base)| (r, base, fs_hz));
         self
     }
 }
@@ -514,10 +542,21 @@ impl ProcessStep for PlaybackStep {
                 }
             };
             self.pos += 1;
-            if d.abs() > self.drive_peak {
-                self.drive_peak = d.abs();
-            }
             drive_out.push(d as f32);
+        }
+        // The level ramp, per output block (bench finding 2, 2026-11-01).
+        if let Some((ramp, base_db, fs_hz)) = &self.ramp {
+            let (_end, g2) = super::ramp::scale_block(ramp, *base_db, *fs_hz, drive_out);
+            self.gain2_sum += g2;
+        } else {
+            self.gain2_sum += n_frames as f64;
+        }
+        self.gain2_n += n_frames;
+        for d in drive_out.iter() {
+            let a = f64::from(d.abs());
+            if a > self.drive_peak {
+                self.drive_peak = a;
+            }
         }
         // Display tap: hand this tick's freshly acquired block out
         // BEFORE the segment completes. Cheap by contract; never blocks.
@@ -602,6 +641,11 @@ pub struct SegmentResult {
     /// underruns, late samples, rate coercions). Empty on a clean segment and
     /// on backends that report none.
     pub driver_warnings: Vec<String>,
+    /// The mean power gain the drive level ramp applied over this segment's
+    /// samples, relative to the level its drive was synthesized at (1 when the
+    /// level stood still). A segment measured while the level moved is brought
+    /// to the level the ramp reached with it.
+    pub drive_power_gain: f64,
 }
 
 impl SegmentResult {
@@ -635,6 +679,11 @@ pub struct PlantLoop {
     /// Per-tick display tap; installed by the service, fired by
     /// `PlaybackStep` inside `run_segment`.
     block_observer: Option<BlockObserver>,
+    /// The drive level ramp for the next segment and the level its drive is
+    /// synthesized at (see [`PlantLoop::set_drive_ramp`]).
+    drive_ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>,
+    /// The rate the station programmed, for the ramp's time base.
+    fs_hz: f64,
     /// What the last segment boundary's arm/start actually did.
     last_boundary: Option<BoundaryTrace>,
     /// Whether THIS run has already primed the output.
@@ -849,6 +898,8 @@ impl PlantLoop {
 
         Ok(PlantLoop {
             block_observer: None,
+            drive_ramp: None,
+            fs_hz: cfg.fs_hz,
             last_boundary: None,
             output_primed: false,
             carry_queue: Vec::new(),
@@ -933,6 +984,14 @@ impl PlantLoop {
         self.block_observer = o;
     }
 
+    /// Scale the next segments' output blocks by `ramp`'s walk from `base_db`, the
+    /// level their drive is synthesized at (`None`: play records as synthesized).
+    /// The service sets it before every control segment and clears it for the
+    /// identification.
+    pub fn set_drive_ramp(&mut self, ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64)>) {
+        self.drive_ramp = ramp;
+    }
+
     /// Drive-to-response pipeline lag, frames. See the field doc; consumers that
     /// correlate the drive SIGNAL against the response SIGNAL must align by this.
     pub fn pipeline_lag_frames(&self) -> usize {
@@ -947,6 +1006,13 @@ impl PlantLoop {
     /// The number of enabled non-drive input channels (interleave width).
     pub fn n_input_channels(&self) -> usize {
         self.n_ch
+    }
+
+    /// The station's per-input overload flags, in frame order
+    /// (`Backend::input_overloads`: a sample reached 98 % of the input's configured
+    /// range); empty when the station does not report them.
+    pub fn input_overloads(&mut self) -> Vec<bool> {
+        self.backend.input_overloads()
     }
 
     /// The engine ticks one segment spans, at the configured block cadence. The
@@ -1117,7 +1183,8 @@ impl PlantLoop {
             }
             self.output_primed = true;
             let mut step = PlaybackStep::new(drive.clone(), self.n_ch)
-                .with_observer(self.block_observer.clone());
+                .with_observer(self.block_observer.clone())
+                .with_ramp(self.drive_ramp.clone(), self.fs_hz);
             let mut sink = VecCaptureSink::new();
             let report = engine.run_ticks(&mut self.backend, &mut step, &mut sink, ticks);
             // AO free space right after the last write of the segment.
@@ -1136,6 +1203,7 @@ impl PlantLoop {
                 if scheduling_fault_retry_allowed(self.station, report.frames_in, attempt) {
                     continue;
                 }
+                let drive_power_gain = step.power_gain();
                 return SegmentResult {
                     interleaved: step.interleaved,
                     n_ch: self.n_ch,
@@ -1149,6 +1217,7 @@ impl PlantLoop {
                     )),
                     zero_filled: step.zero_filled,
                     driver_warnings: self.backend.take_warnings(),
+                    drive_power_gain,
                 };
             }
 
@@ -1176,6 +1245,7 @@ impl PlantLoop {
             // The DRIVER's own diagnostics for this segment (underruns,
             // late samples, coercions). Previously collected and unreachable.
             let driver_warnings = self.backend.take_warnings();
+            let drive_power_gain = step.power_gain();
             return SegmentResult {
                 interleaved: step.interleaved,
                 n_ch: self.n_ch,
@@ -1184,6 +1254,7 @@ impl PlantLoop {
                 faulted,
                 zero_filled: step.zero_filled,
                 driver_warnings,
+                drive_power_gain,
             };
         }
     }
@@ -1276,6 +1347,14 @@ impl DriveSynth {
         out
     }
 
+    /// Scale the synthesis overlap carried into the next segment by `gain` (see
+    /// `ColaSynth::scale_tail`): after a segment whose output a level ramp scaled
+    /// from its synthesis level, so the next segment, synthesized at the level
+    /// the ramp reached, does not crossfade in from the old level.
+    pub fn scale_carry(&mut self, gain: f64) {
+        self.cola.scale_tail(gain);
+    }
+
     /// Synthesize one window-length drive segment from a one-sided drive PSD
     /// (`nfft/2+1` bins). Seamless with the previous call.
     pub fn segment(&mut self, psd: &[f64]) -> Vec<f64> {
@@ -1333,14 +1412,16 @@ impl KinematicMonitor {
         let mut slots = Vec::new();
         let mut slot = 0usize;
         for ch in &table.channels {
-            if !ch.enabled {
+            // A drive row is an OUTPUT: it has no place in the acquired frame, so it
+            // takes no slot and does not widen the frame. This loop used to count
+            // it, which read every input after a drive row one slot too high and
+            // walked the interleave with the wrong stride (the defect the engine's
+            // watchdog had until 2026-07-16).
+            if !ch.enabled || ch.role == ChannelRole::Drive {
                 continue;
             }
             let this_slot = slot;
             slot += 1;
-            if ch.role == ChannelRole::Drive {
-                continue; // outputs are not limit-monitored inputs
-            }
             if !ChannelLimiter::has_limit(&ch.abort) {
                 continue;
             }
@@ -1388,7 +1469,8 @@ impl KinematicMonitor {
         self.trip
     }
 
-    /// Feed one interleaved telemetry chunk (`n_enabled` samples per frame) through the
+    /// Feed one interleaved telemetry chunk (one sample per enabled INPUT per frame,
+    /// the acquired frame; drive rows take no place in it) through the
     /// tri-field check. Latches + returns the FIRST trip. During the settle window,
     /// velocity/displacement trips are suppressed; the accel axis is always live.
     pub fn feed(&mut self, interleaved: &[f64]) -> Option<AbortTrip> {

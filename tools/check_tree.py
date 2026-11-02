@@ -6,7 +6,10 @@
    keeps them out does not publish them. Every one-, two- and three-word
    run of every line is hashed and looked up. A third-party license
    notice that must be redistributed word for word is listed in
-   NOTICES and not read.
+   NOTICES and not read. An address that cannot be written without an
+   organization's name, such as a dependency's repository, is listed in
+   REFERENCES, as a hash of the exact address; it is taken out of its line
+   and the rest of the line is read as usual.
 2. **Every Python file checked.** Every tracked Python file is in a scope of
    `check_licenses.SCOPES`, so `check_licenses.py`, run in each scope's
    installed environment, checks its imports and every package installed
@@ -20,6 +23,7 @@
 
     python tools/check_tree.py                # exit 0 clean, 1 with findings
     python tools/check_tree.py --hash "a name"  # the line to add to NAMES
+    python tools/check_tree.py --hash-reference "an address"  # for REFERENCES
 
 Rust crate licenses, bans and sources are checked by cargo-deny
 (`cargo deny check`, configured in deny.toml).
@@ -70,13 +74,37 @@ NOTICES = frozenset({
     'src/hertzforge/io/escdf_specifications/LICENSE',
 })
 
+#: Addresses that must name an organization because the name is part of
+#: where the thing is, as `reference_hash` of the exact address. Add one
+#: with `python tools/check_tree.py --hash-reference "the address"`.
+REFERENCES = frozenset({
+    # the ESCDF reference implementation, installed in the package job
+    '542bd16b80f0fd98',
+})
+
 _WORD = re.compile(r'[a-z0-9]+')
+
+#: an address in a line: a scheme, `://`, and everything to the next space,
+#: quote or bracket
+_ADDRESS = re.compile(r'[a-z][a-z0-9+.-]*://[^\s\'"<>()\[\]]+', re.IGNORECASE)
 
 
 def phrase_hash(text: str) -> str:
     """The hash a name is stored and looked up under."""
     normalized = ' '.join(_WORD.findall(text.lower()))
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:16]
+
+
+def reference_hash(address: str) -> str:
+    """The hash an exact address is listed under in REFERENCES."""
+    return hashlib.sha256(address.encode('utf-8')).hexdigest()[:16]
+
+
+def without_references(line: str, references: frozenset[str] = REFERENCES) -> str:
+    """`line` with every address listed in `references` taken out."""
+    return _ADDRESS.sub(
+        lambda match: '' if reference_hash(match.group(0)) in references
+        else match.group(0), line)
 
 
 def tracked_files(root: pathlib.Path = ROOT) -> list[pathlib.Path]:
@@ -99,9 +127,11 @@ def _text(path: pathlib.Path) -> str | None:
 
 def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
                 names: frozenset[str] = NAMES,
-                notices: frozenset[str] = NOTICES) -> list[str]:
-    """Every line where a run of one to three words hashes to a listed name.
-    The finding gives the place, never the word."""
+                notices: frozenset[str] = NOTICES,
+                references: frozenset[str] = REFERENCES) -> list[str]:
+    """Every line where a run of one to three words hashes to a listed name,
+    once the listed references are taken out of it. The finding gives the
+    place, never the word."""
     found = []
     for path in files:
         if path.name in SKIPPED or path.relative_to(root).as_posix() in notices:
@@ -112,7 +142,7 @@ def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
         # the path itself is part of the tree too
         lines = [str(path.relative_to(root)), *text.splitlines()]
         for number, line in enumerate(lines):
-            words = _WORD.findall(line.lower())
+            words = _WORD.findall(without_references(line, references).lower())
             runs = (' '.join(words[i:i + size]) for size in (1, 2, 3)
                     for i in range(len(words) - size + 1))
             if any(phrase_hash(run) in names for run in runs):
@@ -141,6 +171,9 @@ def check_npm_licenses(lockfile: pathlib.Path, root: pathlib.Path = ROOT) -> lis
 def main(argv: Sequence[str] = (), root: pathlib.Path = ROOT) -> int:
     if len(argv) == 2 and argv[0] == '--hash':
         print(f"    '{phrase_hash(argv[1])}',")
+        return 0
+    if len(argv) == 2 and argv[0] == '--hash-reference':
+        print(f"    '{reference_hash(argv[1])}',")
         return 0
     files = tracked_files(root)
     # every npm lockfile in the tree, the shell's and any tool's

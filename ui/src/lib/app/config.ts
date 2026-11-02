@@ -1,5 +1,6 @@
 /** Shell configuration from the page URL. */
 
+import type { ControlServerOptions } from '$lib/protocol/mock/control';
 import type { ThemePref } from '$lib/theme/theme.svelte';
 
 export const DEFAULT_ANALYSIS_URL = 'ws://127.0.0.1:8791/';
@@ -14,6 +15,24 @@ export interface ShellConfig {
 	controlUrl: string;
 	/** `?theme=dark|light|system` forces a theme for this load (screenshots, tests). */
 	theme: ThemePref | null;
+	/**
+	 * `?popout=1&page=<id>`: a window that shows one display page of the run, opened from the main
+	 * window to place on another monitor. It observes the run with its own subscription.
+	 */
+	popout: boolean;
+	page: string | null;
+	/**
+	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
+	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
+	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`.
+	 */
+	mockControl: ControlServerOptions;
+}
+
+function num(value: string | null): number | undefined {
+	if (value === null || value.trim() === '') return undefined;
+	const n = Number(value);
+	return Number.isFinite(n) ? n : undefined;
 }
 
 function wsUrl(value: string | null, fallback: string): string {
@@ -34,6 +53,16 @@ export function readConfig(search: string): ShellConfig {
 		mock: mock === '1' || mock === 'true',
 		analysisUrl: wsUrl(q.get('analysis'), DEFAULT_ANALYSIS_URL),
 		controlUrl: wsUrl(q.get('control'), DEFAULT_CONTROL_URL),
-		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null
+		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
+		popout: q.get('popout') === '1',
+		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
+		mockControl: {
+			speed: num(q.get('mock_speed')),
+			niReal: q.get('mock_ni') === 'real' ? true : undefined,
+			niInstalled: q.get('mock_ni') === 'absent' ? false : undefined,
+			abortDemoAtS: num(q.get('mock_abort_at')),
+			feasibilityExceeds: q.get('mock_feasibility') === 'exceeds' ? true : undefined,
+			coherence: num(q.get('mock_coherence'))
+		}
 	};
 }

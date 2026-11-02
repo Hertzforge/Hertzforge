@@ -7,7 +7,8 @@
 //!   outside the repository.
 //! - **This crate** reaches only the controller crates on its own, narrower reviewed
 //!   allowlist, and never the controller's desktop app, directly or transitively,
-//!   through any dependency kind.
+//!   through any dependency kind of its own (its dependencies' own dev-dependencies
+//!   are never built for it, so the walk does not follow them).
 //!
 //! The allowlists are the whole rule, so the tree never has to name what it keeps out.
 //!
@@ -20,19 +21,27 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::process::Command;
 
-/// The only controller crates this crate may reach: open, hardware-neutral, reviewed.
-/// A new one is a change to review (license, hardware coupling) before this list grows.
+/// The only controller crates this crate may reach, each reviewed for license and
+/// hardware coupling. A new one is a change to review before this list grows.
+///
+/// Hardware comes in through one door: `hertzforge-station`, the controller's station
+/// factory, which alone names the NI-DAQmx backend (`hertzforge-hal-ni`, loaded at run
+/// time from NI's public driver; deny.toml allows no other crate to name it) and the
+/// build stamp every run's provenance carries (`hertzforge-buildinfo`).
 const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-breakpoints",
+    "hertzforge-buildinfo",
     "hertzforge-capture",
     "hertzforge-channel-table",
     "hertzforge-dsp",
     "hertzforge-engine",
     "hertzforge-hal",
+    "hertzforge-hal-ni",
     "hertzforge-hal-sim",
     "hertzforge-module-abi",
     "hertzforge-random",
     "hertzforge-shaker-db",
+    "hertzforge-station",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -165,7 +174,10 @@ fn reachable() -> Vec<Package> {
             )
         })
         .collect();
-    let edges: HashMap<&str, Vec<&str>> = meta["resolve"]["nodes"]
+    // Each edge keeps whether it is ONLY a dev-dependency: a dependency's own
+    // dev-dependencies (its tests and examples) are never built for this crate, so the
+    // walk follows them from this crate alone.
+    let edges: HashMap<&str, Vec<(&str, bool)>> = meta["resolve"]["nodes"]
         .as_array()
         .unwrap()
         .iter()
@@ -176,7 +188,12 @@ fn reachable() -> Vec<Package> {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .map(|d| d["pkg"].as_str().unwrap())
+                    .map(|d| {
+                        let dev_only = d["dep_kinds"]
+                            .as_array()
+                            .is_some_and(|k| !k.is_empty() && k.iter().all(|k| k["kind"] == "dev"));
+                        (d["pkg"].as_str().unwrap(), dev_only)
+                    })
                     .collect(),
             )
         })
@@ -191,7 +208,15 @@ fn reachable() -> Vec<Package> {
     let mut queue = VecDeque::from([root]);
     while let Some(id) = queue.pop_front() {
         if seen.insert(id) {
-            queue.extend(edges.get(id).into_iter().flatten().copied());
+            let from_root = id == root;
+            queue.extend(
+                edges
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, dev_only)| from_root || !dev_only)
+                    .map(|(pkg, _)| *pkg),
+            );
         }
     }
     seen.remove(root);

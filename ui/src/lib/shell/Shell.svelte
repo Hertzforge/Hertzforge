@@ -4,10 +4,12 @@
 	import { getApp } from '$lib/app/state.svelte';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
+	import Acquire from '$lib/workspaces/Acquire.svelte';
 	import Analyze from '$lib/workspaces/Analyze.svelte';
 	import Modal from '$lib/workspaces/Modal.svelte';
 	import Simulate from '$lib/workspaces/Simulate.svelte';
 	import CommandPalette from './CommandPalette.svelte';
+	import DisplayWindow from './DisplayWindow.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import Rail from './Rail.svelte';
 	import TopBar from './TopBar.svelte';
@@ -15,11 +17,22 @@
 	const app = getApp();
 
 	onMount(() => {
+		if (app.config.popout) return;
 		theme.init(app.config.theme);
 		app.start();
 	});
 
 	function onKey(e: KeyboardEvent) {
+		// A display window keeps its own keys (it aborts on Cmd or Ctrl and period too).
+		if (app.config.popout) return;
+		// Abort a live run from anywhere in the shell, whatever has focus (Cmd or Ctrl and period).
+		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === '.' || e.code === 'Period')) {
+			if (app.acquire.actions.abort.enabled) {
+				e.preventDefault();
+				void app.acquire.abort();
+			}
+			return;
+		}
 		if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
 			e.preventDefault();
 			app.paletteOpen = !app.paletteOpen;
@@ -35,14 +48,19 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
-<svelte:head><title>{info.title} | Hertzforge</title></svelte:head>
+<svelte:head>{#if !app.config.popout}<title>{info.title} | Hertzforge</title>{/if}</svelte:head>
 
+{#if app.config.popout}
+	<DisplayWindow {app} />
+{:else}
 <div class="shell">
 	<TopBar {app} />
-	<div class="body">
-		<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />
+	<div class="body" class:collapsed={app.railCollapsed}>
+		{#if !app.railCollapsed}<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
 		<div class="workspace">
-			{#if app.workspace === 'analyze'}
+			{#if app.workspace === 'acquire'}
+				<Acquire {app} />
+			{:else if app.workspace === 'analyze'}
 				<Analyze {app} />
 			{:else if app.workspace === 'modal'}
 				<Modal {app} />
@@ -55,6 +73,7 @@
 	</div>
 	<CommandPalette {app} />
 </div>
+{/if}
 
 <style>
 	.shell {
@@ -68,6 +87,10 @@
 		display: grid;
 		grid-template-columns: var(--rail-width) minmax(0, 1fr);
 		min-height: 0;
+	}
+
+	.body.collapsed {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.workspace {

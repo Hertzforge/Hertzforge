@@ -1,0 +1,169 @@
+//! Closed-loop Random through the protocol (schema/PROTOCOL.md, "Hardware and Random
+//! Control"): the configuration, the run thread that drives the controller's
+//! `RandomService`, the station signal for stop and abort, and the views.
+
+pub mod backend;
+pub mod config;
+pub mod run;
+pub mod subscribe;
+pub mod view;
+
+use crate::protocol::{ErrorCode, MethodError};
+use run::{Cmd, LogEntry, RunShared};
+use std::sync::atomic::Ordering;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::oneshot;
+use view::RunView;
+
+/// The service's handle on one configured run. Dropping it ends the run thread,
+/// which releases anything the run holds; the service drops a run only when it is
+/// not live.
+pub struct RandomRun {
+    pub id: String,
+    pub shared: Arc<RunShared>,
+    /// The configuration as accepted, for `random.reset` and `random.config`.
+    pub config: serde_json::Value,
+    /// Its derived values, as configure returned them.
+    pub derived: serde_json::Value,
+    /// Its reference and bands on the requested grid, for the reference view.
+    pub reference: Arc<view::Lines>,
+    tx: Mutex<mpsc::Sender<Cmd>>,
+}
+
+impl RandomRun {
+    pub fn new(
+        id: String,
+        shared: Arc<RunShared>,
+        tx: mpsc::Sender<Cmd>,
+        config: serde_json::Value,
+        derived: serde_json::Value,
+        reference: Arc<view::Lines>,
+    ) -> RandomRun {
+        RandomRun {
+            id,
+            shared,
+            config,
+            derived,
+            reference,
+            tx: Mutex::new(tx),
+        }
+    }
+
+    pub fn view(&self) -> Arc<RunView> {
+        self.shared.view()
+    }
+
+    pub fn log_since(&self, since: u64) -> (Vec<LogEntry>, u64) {
+        self.shared.log_since(since)
+    }
+
+    /// Name who is stopping or aborting the run, before the signal is set.
+    pub fn ended_by(&self, by: &str) {
+        if let Ok(mut b) = self.shared.ended_by.lock() {
+            *b = Some(by.to_owned());
+        }
+        self.note_request_level();
+    }
+
+    /// Keep the level the drive is at as the run is asked to end (the first ask
+    /// wins): the end says where the stop or abort began, not where a ramp-down
+    /// finished (2026-11-01, bench finding 3).
+    pub fn note_request_level(&self) {
+        let v = self.shared.view();
+        if !matches!(v.state, view::State::Running | view::State::Stopping) {
+            return;
+        }
+        let driving = matches!(v.phase, "engaged" | "full_level" | "ramping_down");
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        let level = match (driving, ramp) {
+            (true, Some(r)) => Some(r.level_db()),
+            _ => v.live_level_db,
+        };
+        if let Ok(mut l) = self.shared.requested_level.lock() {
+            if l.is_none() {
+                *l = level;
+            }
+        }
+    }
+
+    /// Start the controlled stop at the next output block, from the socket's
+    /// thread, while the run thread is inside a control loop; the queued stop
+    /// request then finds it under way. Records how the run will end, in case the
+    /// ramp-down arrives before that request is taken. `false` when no stop ramp
+    /// is configured or the run has not armed (the request alone stops it).
+    pub fn begin_stop(&self, outcome: &'static str, by: &str) -> bool {
+        if let Ok(mut p) = self.shared.pending_stop.lock() {
+            if p.is_none() {
+                *p = Some((outcome, by.to_owned()));
+            }
+        }
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        ramp.is_some_and(|r| r.request_stop().is_some())
+    }
+
+    /// `view` for the live display: while the loop drives, its level and drive
+    /// are the ones the drive level ramp has reached now, block by block, not the
+    /// last control loop's.
+    pub fn live_view(&self, view: Arc<RunView>) -> Arc<RunView> {
+        let driving = matches!(view.state, view::State::Running | view::State::Stopping)
+            && matches!(view.phase, "engaged" | "full_level" | "ramping_down");
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        let (true, Some(ramp)) = (driving, ramp) else {
+            return view;
+        };
+        let now = ramp.level_db();
+        let mut v = (*view).clone();
+        v.drive_now_db = Some(now);
+        if let Some(base) = v.drive_level_db {
+            let g = 10f64.powf((now - base) / 20.0);
+            v.drive_rms_v = v.drive_rms_v.map(|x| x * g);
+            v.drive_psd = v
+                .drive_psd
+                .as_ref()
+                .map(|p| Arc::new(p.iter().map(|x| x * g * g).collect()));
+        }
+        Arc::new(v)
+    }
+
+    /// Set the station signal (stop or abort) before a request is queued, so a long
+    /// controller call ends at the next engine block.
+    pub fn signal(&self, s: u8) {
+        // An abort always wins over a stop.
+        let _ = self.shared.signal.fetch_max(s, Ordering::SeqCst);
+    }
+
+    /// Queue a request and wait for its answer, at most `wait`.
+    pub async fn ask<T: Send + 'static>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, MethodError>>) -> Cmd,
+        wait: Duration,
+    ) -> Result<T, MethodError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(make(tx))?;
+        match tokio::time::timeout(wait, rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => Err(MethodError::internal(format!(
+                "run {} ended before it answered",
+                self.id
+            ))),
+            Err(_) => Err(MethodError::new(
+                ErrorCode::Internal,
+                format!(
+                    "run {} did not answer within {:.0} s; the request stands",
+                    self.id,
+                    wait.as_secs_f64()
+                ),
+            )),
+        }
+    }
+
+    pub fn send(&self, cmd: Cmd) -> Result<(), MethodError> {
+        let tx = match self.tx.lock() {
+            Ok(t) => t,
+            Err(p) => p.into_inner(),
+        };
+        tx.send(cmd)
+            .map_err(|_| MethodError::internal(format!("run {} is no longer running", self.id)))
+    }
+}

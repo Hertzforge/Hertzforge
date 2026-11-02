@@ -388,9 +388,54 @@ pub trait Backend: Send {
     fn output_space(&mut self) -> Option<usize> {
         None
     }
+    /// Per-input overload flags, one per acquired input in frame order: `true`
+    /// once a sample has reached [`INPUT_OVERLOAD_FRACTION`] of that input's
+    /// CONFIGURED range since the backend was last configured (see
+    /// [`mark_overloads`]). Empty when the backend does not report them.
+    ///
+    /// A software check every backend can make, because a driver's own
+    /// overload flag is not always there: the NI 9234 answers DAQmx's
+    /// overloaded-channels query with -200452, unsupported (2026-11-01).
+    fn input_overloads(&mut self) -> Vec<bool> {
+        Vec::new()
+    }
     fn poll_status(&mut self) -> BackendStatus;
     /// Emergency ramp-down and safe stop. Must NEVER issue flash/firmware opcodes.
     fn emergency_stop(&mut self) -> Result<(), HalError>;
+}
+
+/// The fraction of an input's configured range at which a sample counts as an
+/// overload. A delta-sigma converter at its rails reads within a hair of full
+/// scale, and nothing below this is clipping.
+pub const INPUT_OVERLOAD_FRACTION: f64 = 0.98;
+
+/// Mark every input of an interleaved block (`full_scale.len()` samples per
+/// frame) whose magnitude reached `INPUT_OVERLOAD_FRACTION` of its full scale,
+/// in the same unit as the samples. Flags only ever turn on. Returns `true` when
+/// this block turned any on. A full scale that is not a positive number marks
+/// nothing for that input.
+pub fn mark_overloads(block: &[f32], full_scale: &[f64], flags: &mut [bool]) -> bool {
+    let n = full_scale.len().min(flags.len());
+    if n == 0 {
+        return false;
+    }
+    let mut newly = false;
+    for (c, (&fs, flag)) in full_scale.iter().zip(flags.iter_mut()).take(n).enumerate() {
+        if *flag || !(fs.is_finite() && fs > 0.0) {
+            continue;
+        }
+        let limit = INPUT_OVERLOAD_FRACTION * fs;
+        if block
+            .iter()
+            .skip(c)
+            .step_by(full_scale.len())
+            .any(|x| f64::from(x.abs()) >= limit)
+        {
+            *flag = true;
+            newly = true;
+        }
+    }
+    newly
 }
 
 /// A boxed backend IS a backend.
@@ -420,7 +465,8 @@ pub trait Backend: Send {
 ///   arrive in its status; before the fix the assertion read 0 of 1.
 ///
 /// The lesson generalizes: adding a defaulted method to `Backend` is NOT additive for
-/// this impl. Add the forwarding line in the same commit.
+/// this impl. Add the forwarding line in the same commit (as [`Backend::input_overloads`]
+/// did, 2026-11-01).
 impl<T: Backend + ?Sized> Backend for Box<T> {
     fn caps(&self) -> Caps {
         (**self).caps()
@@ -458,6 +504,9 @@ impl<T: Backend + ?Sized> Backend for Box<T> {
     }
     fn output_space(&mut self) -> Option<usize> {
         (**self).output_space()
+    }
+    fn input_overloads(&mut self) -> Vec<bool> {
+        (**self).input_overloads()
     }
     fn poll_status(&mut self) -> BackendStatus {
         (**self).poll_status()
@@ -542,6 +591,9 @@ mod tests {
             fn output_space(&mut self) -> Option<usize> {
                 Some(4096)
             }
+            fn input_overloads(&mut self) -> Vec<bool> {
+                vec![false, true]
+            }
             fn poll_status(&mut self) -> BackendStatus {
                 BackendStatus::default()
             }
@@ -561,6 +613,35 @@ mod tests {
             Some(4096),
             "the Box impl swallowed the real output-buffer depth"
         );
+        assert_eq!(
+            boxed.input_overloads(),
+            vec![false, true],
+            "the Box impl swallowed the input overload flags"
+        );
+    }
+
+    #[test]
+    fn an_input_overloads_at_98_percent_of_its_own_range() {
+        // Two inputs, interleaved: 5 V and 1 V full scale.
+        let fs = [5.0, 1.0];
+        let mut flags = [false, false];
+        assert!(!mark_overloads(&[4.89, 0.97, -4.8, -0.5], &fs, &mut flags));
+        assert_eq!(flags, [false, false], "below 98 % of either range");
+        assert!(mark_overloads(&[1.0, -0.98, 0.0, 0.0], &fs, &mut flags));
+        assert_eq!(
+            flags,
+            [false, true],
+            "-0.98 reaches 98 % of the 1 V input only"
+        );
+        assert!(mark_overloads(&[-4.9, 0.0], &fs, &mut flags));
+        assert_eq!(flags, [true, true]);
+        assert!(
+            !mark_overloads(&[0.0, 0.0], &fs, &mut flags),
+            "flags only turn on"
+        );
+        let mut none = [false];
+        assert!(!mark_overloads(&[1e9], &[f64::NAN], &mut none));
+        assert!(!mark_overloads(&[1e9], &[0.0], &mut none));
     }
 
     #[test]

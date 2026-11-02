@@ -1,0 +1,101 @@
+{
+ "type": "request",
+ "id": 21,
+ "method": "random.configure",
+ "params": {
+  "config": {
+   "title": "Qualification Random",
+   "profile": {
+    "breakpoints": [
+     {
+      "freq_hz": 20,
+      "psd_g2_hz": 0.01
+     },
+     {
+      "freq_hz": 80,
+      "slope_db_oct": 3
+     },
+     {
+      "freq_hz": 350,
+      "psd_g2_hz": 0.04,
+      "alarm_db": [
+       2,
+       2
+      ]
+     },
+     {
+      "freq_hz": 2000,
+      "slope_db_oct": -3
+     }
+    ],
+    "alarm_db": [
+     3,
+     3
+    ],
+    "abort_db": [
+     6,
+     6
+    ]
+   },
+   "acquisition": {
+    "fs_hz": 8192,
+    "n_pts": 2048,
+    "n_avg": 4
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels": [
+     {
+      "db": -12,
+      "dwell_s": 30
+     },
+     {
+      "db": -6,
+      "dwell_s": 30
+     },
+     {
+      "db": 0
+     }
+    ],
+    "full_level_s": 300
+   },
+   "control": {
+    "composite": "weighted_avg",
+    "control_dof": 120,
+    "damping": 4,
+    "max_lines_out": 10,
+    "max_loops_out": 5,
+    "max_sigma": 5,
+    "drive_ceiling_vrms": 2.5,
+    "drive_abort_vrms": null,
+    "review_after_sysid": true,
+    "pretest": {
+     "averages": 4,
+     "level_db": -20,
+     "max_vrms": 0.5,
+     "start_vrms": 0.01,
+     "shaped": false
+    },
+    "level_ramp_s": 3,
+    "shutdown_ramp_s": 3
+   },
+   "limits": [
+    {
+     "channel": 2,
+     "kind": "response",
+     "rows": [
+      {
+       "freq_hz": 20,
+       "ceiling": 0.2
+      },
+      {
+       "freq_hz": 2000,
+       "ceiling": 0.2
+      }
+     ]
+    }
+   ],
+   "feasibility": null
+  }
+ }
+}

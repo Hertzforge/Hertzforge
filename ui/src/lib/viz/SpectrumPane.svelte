@@ -16,7 +16,7 @@
 	import { alignSeries, valueAt } from './align';
 	import { cursors } from './cursor';
 	import { formatFixed, formatTick } from './format';
-	import { logRange, logTicks, mantissasFor } from './logTicks';
+	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
 	import { ROLE_STYLES, dashArray, roleColorVar } from './roles';
 	import { stepsPath } from './steps';
 
@@ -28,9 +28,11 @@
 		minHeight?: number;
 		/** Show the view's title above the legend. */
 		showTitle?: boolean;
+		/** A y range the operator fixed; null lets the pane range itself. */
+		yFixed?: [number, number] | null;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -102,6 +104,7 @@
 
 	/** y range for data, snapped; with `live`, only moves when the data leaves it or shrinks far inside. */
 	function nextYRange(cols: ArrayLike<number | null>[]): [number, number] {
+		if (yFixed) return yFixed;
 		const ext = finiteExtent(cols, logY) ?? (logY ? [1e-4, 1] : [0, 1]);
 		const target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
 		if (!live || !yRange) return target;
@@ -115,11 +118,17 @@
 		return `${Math.round(size)}px ${mono ? cssVar('--font-mono') : cssVar('--font-ui')}`;
 	}
 
-	/** Pick tick density from the pixels each decade gets on this axis. */
-	function logMantissas(u: uPlot, axis: 0 | 1, min: number, max: number): number[] {
+	/** Pixels each decade gets on this axis. */
+	function pxPerDecade(u: uPlot, axis: 0 | 1, min: number, max: number): number {
 		const px = (axis === 0 ? u.bbox.width : u.bbox.height) / devicePixelRatio;
 		const decades = Math.max(0.3, Math.log10(Math.max(max, 1e-300) / Math.max(min, 1e-300)));
-		return mantissasFor(px / decades);
+		return px / decades;
+	}
+
+	/** Ticks for a log axis, as dense as its pixels allow and never denser. */
+	function logSplits(u: uPlot, axis: 0 | 1, min: number, max: number): number[] {
+		const ppd = pxPerDecade(u, axis, min, max);
+		return logTicks(min, max, mantissasFor(ppd), decadeStride(ppd));
 	}
 
 	let measureCtx: CanvasRenderingContext2D | null = null;
@@ -149,6 +158,7 @@
 			height: Math.max(minHeight, plotEl.clientHeight),
 			pxAlign: false,
 			legend: { show: false },
+			focus: { alpha: 0.25 },
 			padding: [10, 24, 0, 0],
 			cursor: {
 				y: false,
@@ -194,7 +204,7 @@
 					space: logX ? 36 : 56,
 					grid: { stroke: grid, width: 1 },
 					ticks: { stroke: grid, width: 1, size: 4 },
-					splits: logX ? (u, _i, min, max) => logTicks(min, max, logMantissas(u, 0, min, max)) : undefined,
+					splits: logX ? (u, _i, min, max) => logSplits(u, 0, min, max) : undefined,
 					filter: logX ? (_u, splits) => splits : undefined,
 					values: (_u, splits) => splits.map((v) => (v == null ? '' : formatTick(v)))
 				},
@@ -210,7 +220,7 @@
 					space: 28,
 					grid: { stroke: grid, width: 1 },
 					ticks: { stroke: grid, width: 1, size: 4 },
-					splits: logY ? (u, _i, min, max) => logTicks(min, max, logMantissas(u, 1, min, max)) : undefined,
+					splits: logY ? (u, _i, min, max) => logSplits(u, 1, min, max) : undefined,
 					filter: logY ? (_u, splits) => splits : undefined,
 					values: (_u, splits) => splits.map((v) => (v == null ? '' : formatTick(v))),
 					size: (_u, values) => {
@@ -267,11 +277,12 @@
 		const [xs, ...cols] = alignSeries(view.series, logX, logY);
 		const next = nextYRange(cols);
 		const plotData = [xs, ...drawOrder.map((o) => cols[o.index])] as uPlot.AlignedData;
+		// Without its scale reset, setData only swaps the data and draws nothing; setting the y range
+		// (held for live data, or moved) is what draws it. `redraw()` is not used: before the first
+		// draw it would set the x range from a scale not yet computed.
 		plot.setData(plotData, false);
-		if (!yRange || next[0] !== yRange[0] || next[1] !== yRange[1]) {
-			yRange = next;
-			plot.setScale('y', { min: next[0], max: next[1] });
-		}
+		yRange = next;
+		plot.setScale('y', { min: next[0], max: next[1] });
 	}
 
 	function destroyPlot() {
@@ -310,6 +321,7 @@
 		// Track the view and the theme; rebuild or update in place.
 		void view;
 		void theme.version;
+		void yFixed;
 		if (plot) update();
 		bindCursor(view.link);
 	});
@@ -325,6 +337,13 @@
 	}
 
 	const xReadout = $derived(cursorX === null ? null : formatFixed(cursorX, 4));
+
+	/** Pointing at a legend entry brings its line forward and dims the others: a cue besides color. */
+	function focusSeries(index: number | null) {
+		if (!plot) return;
+		const at = index === null ? null : drawOrder.findIndex((o) => o.index === index) + 1;
+		plot.setSeries(at && at > 0 ? at : null, { focus: true });
+	}
 
 	function legendLabel(s: Series, styleName: string) {
 		return `${s.name}, ${s.role} line, ${styleName}`;
@@ -349,7 +368,7 @@
 	</div>
 	<ul class="legend" aria-label="Legend">
 		{#each styled as { series, style, colorVar }, i (i)}
-			<li title={legendLabel(series, style.styleName)}>
+			<li title={legendLabel(series, style.styleName)} onmouseenter={() => focusSeries(i)} onmouseleave={() => focusSeries(null)}>
 				<svg class="swatch" viewBox="0 0 26 8" width="26" height="8" aria-hidden="true">
 					<line
 						x1="1"

@@ -305,9 +305,157 @@ pub fn resolve_clock_in(
     }
 }
 
+/// The selftest's own clock row (`examples/ni_selftest.rs`): what a device set
+/// must resolve to, and whether the backend's report agrees.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClockRow {
+    /// What the clock rule says the set resolves to.
+    pub expected: ClockDomain,
+    /// The backend reported `expected`.
+    pub pass: bool,
+    /// The row's words.
+    pub label: &'static str,
+    /// What was reported, and what a failure means.
+    pub detail: String,
+}
+
+/// Check the backend's reported clock domain for a device set against the clock
+/// rule, the way the selftest does: a driver-simulated set is Shared; a real set
+/// is Shared exactly when `proven` holds its entry, and Unknown otherwise.
+///
+/// The entry is looked up here field by field, not through [`resolve_clock`], so
+/// a resolver that drifts from the table cannot vouch for itself. `key` is the
+/// set's identity as the backend built it (`None` before the backend opened,
+/// which no entry matches).
+pub fn selftest_clock_row(
+    proven: &[ProvenClockConfig],
+    all_simulated: bool,
+    key: Option<&ClockKey>,
+    reported: ClockDomain,
+) -> ClockRow {
+    if all_simulated {
+        return ClockRow {
+            expected: ClockDomain::Shared,
+            pass: reported == ClockDomain::Shared,
+            label: "a fully driver-simulated device set resolves to Shared",
+            detail: format!("{reported:?}"),
+        };
+    }
+    let entry = key.and_then(|k| {
+        proven.iter().find(|e| {
+            e.chassis_product == k.chassis_product
+                && e.ai_product == k.ai_product
+                && e.ao_product == k.ao_product
+                && e.routing == k.routing
+        })
+    });
+    match entry {
+        Some(e) => ClockRow {
+            expected: ClockDomain::Shared,
+            pass: reported == ClockDomain::Shared,
+            label: "a REAL device set with a proven-set entry resolves to Shared",
+            detail: format!(
+                "{reported:?} (proven-set entry: {}) -- Unknown here means the entry was not \
+                 matched",
+                e.evidence
+            ),
+        },
+        None => ClockRow {
+            expected: ClockDomain::Unknown,
+            pass: reported == ClockDomain::Unknown,
+            label: "a REAL device set without a proven-set entry resolves to Unknown",
+            detail: format!(
+                "{reported:?} -- Shared here, with no entry in clock::PROVEN_SHARED_CLOCK for \
+                 this set, means the gate has been deleted"
+            ),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bench's own set: the shipped proven entry.
+    fn bench_key() -> ClockKey {
+        ClockKey::new(
+            "cDAQ-9178",
+            "NI 9234",
+            "NI 9263",
+            "/<chassis>/ai/SampleClock",
+        )
+    }
+
+    /// The 2026-11-01 fix verification: on the proven bench the backend says
+    /// Shared, as it must, and the row must pass (it failed, asserting Unknown).
+    #[test]
+    fn the_selftest_row_passes_a_proven_bench_reporting_shared() {
+        let row = selftest_clock_row(
+            PROVEN_SHARED_CLOCK,
+            false,
+            Some(&bench_key()),
+            ClockDomain::Shared,
+        );
+        assert_eq!(row.expected, ClockDomain::Shared);
+        assert!(row.pass, "{row:?}");
+        assert!(row.detail.contains("bench capture 2026-07-30"), "{row:?}");
+    }
+
+    #[test]
+    fn the_selftest_row_fails_a_proven_bench_reporting_unknown() {
+        let row = selftest_clock_row(
+            PROVEN_SHARED_CLOCK,
+            false,
+            Some(&bench_key()),
+            ClockDomain::Unknown,
+        );
+        assert!(!row.pass, "the entry was ignored: {row:?}");
+    }
+
+    #[test]
+    fn the_selftest_row_still_catches_a_deleted_gate() {
+        // A real set with no entry that says Shared: the gate has been deleted.
+        for key in [
+            Some(ClockKey::new(
+                "cDAQ-9178",
+                "NI 9234",
+                "NI 9260",
+                "/<chassis>/ai/SampleClock",
+            )),
+            Some(ClockKey::new("cDAQ-9178", "NI 9234", "NI 9263", "")),
+            None,
+        ] {
+            let shared = selftest_clock_row(
+                PROVEN_SHARED_CLOCK,
+                false,
+                key.as_ref(),
+                ClockDomain::Shared,
+            );
+            assert_eq!(shared.expected, ClockDomain::Unknown);
+            assert!(!shared.pass, "{shared:?}");
+            assert!(
+                shared.detail.contains("gate has been deleted"),
+                "{shared:?}"
+            );
+            let unknown = selftest_clock_row(
+                PROVEN_SHARED_CLOCK,
+                false,
+                key.as_ref(),
+                ClockDomain::Unknown,
+            );
+            assert!(unknown.pass, "{unknown:?}");
+        }
+        // An empty table proves nothing, whatever the key.
+        let row = selftest_clock_row(&[], false, Some(&bench_key()), ClockDomain::Shared);
+        assert!(!row.pass, "{row:?}");
+    }
+
+    #[test]
+    fn the_selftest_row_keeps_the_driver_simulated_rule() {
+        let sim = |reported| selftest_clock_row(PROVEN_SHARED_CLOCK, true, None, reported);
+        assert!(sim(ClockDomain::Shared).pass);
+        assert!(!sim(ClockDomain::Unknown).pass);
+    }
 
     fn key() -> ClockKey {
         ClockKey::new("Chassis-X", "AI-Mod", "AO-Mod", "/Chassis-X/ai/SampleClock")

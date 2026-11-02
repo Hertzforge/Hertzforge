@@ -17,9 +17,8 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'acquire',
 		title: 'Acquire & Control',
 		rail: 'Acquire & Control',
-		live: false,
-		summary: 'Closed-loop test control and recording.',
-		moves: ['Random', 'Sine', 'Shock', 'SRS', 'TWR', 'Recorder']
+		live: true,
+		summary: 'Closed-loop Random control on the simulator or NI hardware.'
 	},
 	{ id: 'analyze', title: 'Analyze', rail: 'Analyze', live: true, summary: 'Run analysis tools on recorded data.' },
 	{ id: 'modal', title: 'Modal', rail: 'Modal', live: true, summary: 'Natural frequencies, damping and mode shapes.' },

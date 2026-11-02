@@ -57,6 +57,8 @@ pub enum Role {
     Reference,
     Tolerance,
     Abort,
+    /// A ceiling the controller holds a channel under; it never aborts.
+    Limit,
     Drive,
     Other,
 }
@@ -68,6 +70,7 @@ impl Role {
             Role::Reference => "reference",
             Role::Tolerance => "tolerance",
             Role::Abort => "abort",
+            Role::Limit => "limit",
             Role::Drive => "drive",
             Role::Other => "other",
         }

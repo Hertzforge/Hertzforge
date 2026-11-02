@@ -302,6 +302,33 @@ impl WarningLog {
     }
 }
 
+/// Whether a driver warning reports an OUTPUT UNDERRUN: the generation ran ahead
+/// of the samples written to it (or DAQmx stopped it rather than regenerate old
+/// samples).
+///
+/// A consumer that asks "were there underruns?" must not count every warning:
+/// the backend also reports coercions, unsupported attributes and taper notes,
+/// and the module sweep's TWR row counted those as underruns (2026-11-01: an
+/// AI task's unsupported-attribute warning failed a clean streaming row). The
+/// statuses are DAQmx's output-underflow family (-200018, -200290, -200621);
+/// the words catch the same conditions in a warning without its code.
+pub fn is_underrun_warning(warning: &str) -> bool {
+    const STATUSES: [&str; 3] = ["-200018", "-200290", "-200621"];
+    const WORDS: [&str; 5] = [
+        "underflow",
+        "underrun",
+        "regeneration of old samples",
+        "before data to be converted was available",
+        "could not write data to the device fast enough",
+    ];
+    let lower = warning.to_ascii_lowercase();
+    STATUSES.iter().any(|c| {
+        lower
+            .match_indices(c)
+            .any(|(i, _)| !lower[i + c.len()..].starts_with(|d: char| d.is_ascii_digit()))
+    }) || WORDS.iter().any(|w| lower.contains(w))
+}
+
 /// Apply the DAQmx status discipline to one call's result.
 ///
 /// - `status == 0` -> `Ok(())`, nothing logged.
@@ -1240,6 +1267,40 @@ impl ErrorText for Driver {
 
 #[cfg(test)]
 mod tests {
+
+    /// The bench's own warnings (2026-11-01) are not underruns; DAQmx's
+    /// output-underflow family is.
+    ///
+    /// RED-MUTATION: make `is_underrun_warning` return true for everything (what
+    /// the sweep's TWR row 4 effectively did) and the first assertion reds.
+    #[test]
+    fn only_output_underrun_warnings_count_as_underruns() {
+        let not = [
+            "ADC overload is NOT being checked: NI-DAQmx error -200452 during \
+             DAQmxGetReadOverloadedChansExist: Specified property is not supported by the \
+             device or is not applicable to the task.",
+            "cDAQ2Mod2/ao0: AO idle-output-behavior NOT settable (NI-DAQmx error -200452 during \
+             DAQmxSetAOIdleOutputBehavior(cDAQ2Mod2/ao0, 12526)); after a stop this output HOLDS \
+             its last commanded sample",
+            "sample rate coerced: requested 12800 Hz, device programmed 12800 Hz",
+            "input overload on cDAQ2Mod1/ai0: a sample reached 98 % of its +/-1 V range",
+            "DAQmx warning 200077 during DAQmxCfgSampClkTiming: requested value -2002900",
+        ];
+        for w in not {
+            assert!(!is_underrun_warning(w), "counted as an underrun: {w}");
+        }
+        let yes = [
+            "NI-DAQmx error -200290 during DAQmxWriteAnalogF64: The generation has stopped to \
+             prevent the regeneration of old samples.",
+            "DAQmx warning -200621: Onboard device memory underflow.",
+            "error -200018: DAC conversion attempted before data to be converted was available.",
+            "HERTZFORGE_T2_FAKE_WARNING: synthetic driver underrun warning injected by the \
+             red-mutation hook",
+        ];
+        for w in yes {
+            assert!(is_underrun_warning(w), "missed an underrun: {w}");
+        }
+    }
     use super::*;
 
     /// A stand-in for the driver's extended-error text, so the status discipline
