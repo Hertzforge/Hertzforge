@@ -484,6 +484,13 @@ try {
 		`${await text(a, 'level-now')}; target ${await text(a, 'level-target')}, control ${await text(a, 'level-control')}, difference ${await text(a, 'level-error')}; ${await text(a, 'level-progress')}`
 	);
 	await until(a, 'the control plot drawn', async (p) => (await panes(p, 'pl-1')) > 0 && (await panes(p, 'pl-2')) > 0);
+	// Every input reads OK, so the Inputs card says nothing of overload; its Range heading defines it.
+	const inputsCard = await text(a, 'live-channels');
+	check(
+		'Inputs card: every input OK and no overload wording, the Range heading defining the word',
+		/OK/.test(inputsCard) && !/overload/i.test(inputsCard) && /Overload once the input reaches the top of its range/.test((await tid(a, 'range-meaning').getAttribute('title')) ?? ''),
+		inputsCard
+	);
 	await shot(a, '05a-run-control-page-and-level-card');
 
 	// The manual ladder holds the level while the display is worked on.

@@ -5,7 +5,7 @@ import type { ChannelRow, NiDevice, RandomState, RefusalReason } from '$lib/prot
 import { primaryAction, runActions, type RunContext } from './actions';
 import { byField, defaultSetup, fromConfig, itemKey, localErrors, toConfig } from './setup';
 import { bindUnbound, newRow, rowFindings, tableChanges } from './table';
-import { clock, db, outcomeTone, refusalTitle, toRefusal, tripFacts } from './words';
+import { clock, db, outcomeTone, overloadNote, RANGE_MEANING, refusalTitle, toRefusal, tripFacts } from './words';
 
 function state(over: Partial<RandomState>): RandomState {
 	return {
@@ -156,6 +156,13 @@ describe('channel table', () => {
 });
 
 describe('words', () => {
+	it('says Overload only while an input is in it; otherwise the word is only defined', () => {
+		expect(overloadNote([])).toBeNull();
+		expect(overloadNote([3])).toBe('Overload: channel 3 reached the top of its range during this run (90 % of it in the run, or 98 % at the station).');
+		expect(overloadNote([1, 3])).toMatch(/^Overload: channels 1, 3 reached the top of their range/);
+		expect(RANGE_MEANING).toMatch(/^OK, or Overload once the input reaches the top of its range/);
+	});
+
 	it('gives every refusal reason a heading, and keeps the service message verbatim', () => {
 		const reasons: RefusalReason[] = [
 			'bad_params', 'not_controller', 'controller_held', 'run_active', 'not_configured', 'run_finished', 'wrong_state',

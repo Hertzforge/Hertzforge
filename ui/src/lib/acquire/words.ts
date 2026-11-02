@@ -130,6 +130,16 @@ export function alarmText(a: Alarm, channelName?: (index: number) => string): st
 	return 'Alarm';
 }
 
+/** What the Inputs card's Range column means, for its heading's tooltip. */
+export const RANGE_MEANING = 'OK, or Overload once the input reaches the top of its range in this run: 90 % of it in the run, or 98 % at the station.';
+
+/** The Inputs card's note while inputs are in overload: which, and what it means; null when none is. */
+export function overloadNote(channels: number[]): string | null {
+	if (!channels.length) return null;
+	const which = channels.length === 1 ? `channel ${channels[0]} reached the top of its range` : `channels ${channels.join(', ')} reached the top of their range`;
+	return `Overload: ${which} during this run (90 % of it in the run, or 98 % at the station).`;
+}
+
 /** The level card's status line: what the run is doing now, in plain words. */
 export interface LevelStatus {
 	/** The shape beside the words: no meaning rests on the color alone. */

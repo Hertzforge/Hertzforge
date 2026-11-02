@@ -13,7 +13,7 @@
 	import PageBar from './display/PageBar.svelte';
 	import PageView from './display/PageView.svelte';
 	import type { AcquireState } from './store.svelte';
-	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, TRIP_WORDS, tripFacts } from './words';
+	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {
 		acq: AcquireState;
@@ -38,6 +38,8 @@
 	};
 	const logTime = (u: number) => new Date(u * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 	const recent = $derived([...acq.log].reverse().slice(0, 200));
+	/** Said only while an input is in overload; otherwise the Range heading explains the word. */
+	const overload = $derived(overloadNote(f ? f.channels.filter((c) => c.overload).map((c) => c.index) : []));
 	/** The run has streamed: its plots have data or will with the next loop. */
 	const streaming = $derived(!!run && (run.state === 'running' || run.state === 'review' || run.state === 'stopping' || (run.state === 'finished' && run.elapsed_s !== null)));
 	/** The enabled inputs of the service's channel table, for choosing a plot's channels. */
@@ -110,7 +112,7 @@
 				<section class="card" aria-label="Inputs" data-testid="live-channels">
 					<h3>Inputs</h3>
 					<table class="chans">
-						<thead><tr><th>#</th><th>Channel</th><th class="r">rms</th><th>Range</th></tr></thead>
+						<thead><tr><th>#</th><th>Channel</th><th class="r">rms</th><th><span class="defined" title={RANGE_MEANING} data-testid="range-meaning">Range</span></th></tr></thead>
 						<tbody>
 							{#each f.channels as c (c.index)}
 								<tr class:over={c.overload}>
@@ -128,7 +130,9 @@
 							{/each}
 						</tbody>
 					</table>
-					<p class="aq-small aq-muted foot">Overload: the input reached the top of its range during this run (90 % of it in the run, or 98 % at the station).</p>
+					{#if overload}
+						<p class="aq-small foot overnote" role="status" data-testid="overload-note"><StatusMark status="warn" word={false} />{overload}</p>
+					{/if}
 				</section>
 			{/if}
 
@@ -379,6 +383,20 @@
 
 	.foot {
 		margin-top: 6px;
+	}
+
+	.overnote {
+		display: flex;
+		align-items: flex-start;
+		gap: 4px;
+		color: var(--amber-1);
+	}
+
+	/* A heading with a definition behind it: dotted, and the definition on hover. */
+	.defined {
+		text-decoration: underline dotted;
+		text-underline-offset: 2px;
+		cursor: help;
 	}
 
 	.log {
