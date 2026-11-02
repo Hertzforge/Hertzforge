@@ -4,7 +4,8 @@
 	 *
 	 * Log or linear axes come from the view. Each series' role sets its dash pattern and width;
 	 * color is the second cue, and the legend names the line style in words. Panes with the same
-	 * `link` share a cursor on x through the CursorHub. Live updates keep the axes still: the
+	 * `link` share a cursor on x through the CursorHub, and a shape view of the same result with
+	 * that `link` puts its playback time on the plot as a line that drags to seek. Live updates keep the axes still: the
 	 * plot is rebuilt only when the structure changes, and the y range only moves when the data
 	 * leaves it.
 	 */
@@ -14,7 +15,7 @@
 	import type { Series, SpectrumView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { alignSeries, valueAt } from './align';
-	import { cursors } from './cursor';
+	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
 	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
 	import { ROLE_STYLES, dashArray, roleColorVar } from './roles';
@@ -30,9 +31,11 @@
 		showTitle?: boolean;
 		/** A y range the operator fixed; null lets the pane range itself. */
 		yFixed?: [number, number] | null;
+		/** The result the view belongs to, which a playhead is scoped to. */
+		scope?: string;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -43,6 +46,13 @@
 	let resizeObs: ResizeObserver | null = null;
 	let unsubscribeCursor: (() => void) | null = null;
 	let subscribedLink: string | undefined;
+
+	/** The playback line, its time, and the group it is shared in. */
+	let playLine: HTMLDivElement | null = null;
+	let playX: number | null = null;
+	let dragging = false;
+	let unsubscribePlayhead: (() => void) | null = null;
+	let playGroup: string | undefined;
 
 	let cursorX = $state<number | null>(null);
 	let cursorIsLocal = $state(false);
@@ -242,6 +252,7 @@
 				}))
 			],
 			hooks: {
+				draw: [placePlayLine],
 				setCursor: [
 					(u) => {
 						const left = u.cursor.left ?? -1;
@@ -262,6 +273,14 @@
 
 		plot = new uPlot(opts, plotData, plotEl);
 		structureKey = keyOf(view);
+		playLine = document.createElement('div');
+		playLine.className = 'playline';
+		playLine.title = 'Drag to move playback';
+		// the line's own drag, not the plot's zoom
+		playLine.addEventListener('mousedown', (e) => e.stopPropagation());
+		playLine.addEventListener('pointerdown', startDrag);
+		plot.over.appendChild(playLine);
+		placePlayLine();
 		resizeObs = new ResizeObserver(() => {
 			if (!plot) return;
 			const w = Math.max(100, plotEl.clientWidth);
@@ -283,6 +302,53 @@
 		plot.setData(plotData, false);
 		yRange = next;
 		plot.setScale('y', { min: next[0], max: next[1] });
+	}
+
+	/** Put the playback line at its time, or hide it when there is none or it is off the plot. */
+	function placePlayLine() {
+		if (!plot || !playLine) return;
+		const left = playX === null ? -1 : plot.valToPos(playX, 'x');
+		const inside = left >= 0 && left <= plot.over.clientWidth;
+		playLine.style.display = inside ? '' : 'none';
+		if (inside) playLine.style.left = `${left}px`;
+	}
+
+	function startDrag(e: PointerEvent) {
+		if (!plot || !playGroup) return;
+		const line = e.currentTarget as HTMLDivElement;
+		line.setPointerCapture(e.pointerId);
+		dragging = true;
+		const move = (ev: PointerEvent) => {
+			if (!plot || !playGroup) return;
+			const { min, max } = plot.scales.x;
+			const x = plot.posToVal(ev.clientX - plot.over.getBoundingClientRect().left, 'x');
+			playX = Math.min(Math.max(x, min ?? x), max ?? x);
+			placePlayLine();
+			playheads.set(playGroup, playX, paneId);
+		};
+		const end = () => {
+			dragging = false;
+			line.removeEventListener('pointermove', move);
+			line.removeEventListener('pointerup', end);
+			line.removeEventListener('pointercancel', end);
+		};
+		line.addEventListener('pointermove', move);
+		line.addEventListener('pointerup', end);
+		line.addEventListener('pointercancel', end);
+	}
+
+	function bindPlayhead(group: string | undefined) {
+		if (group === playGroup) return;
+		unsubscribePlayhead?.();
+		unsubscribePlayhead = null;
+		playGroup = group;
+		if (!group) return;
+		unsubscribePlayhead = playheads.subscribe(group, (state) => {
+			// while dragging the line stays under the pointer, not on the sample playback snapped to
+			if (dragging) return;
+			playX = state.x;
+			placePlayLine();
+		});
 	}
 
 	function destroyPlot() {
@@ -324,11 +390,13 @@
 		void yFixed;
 		if (plot) update();
 		bindCursor(view.link);
+		bindPlayhead(view.link ? playheadGroup(view.link, scope) : undefined);
 	});
 
 	onDestroy(() => {
 		if (view.link) cursors.clear(view.link, paneId);
 		unsubscribeCursor?.();
+		unsubscribePlayhead?.();
 		destroyPlot();
 	});
 
@@ -506,6 +574,27 @@
 		font-family: var(--font-mono);
 		position: absolute;
 		inset: 0;
+	}
+
+	.plot :global(.playline) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 9px;
+		transform: translateX(-50%);
+		cursor: ew-resize;
+		z-index: 1;
+	}
+
+	/* the overlay's orange: the time the shape view beside it shows */
+	.plot :global(.playline)::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 3.5px;
+		width: 2px;
+		background: #e69f00;
 	}
 
 	.plot :global(.u-cursor-x) {

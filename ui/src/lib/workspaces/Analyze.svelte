@@ -191,6 +191,7 @@
 										onselect={v.view === 'matrix' && v.selects ? (cell) => (pairs[r.id] = cell) : undefined}
 										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
 										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
+										scope={String(r.id)}
 									/>
 								</div>
 							{/each}

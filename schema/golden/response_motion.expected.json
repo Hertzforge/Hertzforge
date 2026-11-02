@@ -39,6 +39,7 @@
      ]
     },
     "modes": [],
+    "link": "time",
     "motion": {
      "label": "Time",
      "unit": "s",
