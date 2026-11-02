@@ -54,7 +54,7 @@ def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
     power law with VD's `plot.as_power_law`; anything else is a line.
     `x` and `y` are the lines to draw, already cut to what is shown.
     """
-    from visualdynamics.plot import as_power_law, bin_edges, drawing_shape
+    from hertzforge.drawing.plot import as_power_law, bin_edges, drawing_shape
 
     shape = drawing_shape(data)
     x = np.asarray(x, dtype=float)

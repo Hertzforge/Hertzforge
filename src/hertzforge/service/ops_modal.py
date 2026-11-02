@@ -2,7 +2,7 @@
 
 Shapes are `fem.Model.eigensolution`'s, mass-normalized as it returns
 them, turned into one translation per node along the directions
-`visualdynamics.deform.dof_directions` gives (each DOF's direction, out of
+`hertzforge.deform.dof_directions` gives (each DOF's direction, out of
 the node's displacement coordinate system), as `node_displacements` does.
 Nothing is rescaled here: the shell scales a shape for display.
 """
