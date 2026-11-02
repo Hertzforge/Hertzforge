@@ -1,0 +1,38 @@
+package hertzforge:control-law@0.1.0;
+
+/// A single-output Random control law: its state lives in one `law`
+/// resource, built once per run.
+interface random-single-law {
+    use types.{setup, param, loop-inputs, loop-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: setup, params: list<param>) -> result<law, string>;
+
+        /// The first loop, from the system-identification measurement:
+        /// return the starting drive.
+        seed: func(inputs: loop-inputs) -> result<loop-outputs, string>;
+
+        /// One control loop: return the next drive from the latest
+        /// measurement.
+        iterate: func(inputs: loop-inputs) -> result<loop-outputs, string>;
+
+        /// The scheduled level moved. `target-rms` is the new in-band
+        /// root-mean-square target; `feedforward-scale` is the new level as
+        /// an amplitude ratio to the full target (1.0 is full level).
+        retarget-level: func(target-rms: f64, feedforward-scale: f64);
+    }
+}
+
+/// The world a single-output Random law file implements.
+world random-single {
+    use types.{manifest};
+
+    /// The law's name, version, parameters and diagnostics.
+    export describe: func() -> manifest;
+
+    export random-single-law;
+}
