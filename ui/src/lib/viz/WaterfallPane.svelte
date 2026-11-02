@@ -300,24 +300,26 @@
 	const LABEL_GAP_PX = 12;
 
 	/**
-	 * Pin each HTML label over its point on the stage. Record labels are thinned by where they land
-	 * on screen, not only by count: forty names along a depth axis seen end-on would overprint.
+	 * Pin each HTML label over its point on the stage. Record and level labels are thinned by where
+	 * they land on screen, not only by count: forty names along a depth axis seen end-on, or a
+	 * decade every few pixels on a short level axis, would overprint.
 	 */
 	function placeLabels() {
 		if (!overlay) return;
 		const w = canvasHost.clientWidth;
 		const h = canvasHost.clientHeight;
-		let lastX = -Infinity;
-		let lastY = -Infinity;
+		const last: Record<string, [number, number]> = {};
 		for (const el of overlay.querySelectorAll<HTMLElement>('[data-at]')) {
 			const [x, y, z] = el.dataset.at!.split(',').map(Number);
 			probe.set(x, y, z).project(camera);
 			const sx = ((probe.x + 1) / 2) * w;
 			const sy = ((1 - probe.y) / 2) * h;
 			let visible = probe.z < 1;
-			if (visible && el.classList.contains('rec')) {
-				if (Math.hypot(sx - lastX, sy - lastY) < LABEL_GAP_PX) visible = false;
-				else [lastX, lastY] = [sx, sy];
+			const thinned = el.classList.contains('rec') ? 'rec' : el.classList.contains('z') ? 'z' : null;
+			if (visible && thinned) {
+				const [lx, ly] = last[thinned] ?? [-Infinity, -Infinity];
+				if (Math.hypot(sx - lx, sy - ly) < LABEL_GAP_PX) visible = false;
+				else last[thinned] = [sx, sy];
 			}
 			el.style.visibility = visible ? 'visible' : 'hidden';
 			el.style.transform = `translate(${sx}px, ${sy}px)`;

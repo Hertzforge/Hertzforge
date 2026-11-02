@@ -380,6 +380,11 @@
 		renderer = null;
 	});
 
+	/** Move to the next or previous mode, staying within the view's modes. */
+	function step(by: number) {
+		mode = Math.min(view.modes.length - 1, Math.max(0, mode + by));
+	}
+
 	function onKey(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
 		const k = e.key.toLowerCase();
@@ -387,6 +392,8 @@
 		else if (k === 'w') wireframe = !wireframe;
 		else if (k === 'g') ghost = !ghost;
 		else if (k === 'r') resetView();
+		else if (e.key === 'ArrowDown' && view.modes.length > 1) step(1);
+		else if (e.key === 'ArrowUp' && view.modes.length > 1) step(-1);
 		else return;
 		e.preventDefault();
 	}
@@ -401,7 +408,7 @@
 	bind:this={host}
 	tabindex="0"
 	role="group"
-	aria-label="{view.title}. Space plays or pauses, W toggles wireframe, G toggles the undeformed ghost, R resets the view."
+	aria-label="{view.title}. Space plays or pauses, W toggles wireframe, G toggles the undeformed ghost, R resets the view, Up and Down step through the modes."
 	onkeydown={onKey}
 >
 	<div class="canvas" data-testid="shape3d-canvas" bind:this={canvasHost}></div>
@@ -446,6 +453,17 @@
 
 		{#if current}
 			<div class="modetag">
+				{#if view.modes.length > 1}
+					<!-- a view shown outside a workspace with a mode table steps here -->
+					<span class="stepper">
+						<button class="btn icon sm" data-testid="shape3d-previous" disabled={mode <= 0} onclick={() => step(-1)} title="Previous mode (Up)" aria-label="Previous mode">
+							<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						</button>
+						<button class="btn icon sm" data-testid="shape3d-next" disabled={mode >= view.modes.length - 1} onclick={() => step(1)} title="Next mode (Down)" aria-label="Next mode">
+							<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						</button>
+					</span>
+				{/if}
 				<span class="m">Mode {current.index}</span>
 				<span class="num">{formatFixed(current.frequency_hz, 4)} Hz</span>
 				{#if current.damping != null}<span class="num dim">{formatFixed(current.damping * 100, 3)} % damping</span>{/if}
@@ -601,6 +619,12 @@
 		font-size: var(--text-sm);
 		color: var(--text-1);
 		pointer-events: none;
+	}
+
+	.stepper {
+		display: inline-flex;
+		gap: 2px;
+		pointer-events: auto;
 	}
 
 	.modetag .m {

@@ -165,7 +165,7 @@ on the dataset sets `"options_from":"channels"`; the shell fills them from the d
 `channels` list returned by `dataset.open`.
 
 `workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
-`accepts` is a dataset kind (`random_run`, `modal_model`); the shell shows an operation only when
+`accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
 the selected dataset is of that kind ("tools follow the data").
 
 ## Methods

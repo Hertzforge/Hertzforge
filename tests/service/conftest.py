@@ -53,6 +53,11 @@ def random_run():
 
 
 @pytest.fixture(scope='session')
+def modal_run():
+    return _open('plate-modal')
+
+
+@pytest.fixture(scope='session')
 def drone():
     return _open('drone-fem')
 

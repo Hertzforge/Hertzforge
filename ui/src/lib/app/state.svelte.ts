@@ -67,8 +67,11 @@ class AnalyzeState {
 
 	constructor(private readonly app: AppState) {}
 
+	/** Every dataset some Analyze tool accepts: a new kind of data shows up here once a tool takes it. */
 	get datasets(): DatasetInfo[] {
-		return (this.app.catalog?.datasets ?? []).filter((d) => d.kind === 'random_run');
+		const catalog = this.app.catalog;
+		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.workspace === 'analyze').map((o) => o.accepts));
+		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
 	}
 
 	/** Tools follow the data: only operations that accept the open dataset's kind. */

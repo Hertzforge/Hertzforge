@@ -197,7 +197,7 @@
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
         "workspace": {"enum": ["acquire", "analyze", "modal", "model", "specify", "simulate", "report"]},
-        "accepts": {"enum": ["random_run", "modal_model"]},
+        "accepts": {"enum": ["random_run", "modal_model", "modal_run"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall"]}}
@@ -207,7 +207,7 @@
       "type": "object", "required": ["id", "kind", "title"],
       "properties": {
         "id": {"type": "string"},
-        "kind": {"enum": ["random_run", "modal_model"]},
+        "kind": {"enum": ["random_run", "modal_model", "modal_run"]},
         "title": {"type": "string"},
         "description": {"type": "string"}
       }

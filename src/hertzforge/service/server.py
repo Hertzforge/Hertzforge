@@ -30,12 +30,14 @@ from . import frames
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
+from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
 
-OPERATIONS: tuple[Operation, ...] = RANDOM_OPERATIONS + MODAL_OPERATIONS
+OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
+                                     + MODAL_RUN_OPERATIONS)
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -68,6 +70,8 @@ PRELOAD = (
     # forming its octave and coherence products
     'hertzforge.core.detect',
     'hertzforge.core.octave',
+    # fitting a modal survey's FRFs
+    'hertzforge.core.modal_fit',
     'hertzforge.core.partial_coherence',
     # solving a model's modes
     'hertzforge.core.sparse_solve',
