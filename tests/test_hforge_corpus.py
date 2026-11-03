@@ -114,7 +114,7 @@ def test_a_vdyn_project_moves_across_unchanged(tmp_path, name):
     moved = Project.open(os.path.join(VDYN_CORPUS, name)).save(tmp_path / 'moved')
     again = Project.open(moved).save(tmp_path / 'again.hforge')
     first, second = file_tree(moved), file_tree(again)
-    assert first['@' + native.STAMP] == native.SCHEMA_VERSION
+    assert first['@' + native.STAMP] == native.BASE_SCHEMA
     assert set(first) == set(second), set(first) ^ set(second)
     assert not [key for key in first if not same(first[key], second[key])]
 

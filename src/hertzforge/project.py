@@ -37,7 +37,7 @@ from .core.data import (
     TransientSpecification,
     _CoherenceBase,
 )
-from .core.data_index import DataIndex, IndexEntry
+from .core.data_index import DataIndex, IndexEntry, Reference, file_state
 from .core.data_index import digest as digest_file
 from .core.data_index import now as _index_now
 from .core.field_limit import CONFIDENCE as _FIELD_CONFIDENCE
@@ -556,6 +556,20 @@ class Project(dict):
         #: None: where a check of the data index looks for moved files,
         #: and the file whose checksum the report states
         self.file: str | None = None
+        #: objects held by reference to another `.hforge` file rather
+        #: than copied into this one, by name (`hold_by_reference`): a
+        #: run imported from its own file is read from there, and a
+        #: save writes where it is instead of a second copy
+        self.references: dict[str, Reference] = {}
+        #: references that did not resolve when the project was opened,
+        #: by name: the file was not found, or has changed. The object
+        #: is not in the project; a save keeps its reference as it was,
+        #: and `remove` drops it
+        self.unresolved: dict[str, Reference] = {}
+        #: each referenced object's fingerprint when it was read
+        #: (`io.native.fingerprint`), which a save compares to tell an
+        #: object still the one in its file from one edited since
+        self._reference_prints: dict[str, str] = {}
         #: this sitting's acts, each a runnable line of Python — what
         #: the console shows and `session_script` exports (Brandon,
         #: 2026-08-30). In memory only, and deliberately so: the
@@ -649,7 +663,7 @@ class Project(dict):
             project.
         """
         unique, n = str(name), 1
-        while unique in self:
+        while unique in self or unique in self.unresolved:
             n += 1
             unique = f'{name} ({n})'
         self[unique] = obj
@@ -722,17 +736,33 @@ class Project(dict):
         """
         from .io import import_file as read
         from .io import project_type_of
+        from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
         was_empty = not self
         result = read(str(path), **options)
+        local = os.path.abspath(os.path.expanduser(str(path)))
+        # a large object read from another .hforge stays there: the
+        # project holds it by reference rather than as a second copy
+        large = ({name: kind for name, (kind, size)
+                  in object_sizes(local).items()
+                  if size >= REFERENCE_FROM_BYTES}
+                 if local.endswith('.hforge') else {})
         # the file's checksum before anything is added: a file that
         # cannot be hashed (gone since it was read) refuses the import
         # whole rather than leave objects the index cannot trace.
         # Opening a project into an empty one is opening it, not
-        # importing a file it rests on; its own index comes with it
-        indexed = not (isinstance(result, Project) and was_empty)
-        local = os.path.expanduser(str(path))
+        # importing a file it rests on; its own index comes with it,
+        # unless objects are held by reference to it
+        indexed = not (isinstance(result, Project) and was_empty) or bool(large)
         checksum = digest_file(local) if indexed else None
+        state = file_state(local)
+
+        def refer(name: str, inside: str) -> None:
+            if inside in large:
+                assert checksum is not None
+                self.hold_by_reference(name, Reference(
+                    local, inside, large[inside], checksum[0], checksum[1],
+                    state[1]))
         self.project_type = project_type_of(str(path)) or self.project_type
         if isinstance(result, Project):
             mapping = {name: self.add(name, obj)
@@ -741,6 +771,14 @@ class Project(dict):
             if indexed:
                 self._index_import(local, result, list(mapping.values()),
                                    checksum)
+            for old, new in mapping.items():
+                if old in result.references:
+                    self.hold_by_reference(new, result.references[old])
+                else:
+                    refer(new, old)
+            for name, reference in result.unresolved.items():
+                if name not in self:
+                    self.unresolved[name] = reference
             if any(old != new for old, new in mapping.items()):
                 # a clash renamed something: the references the
                 # imported objects carry follow it
@@ -770,6 +808,8 @@ class Project(dict):
                 self.link(*added)
         else:
             added = [self.add(display_name(type(result).__name__), result)]
+            if large:
+                refer(added[0], '')
         self._index_import(local, result, added, checksum)
         return added
 
@@ -817,6 +857,9 @@ class Project(dict):
             for source in entry.objects))
         for name in names:
             self.pop(name, None)
+            self.references.pop(name, None)
+            self.unresolved.pop(name, None)
+            self._reference_prints.pop(name, None)
             if self.active_geometry == name:
                 self.active_geometry = next(
                     (n for n, obj in self.items()
@@ -846,7 +889,7 @@ class Project(dict):
         """
         if old not in self:
             raise KeyError(f'no object named {old!r}')
-        if new in self:
+        if new in self or new in self.unresolved:
             raise ValueError(f'name {new!r} is already in use')
         if not str(new).strip():
             raise ValueError('name cannot be empty')
@@ -868,7 +911,24 @@ class Project(dict):
             if record.get('source') == old:
                 record['source'] = new
         self.data_index.rename_object(old, new)
+        if old in self.references:
+            self.references[new] = self.references.pop(old)
+            self._reference_prints[new] = self._reference_prints.pop(old)
         return new
+
+    def hold_by_reference(self, name: str, reference: Reference) -> None:
+        """Hold the object `name` by reference to the file it was read
+        from, so a save writes the reference rather than a copy.
+
+        The object as it is now is what the file holds. Edited later, it
+        is saved whole instead, since a reference would lose the edit.
+        """
+        from .io.native import fingerprint
+
+        if name not in self:
+            raise KeyError(f'no object named {name!r}')
+        self.references[name] = reference
+        self._reference_prints[name] = fingerprint(self[name])
 
     def rename_dof(self, source: Any, old: str, new: str,
                    quantity: str | None = None) -> list[str]:
@@ -8313,14 +8373,40 @@ class Project(dict):
             # suffix would refuse the other two it keeps
             export_file(self, str(path), format='escdf', **options)
             return str(path)
+        written = hforge_path(str(path))
+        target = os.path.abspath(os.path.expanduser(written))
+        kept = self._kept_references(target)
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
                   provenance=self.provenance,
-                  data_index=self.data_index.records(), compress=compress)
-        written = hforge_path(str(path))
-        self.file = os.path.abspath(os.path.expanduser(written))
+                  data_index=self.data_index.records(), compress=compress,
+                  references={**kept, **self.unresolved})
+        # an object edited since it was read is in this file now, whole
+        for name in set(self.references) - set(kept):
+            del self.references[name]
+            del self._reference_prints[name]
+        self.file = target
         return written
+
+    def _kept_references(self, target: str) -> dict[str, Reference]:
+        """The references a save to `target` writes: each object still
+        as it was read from its file. One edited since, and one whose
+        file is `target` itself, which the save replaces, are written
+        whole."""
+        from .io.native import fingerprint
+
+        kept = {}
+        for name, reference in self.references.items():
+            if name not in self:
+                continue
+            if (os.path.normcase(reference.path) == os.path.normcase(target)
+                    or os.path.exists(target) and os.path.exists(reference.path)
+                    and os.path.samefile(reference.path, target)):
+                continue
+            if fingerprint(self[name]) == self._reference_prints[name]:
+                kept[name] = reference
+        return kept
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:

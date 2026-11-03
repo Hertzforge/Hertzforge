@@ -19,7 +19,11 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1   (integer)
+    hertzforge_schema = 1 or 2   (integer)
+
+Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
+held by reference to another file (below), and only a file with such an
+object is stamped 2.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -80,6 +84,45 @@ root (absent otherwise):
                       contents). A dataset rather than an attribute
                       because an attached file's text can pass the
                       64 KiB an HDF5 attribute holds
+
+## Objects Held by Reference
+
+A project can hold an object by reference to a `.hforge` file instead
+of a copy, so a project that analyzes a long run does not store the run
+a second time. Hertzforge does this for every object of 64 MiB or more
+imported from another `.hforge` file, as long as the object has not
+been edited since it was read. An edited object is saved whole.
+
+A referenced object is a numbered group under `objects/` with its
+`name` and `kind` like any other, no datasets, and these attributes:
+
+    reference_path         the file, relative to the folder the project
+                           file is in, with '/' between folders; the
+                           absolute path when there is no relative one
+                           (another drive, on Windows)
+    reference_absolute     the file's absolute path when it was saved
+    reference_object       the object's name in that file; '' when the
+                           file holds a single object (the root group
+                           named for `kind`)
+    reference_size         the file's size in bytes
+    reference_sha256       the file's SHA-256, 64 lower-case hex digits
+    reference_modified_ns  the file's modification time, in nanoseconds
+
+The reader looks for the file by its relative path, then its absolute
+path, then by its name in the project's folder. A file with the recorded
+size and modification time is taken as it is; one with another time is
+hashed, and taken when the SHA-256 matches, since a copied or moved file
+keeps its bytes. The object is then read from that file, its large
+arrays mapped as they would be from the project itself. When the file
+is not found, or every candidate's checksum differs, the project opens
+without the object, and saving it keeps the reference unchanged, so the
+object comes back once the file is in place again. A referenced file
+that holds the object by reference in turn is followed, up to eight
+files deep.
+
+HDF5's external links are not used, because they break with no error
+when a file moves and carry no checksum. The file is also recorded in
+the project's `data_index`, as every imported file is.
 
 ## Conventions
 
