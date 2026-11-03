@@ -37,7 +37,7 @@ use hertzforge_dsp::frf_ext::cross_welch_with;
 use hertzforge_dsp::spectrum_offline::Detrend;
 use hertzforge_hal::{AcquisitionConfig, Backend};
 use hertzforge_hal_sim::plants::{Conditioning, NamedPlant, StandardPlant};
-use hertzforge_hal_sim::{PlantModel, SimBackend, SimConfig, C64};
+use hertzforge_hal_sim::{FrfPlant, PlantModel, SimBackend, SimConfig, C64};
 
 /// What one identification run measured.
 #[derive(Debug)]
@@ -127,6 +127,19 @@ fn slowest_decay_s(model: &PlantModel) -> f64 {
     }
 }
 
+/// How long after a new realization starts the inputs are in the periodic steady state:
+/// seven decay times of the slowest mode (a 0.1 % remainder) for a modal plant, the
+/// FIR's whole memory (exact) for an FRF plant.
+fn settle_s(model: &PlantModel, fs: f64) -> f64 {
+    match model {
+        PlantModel::Frf(p) => {
+            let t = p.impulse_responses(fs).expect("a playable stack");
+            (t.taps + t.block + p.transport_delay_samples) as f64 / fs
+        }
+        _ => 7.0 * slowest_decay_s(model),
+    }
+}
+
 fn identify(plant: &NamedPlant, fs: f64, n: usize, realizations: usize, noise: f64) -> Identified {
     let (n_in, n_d) = plant.model.dims().expect("a sized plant");
     let mut b: SimBackend = SimConfig::new()
@@ -144,7 +157,7 @@ fn identify(plant: &NamedPlant, fs: f64, n: usize, realizations: usize, noise: f
     b.start().unwrap();
 
     let period_s = n as f64 / fs;
-    let settle_periods = ((7.0 * slowest_decay_s(&plant.model)) / period_s).ceil() as usize;
+    let settle_periods = (settle_s(&plant.model, fs) / period_s).ceil() as usize;
     let amp = 1.0 / ((n / 2 - 1) as f64 / 2.0).sqrt(); // about 1 V rms per drive
     let mut rng = Rng::new(0xF00D_5EED);
     let mut x: Vec<Vec<f64>> = vec![Vec::with_capacity(realizations * n); n_d];
@@ -336,6 +349,18 @@ fn h1_identification_of_the_4x4_modal_plant_matches_its_analytic_frf() {
     let plant = StandardPlant::Modal4x4.build();
     let r = identify(&plant, 8192.0, 4096, 8, 1e-5);
     assert_identified("modal-4x4", &r);
+}
+
+/// The FRF plant replaying the 4 x 4 plant's exact FRF (2 Hz lines) is identified back
+/// to what it reports it plays (the stack behind its block latency), to the same bars.
+#[test]
+fn h1_identification_of_an_frf_plant_replaying_the_4x4_matches_its_analytic_frf() {
+    let fs = 8192.0;
+    let mut plant = StandardPlant::Modal4x4.build();
+    let stack = plant.model.analytic_frf(2049, 2.0, fs);
+    plant.model = PlantModel::Frf(FrfPlant::new(stack, 2.0));
+    let r = identify(&plant, fs, 4096, 8, 1e-5);
+    assert_identified("frf replay of modal-4x4", &r);
 }
 
 /// 12 x 6, the same check (longer; run with `--ignored`).

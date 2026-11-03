@@ -269,7 +269,7 @@ impl FrfPlant {
                     let (re, im) = spec[m];
                     spec[grid - m] = (re, -im);
                 }
-                let time = fft::ifft(&spec);
+                let time = inverse_dft(&spec);
                 let dst = &mut h[(i * n_d + j) * taps..(i * n_d + j + 1) * taps];
                 for (n, d) in dst.iter_mut().enumerate() {
                     *d = time[n].0;
@@ -556,6 +556,35 @@ impl PlantModel {
     }
 }
 
+/// The sign of the workspace FFT's forward exponent, measured: `-1` for the textbook
+/// `X[k] = sum x[n] exp(-j 2 pi k n / N)`, `+1` for the other. Its documentation and its
+/// butterflies have disagreed (the forward transform uses the positive exponent), so
+/// every transform here whose meaning depends on the sign asks rather than assumes.
+/// (The block convolution does not depend on it: a matched forward and inverse pair
+/// convolves either way.)
+fn fft_exponent_sign() -> f64 {
+    let x = fft::fft(&[(0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]);
+    if x[1].1 > 0.0 {
+        1.0
+    } else {
+        -1.0
+    }
+}
+
+/// The textbook inverse DFT, `x[n] = (1/N) sum_k X[k] exp(+j 2 pi k n / N)`, whichever
+/// sign the workspace FFT uses.
+fn inverse_dft(spec: &[Cplx]) -> Vec<Cplx> {
+    if fft_exponent_sign() < 0.0 {
+        fft::ifft(spec)
+    } else {
+        let inv = 1.0 / spec.len() as f64;
+        fft::fft(spec)
+            .into_iter()
+            .map(|(re, im)| (re * inv, im * inv))
+            .collect()
+    }
+}
+
 /// The FRF plant's analytic response by one FFT per element, when the requested grid
 /// is an FFT grid of the configured rate (`fs / df` a power of two, at least the tap
 /// count). `None` sends the caller to the direct sum.
@@ -579,6 +608,9 @@ fn frf_on_fft_grid(p: &FrfPlant, lines: usize, df_hz: f64, fs_hz: f64) -> Option
     let mut out = MatrixStack::zeros(lines, taps.n_inputs, taps.n_drives);
     let mut buf: Vec<Cplx> = vec![(0.0, 0.0); n];
     let lag = p.transport_delay_samples + taps.block;
+    // A real `h` transformed with the positive exponent is the conjugate of the
+    // negative-exponent transform this FRF is defined by.
+    let conj = fft_exponent_sign() > 0.0;
     for i in 0..taps.n_inputs {
         for j in 0..taps.n_drives {
             buf.iter_mut().for_each(|s| *s = (0.0, 0.0));
@@ -589,7 +621,8 @@ fn frf_on_fft_grid(p: &FrfPlant, lines: usize, df_hz: f64, fs_hz: f64) -> Option
             for (k, &(re, im)) in buf.iter().enumerate().take(lines) {
                 let ph = -TAU * (k as f64 * df_hz) * lag as f64 / fs_hz;
                 let dl = C64::new(ph.cos(), ph.sin());
-                out.set(k, i, j, C64::new(re, im) * dl);
+                let v = C64::new(re, if conj { -im } else { im });
+                out.set(k, i, j, v * dl);
             }
         }
     }
