@@ -193,3 +193,15 @@ def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
             'values': values.reshape(len(rows['ticks']), len(columns['ticks'])),
             'value_label': value_label,
             'value_range': [float(value_range[0]), float(value_range[1])]}
+
+
+def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]]) -> dict[str, Any]:
+    """A `table` view: rows of text under column headings, one cell per
+    column."""
+    columns = [str(c) for c in columns]
+    rows = [[str(cell) for cell in row] for row in rows]
+    for row in rows:
+        if len(row) != len(columns):
+            raise ValueError(f'table {title!r}: a row of {len(row)} cells under '
+                             f'{len(columns)} columns')
+    return {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}

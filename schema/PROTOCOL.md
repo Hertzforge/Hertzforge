@@ -214,6 +214,19 @@ rotation. Clicking cell (r, c) shows mode r with overlay c drawn over it, rotate
 in one flat color, scaled to the same amplitude; the playback and the camera carry on through a
 click. Visual Dynamics draws a MAC pair the same way.
 
+**`table`** (rows of text under column headings, such as a mode table)
+
+```
+{"view":"table","title":"...",
+ "columns":["Mode","Frequency [Hz]","Damping [%]","Description"],
+ "rows":[["1","439.2000","1.250",""],...]}          one cell per column, as text
+```
+
+Every cell is text, written the way the value is usually quoted (the service formats it). The
+shell draws the table with its headings held at the top as it scrolls, puts a cell that reads as
+a number at the right of its column, and copies the whole table as tab-separated text, the
+headings first, so it pastes into a spreadsheet.
+
 ## Operations: Declarative Panels
 
 The analysis service describes each operation; the shell builds the panel from the description.
