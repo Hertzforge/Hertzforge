@@ -102,7 +102,17 @@
         "x": {"$ref": "#/$defs/axis"},
         "y": {"$ref": "#/$defs/axis"},
         "series": {"type": "array", "items": {"$ref": "#/$defs/series"}},
-        "link": {"type": "string"}
+        "link": {"type": "string"},
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}}
+      }
+    },
+    "region": {
+      "type": "object", "required": ["x0", "x1", "kind"], "additionalProperties": false,
+      "properties": {
+        "x0": {"type": "number"},
+        "x1": {"type": "number"},
+        "kind": {"enum": ["frame", "cut"]},
+        "label": {"type": "string"}
       }
     },
     "readingView": {

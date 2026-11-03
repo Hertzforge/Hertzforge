@@ -82,13 +82,27 @@ def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
 
 
 def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
-             link: str | None = None) -> dict[str, Any]:
+             link: str | None = None,
+             regions: Sequence[dict] = ()) -> dict[str, Any]:
     """A `spectrum` view of `lines` on the axes `x` and `y`. Panes with
-    the same `link` share a cursor position on x."""
+    the same `link` share a cursor position on x; `regions` are shaded
+    behind the curves."""
     out = {'view': 'spectrum', 'title': title, 'x': x, 'y': y,
            'series': list(lines)}
     if link is not None:
         out['link'] = link
+    if regions:
+        out['regions'] = list(regions)
+    return out
+
+
+def region(x0: float, x1: float, kind: Literal['frame', 'cut'],
+           label: str | None = None) -> dict[str, Any]:
+    """A span of x shaded behind a spectrum's curves: a `frame` averaged
+    from, or a `cut` left out."""
+    out: dict[str, Any] = {'x0': float(x0), 'x1': float(x1), 'kind': kind}
+    if label:
+        out['label'] = label
     return out
 
 

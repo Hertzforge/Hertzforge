@@ -87,7 +87,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, theme.version]);
+		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version]);
 	}
 
 	function finiteExtent(values: ArrayLike<number | null>[], positive: boolean): [number, number] | null {
@@ -156,6 +156,8 @@
 
 	/** The marker line, placed at `marker`. */
 	let markerLine: HTMLDivElement | null = null;
+	/** The view's regions, shaded behind the curves, one element each. */
+	let regionEls: HTMLDivElement[] = [];
 	/** Where a press on the plot began, to tell a click from a drag. */
 	let pressedAt: number | null = null;
 
@@ -268,7 +270,7 @@
 				}))
 			],
 			hooks: {
-				draw: [placePlayLine, placeMarker],
+				draw: [placePlayLine, placeMarker, placeRegions],
 				setScale: [
 					(u, key) => {
 						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
@@ -306,6 +308,14 @@
 		markerLine.className = 'marker';
 		plot.over.appendChild(markerLine);
 		placeMarker();
+		regionEls = (view.regions ?? []).map((r) => {
+			const el = document.createElement('div');
+			el.className = `region ${r.kind}`;
+			if (r.label) el.title = r.label;
+			plot!.under.appendChild(el);
+			return el;
+		});
+		placeRegions();
 		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
 		plot.over.addEventListener('click', (e) => {
 			const moved = pressedAt === null ? 0 : Math.abs(e.clientX - pressedAt);
@@ -350,6 +360,21 @@
 		void marker;
 		placeMarker();
 	});
+
+	/** Shade each region over the part of it on the plot. */
+	function placeRegions() {
+		if (!plot) return;
+		const width = plot.under.clientWidth;
+		(view.regions ?? []).forEach((r, i) => {
+			const el = regionEls[i];
+			if (!el) return;
+			const a = Math.max(0, Math.min(width, plot!.valToPos(r.x0, 'x')));
+			const b = Math.max(0, Math.min(width, plot!.valToPos(r.x1, 'x')));
+			el.style.display = b > a ? '' : 'none';
+			el.style.left = `${a}px`;
+			el.style.width = `${b - a}px`;
+		});
+	}
 
 	/** Put the playback line at its time, or hide it when there is none or it is off the plot. */
 	function placePlayLine() {
@@ -644,6 +669,22 @@
 		left: 3.5px;
 		width: 2px;
 		background: #e69f00;
+	}
+
+	.plot :global(.region) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		pointer-events: none;
+	}
+
+	.plot :global(.region.frame) {
+		background: var(--region-frame);
+		border-left: 1px solid var(--region-frame-edge);
+	}
+
+	.plot :global(.region.cut) {
+		background: var(--region-cut);
 	}
 
 	.plot :global(.marker) {

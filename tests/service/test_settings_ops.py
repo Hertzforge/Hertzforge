@@ -40,14 +40,21 @@ def test_the_descriptors_validate_and_open_on_settings(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
         assert op.edits
-        assert all('setting' in p.to_json() for p in op.params if p.name != 'source')
+        assert all('setting' in p.to_json() for p in op.params
+                   if p.name not in ('source', 'record'))
 
 
 def test_averaging_set_is_stored_read_back_and_listed(state, validate):
     project = state.project
-    (reading,) = run(project, 'project.set_averaging', frame_length=2048, overlap=0.5,
-                     window='flattop', frames=4, start=0.5)
-    wire_views([reading], validate)
+    trace, reading = run(project, 'project.set_averaging', frame_length=2048, overlap=0.5,
+                         window='flattop', frames=4, start=0.5)
+    wire_views([trace, reading], validate)
+    rate = project['Time History'].sample_rate
+    frames = trace['regions']
+    assert [r['kind'] for r in frames] == ['frame'] * 4
+    assert frames[0]['x0'] == pytest.approx(0.5, abs=1 / rate)
+    assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(1024 / rate)
+    assert frames[0]['label'].startswith('Frame 1, ')
     averaging = project['Time History'].averaging
     assert (averaging.frame_length, averaging.window, averaging.frames) == (2048, 'flattop', 4)
     rows = {row['label']: row['value'] for row in reading['rows']}
@@ -67,7 +74,8 @@ def test_averaging_the_record_cannot_hold_is_refused(state):
 
 
 def test_detected_averaging_frames_the_steady_stretch(state):
-    (reading,) = run(state.project, 'project.detect_averaging')
+    trace, reading = run(state.project, 'project.detect_averaging')
+    assert trace['regions'] and trace['regions'][0]['kind'] == 'frame'
     assert state.project['Time History'].averaging is not None
     assert {row['label'] for row in reading['rows']} >= {'Frames averaged', 'Line spacing'}
 
@@ -76,7 +84,9 @@ def test_detected_averaging_frames_the_steady_stretch(state):
                                             ('high-pass', 'high-pass at 20 Hz'),
                                             ('band-pass', 'band-pass')])
 def test_a_filter_takes_the_edges_its_kind_has(state, kind, said):
-    (reading,) = run(state.project, 'project.set_filter', kind=kind, low=20.0, high=400.0)
+    trace, reading = run(state.project, 'project.set_filter', kind=kind, low=20.0, high=400.0)
+    assert [line['role'] for line in trace['series']] == ['measured', 'drive']
+    assert trace['series'][0]['name'].endswith(', filtered')
     assert said in reading['rows'][0]['value']
     listed = settings(state)['filtering']
     assert listed['kind'] == kind
@@ -92,8 +102,11 @@ def test_a_filter_edge_above_nyquist_is_refused(state):
 
 def test_a_truncation_span_lets_apply_truncation_run(state):
     project = state.project
-    run(project, 'project.set_truncation', start=0.5, stop=1.5)
+    trace, _reading = run(project, 'project.set_truncation', start=0.5, stop=1.5)
     assert settings(state)['truncation'] == {'start': 0.5, 'stop': 1.5}
+    cut = trace['regions']
+    assert [r['kind'] for r in cut] == ['cut', 'cut']
+    assert (cut[0]['x1'], cut[1]['x0']) == (0.5, 1.5)
     added = project.truncate_data('Time History')
     assert float(project[added].abscissa[-1]) <= 1.5
 
@@ -101,3 +114,15 @@ def test_a_truncation_span_lets_apply_truncation_run(state):
 def test_a_span_outside_the_record_is_refused(state):
     with pytest.raises(ProtocolError, match='is not inside it'):
         run(state.project, 'project.set_truncation', start=0.0, stop=1e6)
+
+
+def test_many_frames_shade_as_one_span(state):
+    trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
+                          overlap=0.0, frames=300)
+    (span,) = trace['regions']
+    assert span['label'].startswith('300 frames')
+
+
+def test_the_record_drawn_on_must_be_in_the_history(state):
+    with pytest.raises(ProtocolError, match='there is no record 99'):
+        run(state.project, 'project.set_truncation', start=0.5, stop=1.5, record=99)
