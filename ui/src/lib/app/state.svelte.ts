@@ -351,6 +351,34 @@ class ModalState {
 			if (seq === this.seq) this.loading = false;
 		}
 	}
+
+	/** The project's shape set `shapes` on its active geometry (`project.mode_shapes`). */
+	async selectShapes(shapes: string): Promise<void> {
+		const geometry = this.app.project.summary?.active_geometry;
+		if (!geometry) return;
+		const seq = ++this.seq;
+		this.datasetId = `project:${shapes}`;
+		this.loading = true;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: 'project.mode_shapes', params: { shapes, geometry } },
+				{ timeoutMs: 30_000 }
+			);
+			if (seq !== this.seq) return;
+			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
+			if (!shape) throw new Error('project.mode_shapes returned no shape3d view.');
+			this.view = shape;
+			this.mode = 0;
+		} catch (err) {
+			if (seq !== this.seq) return;
+			this.view = null;
+			this.error = message(err);
+		} finally {
+			if (seq === this.seq) this.loading = false;
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
