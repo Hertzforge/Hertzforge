@@ -30,6 +30,7 @@ from websockets.exceptions import ConnectionClosed
 from . import fitting, frames, projects, reports
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
+from .ops_history import OPERATIONS as HISTORY_OPERATIONS
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
 from .ops_model import OPERATIONS as MODEL_OPERATIONS
@@ -37,7 +38,9 @@ from .ops_project import OPERATIONS as PROJECT_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .ops_readings import OPERATIONS as READING_OPERATIONS
 from .ops_settings import OPERATIONS as SETTINGS_OPERATIONS
+from .ops_sine_shock import OPERATIONS as SINE_SHOCK_OPERATIONS
 from .ops_specify import OPERATIONS as SPECIFY_OPERATIONS
+from .ops_spectra import OPERATIONS as SPECTRA_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
@@ -45,7 +48,9 @@ log = logging.getLogger('hertzforge.service')
 OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS
                                      + SETTINGS_OPERATIONS + MODEL_OPERATIONS
-                                     + SPECIFY_OPERATIONS + READING_OPERATIONS)
+                                     + SPECIFY_OPERATIONS + READING_OPERATIONS
+                                     + HISTORY_OPERATIONS + SPECTRA_OPERATIONS
+                                     + SINE_SHOCK_OPERATIONS)
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
