@@ -17,15 +17,21 @@ against its rating, a shot's checks and pulses, a notch's place in the plan, a
 deviation's hold) comes from `preview`, through the same functions the log
 judges by. Nothing here drives the controller: every check is a reminder.
 
-Visual Dynamics shows a drive or notch prediction beside what is read when its
-window has drawn one; this window has none to offer, and says so as VD does
-for a log kept with no project.
+Beside what is read, the window shows the predictions drawn for the project
+open on the connection, as Visual Dynamics' dock shows the ones its window drew:
+the notch Notch Prediction cut (`core.limit_prediction`) beside a notch entry,
+and the drives Drive Prediction asked for (`core.drive_prediction`) beside the
+level row's drive. Each tool hands its prediction over as it draws it (`offer`);
+with none drawn, which is always so for a log kept with no project, the place
+it would be shown says so.
 """
 
 from __future__ import annotations
 
 import contextlib
+import weakref
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime, time
 from typing import Any
 
@@ -131,6 +137,44 @@ FORMS = ('level row', 'abort', *SMALL, 'correct', 'open test', 'roll', 'close te
 #: what a box is typed as
 BOX_KINDS = ('text', 'number', 'whole', 'numbers', 'texts', 'flag', 'choice', 'path',
              'entry', 'notches', 'files', 'answers', 'heading')
+
+
+@dataclass(frozen=True)
+class Predictions:
+    """The predictions drawn for a project: the notch prediction
+    (`core.limit_prediction.LimitPrediction`) and the drive prediction
+    (`core.drive_prediction.DrivePrediction`), each None until one is drawn,
+    with what each was made from in words."""
+
+    limit: Any = None
+    limit_from: str = ''
+    drive: Any = None
+    drive_from: str = ''
+
+
+#: the predictions each open project has drawn, by its id; dropped with it
+_DRAWN: dict[int, Predictions] = {}
+
+
+def offer(project: Any, kind: str, prediction: Any, source: str) -> None:
+    """Keep `prediction` for the run log of `project`'s connection: `kind`
+    'limit' (a notch prediction) or 'drive', `source` naming the objects it
+    was made from. The next of a kind replaces the last."""
+    key = id(project)
+    if key not in _DRAWN:
+        weakref.finalize(project, _DRAWN.pop, key, None)
+    held = _DRAWN.get(key, Predictions())
+    if kind == 'limit':
+        _DRAWN[key] = replace(held, limit=prediction, limit_from=source)
+    elif kind == 'drive':
+        _DRAWN[key] = replace(held, drive=prediction, drive_from=source)
+    else:
+        raise ValueError(f'{kind!r} is not a kind of prediction; it is limit or drive')
+
+
+def drawn(project: Any) -> Predictions:
+    """The predictions drawn for `project`, none for no project."""
+    return Predictions() if project is None else _DRAWN.get(id(project), Predictions())
 
 
 def _now() -> datetime:
@@ -745,12 +789,40 @@ def projection_text(header: Mapping[str, Any], level: Any, *, voltage: Any = Non
     return str(projection)
 
 
-def _level_text(header: Mapping[str, Any], form: Reader) -> str:
+def _level_text(header: Mapping[str, Any], form: Reader, predictions: Predictions,
+                system: Any) -> str:
     fields = form.typed('level_db', 'voltage', 'current', 'drive_fraction')
     projection = projection_text(header, fields.get('level_db'),
                                  voltage=fields.get('voltage'), current=fields.get('current'),
                                  drive_fraction=fields.get('drive_fraction'))
-    return f'{projection}\nPredicted drive: {NO_PREDICTION}'
+    return f'{projection}\n{drive_text(predictions, header, fields, system)}'
+
+
+def drive_text(predictions: Predictions, header: Mapping[str, Any],
+               fields: Mapping[str, Any], system: Any = None) -> str:
+    """The drive predicted for the test's setup (each drive demand in the
+    prediction's own words, `Demand.describe`) beside the drive the level row
+    reads, its drive fraction projected to full level
+    (`run_log_model.project`)."""
+    prediction = predictions.drive
+    if prediction is None:
+        return f'Predicted drive: {NO_PREDICTION}'
+    drives = [demand.describe(system) for demand in prediction.demands
+              if demand.kind == 'drive']
+    said = (f'Predicted drive (from {predictions.drive_from}): '
+            + ('; '.join(drives) if drives else 'the prediction judges no drive'))
+    level = fields.get('level_db')
+    fraction = fields.get('drive_fraction')
+    if fraction is None:
+        return f'{said}\nRead drive: no drive fraction read'
+    if level is None:
+        return f'{said}\nRead drive: {fraction:g} of the range, at no level'
+    try:
+        check = project(level, drive_fraction=fraction,
+                        drive_window=header.get('drive_window')).check('drive fraction')
+    except RunLogError as error:
+        return f'{said}\nRead drive: not projected: {error}'
+    return f'{said}\nRead drive: {fraction:g} of the range at {level:+g} dB; {check.message}'
 
 
 def sweep_text(header: Mapping[str, Any], form: Reader) -> str:
@@ -787,13 +859,41 @@ def shot_text(seen: Mapping[str, Any] | None, axis: str | None, form: Reader) ->
     return f'{checks}\nPulses so far: {counted.message}\nWith this shot: {after.message}'
 
 
-def notch_text(header: Mapping[str, Any], form: Reader) -> str:
+def notch_text(header: Mapping[str, Any], form: Reader, predictions: Predictions,
+               system: Any = None) -> str:
     """A notch's place in the plan, then the prediction beside it."""
     typed = form.typed('band', 'depth_db')
     planned, why = notch_in_plan(header.get('notches_planned'), form.value('axis'), typed)
     plan = (f'Planned: {why}' if planned else
             f'Not planned: {why} Written, it holds the test until a deviation names it.')
-    return f'{plan}\nPredicted: {NO_PREDICTION}'
+    return plan + '\n' + predicted_notch_text(predictions, typed.get('band'),
+                                              typed.get('depth_db'), system)
+
+
+def predicted_notch_text(predictions: Predictions, band: Any, depth_db: float | None,
+                         system: Any = None) -> str:
+    """The notch the limit prediction cuts at `band` beside the notch
+    observed there, each predicted notch in the prediction's own words
+    (`Notch.describe`); with no band typed, the prediction's verdict."""
+    prediction = predictions.limit
+    if prediction is None:
+        return f'Predicted: {NO_PREDICTION}'
+    said = f'Predicted (from {predictions.limit_from})'
+    if band is None:
+        return f'{said}: {prediction.verdict()}'
+    try:
+        low, high = band_hz(band, 'the band')
+    except RunLogError as error:
+        return f'{said}: not compared: {error}'
+    observed = (f'Observed: {low:g} to {high:g} Hz, '
+                + (f'{abs(depth_db):g} dB deep' if depth_db is not None else 'no depth given'))
+    near = [notch for notch in prediction.notches if notch.low <= high and notch.high >= low]
+    if not near:
+        return (f'{said}: no notch from {low:g} to {high:g} Hz; {prediction.verdict()}\n'
+                f'{observed}')
+    return (f'{said}: ' + '; '.join(notch.describe(prediction.dimension, prediction.tolerance,
+                                                    system) for notch in near)
+            + f'\n{observed}')
 
 
 def deviation_text(seen: Mapping[str, Any] | None, form: Reader) -> str:
@@ -811,22 +911,25 @@ def deviation_text(seen: Mapping[str, Any] | None, form: Reader) -> str:
 
 
 def preview(name: str, spec: Mapping[str, Any], texts: Mapping[str, Any],
-            seen: Mapping[str, Any] | None, axis: str | None) -> str:
-    """What form `name` computes from what is typed, in words; '' for a
-    form that computes nothing. A box that cannot be read says so."""
+            seen: Mapping[str, Any] | None, axis: str | None,
+            predictions: Predictions | None = None, system: Any = None) -> str:
+    """What form `name` computes from what is typed, in words, the
+    predictions drawn shown beside what is read; '' for a form that computes
+    nothing. A box that cannot be read says so."""
     if not spec.get('live'):
         return ''
+    predictions = predictions or Predictions()
     form = Reader(spec, texts)
     header = dict(seen['header']) if seen is not None else {}
     try:
         if name == 'level row':
-            return _level_text(header, form)
+            return _level_text(header, form, predictions, system)
         if name == 'sweep':
             return sweep_text(header, form)
         if name == 'shot':
             return shot_text(seen, axis, form)
         if name == 'notch':
-            return notch_text(header, form)
+            return notch_text(header, form, predictions, system)
         if name == 'deviation':
             return deviation_text(seen, form)
     except RunLogError as error:
@@ -1020,6 +1123,10 @@ class Keeper:
     def __init__(self) -> None:
         self.log: RunLog | None = None
         self.read_only: str = ''
+        #: the predictions drawn for the connection's project, and the unit
+        #: system its words are in, as the request that reads them sets them
+        self.predictions: Predictions = Predictions()
+        self.system: Any = None
 
     def close(self) -> None:
         """Close the log, releasing its lock. Safe to call again."""
@@ -1082,7 +1189,8 @@ class Keeper:
         now = _now()
         return {**spec, 'taken': now.isoformat(), 'time': _clock(now),
                 'preview': preview(name, spec, {f['field']: f.get('value', '')
-                                                for f in spec['fields']}, seen, axis)}
+                                                for f in spec['fields']}, seen, axis,
+                                   self.predictions, self.system)}
 
     def preview(self, name: str, texts: Mapping[str, Any], axis: str | None,
                 target: Any) -> dict[str, Any]:
@@ -1092,7 +1200,7 @@ class Keeper:
             spec = form_spec(name, seen, self.log, axis, target)
         except RunLogError as error:
             raise refused(str(error)) from None
-        return {'text': preview(name, spec, texts, seen, axis)}
+        return {'text': preview(name, spec, texts, seen, axis, self.predictions, self.system)}
 
     def write(self, name: str, texts: Mapping[str, Any], text: str, when: str, taken: str,
               author: str, axis: str | None, target: Any) -> dict[str, Any]:
@@ -1139,8 +1247,12 @@ def _text(params: Mapping[str, Any], key: str, method: str, default: str = '') -
     return value
 
 
-def request(keeper: Keeper, method: str, params: Any) -> dict[str, Any]:
-    """Answer one `runlog.*` request on `keeper`, run on a worker thread."""
+def request(keeper: Keeper, method: str, params: Any, project: Any = None,
+            system: Any = None) -> dict[str, Any]:
+    """Answer one `runlog.*` request on `keeper`, run on a worker thread, the
+    predictions drawn for `project` (the connection's) shown in `system`'s
+    units."""
+    keeper.predictions, keeper.system = drawn(project), system
     if not isinstance(params, Mapping):
         raise bad_request(f'{method} "params" must be an object')
     axis = _text(params, 'axis', method).strip() or None
