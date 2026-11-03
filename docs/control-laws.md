@@ -22,7 +22,8 @@ A law has four parts:
 - **`seed` and `iterate`**. `seed` is called once with the system-identification measurement and
   returns the starting drive. `iterate` is called once per control loop with the latest
   measurement and returns the next drive.
-- **`retarget-level`**, called when the scheduled level moves.
+- **`retarget-level`**, called when the scheduled level moves, with the new level in dB and
+  the target's in-band RMS at that level. It returns the drive at the new level.
 
 The law keeps whatever state it needs between calls. Calls never overlap.
 
@@ -97,7 +98,9 @@ impl RandomLaw for MyLaw {
     fn new(setup: Setup, params: Params) -> Result<Self, String> { /* read params.number("gain") ... */ }
     fn seed(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String> { /* starting drive */ }
     fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String> { /* next drive */ }
-    fn retarget_level(&mut self, target_rms: f64, feedforward_scale: f64) { /* level moved */ }
+    fn retarget_level(&mut self, level_db: f64, target_rms: f64) -> Result<LoopOutputs, String> {
+        /* the drive at the new level */
+    }
 }
 
 export_law!(MyLaw);
@@ -119,7 +122,10 @@ with `cargo test` by calling its methods directly, before it is ever built to We
 [`laws/ratio/`](../laws/ratio/) is a complete law to start from: per-line ratio correction. Each
 in-band line whose coherence is at or above a floor moves its drive by a fraction (the gain) of the
 measured error in dB, limited to a largest step per loop; lines below the floor hold their drive.
-It declares three number parameters and two diagnostics.
+It declares three number parameters and two diagnostics. Its math is a plain Rust crate,
+[`crates/hertzforge-law-ratio-math`](../crates/hertzforge-law-ratio-math/), and `laws/ratio` only
+carries values across the interface: a pattern worth copying, because the math can then be used and
+tested anywhere.
 
 ## Responsibility for imported laws
 

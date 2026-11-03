@@ -22,7 +22,7 @@
 //!     fn new(setup: Setup, params: Params) -> Result<Self, String> { /* ... */ }
 //!     fn seed(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String> { /* ... */ }
 //!     fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String> { /* ... */ }
-//!     fn retarget_level(&mut self, target_rms: f64, feedforward_scale: f64) { /* ... */ }
+//!     fn retarget_level(&mut self, level_db: f64, target_rms: f64) -> Result<LoopOutputs, String> { /* ... */ }
 //! }
 //!
 //! export_law!(Hold);
@@ -89,10 +89,10 @@ pub trait RandomLaw: Sized + 'static {
     /// Return the next drive from the latest measurement.
     fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String>;
 
-    /// The scheduled level moved: `target_rms` is the new in-band RMS
-    /// target, `feedforward_scale` the new level as an amplitude ratio to
-    /// the full target (1.0 is full level).
-    fn retarget_level(&mut self, target_rms: f64, feedforward_scale: f64);
+    /// The scheduled level moved: return the drive at the new level.
+    /// `level_db` is the new level in dB relative to the full target (0 dB
+    /// is full level), `target_rms` the target's in-band RMS at that level.
+    fn retarget_level(&mut self, level_db: f64, target_rms: f64) -> Result<LoopOutputs, String>;
 }
 
 /// The parameter values a law is built with: one per declared parameter, in
@@ -225,10 +225,11 @@ impl<L: RandomLaw> wit_law::GuestLaw for LawResource<L> {
             .iterate(&inputs)
     }
 
-    fn retarget_level(&self, target_rms: f64, feedforward_scale: f64) {
-        if let Ok(mut law) = self.law.try_borrow_mut() {
-            law.retarget_level(target_rms, feedforward_scale);
-        }
+    fn retarget_level(&self, level_db: f64, target_rms: f64) -> Result<LoopOutputs, String> {
+        self.law
+            .try_borrow_mut()
+            .map_err(|_| REENTERED.to_string())?
+            .retarget_level(level_db, target_rms)
     }
 }
 

@@ -120,7 +120,9 @@ interface random-mimo-law {
         constructor(setup: mimo-setup, params: list<param>) -> result<law, string>;
         seed: func(inputs: mimo-inputs) -> result<mimo-outputs, string>;
         iterate: func(inputs: mimo-inputs) -> result<mimo-outputs, string>;
-        retarget-level: func(target-rms: f64, feedforward-scale: f64);
+        /// The scheduled level moved to `level-db`, dB relative to the
+        /// reference (0 dB is full level): return the drive at the new level.
+        retarget-level: func(level-db: f64) -> result<mimo-outputs, string>;
     }
 }
 

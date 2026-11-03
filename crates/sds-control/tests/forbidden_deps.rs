@@ -85,14 +85,16 @@ const IMPORTED_MODULES: &[&str] = &["mimo_compile_probe", "random_sim_slice", "s
 /// The repository's own packages that are not controller code.
 const OWN_PACKAGES: &[&str] = &["sds-control"];
 
-/// The control-law host and its guest SDK, written in this repository rather
-/// than imported, and the guest crates built to WebAssembly: the control laws
-/// under `laws/` and the law host's test fixtures. Reviewed for license and
-/// hardware coupling when they came in: none names a backend or the Sim, and
-/// the guests can reach nothing but the numbers the host hands them.
+/// The control-law host and its guest SDK and the shared ratio-law math,
+/// written in this repository rather than imported, and the guest crates built
+/// to WebAssembly: the control laws under `laws/` and the law host's test
+/// fixtures. Reviewed for license and hardware coupling when they came in: none
+/// names a backend or the Sim, and the guests can reach nothing but the numbers
+/// the host hands them.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-host",
     "hertzforge-law-ratio",
+    "hertzforge-law-ratio-math",
     "hertzforge-law-sdk",
     "law-fixture-bad-manifest",
     "law-fixture-misbehave",

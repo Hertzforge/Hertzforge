@@ -20,10 +20,13 @@ interface random-single-law {
         /// measurement.
         iterate: func(inputs: loop-inputs) -> result<loop-outputs, string>;
 
-        /// The scheduled level moved. `target-rms` is the new in-band
-        /// root-mean-square target; `feedforward-scale` is the new level as
-        /// an amplitude ratio to the full target (1.0 is full level).
-        retarget-level: func(target-rms: f64, feedforward-scale: f64);
+        /// The scheduled level moved: return the drive at the new level.
+        /// `level-db` is the new level in dB relative to the full target
+        /// (0 dB is full level); `target-rms` is the target's in-band
+        /// root-mean-square at that level. The controller checks the drive
+        /// returned like any other; an error keeps the drive in force,
+        /// carried to the new level by the controller.
+        retarget-level: func(level-db: f64, target-rms: f64) -> result<loop-outputs, string>;
     }
 }
 

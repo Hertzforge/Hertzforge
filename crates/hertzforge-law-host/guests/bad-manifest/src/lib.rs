@@ -29,18 +29,26 @@ impl RandomLaw for Nameless {
     }
 
     fn seed(&mut self, _inputs: &LoopInputs) -> Result<LoopOutputs, String> {
-        Ok(LoopOutputs {
+        Ok(self.zero())
+    }
+
+    fn iterate(&mut self, _inputs: &LoopInputs) -> Result<LoopOutputs, String> {
+        Ok(self.zero())
+    }
+
+    fn retarget_level(&mut self, _level_db: f64, _target_rms: f64) -> Result<LoopOutputs, String> {
+        Ok(self.zero())
+    }
+}
+
+impl Nameless {
+    fn zero(&self) -> LoopOutputs {
+        LoopOutputs {
             drive_psd: vec![0.0; self.n],
             level_cmd_db: 0.0,
             diagnostics: no_diagnostics(),
-        })
+        }
     }
-
-    fn iterate(&mut self, inputs: &LoopInputs) -> Result<LoopOutputs, String> {
-        self.seed(inputs)
-    }
-
-    fn retarget_level(&mut self, _target_rms: f64, _feedforward_scale: f64) {}
 }
 
 export_law!(Nameless);

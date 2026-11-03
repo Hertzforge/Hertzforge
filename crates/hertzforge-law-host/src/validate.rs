@@ -2,7 +2,7 @@
 //! what it returns. Pure functions over the plain types, so each rule is
 //! tested without a WebAssembly component.
 
-use crate::error::LawError;
+use crate::error::{LawError, OutputRule};
 use crate::types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, IntegerSpec, LoopInputs, LoopOutputs,
     Manifest, NumberSpec, Param, ParamKind, ParamSpec, ParamValue, Setup,
@@ -497,77 +497,83 @@ pub fn validate_inputs(i: &LoopInputs<'_>, n: usize) -> Result<(), LawError> {
 
 /// Check one loop's outputs: a drive of `n` finite, non-negative lines, a
 /// finite level command, reported lines on the grid, finite optional values,
-/// and named values that are declared, unique and finite.
+/// and named values that are declared, unique and finite. A failure is
+/// [`LawError::BadOutput`] naming the first rule broken, in [`OutputRule`]
+/// order.
 pub fn validate_outputs(
     o: &LoopOutputs,
     n: usize,
     diagnostics: &[DiagnosticSpec],
 ) -> Result<(), LawError> {
-    let check = || -> Result<(), String> {
-        if o.drive_psd.len() != n {
-            return Err(format!(
+    let bad = |rule: OutputRule, detail: String| Err(LawError::BadOutput { rule, detail });
+    if o.drive_psd.len() != n {
+        return bad(
+            OutputRule::WrongLength,
+            format!(
                 "the drive has {} lines, the grid has {n}",
                 o.drive_psd.len()
+            ),
+        );
+    }
+    if let Some((k, x)) = o.drive_psd.iter().enumerate().find(|(_, x)| !x.is_finite()) {
+        return bad(
+            OutputRule::NonFiniteDrive,
+            format!("drive line {k} is {x}, not a finite number"),
+        );
+    }
+    if let Some((k, x)) = o.drive_psd.iter().enumerate().find(|(_, x)| **x < 0.0) {
+        return bad(
+            OutputRule::NegativeDrive,
+            format!("drive line {k} is {x}, below zero"),
+        );
+    }
+    if !o.level_cmd_db.is_finite() {
+        return bad(
+            OutputRule::NonFiniteLevel,
+            format!("the level command {} dB is not finite", o.level_cmd_db),
+        );
+    }
+    let d = &o.diagnostics;
+    let diag = |detail: String| bad(OutputRule::Diagnostics, detail);
+    for (name, bins) in [
+        ("untrusted", &d.untrusted_bins),
+        ("clamped", &d.clamped_bins),
+        ("divergent", &d.divergent_bins),
+    ] {
+        if bins.len() > n {
+            return diag(format!(
+                "{} {name} lines reported on a grid of {n}",
+                bins.len()
             ));
         }
-        if let Some((k, x)) = o
-            .drive_psd
-            .iter()
-            .enumerate()
-            .find(|(_, x)| !x.is_finite() || **x < 0.0)
-        {
-            return Err(format!(
-                "drive line {k} is {x}, not a finite, non-negative number"
+        if let Some(k) = bins.iter().find(|k| **k >= n) {
+            return diag(format!("{name} line {k} is off the grid of {n}"));
+        }
+    }
+    for (name, v) in [
+        ("in-band error", d.inband_err_db),
+        ("in-band RMS", d.inband_rms_g),
+    ] {
+        if let Some(x) = v {
+            if !x.is_finite() {
+                return diag(format!("{name} {x} is not finite"));
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    for v in &d.values {
+        if !diagnostics.iter().any(|s| s.key == v.key) {
+            return diag(format!(
+                "diagnostic `{}` is not declared in the manifest",
+                v.key
             ));
         }
-        if !o.level_cmd_db.is_finite() {
-            return Err(format!(
-                "the level command {} dB is not finite",
-                o.level_cmd_db
-            ));
+        if !seen.insert(v.key.as_str()) {
+            return diag(format!("diagnostic `{}` is reported twice", v.key));
         }
-        let d = &o.diagnostics;
-        for (name, bins) in [
-            ("untrusted", &d.untrusted_bins),
-            ("clamped", &d.clamped_bins),
-            ("divergent", &d.divergent_bins),
-        ] {
-            if bins.len() > n {
-                return Err(format!(
-                    "{} {name} lines reported on a grid of {n}",
-                    bins.len()
-                ));
-            }
-            if let Some(k) = bins.iter().find(|k| **k >= n) {
-                return Err(format!("{name} line {k} is off the grid of {n}"));
-            }
+        if !v.value.is_finite() {
+            return diag(format!("diagnostic `{}` is {}, not finite", v.key, v.value));
         }
-        for (name, v) in [
-            ("in-band error", d.inband_err_db),
-            ("in-band RMS", d.inband_rms_g),
-        ] {
-            if let Some(x) = v {
-                if !x.is_finite() {
-                    return Err(format!("{name} {x} is not finite"));
-                }
-            }
-        }
-        let mut seen = HashSet::new();
-        for v in &d.values {
-            if !diagnostics.iter().any(|s| s.key == v.key) {
-                return Err(format!(
-                    "diagnostic `{}` is not declared in the manifest",
-                    v.key
-                ));
-            }
-            if !seen.insert(v.key.as_str()) {
-                return Err(format!("diagnostic `{}` is reported twice", v.key));
-            }
-            if !v.value.is_finite() {
-                return Err(format!("diagnostic `{}` is {}, not finite", v.key, v.value));
-            }
-        }
-        Ok(())
-    };
-    check().map_err(LawError::BadOutput)
+    }
+    Ok(())
 }

@@ -50,15 +50,37 @@ pub enum LawError {
     /// The law returned an error of its own.
     Law(String),
     /// The law returned a result that breaks the output rules: wrong length,
-    /// a non-finite or negative drive, a line off the grid, an undeclared or
-    /// non-finite diagnostic.
-    BadOutput(String),
+    /// a non-finite or negative drive, a non-finite level, a line off the grid,
+    /// an undeclared or non-finite diagnostic.
+    BadOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: OutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
     /// The host itself failed (for example, it could not start its timer
     /// thread).
     Host(String),
+}
+
+/// The output rules a law's result is checked against, in the order they are
+/// checked ([`LawError::BadOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputRule {
+    /// The drive has one value per line.
+    WrongLength,
+    /// Every drive line is a finite number.
+    NonFiniteDrive,
+    /// No drive line is negative.
+    NegativeDrive,
+    /// The level command is a finite number.
+    NonFiniteLevel,
+    /// Every reported line is on the grid, and every named value is declared,
+    /// reported once and finite.
+    Diagnostics,
 }
 
 impl LawError {
@@ -100,7 +122,9 @@ impl fmt::Display for LawError {
                  {limit_bytes} bytes"
             ),
             LawError::Law(s) => write!(f, "the law returned an error: {s}"),
-            LawError::BadOutput(s) => write!(f, "the law's output was refused: {s}"),
+            LawError::BadOutput { detail, .. } => {
+                write!(f, "the law's output was refused: {detail}")
+            }
             LawError::Poisoned(s) => write!(
                 f,
                 "the law instance is unusable after an earlier failure: {s}"

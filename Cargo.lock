@@ -804,8 +804,13 @@ dependencies = [
 name = "hertzforge-law-ratio"
 version = "0.1.0"
 dependencies = [
+ "hertzforge-law-ratio-math",
  "hertzforge-law-sdk",
 ]
+
+[[package]]
+name = "hertzforge-law-ratio-math"
+version = "0.1.0"
 
 [[package]]
 name = "hertzforge-law-sdk"

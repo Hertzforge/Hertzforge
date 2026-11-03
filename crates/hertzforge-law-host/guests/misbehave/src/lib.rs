@@ -1,8 +1,8 @@
 //! A law that misbehaves on purpose, for the host's tests. The `mode`
-//! parameter picks what `iterate` does; `seed` always returns the target as
-//! the drive.
+//! parameter picks what `iterate` does; `seed` and `retarget-level` always
+//! return the target at the scheduled level as the drive.
 //!
-//! - `ok`: return the target as the drive.
+//! - `ok`: return the target at the scheduled level as the drive.
 //! - `trap`: panic (a trap, with a message on stderr).
 //! - `spin`: loop forever.
 //! - `grow`: allocate until memory runs out.
@@ -56,13 +56,16 @@ pub struct Misbehave {
     mode: String,
     target: Vec<f64>,
     band: Band,
+    /// The scheduled level, dB re the full target.
+    level_db: f64,
 }
 
 impl Misbehave {
     fn drive(&self) -> Vec<f64> {
+        let power = 10f64.powf(self.level_db / 10.0);
         let mut d = vec![0.0; self.target.len()];
         for k in band_range(self.band) {
-            d[k] = self.target[k];
+            d[k] = self.target[k] * power;
         }
         d
     }
@@ -78,7 +81,7 @@ impl Misbehave {
             .collect();
         LoopOutputs {
             drive_psd: self.drive(),
-            level_cmd_db: 0.0,
+            level_cmd_db: self.level_db,
             diagnostics,
         }
     }
@@ -163,6 +166,7 @@ impl RandomLaw for Misbehave {
             mode: params.choice("mode")?.to_string(),
             target: setup.target_psd,
             band: setup.band,
+            level_db: 0.0,
         })
     }
 
@@ -217,7 +221,10 @@ impl RandomLaw for Misbehave {
         }
     }
 
-    fn retarget_level(&mut self, _target_rms: f64, _feedforward_scale: f64) {}
+    fn retarget_level(&mut self, level_db: f64, _target_rms: f64) -> Result<LoopOutputs, String> {
+        self.level_db = level_db;
+        Ok(self.ok(Vec::new()))
+    }
 }
 
 export_law!(Misbehave);

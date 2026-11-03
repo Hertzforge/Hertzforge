@@ -7,7 +7,7 @@
 
 use hertzforge_law_host::{
     law_file_sha256, HostConfig, LawError, LawHost, LawInstance, LoadedLaw, LoopInputs,
-    LoopOutputs, Param, ParamValue, Setup,
+    LoopOutputs, OutputRule, Param, ParamValue, Setup,
 };
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -396,12 +396,8 @@ impl NativeRatio {
         (untrusted, clamped)
     }
 
-    fn retarget(&mut self, target_rms: f64, ff: f64) {
-        let s = if ff > 0.0 {
-            ff
-        } else {
-            target_rms / self.full_rms
-        };
+    fn retarget(&mut self, level_db: f64) {
+        let s = 10f64.powf(level_db / 20.0);
         let r = (s / self.scale).powi(2);
         for d in &mut self.drive[self.lo..self.hi] {
             *d *= r;
@@ -526,15 +522,27 @@ fn the_wasm_ratio_law_agrees_with_a_native_reference() {
     let mut notched = vec![false; plant.n];
     let (mut clamped_total, mut first_err, mut last_err) = (0usize, None, 0.0);
     for l in 1..=24usize {
-        let (level_db, scale) = match l {
-            10 => (Some(-6.0), 10f64.powf(-6.0 / 20.0)),
-            18 => (Some(0.0), 1.0),
-            _ => (None, 0.0),
+        let level_db = match l {
+            10 => Some(-6.0),
+            18 => Some(0.0),
+            _ => None,
         };
-        if level_db.is_some() {
-            let rms = native.full_rms * scale;
-            wasm.retarget_level(rms, scale, BUDGET).expect("retargets");
-            native.retarget(rms, scale);
+        if let Some(level_db) = level_db {
+            let rms = native.full_rms * 10f64.powf(level_db / 20.0);
+            let out = wasm
+                .retarget_level(level_db, rms, BUDGET)
+                .expect("retargets");
+            native.retarget(level_db);
+            for k in 0..plant.n {
+                assert!(
+                    close(out.drive_psd[k], native.drive[k], TOL),
+                    "retarget at loop {l}, line {k}"
+                );
+            }
+            assert!(
+                (out.level_cmd_db - native.level_cmd_db()).abs() <= TOL,
+                "retarget at loop {l}: level"
+            );
         }
         if l == 6 {
             for x in &mut notched[200..205] {
@@ -625,7 +633,7 @@ fn a_trapping_law_is_reported_and_its_instance_poisoned() {
         Err(LawError::Poisoned(_))
     ));
     assert!(matches!(
-        law.retarget_level(1.0, 1.0, BUDGET),
+        law.retarget_level(0.0, 1.0, BUDGET),
         Err(LawError::Poisoned(_))
     ));
 }
@@ -777,9 +785,16 @@ fn two_instances_given_the_same_inputs_return_identical_outputs() {
 #[test]
 fn each_bad_output_is_refused_without_poisoning_the_instance() {
     let h = host();
-    for m in ["nan", "short", "undeclared"] {
+    for (m, want) in [
+        ("nan", OutputRule::NonFiniteDrive),
+        ("short", OutputRule::WrongLength),
+        ("undeclared", OutputRule::Diagnostics),
+    ] {
         let (law, r, _) = iterate_once(misbehave_in(&h, m), BUDGET);
-        assert!(matches!(r, Err(LawError::BadOutput(_))), "{m}: {r:?}");
+        assert!(
+            matches!(&r, Err(LawError::BadOutput { rule, .. }) if *rule == want),
+            "{m}: {r:?}"
+        );
         assert!(!law.is_poisoned(), "{m}: a refused output is not a trap");
     }
 }

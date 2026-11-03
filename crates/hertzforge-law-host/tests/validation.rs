@@ -8,8 +8,8 @@ use hertzforge_law_host::validate::{
 };
 use hertzforge_law_host::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, IntegerSpec, LawError,
-    LoopDiagnostics, LoopInputs, LoopOutputs, Manifest, NumberSpec, Param, ParamKind, ParamSpec,
-    ParamValue, Setup,
+    LoopDiagnostics, LoopInputs, LoopOutputs, Manifest, NumberSpec, OutputRule, Param, ParamKind,
+    ParamSpec, ParamValue, Setup,
 };
 
 fn number(min: f64, max: f64, step: f64, default: f64) -> NumberSpec {
@@ -491,50 +491,59 @@ fn good_outputs() -> LoopOutputs {
 fn each_bad_output_is_refused() {
     let declared = good_manifest().diagnostics;
     assert_eq!(validate_outputs(&good_outputs(), N, &declared), Ok(()));
-    type Mutation = (&'static str, fn(&mut LoopOutputs));
+    type Mutation = (&'static str, OutputRule, fn(&mut LoopOutputs));
+    use OutputRule::*;
     let cases: Vec<Mutation> = vec![
-        ("drive one line short", |o| {
+        ("drive one line short", WrongLength, |o| {
             o.drive_psd.pop();
         }),
-        ("drive one line long", |o| o.drive_psd.push(0.0)),
-        ("NaN drive", |o| o.drive_psd[3] = f64::NAN),
-        ("infinite drive", |o| o.drive_psd[3] = f64::INFINITY),
-        ("negative drive", |o| o.drive_psd[3] = -1e-9),
-        ("non-finite level", |o| o.level_cmd_db = f64::NAN),
-        ("untrusted line off the grid", |o| {
+        ("drive one line long", WrongLength, |o| {
+            o.drive_psd.push(0.0)
+        }),
+        ("NaN drive", NonFiniteDrive, |o| o.drive_psd[3] = f64::NAN),
+        ("infinite drive", NonFiniteDrive, |o| {
+            o.drive_psd[3] = f64::INFINITY
+        }),
+        ("negative drive", NegativeDrive, |o| o.drive_psd[3] = -1e-9),
+        ("non-finite level", NonFiniteLevel, |o| {
+            o.level_cmd_db = f64::NAN
+        }),
+        ("untrusted line off the grid", Diagnostics, |o| {
             o.diagnostics.untrusted_bins.push(N)
         }),
-        ("divergent line off the grid", |o| {
+        ("divergent line off the grid", Diagnostics, |o| {
             o.diagnostics.divergent_bins.push(usize::MAX)
         }),
-        ("non-finite in-band error", |o| {
+        ("non-finite in-band error", Diagnostics, |o| {
             o.diagnostics.inband_err_db = Some(f64::INFINITY)
         }),
-        ("undeclared diagnostic", |o| {
+        ("undeclared diagnostic", Diagnostics, |o| {
             o.diagnostics.values.push(DiagnosticValue {
                 key: "surprise".into(),
                 value: 1.0,
             })
         }),
-        ("diagnostic reported twice", |o| {
+        ("diagnostic reported twice", Diagnostics, |o| {
             o.diagnostics.values.push(DiagnosticValue {
                 key: "condition".into(),
                 value: 1.0,
             })
         }),
-        ("non-finite diagnostic", |o| {
+        ("non-finite diagnostic", Diagnostics, |o| {
             o.diagnostics.values[0].value = f64::NAN
         }),
+        // Two rules broken: the first in rule order is named.
+        ("negative line and a NaN line", NonFiniteDrive, |o| {
+            o.drive_psd[1] = -1.0;
+            o.drive_psd[3] = f64::NAN;
+        }),
     ];
-    for (name, mutate) in cases {
+    for (name, want, mutate) in cases {
         let mut o = good_outputs();
         mutate(&mut o);
-        assert!(
-            matches!(
-                validate_outputs(&o, N, &declared),
-                Err(LawError::BadOutput(_))
-            ),
-            "{name}: passed"
-        );
+        match validate_outputs(&o, N, &declared) {
+            Err(LawError::BadOutput { rule, .. }) => assert_eq!(rule, want, "{name}"),
+            other => panic!("{name}: {other:?}"),
+        }
     }
 }

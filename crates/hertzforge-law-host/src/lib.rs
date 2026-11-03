@@ -54,7 +54,7 @@ mod ticker;
 mod types;
 pub mod validate;
 
-pub use error::LawError;
+pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, HostConfig, LawHost, LawInstance, LoadedLaw};
 pub use types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, GuestOutput, IntegerSpec,

@@ -325,19 +325,21 @@ impl LawInstance {
         self.loop_call(LoopCall::Iterate, inputs, budget)
     }
 
-    /// Tell the law the scheduled level moved: `target_rms` is the new
-    /// in-band RMS target, `feedforward_scale` the new level as an amplitude
-    /// ratio to the full target.
+    /// Tell the law the scheduled level moved, and get the drive at the new
+    /// level: `level_db` is the new level in dB relative to the full target,
+    /// `target_rms` the target's in-band RMS at that level. The output is
+    /// checked like a loop's.
     pub fn retarget_level(
         &mut self,
+        level_db: f64,
         target_rms: f64,
-        feedforward_scale: f64,
         budget: Duration,
-    ) -> Result<(), LawError> {
+    ) -> Result<LoopOutputs, LawError> {
         self.check_usable()?;
-        if !target_rms.is_finite() || !feedforward_scale.is_finite() {
+        if !level_db.is_finite() || !target_rms.is_finite() || target_rms < 0.0 {
             return Err(LawError::InputsInvalid(format!(
-                "retarget to {target_rms} RMS at scale {feedforward_scale}: not finite"
+                "retarget to {level_db} dB at {target_rms} RMS: the level must be finite and \
+                 the RMS finite and non-negative"
             )));
         }
         let ticker = Arc::clone(&self.ticker);
@@ -347,13 +349,8 @@ impl LawInstance {
             .bindings
             .hertzforge_control_law_random_single_law()
             .law()
-            .call_retarget_level(
-                &mut self.sandbox.store,
-                self.law,
-                target_rms,
-                feedforward_scale,
-            );
-        r.map_err(|e| self.poison(&e))
+            .call_retarget_level(&mut self.sandbox.store, self.law, level_db, target_rms);
+        self.finish(r)
     }
 
     fn check_usable(&self) -> Result<(), LawError> {
@@ -389,6 +386,18 @@ impl LawInstance {
             LoopCall::Seed => guest.call_seed(&mut self.sandbox.store, self.law, &wit_inputs),
             LoopCall::Iterate => guest.call_iterate(&mut self.sandbox.store, self.law, &wit_inputs),
         };
+        self.finish(r)
+    }
+
+    /// A call's result as the caller sees it: a failure of the call itself
+    /// poisons the instance, the law's own error is passed on, and an output is
+    /// converted and checked.
+    fn finish(
+        &mut self,
+        r: wasmtime::Result<
+            Result<crate::bindings::hertzforge::control_law::types::LoopOutputs, String>,
+        >,
+    ) -> Result<LoopOutputs, LawError> {
         let out = r.map_err(|e| self.poison(&e))?.map_err(LawError::Law)?;
         let out = convert::outputs(out);
         validate::validate_outputs(&out, self.nbins, &self.diagnostics)?;
