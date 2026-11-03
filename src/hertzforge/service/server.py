@@ -382,7 +382,8 @@ class Connection:
                 'report.export': ('name', 'path'),
                 'report.editor': ('name', 'selected', 'theme', 'page'),
                 'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
-                                   'kind', 'field', 'value')}
+                                   'kind', 'field', 'value'),
+                'report.print': ('name',), 'report.issue': ('name', 'step', 'path')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -396,6 +397,12 @@ class Connection:
             if method == 'report.render':
                 html = await call(reports.render, project, params)
                 return {'name': params['name'], 'html': html}
+            if method == 'report.print':
+                return {'html': await call(reports.print_page, project, params)}
+            if method == 'report.issue':
+                done = await call(reports.issue, project, params)
+                self.project.modified = True
+                return {**done, 'project': projects.summary(self.project)}
             if method == 'report.editor':
                 return await call(reports.edit_page, project, params)
             if method == 'report.operate':

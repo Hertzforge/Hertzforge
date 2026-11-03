@@ -800,6 +800,70 @@ def index_run_log_files(project: Any, params: dict[str, Any]) -> list[dict]:
     return [v.reading(f'Files named in {params["run_log"]}', rows), *_index(project)]
 
 
+def _identity_params() -> tuple[Param, ...]:
+    from hertzforge.report.identity import FIELDS
+
+    return tuple(Param(field.key, field.label + ('' if field.required else ' (optional)'),
+                       'string', default='', setting=f'identity.{field.key}')
+                 for field in FIELDS)
+
+
+def report_identity(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.report_identity`: the report's identification fields as
+    entered (`Project.report_identity`), which the page carries in its
+    margins and its identification block while the report feature
+    `report_identity` is on; then what is still missing before it can be
+    issued. People authorized are comma-separated."""
+    from hertzforge.report.identity import FIELDS, missing, value
+
+    name = params['source']
+    report = project[name]
+    fields = {}
+    for field in FIELDS:
+        given = params[field.key].strip()
+        if field.key == 'authorized':
+            fields[field.key] = [person.strip() for person in given.split(',') if person.strip()]
+        else:
+            fields[field.key] = given
+    try:
+        project.report_identity(name, **fields)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    rows = [v.row(field.label, ', '.join(value(report, field.key))
+                  if field.key == 'authorized' else value(report, field.key) or 'not entered',
+                  None, 'info' if value(report, field.key) or not field.required else 'warn')
+            for field in FIELDS]
+    owed = missing(report)
+    rows.append(v.row('Status', value(report, 'status'), None, 'info'))
+    rows.append(v.row('Before issue', 'every required field entered' if not owed
+                      else 'still to enter: ' + ', '.join(owed), None,
+                      'pass' if not owed else 'warn'))
+    return [v.reading(f'Identity of {name}', rows)]
+
+
+def amend_report(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.amend_report`: an issued report amended
+    (`Project.amend_report`): the change, where it is, what it said, what
+    it says now and why, under a new revision (and a number of its own
+    when given). The amendment is then issued like any report."""
+    from hertzforge.report.identity import record, value
+
+    name = params['source']
+    change = {key: params[key].strip() for key in ('where', 'was', 'now', 'reason')
+              if params[key].strip()}
+    try:
+        project.amend_report(name, [change], revision=params['revision'].strip(),
+                             number=params['number'].strip() or None)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    report = project[name]
+    rows = [v.row('Status', value(report, 'status'), None, 'info'),
+            v.row('Revision', value(report, 'revision'), None, 'info'),
+            v.row('Issues recorded', float(len(record(report))), '', 'info')]
+    rows += [v.row(f'Change, {part}', text, None, 'info') for part, text in change.items()]
+    return [v.reading(f'Amendment of {name}', rows)]
+
+
 OPERATIONS = (
     Operation(
         id='project.report_features', title='Report Features', workspace='report',
@@ -1062,4 +1126,24 @@ OPERATIONS = (
                 'checksum the log records.',
         params=(RUN_LOG, SEARCH), outputs=('reading', 'table'), run=index_run_log_files,
         edits=True),
+    Operation(
+        id='project.report_identity', title='Report Identity', workspace='report',
+        accepts='project',
+        summary='The report\'s number, revision, laboratory, customer, dates and who '
+                'authorized it, carried in its margins while Report Identity is on; what '
+                'is still to enter before it is issued.',
+        params=(SOURCE, *_identity_params()), outputs=('reading',), run=report_identity,
+        edits=True),
+    Operation(
+        id='project.amend_report', title='Amend Report', workspace='report',
+        accepts='project',
+        summary='An issued report amended: where the change is, what it said, what it says '
+                'now and why, under a new revision.',
+        params=(SOURCE, Param('where', 'Where', 'string', default=''),
+                Param('was', 'Was', 'string', default=''),
+                Param('now', 'Now', 'string', default=''),
+                Param('reason', 'Reason', 'string', default=''),
+                Param('revision', 'New revision', 'string', default=''),
+                Param('number', 'Number of its own (optional)', 'string', default='')),
+        outputs=('reading',), run=amend_report, edits=True),
 )

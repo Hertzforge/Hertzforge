@@ -360,8 +360,9 @@ for at. They are not loaded and no tool lists them; saving keeps their reference
 filled from them. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` is
-`features`: each report feature's key, true where it is on. `modified` is true after an import or an operation that added,
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+`features` (each report feature's key, true where it is on) and `identity` (each identification
+field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic
@@ -417,6 +418,8 @@ first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`
 | `report.export` | `{"name","path"}` | `{"path"}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
+| `report.print` | `{"name"}` | `{"html"}` |
+| `report.issue` | `{"name","step","path"?}` | `{"html","status"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -439,6 +442,17 @@ or the selected block's `index`, `kind` and `mode`, and either its `text` (a tex
 names a skeleton section, check or requirement block, which has a pane of its own) or its
 `fields` (`{field,label,value,options:[[value,label]...]}`, the objects it may name, symbolic
 bindings such as `@basis:ShapeSet` first) and `caption`.
+
+`report.print` gives the reader's page as it is printed: light, its figures drawn at print
+resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
+PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
+changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
+Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
+on, every required field entered, not already issued), marks it issued (or amended), and gives the
+page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
+issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
+puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+as text beside its `features`.
 
 `report.operate` applies one of VD's editor operations and answers with the editor at the block it
 leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound to the first

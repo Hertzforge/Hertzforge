@@ -146,3 +146,65 @@ def test_a_selection_from_the_page_comes_back_without_the_page(edited, validate)
     out = reports.edit_page(project, {'name': name, 'selected': 0, 'page': False})
     validate(out, 'reportEditorResult')
     assert 'html' not in out and out['block']['index'] == 0
+
+
+FIELDS = {'number': 'HF-001', 'revision': 'A', 'laboratory': 'The lab', 'address': '1 Road',
+          'location': 'Bay 2', 'customer': 'Someone', 'contact': 'A person',
+          'received': '2026-11-01', 'tested': '2026-11-02', 'issued': '2026-11-03',
+          'authorized': ['B. Signer']}
+
+
+@pytest.fixture
+def identified(project):
+    name = reports.generate(project, {'template': 'empty', 'name': 'R'})
+    project.report_features(name, enable=['report_identity'])
+    project.report_identity(name, **FIELDS)
+    return project, name
+
+
+def test_the_printed_page_draws_finely_and_asks_to_print(edited):
+    project, name = edited
+    page = reports.print_page(project, {'name': name})
+    assert "replaceState(null, '', '#print')" in page and 'print()' in page
+
+
+def test_an_issue_is_begun_printed_and_recorded_with_its_hashes(identified, tmp_path):
+    import hashlib
+
+    project, name = identified
+    begun = reports.issue(project, {'name': name, 'step': 'begin'})
+    assert begun['status'] == 'issued' and 'print()' in begun['html']
+    pdf = tmp_path / 'issued.pdf'
+    pdf.write_bytes(b'%PDF-1.4\n% a page\n%%EOF\n')
+    done = reports.issue(project, {'name': name, 'step': 'record', 'path': str(pdf)})
+    assert done['entry']['sha256'] == hashlib.sha256(pdf.read_bytes()).hexdigest()
+    assert done['entry']['number'] == 'HF-001' and done['entry']['file'] == 'issued.pdf'
+    with pytest.raises(ProtocolError, match='already issued'):
+        reports.issue(project, {'name': name, 'step': 'begin'})
+
+
+def test_an_issue_cancelled_leaves_a_draft(identified, tmp_path):
+    from hertzforge.report.identity import value
+
+    project, name = identified
+    reports.issue(project, {'name': name, 'step': 'begin'})
+    assert value(project[name], 'status') == 'issued'
+    reports.issue(project, {'name': name, 'step': 'cancel'})
+    assert value(project[name], 'status') == 'draft'
+    with pytest.raises(ProtocolError, match='not waiting to be issued'):
+        reports.issue(project, {'name': name, 'step': 'record', 'path': str(tmp_path / 'x.pdf')})
+
+
+def test_a_file_that_is_not_a_pdf_is_not_recorded(identified, tmp_path):
+    project, name = identified
+    reports.issue(project, {'name': name, 'step': 'begin'})
+    page = tmp_path / 'page.html'
+    page.write_text('<html></html>')
+    with pytest.raises(ProtocolError, match='is not a PDF'):
+        reports.issue(project, {'name': name, 'step': 'record', 'path': str(page)})
+
+
+def test_a_report_without_identity_is_not_issued(edited):
+    project, name = edited
+    with pytest.raises(ProtocolError, match='does not have Identity and issue'):
+        reports.issue(project, {'name': name, 'step': 'begin'})

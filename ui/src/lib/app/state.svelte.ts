@@ -659,6 +659,47 @@ export class ReportState {
 		});
 	}
 
+	/** The page being printed, in a frame of its own that asks for the print dialog. */
+	printing = $state<string | null>(null);
+	/** An issue under way: the report is marked issued and its page printed; the PDF is named next. */
+	issuing = $state<string | null>(null);
+	/** The last issue recorded. */
+	issued = $state<Record<string, string> | null>(null);
+
+	/** Print the reader's page; the print dialog saves it as a PDF. */
+	async print(): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		await this.act('Preparing the page to print', async () => {
+			const res = await this.app.analysis.request<{ html: string }>('report.print', { name }, { timeoutMs: RUN_TIMEOUT_MS });
+			this.printing = res.html;
+		});
+	}
+
+	/** Begin, record or cancel an issue (`report.issue`). */
+	async issue(step: 'begin' | 'record' | 'cancel', path?: string): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
+		await this.act(doing, async () => {
+			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; project: ProjectSummary }>(
+				'report.issue',
+				{ name, step, ...(path ? { path } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.app.project.apply(res.project);
+			if (step === 'begin') {
+				this.issuing = res.status ?? 'issued';
+				this.issued = null;
+				this.printing = res.html ?? null;
+			} else {
+				this.issuing = null;
+				if (res.entry) this.issued = res.entry;
+				await this.load(name);
+			}
+		});
+	}
+
 	/** Select a block on the page (null for the report itself); its pane follows. */
 	async select(at: number | null): Promise<void> {
 		const name = this.name;

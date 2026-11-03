@@ -500,3 +500,38 @@ def test_the_features_open_on_the_reports_own(validate):
     assert entry['settings']['features'][key] is True
     assert sum(entry['settings']['features'].values()) == 1
     validate(listing.summary(state), 'project')
+
+
+def test_identity_is_entered_read_back_and_amended(tmp_path):
+    from hertzforge.service import projects as listing
+    from hertzforge.service import reports
+
+    state, _ = listing.import_file(None, {'path': str(PLATE / 'random.nc4')})
+    project = state.project
+    name = project.generate_report('empty', name='R')
+    project.report_features(name, enable=['report_identity'])
+    given = {key: '' for key in ('number', 'revision', 'laboratory', 'address', 'location',
+                                 'customer', 'contact', 'received', 'tested', 'issued',
+                                 'authorized', 'distribution')}
+    given.update(number='HF-2', revision='A', laboratory='Lab', address='Road',
+                 location='Bay', customer='C', contact='P', received='2026-11-01',
+                 tested='2026-11-02', issued='2026-11-03', authorized='One, Two')
+    (reading,) = OPS['project.report_identity'].run(project, {'source': name, **given})
+    rows = {row['label']: row for row in reading['rows']}
+    assert rows['Authorized by']['value'] == 'One, Two'
+    assert rows['Before issue']['status'] == 'pass'
+    entry = next(o for o in listing.summary(state)['objects'] if o['name'] == name)
+    assert entry['settings']['identity']['authorized'] == 'One, Two'
+    reports.issue(project, {'name': name, 'step': 'begin'})
+    pdf = tmp_path / 'a.pdf'
+    pdf.write_bytes(b'%PDF-1.4\n%%EOF\n')
+    reports.issue(project, {'name': name, 'step': 'record', 'path': str(pdf)})
+    with pytest.raises(ProtocolError, match='where'):
+        OPS['project.amend_report'].run(project, {
+            'source': name, 'where': '', 'was': '', 'now': '', 'reason': '',
+            'revision': 'B', 'number': ''})
+    (amended,) = OPS['project.amend_report'].run(project, {
+        'source': name, 'where': 'Section 2', 'was': '3 modes', 'now': '4 modes',
+        'reason': 'one missed', 'revision': 'B', 'number': ''})
+    rows = {row['label']: row['value'] for row in amended['rows']}
+    assert rows['Revision'] == 'B' and rows['Issues recorded'] == 1

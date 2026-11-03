@@ -7,7 +7,7 @@
 	 * the desktop app Save opens the dialog; in a browser it asks for a path.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
-	import { chooseReportPath, hasNativeFiles } from '$lib/project/files';
+	import { choosePdf, chooseReportPath, hasNativeFiles } from '$lib/project/files';
 	import { theme } from '$lib/theme/theme.svelte';
 
 	interface Props {
@@ -114,7 +114,15 @@
 		asking = !asking;
 	}
 
-	async function submit(e: SubmitEvent) {
+	let pdf = $state('');
+	async function recordIssue(e?: SubmitEvent) {
+		e?.preventDefault();
+		let path = pdf.trim();
+		if (!path && hasNativeFiles()) path = (await choosePdf()) ?? '';
+		if (path) await r.issue('record', path);
+	}
+
+		async function submit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!path.trim()) return;
 		await r.export(path.trim());
@@ -161,6 +169,20 @@
 					</form>
 				{/if}
 				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>.</p>{/if}
+				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
+					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
+				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
+					title="Mark the report issued, print it, then name the PDF so the issue is recorded with its hash">Issue</button>
+				{#if r.issuing}
+					<form class="ask" onsubmit={recordIssue} data-testid="report-issue-form">
+						<p class="muted">Marked {r.issuing}. Save the page from the print dialog as a PDF, then name it here so the issue is recorded.</p>
+						<label class="lbl" for="report-pdf">The PDF printed</label>
+						<input id="report-pdf" class="field mono" bind:value={pdf} placeholder={hasNativeFiles() ? 'Leave empty to choose it' : '/path/to/report.pdf'} data-testid="report-pdf" spellcheck="false" />
+						<button class="btn primary sm" type="submit" disabled={r.busy !== null || (!pdf.trim() && !hasNativeFiles())}>Record the Issue</button>
+						<button class="btn ghost sm" type="button" onclick={() => r.issue('cancel')} disabled={r.busy !== null}>Cancel</button>
+					</form>
+				{/if}
+				{#if r.issued}<p class="muted" data-testid="report-issued">Issued {r.issued.number} revision {r.issued.revision}, PDF {r.issued.sha256?.slice(0, 12)}.</p>{/if}
 			</section>
 		{/if}
 		{#if ed}
@@ -228,6 +250,12 @@
 		{#if page}
 			<!-- the core's own page: its scripts run, isolated from the shell -->
 			<iframe bind:this={frame} title={r.name ?? 'Report'} sandbox="allow-scripts" srcdoc={page} data-testid="report-frame"></iframe>
+		{/if}
+		{#if r.printing}
+			<!-- the page as printed, out of sight: it asks for the print dialog once its figures are drawn -->
+			{#key r.printing}
+				<iframe class="printing" title="Printing" sandbox="allow-scripts allow-modals" srcdoc={r.printing} data-testid="report-print-frame"></iframe>
+			{/key}
 		{:else}
 			<div class="placeholder">Generate a report, or pick one in the project.</div>
 		{/if}
@@ -340,6 +368,15 @@
 
 	.sep {
 		flex: 1;
+	}
+
+	.printing {
+		position: absolute;
+		width: 816px;
+		height: 1056px;
+		left: -10000px;
+		top: 0;
+		flex: none;
 	}
 
 	.text {
