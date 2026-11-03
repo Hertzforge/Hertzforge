@@ -16,6 +16,11 @@ binaries.
 | tokio / tokio-tungstenite / futures-util | MIT | hertzforge-backendd daemon and the control service |
 | hound | Apache-2.0 | WAV read/write (hertzforge-formats, Insight). NOTICE: Apache-2.0 only, not dual |
 | num-complex | MIT OR Apache-2.0 | complex numbers in the spectral density matrix stacks (hertzforge-sdm) |
+| faer, faer-traits | MIT | per-line dense linear algebra (Hermitian eigendecomposition, SVD, Cholesky, matrix products) in hertzforge-sdm |
+| faer's kernels and helpers: gemm, gemm-common, gemm-c32, gemm-c64, gemm-f32, gemm-f64, nano-gemm, nano-gemm-core, nano-gemm-c32, nano-gemm-c64, nano-gemm-f32, nano-gemm-f64, private-gemm-x86, pulp, pulp-wasm-simd-flag, dyn-stack, dyn-stack-macros, equator, equator-macro, reborrow, qd, raw-cpuid, sysctl | MIT | matrix-multiply kernels, SIMD dispatch, workspace and CPU detection under faer |
+| generativity, num_cpus, hermit-abi, paste, seq-macro, enum-as-inner | MIT OR Apache-2.0 | helpers in faer's dependency tree |
+| bytemuck | Zlib OR Apache-2.0 OR MIT | plain-data casts in faer's dependency tree |
+| walkdir, same-file | Unlicense OR MIT (used under MIT) | sysctl's dependencies under faer's matrix kernels |
 
 ## npm packages shipped in the shell
 

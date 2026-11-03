@@ -12,3 +12,6 @@ description = "Spectral density matrix stacks and the multiple-output control-la
 [dependencies]
 num-complex = { version = "0.4", default-features = false, features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
+# Dense per-line linear algebra (eigen, SVD, Cholesky). MIT. Default features off:
+# no rayon (law files are single-threaded WebAssembly), no file or random helpers.
+faer = { version = "0.24", default-features = false, features = ["std"] }

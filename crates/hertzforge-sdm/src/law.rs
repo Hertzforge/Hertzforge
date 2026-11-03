@@ -331,6 +331,12 @@ impl From<ShapeError> for LawError {
     }
 }
 
+impl From<crate::linalg::LinalgError> for LawError {
+    fn from(e: crate::linalg::LinalgError) -> Self {
+        LawError(e.to_string())
+    }
+}
+
 /// The native MIMO control-law boundary. A law file built against the
 /// `random-mimo` world is adapted to this trait by the host; the built-in laws
 /// implement it directly and are also built as law files from the same source.
