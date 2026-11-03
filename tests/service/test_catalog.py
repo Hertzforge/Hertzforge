@@ -31,7 +31,7 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                    'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
                    'modal_run.resynthesis',
                    'project.waterfall', 'project.compute_psds', 'project.compute_frfs',
-                   'project.fit_modes', 'project.mode_shapes',
+                   'project.fit_modes', 'project.mode_shapes', 'project.plot',
                    *(f'project.{verb}' for verb in (
                        'integrate', 'differentiate', 'filter_data', 'truncate_data',
                        'resample', 'compute_spectra', 'compute_cpsds', 'compute_srs',
