@@ -260,7 +260,7 @@ export interface ParamDescriptor {
 	step?: number;
 	options?: ParamOption[];
 	/** The dataset's channels, or the open project's objects of the kinds named (`objects:psd|frf`). */
-	options_from?: 'channels' | `objects:${string}`;
+	options_from?: 'channels' | `objects:${string}` | `verb:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
 }
@@ -275,6 +275,8 @@ export interface ProjectObject {
 	/** False for an object imported without its units. */
 	units_defined?: boolean;
 	groups: string[];
+	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
+	verbs?: string[];
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */

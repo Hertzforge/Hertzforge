@@ -239,6 +239,13 @@ project's objects of those kinds, in the project's order. Left out, it takes the
 An operation run when the project has none of the kinds a required param takes is refused, and
 the refusal names the kind.
 
+An `enum` that names an object a core verb takes sets `"options_from":"verb:<verb>"`, such as
+`verb:integrate`; the shell fills it with the objects whose `verbs` (in the project summary) list
+that verb. Which verb applies to what is the core's own table (`Project.verbs`): Integrate takes a
+time history whose channels are accelerations or velocities, Compute FRFs one whose channels have
+both a response and a reference side, and so on, which no list of kinds can say. Left out, it
+takes the first of them, and an operation run when no object takes the verb is refused.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -283,8 +290,9 @@ The project as the shell lists it:
 ```
 {"title":"Bracket Survey","file":"/Users/.../survey.hforge"|null,"modified":true,
  "objects":[{"name":"FRF","kind":"frf","records":22,"source":"SIM",
-             "units_defined":true,"groups":["Group 1"]},
-            {"name":"Geometry","kind":"geometry","units_defined":false,"groups":[]}]}
+             "units_defined":true,"groups":["Group 1"],"verbs":["fit_modes"]},
+            {"name":"Geometry","kind":"geometry","units_defined":false,"groups":[],
+             "verbs":["generate_rigid_body_modes","add_solid_block"]}]}
 ```
 
 `kind` is the object's class name in lower case with underscores (`time_history`, `psd`, `frf`,
@@ -292,7 +300,9 @@ The project as the shell lists it:
 `records` is present for data objects, `source` for measured data, and `units_defined` is false
 for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
 names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
-order. `modified` is true after an import and false after an open or a save.
+order. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
+`verb:` params are filled from. `modified` is true after an import or an operation that added,
+removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic
 `project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A

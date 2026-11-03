@@ -20,17 +20,33 @@ export function objectKinds(p: ParamDescriptor): string[] {
 	return p.options_from?.startsWith('objects:') ? p.options_from.slice('objects:'.length).split('|') : [];
 }
 
+/** The core verb a `verb:` param's objects take, or '' for any other param. */
+export function objectVerb(p: ParamDescriptor): string {
+	return p.options_from?.startsWith('verb:') ? p.options_from.slice('verb:'.length) : '';
+}
+
 /**
  * The params with each `objects:` param's options filled from the project's objects of its kinds,
- * in the project's order, so the form and its checks treat it as any other enum.
+ * and each `verb:` param's from the objects its verb applies to, in the project's order, so the
+ * form and its checks treat it as any other enum.
  */
 export function withObjects(params: ParamDescriptor[], objects: ProjectObject[]): ParamDescriptor[] {
 	return params.map((p) => {
 		const kinds = objectKinds(p);
-		if (!kinds.length) return p;
-		const options = objects.filter((o) => kinds.includes(o.kind)).map((o) => ({ value: o.name, label: o.name }));
-		return { ...p, options };
+		const verb = objectVerb(p);
+		if (!kinds.length && !verb) return p;
+		const taken = objects.filter((o) => (verb ? (o.verbs ?? []).includes(verb) : kinds.includes(o.kind)));
+		return { ...p, options: taken.map((o) => ({ value: o.name, label: o.name })) };
 	});
+}
+
+/**
+ * Whether a project tool has something to run on: every param filled from the project's objects
+ * (after `withObjects`) lists at least one. A tool that does not is not shown, as Visual Dynamics
+ * offers a verb only where it applies.
+ */
+export function hasObjectsFor(params: ParamDescriptor[]): boolean {
+	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || (p.options ?? []).length > 0);
 }
 
 function clamp(v: number, p: ParamDescriptor): number {
@@ -92,7 +108,8 @@ export function validate(p: ParamDescriptor, value: unknown, channels: ParamOpti
 			if (opts.length === 0) {
 				if (p.options_from === 'channels') return 'Open a dataset to list its channels.';
 				const kinds = objectKinds(p);
-				return kinds.length ? `The project has no ${kinds.map((k) => k.replace(/_/g, ' ')).join(' or ')}.` : 'No options.';
+				if (kinds.length) return `The project has no ${kinds.map((k) => k.replace(/_/g, ' ')).join(' or ')}.`;
+				return objectVerb(p) ? 'Nothing in the project takes this.' : 'No options.';
 			}
 			return opts.some((o) => o.value === value) ? null : 'Choose one of the options.';
 		}
