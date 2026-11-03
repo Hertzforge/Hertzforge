@@ -305,6 +305,8 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.rename` | `{"name","to"}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |
+| `project.duplicate` | `{"names"}` | `{"project"}` |
+| `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `fit.*` | see Fitting modes below | |
@@ -321,7 +323,10 @@ and defaults it to "Project". `project.rename` gives the object `name` the name 
 group, provenance record and report block that names it follows; a name in use is refused.
 `project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
 none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
-nothing else names one. Each answers with the project.
+nothing else names one. `project.duplicate` adds a copy of each object in `names` beside it, named
+"<name> copy", in no group. `project.refresh` computes each derived object in `names` again from
+its source, in place and under its own name; an empty list refreshes every stale object, sources
+first. Each answers with the project.
 
 Units a file did not state are declared by channel, not by record, as Visual Dynamics' Imported
 Units pane declares them. `project.units` gives an object's tables: a geometry's one row (`side`
@@ -355,9 +360,11 @@ order. `active_geometry` is the active geometry's name, or null. `unresolved`, p
 there are any, lists the objects the project holds by reference to another `.hforge` file that
 was `not found` or has `changed` since: each with its `name`, `kind` and the `path` it was looked
 for at. They are not loaded and no tool lists them; saving keeps their references, and
-`project.remove` drops one. `verbs` are the core's processing verbs that apply to the object, in the core's order, then
-`overload_check` where a linked channel table describes a time history; `verb:` params are
-filled from them. `settings` is a time history's analysis settings, each group
+`project.remove` drops one. `stale` (present only when it is) says why a derived object no longer
+matches its source: the source's settings changed after it was computed. `verbs` are the core's
+processing verbs that apply to the object, in the core's order, then `overload_check` where a
+linked channel table describes a time history; `verb:` params are filled from them. `settings` is
+a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
 has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,

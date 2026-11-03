@@ -85,6 +85,9 @@
 			<button class="btn ghost sm" data-testid="project-open" onclick={() => act('open')} disabled={!app.analysis.isOpen || p.busy !== null}>Open</button>
 			<button class="btn ghost sm" data-testid="project-import" onclick={() => act('import')} disabled={!app.analysis.isOpen || p.busy !== null}>Import</button>
 			{#if p.summary}
+				{#if p.summary.objects.filter((o) => o.stale).length > 1}
+					<button class="btn ghost sm" data-testid="project-refresh" title="Compute every stale object again, sources first" onclick={() => p.refresh()} disabled={p.busy !== null}>Recompute All</button>
+				{/if}
 				<button class="btn ghost sm" data-testid="project-save" onclick={() => act('save')} disabled={p.busy !== null}>Save</button>
 			{/if}
 		</div>
@@ -157,6 +160,7 @@
 						{:else}
 							<span class="oname">{o.name}</span>
 							{#if active}<span class="mark" title="Data is drawn on this geometry when nothing else names one">active</span>{/if}
+							{#if o.stale}<span class="mark stale" data-testid="stale-{o.name}" title={o.stale}>stale</span>{/if}
 							{#if o.units_defined === false}
 								<button class="badge" data-testid="units-badge-{o.name}" title="Imported without its units: declare them" onclick={() => p.toggleUnits(o.name)}>units?</button>
 							{/if}
@@ -168,6 +172,10 @@
 								{#if o.units_defined !== undefined}
 									<button class="link" data-testid="units-{o.name}" onclick={() => p.toggleUnits(o.name)} disabled={p.busy !== null}>Units</button>
 								{/if}
+								{#if o.stale}
+									<button class="link" data-testid="refresh-{o.name}" title="Compute {o.name} again from its source: {o.stale}" onclick={() => p.refresh([o.name])} disabled={p.busy !== null}>Recompute</button>
+								{/if}
+								<button class="link" data-testid="duplicate-{o.name}" title="Add a copy of {o.name}" onclick={() => p.duplicate([o.name])} disabled={p.busy !== null}>Copy</button>
 								<button class="link" data-testid="rename-{o.name}" onclick={() => startRename(o.name)} disabled={p.busy !== null}>Rename</button>
 								<button class="icon" data-testid="remove-{o.name}" title="Remove {o.name}" aria-label="Remove {o.name}" onclick={() => { renaming = null; confirming = o.name; }} disabled={p.busy !== null}>
 									<Icon name="trash" size={12} />
@@ -367,6 +375,10 @@
 	.mark {
 		font-size: 10px;
 		color: var(--text-3);
+	}
+
+	.mark.stale {
+		color: var(--status-warn);
 	}
 
 	.row-actions {

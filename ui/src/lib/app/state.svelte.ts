@@ -753,6 +753,15 @@ export class ProjectState {
 		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
 	}
 
+	duplicate(names: string[]): Promise<boolean> {
+		return this.call(`Copying ${names.join(', ')}`, 'project.duplicate', { names }, false);
+	}
+
+	/** Compute derived objects again from their sources; with none named, every stale one. */
+	refresh(names: string[] = []): Promise<boolean> {
+		return this.call(names.length ? `Recomputing ${names.join(', ')}` : 'Recomputing what is stale', 'project.refresh', { names });
+	}
+
 	activate(geometry: string): Promise<boolean> {
 		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
 	}

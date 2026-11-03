@@ -296,6 +296,8 @@ export interface ProjectObject {
 	source?: DataSource;
 	/** False for an object imported without its units. */
 	units_defined?: boolean;
+	/** Why a derived object no longer matches its source; absent while it does. */
+	stale?: string;
 	groups: string[];
 	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
 	verbs?: string[];

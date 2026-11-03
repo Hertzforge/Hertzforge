@@ -294,6 +294,7 @@
         "records": {"type": "integer", "minimum": 0},
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
+        "stale": {"type": "string"},
         "groups": {"type": "array", "items": {"type": "string"}},
         "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
         "settings": {
