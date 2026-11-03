@@ -199,7 +199,10 @@ def test_a_verb_param_lists_the_objects_the_core_offers_the_verb_on():
 def test_the_summary_lists_each_objects_verbs_from_the_cores_table(plate):
     state = projects.OpenProject(plate)
     listed = {o['name']: o['verbs'] for o in projects.summary(state)['objects']}
-    assert listed['Time History'] == [verb for verb, _ in plate.verbs('Time History')]
+    # the plate's channel table is linked with its record, so it can be read
+    # against the table's ranges as well
+    assert listed['Time History'] == [verb for verb, _ in plate.verbs('Time History')] + [
+        'overload_check']
     assert 'compute_frfs' in listed['Time History']
     assert 'compute_frfs' not in listed['Channel Table']
 
