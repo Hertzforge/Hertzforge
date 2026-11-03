@@ -5,9 +5,22 @@
 #
 # Needs a "Developer ID Application" identity in a keychain (ci_signing.sh puts one
 # there on a runner; MACOS_SIGNING_IDENTITY names it, or the first one found is
-# used) and, to notarize, NOTARY_APPLE_ID, NOTARY_PASSWORD (an app-specific
-# password) and NOTARY_TEAM_ID. Without the notary values the app and image are
-# signed and not notarized, and the script says so.
+# used). To notarize, notarytool is told who we are the first way that answers:
+#
+# 1. NOTARY_APPLE_ID and NOTARY_PASSWORD (an app-specific password) from the
+#    environment, as the desktop workflow fills them from its secrets;
+# 2. a login-keychain item NOTARY_ITEM (default vd-notary-password) holding the
+#    app-specific password with the Apple ID as its account, the item Visual
+#    Dynamics' builds on the same developer's Mac already use; a script reads it
+#    with no prompt while the login keychain is unlocked;
+# 3. the notarytool profile NOTARY_PROFILE (default vd-notary), made once with
+#    `xcrun notarytool store-credentials`. It lives in the data-protection
+#    keychain, which macOS opens only to an unlocked user session, so from a
+#    script it can be unreachable for a while; VD learned that and keeps item 2.
+#
+# The team is NOTARY_TEAM_ID, or else the one the identity's name ends with.
+# Without credentials that answer, the app and image are signed and not
+# notarized, and the script says so.
 #
 # Adapted from the signing half of Visual Dynamics' packaging/build_macos.sh (MIT,
 # Brandon Zwink). What carries over, each learned there: sign inside out, every
@@ -17,8 +30,9 @@
 # and staple the app before the image is made, so a copied app opens offline; then
 # sign, notarize and staple the image.
 #
-# Not run yet: no Developer ID is configured for this project. It is the step the
-# desktop workflow runs when HERTZFORGE_SIGN_MACOS is "true" (docs/desktop-app.md).
+# Run on the developer's Mac after a build (first on November 3, 2026, notarized on
+# the first try), and the step the desktop workflow runs when HERTZFORGE_SIGN_MACOS
+# is "true", which it is not yet (docs/desktop-app.md).
 set -euo pipefail
 trap 'echo "sign_macos.sh: stopped at line $LINENO (exit $?)" >&2' ERR
 APP="${1:?usage: sign_macos.sh <app> <dmg>}"
@@ -42,13 +56,36 @@ codesign "${flags[@]}" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 echo "sign_macos.sh: signed as $SIGN"
 
+TEAM="${NOTARY_TEAM_ID:-$(sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p' <<<"$SIGN")}"
+NOTARY_ITEM="${NOTARY_ITEM:-vd-notary-password}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-vd-notary}"
+NOTARY=()
+if [[ -n ${NOTARY_APPLE_ID:-} && -n ${NOTARY_PASSWORD:-} ]]; then
+  NOTARY=(--apple-id "$NOTARY_APPLE_ID" --team-id "$TEAM" --password "$NOTARY_PASSWORD")
+  echo "sign_macos.sh: notarizing as the Apple ID in the environment"
+elif password=$(security find-generic-password -s "$NOTARY_ITEM" -w 2>/dev/null) && [[ -n $password ]]; then
+  account=$(security find-generic-password -s "$NOTARY_ITEM" 2>/dev/null |
+            sed -n 's/.*"acct"<blob>="\(.*\)"/\1/p')
+  NOTARY=(--apple-id "$account" --team-id "$TEAM" --password "$password")
+  echo "sign_macos.sh: notarizing with the login-keychain item $NOTARY_ITEM"
+else
+  NOTARY=(--keychain-profile "$NOTARY_PROFILE")
+fi
+
 notarize() {
-  if [[ -n ${NOTARY_APPLE_ID:-} && -n ${NOTARY_PASSWORD:-} && -n ${NOTARY_TEAM_ID:-} ]]; then
-    xcrun notarytool submit "$1" --apple-id "$NOTARY_APPLE_ID" \
-      --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait | tail -3
-    return 0
+  # asking for the submission history first is the one check that the
+  # credentials still answer, before minutes of uploading
+  xcrun notarytool history "${NOTARY[@]}" >/dev/null 2>&1 || return 1
+  local said id
+  said=$(xcrun notarytool submit "$1" "${NOTARY[@]}" --wait)
+  echo "$said" | tail -3
+  # --wait exits 0 whatever Apple decided: the status says, and Apple's log says why
+  if ! grep -q 'status: Accepted' <<<"$said"; then
+    id=$(sed -n 's/^ *id: //p' <<<"$said" | head -1)
+    [[ -n $id ]] && xcrun notarytool log "$id" "${NOTARY[@]}" >&2
+    echo "sign_macos.sh: Apple did not accept $(basename "$1")" >&2
+    exit 1
   fi
-  return 1
 }
 
 ZIP="$(dirname "$DMG")/notarize-$$.zip"
