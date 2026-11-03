@@ -633,6 +633,18 @@ class ProjectState {
 		return this.call('Starting a project', 'project.new', { title });
 	}
 
+	rename(name: string, to: string): Promise<boolean> {
+		return this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
+	}
+
+	remove(names: string[]): Promise<boolean> {
+		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
+	}
+
+	activate(geometry: string): Promise<boolean> {
+		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
+	}
+
 	private async call(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<boolean> {
 		this.busy = doing;
 		this.progress = null;

@@ -44,7 +44,8 @@ OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + SETTINGS_OPERATIONS)
 
 #: the requests on a connection's own project
-PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save')
+PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
+                   'project.rename', 'project.remove', 'project.activate')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -316,6 +317,15 @@ class Connection:
             self.project, added = await call(projects.import_file, self.project,
                                              params, report)
             return {'added': added, 'project': projects.summary(self.project)}
+        edits = {'project.rename': (projects.rename, ('name', 'to')),
+                 'project.remove': (projects.remove, ('names',)),
+                 'project.activate': (projects.activate, ('geometry',))}
+        if method in edits:
+            edit, keys = edits[method]
+            _only(params, keys, method)
+            await call(edit, self.project, params)
+            assert self.project is not None
+            return {'project': projects.summary(self.project)}
         _only(params, ('path', 'compress'), method)
         written = await call(projects.save, self.project, params)
         assert self.project is not None

@@ -117,3 +117,18 @@ def test_a_fit_runs_over_the_socket_and_ends_with_its_project(validate):
     assert published['project']['modified']
     assert 'needs a fit under way' in results[7]['error']['message']
     assert results[8]['result'] == {}
+
+
+def test_a_fit_ends_when_its_frf_leaves_the_project():
+    responses = asyncio.run(_exchange([
+        ('project.import', {'path': str(PLATE / 'frfs.unv')}),
+        ('fit.start', {'frf': 'FRF'}),
+        ('project.remove', {'names': ['FRF']}),
+        ('fit.find', {}),
+        ('fit.find', {}),
+    ]))
+    removed, gone, after = (got[-1] for got in responses[2:])
+    assert 'result' in removed
+    assert gone['error']['code'] == 'refused'
+    assert 'no longer in the project' in gone['error']['message']
+    assert 'needs a fit under way' in after['error']['message'], 'the fit ended'

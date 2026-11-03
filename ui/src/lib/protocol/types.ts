@@ -289,6 +289,8 @@ export interface ProjectSummary {
 	file: string | null;
 	modified: boolean;
 	objects: ProjectObject[];
+	/** The geometry data is drawn on when nothing else names one. */
+	active_geometry?: string | null;
 }
 
 /** A mode of a fit: confirmed, or the preview. */

@@ -279,6 +279,9 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `project.rename` | `{"name","to"}` | `{"project"}` |
+| `project.remove` | `{"names"}` | `{"project"}` |
+| `project.activate` | `{"geometry"}` | `{"project"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
@@ -289,8 +292,12 @@ import it. `project.import` adds a file's objects to the project, making an empt
 none is open. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
 project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
-and defaults it to "Project". Project requests on one connection run one at a time, in the order
-they arrive.
+and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
+group, provenance record and report block that names it follows; a name in use is refused.
+`project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
+none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
+nothing else names one. Each answers with the project. Project requests on one connection run one
+at a time, in the order they arrive.
 
 The project as the shell lists it:
 
@@ -307,7 +314,7 @@ The project as the shell lists it:
 `records` is present for data objects, `source` for measured data, and `units_defined` is false
 for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
 names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
-order. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
+order. `active_geometry` is the active geometry's name, or null. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
 `verb:` params are filled from. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
