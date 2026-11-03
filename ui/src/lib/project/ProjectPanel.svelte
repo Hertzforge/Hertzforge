@@ -8,6 +8,7 @@
 	import Icon from '$lib/shell/Icon.svelte';
 	import { formatCount } from '$lib/viz/format';
 	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
+	import UnitsEditor from './UnitsEditor.svelte';
 
 	interface Props {
 		app: AppState;
@@ -156,11 +157,16 @@
 						{:else}
 							<span class="oname">{o.name}</span>
 							{#if active}<span class="mark" title="Data is drawn on this geometry when nothing else names one">active</span>{/if}
-							{#if o.units_defined === false}<span class="badge" title="Imported without its units">units?</span>{/if}
+							{#if o.units_defined === false}
+								<button class="badge" data-testid="units-badge-{o.name}" title="Imported without its units: declare them" onclick={() => p.toggleUnits(o.name)}>units?</button>
+							{/if}
 							<span class="okind">{o.kind.replace(/_/g, ' ')}{o.records !== undefined ? `, ${formatCount(o.records)}` : ''}</span>
 							<span class="row-actions">
 								{#if o.kind === 'geometry' && !active}
 									<button class="link" data-testid="activate-{o.name}" title="Draw data on this geometry" onclick={() => p.activate(o.name)} disabled={p.busy !== null}>Make active</button>
+								{/if}
+								{#if o.units_defined !== undefined}
+									<button class="link" data-testid="units-{o.name}" onclick={() => p.toggleUnits(o.name)} disabled={p.busy !== null}>Units</button>
 								{/if}
 								<button class="link" data-testid="rename-{o.name}" onclick={() => startRename(o.name)} disabled={p.busy !== null}>Rename</button>
 								<button class="icon" data-testid="remove-{o.name}" title="Remove {o.name}" aria-label="Remove {o.name}" onclick={() => { renaming = null; confirming = o.name; }} disabled={p.busy !== null}>
@@ -171,6 +177,7 @@
 					</li>
 				{/each}
 			</ul>
+			{#if p.units}<UnitsEditor project={p} tables={p.units} />{/if}
 		{:else}
 			<p class="muted">Empty. Import a file, or drop one on the window in the desktop app.</p>
 		{/if}
@@ -368,6 +375,8 @@
 	}
 
 	.badge {
+		cursor: pointer;
+		background: none;
 		padding: 0 4px;
 		font-size: 10px;
 		color: var(--amber-2);

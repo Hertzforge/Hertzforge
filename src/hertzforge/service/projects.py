@@ -224,6 +224,28 @@ def remove(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     state.modified = True
 
 
+def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.units`: the tables an object's units are declared in
+    (`service.units.tables`)."""
+    from . import units as declared
+
+    state = _open(state, 'project.units')
+    return declared.tables(state.project, _name(params, 'name', 'project.units'))
+
+
+def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:
+    """`project.define_units`: units declared on an object by table and
+    row (`service.units.define`); the records converted."""
+    from . import units as declared
+
+    state = _open(state, 'project.define_units')
+    name = _name(params, 'name', 'project.define_units')
+    with state.project.journal_as(None):
+        converted = declared.define(state.project, name, params.get('units'))
+    state.modified = True
+    return converted
+
+
 def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.activate`: the geometry data is drawn on when nothing else
     names one."""

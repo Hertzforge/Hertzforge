@@ -293,6 +293,21 @@ export interface ProjectSummary {
 	active_geometry?: string | null;
 }
 
+/** One row of `project.units`: a channel, or the object itself, and its unit. */
+export interface UnitsRow {
+	key: string;
+	label: string;
+	quantity: string | null;
+	unit: string | null;
+	choices: string[];
+}
+
+/** `project.units`: the tables an object's units are declared in. */
+export interface UnitsTables {
+	name: string;
+	tables: { side: 'object' | 'channels' | 'response' | 'reference'; rows: UnitsRow[] }[];
+}
+
 /** `project.progress`: how far an import has read. */
 export interface ProjectProgress {
 	done: number;
