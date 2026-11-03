@@ -292,3 +292,31 @@ def test_a_set_is_projected_onto_another_sets_dofs(plate):
              n != 'Geometry Rigid Body Modes']
     assert added and plate[added[0]].num_shapes == 6
     assert view['view'] in ('shape3d', 'reading')
+def test_plot_draws_the_records_named_on_one_plot(plate, validate):
+    (view,) = run(plate, 'project.plot', data='Time History', records='1-3')
+    wire_views([view], validate)
+    assert view['view'] == 'spectrum' and view['title'] == 'Time History'
+    assert [s['name'] for s in view['series']] == [
+        plate['Time History'].record_label(i) for i in range(3)]
+    assert view['x']['label'] == 'Time' and view['y']['label'] == 'Acceleration'
+
+
+def test_plot_leaves_out_records_of_another_quantity_and_says_so(plate):
+    (view,) = run(plate, 'project.plot', data='Time History', records='1-13')
+    assert len(view['series']) == 11
+    assert view['title'] == 'Time History (2 of another quantity left out)'
+
+
+@pytest.mark.parametrize(('text', 'expected'), [('', list(range(8))), ('2', [1]),
+                                                ('1-3, 3, 7', [0, 1, 2, 6])])
+def test_records_are_named_from_one(text, expected):
+    from hertzforge.service.ops_project import chosen_records
+    assert chosen_records(text, 13) == expected
+
+
+@pytest.mark.parametrize('text', ['0', '14', '3-x', '5-2'])
+def test_records_outside_the_object_are_refused(text):
+    from hertzforge.service.ops_project import chosen_records
+    with pytest.raises(ProtocolError) as error:
+        chosen_records(text, 13)
+    assert error.value.code == 'refused'
