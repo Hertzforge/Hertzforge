@@ -304,7 +304,7 @@ def _field(field: str, label: str, value: Any, options: list[tuple[str, str]]
 
 
 def editor(project: Any, name: str, selected: int | None, theme: str | None,
-           page: bool = True) -> dict[str, Any]:
+           page: bool = True, units: Any = None) -> dict[str, Any]:
     """`report.editor`: the edit page with `selected` framed, the pane for
     it, and the labels a text block may reference (`{{figure:...}}`).
     Without `page` the pane alone, and no labels, since nothing was
@@ -319,7 +319,7 @@ def editor(project: Any, name: str, selected: int | None, theme: str | None,
     out['selected'] = selected
     if page:
         labels: list[tuple[str, str]] = []
-        out['html'] = render_html(report, dict(project), edit=True, channel_js=CHANNEL_JS,
+        out['html'] = render_html(report, dict(project), units, edit=True, channel_js=CHANNEL_JS,
                                   object_groups=project.object_groups, selected=selected,
                                   labels=labels, theme=theme)
         out['references'] = [[label, caption] for label, caption in labels]

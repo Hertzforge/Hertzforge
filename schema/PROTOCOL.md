@@ -314,7 +314,17 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.activate` | `{"geometry"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**Display units.** Every view the analysis service sends is drawn in its connection's unit
+system, as Visual Dynamics draws its window in the system its selector names. A connection starts
+in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
+edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
+report's page. A unit it does not recognize, a `shape3d`, a `matrix` and a `table` are sent as
+they are. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's

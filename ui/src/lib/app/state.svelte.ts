@@ -779,6 +779,58 @@ export class ReportState {
 	}
 }
 
+/** Where the chosen unit system is kept between launches. */
+const UNITS_KEY = 'hertzforge.units';
+
+/**
+ * The display unit system (`units.system`): every plot and reading the analysis service sends is
+ * in it, as Visual Dynamics' unit selector puts its window in one. Remembered between launches and
+ * told to the service each time it connects; a change draws the results on screen again.
+ */
+export class UnitsState {
+	name = $state<string | null>(null);
+	systems = $state<string[]>([]);
+
+	constructor(private readonly app: AppState) {}
+
+	private stored(): string | null {
+		try {
+			return localStorage.getItem(UNITS_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	/** The service connected: tell it the system chosen before, or learn its own. */
+	async sync(): Promise<void> {
+		const wanted = this.stored();
+		try {
+			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			this.systems = res.systems;
+			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
+				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				this.name = set.name;
+			} else this.name = res.name;
+		} catch {
+			// an older service without units: its own SI stands
+		}
+	}
+
+	async choose(name: string): Promise<void> {
+		if (name === this.name) return;
+		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		this.name = res.name;
+		try {
+			localStorage.setItem(UNITS_KEY, res.name);
+		} catch {
+			// not kept between launches; this session still uses it
+		}
+		// what is on screen was drawn in the old system: draw it again
+		for (const r of this.app.analyze.results) void this.app.analyze.rerun(r.id, {});
+		if (this.app.report.name) void this.app.report.show(this.app.report.name);
+	}
+}
+
 /**
  * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
  * or importing switches Analyze to it.
@@ -904,6 +956,7 @@ export class AppState {
 	readonly project: ProjectState;
 	readonly fit: FitState;
 	readonly report: ReportState;
+	readonly units: UnitsState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -924,6 +977,7 @@ export class AppState {
 		this.project = new ProjectState(this);
 		this.fit = new FitState(this);
 		this.report = new ReportState(this);
+		this.units = new UnitsState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
