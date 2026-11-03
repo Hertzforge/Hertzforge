@@ -323,8 +323,9 @@ in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, acceler
 `units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
-report's page. A unit it does not recognize, a `shape3d`, a `matrix` and a `table` are sent as
-they are. A view already on screen is not converted again; the shell draws it again.
+report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
+typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
+not recognize, a `shape3d` and a `matrix` are sent as they are. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's

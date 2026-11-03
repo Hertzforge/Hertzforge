@@ -73,3 +73,12 @@ def test_a_connection_starts_in_vds_system_and_chooses_another(validate):
     assert rms(si)['value'] == pytest.approx(rms(us)['value'] * G)
     assert si_set['result']['name'] == display_units.DEFAULT
     assert wrong['error']['code'] == 'bad_request'
+
+
+def test_a_tables_unit_columns_are_converted_but_not_the_ones_typed_into():
+    view = v.table('Nodes', ['Node', 'X [m]', 'Y [m]', 'Note [m]'],
+                   [['1', '0.0254', '0.0508', 'here']],
+                   v.editing('project.set_entity_cell', {}, ['id', None, 'y', None]))
+    (out,) = display_units.convert([view], US)
+    assert out['columns'] == ['Node', 'X [in]', 'Y [m]', 'Note [in]']
+    assert out['rows'][0] == ['1', '1', '0.0508', 'here']

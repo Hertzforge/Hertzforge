@@ -11,13 +11,16 @@ value * scale + offset) and labeled by it. Text the map does not hold, and
 anything without a unit, is left as it is.
 
 Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
-and regions; a `reading`'s rows; a `waterfall`'s axes and values. A
-`shape3d` is drawn as it is, its coordinates and shapes being a picture,
-and a `matrix` and a `table` carry their own words.
+and regions; a `reading`'s rows; a `waterfall`'s axes and values; a
+`table`'s columns headed "<name> [<SI unit>]", each number in them, except
+a column typed into (`edit`), which stays in SI so a value typed means what
+the operation reads. A `shape3d` is drawn as it is, its coordinates and
+shapes being a picture, and a `matrix` carries its own words.
 """
 
 from __future__ import annotations
 
+import re
 from functools import cache
 from typing import Any
 
@@ -114,6 +117,32 @@ def _axis(axis: dict, system: Any) -> tuple[float, float, str] | None:
     return change
 
 
+#: a table column's heading that states its unit: "X [m]"
+HEADING = re.compile(r'^(.*) \[(.+)\]$')
+
+
+def _cell(text: str, change: tuple[float, float, str]) -> str:
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return f'{float(_values(number, change)):.6g}'
+
+
+def _table(view: dict, system: Any) -> None:
+    edited = (view.get('edit') or {}).get('columns') or []
+    for k, heading in enumerate(view['columns']):
+        found = HEADING.match(heading)
+        if not found or (k < len(edited) and edited[k]):
+            continue
+        change = _change(found.group(2), system)
+        if change is None:
+            continue
+        view['columns'][k] = f'{found.group(1)} [{change[2]}]'
+        for row in view['rows']:
+            row[k] = _cell(row[k], change)
+
+
 def convert(views: list[dict], name: str) -> list[dict]:
     """`views` put into the system `name`, in place; returned for chaining.
     SI leaves them untouched."""
@@ -144,6 +173,8 @@ def convert(views: list[dict], name: str) -> list[dict]:
                 row['unit'] = change[2]
                 if isinstance(row['value'], float):
                     row['value'] = float(_values(row['value'], change))
+        elif kind == 'table':
+            _table(view, system)
         elif kind == 'waterfall':
             x = _axis(view['x'], system)
             z = _axis(view['z'], system)
