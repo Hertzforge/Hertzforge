@@ -78,11 +78,15 @@ hertzforge-capture  lib  tests::a_running_capture_flushes_and_syncs_on_the_caden
 hertzforge-capture  lib  tests::a_killed_capture_leaves_a_readable_provisional_sidecar
 hertzforge-capture  lib  tests::a_faulted_writer_keeps_counting_and_records_the_reason
 
-# The engine's real-time gates: the blanking window, the stall deadman, and the
-# 400-channel run under the default scheduling guard and a 30 s budget
+# The engine's real-time gates: the blanking window, the stall deadman, the
+# 400-channel run under the default scheduling guard and a 30 s budget, and the
+# 24-drive, 96-input run on a cross-coupled plant with a spectral-matrix step under
+# the default guard (release builds only: a debug build reports it ignored; run the
+# pass with `--release` to time it)
 hertzforge-engine  test:safety_gates  blanking_suppresses_a_trip_inside_the_window_and_arms_after_it
 hertzforge-engine  test:safety_gates  an_intermittent_but_delivering_stream_is_not_a_stall
 hertzforge-engine  test:scale_400ch  four_hundred_channels_run_clean_at_the_derived_block_and_ring
+hertzforge-engine  test:scale_mimo  mimo_24_drives_96_inputs_run_clean_on_a_modal_plant_with_a_matrix_step
 
 # A job that must still be running when the second start arrives, and a cancel
 # inside a real-time window
