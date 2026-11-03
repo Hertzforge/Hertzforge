@@ -302,3 +302,26 @@ def test_object_groups_are_linked_named_placed_and_given_the_basis(project, vali
         run(project, 'project.unlink', object='Specification')
     with pytest.raises(ProtocolError, match='not in an object group'):
         run(project, 'project.set_basis', object='Specification')
+
+
+def test_an_entity_table_is_edited_cell_by_cell(validate):
+    """The entity tables carry their edit; a cell typed over goes through
+    Set Entity for the entity on that row, and a bad value changes nothing."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'geometry.unv'),
+                                           'units': {'length_unit': 'mm'}})
+    project = state.project
+    ops = {op.id: op for op in OPERATIONS}
+    _drawn, table = ops['project.view_entities'].run(project, {'geometry': 'Geometry',
+                                                               'kind': 'nodes'})
+    validate(table, 'tableView')
+    assert table['edit']['op'] == 'project.set_entity_cell'
+    assert table['edit']['columns'][1] == 'x'
+    _drawn, after = ops['project.set_entity_cell'].run(project, {
+        'geometry': 'Geometry', 'kind': 'nodes', 'row': 1, 'column': 'x', 'value': '0.5'})
+    assert float(after['rows'][0][1]) == pytest.approx(0.5)
+    with pytest.raises(ProtocolError, match="'wide' is not a number"):
+        ops['project.set_entity_cell'].run(project, {
+            'geometry': 'Geometry', 'kind': 'nodes', 'row': 1, 'column': 'x', 'value': 'wide'})
+    with pytest.raises(ProtocolError, match='there is no row 99999'):
+        ops['project.set_entity_cell'].run(project, {
+            'geometry': 'Geometry', 'kind': 'nodes', 'row': 99999, 'column': 'x', 'value': '1'})

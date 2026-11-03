@@ -145,10 +145,12 @@ def _number(value: Any) -> str:
     return f'{float(value):.6g}'
 
 
-def entity_table(geometry: Any, kind: str, title: str) -> dict:
+def entity_table(geometry: Any, kind: str, title: str, name: str | None = None) -> dict:
     """One kind of a geometry's entities as Visual Dynamics' entity
     tables list them (`gui.object_tables.ENTITY_TABLES`), lengths in the
-    geometry's stored unit: meters once its units are declared."""
+    geometry's stored unit: meters once its units are declared. With the
+    geometry's `name`, its cells are typed into in place
+    (`project.set_entity_cell`), a column per field of `FIELDS`."""
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
     from hertzforge.rotate import angles_of
 
@@ -183,7 +185,9 @@ def entity_table(geometry: Any, kind: str, title: str) -> dict:
         rows = [[str(int(group)), geometry.group_name[k],
                  id_runs_text(np.asarray(geometry.elem_id)[elem_group == int(group)])]
                 for k, group in enumerate(geometry.group_id)]
-    return v.table(title, columns, rows)
+    edit = None if name is None else v.editing(
+        'project.set_entity_cell', {'geometry': name, 'kind': kind}, FIELDS[kind])
+    return v.table(title, columns, rows, edit)
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '') -> list[dict]:
@@ -193,7 +197,7 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '') -> list[dict]:
              'elements': 'Elements', 'groups': 'Element groups'}[kind]
     extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
     title = f'{words} of {name}' + (f': {said}' if said else '')
-    return [_drawn(name, geometry, *extra), entity_table(geometry, kind, title)]
+    return [_drawn(name, geometry, *extra), entity_table(geometry, kind, title, name)]
 
 
 # ---- View Entities and the edits ----------------------------------------------------
@@ -521,8 +525,26 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
         geometry.validate()
     except (ValueError, KeyError) as error:
         _restore(geometry, held)
-        raise refused(f'{LABELS[kind]} {entity}, {field}: {str(error).strip(chr(39))}') from None
+        said = str(error).strip(chr(39))
+        if said.startswith(('could not convert', 'invalid literal')):
+            said = f'{params["value"]!r} is not a number'
+        raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
     return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
+
+
+def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_entity_cell`: a cell of an entity table typed over in
+    place, by row (from 1) and column (a field of `FIELDS`): Set Entity
+    for the entity on that row."""
+    geometry = project[params['geometry']]
+    kind = params['kind']
+    ids = [int(i) for i in getattr(geometry, ID_ARRAYS[kind])]
+    if not 1 <= params['row'] <= len(ids):
+        raise refused(f'the {LABELS[kind]} table has {len(ids)} rows; there is no row '
+                      f'{params["row"]}')
+    return set_entity(project, {'geometry': params['geometry'], 'kind': kind,
+                                'entity': ids[params['row'] - 1], 'field': params['column'],
+                                'value': params['value']})
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
@@ -1272,4 +1294,13 @@ OPERATIONS = (
     _analyze('project.name_object_group', 'Name Object Group',
              'The group an object is in named, or its name removed.',
              (OBJECT, NEW_NAME), GROUPS, name_object_group),
+    Operation(
+        id='project.set_entity_cell', title='Set Entity Cell', workspace='model',
+        accepts='project',
+        summary='One cell of an entity table typed over in place, by row and column; the '
+                'tables edit through it.',
+        params=(GEOMETRY, KIND, Param('row', 'Row', 'integer', default=1, min=1, step=1),
+                Param('column', 'Column', 'string', default='id'),
+                Param('value', 'Value', 'string', default='')),
+        outputs=('shape3d', 'table'), run=set_entity_cell, edits=True),
 )

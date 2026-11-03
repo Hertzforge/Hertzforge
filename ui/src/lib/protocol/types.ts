@@ -250,6 +250,15 @@ export interface TableView {
 	columns: string[];
 	/** One cell per column, as text. */
 	rows: string[][];
+	/** Present when the cells are typed into: the operation that sets one, and each column's key (null: read only). */
+	edit?: TableEdit;
+}
+
+/** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
+export interface TableEdit {
+	op: string;
+	params: Record<string, unknown>;
+	columns: (string | null)[];
 }
 
 export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;

@@ -213,6 +213,7 @@
 										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
 										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
 										scope={String(r.id)}
+										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editCell(r.id, i, v.edit!, row, column, value) : undefined}
 									/>
 								</div>
 							{/each}

@@ -240,7 +240,15 @@
         "view": {"const": "table"},
         "title": {"type": "string"},
         "columns": {"type": "array", "items": {"type": "string"}},
-        "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+        "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "edit": {
+          "type": "object", "required": ["op", "params", "columns"], "additionalProperties": false,
+          "properties": {
+            "op": {"type": "string"},
+            "params": {"type": "object"},
+            "columns": {"type": "array", "items": {"type": ["string", "null"]}}
+          }
+        }
       }
     },
     "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},

@@ -234,6 +234,13 @@ shell draws the table with its headings held at the top as it scrolls, puts a ce
 a number at the right of its column, and copies the whole table as tab-separated text, the
 headings first, so it pastes into a spreadsheet.
 
+A table may carry `"edit":{"op","params","columns"}`: its cells are typed into in place. `columns`
+gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
+operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
+and the first `table` view of the answer takes the table's place; a value the operation refuses
+leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
+the block it covers, cell by cell, as Visual Dynamics' tables paste.
+
 ## Operations: Declarative Panels
 
 The analysis service describes each operation; the shell builds the panel from the description.

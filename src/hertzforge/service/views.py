@@ -209,13 +209,28 @@ def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
             'value_range': [float(value_range[0]), float(value_range[1])]}
 
 
-def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]]) -> dict[str, Any]:
+def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]],
+          edit: dict[str, Any] | None = None) -> dict[str, Any]:
     """A `table` view: rows of text under column headings, one cell per
-    column."""
+    column. With `edit` ({'op', 'params', 'columns'}, see `editing`) its
+    cells are typed into in place."""
     columns = [str(c) for c in columns]
     rows = [[str(cell) for cell in row] for row in rows]
     for row in rows:
         if len(row) != len(columns):
             raise ValueError(f'table {title!r}: a row of {len(row)} cells under '
                              f'{len(columns)} columns')
-    return {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}
+    out = {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}
+    if edit is not None:
+        if len(edit['columns']) != len(columns):
+            raise ValueError(f'table {title!r}: {len(edit["columns"])} edit keys for '
+                             f'{len(columns)} columns')
+        out['edit'] = edit
+    return out
+
+
+def editing(op: str, params: dict[str, Any], columns: Sequence[str | None]) -> dict[str, Any]:
+    """What makes a `table` view's cells editable: the operation that sets
+    one (taking `row` from 1, `column` and `value` beside `params`), and each
+    column's key, or None for a column that is read only."""
+    return {'op': op, 'params': dict(params), 'columns': list(columns)}

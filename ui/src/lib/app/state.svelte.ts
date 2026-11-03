@@ -28,6 +28,7 @@ import type {
 	Shape3DView,
 	SimProfile,
 	SimStateResult,
+	TableEdit,
 	View,
 	Workspace
 } from '$lib/protocol/types';
@@ -267,6 +268,30 @@ class AnalyzeState {
 		} catch (err) {
 			replace({ busy: false });
 			this.runError = message(err);
+		}
+	}
+
+	/**
+	 * Set one cell of a result's editable table (`TableEdit`): its operation runs, and the first table
+	 * it answers with takes that view's place. The refusal, when there is one, comes back as words.
+	 */
+	async editCell(id: number, viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			const table = res.views.find((v) => v.view === 'table');
+			if (table) {
+				this.results = this.results.map((r) =>
+					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
+				);
+			}
+			return null;
+		} catch (err) {
+			return message(err);
 		}
 	}
 
