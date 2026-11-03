@@ -316,6 +316,35 @@
       "type": "object", "additionalProperties": false,
       "properties": {"path": {"type": "string", "minLength": 1}, "compress": {"type": "boolean"}}
     },
+    "fitState": {
+      "type": "object", "required": ["frf", "shapes", "pending", "preview", "modes", "view"],
+      "properties": {
+        "frf": {"type": "string"},
+        "shapes": {"type": ["string", "null"]},
+        "pending": {
+          "type": "object", "required": ["frequency", "damping", "held"],
+          "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}, "held": {"type": "boolean"}}
+        },
+        "preview": {"oneOf": [{"type": "null"}, {
+          "type": "object", "required": ["frequency", "damping"],
+          "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}}
+        }]},
+        "modes": {"type": "array", "items": {
+          "type": "object", "required": ["frequency", "damping", "description"],
+          "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}, "description": {"type": "string"}}
+        }},
+        "view": {"$ref": "#/$defs/spectrumView"}
+      }
+    },
+    "fitResult": {
+      "type": "object", "required": ["fit"],
+      "properties": {"fit": {"$ref": "#/$defs/fitState"}}
+    },
+    "fitPublishResult": {
+      "type": "object", "required": ["name", "project", "fit"],
+      "properties": {"name": {"type": "string"}, "project": {"$ref": "#/$defs/project"},
+                     "fit": {"$ref": "#/$defs/fitState"}}
+    },
     "projectRenameParams": {
       "type": "object", "required": ["name", "to"], "additionalProperties": false,
       "properties": {"name": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
