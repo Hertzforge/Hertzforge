@@ -908,6 +908,7 @@ def wavelet(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- the shock windows ------------------------------------------------------------------------
 
 SHOCK = Param('shock', 'Shock, one past the last adds one', 'integer', default=1, min=1, step=1)
+SHOWN = Param('record', 'Record shown', 'integer', default=1, min=1, step=1)
 START = Param('start', 'Start', 'number', default=0.0, unit='s', step=0.001)
 STOP = Param('stop', 'Stop', 'number', default=0.1, unit='s', step=0.001)
 
@@ -923,6 +924,40 @@ def _shocks_reading(name: str, history: Any) -> dict:
                       f'{covered:.3f} s of record analyzed. One spectrum per channel per '
                       'shock.' if shocks else 'No shocks marked.', None, 'info'))
     return v.reading(f'Shocks on {name}', rows)
+
+
+def _shock_views(name: str, history: Any, params: dict[str, Any]) -> list[dict]:
+    """The shock windows where they can be dragged, as Visual Dynamics shows
+    them on the record and on its 3-D stage: one record with each window a
+    span (`ops_settings._trace`), the whole history on the stage with the
+    same spans (`waterfalls.waterfall_view`), and the windows read. Dragging
+    a window's middle slides it and an edge moves that edge, through Shock
+    Window; a record a file cut into captures has its events settled, and
+    its windows are shown but not dragged."""
+    from .ops_settings import _trace
+    from .waterfalls import waterfall_view
+
+    record = _record(history, params.get('record', 1), name)
+    origin = float(history.abscissa[0])
+    settled = history.split_into_frames
+    regions = [v.region(origin + shock.start, origin + shock.stop, 'span', f'Shock {k + 1}',
+                        None if settled else v.dragging(
+                            'project.set_shock', {'history': name, 'shock': k + 1,
+                                                  'record': record + 1}, 'start', 'stop'))
+               for k, shock in enumerate(history.shocks or ())]
+    stage = waterfall_view(name, history)
+    stage.pop('quantities', None)
+    stage.pop('quantity', None)
+    if regions:
+        stage['regions'] = regions
+    return [_trace(history, name, record, regions), stage, _shocks_reading(name, history)]
+
+
+def shocks(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.shocks`: a time history's shock windows on one record and on
+    its stage, each dragged to move it (`_shock_views`)."""
+    name = params['history']
+    return _shock_views(name, project[name], params)
 
 
 def _store_shocks(history: Any, shocks: tuple, rate: float) -> None:
@@ -975,7 +1010,7 @@ def set_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         edited = tuple(sorted((*shocks, moved), key=lambda shock: shock.start))
         index = edited.index(moved)
     _store_shocks(history, held_apart(edited, moved=index), rate)
-    return [_shocks_reading(name, history)]
+    return _shock_views(name, history, params)
 
 
 REMOVED = Param('shock', 'Shock', 'integer', default=1, min=1, step=1)
@@ -992,7 +1027,7 @@ def remove_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} has {len(shocks)} shock{"s" * (len(shocks) != 1)}; there is '
                       f'no shock {number}')
     history.shocks = tuple(shock for k, shock in enumerate(shocks) if k != number - 1)
-    return [_shocks_reading(name, history)]
+    return _shock_views(name, history, params)
 
 
 OPERATIONS = (
@@ -1076,11 +1111,17 @@ OPERATIONS = (
         id='project.set_shock', title='Shock Window', workspace='analyze', accepts='project',
         summary='One shock window typed by its start and stop on the record\'s clock, held '
                 'off its neighbors; one past the last adds a window.',
-        params=(HISTORY, SHOCK, START, STOP), outputs=('reading',), run=set_shock,
-        edits=True),
+        params=(HISTORY, SHOCK, START, STOP, SHOWN),
+        outputs=('spectrum', 'waterfall', 'reading'), run=set_shock, edits=True),
     Operation(
         id='project.remove_shock', title='Remove Shock', workspace='analyze',
         accepts='project',
         summary='One shock window dropped from a time history.',
-        params=(HISTORY, REMOVED), outputs=('reading',), run=remove_shock, edits=True),
+        params=(HISTORY, REMOVED, SHOWN), outputs=('spectrum', 'waterfall', 'reading'),
+        run=remove_shock, edits=True),
+    Operation(
+        id='project.shocks', title='Shocks', workspace='analyze', accepts='project',
+        summary='A time history\'s shock windows on one record and on its 3-D stage; drag a '
+                'window to move it, or an edge to change it.',
+        params=(HISTORY, SHOWN), outputs=('spectrum', 'waterfall', 'reading'), run=shocks),
 )

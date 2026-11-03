@@ -264,3 +264,44 @@ export function wallTriangles(wall: ArrayLike<number>, map: StageMap, out: numbe
 	}
 	return out;
 }
+
+/** The value at a place on an axis span, `fraction`'s inverse. */
+export function unfraction(t: number, range: [number, number], log: boolean): number {
+	if (log) {
+		const a = Math.log10(range[0]);
+		const b = Math.log10(range[1]);
+		return 10 ** (a + t * (b - a));
+	}
+	return range[0] + t * (range[1] - range[0]);
+}
+
+/**
+ * Where a ray (`origin` + t `direction`, in stage coordinates) meets the stage: the floor, or the
+ * back wall when the view looks along the floor. The point, or null when it meets neither in front
+ * of the camera.
+ */
+export function onStage(origin: [number, number, number], direction: [number, number, number]): [number, number, number] | null {
+	const [ox, oy, oz] = origin;
+	const [dx, dy, dz] = direction;
+	const floor = Math.abs(dz) > 0.15 * Math.hypot(dx, dy, dz);
+	const t = floor ? -oz / dz : dy !== 0 ? (STAGE.y - oy) / dy : -1;
+	if (!(t > 0) || !Number.isFinite(t)) return null;
+	return [ox + t * dx, oy + t * dy, oz + t * dz];
+}
+
+/**
+ * A region's marks on the stage: its floor and back wall shaded as triangles, and its two edges as
+ * lines on both, between stage x `a` and `b`.
+ */
+export function regionMarks(a: number, b: number): { faces: number[]; edges: number[] } {
+	const { y: Y, z: Z } = STAGE;
+	const lo = Math.max(0, Math.min(STAGE.x, Math.min(a, b)));
+	const hi = Math.max(0, Math.min(STAGE.x, Math.max(a, b)));
+	const faces: number[] = [];
+	const edges: number[] = [];
+	if (hi <= lo) return { faces, edges };
+	faces.push(lo, 0, 0, hi, 0, 0, hi, Y, 0, lo, 0, 0, hi, Y, 0, lo, Y, 0);
+	faces.push(lo, Y, 0, hi, Y, 0, hi, Y, Z, lo, Y, 0, hi, Y, Z, lo, Y, Z);
+	for (const x of [lo, hi]) edges.push(x, 0, 0, x, Y, 0, x, Y, 0, x, Y, Z);
+	return { faces, edges };
+}

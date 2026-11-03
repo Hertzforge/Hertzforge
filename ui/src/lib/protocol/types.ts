@@ -266,6 +266,8 @@ export interface WaterfallView {
 	walls?: Float32Array[];
 	/** The records are one surface, each on the same abscissa. */
 	surface?: boolean;
+	/** Spans of the abscissa across the whole stage, dragged as a spectrum's regions are. */
+	regions?: Region[];
 }
 
 export interface StageZone {

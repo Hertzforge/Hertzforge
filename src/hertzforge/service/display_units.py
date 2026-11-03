@@ -204,6 +204,10 @@ def convert(views: list[dict], name: str) -> list[dict]:
             if x is not None:
                 view['x_values'] = _values(view['x_values'], x)
                 view['x_range'] = [float(_values(v, x)) for v in view['x_range']]
+            if x is not None:
+                for region in view.get('regions', []):
+                    region['x0'] = float(_values(region['x0'], x))
+                    region['x1'] = float(_values(region['x1'], x))
             if z is not None:
                 view['z_values'] = _values(view['z_values'], z)
                 if 'z_range' in view:
