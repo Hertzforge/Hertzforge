@@ -76,13 +76,20 @@ kit. Services never send pixels and the shell never computes the numbers.
  "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
             "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
- "link":"frequency"}
+ "link":"frequency",
+ "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}]}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
 dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
 ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
+
+`regions` (optional) shade spans of x behind the curves, as Visual Dynamics draws a time
+history's settings on it: a `frame` is one frame its spectra are averaged from (frames that
+overlap shade darker where they do), and a `cut` is a span left out, such as the ends a truncation
+discards. `label` is said when the span is hovered. They are not listed in the legend; the
+result's reading says what they are.
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
 a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
@@ -256,7 +263,9 @@ An `enum` that names an object a core verb takes sets `"options_from":"verb:<ver
 `verb:integrate`; the shell fills it with the objects whose `verbs` (in the project summary) list
 that verb. Which verb applies to what is the core's own table (`Project.verbs`): Integrate takes a
 time history whose channels are accelerations or velocities, Compute FRFs one whose channels have
-both a response and a reference side, and so on, which no list of kinds can say. Left out, it
+both a response and a reference side, and so on, which no list of kinds can say. One more is
+listed beside the core's: `overload_check`, for a time history a linked channel table describes,
+which the Overload reading reads against that table's ranges. Left out, it
 takes the first of them, and an operation run when no object takes the verb is refused.
 
 A param with `"setting":"<group>.<field>"` opens on that setting of the object the operation's
@@ -346,8 +355,9 @@ order. `active_geometry` is the active geometry's name, or null. `unresolved`, p
 there are any, lists the objects the project holds by reference to another `.hforge` file that
 was `not found` or has `changed` since: each with its `name`, `kind` and the `path` it was looked
 for at. They are not loaded and no tool lists them; saving keeps their references, and
-`project.remove` drops one. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
-`verb:` params are filled from. `settings` is a time history's analysis settings, each group
+`project.remove` drops one. `verbs` are the core's processing verbs that apply to the object, in the core's order, then
+`overload_check` where a linked channel table describes a time history; `verb:` params are
+filled from them. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
 has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,

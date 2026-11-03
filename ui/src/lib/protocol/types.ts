@@ -117,6 +117,17 @@ export interface SpectrumView {
 	y: Axis;
 	series: Series[];
 	link?: string;
+	/** Spans of x shaded behind the curves: frames averaged from, or spans cut away. */
+	regions?: Region[];
+}
+
+/** A span of x shaded behind a spectrum's curves. */
+export interface Region {
+	x0: number;
+	x1: number;
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out. */
+	kind: 'frame' | 'cut';
+	label?: string;
 }
 
 export type Status = 'pass' | 'warn' | 'fail' | 'info';
