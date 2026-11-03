@@ -66,6 +66,15 @@ use hertzforge_hal_ni::{NiBackend, NiError};
 use hertzforge_module_abi::StationClass;
 use serde::{Deserialize, Serialize};
 
+/// The standard cross-coupled plants a HERTZFORGE-SIM station can simulate, by name
+/// (`modal-4x4`, `modal-12x6`, `modal-12x6-ill`, `modal-24x24`, `modal-72x24`,
+/// `rigid-plate-12x6`; [`SimStandardPlant::from_name`] reads one). Plain names: the
+/// plants themselves are built here, by the factory.
+pub use hertzforge_hal_sim::plants::StandardPlant as SimStandardPlant;
+/// An FRF stack (`lines x inputs x drives`, complex, row-major per line), for
+/// [`SimPlant::Frf`].
+pub use hertzforge_sdm::MatrixStack;
+
 /// Which registry row a station selection names.
 ///
 /// Moved here from `ui/src-tauri/src/hardware.rs` for one reason: it is the
@@ -230,6 +239,30 @@ pub struct SimPlantSpec {
     /// default is the conservative `false` (never claim a clock you have
     /// not proven), and a caller must make the claim deliberately.
     pub shared_clock: bool,
+    /// Which plant: the resonator bank above (the default), a standard
+    /// cross-coupled modal plant, or a plant that plays a given FRF matrix.
+    pub plant: SimPlant,
+}
+
+/// Which plant a HERTZFORGE-SIM station simulates.
+///
+/// `noise_level`, `seed`, `sample_rate_hz`, `transport_delay_samples` and the clock
+/// claim of the [`SimPlantSpec`] apply to every choice; `resonances` and `feedthrough`
+/// describe the resonator bank only. A sized plant (modal or FRF) raises the station's
+/// advertised channel maxima to its own size, and its `configure` refuses a table of
+/// any other size (its measurement rows, Control and Monitor, are the plant's inputs;
+/// its Drive rows are the plant's drives).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum SimPlant {
+    /// The single-path resonator bank of the spec's `resonances` and `feedthrough`:
+    /// every module's plant, driven by the first drive row.
+    #[default]
+    Resonators,
+    /// A standard cross-coupled modal plant: every drive reaches every input.
+    Modal(SimStandardPlant),
+    /// A plant that plays this FRF matrix (line `k` at `k * df_hz`), measured or
+    /// computed, by block convolution.
+    Frf { stack: MatrixStack, df_hz: f64 },
 }
 
 impl Default for SimPlantSpec {
@@ -256,6 +289,7 @@ impl Default for SimPlantSpec {
             max_input_channels: 8,
             max_output_channels: 2,
             shared_clock: false,
+            plant: SimPlant::Resonators,
         }
     }
 }
@@ -625,7 +659,7 @@ impl Backend for TrackedBackend {
 /// The HERTZFORGE-SIM station. Infallible: a software plant has nothing to fail at
 /// construction, and its `configure` is where a bad table is caught.
 fn build_sim(plant: &SimPlantSpec) -> StationBackend {
-    let backend = hertzforge_hal_sim::SimConfig::new()
+    let mut cfg = hertzforge_hal_sim::SimConfig::new()
         .sample_rate_hz(plant.sample_rate_hz)
         .resonances(plant.resonances.clone())
         .noise_level(plant.noise_level)
@@ -634,8 +668,23 @@ fn build_sim(plant: &SimPlantSpec) -> StationBackend {
         .shared_clock(plant.shared_clock)
         .seed(plant.seed)
         .max_input_channels(plant.max_input_channels.max(1))
-        .max_output_channels(plant.max_output_channels.max(1))
-        .build();
+        .max_output_channels(plant.max_output_channels.max(1));
+    // A sized plant goes on last: `plant` raises the maxima set above to its own size.
+    // A stack the plant cannot play is refused at `configure`, with the reason, like
+    // any other bad table.
+    let sized = match &plant.plant {
+        SimPlant::Resonators => None,
+        SimPlant::Modal(p) => Some(p.build().model),
+        SimPlant::Frf { stack, df_hz } => Some(hertzforge_hal_sim::PlantModel::Frf(
+            hertzforge_hal_sim::FrfPlant::new(stack.clone(), *df_hz),
+        )),
+    };
+    if let Some(model) = sized {
+        cfg = cfg
+            .plant(model)
+            .transport_delay_samples(plant.transport_delay_samples);
+    }
+    let backend = cfg.build();
     StationBackend {
         backend: TrackedBackend::wrap(Box::new(backend)),
         station: StationClass::HertzforgeSim,
@@ -1002,6 +1051,90 @@ mod tests {
         assert_eq!(caps.max_output_channels, 2);
         assert_eq!(caps.sample_rate_hz, 51_200.0);
         assert_eq!(caps.clock, hertzforge_hal::ClockDomain::Shared);
+    }
+
+    /// A Sim station's plant choice reaches the backend: a standard modal plant by name
+    /// sizes the station to itself, cross-couples every drive into every input through
+    /// the station's own `Backend`, and refuses a table of another size; an FRF stack
+    /// plays at its size.
+    ///
+    /// RED-MUTATION: drop the `SimPlant::Modal` arm from `build_sim` (map it to `None`)
+    /// and the station is the single-path bank: the caps stay at 8 by 2 and the 12 by 6
+    /// table is refused for its six drives.
+    #[test]
+    fn the_sim_plant_choice_reaches_the_backend() {
+        use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
+        let table = |n_in: usize, n_d: usize| {
+            let mut t = ChannelTable::new();
+            for k in 0..n_in + n_d {
+                let mut c = Channel::new(k as u32 + 1);
+                c.role = if k < n_in {
+                    ChannelRole::Control
+                } else {
+                    ChannelRole::Drive
+                };
+                c.range_max = 1e9;
+                t.channels.push(c);
+            }
+            t
+        };
+        let fs = 8192.0;
+        let plant = SimStandardPlant::from_name("modal-12x6").expect("a standard plant");
+        let spec = StationSpec {
+            sim: SimPlantSpec {
+                sample_rate_hz: fs,
+                shared_clock: true,
+                noise_level: 0.0,
+                plant: SimPlant::Modal(plant),
+                ..SimPlantSpec::default()
+            },
+            ..StationSpec::default()
+        };
+        let mut st = try_build_station_backend(BackendKind::Sim, &spec).expect("builds");
+        let caps = st.backend.caps();
+        assert_eq!((caps.max_input_channels, caps.max_output_channels), (12, 6));
+        let acq = hertzforge_hal::AcquisitionConfig::new(fs, 64);
+        st.backend.open().unwrap();
+        assert!(
+            st.backend.configure(&table(4, 4), &acq).is_err(),
+            "a 4 by 4 table on the 12 by 6 plant"
+        );
+        st.backend.configure(&table(12, 6), &acq).expect("12 by 6");
+        st.backend.arm().unwrap();
+        st.backend.start().unwrap();
+        // Drive only the LAST drive; every input moves.
+        let mut energy = [0.0f64; 12];
+        let mut buf = [0.0f32; 12];
+        for s in 0..4096 {
+            let x = (std::f64::consts::TAU * 97.0 * s as f64 / fs).sin() as f32;
+            st.backend
+                .write_drive(&[0.0, 0.0, 0.0, 0.0, 0.0, x])
+                .unwrap();
+            st.backend.read_input(&mut buf).unwrap();
+            for (e, v) in energy.iter_mut().zip(&buf) {
+                *e += (*v as f64).powi(2);
+            }
+        }
+        assert!(
+            energy.iter().all(|&e| e > 1e-3),
+            "every input sees the last drive: {energy:?}"
+        );
+
+        // An FRF stack plays at its own size.
+        let stack = plant.build().model.analytic_frf(2049, 2.0, fs);
+        let spec = StationSpec {
+            sim: SimPlantSpec {
+                sample_rate_hz: fs,
+                plant: SimPlant::Frf { stack, df_hz: 2.0 },
+                ..SimPlantSpec::default()
+            },
+            ..StationSpec::default()
+        };
+        let mut st = try_build_station_backend(BackendKind::Sim, &spec).expect("builds");
+        st.backend.open().unwrap();
+        st.backend
+            .configure(&table(12, 6), &acq)
+            .expect("the stack is 12 by 6");
     }
 
     /// The counting wrapper every station is handed out in forwards the trait's
