@@ -333,7 +333,8 @@
           "type": "object", "required": ["frequency", "damping", "description"],
           "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}, "description": {"type": "string"}}
         }},
-        "view": {"$ref": "#/$defs/spectrumView"}
+        "view": {"$ref": "#/$defs/spectrumView"},
+        "mac": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/matrixView"}]}
       }
     },
     "fitResult": {

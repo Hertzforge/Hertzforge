@@ -9,6 +9,7 @@
 	import type { FitState } from '$lib/app/state.svelte';
 	import { formatFixed } from '$lib/viz/format';
 	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
+	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
 	interface Props {
 		fit: FitState;
@@ -68,6 +69,10 @@
 				onRange={(low, high) => (fit.range = [low, high])}
 			/>
 		</div>
+
+		{#if s.mac}
+			<div class="mac" data-testid="fit-mac"><ViewRenderer view={s.mac} /></div>
+		{/if}
 
 		<table class="modes" data-testid="fit-modes" aria-label="Confirmed modes">
 			<thead><tr><th>Mode</th><th>Frequency (Hz)</th><th>Damping (%)</th><th>Description</th></tr></thead>
@@ -140,8 +145,15 @@
 		min-width: 10em;
 	}
 
-	.plot {
-		min-height: 320px;
+	/* a scrolling column: each part keeps its own height rather than shrinking under the next */
+	.fit > :global(*) {
+		flex-shrink: 0;
+	}
+
+	/* the pane fills its box: the rotated mode labels need room under the cells */
+	.mac {
+		max-width: 460px;
+		height: 360px;
 	}
 
 	.modes {

@@ -310,6 +310,8 @@ export interface FitStateView {
 	preview: FitMode | null;
 	modes: FitMode[];
 	view: SpectrumView;
+	/** The confirmed modes' auto-MAC, the preview last; null for fewer than two. */
+	mac?: MatrixView | null;
 }
 
 /** `project.progress`: how far an import has read. */
