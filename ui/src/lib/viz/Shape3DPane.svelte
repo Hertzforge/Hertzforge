@@ -79,6 +79,43 @@
 	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
 	const AMP_FULL_SCALE = 0.15;
 
+	/** How long Record records: three cycles of a mode, or that long of a motion. */
+	const RECORD_S = 3 * CYCLE_S;
+	let recording = $state(false);
+
+	/**
+	 * The animation recorded from the view as it plays and saved as a video, as Visual Dynamics saves
+	 * an animation: MP4 where the web view can write it (Safari's can), WebM otherwise. The
+	 * background is painted in for the recording, since the view is drawn on a clear one.
+	 */
+	async function record() {
+		const drawer = renderer;
+		if (!drawer || recording || typeof MediaRecorder === 'undefined') return;
+		const type = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+		if (!type) return;
+		recording = true;
+		playing = true;
+		const before = drawer.getClearAlpha();
+		drawer.setClearColor(plotBackground(drawer.domElement), 1);
+		const stream = drawer.domElement.captureStream(30);
+		const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8_000_000 });
+		const pieces: Blob[] = [];
+		recorder.ondataavailable = (e) => e.data.size && pieces.push(e.data);
+		const done = new Promise<void>((resolve) => (recorder.onstop = () => resolve()));
+		recorder.start();
+		await new Promise((r) => setTimeout(r, RECORD_S * 1000));
+		recorder.stop();
+		await done;
+		stream.getTracks().forEach((t) => t.stop());
+		drawer.setClearAlpha(before);
+		recording = false;
+		const link = document.createElement('a');
+		link.href = URL.createObjectURL(new Blob(pieces, { type }));
+		link.download = `${view.title.replace(/[^\w .-]+/g, '_').slice(0, 80) || 'animation'}.${type.startsWith('video/mp4') ? 'mp4' : 'webm'}`;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+	}
+
 	let host: HTMLDivElement;
 	let canvasHost: HTMLDivElement;
 	let triad: SVGSVGElement;
@@ -637,7 +674,9 @@
 				Ghost
 			</button>
 			{/if}
-<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
+{#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
+				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
+			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 			<button class="btn icon sm" data-testid="shape3d-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
 				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
