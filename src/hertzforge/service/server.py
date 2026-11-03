@@ -8,7 +8,8 @@ dataset, running an operation, framing a large result) runs in a worker
 thread so the event loop stays responsive.
 
 Datasets are opened once per process and shared; a handle belongs to the
-connection that opened it and ends with it.
+connection that opened it and ends with it. Each connection also has at
+most one project of its own (`project.*`), which ends with it.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import frames
+from . import frames, projects
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
@@ -38,6 +39,9 @@ log = logging.getLogger('hertzforge.service')
 
 OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + MODAL_RUN_OPERATIONS)
+
+#: the requests on a connection's own project
+PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -223,22 +227,87 @@ def _only(params: Any, allowed: Sequence[str], method: str) -> None:
                           f'it has no {", ".join(map(repr, extra))}')
 
 
+#: the shortest gap between two `project.progress` events of one file
+PROGRESS_INTERVAL_S = 0.1
+
+
 class Connection:
-    """One client: its handles, its requests in flight, and the lock that
-    keeps its frames whole."""
+    """One client: its handles, its project, its requests in flight, and
+    the lock that keeps its frames whole."""
 
     def __init__(self, service: Service, socket: ServerConnection) -> None:
         self.service: Service = service
         self.socket: ServerConnection = socket
         self.handles: dict[str, Handle] = {}
+        self.project: projects.OpenProject | None = None
+        #: one project request at a time: two imports must not add to one
+        #: project at once, and a save must not write one half-imported
+        self.project_lock: asyncio.Lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
         self.sending: asyncio.Lock = asyncio.Lock()
+        self._seq = itertools.count(1)
 
     async def send(self, frame: str | bytes) -> None:
         """Send one frame, under the lock, so concurrent responses never
         interleave on the socket."""
         async with self.sending:
             await self.socket.send(frame)
+
+    async def event(self, topic: str, data: dict[str, Any]) -> None:
+        """Send one event on `topic`, numbered in this connection's order."""
+        try:
+            await self.send(frames.encode_text(
+                {'type': 'event', 'topic': topic, 'seq': next(self._seq),
+                 'data': data}))
+        except ConnectionClosed:
+            pass
+
+    def progress(self, path: str) -> Callable[[int, int], None]:
+        """A (done, total) callable for a reader on a worker thread that
+        sends `project.progress` events, at most one per
+        PROGRESS_INTERVAL_S and always the last."""
+        loop = asyncio.get_running_loop()
+        last = [-PROGRESS_INTERVAL_S]
+
+        def report(done: int, total: int) -> None:
+            now = time.monotonic()
+            if now - last[0] < PROGRESS_INTERVAL_S and done < total:
+                return
+            last[0] = now
+            data = {'done': int(done), 'total': int(total), 'path': path}
+            asyncio.run_coroutine_threadsafe(
+                self.event('project.progress', data), loop)
+        return report
+
+    async def project_request(self, method: str,
+                              params: Any) -> dict[str, Any]:
+        """Answer one `project.*` request on this connection's project, after
+        any still running."""
+        async with self.project_lock:
+            return await self._project_request(method, params)
+
+    async def _project_request(self, method: str,
+                               params: Any) -> dict[str, Any]:
+        call = self.service.in_worker
+        if method == 'project.new':
+            _only(params, ('title',), method)
+            self.project = await call(projects.new, params)
+            return {'project': projects.summary(self.project)}
+        if method == 'project.open':
+            _only(params, ('path',), method)
+            self.project = await call(projects.open_file, params)
+            return {'project': projects.summary(self.project)}
+        if method == 'project.import':
+            _only(params, ('path', 'units'), method)
+            path = params.get('path')
+            report = self.progress(path) if isinstance(path, str) else None
+            self.project, added = await call(projects.import_file, self.project,
+                                             params, report)
+            return {'added': added, 'project': projects.summary(self.project)}
+        _only(params, ('path', 'compress'), method)
+        written = await call(projects.save, self.project, params)
+        assert self.project is not None
+        return {'path': written, 'project': projects.summary(self.project)}
 
     async def serve(self) -> None:
         """Send `hello`, then answer each request in its own task until the
@@ -292,11 +361,16 @@ class Connection:
                 frame = await self.service.in_worker(
                     frames.pack, {'type': 'response', 'id': ident,
                                   'result': result})
+            elif method in PROJECT_METHODS:
+                result = await self.project_request(method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             else:
                 raise ProtocolError(
                     'unknown_method',
                     f'The analysis service has no method {method!r}; it '
-                    'answers catalog.list, dataset.open and op.run.')
+                    'answers catalog.list, dataset.open, op.run and '
+                    f'{", ".join(PROJECT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)
         except asyncio.CancelledError:
