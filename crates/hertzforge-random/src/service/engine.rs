@@ -753,6 +753,25 @@ impl PlantLoop {
         cfg: &mut LoopConfig,
         table: ChannelTable,
     ) -> Result<Self, String> {
+        // Single-output Random drives ONE output: `PlaybackStep` emits one drive
+        // sample per frame, while the engine below is sized for every enabled
+        // Drive row. Two rows would spread one stream across both outputs and
+        // drop half the frames with nothing to say so. Refused here, before any
+        // device is opened, until the drive path is generalized for
+        // multiple-output control (which has its own test type).
+        let drive_rows = table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .count();
+        if drive_rows > 1 {
+            return Err(format!(
+                "arm refused: this test type drives one output, and the channel table \
+                 enables {drive_rows} drive rows; disable all but one, or choose a \
+                 multiple-output test type"
+            ));
+        }
+
         let mut backend = backend;
         backend.open().map_err(|e| format!("open: {e:?}"))?;
 
