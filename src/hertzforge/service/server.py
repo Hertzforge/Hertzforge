@@ -27,7 +27,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import frames, projects
+from . import fitting, frames, projects
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
@@ -251,6 +251,8 @@ class Connection:
         #: one project request at a time: two imports must not add to one
         #: project at once, and a save must not write one half-imported
         self.project_lock: asyncio.Lock = asyncio.Lock()
+        #: the mode fit under way on the project (`fit.*`), or None
+        self.fit: fitting.Fit | None = None
         self.tasks: set[asyncio.Task] = set()
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
@@ -300,10 +302,12 @@ class Connection:
         if method == 'project.new':
             _only(params, ('title',), method)
             self.project = await call(projects.new, params)
+            self.fit = None
             return {'project': projects.summary(self.project)}
         if method == 'project.open':
             _only(params, ('path',), method)
             self.project = await call(projects.open_file, params)
+            self.fit = None
             return {'project': projects.summary(self.project)}
         if method == 'project.import':
             _only(params, ('path', 'units'), method)
@@ -341,6 +345,44 @@ class Connection:
             if op.edits or list(project) != before:
                 state.modified = True
             return {'views': views, 'project': projects.summary(state)}
+
+    async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
+        """Answer one `fit.*` request: a step of the mode fit on this
+        connection's project, and the fit's state after it."""
+        if not isinstance(params, Mapping):
+            raise bad_request(f'{method} "params" must be an object, not '
+                              f'{json_type(params)}')
+        call = self.service.in_worker
+        async with self.project_lock:
+            if self.project is None:
+                raise refused(f'{method} works on a project, and none is open')
+            project = self.project.project
+            if method == 'fit.start':
+                _only(params, ('frf', 'shapes'), method)
+                self.fit = await call(fitting.start, project, params)
+                return {'fit': await call(fitting.state, self.fit)}
+            if method == 'fit.end':
+                _only(params, (), method)
+                self.fit = None
+                return {}
+            fit = self.fit
+            if fit is None:
+                raise refused(f'{method} needs a fit under way; fit.start begins one')
+            if fit.frf not in project:
+                self.fit = None
+                raise refused(f'{fit.frf}, the FRF being fitted, is no longer in the '
+                              'project; start the fit again')
+            if method == 'fit.publish':
+                _only(params, ('name',), method)
+                name = await call(fitting.publish, project, fit, params)
+                self.project.modified = True
+                return {'name': name, 'project': projects.summary(self.project),
+                        'fit': await call(fitting.state, fit)}
+            keys = {'fit.find': ('low', 'high'), 'fit.move': ('frequency',),
+                    'fit.damping': ('damping',), 'fit.confirm': ('description',)}
+            _only(params, keys.get(method, ()), method)
+            await call(fitting.act, fit, method, params)
+            return {'fit': await call(fitting.state, fit)}
 
     async def serve(self) -> None:
         """Send `hello`, then answer each request in its own task until the
@@ -403,12 +445,18 @@ class Connection:
                 result = await self.project_request(method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in fitting.FIT_METHODS:
+                result = await self.fit_request(method, params)
+                frame = await self.service.in_worker(
+                    frames.pack, {'type': 'response', 'id': ident,
+                                  'result': result})
             else:
                 raise ProtocolError(
                     'unknown_method',
                     f'The analysis service has no method {method!r}; it '
-                    'answers catalog.list, dataset.open, op.run and '
-                    f'{", ".join(PROJECT_METHODS)}.')
+                    'answers catalog.list, dataset.open, op.run, '
+                    f'{", ".join(PROJECT_METHODS)} and '
+                    f'{", ".join(fitting.FIT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)
         except asyncio.CancelledError:

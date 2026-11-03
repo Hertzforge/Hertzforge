@@ -279,6 +279,7 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `fit.*` | see Fitting modes below | |
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's
@@ -317,6 +318,43 @@ A reader that can count reports its progress while an import runs, as event topi
 `project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A
 file the core cannot read is refused in the core's own words (`refused`, or `not_found` for a path
 with no file).
+
+**Fitting modes.** One mode at a time, on the residual, as Visual Dynamics' fitting screen fits
+them; the session is the core's `ModalFitSession`. Each connection has at most one fit, on its
+project, and opening or starting another project ends it.
+
+| Method | Params | Result |
+|---|---|---|
+| `fit.start` | `{"frf","shapes"?}` | `{"fit"}` |
+| `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
+| `fit.move` | `{"frequency"}` | `{"fit"}` |
+| `fit.damping` | `{"damping"}` | `{"fit"}` |
+| `fit.fit` | `{}` | `{"fit"}` |
+| `fit.confirm` | `{"description"?}` | `{"fit"}` |
+| `fit.refine` | `{}` | `{"fit"}` |
+| `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
+| `fit.end` | `{}` | `{}` |
+
+`fit.start` fits the FRF `frf`, or, with `shapes`, edits that shape set's fit (Edit Fit): its
+modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
+frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
+residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left
+out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and searches the
+damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
+`fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
+and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
+`fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
+"<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
+published. A step the core refuses is refused in its words; a fit whose FRF has left the project
+ends.
+
+`fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.
+`shapes` is the set the fit edits or last published, or null. `preview` is null or the previewed
+mode's `{"frequency","damping"}`; each of `modes` is `{"frequency","damping","description"}` in
+frequency order, damping a fraction of critical. `view` is a `spectrum` view, frames carrying its
+arrays as `op.run` does: x `Frequency` Hz, y `CMIF` log, `link` `frequency`, the measured CMIF's
+first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`...) each
+`follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
 
 **Control service**
 
