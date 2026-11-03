@@ -4,6 +4,8 @@
 use crate::bindings::{RandomSingle, RandomSinglePre};
 use crate::convert;
 use crate::error::LawError;
+use crate::mimo::LoadedMimoLaw;
+use crate::mimo_bindings::RandomMimoPre;
 use crate::sandbox::{self, HostState, Sandbox};
 use crate::ticker::Ticker;
 use crate::types::{
@@ -13,7 +15,7 @@ use crate::validate;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
-use wasmtime::component::{Component, Linker, ResourceAny};
+use wasmtime::component::{Component, InstancePre, Linker, ResourceAny};
 use wasmtime::{Config, Engine};
 
 /// How a [`LawHost`] contains the laws it runs.
@@ -68,7 +70,7 @@ impl HostConfig {
     }
 }
 
-fn chain(e: &wasmtime::Error) -> String {
+pub(crate) fn chain(e: &wasmtime::Error) -> String {
     e.chain()
         .map(|c| c.to_string())
         .collect::<Vec<_>>()
@@ -94,10 +96,37 @@ pub fn law_file_sha256(bytes: &[u8]) -> String {
 /// Loads and compiles law files. One per process is enough; it owns the
 /// Wasmtime engine, the linker and the deadline ticker thread.
 pub struct LawHost {
-    engine: Engine,
+    pub(crate) engine: Engine,
     linker: Linker<HostState>,
-    config: HostConfig,
-    ticker: Arc<Ticker>,
+    pub(crate) config: HostConfig,
+    pub(crate) ticker: Arc<Ticker>,
+}
+
+/// A law file of either kind, as [`LawHost::load_any`] found it.
+#[derive(Clone)]
+pub enum AnyLaw {
+    /// A single-output Random law (the `random-single` world).
+    Single(LoadedLaw),
+    /// A multiple-output Random law (the `random-mimo` world).
+    Mimo(LoadedMimoLaw),
+}
+
+impl AnyLaw {
+    /// Name, version, author and file hash.
+    pub fn identity(&self) -> &LawIdentity {
+        match self {
+            AnyLaw::Single(l) => l.identity(),
+            AnyLaw::Mimo(l) => l.identity(),
+        }
+    }
+
+    /// The world the file implements: `random-single` or `random-mimo`.
+    pub fn world(&self) -> &'static str {
+        match self {
+            AnyLaw::Single(_) => crate::WORLD,
+            AnyLaw::Mimo(_) => crate::MIMO_WORLD,
+        }
+    }
 }
 
 impl LawHost {
@@ -130,15 +159,69 @@ impl LawHost {
         &self.config
     }
 
-    /// Compile a law file and read its manifest. This is the only place a
-    /// law is compiled; instantiating it later for a run compiles nothing.
+    /// Compile a single-output law file and read its manifest. Loading is the
+    /// only place a law is compiled; instantiating it later for a run
+    /// compiles nothing.
     ///
     /// Fails with [`LawError::Compile`] when the bytes are not a component,
     /// [`LawError::NotALaw`] when the component is not a `random-single` law
-    /// or imports more than WASI 0.2, [`LawError::ManifestInvalid`] when the
+    /// (saying so when it is a `random-mimo` one) or imports more than WASI
+    /// 0.2, [`LawError::ManifestInvalid`] when the
     /// manifest breaks a rule, and a trap, deadline or memory error when the
     /// law fails while being read.
     pub fn load(&self, bytes: &[u8]) -> Result<LoadedLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match RandomSinglePre::new(pre.clone()) {
+            Ok(single) => self.read_single(sha256, single),
+            Err(e) => Err(LawError::NotALaw(match RandomMimoPre::new(pre) {
+                Ok(_) => "it is a multiple-output Random law (the random-mimo world), not a \
+                          single-output one"
+                    .into(),
+                Err(_) => chain(&e),
+            })),
+        }
+    }
+
+    /// Compile a multiple-output law file and read its manifest: as
+    /// [`Self::load`], for the `random-mimo` world. Fails with
+    /// [`LawError::NotALaw`] when the component is not a `random-mimo` law,
+    /// and [`LawError::ManifestInvalid`] when the manifest breaks a rule
+    /// (including the MIMO rules: at least one shape, no repeated shape or
+    /// need, a layout for every declared diagnostic).
+    pub fn load_mimo(&self, bytes: &[u8]) -> Result<LoadedMimoLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match RandomMimoPre::new(pre.clone()) {
+            Ok(mimo) => LoadedMimoLaw::read(self, sha256, mimo),
+            Err(e) => Err(LawError::NotALaw(match RandomSinglePre::new(pre) {
+                Ok(_) => "it is a single-output Random law (the random-single world), not a \
+                          multiple-output one"
+                    .into(),
+                Err(_) => chain(&e),
+            })),
+        }
+    }
+
+    /// Compile a law file of either kind and read its manifest: the world it
+    /// implements decides which. Fails with [`LawError::NotALaw`] when it
+    /// implements neither, naming why for both.
+    pub fn load_any(&self, bytes: &[u8]) -> Result<AnyLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        let single_err = match RandomSinglePre::new(pre.clone()) {
+            Ok(single) => return self.read_single(sha256, single).map(AnyLaw::Single),
+            Err(e) => chain(&e),
+        };
+        match RandomMimoPre::new(pre) {
+            Ok(mimo) => LoadedMimoLaw::read(self, sha256, mimo).map(AnyLaw::Mimo),
+            Err(e) => Err(LawError::NotALaw(format!(
+                "not a single-output law ({single_err}) and not a multiple-output law ({})",
+                chain(&e)
+            ))),
+        }
+    }
+
+    /// Compile `bytes` and link them against the sandbox: the one place a
+    /// law is compiled.
+    fn compile(&self, bytes: &[u8]) -> Result<(String, InstancePre<HostState>), LawError> {
         let sha256 = law_file_sha256(bytes);
         let component =
             Component::new(&self.engine, bytes).map_err(|e| LawError::Compile(chain(&e)))?;
@@ -146,13 +229,24 @@ impl LawHost {
             .linker
             .instantiate_pre(&component)
             .map_err(|e| LawError::NotALaw(chain(&e)))?;
-        let pre = RandomSinglePre::new(pre).map_err(|e| LawError::NotALaw(chain(&e)))?;
+        Ok((sha256, pre))
+    }
 
-        let mut sb = Sandbox::new(
+    /// A fresh sandbox on this host's settings.
+    pub(crate) fn sandbox(&self) -> Sandbox {
+        Sandbox::new(
             &self.engine,
             self.config.memory_limit_bytes,
             self.config.capture_bytes,
-        );
+        )
+    }
+
+    fn read_single(
+        &self,
+        sha256: String,
+        pre: RandomSinglePre<HostState>,
+    ) -> Result<LoadedLaw, LawError> {
+        let mut sb = self.sandbox();
         let _active = self.ticker.active();
         sb.arm(self.config.describe_budget);
         let bindings = pre

@@ -807,11 +807,20 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "hertzforge-sdm",
  "rand 0.10.3",
  "sha2",
  "tokio",
  "wasmtime",
  "wasmtime-wasi",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-zero"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-laws",
 ]
 
 [[package]]
@@ -830,7 +839,17 @@ version = "0.1.0"
 name = "hertzforge-law-sdk"
 version = "0.1.0"
 dependencies = [
+ "hertzforge-sdm",
  "wit-bindgen",
+]
+
+[[package]]
+name = "hertzforge-mimo-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-sdm",
 ]
 
 [[package]]
@@ -1204,6 +1223,13 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "law-fixture-bad-manifest"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-mimo-misbehave"
 version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
