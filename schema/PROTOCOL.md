@@ -314,7 +314,17 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.activate` | `{"geometry"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**Display units.** Every view the analysis service sends is drawn in its connection's unit
+system, as Visual Dynamics draws its window in the system its selector names. A connection starts
+in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
+edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
+report's page. A unit it does not recognize, a `shape3d`, a `matrix` and a `table` are sent as
+they are. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's
@@ -367,7 +377,9 @@ for at. They are not loaded and no tool lists them; saving keeps their reference
 filled from them. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+`features` (each report feature's key, true where it is on) and `identity` (each identification
+field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic
@@ -421,6 +433,10 @@ first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
 | `report.export` | `{"name","path"}` | `{"path"}` |
+| `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
+| `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
+| `report.print` | `{"name"}` | `{"html"}` |
+| `report.issue` | `{"name","step","path"?}` | `{"html","status"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -429,6 +445,37 @@ gives the report `name` as one HTML document, with its stylesheet, data and view
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
 added when it has another suffix), beside the target first and renamed over it.
+
+`report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
+tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
+and the pane for the selection. A click on a block posts `{"hforgeReport":{"op":"select","at":n}}`
+(`at` null outside every block) to the page's parent, which the shell answers with
+`report.editor` at that block and `"page":false`: the page has framed the block itself, so the
+answer leaves `html` and `references` out and nothing is rendered again. `title`, `marking` and `marking_color` (`ink` or `red`) are the
+report's; `blocks` how many it has; `insert` the Insert menu as `[kind, label]` pairs (Markdown,
+then `core.report.insert_options`); `references` the `[label, caption]` of each numbered figure
+and table, for a text block's `{{figure:<caption>}}` token. `block` is null with nothing selected,
+or the selected block's `index`, `kind` and `mode`, and either its `text` (a text block; `special`
+names a skeleton section, check or requirement block, which has a pane of its own) or its
+`fields` (`{field,label,value,options:[[value,label]...]}`, the objects it may name, symbolic
+bindings such as `@basis:ShapeSet` first) and `caption`.
+
+`report.print` gives the reader's page as it is printed: light, its figures drawn at print
+resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
+PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
+changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
+Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
+on, every required field entered, not already issued), marks it issued (or amended), and gives the
+page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
+issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
+puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+as text beside its `features`.
+
+`report.operate` applies one of VD's editor operations and answers with the editor at the block it
+leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound to the first
+object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
+`value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
+`marking` and `marking_color` (`value`).
 
 **Control service**
 

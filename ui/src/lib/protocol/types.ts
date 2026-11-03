@@ -308,8 +308,8 @@ export interface ProjectObject {
 	groups: string[];
 	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
 	verbs?: string[];
-	/** A time history's analysis settings, each group present only when set. */
-	settings?: Record<string, Record<string, number | string>>;
+	/** A time history's analysis settings, each group present only when set; a report's features. */
+	settings?: Record<string, Record<string, number | string | boolean>>;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */
@@ -1033,4 +1033,37 @@ export interface RandomLogResult {
 export interface RandomLogEvent {
 	run_id: string;
 	entries: LogEntry[];
+}
+
+/** One field of a report block the editor's pane sets: the objects it may name. */
+export interface ReportField {
+	field: string;
+	label: string;
+	value: string;
+	options: [string, string][];
+}
+
+/** `report.editor`: the edit page and the pane for the selection. */
+export interface ReportEditor {
+	/** The edit page; left out when only the pane was asked for. */
+	html?: string;
+	selected: number | null;
+	title: string;
+	marking: string;
+	marking_color: 'ink' | 'red';
+	blocks: number;
+	/** The Insert menu, `[kind, label]`. */
+	insert: [string, string][];
+	/** `[label, caption]` of each numbered figure and table, for `{{figure:<caption>}}`; left out with `html`. */
+	references?: [string, string][];
+	block: {
+		index: number;
+		kind: string;
+		mode: string;
+		fields: ReportField[];
+		text?: string;
+		caption?: string;
+		special?: string | null;
+	} | null;
+	project?: ProjectSummary;
 }

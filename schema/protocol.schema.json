@@ -309,7 +309,9 @@
           "properties": {
             "averaging": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
             "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
-            "truncation": {"type": "object", "additionalProperties": {"type": "number"}}
+            "truncation": {"type": "object", "additionalProperties": {"type": "number"}},
+            "features": {"type": "object", "additionalProperties": {"type": "boolean"}},
+            "identity": {"type": "object", "additionalProperties": {"type": "string"}}
           }
         }
       }
@@ -403,6 +405,36 @@
     "reportExportResult": {
       "type": "object", "required": ["path"],
       "properties": {"path": {"type": "string"}}
+    },
+    "reportField": {
+      "type": "object", "required": ["field", "label", "value", "options"],
+      "properties": {
+        "field": {"type": "string"}, "label": {"type": "string"}, "value": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}
+      }
+    },
+    "reportEditorResult": {
+      "type": "object",
+      "required": ["selected", "title", "marking", "marking_color", "blocks", "insert", "block"],
+      "properties": {
+        "html": {"type": "string"},
+        "selected": {"type": ["integer", "null"]},
+        "title": {"type": "string"}, "marking": {"type": "string"},
+        "marking_color": {"enum": ["ink", "red"]},
+        "blocks": {"type": "integer", "minimum": 0},
+        "insert": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
+        "references": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
+        "block": {"oneOf": [{"type": "null"}, {
+          "type": "object", "required": ["index", "kind", "mode", "fields"],
+          "properties": {
+            "index": {"type": "integer"}, "kind": {"type": "string"}, "mode": {"type": "string"},
+            "fields": {"type": "array", "items": {"$ref": "#/$defs/reportField"}},
+            "text": {"type": "string"}, "caption": {"type": "string"},
+            "special": {"type": ["string", "null"]}
+          }
+        }]},
+        "project": {"$ref": "#/$defs/project"}
+      }
     },
     "projectUnitsParams": {
       "type": "object", "required": ["name"], "additionalProperties": false,

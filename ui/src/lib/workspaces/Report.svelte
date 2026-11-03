@@ -1,11 +1,13 @@
 <script lang="ts">
 	/**
 	 * Report: Visual Dynamics' report on the project, generated from a starter template bound to its
-	 * objects and shown as the page the core writes, in a sandboxed frame, exactly as a reader of the
-	 * saved file sees it. In the desktop app Save opens the dialog; in a browser it asks for a path.
+	 * objects and edited as VD's report editor edits it. The page is the core's edit page in a
+	 * sandboxed frame; a click on a block selects it, and every act (insert, move, delete, a source,
+	 * the caption, the text, the title and marking) is on the bar and the pane here, as on VD's. In
+	 * the desktop app Save opens the dialog; in a browser it asks for a path.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
-	import { chooseReportPath, hasNativeFiles } from '$lib/project/files';
+	import { choosePdf, chooseReportPath, hasNativeFiles } from '$lib/project/files';
 	import { theme } from '$lib/theme/theme.svelte';
 
 	interface Props {
@@ -27,6 +29,62 @@
 		['empty', 'Empty']
 	] as const;
 	let template = $state('modal');
+	let inserting = $state('markdown');
+	let frame = $state<HTMLIFrameElement | null>(null);
+	const ed = $derived(r.editor);
+	const block = $derived(ed?.block ?? null);
+
+	// the page says which block was clicked, and how far it is scrolled
+	$effect(() => {
+		const heard = (e: MessageEvent) => {
+			if (!frame || e.source !== frame.contentWindow) return;
+			const said = e.data as { hforgeReport?: { op: string; at: number | null }; hforgeScroll?: number };
+			if (typeof said?.hforgeScroll === 'number') r.scroll = said.hforgeScroll;
+			if (said?.hforgeReport?.op === 'select') void r.select(said.hforgeReport.at ?? null);
+		};
+		window.addEventListener('message', heard);
+		return () => window.removeEventListener('message', heard);
+	});
+
+	// the page re-rendered by an edit opens where it was scrolled
+	const page = $derived(
+		r.html ? r.html.replace(/<\/body>/i, `<script>addEventListener('load', () => scrollTo(0, ${Math.round(r.scroll)}));<\/script></body>`) : null
+	);
+
+	// typing rests before the page re-renders, as VD's editor waits
+	let text = $state('');
+	let typing: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		text = block?.text ?? '';
+	});
+	function typed() {
+		if (typing) clearTimeout(typing);
+		const at = block?.index;
+		typing = setTimeout(() => {
+			if (at !== undefined) void r.operate('text', { at, value: text });
+		}, 400);
+	}
+
+	let editor = $state<HTMLTextAreaElement | null>(null);
+	function reference(caption: string, label: string) {
+		if (!editor) return;
+		const token = `{{${label.toLowerCase().startsWith('table') ? 'table' : 'figure'}:${caption}}}`;
+		const at = editor.selectionStart ?? text.length;
+		text = text.slice(0, at) + token + text.slice(editor.selectionEnd ?? at);
+		typed();
+	}
+
+	function insert() {
+		void r.operate('insert', block ? { kind: inserting, at: block.index + 1 } : { kind: inserting });
+	}
+
+	function move(step: number) {
+		if (!block) return;
+		const to = block.index + step;
+		if (to < 0 || ed === null || to >= ed.blocks) return;
+		// the lifted block lands before `to`, so a step down is two past its own index
+		void r.operate('move', { from: block.index, to: step < 0 ? to : to + 1 });
+	}
 	let asking = $state(false);
 	let path = $state('');
 
@@ -56,7 +114,15 @@
 		asking = !asking;
 	}
 
-	async function submit(e: SubmitEvent) {
+	let pdf = $state('');
+	async function recordIssue(e?: SubmitEvent) {
+		e?.preventDefault();
+		let path = pdf.trim();
+		if (!path && hasNativeFiles()) path = (await choosePdf()) ?? '';
+		if (path) await r.issue('record', path);
+	}
+
+		async function submit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!path.trim()) return;
 		await r.export(path.trim());
@@ -103,6 +169,65 @@
 					</form>
 				{/if}
 				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>.</p>{/if}
+				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
+					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
+				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
+					title="Mark the report issued, print it, then name the PDF so the issue is recorded with its hash">Issue</button>
+				{#if r.issuing}
+					<form class="ask" onsubmit={recordIssue} data-testid="report-issue-form">
+						<p class="muted">Marked {r.issuing}. Save the page from the print dialog as a PDF, then name it here so the issue is recorded.</p>
+						<label class="lbl" for="report-pdf">The PDF printed</label>
+						<input id="report-pdf" class="field mono" bind:value={pdf} placeholder={hasNativeFiles() ? 'Leave empty to choose it' : '/path/to/report.pdf'} data-testid="report-pdf" spellcheck="false" />
+						<button class="btn primary sm" type="submit" disabled={r.busy !== null || (!pdf.trim() && !hasNativeFiles())}>Record the Issue</button>
+						<button class="btn ghost sm" type="button" onclick={() => r.issue('cancel')} disabled={r.busy !== null}>Cancel</button>
+					</form>
+				{/if}
+				{#if r.issued}<p class="muted" data-testid="report-issued">Issued {r.issued.number} revision {r.issued.revision}, PDF {r.issued.sha256?.slice(0, 12)}.</p>{/if}
+			</section>
+		{/if}
+		{#if ed}
+			<section class="block pane" data-testid="report-pane" aria-label="Selection">
+				{#if !block}
+					<h2 class="eyebrow">This report</h2>
+					<label class="lbl" for="report-title">Title</label>
+					<input id="report-title" class="field" value={ed.title} data-testid="report-title"
+						onchange={(e) => r.operate('title', { value: e.currentTarget.value })} />
+					<label class="lbl" for="report-marking">Marking</label>
+					<input id="report-marking" class="field" value={ed.marking} placeholder="no marking" data-testid="report-marking"
+						onchange={(e) => r.operate('marking', { value: e.currentTarget.value })} />
+					<label class="lbl" for="report-marking-color">Marking color</label>
+					<select id="report-marking-color" class="field" value={ed.marking_color} data-testid="report-marking-color"
+						onchange={(e) => r.operate('marking_color', { value: e.currentTarget.value })}>
+						<option value="ink">Black/White</option>
+						<option value="red">Red</option>
+					</select>
+					<p class="muted">Click a block in the page to edit it; Insert adds one after the selection, or at the end.</p>
+				{:else if block.kind === 'text'}
+					<h2 class="eyebrow">Block {block.index + 1}, text</h2>
+					{#if block.special}<p class="muted">This is the report's {block.special} block; its own pane is still to come, and its text is edited here.</p>{/if}
+					<textarea class="field mono text" bind:this={editor} bind:value={text} oninput={typed} data-testid="report-text"
+						placeholder="Markdown: # heading, **bold**, - list"></textarea>
+					{#if ed.references?.length}
+						<label class="lbl" for="report-reference">Reference</label>
+						<select id="report-reference" class="field" data-testid="report-reference"
+							onchange={(e) => { const i = Number(e.currentTarget.value); const ref = ed.references?.[i]; if (ref) reference(ref[1], ref[0]); e.currentTarget.value = '-1'; }}>
+							<option value="-1">Insert a figure or table number</option>
+							{#each ed.references ?? [] as [label, caption], i (i)}<option value={i}>{label}: {caption}</option>{/each}
+						</select>
+					{/if}
+				{:else}
+					<h2 class="eyebrow">Block {block.index + 1}, {block.kind}{block.mode ? ` (${block.mode})` : ''}</h2>
+					{#each block.fields as f (f.field)}
+						<label class="lbl" for="report-field-{f.field}">{f.label}</label>
+						<select id="report-field-{f.field}" class="field" value={f.value} data-testid="report-field-{f.field}"
+							onchange={(e) => r.operate('field', { at: block.index, field: f.field, value: e.currentTarget.value })}>
+							{#each f.options as [value, label] (value)}<option {value}>{label}</option>{/each}
+						</select>
+					{/each}
+					<label class="lbl" for="report-caption">Caption</label>
+					<input id="report-caption" class="field" value={block.caption ?? ''} placeholder="caption" data-testid="report-caption"
+						onchange={(e) => r.operate('field', { at: block.index, field: 'caption', value: e.currentTarget.value })} />
+				{/if}
 			</section>
 		{/if}
 		{#if r.busy}<p class="muted pad" role="status">{r.busy}.</p>{/if}
@@ -110,9 +235,27 @@
 	</aside>
 
 	<main class="stage" aria-label="Report page">
-		{#if r.html}
+		{#if ed}
+			<div class="bar" role="toolbar" aria-label="Report blocks" data-testid="report-bar">
+				<select class="field" bind:value={inserting} aria-label="What to insert" data-testid="report-insert-kind">
+					{#each ed.insert as [kind, label] (kind)}<option value={kind}>{label}</option>{/each}
+				</select>
+				<button class="btn sm" data-testid="report-insert" onclick={insert} disabled={r.busy !== null}>Insert</button>
+				<span class="sep"></span>
+				<button class="btn ghost sm" data-testid="report-up" onclick={() => move(-1)} disabled={!block || block.index === 0 || r.busy !== null}>Move Up</button>
+				<button class="btn ghost sm" data-testid="report-down" onclick={() => move(1)} disabled={!block || block.index >= ed.blocks - 1 || r.busy !== null}>Move Down</button>
+				<button class="btn ghost sm danger" data-testid="report-delete" onclick={() => block && r.operate('remove', { at: block.index })} disabled={!block || r.busy !== null}>Delete</button>
+			</div>
+		{/if}
+		{#if page}
 			<!-- the core's own page: its scripts run, isolated from the shell -->
-			<iframe title={r.name ?? 'Report'} sandbox="allow-scripts" srcdoc={r.html} data-testid="report-frame"></iframe>
+			<iframe bind:this={frame} title={r.name ?? 'Report'} sandbox="allow-scripts" srcdoc={page} data-testid="report-frame"></iframe>
+		{/if}
+		{#if r.printing}
+			<!-- the page as printed, out of sight: it asks for the print dialog once its figures are drawn -->
+			{#key r.printing}
+				<iframe class="printing" title="Printing" sandbox="allow-scripts allow-modals" srcdoc={r.printing} data-testid="report-print-frame"></iframe>
+			{/key}
 		{:else}
 			<div class="placeholder">Generate a report, or pick one in the project.</div>
 		{/if}
@@ -204,13 +347,48 @@
 	}
 
 	.stage {
+		display: flex;
+		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
 	}
 
-	iframe {
+	.bar {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		padding: var(--sp-2) var(--sp-3);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	.bar select {
+		width: auto;
+		max-width: 260px;
+	}
+
+	.sep {
+		flex: 1;
+	}
+
+	.printing {
+		position: absolute;
+		width: 816px;
+		height: 1056px;
+		left: -10000px;
+		top: 0;
+		flex: none;
+	}
+
+	.text {
 		width: 100%;
-		height: 100%;
+		min-height: 220px;
+		resize: vertical;
+	}
+
+	iframe {
+		flex: 1;
+		width: 100%;
+		min-height: 0;
 		border: 0;
 		background: var(--bg-0);
 	}
