@@ -4,6 +4,7 @@
 	 * shape view; arrow keys in the table step through modes.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
+	import FitPanel from '$lib/modal/FitPanel.svelte';
 	import { formatFixed } from '$lib/viz/format';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
@@ -14,6 +15,17 @@
 
 	const m = $derived(app.modal);
 	let table = $state<HTMLElement | null>(null);
+
+	// the project's FRFs a fit can start on, and the shape sets an Edit Fit can start from
+	const objects = $derived(app.project.summary?.objects ?? []);
+	const frfs = $derived(objects.filter((o) => o.kind === 'frf').map((o) => o.name));
+	const shapeSets = $derived(objects.filter((o) => o.kind === 'shape_set').map((o) => o.name));
+	let frf = $state('');
+	let from = $state('');
+	$effect(() => {
+		if (!frfs.includes(frf)) frf = frfs[0] ?? '';
+		if (from && !shapeSets.includes(from)) from = '';
+	});
 
 	// The first model opens on arrival, so the view is never empty when there is something to show.
 	$effect(() => {
@@ -38,6 +50,26 @@
 
 <div class="modal">
 	<aside class="side" aria-label="Model and modes">
+		{#if frfs.length}
+			<section class="block" data-testid="fit-start">
+				<h2 class="eyebrow">Fit modes</h2>
+				<label class="lbl" for="fit-frf">FRF</label>
+				<select id="fit-frf" class="field" bind:value={frf} data-testid="fit-frf">
+					{#each frfs as name (name)}<option value={name}>{name}</option>{/each}
+				</select>
+				{#if shapeSets.length}
+					<label class="lbl" for="fit-from">Start from</label>
+					<select id="fit-from" class="field" bind:value={from} data-testid="fit-from">
+						<option value="">A new fit</option>
+						{#each shapeSets as name (name)}<option value={name}>Edit Fit of {name}</option>{/each}
+					</select>
+				{/if}
+				<button class="btn primary sm start" data-testid="fit-begin" onclick={() => app.fit.start(frf, from || undefined)} disabled={!frf || app.fit.busy !== null}>
+					{from ? 'Edit Fit' : 'Fit Modes'}
+				</button>
+				{#if app.fit.error && !app.fit.state}<p class="error" role="alert">{app.fit.error}</p>{/if}
+			</section>
+		{/if}
 		<section class="block">
 			<h2 class="eyebrow">Model</h2>
 			{#if !app.catalog}
@@ -103,7 +135,9 @@
 	</aside>
 
 	<main class="stage" aria-label="Mode shape">
-		{#if m.view}
+		{#if app.fit.state}
+			<FitPanel fit={app.fit} />
+		{:else if m.view}
 			<ViewRenderer view={m.view} bind:mode={m.mode} />
 		{:else}
 			<div class="placeholder">
@@ -137,6 +171,21 @@
 
 	.block h2.eyebrow {
 		margin-bottom: var(--sp-2);
+	}
+
+	.lbl {
+		display: block;
+		margin: var(--sp-2) 0 2px;
+		font-size: var(--text-xs);
+		color: var(--text-3);
+	}
+
+	.block select {
+		width: 100%;
+	}
+
+	.start {
+		margin-top: var(--sp-2);
 	}
 
 	.modes {
