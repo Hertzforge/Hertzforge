@@ -245,3 +245,55 @@ def test_detecting_shocks_marks_the_history_and_counts_as_an_edit(plate, validat
     wire_views([reading], validate)
     assert reading['rows'][0]['value'] == len(plate['Time History'].shocks) > 0
     assert OPS['project.detect_shocks'].edits
+
+
+def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate):
+    run(plate, 'project.compute_frfs', method='H1')
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=4)
+    fitted = next(name for name in plate if projects.kind_of(plate[name]) == 'shape_set')
+    matrix, shape = run(plate, 'project.mac', first=fitted, second=fitted)
+    wire_views([matrix, shape], validate)
+    assert matrix['title'] == f'Auto-MAC of {fitted}' and matrix['selects'] == 'shape3d'
+    assert np.allclose(np.diag(np.asarray(matrix['values'])), 1.0)
+    assert len(shape['overlays']) == len(shape['modes'])
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
+    other = [name for name in plate if projects.kind_of(plate[name]) == 'shape_set'][-1]
+    (matrix, _) = run(plate, 'project.mac', first=fitted, second=other)
+    assert np.asarray(matrix['values']).shape == (plate[fitted].num_shapes,
+                                                  plate[other].num_shapes)
+
+
+def test_mac_without_a_geometry_is_the_matrix_alone(plate):
+    run(plate, 'project.compute_frfs', method='H1')
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
+    plate.remove(*[name for name in plate if projects.kind_of(plate[name]) == 'geometry'])
+    fitted = next(name for name in plate if projects.kind_of(plate[name]) == 'shape_set')
+    assert [v['view'] for v in run(plate, 'project.mac', first=fitted, second=fitted)] == ['matrix']
+def test_plot_draws_the_records_named_on_one_plot(plate, validate):
+    (view,) = run(plate, 'project.plot', data='Time History', records='1-3')
+    wire_views([view], validate)
+    assert view['view'] == 'spectrum' and view['title'] == 'Time History'
+    assert [s['name'] for s in view['series']] == [
+        plate['Time History'].record_label(i) for i in range(3)]
+    assert view['x']['label'] == 'Time' and view['y']['label'] == 'Acceleration'
+
+
+def test_plot_leaves_out_records_of_another_quantity_and_says_so(plate):
+    (view,) = run(plate, 'project.plot', data='Time History', records='1-13')
+    assert len(view['series']) == 11
+    assert view['title'] == 'Time History (2 of another quantity left out)'
+
+
+@pytest.mark.parametrize(('text', 'expected'), [('', list(range(8))), ('2', [1]),
+                                                ('1-3, 3, 7', [0, 1, 2, 6])])
+def test_records_are_named_from_one(text, expected):
+    from hertzforge.service.ops_project import chosen_records
+    assert chosen_records(text, 13) == expected
+
+
+@pytest.mark.parametrize('text', ['0', '14', '3-x', '5-2'])
+def test_records_outside_the_object_are_refused(text):
+    from hertzforge.service.ops_project import chosen_records
+    with pytest.raises(ProtocolError) as error:
+        chosen_records(text, 13)
+    assert error.value.code == 'refused'
