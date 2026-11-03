@@ -12,7 +12,7 @@ from typing import Any, Literal
 import numpy as np
 
 Scale = Literal['log', 'linear']
-Role = Literal['measured', 'reference', 'tolerance', 'abort', 'drive', 'other']
+Role = Literal['measured', 'reference', 'tolerance', 'abort', 'limit', 'drive', 'other']
 Status = Literal['pass', 'warn', 'fail', 'info']
 Shape = Literal['line', 'steps', 'law']
 
