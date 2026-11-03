@@ -764,6 +764,7 @@ dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
  "hertzforge-hal",
+ "hertzforge-sdm",
 ]
 
 [[package]]

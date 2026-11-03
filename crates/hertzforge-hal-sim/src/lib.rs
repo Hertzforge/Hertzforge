@@ -10,17 +10,28 @@
 //!
 //! ## What the plant models
 //!
-//! - **Resonance.** Each DOF is a 2nd-order IIR resonator ([`Resonator`]) tuned to a
-//!   resonance `f_n` and quality factor `Q`, discretized at the backend sample rate. A
-//!   drive at `f_n` is amplified by roughly `Q`; off-resonance drive produces a much
-//!   smaller response, with the correct 2nd-order phase roll (0 -> -90 deg at resonance
-//!   -> -180 deg well above it).
-//! - **Multiple modes.** Several resonators sum, so a swept sine shows a peak at each
-//!   `f_n`. Default is a single mode; [`SimConfig::resonances`] takes as many as wanted.
-//! - **Noise floor.** A small additive Gaussian noise term from a deterministic xorshift
-//!   PRNG ([`Xorshift64`]) seeded from config, so tests are reproducible.
-//! - **Transport delay.** An optional integer-sample delay line ([`DelayLine`]) between
-//!   drive and response, mirroring real DAC->amp->shaker->accel->ADC latency.
+//! The plant is a [`PlantModel`] on [`SimConfig::plant`] (the [`plant`] module docs
+//! have the full table):
+//!
+//! - **[`PlantModel::Resonators`], the default.** The original single-path plant: a
+//!   bank of 2nd-order IIR resonators ([`Resonator`]), each tuned to `f_n` and `Q`
+//!   and discretized at the backend sample rate, summed with a broadband feedthrough
+//!   behind an integer transport delay ([`DelayLine`]). A drive at `f_n` is amplified
+//!   by roughly `Q`. It is driven by the FIRST drive row and every measurement input
+//!   reads the same response, noise included; for one drive it is sample-for-sample
+//!   the plant this crate always had.
+//! - **[`PlantModel::Modal`].** Every input sees every drive: modes with input and
+//!   output shape vectors give a full cross-coupled `n_inputs x n_drives` FRF with
+//!   real resonances and phase, and each input has its own noise.
+//! - **[`PlantModel::Frf`].** Plays any FRF matrix (a measured one, say) by block
+//!   convolution.
+//! - **Noise floor.** Additive Gaussian noise from a deterministic xorshift PRNG
+//!   ([`Xorshift64`]) seeded from config, so tests are reproducible.
+//! - **Exact truth.** [`PlantModel::analytic_frf`] is the complex FRF of the discretized
+//!   plant the backend steps, so an identification can be checked against it.
+//!
+//! [`plants`] holds a standard set of modal plants (with their geometry and their
+//! conditioning claims) for MIMO control work.
 //!
 //! ## Output-buffer model
 //!
@@ -50,11 +61,21 @@
 
 #![allow(dead_code)]
 
+pub mod plant;
+pub mod plants;
+
+pub use hertzforge_sdm::{MatrixStack, C64};
+pub use plant::{
+    FrfPlant, FrfTaps, ModalPlant, Mode, ModeResponse, PlantModel, ResonatorBank,
+    DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,
+};
+
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_hal::{
     AcquisitionConfig, Backend, BackendStatus, Caps, ClockDomain, ConfiguredActual, HalError,
     InputRead, LoopOwner, OutputBufferContract, UnderrunPolicy,
 };
+use plant::Plant;
 use std::collections::VecDeque;
 use std::f64::consts::TAU;
 
@@ -122,6 +143,16 @@ impl Xorshift64 {
         let u1 = self.next_unit().max(1e-12);
         let u2 = self.next_unit();
         (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+    }
+
+    /// Both standard-normal samples of one Box-Muller draw (the cosine one is what
+    /// [`Self::next_gaussian`] returns from the same draw). Independent of each other.
+    fn next_gaussian_pair(&mut self) -> (f64, f64) {
+        let u1 = self.next_unit().max(1e-12);
+        let u2 = self.next_unit();
+        let r = (-2.0 * u1.ln()).sqrt();
+        let (s, c) = (TAU * u2).sin_cos();
+        (r * c, r * s)
     }
 }
 
@@ -225,6 +256,49 @@ impl Resonator {
         }
     }
 
+    /// A resonator of the given [`ModeResponse`]: [`ModeResponse::Bandpass`] is
+    /// [`Resonator::new`]; [`ModeResponse::Acceleration`] is the RBJ high-pass biquad
+    /// at the same `f_n` and `Q` (`s^2 / (s^2 + s w_n / Q + w_n^2)`, prewarped so its
+    /// peak of about `Q` sits at `f_n`, unity at the Nyquist frequency).
+    pub fn with_response(f_n: f64, q: f64, fs_hz: f64, response: ModeResponse) -> Self {
+        match response {
+            ModeResponse::Bandpass => Self::new(f_n, q, fs_hz),
+            ModeResponse::Acceleration => {
+                let q = q.max(0.5);
+                let w0 = TAU * f_n / fs_hz;
+                let cos_w0 = w0.cos();
+                let alpha = w0.sin() / (2.0 * q);
+                let a0 = 1.0 + alpha;
+                Resonator {
+                    b0: (1.0 + cos_w0) / 2.0 / a0,
+                    b1: -(1.0 + cos_w0) / a0,
+                    b2: (1.0 + cos_w0) / 2.0 / a0,
+                    a1: -2.0 * cos_w0 / a0,
+                    a2: (1.0 - alpha) / a0,
+                    z1: 0.0,
+                    z2: 0.0,
+                    f_n,
+                    q,
+                }
+            }
+        }
+    }
+
+    /// The exact frequency response of this biquad at `f_hz` for sample rate
+    /// `fs_hz`: `H(z)` at `z = exp(j 2 pi f / fs)`.
+    pub fn response(&self, f_hz: f64, fs_hz: f64) -> C64 {
+        let w = TAU * f_hz / fs_hz;
+        let z1 = C64::new(w.cos(), -w.sin()); // z^-1
+        let z2 = z1 * z1;
+        let one = C64::new(1.0, 0.0);
+        let num = one * self.b0 + z1 * self.b1 + z2 * self.b2;
+        let den = one + z1 * self.a1 + z2 * self.a2;
+        // num / den without the Float-gated division helpers.
+        let d = den.re * den.re + den.im * den.im;
+        let p = num * den.conj();
+        C64::new(p.re / d, p.im / d)
+    }
+
     /// Process one input sample (Direct Form II Transposed).
     #[inline]
     fn process(&mut self, x: f64) -> f64 {
@@ -241,64 +315,6 @@ impl Resonator {
 }
 
 // ---------------------------------------------------------------------------------------
-// Plant: a bank of resonators + broadband feedthrough + noise + transport delay.
-// ---------------------------------------------------------------------------------------
-
-/// The synthetic plant: sum of resonator responses to the drive, plus a small broadband
-/// feedthrough term (so off-resonance drive still produces *some* response), plus additive
-/// Gaussian noise, plus an optional transport delay.
-#[derive(Debug, Clone)]
-struct Plant {
-    resonators: Vec<Resonator>,
-    delay: DelayLine,
-    rng: Xorshift64,
-    noise_level: f64,
-    feedthrough: f64,
-    // Last drive value seen (for emergency ramp-down / hold).
-    last_drive: f64,
-}
-
-impl Plant {
-    fn from_config(cfg: &SimConfig) -> Self {
-        let resonators = cfg
-            .resonances
-            .iter()
-            .map(|&(f_n, q)| Resonator::new(f_n, q, cfg.sample_rate_hz))
-            .collect();
-        Plant {
-            resonators,
-            delay: DelayLine::new(cfg.transport_delay_samples),
-            rng: Xorshift64::new(cfg.seed),
-            noise_level: cfg.noise_level,
-            feedthrough: cfg.feedthrough,
-            last_drive: 0.0,
-        }
-    }
-
-    /// Advance the plant by one sample given a drive input, returning the acceleration
-    /// response (in the plant's arbitrary "g" unit).
-    #[inline]
-    fn step(&mut self, drive: f64) -> f64 {
-        self.last_drive = drive;
-        let delayed = self.delay.process(drive);
-        let mut resonant = 0.0;
-        for r in &mut self.resonators {
-            resonant += r.process(delayed);
-        }
-        // Broadband feedthrough keeps off-resonance response non-zero and finite.
-        let response = resonant + self.feedthrough * delayed;
-        let noise = self.noise_level * self.rng.next_gaussian();
-        response + noise
-    }
-
-    fn reset(&mut self) {
-        self.resonators.iter_mut().for_each(Resonator::reset);
-        self.delay.reset();
-        self.last_drive = 0.0;
-    }
-}
-
-// ---------------------------------------------------------------------------------------
 // Configuration + builder.
 // ---------------------------------------------------------------------------------------
 
@@ -308,14 +324,11 @@ impl Plant {
 pub struct SimConfig {
     /// Sample rate in Hz. Default [`DEFAULT_SAMPLE_RATE_HZ`].
     pub sample_rate_hz: f64,
-    /// One `(f_n, Q)` pair per fixture mode. Default: a single mode.
-    pub resonances: Vec<(f64, f64)>,
-    /// Additive Gaussian noise standard deviation (plant "g" units).
+    /// The plant. Default: the single-mode resonator bank
+    /// ([`ResonatorBank::default`]).
+    pub plant: PlantModel,
+    /// Additive Gaussian noise standard deviation (plant "g" units), per input.
     pub noise_level: f64,
-    /// Broadband drive->response feedthrough gain (keeps off-resonance response finite).
-    pub feedthrough: f64,
-    /// Transport delay in whole samples (DAC->amp->shaker->ADC latency).
-    pub transport_delay_samples: usize,
     /// PRNG seed for the noise floor (determinism).
     pub seed: u64,
     /// Max input channels the backend advertises.
@@ -334,10 +347,8 @@ impl Default for SimConfig {
     fn default() -> Self {
         SimConfig {
             sample_rate_hz: DEFAULT_SAMPLE_RATE_HZ,
-            resonances: vec![(DEFAULT_RESONANCE_HZ, DEFAULT_Q)],
+            plant: PlantModel::default(),
             noise_level: 1e-4,
-            feedthrough: 1e-3,
-            transport_delay_samples: 0,
             seed: DEFAULT_SEED,
             max_input_channels: 8,
             max_output_channels: 2,
@@ -357,15 +368,45 @@ impl SimConfig {
         self
     }
 
-    /// Replace the resonance bank with a single `(f_n, Q)` mode.
-    pub fn resonance(mut self, f_n: f64, q: f64) -> Self {
-        self.resonances = vec![(f_n, q)];
+    /// Use `model` as the plant. The advertised channel maxima are raised, never
+    /// lowered, to the model's own size (a plant the caps forbid could not be
+    /// configured); a later `max_*_channels` call still sets them outright.
+    pub fn plant(mut self, model: PlantModel) -> Self {
+        if let Some((n_in, n_d)) = model.dims() {
+            self.max_input_channels = self.max_input_channels.max(n_in as u32);
+            self.max_output_channels = self.max_output_channels.max(n_d as u32);
+        }
+        self.plant = model;
         self
     }
 
-    /// Replace the resonance bank with an explicit list of `(f_n, Q)` modes.
+    /// The resonator bank the plant is, making it one if it is not (keeping the
+    /// current model's transport delay).
+    fn bank_mut(&mut self) -> &mut ResonatorBank {
+        if !matches!(self.plant, PlantModel::Resonators(_)) {
+            let delay = self.plant.transport_delay_samples();
+            self.plant = PlantModel::Resonators(ResonatorBank {
+                transport_delay_samples: delay,
+                ..ResonatorBank::default()
+            });
+        }
+        match &mut self.plant {
+            PlantModel::Resonators(b) => b,
+            _ => unreachable!("made a resonator bank just above"),
+        }
+    }
+
+    /// Use the resonator bank with a single `(f_n, Q)` mode (keeping the bank's
+    /// feedthrough and the plant's transport delay).
+    pub fn resonance(mut self, f_n: f64, q: f64) -> Self {
+        self.bank_mut().resonances = vec![(f_n, q)];
+        self
+    }
+
+    /// Use the resonator bank with an explicit list of `(f_n, Q)` modes (keeping the
+    /// bank's feedthrough and the plant's transport delay).
     pub fn resonances(mut self, modes: Vec<(f64, f64)>) -> Self {
-        self.resonances = modes;
+        self.bank_mut().resonances = modes;
         self
     }
 
@@ -374,13 +415,21 @@ impl SimConfig {
         self
     }
 
+    /// Broadband feedthrough of a resonator bank or a modal plant. An FRF plant plays
+    /// its stack as given and has none, so this does not change it.
     pub fn feedthrough(mut self, g: f64) -> Self {
-        self.feedthrough = g;
+        match &mut self.plant {
+            PlantModel::Resonators(b) => b.feedthrough = g,
+            PlantModel::Modal(m) => m.feedthrough = g,
+            PlantModel::Frf(_) => {}
+        }
         self
     }
 
+    /// Transport delay in whole samples (DAC->amp->shaker->ADC latency), on whichever
+    /// plant this is.
     pub fn transport_delay_samples(mut self, n: usize) -> Self {
-        self.transport_delay_samples = n;
+        self.plant.set_transport_delay_samples(n);
         self
     }
 
@@ -445,6 +494,11 @@ struct ChannelMap {
     /// Each input's full scale (the row's `range_max`), in the order above, for the
     /// overload check.
     full_scale: Vec<f64>,
+    /// Per input, in the order above: which plant response it reads. Measurement rows
+    /// (Control, Monitor) take the plant's outputs in table order (all of them output
+    /// 0 on the single-path bank); a Reference row reads the commanded drive and its
+    /// entry is unused.
+    plant_index: Vec<usize>,
     /// Number of drive (output) channels.
     n_drive: usize,
 }
@@ -466,9 +520,16 @@ struct InputChannel {
 #[derive(Debug, Clone)]
 pub struct SimBackend {
     cfg: SimConfig,
-    plant: Plant,
+    /// The running plant, rebuilt at every `configure` at the configured rate. `None`
+    /// only while the model does not validate (configure then refuses with the reason).
+    plant: Option<Plant>,
     state: State,
     map: Option<ChannelMap>,
+    /// This frame's drive as applied to the plant (ramp-scaled, zero unless running);
+    /// `n_drive` long, sized at configure so the hot path never allocates.
+    drive_now: Vec<f64>,
+    /// This frame's plant responses, one per plant output, sized at configure.
+    resp: Vec<f64>,
     /// The drive frame CURRENTLY applied to the plant: the last frame `read_input`
     /// consumed out of [`SimBackend::out_fifo`]. When the FIFO runs dry this value
     /// is held (a zero-order hold, the benign device behavior; the engine's
@@ -510,12 +571,14 @@ impl SimBackend {
 
     /// Build from an explicit [`SimConfig`].
     pub fn from_config(cfg: SimConfig) -> Self {
-        let plant = Plant::from_config(&cfg);
+        let plant = Plant::build(&cfg.plant, cfg.sample_rate_hz, cfg.noise_level, cfg.seed).ok();
         SimBackend {
             cfg,
             plant,
             state: State::Closed,
             map: None,
+            drive_now: Vec::new(),
+            resp: Vec::new(),
             pending_drive: Vec::new(),
             out_fifo: VecDeque::new(),
             sample_counter: 0,
@@ -524,6 +587,20 @@ impl SimBackend {
             faulted: false,
             overloaded: Vec::new(),
         }
+    }
+
+    /// The plant model this backend runs.
+    pub fn plant_model(&self) -> &PlantModel {
+        &self.cfg.plant
+    }
+
+    /// The exact FRF of the running plant at the backend's current rate (the rate
+    /// `configure` adopted), on lines `0, df, 2 df, ...`. See
+    /// [`PlantModel::analytic_frf`].
+    pub fn analytic_frf(&self, lines: usize, df_hz: f64) -> MatrixStack {
+        self.cfg
+            .plant
+            .analytic_frf(lines, df_hz, self.cfg.sample_rate_hz)
     }
 
     /// Number of measurement (input) channels currently configured.
@@ -555,17 +632,24 @@ impl SimBackend {
     /// Advance the ramp one step; returns the scale to apply THIS sample. Once it decays
     /// below a small floor, the drive is pinned to zero.
     fn step_ramp(&mut self) -> f64 {
-        match self.ramp {
-            None => 1.0,
-            Some(g) => {
-                let scale = g;
-                // Geometric decay toward zero. At 65 kHz a 0.99/sample factor is roughly a
-                // 1.5 ms time constant: fast enough for a safe ramp-down, slow enough not
-                // to slam the shaker with a step discontinuity.
-                let next = g * 0.99;
-                self.ramp = Some(if next < 1e-4 { 0.0 } else { next });
-                scale
-            }
+        advance_ramp(&mut self.ramp)
+    }
+}
+
+/// [`SimBackend::step_ramp`] on the ramp field alone, so the frame loop can advance it
+/// while it holds the plant borrowed.
+#[inline]
+fn advance_ramp(ramp: &mut Option<f64>) -> f64 {
+    match *ramp {
+        None => 1.0,
+        Some(g) => {
+            let scale = g;
+            // Geometric decay toward zero. At 65 kHz a 0.99/sample factor is roughly a
+            // 1.5 ms time constant: fast enough for a safe ramp-down, slow enough not
+            // to slam the shaker with a step discontinuity.
+            let next = g * 0.99;
+            *ramp = Some(if next < 1e-4 { 0.0 } else { next });
+            scale
         }
     }
 }
@@ -613,7 +697,9 @@ impl Backend for SimBackend {
 
     fn close(&mut self) -> Result<(), HalError> {
         // Close is always safe: reset the plant, drop the mapping, return to Closed.
-        self.plant.reset();
+        if let Some(plant) = self.plant.as_mut() {
+            plant.reset();
+        }
         self.ramp = None;
         self.map = None;
         self.pending_drive.clear();
@@ -698,8 +784,47 @@ impl Backend for SimBackend {
             )));
         }
 
+        // A sized plant (modal, FRF) must match the table: its outputs are the
+        // measurement rows (Control, Monitor) in table order, its inputs the drive rows.
+        let n_measured = input_channels
+            .iter()
+            .filter(|c| c.role != ChannelRole::Reference)
+            .count();
+        if let Some((want_in, want_drive)) = self.cfg.plant.dims() {
+            if n_measured != want_in || n_drive != want_drive {
+                return Err(HalError::Config(format!(
+                    "the {} plant is {want_in} measurement inputs by {want_drive} drives; the \
+                     table configures {n_measured} measurement inputs (Control and Monitor \
+                     rows) and {n_drive} drive rows",
+                    self.cfg.plant.kind()
+                )));
+            }
+        }
+
         // Rebuild the plant fresh from config so re-configure is idempotent.
-        self.plant = Plant::from_config(&self.cfg);
+        let plant = Plant::build(
+            &self.cfg.plant,
+            self.cfg.sample_rate_hz,
+            self.cfg.noise_level,
+            self.cfg.seed,
+        )
+        .map_err(|e| HalError::Config(format!("the {} plant: {e}", self.cfg.plant.kind())))?;
+        let single_path = plant.n_outputs() == 1;
+        let mut next = 0usize;
+        let plant_index = input_channels
+            .iter()
+            .map(|c| match c.role {
+                ChannelRole::Reference => 0,
+                _ if single_path => 0,
+                _ => {
+                    next += 1;
+                    next - 1
+                }
+            })
+            .collect();
+        self.resp = vec![0.0; plant.n_outputs()];
+        self.plant = Some(plant);
+        self.drive_now = vec![0.0; n_drive];
         self.pending_drive = vec![0.0; n_drive];
         // Preallocate the whole FIFO so nothing allocates on the hot path.
         self.out_fifo = VecDeque::with_capacity(self.cfg.output_buffer_frames.max(1) * n_drive);
@@ -709,6 +834,7 @@ impl Backend for SimBackend {
             input_channels,
             roles,
             full_scale,
+            plant_index,
             n_drive,
         });
         self.state = State::Configured;
@@ -780,10 +906,16 @@ impl Backend for SimBackend {
         let frames = out.len() / n_ch;
         let n_drive = map.n_drive;
 
-        // Take the role vector out of `map` for the duration of the frame loop so the
-        // plant/ramp/FIFO mutations below are not fighting an immutable borrow. It goes
-        // straight back afterwards; nothing allocates (the Vec was built at configure).
-        let mut roles = std::mem::take(&mut self.map.as_mut().expect("checked above").roles);
+        // Take the per-input vectors out of `map` (and the frame scratch out of `self`)
+        // for the duration of the frame loop so the plant/ramp/FIFO mutations below are
+        // not fighting a borrow. They go straight back afterwards; nothing allocates
+        // (every Vec was built at configure).
+        let map_mut = self.map.as_mut().expect("checked above");
+        let mut roles = std::mem::take(&mut map_mut.roles);
+        let mut plant_index = std::mem::take(&mut map_mut.plant_index);
+        let mut drive_now = std::mem::take(&mut self.drive_now);
+        let mut resp = std::mem::take(&mut self.resp);
+        let plant = self.plant.as_mut().expect("configure built the plant");
 
         for f in 0..frames {
             // CONSUME one drive frame per generated sample frame. An empty FIFO holds
@@ -795,26 +927,30 @@ impl Backend for SimBackend {
                     self.pending_drive[c] = self.out_fifo.pop_front().unwrap_or(0.0);
                 }
             }
-            // One combined drive value feeds the (single-input) plant this frame.
-            let drive_cmd = self.pending_drive.first().copied().unwrap_or(0.0);
-            let scale = self.step_ramp();
-            let drive = if running { drive_cmd * scale } else { 0.0 };
-            let response = self.plant.step(drive);
-            for (c, role) in roles.iter().enumerate() {
-                // Reference channels read the commanded drive (a MIMO reference is the
-                // commanded reference, not the plant response); everything else reads the
-                // measured plant response. Deliberate, simple convention.
+            // The whole drive frame feeds the plant, every drive row, scaled by the
+            // stop ramp (advanced once per frame) and zero unless running.
+            let scale = advance_ramp(&mut self.ramp);
+            for (d, &cmd) in drive_now.iter_mut().zip(&self.pending_drive) {
+                *d = if running { cmd * scale } else { 0.0 };
+            }
+            plant.step(&drive_now, &mut resp);
+            // Reference channels read the commanded first drive (a MIMO reference is
+            // the commanded reference, not the plant response); every measurement
+            // input reads its plant response. Deliberate, simple convention.
+            let reference = drive_now.first().copied().unwrap_or(0.0);
+            for (c, (role, &k)) in roles.iter().zip(&plant_index).enumerate() {
                 let sample = match role {
-                    ChannelRole::Reference => drive,
-                    _ => response,
+                    ChannelRole::Reference => reference,
+                    _ => resp[k],
                 };
                 out[f * n_ch + c] = sample as f32;
             }
         }
-        std::mem::swap(
-            &mut self.map.as_mut().expect("checked above").roles,
-            &mut roles,
-        );
+        let map_mut = self.map.as_mut().expect("checked above");
+        std::mem::swap(&mut map_mut.roles, &mut roles);
+        std::mem::swap(&mut map_mut.plant_index, &mut plant_index);
+        std::mem::swap(&mut self.drive_now, &mut drive_now);
+        std::mem::swap(&mut self.resp, &mut resp);
         self.sample_counter += frames as u64;
         if let Some(map) = self.map.as_ref() {
             hertzforge_hal::mark_overloads(
