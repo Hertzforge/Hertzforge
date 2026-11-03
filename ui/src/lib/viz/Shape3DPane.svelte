@@ -58,6 +58,9 @@
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
 
+	/** The gray a geometry is drawn in when nothing moves, as Visual Dynamics draws one undeformed. */
+	const REST_GRAY = 0.62;
+
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
 
@@ -306,7 +309,9 @@
 		const position = new BufferAttribute(view.nodes, 3);
 		shapeAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 		shapeImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
-		colorAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
+		// a neutral gray until a mode or a motion colors the nodes: a geometry on its own is not
+		// at the bottom of the colormap, which reads as black on a dark background
+		colorAttr = new BufferAttribute(new Float32Array(view.nodes.length).fill(srgbToLinear(REST_GRAY)), 3);
 		geometry.setAttribute('position', position);
 		geometry.setAttribute('shape', shapeAttr);
 		geometry.setAttribute('shapeImag', shapeImagAttr);
