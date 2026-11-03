@@ -268,3 +268,33 @@ def test_edits_need_an_open_project_and_well_formed_params():
     with pytest.raises(ProtocolError, match='"names"') as error:
         projects.remove(state, {'names': 'Time History'})
     assert error.value.code == 'bad_request'
+
+
+def test_a_reference_that_did_not_resolve_is_listed_and_can_be_removed(tmp_path, monkeypatch, validate):
+    import os
+
+    import numpy as np
+
+    import hertzforge as hz
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.io import native
+
+    monkeypatch.setattr(native, 'REFERENCE_FROM_BYTES', 1024)
+    run = hz.Project('run')
+    run.add('Run', TimeHistory(np.arange(4096) / 1024.0, np.ones((2, 4096)),
+                               response_dof=['1Z+', '2Z+']))
+    run_path = run.save(tmp_path / 'run.hforge')
+    analysis = hz.Project('analysis')
+    analysis.import_file(run_path)
+    path = analysis.save(tmp_path / 'analysis.hforge')
+    os.remove(run_path)
+    with pytest.warns(UserWarning):
+        state = projects.open_file({'path': path})
+    summary = projects.summary(state)
+    validate(summary, 'project')
+    assert summary['objects'] == []
+    (missing,) = summary['unresolved']
+    assert missing == {'name': 'Run', 'kind': 'data', 'path': str(run_path),
+                       'reason': 'not found'}
+    projects.remove(state, {'names': ['Run']})
+    assert 'unresolved' not in projects.summary(state)

@@ -26,21 +26,14 @@ def test_catalog_validates(catalog, validate):
 
 def test_catalog_names_every_operation_and_dataset(catalog):
     ids = {op['id'] for op in catalog['operations']}
-    assert ids == {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
-                   'modal.modes', 'modal_run.waterfall', 'modal_run.modes',
-                   'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
-                   'modal_run.resynthesis',
-                   'project.waterfall', 'project.compute_psds', 'project.compute_frfs',
-                   'project.fit_modes', 'project.mode_shapes', 'project.mac', 'project.plot',
-                   *(f'project.{verb}' for verb in (
-                       'integrate', 'differentiate', 'filter_data', 'truncate_data',
-                       'resample', 'compute_spectra', 'compute_cpsds', 'compute_srs',
-                       'compute_multiple_coherence', 'compute_octave',
-                       'make_realizable', 'convert_to_specification',
-                       'convert_to_psd', 'detect_shocks', 'extract_sine',
-                       'set_averaging', 'detect_averaging', 'set_filter',
-                       'set_truncation', 'view_geometry', 'group_properties',
-                       'merge_coincident_nodes'))}
+    assert ids == {op.id for op in OPERATIONS}
+    # the tools on the demonstration datasets, by name; the project's own are
+    # many and each is tested where it is defined
+    assert {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
+            'modal.modes', 'modal_run.waterfall', 'modal_run.modes',
+            'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
+            'modal_run.resynthesis'} <= ids
+    assert all(op.accepts == 'project' for op in OPERATIONS if op.id.startswith('project.'))
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}

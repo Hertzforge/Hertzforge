@@ -329,7 +329,11 @@ The project as the shell lists it:
 `records` is present for data objects, `source` for measured data, and `units_defined` is false
 for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
 names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
-order. `active_geometry` is the active geometry's name, or null. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
+order. `active_geometry` is the active geometry's name, or null. `unresolved`, present only when
+there are any, lists the objects the project holds by reference to another `.hforge` file that
+was `not found` or has `changed` since: each with its `name`, `kind` and the `path` it was looked
+for at. They are not loaded and no tool lists them; saving keeps their references, and
+`project.remove` drops one. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
 `verb:` params are filled from. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind

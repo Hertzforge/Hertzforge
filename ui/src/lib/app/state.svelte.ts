@@ -773,7 +773,7 @@ export class ProjectState {
 			this.apply(res.project);
 			if (show) {
 				// the workspaces with the project panel keep the window; any other goes to Analyze
-				if (this.app.workspace !== 'model') this.app.workspace = 'analyze';
+				if (this.app.workspace !== 'model' && this.app.workspace !== 'specify') this.app.workspace = 'analyze';
 				this.app.analyze.selectProject();
 			}
 			return true;
