@@ -241,6 +241,8 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 PARTNER = Param('shapes', 'Shape set', 'enum', options_from='objects:shape_set')
 MODES = Param('num_modes', 'Modes', 'integer', default=20, min=1, max=200, step=1)
 ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
+              min=0.01, max=100.0, step=0.5)
 
 
 def _added_shapes(project: Any, call: Any) -> list[dict]:
@@ -276,9 +278,11 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
-    DOFs, or at a channel table's (`Project.project_onto_basis`)."""
+    DOFs, or at a channel table's (`Project.project_onto_basis`), a node
+    matched within a share of the basis model's size, 2 % as Visual
+    Dynamics' dialog opens."""
     return _added_shapes(project, lambda: project.project_onto_basis(
-        params['source'], onto=params['onto']))
+        params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
 
 
 FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
@@ -357,7 +361,7 @@ MODAL_VERB_OPERATIONS = (
         workspace='modal', accepts='project',
         summary='A shape set sampled at another set\'s DOFs, or at a channel '
                 'table\'s sensors, by the nearest node and its direction.',
-        params=(_source('project_onto_basis', 'Shape set'), ONTO),
+        params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
         outputs=('shape3d', 'reading'), run=onto_basis),
 )
 
