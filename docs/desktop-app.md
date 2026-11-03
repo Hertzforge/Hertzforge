@@ -109,7 +109,7 @@ folder (`~/Library/Caches/org.hertzforge.app/` on macOS). The control service's 
 
 ## Unsigned Builds
 
-The builds are not signed yet. What a user sees because of it:
+The builds CI makes are not signed yet. What a user sees because of it:
 
 - **macOS.** The app is signed ad hoc (no developer identity), which Apple silicon requires before it
   will start an app at all. A downloaded copy is refused the first time it is opened, with a warning
@@ -122,17 +122,29 @@ The builds are not signed yet. What a user sees because of it:
   downloads it, which needs a network that one time.
 - **Linux.** Nothing is signed; the AppImage needs to be made executable.
 
-Signing for macOS is prepared and not enabled. `desktop/packaging/ci_signing.sh` puts a Developer ID
-certificate from repository secrets into a keychain of the runner's own, and
-`desktop/packaging/sign_macos.sh` signs every binary in the app with the hardened runtime
-(`entitlements.plist`), notarizes and staples the app, then makes, signs and notarizes the disk image.
-Both are adapted from Visual Dynamics' signed release route. To enable them: set the secrets
-`MACOS_CERTIFICATE` (the .p12 with its private key, base64), `MACOS_CERTIFICATE_PASSWORD`,
-`NOTARY_APPLE_ID`, `NOTARY_PASSWORD` (an app-specific password) and `NOTARY_TEAM_ID`, and the
-repository variable `HERTZFORGE_SIGN_MACOS` to `true`. The first signed build should be launched
-from its downloaded image before it is trusted: the entitlements the bundled Python needs under the
-hardened runtime are Visual Dynamics', not yet tried here. Windows stays unsigned, as Visual Dynamics'
-builds are.
+On the developer's Mac, `desktop/packaging/sign_macos.sh` signs every binary in
+the app with the hardened runtime (`entitlements.plist`), notarizes and staples the app, then makes,
+signs and notarizes the disk image. It is adapted from Visual Dynamics' signed release route and finds
+the same credentials: the "Developer ID Application" identity in the keychain, and for notarization the
+app-specific password in the login-keychain item `vd-notary-password` (or the notarytool profile
+`vd-notary`). The team is the one the identity's name ends with. After a build:
+
+```bash
+desktop/packaging/sign_macos.sh "$CARGO_TARGET_DIR/release/bundle/macos/Hertzforge.app" Hertzforge.dmg
+```
+
+The first run, on November 3, 2026, signed and notarized the app and its image on the first try, and
+Gatekeeper assessed both as "Notarized Developer ID". The signed app started both services, and its
+bundled Python, under the hardened runtime with Visual Dynamics' entitlements, imported NumPy, SciPy,
+pandas, netCDF4, h5py and the CAD kernel and computed a PSD from the plate data. The signed app is not
+yet tried as a copy downloaded on another Mac.
+
+Signing in CI is prepared and not enabled. `desktop/packaging/ci_signing.sh` puts a Developer ID
+certificate from repository secrets into a keychain of the runner's own, and the desktop workflow then
+runs `sign_macos.sh`. To enable it: set the secrets `MACOS_CERTIFICATE` (the .p12 with its private key,
+base64), `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_APPLE_ID`, `NOTARY_PASSWORD` (an app-specific password)
+and `NOTARY_TEAM_ID`, and the repository variable `HERTZFORGE_SIGN_MACOS` to `true`. Windows stays
+unsigned, as Visual Dynamics' builds are.
 
 ## The Local Proof
 
