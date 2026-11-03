@@ -34,3 +34,23 @@ describe('series looks', () => {
 		expect(looks.map((l) => l.follows)).toEqual([false, true, false, false, false]);
 	});
 });
+
+describe('many measured curves', () => {
+	it('gives each its own color along viridis once the blue family runs out', () => {
+		const series = Array.from({ length: 5 }, () => ({ role: 'measured' as const }));
+		const looks = seriesLooks(series);
+		const colors = looks.map((l) => l.color);
+		expect(new Set(colors).size).toBe(5);
+		expect(colors[0]).toBe('rgb(68 1 84)');
+	});
+
+	it('keeps the blue family for three or fewer, and a follower takes its measurement\'s color', () => {
+		expect(seriesLooks([{ role: 'measured' }, { role: 'measured' }]).every((l) => l.color === undefined)).toBe(true);
+		const looks = seriesLooks([
+			{ role: 'measured' }, { role: 'measured' }, { role: 'measured' }, { role: 'measured' }, { role: 'measured', follows: 1 }
+		]);
+		expect(looks[4].follows).toBe(true);
+		expect(looks[4].color).toBe(looks[1].color);
+		expect(new Set(looks.slice(0, 4).map((l) => l.color)).size).toBe(4);
+	});
+});

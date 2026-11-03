@@ -238,9 +238,9 @@
 			],
 			series: [
 				{},
-				...ordered.map(({ series, index, style, colorVar }) => ({
+				...ordered.map(({ series, index, style, colorVar, color }) => ({
 					label: series.name,
-					stroke: cssVar(colorVar),
+					stroke: color ?? cssVar(colorVar),
 					width: style.width,
 					dash: style.dash,
 					spanGaps: true,
@@ -432,7 +432,7 @@
 		</div>
 	</div>
 	<ul class="legend" aria-label="Legend">
-		{#each styled as { series, style, colorVar, follows }, i (i)}
+		{#each styled as { series, style, colorVar, color, follows }, i (i)}
 			{#if !follows}
 			<li title={legendLabel(series, style.styleName)} onmouseenter={() => focusSeries(i)} onmouseleave={() => focusSeries(null)}>
 				<svg class="swatch" viewBox="0 0 26 8" width="26" height="8" aria-hidden="true">
@@ -441,7 +441,7 @@
 						y1="4"
 						x2="25"
 						y2="4"
-						stroke="var({colorVar})"
+						stroke={color ?? `var(${colorVar})`}
 						stroke-width={style.width + 0.4}
 						stroke-dasharray={dashArray(series.role)}
 						stroke-linecap="butt"
