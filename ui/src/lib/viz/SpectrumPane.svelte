@@ -33,15 +33,23 @@
 		yFixed?: [number, number] | null;
 		/** The result the view belongs to, which a playhead is scoped to. */
 		scope?: string;
+		/** A click on the plot (not a drag), with the x it landed on: a cursor the caller places. */
+		onPick?: (x: number) => void;
+		/** The x range on screen, each time it changes: a zoom the caller reads as a band. */
+		onRange?: (low: number, high: number) => void;
+		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
+		marker?: number | null;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
 	let plotEl: HTMLDivElement;
 	let plot: uPlot | null = null;
 	let structureKey = '';
+	/** The title of the plot last built, whose x range a rebuild of the same plot keeps. */
+	let keptTitle: string | null = null;
 	let yRange: [number, number] | null = null;
 	let resizeObs: ResizeObserver | null = null;
 	let unsubscribeCursor: (() => void) | null = null;
@@ -146,7 +154,18 @@
 		return measureCtx.measureText(text).width;
 	}
 
+	/** The marker line, placed at `marker`. */
+	let markerLine: HTMLDivElement | null = null;
+	/** Where a press on the plot began, to tell a click from a drag. */
+	let pressedAt: number | null = null;
+
 	function build() {
+		// the same plot rebuilt for a new series (a fit's synthesis arriving) keeps the x range the
+		// person zoomed to: the view belongs to them
+		const kept = plot && plot.scales.x.min != null && plot.scales.x.max != null && keptTitle === view.title
+			? { min: plot.scales.x.min, max: plot.scales.x.max }
+			: null;
+		keptTitle = view.title;
 		destroyPlot();
 		const data = alignSeries(view.series, logX, logY);
 		const [xs, ...cols] = data;
@@ -249,7 +268,12 @@
 				}))
 			],
 			hooks: {
-				draw: [placePlayLine],
+				draw: [placePlayLine, placeMarker],
+				setScale: [
+					(u, key) => {
+						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
+					}
+				],
 				setCursor: [
 					(u) => {
 						const left = u.cursor.left ?? -1;
@@ -278,6 +302,18 @@
 		playLine.addEventListener('pointerdown', startDrag);
 		plot.over.appendChild(playLine);
 		placePlayLine();
+		markerLine = document.createElement('div');
+		markerLine.className = 'marker';
+		plot.over.appendChild(markerLine);
+		placeMarker();
+		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
+		plot.over.addEventListener('click', (e) => {
+			const moved = pressedAt === null ? 0 : Math.abs(e.clientX - pressedAt);
+			pressedAt = null;
+			if (!plot || !onPick || moved > 3) return;
+			onPick(plot.posToVal(e.clientX - plot.over.getBoundingClientRect().left, 'x'));
+		});
+		if (kept) plot.setScale('x', kept);
 		resizeObs = new ResizeObserver(() => {
 			if (!plot) return;
 			const w = Math.max(100, plotEl.clientWidth);
@@ -300,6 +336,20 @@
 		yRange = next;
 		plot.setScale('y', { min: next[0], max: next[1] });
 	}
+
+	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */
+	function placeMarker() {
+		if (!plot || !markerLine) return;
+		const left = marker === null ? -1 : plot.valToPos(marker, 'x');
+		const inside = left >= 0 && left <= plot.over.clientWidth;
+		markerLine.style.display = inside ? '' : 'none';
+		if (inside) markerLine.style.left = `${left}px`;
+	}
+
+	$effect(() => {
+		void marker;
+		placeMarker();
+	});
 
 	/** Put the playback line at its time, or hide it when there is none or it is off the plot. */
 	function placePlayLine() {
@@ -594,6 +644,15 @@
 		left: 3.5px;
 		width: 2px;
 		background: #e69f00;
+	}
+
+	.plot :global(.marker) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 0;
+		border-left: 1px dashed var(--text-2);
+		pointer-events: none;
 	}
 
 	.plot :global(.u-cursor-x) {
