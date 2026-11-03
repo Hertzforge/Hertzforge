@@ -97,11 +97,20 @@ fi
 SITE="$LIB/site-packages"
 "$PY" -m pip uninstall -q -y pip
 rm -rf "$LIB/ensurepip" "$LIB/idlelib" "$LIB/tkinter" "$LIB/turtledemo" "$LIB/test" \
-  "$LIB/lib2to3" "$OUT/python/lib/"tcl* "$OUT/python/lib/"tk* "$OUT/python/lib/"libtcl* \
-  "$OUT/python/lib/"libtk* "$OUT/python/lib/"itcl* "$OUT/python/lib/"thread* \
-  "$OUT/python/lib/pkgconfig" "$OUT/python/tcl" "$OUT/python/include" "$OUT/python/share" \
+  "$LIB/lib2to3" "$OUT/python/tcl" "$OUT/python/include" "$OUT/python/share" \
   "$OUT/python/Scripts" "$OUT/python/libs" "$DYNLOAD"/_tkinter* "$DYNLOAD"/_dbm* \
   "$DYNLOAD"/tcl* "$DYNLOAD"/tk*
+if [[ $EXE == bin/python3 ]]; then
+  # Tcl/Tk and its thread extension sit in lib/ beside the standard library's own
+  # folder. Never on Windows: there lib/ IS the standard library (Lib/, and the file
+  # system ignores case), and lib/thread* took threading.py with it (2026-11-02).
+  rm -rf "$OUT/python/lib/"tcl* "$OUT/python/lib/"tk* "$OUT/python/lib/"libtcl* \
+    "$OUT/python/lib/"libtk* "$OUT/python/lib/"itcl* "$OUT/python/lib/"thread* \
+    "$OUT/python/lib/pkgconfig"
+  # The unversioned libpythonX.Y.so is a link for linking extensions at build time;
+  # the interpreter loads libpythonX.Y.so.1.0 by its versioned name.
+  find "$OUT/python/lib" -maxdepth 1 -type l -name 'libpython*.so' -delete
+fi
 if [[ $EXE == bin/python3 ]]; then
   # One interpreter file and no links (an installer copies a link as a second copy,
   # or not at all): bin/python3, the file bin/python3.N pointed at.
@@ -121,6 +130,9 @@ for pkg in numpy scipy pandas h5py netCDF4 pint openpyxl; do
   [[ -d "$SITE/$pkg" ]] && find "$SITE/$pkg" -depth -type d -name tests -exec rm -rf {} +
 done
 find "$OUT/python" -type d -name __pycache__ -prune -exec rm -rf {} +
+# The trimmed runtime still starts the service: an over-eager removal fails here, by
+# name, rather than as a missing module deep in a later step.
+"$PY" -I -B -c 'import threading, logging, concurrent.futures, hertzforge.service'
 # Bytecode for everything, checked by hash and not by the source's time stamp: the
 # installers copy files with new times, and the app starts Python with -B, so a
 # bundle that is read only (and later signed) never has bytecode written into it.
