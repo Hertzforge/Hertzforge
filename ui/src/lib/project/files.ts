@@ -125,3 +125,14 @@ export async function choosePdf(): Promise<string | null> {
 	const chosen = await dialog.open({ title: 'The Issued PDF', multiple: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
 	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
 }
+
+const RUN_LOG_FILTER: DialogFilter = { name: 'Run log', extensions: ['hflog', 'vdlog'] };
+
+/** A run log chosen in the native dialog: one to open, or where to start one. Null when cancelled. */
+export async function chooseRunLog(purpose: 'open' | 'new'): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	if (purpose === 'new') return dialog.save({ title: 'New Run Log', defaultPath: 'Run log.hflog', filters: [RUN_LOG_FILTER] });
+	const chosen = await dialog.open({ title: 'Open Run Log', multiple: false, filters: [RUN_LOG_FILTER] });
+	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
+}

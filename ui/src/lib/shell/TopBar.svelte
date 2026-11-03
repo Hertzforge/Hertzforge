@@ -77,6 +77,8 @@
 				{#each app.units.systems as name (name)}<option value={name}>{name}</option>{/each}
 			</select>
 		{/if}
+		<button class="btn ghost sm" class:on={app.runLog.shown} data-testid="runlog-toggle" aria-pressed={app.runLog.shown} onclick={() => app.runLog.toggle()}
+			title="The run log, written while a test runs, beside any workspace">Run Log</button>
 		<ConnectionPill client={app.analysis} label="Analysis" testid="conn-analysis" />
 		<ConnectionPill client={app.control} label="Control" testid="conn-control" />
 		<button class="btn ghost sm themebtn" data-testid="theme-toggle" onclick={() => theme.cycle()} title="Theme: {themeLabel}. Click to change." aria-label="Theme: {themeLabel}">
@@ -87,6 +89,12 @@
 </header>
 
 <style>
+	.btn.on {
+		color: var(--text-1);
+		background: var(--bg-4);
+		box-shadow: inset 0 0 0 1px var(--line-3);
+	}
+
 	.units {
 		width: auto;
 		max-width: 190px;

@@ -29,7 +29,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import display_units, fitting, frames, projects, reports
+from . import display_units, fitting, frames, projects, reports, run_logs
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
@@ -270,6 +270,10 @@ class Connection:
         #: the unit system views are drawn in (`units.system`); Visual
         #: Dynamics' own to start (in-slinch-lbf-s, accelerations in g)
         self.units: str = display_units.START
+        #: the run log this connection keeps (`runlog.*`), its requests one
+        #: at a time so entries are written in the order they were sent
+        self.run_log: run_logs.Keeper = run_logs.Keeper()
+        self.run_log_lock: asyncio.Lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
@@ -512,6 +516,9 @@ class Connection:
         finally:
             for task in self.tasks:
                 task.cancel()
+            # the log's lock is released with the connection, so another
+            # writer can take it
+            self.run_log.close()
 
     async def answer(self, request: dict[str, Any]) -> None:
         """Run one request and send its response. A ProtocolError becomes an
@@ -552,6 +559,12 @@ class Connection:
             elif method == 'units.system':
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': self.units_request(params)})
+            elif method in run_logs.RUN_LOG_METHODS:
+                async with self.run_log_lock:
+                    result = await self.service.in_worker(run_logs.request, self.run_log,
+                                                          method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
@@ -563,7 +576,8 @@ class Connection:
                     f'The analysis service has no method {method!r}; it '
                     'answers catalog.list, dataset.open, op.run, '
                     f'{", ".join(PROJECT_METHODS)}, '
-                    f'{", ".join(fitting.FIT_METHODS)} and '
+                    f'{", ".join(fitting.FIT_METHODS)}, '
+                    f'{", ".join(run_logs.RUN_LOG_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)

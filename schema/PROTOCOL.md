@@ -500,6 +500,43 @@ CMIF (`CMIF 1, residual`..., role `drive`). `half_power` is the half-power readi
 CMIF peak under the cursor: `{"frequency","low","high","q","damping","notes"}`, each of `low`,
 `high`, `q` and `damping` null where it could not be read, and `notes` saying why.
 
+**Run log.** The log keeper's run log, as Visual Dynamics' Run Log window keeps it while a test
+runs. A connection holds at most one log open; its lock is released when the log is closed or the
+connection ends, and a log another writer holds opens read-only, saying why.
+
+| Method | Params | Result |
+|---|---|---|
+| `runlog.new` | `{"path","title"?,"mirror"?}` | `{"log"}` |
+| `runlog.open` | `{"path","mirror"?}` | `{"log"}` |
+| `runlog.close` | `{}` | `{"log":null}` |
+| `runlog.reload` | `{}` | `{"log"}` |
+| `runlog.state` | `{}` | `{"log"}` (null with none open) |
+| `runlog.form` | `{"form","axis"?,"target"?}` | `{form...,"taken","time","preview"}` |
+| `runlog.preview` | `{"form","values","axis"?,"target"?}` | `{"text"}` |
+| `runlog.write` | `{"form","values","text"?,"time"?,"taken","author","axis"?,"target"?}` | `{"log","said"}` |
+
+`log` is the window's view: its `path`, `title`, `writable` and `read_only` (why it cannot be
+written), the `status` the strip reads (the current test, its axis, run, level and outcome, when
+the run started and stopped), the day's `rows` (each entry's `id`, `kind`, `test`, `date`, `line`,
+the `corrections` that changed it, and when it was entered if `late`), the `tests` with their
+states, the `holds` and `owed` lists, the current test's `header`, the `run` a level row goes into,
+the `level` it offers, and the `readings` forms the test's runs take.
+
+A `form` is one of: `level row`, `abort`, `note`, `clock check`, `person in`, `person out`, `run
+start`, `run stop`, `cause found`, `correct` (with the entry's id as `target`), `open test`,
+`roll`, `close test`, `release`, `header`, `sweep`, `shot`, `result`, `notch`, `deviation`,
+`anomaly`, `disposition`, `setting change`, `opinion` and `new log`. `runlog.form` describes it:
+its `title`, its `fields` (each `field`, `label`, `box` kind, `choices` for a choice and the
+`value` it opens with; a `heading` box titles a group), the `required` fields, the label of its
+line of free `text` ('' for none), a `note`, whether it takes an event time (`with_time`) and
+whether it computes something as it is typed (`live`). It is opened at `taken`, which `time` shows
+as HH:MM:SS. Each box's text goes back as typed in `values`, by field, and the service reads it by
+its box kind; `preview` is what a `live` form computes from it (the projection to full level, a
+sweep's current against its rating, a shot's checks and pulses, a notch's place in the plan, the
+hold a deviation answers). `runlog.write` writes it as its entries, the event time read from
+`time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
+what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
+
 **Reports.** Visual Dynamics' report on the connection's project, as the core writes it.
 
 | Method | Params | Result |
