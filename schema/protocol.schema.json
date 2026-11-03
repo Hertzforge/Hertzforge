@@ -233,7 +233,16 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}]},
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/tableView"}]},
+    "tableView": {
+      "type": "object", "required": ["view", "title", "columns", "rows"], "additionalProperties": false,
+      "properties": {
+        "view": {"const": "table"},
+        "title": {"type": "string"},
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+      }
+    },
     "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},
     "param": {
       "type": "object", "required": ["name", "label", "type"],
@@ -265,7 +274,7 @@
         "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
-        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix"]}}
+        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table"]}}
       }
     },
     "dataset": {

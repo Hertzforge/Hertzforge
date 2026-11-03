@@ -80,8 +80,26 @@ export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
 	}
 }
 
+/**
+ * Every param's starting value. A project-object param filled from the same objects as an earlier
+ * one starts on an object the earlier ones have not taken, when there is one: two shape sets to
+ * match or compare start as two sets, not one set twice.
+ */
 export function defaultValues(params: ParamDescriptor[], channels: ParamOption[] = []): ParamValues {
-	return Object.fromEntries(params.map((p) => [p.name, defaultFor(p, channels)]));
+	const taken = new Map<string, Set<ParamValue>>();
+	return Object.fromEntries(
+		params.map((p) => {
+			let value = defaultFor(p, channels);
+			const source = objectKinds(p).length || objectVerb(p) ? p.options_from : undefined;
+			if (source) {
+				const used = taken.get(source) ?? new Set();
+				if (used.has(value)) value = optionsFor(p, channels).find((o) => !used.has(o.value))?.value ?? value;
+				used.add(value);
+				taken.set(source, used);
+			}
+			return [p.name, value];
+		})
+	);
 }
 
 /** Words a user can act on, or null when the value is valid. */

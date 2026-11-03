@@ -8,6 +8,7 @@
 	import MatrixPane from './MatrixPane.svelte';
 	import ReadingPane from './ReadingPane.svelte';
 	import SpectrumPane from './SpectrumPane.svelte';
+	import TablePane from './TablePane.svelte';
 
 	interface Props {
 		view: View;
@@ -63,6 +64,8 @@
 	{/await}
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {onselect} />
+{:else if view.view === 'table'}
+	<TablePane {view} />
 {:else}
 	<p class="unknown" data-testid="view-unknown">This shell has no renderer for the view "{(view as { view: string }).view}".</p>
 {/if}
