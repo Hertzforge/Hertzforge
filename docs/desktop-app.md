@@ -149,13 +149,18 @@ HERTZFORGE_E2E_SCRIPT=desktop/packaging/e2e/random_run.js HERTZFORGE_E2E_ANSWER=
 network; opens a dataset and runs a tool in Analyze and solves a model in Modal; runs Random on the
 simulator to completion from Acquire & Control; opens a display page in a window of its own; then
 starts a second run and quits while it drives. Each step is written to the app's log, and the control
-service's log says how the run ended. Build the app again without `--e2e` before handing it on.
+service's log says how the run ended. `desktop/packaging/e2e/drop_files.js` checks that the shell
+sees Tauri's API and that a drop on the window (sent as the `tauri://drag-drop` event the window
+emits for one) reaches the analysis service by its path. Build the app again without `--e2e` before
+handing it on.
 
 ## Not Done Yet
 
 - Signing, as above; notarization has not been tried.
 - The Windows and Linux installers are built by CI and have not been installed and run.
-- File dialogs, File menu items, drag and drop and the `.hforge` file association: the macOS menu
-  has the standard application, Edit, View and Window menus only.
+- File menu items and the `.hforge` file association: the macOS menu has the standard application,
+  Edit, View and Window menus only. The Open, Import and Save buttons use the native dialogs, and
+  files dropped on the window open or import by their paths (`capabilities/main.json` grants the
+  main window its events and the two dialogs; the display windows get nothing).
 - Intel Macs and Windows on Arm.
 - Updates: there is no updater.
