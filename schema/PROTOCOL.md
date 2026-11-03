@@ -361,13 +361,16 @@ project, and opening or starting another project ends it.
 
 | Method | Params | Result |
 |---|---|---|
-| `fit.start` | `{"frf","shapes"?}` | `{"fit"}` |
+| `fit.start` | `{"frf","shapes"?,"coherence"?}` | `{"fit"}` |
 | `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
 | `fit.move` | `{"frequency"}` | `{"fit"}` |
 | `fit.damping` | `{"damping"}` | `{"fit"}` |
 | `fit.fit` | `{}` | `{"fit"}` |
 | `fit.confirm` | `{"description"?}` | `{"fit"}` |
 | `fit.refine` | `{}` | `{"fit"}` |
+| `fit.delete` | `{"modes"}` | `{"fit"}` |
+| `fit.edit` | `{"mode","damping"?,"description"?}` | `{"fit"}` |
+| `fit.residual` | `{"show"}` | `{"fit"}` |
 | `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
 | `fit.end` | `{}` | `{}` |
 
@@ -379,6 +382,12 @@ out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and
 damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
 `fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
 and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
+`fit.delete` takes back the confirmed modes at `modes` (indices into `modes`, from 0) and drops
+the preview. `fit.edit` types a confirmed mode's `damping` (a fraction of critical, above 0 and up
+to 1) or `description` into its row, as Visual Dynamics' fit table does; a damping changes the
+synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
+`coherence`, the name of a coherence or multiple coherence in the project, `fit.start` weights each
+response at each line by γ²/(1-γ²), as the core does (`ModalFitSession`).
 `fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
 "<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
 published. A step the core refuses is refused in its words; a fit whose FRF has left the project
@@ -392,7 +401,11 @@ arrays as `op.run` does: x `Frequency` Hz, y `CMIF` log, `link` `frequency`, the
 first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`...) each
 `follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
 `mac` is a `matrix` view of the confirmed modes' auto-MAC with the preview's row and column last
-(`New: <f> Hz`), how alike the shapes are; null for fewer than two.
+(`New: <f> Hz`), how alike the shapes are; null for fewer than two. `coherence` names the
+coherence the fit is weighted by, or null; `residual` says whether the view draws the residual's
+CMIF (`CMIF 1, residual`..., role `drive`). `half_power` is the half-power reading of the residual
+CMIF peak under the cursor: `{"frequency","low","high","q","damping","notes"}`, each of `low`,
+`high`, `q` and `damping` null where it could not be read, and `notes` saying why.
 
 **Reports.** Visual Dynamics' report on the connection's project, as the core writes it.
 

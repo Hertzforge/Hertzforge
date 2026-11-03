@@ -405,7 +405,7 @@ class Connection:
                 raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'fit.start':
-                _only(params, ('frf', 'shapes'), method)
+                _only(params, ('frf', 'shapes', 'coherence'), method)
                 self.fit = await call(fitting.start, project, params)
                 return {'fit': await call(fitting.state, self.fit)}
             if method == 'fit.end':
@@ -426,7 +426,9 @@ class Connection:
                 return {'name': name, 'project': projects.summary(self.project),
                         'fit': await call(fitting.state, fit)}
             keys = {'fit.find': ('low', 'high'), 'fit.move': ('frequency',),
-                    'fit.damping': ('damping',), 'fit.confirm': ('description',)}
+                    'fit.damping': ('damping',), 'fit.confirm': ('description',),
+                    'fit.delete': ('modes',), 'fit.edit': ('mode', 'damping', 'description'),
+                    'fit.residual': ('show',)}
             _only(params, keys.get(method, ()), method)
             await call(fitting.act, fit, method, params)
             return {'fit': await call(fitting.state, fit)}

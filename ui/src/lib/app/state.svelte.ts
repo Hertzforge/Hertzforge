@@ -538,9 +538,9 @@ export class FitState {
 
 	constructor(private readonly app: AppState) {}
 
-	start(frf: string, shapes?: string): Promise<boolean> {
+	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		return this.step('Starting the fit', 'fit.start', shapes ? { frf, shapes } : { frf });
+		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}) });
 	}
 
 	find(): Promise<boolean> {
@@ -565,6 +565,20 @@ export class FitState {
 
 	refine(): Promise<boolean> {
 		return this.step('Refining the residues', 'fit.refine', {});
+	}
+
+	/** Take confirmed modes back, by their index in `modes`. */
+	remove(modes: number[]): Promise<boolean> {
+		return this.step(`Taking back mode ${modes.map((k) => k + 1).join(', ')}`, 'fit.delete', { modes });
+	}
+
+	/** Type a confirmed mode's damping (a fraction of critical) or description into its row. */
+	edit(mode: number, change: { damping?: number; description?: string }): Promise<boolean> {
+		return this.step(`Editing mode ${mode + 1}`, 'fit.edit', { mode, ...change });
+	}
+
+	showResidual(show: boolean): Promise<boolean> {
+		return this.step(show ? 'Drawing the residual' : 'Hiding the residual', 'fit.residual', { show });
 	}
 
 	async publish(name?: string): Promise<boolean> {

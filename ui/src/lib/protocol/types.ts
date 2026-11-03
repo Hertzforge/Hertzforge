@@ -340,6 +340,22 @@ export interface FitStateView {
 	view: SpectrumView;
 	/** The confirmed modes' auto-MAC, the preview last; null for fewer than two. */
 	mac?: MatrixView | null;
+	/** The coherence the fit is weighted by, or null. */
+	coherence?: string | null;
+	/** Whether the view draws the residual's own CMIF. */
+	residual?: boolean;
+	/** The half-power reading of the residual CMIF peak under the cursor. */
+	half_power?: HalfPowerReading;
+}
+
+/** Q read off the half-power width of the residual CMIF peak; null where it could not be read. */
+export interface HalfPowerReading {
+	frequency: number;
+	low: number | null;
+	high: number | null;
+	q: number | null;
+	damping: number | null;
+	notes: string[];
 }
 
 /** `project.progress`: how far an import has read. */

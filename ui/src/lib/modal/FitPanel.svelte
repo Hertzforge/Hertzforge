@@ -8,6 +8,7 @@
 	 */
 	import type { FitState } from '$lib/app/state.svelte';
 	import { formatFixed } from '$lib/viz/format';
+	import Icon from '$lib/shell/Icon.svelte';
 	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
@@ -23,6 +24,20 @@
 	async function confirm() {
 		if (await fit.confirm(description.trim() || undefined)) description = '';
 	}
+
+	/** A damping typed into a mode's row, in percent; refused words come back from the service. */
+	function editDamping(i: number, text: string) {
+		const percent = Number(text);
+		if (Number.isFinite(percent) && percent !== s!.modes[i].damping * 100) void fit.edit(i, { damping: percent / 100 });
+	}
+
+	function editDescription(i: number, text: string) {
+		if (text.trim() !== (s!.modes[i].description ?? '')) void fit.edit(i, { description: text });
+	}
+
+	const enter = (e: KeyboardEvent) => {
+		if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+	};
 
 	function hold(e: SubmitEvent) {
 		e.preventDefault();
@@ -44,6 +59,12 @@
 					{s.shapes ? `Publish to ${s.shapes}` : 'Publish'}
 				</button>
 			{/if}
+			{#if s.modes.length}
+				<label class="toggle" title="Draw the residual's own CMIF: what is left after the confirmed modes, the curve Find Mode hunts">
+					<input type="checkbox" data-testid="fit-residual" checked={s.residual ?? false} onchange={(e) => fit.showResidual(e.currentTarget.checked)} disabled={fit.busy !== null} />
+					Residual
+				</label>
+			{/if}
 			<button class="btn ghost sm" data-testid="fit-end" onclick={() => fit.end()}>End Fit</button>
 		</div>
 
@@ -51,6 +72,12 @@
 			<span>Cursor <b class="num">{formatFixed(s.pending.frequency, 4)}</b> Hz</span>
 			<span>Damping <b class="num">{formatFixed(s.pending.damping * 100, 3)}</b> %{s.pending.held ? ' (held)' : ''}</span>
 			{#if s.preview}<span class="preview">Previewing the mode at {formatFixed(s.preview.frequency, 4)} Hz</span>{/if}
+			{#if s.half_power}
+				{@const hp = s.half_power}
+				<span data-testid="fit-half-power" title={hp.notes.join('; ') || 'Q from the half-power width of the residual CMIF peak under the cursor'}>
+					Half-power {#if hp.q !== null && hp.damping !== null}Q <b class="num">{formatFixed(hp.q, 1)}</b>, <b class="num">{formatFixed(hp.damping * 100, 3)}</b> %{:else}not read{/if}
+				</span>
+			{/if}
 			<form class="hold" onsubmit={hold}>
 				<label for="fit-hold">Hold damping</label>
 				<input id="fit-hold" class="field mono" bind:value={heldPercent} placeholder="%" inputmode="decimal" />
@@ -75,17 +102,28 @@
 		{/if}
 
 		<table class="modes" data-testid="fit-modes" aria-label="Confirmed modes">
-			<thead><tr><th>Mode</th><th>Frequency (Hz)</th><th>Damping (%)</th><th>Description</th></tr></thead>
+			<thead><tr><th>Mode</th><th>Frequency (Hz)</th><th>Damping (%)</th><th>Description</th><th></th></tr></thead>
 			<tbody>
-				{#each s.modes as md, i (i)}
-					<tr>
+				{#each s.modes as md, i (`${i}:${md.frequency}:${md.damping}:${md.description}`)}
+					<tr data-testid="fit-mode-{i}">
 						<td class="num">{i + 1}</td>
 						<td class="num">{formatFixed(md.frequency, 5)}</td>
-						<td class="num">{formatFixed(md.damping * 100, 3)}</td>
-						<td>{md.description ?? ''}</td>
+						<td>
+							<input class="cell num" aria-label="Damping of mode {i + 1}, percent" data-testid="fit-mode-damping-{i}" value={formatFixed(md.damping * 100, 3)}
+								onchange={(e) => editDamping(i, e.currentTarget.value)} onkeydown={enter} disabled={fit.busy !== null} />
+						</td>
+						<td>
+							<input class="cell" aria-label="Description of mode {i + 1}" data-testid="fit-mode-description-{i}" value={md.description ?? ''}
+								onchange={(e) => editDescription(i, e.currentTarget.value)} onkeydown={enter} disabled={fit.busy !== null} />
+						</td>
+						<td>
+							<button class="icon" data-testid="fit-mode-delete-{i}" title="Take mode {i + 1} back" aria-label="Take mode {i + 1} back" onclick={() => fit.remove([i])} disabled={fit.busy !== null}>
+								<Icon name="trash" size={12} />
+							</button>
+						</td>
 					</tr>
 				{:else}
-					<tr><td colspan="4" class="muted">No mode confirmed yet. Find Mode, Fit Mode, then Confirm Mode.</td></tr>
+					<tr><td colspan="5" class="muted">No mode confirmed yet. Find Mode, Fit Mode, then Confirm Mode.</td></tr>
 				{/each}
 			</tbody>
 		</table>
@@ -171,6 +209,43 @@
 
 	.modes td {
 		padding: 2px 6px 2px 0;
+	}
+
+	/* a row's damping and description are typed in place, as in Visual Dynamics' fit table */
+	.cell {
+		width: 100%;
+		padding: 1px 4px;
+		font: inherit;
+		color: var(--text-1);
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm, 3px);
+	}
+
+	.cell:hover,
+	.cell:focus {
+		border-color: var(--line-2, var(--line-1));
+		background: var(--bg-2);
+	}
+
+	.cell.num {
+		width: 6em;
+		text-align: right;
+	}
+
+	.toggle {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: var(--text-xs);
+		color: var(--text-2);
+	}
+
+	.icon {
+		background: none;
+		border: none;
+		color: var(--text-3);
+		cursor: pointer;
 	}
 
 	.muted,
