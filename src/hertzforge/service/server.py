@@ -27,7 +27,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import fitting, frames, projects
+from . import fitting, frames, projects, reports
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
@@ -369,6 +369,25 @@ class Connection:
                 state.modified = True
             return {'views': views, 'project': projects.summary(state)}
 
+    async def report_request(self, method: str, params: Any) -> dict[str, Any]:
+        """Answer one `report.*` request on this connection's project."""
+        keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
+                'report.export': ('name', 'path')}
+        _only(params, keys[method], method)
+        call = self.service.in_worker
+        async with self.project_lock:
+            if self.project is None:
+                raise refused(f'{method} works on a project, and none is open')
+            project = self.project.project
+            if method == 'report.generate':
+                name = await call(reports.generate, project, params)
+                self.project.modified = True
+                return {'name': name, 'project': projects.summary(self.project)}
+            if method == 'report.render':
+                html = await call(reports.render, project, params)
+                return {'name': params['name'], 'html': html}
+            return {'path': await call(reports.export, project, params)}
+
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `fit.*` request: a step of the mode fit on this
         connection's project, and the fit's state after it."""
@@ -468,6 +487,10 @@ class Connection:
                 result = await self.project_request(method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in reports.REPORT_METHODS:
+                result = await self.report_request(method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
@@ -478,8 +501,9 @@ class Connection:
                     'unknown_method',
                     f'The analysis service has no method {method!r}; it '
                     'answers catalog.list, dataset.open, op.run, '
-                    f'{", ".join(PROJECT_METHODS)} and '
-                    f'{", ".join(fitting.FIT_METHODS)}.')
+                    f'{", ".join(PROJECT_METHODS)}, '
+                    f'{", ".join(fitting.FIT_METHODS)} and '
+                    f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)
         except asyncio.CancelledError:

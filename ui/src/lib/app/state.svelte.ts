@@ -33,6 +33,7 @@ import type {
 } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
+import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
 
@@ -613,6 +614,71 @@ export class FitState {
 }
 
 /**
+ * The project's reports (`report.*`): Visual Dynamics' report, generated from a starter template and
+ * shown as the page the core writes.
+ */
+export class ReportState {
+	/** The report shown, and its page. */
+	name = $state<string | null>(null);
+	html = $state<string | null>(null);
+	busy = $state<string | null>(null);
+	error = $state<string | null>(null);
+	/** Where the last export went. */
+	exported = $state<string | null>(null);
+
+	constructor(private readonly app: AppState) {}
+
+	async generate(template: string): Promise<void> {
+		await this.act('Generating the report', async () => {
+			const res = await this.app.analysis.request<{ name: string; project: ProjectSummary }>(
+				'report.generate',
+				{ template },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.app.project.apply(res.project);
+			await this.load(res.name);
+		});
+	}
+
+	/** Show the report `name`, in the shell's own theme. */
+	async show(name: string): Promise<void> {
+		await this.act(`Opening ${name}`, () => this.load(name));
+	}
+
+	async export(path: string): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		await this.act('Saving the page', async () => {
+			const res = await this.app.analysis.request<{ path: string }>('report.export', { name, path }, { timeoutMs: RUN_TIMEOUT_MS });
+			this.exported = res.path;
+		});
+	}
+
+	private async load(name: string): Promise<void> {
+		const res = await this.app.analysis.request<{ name: string; html: string }>(
+			'report.render',
+			{ name, theme: theme.resolved },
+			{ timeoutMs: RUN_TIMEOUT_MS }
+		);
+		this.name = res.name;
+		this.html = res.html;
+		this.exported = null;
+	}
+
+	private async act(doing: string, work: () => Promise<void>): Promise<void> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			await work();
+		} catch (err) {
+			this.error = message(err);
+		} finally {
+			this.busy = null;
+		}
+	}
+}
+
+/**
  * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
  * or importing switches Analyze to it.
  */
@@ -736,6 +802,7 @@ export class AppState {
 	readonly analyze: AnalyzeState;
 	readonly project: ProjectState;
 	readonly fit: FitState;
+	readonly report: ReportState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -755,6 +822,7 @@ export class AppState {
 		this.analyze = new AnalyzeState(this);
 		this.project = new ProjectState(this);
 		this.fit = new FitState(this);
+		this.report = new ReportState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.

@@ -279,6 +279,7 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `report.*` | see Reports below | |
 | `project.rename` | `{"name","to"}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |
@@ -382,6 +383,22 @@ first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`
 `follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
 `mac` is a `matrix` view of the confirmed modes' auto-MAC with the preview's row and column last
 (`New: <f> Hz`), how alike the shapes are; null for fewer than two.
+
+**Reports.** Visual Dynamics' report on the connection's project, as the core writes it.
+
+| Method | Params | Result |
+|---|---|---|
+| `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
+| `report.render` | `{"name","theme"?}` | `{"name","html"}` |
+| `report.export` | `{"name","path"}` | `{"path"}` |
+
+`report.generate` builds a report from a starter template bound by type to the project's objects
+(`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
+`transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
+gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
+nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
+shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
+added when it has another suffix), beside the target first and renamed over it.
 
 **Control service**
 

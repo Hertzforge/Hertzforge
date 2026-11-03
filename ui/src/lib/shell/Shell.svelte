@@ -14,6 +14,7 @@
 	import Placeholder from './Placeholder.svelte';
 	import Model from '$lib/workspaces/Model.svelte';
 	import Specify from '$lib/workspaces/Specify.svelte';
+	import Report from '$lib/workspaces/Report.svelte';
 	import Rail from './Rail.svelte';
 	import TopBar from './TopBar.svelte';
 
@@ -79,6 +80,8 @@
 				<Model {app} />
 			{:else if app.workspace === 'specify'}
 				<Specify {app} />
+			{:else if app.workspace === 'report'}
+				<Report {app} />
 			{:else}
 				<Placeholder {info} />
 			{/if}
