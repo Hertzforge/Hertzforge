@@ -26,6 +26,7 @@ use futures_util::{SinkExt, StreamExt};
 use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -51,6 +52,19 @@ const STOP_WAIT: Duration = Duration::from_secs(15);
 const EVENT_BUFFER: usize = 256;
 /// How long an arm may take: opening and committing NI tasks takes seconds.
 const ARM_WAIT: Duration = Duration::from_secs(120);
+/// How often the shutdown looks whether the run it stopped has ended.
+const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
+
+/// The methods that could start a drive or raise one. Once shutdown has begun
+/// ([`Service::shutdown`]) they are refused; one already under way finishes first.
+const DRIVE_METHODS: [&str; 6] = [
+    "random.arm",
+    "random.start",
+    "random.proceed",
+    "random.level",
+    "random.mode",
+    "sim.start",
+];
 
 /// The methods this service serves, for the unknown-method message.
 const METHODS: &str = "session.state, session.claim, session.release, station.list, \
@@ -246,6 +260,12 @@ pub struct Service {
     /// The connections with a subscription of their own; every other connection is
     /// on the default subscription (`random.live`).
     displays: std::sync::Mutex<HashMap<ConnId, Display>>,
+    /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
+    closing: AtomicBool,
+    /// Held shared by each of [`DRIVE_METHODS`] while it runs, and taken whole by the
+    /// shutdown, so a method that passed the check before shutdown began has finished
+    /// before the shutdown looks for a live run.
+    drive_gate: tokio::sync::RwLock<()>,
 }
 
 fn unix_s() -> u64 {
@@ -289,6 +309,8 @@ impl Service {
             notices: std::sync::Mutex::new(Some(notices)),
             background: AtomicBool::new(false),
             displays: std::sync::Mutex::new(HashMap::new()),
+            closing: AtomicBool::new(false),
+            drive_gate: tokio::sync::RwLock::new(()),
         })
     }
 
@@ -491,6 +513,71 @@ impl Service {
         }
     }
 
+    /// Shut down: the process has been told to stop (a signal, or its parent closing
+    /// standard input; `main.rs`). From here on every method that could start or raise
+    /// a drive is refused, and one already under way finishes first. A live Random run
+    /// then ends with the controlled stop, the path of the safe stop (the level ramps
+    /// down over the run's shutdown ramp while the loop drives; never an abort). Should
+    /// the run still be live well after its ramp, it is aborted, as `random.abort`
+    /// would. This returns only once no run is live, so the process can exit with
+    /// nothing driving and every station released; connections are served throughout,
+    /// so each screen sees the run end and keeps Stop and Abort. The result says what
+    /// was stopped, for the log.
+    pub async fn shutdown(&self) -> Option<String> {
+        self.closing.store(true, Ordering::SeqCst);
+        drop(self.drive_gate.write().await);
+        let (random, sim) = {
+            let inner = self.inner.lock().await;
+            (inner.random.clone(), inner.sim.run.clone())
+        };
+        // A `sim.*` demonstration run is simulated end to end; it is stopped so the
+        // process ends tidily.
+        if let Some(sim) = sim.filter(|r| !r.is_finished()) {
+            sim.request_stop();
+            let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
+        }
+        let run = random.filter(|r| r.view().state.is_live())?;
+        let ramp_s = rconfig::parse(&run.config)
+            .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
+                c.control.shutdown_ramp_s
+            });
+        let patience = wait_for(&run) + Duration::from_secs_f64(2.0 * ramp_s.max(0.0));
+        stop_run(&run, "safe_stop", rrun::SHUTDOWN_BY.into(), true).await;
+        let asked = Instant::now();
+        let mut aborted = false;
+        while run.view().state.is_live() {
+            if !aborted && asked.elapsed() > patience {
+                aborted = true;
+                // Not `eprintln!`: once a parent has gone, its end of a pipe on
+                // standard error may be closed, and that would panic here.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "sds-control: run {} is still live {} s after its controlled stop; \
+                     aborting it",
+                    run.id,
+                    patience.as_secs()
+                );
+                run.ended_by(rrun::SHUTDOWN_BY);
+                run.signal(ABORT);
+                let _ = run
+                    .ask(
+                        |reply| Cmd::Abort {
+                            by: rrun::SHUTDOWN_BY.into(),
+                            reply,
+                        },
+                        wait_for(&run),
+                    )
+                    .await;
+            }
+            tokio::time::sleep(SHUTDOWN_POLL).await;
+        }
+        let v = run.view();
+        Some(match &v.end {
+            Some(end) => format!("run {} ended ({}): {}", run.id, end.outcome, end.message),
+            None => format!("run {} ended", run.id),
+        })
+    }
+
     /// The connection went: with a goodbye (a clean close) control is free at once;
     /// without one, the seat is kept for the timeout.
     pub async fn disconnected(&self, conn: &Conn, goodbye: bool) {
@@ -523,6 +610,15 @@ impl Service {
         method: &str,
         params: &Map<String, Value>,
     ) -> Result<(Value, Arrays), MethodError> {
+        let _gate = if DRIVE_METHODS.contains(&method) {
+            let gate = self.drive_gate.read().await;
+            if self.closing.load(Ordering::SeqCst) {
+                return Err(shutting_down());
+            }
+            Some(gate)
+        } else {
+            None
+        };
         match method {
             "random.configure" => self.random_configure(conn, params).await,
             "random.config" => Ok(self.random_config().await),
@@ -1431,6 +1527,15 @@ async fn stop_run(run: &RandomRun, outcome: &'static str, by: String, wait: bool
             reply: None,
         });
     }
+}
+
+/// The refusal of a method that could start or raise a drive once shutdown has begun.
+fn shutting_down() -> MethodError {
+    MethodError::named(
+        ErrorCode::Refused,
+        "shutting_down",
+        "The control service is shutting down: it is stopping any run and starts none.",
+    )
 }
 
 fn wrong_state(v: &RunView, verb: &str) -> MethodError {

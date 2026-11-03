@@ -386,6 +386,7 @@ plain words: it never names a protocol method.
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random configuration has errors | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode` and `sim.start` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -731,6 +732,23 @@ Result column is the `random.state` object below.
   `run_id`). It and `random.configure` are the ways out of `finished`.
 - **`random.clear`** drops the configuration and releases the station (`unconfigured`).
 
+### Shutting Down
+
+The control service does not end its process with a run live: a killed process can leave an
+output holding its last sample. Told to stop (Ctrl-C, SIGTERM or SIGHUP on Unix; Ctrl-C,
+Ctrl-Break or a closed console on Windows; and, started with `--watch-stdin`, the end of its
+standard input) it refuses every verb that could start or raise a drive (`shutting_down`; one
+already under way finishes first), ends a live run with the controlled stop, the path of
+`random.stop` (while driving, the level ramps down over `shutdown_ramp_s`; never an abort), and
+exits once the run has ended. The run's outcome is `safe_stop`, and its message says the service
+was shut down. Connections are served until then, so every screen sees the run end and keeps
+Stop and Abort. A stop that has not ended well after its ramp (three control loops, ten seconds
+and twice `shutdown_ramp_s`) is followed by the abort.
+
+`--watch-stdin` is for a parent process that starts the service, such as the desktop app: the
+parent stops it by closing the pipe on its standard input, never by killing it, and if the
+parent dies the operating system closes the pipe, so the run stops the same way.
+
 ### Run State
 
 `random.state` answers with the state object, and the `random.state` text event carries the same
@@ -783,7 +801,7 @@ or abort was asked for (a controlled stop's ramp-down starts there), or where th
 | `completed` | The schedule finished |
 | `operator_stop` | `random.stop` |
 | `operator_abort` | `random.abort` |
-| `safe_stop` | Nobody held control for `timeout_s`; the service stopped the run (see Controller and Observers) |
+| `safe_stop` | The service stopped the run with the controlled stop: nobody held control for `timeout_s` (see Controller and Observers), or the service was shut down (see Shutting Down); `message` says which |
 | `aborted` | A protection abort tripped; `trip` says which |
 | `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
 | `sysid_level_unreachable` | System identification could not bring the control response to `pretest.level_db` within its drive ceiling, or the response did not settle on it; the run never drove at test level |

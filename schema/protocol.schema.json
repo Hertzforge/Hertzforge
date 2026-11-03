@@ -356,7 +356,7 @@
                "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
-               "shaker_record_invalid"]
+               "shaker_record_invalid", "shutting_down"]
     },
     "itemReason": {
       "enum": ["duplicate_index", "no_channel_enabled", "zero_sensitivity", "non_positive_range",

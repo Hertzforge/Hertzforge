@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- For the bundled Python under the hardened runtime, as Visual Dynamics'
+       signed builds (MIT, Brandon Zwink) carry them: CPython and the C
+       libraries its packages load (ctypes callbacks among them) need writable,
+       executable memory, and the hardened runtime kills the process without these. -->
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <!-- Python loads its extension modules and their libraries from inside the
+       bundle at run time, which library validation refuses unless every one
+       carries the same team signature. -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>
