@@ -88,7 +88,11 @@ group; panes with the same `link` share a cursor position on x.
 `regions` (optional) shade spans of x behind the curves, as Visual Dynamics draws a time
 history's settings on it: a `frame` is one frame its spectra are averaged from (frames that
 overlap shade darker where they do), and a `cut` is a span left out, such as the ends a truncation
-discards. `label` is said when the span is hovered. They are not listed in the legend; the
+discards; a `span` draws its edges alone. `label` is said when the span is hovered. A region with
+`"drag":{"op","params","low","high"?}` is moved on the plot: its middle slides it and, with
+`high`, an edge moves that edge. On release the shell runs `op` with `params`, the new x0 as
+`low` and the new x1 as `high`, and the answer's views take the result's place, as Visual
+Dynamics' averaging and truncation regions are dragged. They are not listed in the legend; the
 result's reading says what they are.
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
@@ -234,6 +238,13 @@ shell draws the table with its headings held at the top as it scrolls, puts a ce
 a number at the right of its column, and copies the whole table as tab-separated text, the
 headings first, so it pastes into a spreadsheet.
 
+A table may carry `"edit":{"op","params","columns"}`: its cells are typed into in place. `columns`
+gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
+operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
+and the first `table` view of the answer takes the table's place; a value the operation refuses
+leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
+the block it covers, cell by cell, as Visual Dynamics' tables paste.
+
 ## Operations: Declarative Panels
 
 The analysis service describes each operation; the shell builds the panel from the description.
@@ -258,6 +269,9 @@ An `enum` that names one of the project's objects sets `"options_from":"objects:
 project's objects of those kinds, in the project's order. Left out, it takes the first of them.
 An operation run when the project has none of the kinds a required param takes is refused, and
 the refusal names the kind.
+
+An `objects:` or `verb:` enum whose `default` is `""` is optional: `""` names no object, the shell
+offers it first as "(none)", and the tool is shown even when the project has no such object.
 
 An `enum` that names an object a core verb takes sets `"options_from":"verb:<verb>"`, such as
 `verb:integrate`; the shell fills it with the objects whose `verbs` (in the project summary) list
@@ -309,7 +323,18 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**Display units.** Every view the analysis service sends is drawn in its connection's unit
+system, as Visual Dynamics draws its window in the system its selector names. A connection starts
+in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
+edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
+report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
+typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
+not recognize, a `shape3d` and a `matrix` are sent as they are. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's
@@ -367,7 +392,9 @@ linked channel table describes a time history; `verb:` params are filled from th
 a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+`features` (each report feature's key, true where it is on) and `identity` (each identification
+field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic
@@ -434,6 +461,10 @@ CMIF peak under the cursor: `{"frequency","low","high","q","damping","notes"}`, 
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
 | `report.export` | `{"name","path"}` | `{"path"}` |
+| `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
+| `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
+| `report.print` | `{"name"}` | `{"html"}` |
+| `report.issue` | `{"name","step","path"?}` | `{"html","status"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -442,6 +473,37 @@ gives the report `name` as one HTML document, with its stylesheet, data and view
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
 added when it has another suffix), beside the target first and renamed over it.
+
+`report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
+tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
+and the pane for the selection. A click on a block posts `{"hforgeReport":{"op":"select","at":n}}`
+(`at` null outside every block) to the page's parent, which the shell answers with
+`report.editor` at that block and `"page":false`: the page has framed the block itself, so the
+answer leaves `html` and `references` out and nothing is rendered again. `title`, `marking` and `marking_color` (`ink` or `red`) are the
+report's; `blocks` how many it has; `insert` the Insert menu as `[kind, label]` pairs (Markdown,
+then `core.report.insert_options`); `references` the `[label, caption]` of each numbered figure
+and table, for a text block's `{{figure:<caption>}}` token. `block` is null with nothing selected,
+or the selected block's `index`, `kind` and `mode`, and either its `text` (a text block; `special`
+names a skeleton section, check or requirement block, which has a pane of its own) or its
+`fields` (`{field,label,value,options:[[value,label]...]}`, the objects it may name, symbolic
+bindings such as `@basis:ShapeSet` first) and `caption`.
+
+`report.print` gives the reader's page as it is printed: light, its figures drawn at print
+resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
+PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
+changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
+Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
+on, every required field entered, not already issued), marks it issued (or amended), and gives the
+page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
+issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
+puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+as text beside its `features`.
+
+`report.operate` applies one of VD's editor operations and answers with the editor at the block it
+leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound to the first
+object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
+`value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
+`marking` and `marking_color` (`value`).
 
 **Control service**
 

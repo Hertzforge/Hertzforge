@@ -59,9 +59,20 @@ CUT_STOP = Param('stop', 'Stop', 'number', default=1.0, unit='s', step=0.1,
 
 
 def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
-    """The analysis settings an object carries, as the project summary
-    lists them: {'averaging': {...}, 'filtering': {...}, 'truncation':
-    {...}}, each present only when set. What a `setting` param opens on."""
+    """The settings an object carries, as the project summary lists them: a
+    time history's {'averaging': {...}, 'filtering': {...}, 'truncation':
+    {...}}, each present only when set, and a report's {'features': {key:
+    on}} for every report feature and its identification fields
+    {'identity': {key: text}}. What a `setting` param opens on."""
+    from hertzforge.core.report import Report
+
+    if isinstance(obj, Report):
+        from hertzforge.report.features import FEATURES
+        from hertzforge.report.identity import FIELDS, value
+
+        held = set(obj.features)
+        return {'features': {key: key in held for key in FEATURES},
+                'identity': {field.key: _text(value(obj, field.key)) for field in FIELDS}}
     out: dict[str, dict[str, Any]] = {}
     averaging = getattr(obj, 'averaging', None)
     if averaging is not None:
@@ -78,6 +89,12 @@ def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
     if truncation is not None:
         out['truncation'] = {'start': truncation.start, 'stop': truncation.stop}
     return out
+
+
+def _text(held: Any) -> str:
+    """An identification field as the form shows it: a list of people
+    comma-separated."""
+    return ', '.join(map(str, held)) if isinstance(held, list) else str(held or '')
 
 
 def _rate(history: Any) -> float:
@@ -114,6 +131,21 @@ def _trace(history: Any, name: str, record: int, regions: list[dict],
                  v.series(f'{label}, as recorded', 'drive', x, y)]
     return v.spectrum(f'{name}, {label}', *axes(history, record, 'real', arrays), lines,
                       regions=regions)
+
+
+def _frames_span(history: Any, name: str, record: int) -> list[dict]:
+    """The span of every frame, dragged on the plot to slide the frames
+    along the record as Visual Dynamics' averaging region slides; the
+    averaging run again with its settings as they are and the new start."""
+    averaging = history.averaging
+    rate = _rate(history)
+    origin = float(history.abscissa[0])
+    bounds = averaging.frame_bounds(rate, origin)
+    held = {'source': name, 'record': record + 1, 'frame_length': averaging.frame_length,
+            'overlap': averaging.overlap, 'window': averaging.window,
+            'frames': averaging.frames, 'detrend': averaging.detrend}
+    return [v.region(bounds[0][0], bounds[-1][1], 'span', 'Drag to slide the frames',
+                     v.dragging('project.set_averaging', held, 'start'))]
 
 
 def _frames(history: Any) -> list[dict]:
@@ -166,7 +198,7 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'not {averaging.frames}')
     record = _shown(history, name, params)
     history.averaging = averaging
-    return [_trace(history, name, record, _frames(history)),
+    return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
 
@@ -181,7 +213,7 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         history.averaging = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
-    return [_trace(history, name, record, _frames(history)),
+    return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
 
@@ -241,6 +273,10 @@ def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
     cut = [v.region(a, b, 'cut', label) for a, b, label in (
         (first, start, f'Cut, {first:g} to {start:g} s'),
         (stop, last, f'Cut, {stop:g} to {last:g} s')) if b > a]
+    # the kept span, its edges or the whole dragged as VD's truncation is
+    cut.append(v.region(start, stop, 'span', 'Drag an edge, or the middle to slide it',
+                        v.dragging('project.set_truncation',
+                                   {'source': name, 'record': record + 1}, 'start', 'stop')))
     return [_trace(history, name, record, cut),
             v.reading(f'Truncation of {name}', [
         v.row('From', start, 's', 'info'), v.row('To', stop, 's', 'info'),

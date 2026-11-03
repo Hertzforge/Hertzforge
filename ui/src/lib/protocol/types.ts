@@ -125,9 +125,11 @@ export interface SpectrumView {
 export interface Region {
 	x0: number;
 	x1: number;
-	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out. */
-	kind: 'frame' | 'cut';
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone. */
+	kind: 'frame' | 'cut' | 'span';
 	label?: string;
+	/** Present when the span is dragged: `op` runs with `params`, the new x0 as `low`, x1 as `high`. */
+	drag?: { op: string; params: Record<string, unknown>; low: string; high?: string };
 }
 
 export type Status = 'pass' | 'warn' | 'fail' | 'info';
@@ -250,6 +252,15 @@ export interface TableView {
 	columns: string[];
 	/** One cell per column, as text. */
 	rows: string[][];
+	/** Present when the cells are typed into: the operation that sets one, and each column's key (null: read only). */
+	edit?: TableEdit;
+}
+
+/** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
+export interface TableEdit {
+	op: string;
+	params: Record<string, unknown>;
+	columns: (string | null)[];
 }
 
 export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;
@@ -301,8 +312,8 @@ export interface ProjectObject {
 	groups: string[];
 	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
 	verbs?: string[];
-	/** A time history's analysis settings, each group present only when set. */
-	settings?: Record<string, Record<string, number | string>>;
+	/** A time history's analysis settings, each group present only when set; a report's features. */
+	settings?: Record<string, Record<string, number | string | boolean>>;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */
@@ -1042,4 +1053,37 @@ export interface RandomLogResult {
 export interface RandomLogEvent {
 	run_id: string;
 	entries: LogEntry[];
+}
+
+/** One field of a report block the editor's pane sets: the objects it may name. */
+export interface ReportField {
+	field: string;
+	label: string;
+	value: string;
+	options: [string, string][];
+}
+
+/** `report.editor`: the edit page and the pane for the selection. */
+export interface ReportEditor {
+	/** The edit page; left out when only the pane was asked for. */
+	html?: string;
+	selected: number | null;
+	title: string;
+	marking: string;
+	marking_color: 'ink' | 'red';
+	blocks: number;
+	/** The Insert menu, `[kind, label]`. */
+	insert: [string, string][];
+	/** `[label, caption]` of each numbered figure and table, for `{{figure:<caption>}}`; left out with `html`. */
+	references?: [string, string][];
+	block: {
+		index: number;
+		kind: string;
+		mode: string;
+		fields: ReportField[];
+		text?: string;
+		caption?: string;
+		special?: string | null;
+	} | null;
+	project?: ProjectSummary;
 }

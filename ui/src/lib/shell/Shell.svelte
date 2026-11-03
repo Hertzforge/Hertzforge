@@ -32,6 +32,11 @@
 		});
 	});
 
+	// each time the analysis service connects it is told the display units chosen before
+	$effect(() => {
+		if (!app.config.popout && app.analysis.isOpen) void app.units.sync();
+	});
+
 	function onKey(e: KeyboardEvent) {
 		// A display window keeps its own keys (it aborts on Cmd or Ctrl and period too).
 		if (app.config.popout) return;

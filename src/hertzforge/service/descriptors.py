@@ -22,7 +22,7 @@ DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
 #: what an operation runs on: a catalog dataset of one kind, or the
 #: connection's own project
 Accepts = DatasetKind | Literal['project']
-ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix']
+ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it
 REQUIRED = object()
@@ -62,6 +62,9 @@ class Param:
     #: set from the result's view rather than the panel, which does not
     #: show it (a waterfall's quantity, chosen among the groups it drew)
     in_view: bool = False
+    #: an `objects:` param with default '' is optional: '' names no object,
+    #: the shell offers it as "(none)", and the operation runs without one
+    #: (`optional`)
     #: the setting of the object the operation's `source` param names that
     #: the param opens on, as '<group>.<field>' in the summary's
     #: `settings` ('averaging.frame_length'); the default when the object
@@ -75,6 +78,11 @@ class Param:
                 or source.startswith('verb:') and self.verb):
             raise ValueError(f'options_from {source!r} is "channels", '
                              '"objects:<kind>|<kind>" or "verb:<verb>"')
+
+    @property
+    def optional(self) -> bool:
+        """Whether this is an object param that may name none ('')."""
+        return bool(self.options_from) and self.options_from != 'channels' and self.default == ''
 
     @property
     def kinds(self) -> tuple[str, ...]:
@@ -150,6 +158,8 @@ class Param:
             return value
         allowed = (list(choices) if self.options_from is not None
                    else [option.value for option in self.options])
+        if self.optional and value == '':
+            return value
         if value not in allowed:
             shown = ', '.join(repr(a) for a in allowed[:12])
             more = ', ...' if len(allowed) > 12 else ''

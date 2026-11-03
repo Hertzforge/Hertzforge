@@ -29,7 +29,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import fitting, frames, projects, reports
+from . import display_units, fitting, frames, projects, reports
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
@@ -267,6 +267,9 @@ class Connection:
         self.project_lock: asyncio.Lock = asyncio.Lock()
         #: the mode fit under way on the project (`fit.*`), or None
         self.fit: fitting.Fit | None = None
+        #: the unit system views are drawn in (`units.system`); Visual
+        #: Dynamics' own to start (in-slinch-lbf-s, accelerations in g)
+        self.units: str = display_units.START
         self.tasks: set[asyncio.Task] = set()
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
@@ -377,12 +380,17 @@ class Connection:
             views = await self.service.in_worker(op.run, project, values)
             if op.edits or list(project) != before:
                 state.modified = True
+            display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}
 
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
         keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
-                'report.export': ('name', 'path')}
+                'report.export': ('name', 'path'),
+                'report.editor': ('name', 'selected', 'theme', 'page'),
+                'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
+                                   'kind', 'field', 'value'),
+                'report.print': ('name',), 'report.issue': ('name', 'step', 'path')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -394,9 +402,46 @@ class Connection:
                 self.project.modified = True
                 return {'name': name, 'project': projects.summary(self.project)}
             if method == 'report.render':
-                html = await call(reports.render, project, params)
+                html = await call(reports.render, project, params, 'report.render', self.system)
                 return {'name': params['name'], 'html': html}
-            return {'path': await call(reports.export, project, params)}
+            if method == 'report.print':
+                return {'html': await call(reports.print_page, project, params, self.system)}
+            if method == 'report.issue':
+                done = await call(reports.issue, project, params, self.system)
+                self.project.modified = True
+                return {**done, 'project': projects.summary(self.project)}
+            if method == 'report.editor':
+                return await call(reports.edit_page, project, params, self.system)
+            if method == 'report.operate':
+                edited = await call(reports.operate, project, params, self.system)
+                self.project.modified = True
+                return {**edited, 'project': projects.summary(self.project)}
+            return {'path': await call(reports.export, project, params, self.system)}
+
+    @property
+    def system(self) -> Any:
+        """The `UnitSystem` this connection draws in."""
+        from hertzforge.units import SYSTEMS
+
+        return SYSTEMS[self.units]
+
+    def fit_state(self, fit: fitting.Fit) -> dict[str, Any]:
+        """The fit's state with its CMIF drawn in this connection's units."""
+        state = fitting.state(fit)
+        display_units.convert([state['view']], self.units)
+        return state
+
+    def units_request(self, params: Any) -> dict[str, Any]:
+        """`units.system`: the unit system this connection's views are drawn
+        in, set when `name` is given; the systems there are."""
+        _only(params, ('name',), 'units.system')
+        name = params.get('name')
+        if name is not None:
+            if name not in display_units.systems():
+                raise bad_request(f'units.system "name" is one of '
+                                  f'{", ".join(display_units.systems())}')
+            self.units = name
+        return {'name': self.units, 'systems': display_units.systems()}
 
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `fit.*` request: a step of the mode fit on this
@@ -412,7 +457,7 @@ class Connection:
             if method == 'fit.start':
                 _only(params, ('frf', 'shapes', 'coherence'), method)
                 self.fit = await call(fitting.start, project, params)
-                return {'fit': await call(fitting.state, self.fit)}
+                return {'fit': await call(self.fit_state, self.fit)}
             if method == 'fit.end':
                 _only(params, (), method)
                 self.fit = None
@@ -429,14 +474,14 @@ class Connection:
                 name = await call(fitting.publish, project, fit, params)
                 self.project.modified = True
                 return {'name': name, 'project': projects.summary(self.project),
-                        'fit': await call(fitting.state, fit)}
+                        'fit': await call(self.fit_state, fit)}
             keys = {'fit.find': ('low', 'high'), 'fit.move': ('frequency',),
                     'fit.damping': ('damping',), 'fit.confirm': ('description',),
                     'fit.delete': ('modes',), 'fit.edit': ('mode', 'damping', 'description'),
                     'fit.residual': ('show',)}
             _only(params, keys.get(method, ()), method)
             await call(fitting.act, fit, method, params)
-            return {'fit': await call(fitting.state, fit)}
+            return {'fit': await call(self.fit_state, fit)}
 
     async def serve(self) -> None:
         """Send `hello`, then answer each request in its own task until the
@@ -492,6 +537,7 @@ class Connection:
                                   'result': result})
             elif method == 'op.run':
                 result = await self.service.op_run(params, self.handles)
+                display_units.convert(result.get('views', []), self.units)
                 frame = await self.service.in_worker(
                     frames.pack, {'type': 'response', 'id': ident,
                                   'result': result})
@@ -503,6 +549,9 @@ class Connection:
                 result = await self.report_request(method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method == 'units.system':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': self.units_request(params)})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(

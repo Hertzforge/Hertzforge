@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * Waterfall view, drawn with three.js: every record a polyline at its own depth, colored by
 	 * level on the sequential colormap (viridis), the way Visual Dynamics' 3-D data view draws time
@@ -499,6 +500,15 @@
 	// the curves rarely pass in front of its labels
 	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
 	const recordAt = (r: number) => `${STAGE.x + 0.03},${recordCount > 1 ? (r / (recordCount - 1)) * STAGE.y : 0},0`;
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
+	async function copyImage() {
+		const drawer = renderer;
+		if (!drawer) return;
+		copiedImage = await copyCanvas(drawer.domElement, plotBackground(drawer.domElement), () => drawer.render(scene, camera), view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -550,6 +560,7 @@
 
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Waterfall display">
+			<button class="btn ghost sm copyimg" data-testid="waterfall-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 			<div class="seg" role="radiogroup" aria-label="Viewpoint">
 				<button role="radio" data-testid="waterfall-perspective" aria-checked={facing === 'perspective'} class:on={facing === 'perspective'} onclick={() => face('perspective')} title="Perspective (R)">3-D</button>
 				<button role="radio" data-testid="waterfall-top" aria-checked={facing === 'top'} class:on={facing === 'top'} onclick={() => face('top')} title="From the top: a map of level over abscissa and record (T)">Top</button>
@@ -601,6 +612,11 @@
 </div>
 
 <style>
+	.copyimg {
+		flex: none;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.waterfall {
 		position: relative;
 		height: 100%;

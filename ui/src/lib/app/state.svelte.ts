@@ -24,10 +24,13 @@ import type {
 	ProjectProgress,
 	UnitsTables,
 	ProjectSummary,
+	ReportEditor,
 	RunState,
 	Shape3DView,
 	SimProfile,
+	Region,
 	SimStateResult,
+	TableEdit,
 	View,
 	Workspace
 } from '$lib/protocol/types';
@@ -264,6 +267,48 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<OpResult>('op.run', target(op, result.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			replace({ views: res.views, params, paramSummary: summarize(this.paramsOf(op), params, this.opened?.channels ?? []), busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
+		}
+	}
+
+	/**
+	 * Set one cell of a result's editable table (`TableEdit`): its operation runs, and the first table
+	 * it answers with takes that view's place. The refusal, when there is one, comes back as words.
+	 */
+	async editCell(id: number, viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			const table = res.views.find((v) => v.view === 'table');
+			if (table) {
+				this.results = this.results.map((r) =>
+					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
+				);
+			}
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** A span dragged on a result's plot: its operation runs with the new edges, and its views take the result's place. */
+	async dragSpan(id: number, drag: NonNullable<Region['drag']>, x0: number, x1: number): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		if (!result || result.busy) return;
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, busy: false });
 		} catch (err) {
 			replace({ busy: false });
 			this.runError = message(err);
@@ -639,6 +684,10 @@ export class ReportState {
 	error = $state<string | null>(null);
 	/** Where the last export went. */
 	exported = $state<string | null>(null);
+	/** The editor's pane for the selection, from the last `report.editor`. */
+	editor = $state.raw<ReportEditor | null>(null);
+	/** How far the page was scrolled, kept across the re-render an edit makes. */
+	scroll = 0;
 
 	constructor(private readonly app: AppState) {}
 
@@ -668,14 +717,85 @@ export class ReportState {
 		});
 	}
 
+	/** The page being printed, in a frame of its own that asks for the print dialog. */
+	printing = $state<string | null>(null);
+	/** An issue under way: the report is marked issued and its page printed; the PDF is named next. */
+	issuing = $state<string | null>(null);
+	/** The last issue recorded. */
+	issued = $state<Record<string, string> | null>(null);
+
+	/** Print the reader's page; the print dialog saves it as a PDF. */
+	async print(): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		await this.act('Preparing the page to print', async () => {
+			const res = await this.app.analysis.request<{ html: string }>('report.print', { name }, { timeoutMs: RUN_TIMEOUT_MS });
+			this.printing = res.html;
+		});
+	}
+
+	/** Begin, record or cancel an issue (`report.issue`). */
+	async issue(step: 'begin' | 'record' | 'cancel', path?: string): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
+		await this.act(doing, async () => {
+			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; project: ProjectSummary }>(
+				'report.issue',
+				{ name, step, ...(path ? { path } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.app.project.apply(res.project);
+			if (step === 'begin') {
+				this.issuing = res.status ?? 'issued';
+				this.issued = null;
+				this.printing = res.html ?? null;
+			} else {
+				this.issuing = null;
+				if (res.entry) this.issued = res.entry;
+				await this.load(name);
+			}
+		});
+	}
+
+	/** Select a block on the page (null for the report itself); its pane follows. */
+	async select(at: number | null): Promise<void> {
+		const name = this.name;
+		if (!name || at === (this.editor?.selected ?? null)) return;
+		// the page framed the block itself: the pane alone comes back
+		await this.act('Selecting', async () => this.take(await this.request('report.editor', { name, selected: at, page: false })));
+	}
+
+	/** One of the editor's operations (`report.operate`); the page and pane follow. */
+	async operate(op: string, params: Record<string, unknown> = {}): Promise<boolean> {
+		const name = this.name;
+		if (!name) return false;
+		let ok = false;
+		await this.act('Editing the report', async () => {
+			const res = await this.request('report.operate', { name, op, selected: this.editor?.selected ?? null, ...params });
+			if (res.project) this.app.project.apply(res.project);
+			this.take(res);
+			ok = true;
+		});
+		return ok;
+	}
+
+	private request(method: string, params: Record<string, unknown>): Promise<ReportEditor> {
+		return this.app.analysis.request<ReportEditor>(method, { ...params, theme: theme.resolved }, { timeoutMs: RUN_TIMEOUT_MS });
+	}
+
+	private take(res: ReportEditor): void {
+		// a pane alone keeps the page and the labels rendered with it
+		this.editor = res.html === undefined ? { ...res, references: this.editor?.references ?? [] } : res;
+		if (res.html !== undefined) this.html = res.html;
+	}
+
 	private async load(name: string): Promise<void> {
-		const res = await this.app.analysis.request<{ name: string; html: string }>(
-			'report.render',
-			{ name, theme: theme.resolved },
-			{ timeoutMs: RUN_TIMEOUT_MS }
-		);
-		this.name = res.name;
-		this.html = res.html;
+		const keep = this.name === name ? (this.editor?.selected ?? null) : null;
+		if (this.name !== name) this.scroll = 0;
+		const res = await this.request('report.editor', { name, selected: keep });
+		this.name = name;
+		this.take(res);
 		this.exported = null;
 	}
 
@@ -689,6 +809,58 @@ export class ReportState {
 		} finally {
 			this.busy = null;
 		}
+	}
+}
+
+/** Where the chosen unit system is kept between launches. */
+const UNITS_KEY = 'hertzforge.units';
+
+/**
+ * The display unit system (`units.system`): every plot and reading the analysis service sends is
+ * in it, as Visual Dynamics' unit selector puts its window in one. Remembered between launches and
+ * told to the service each time it connects; a change draws the results on screen again.
+ */
+export class UnitsState {
+	name = $state<string | null>(null);
+	systems = $state<string[]>([]);
+
+	constructor(private readonly app: AppState) {}
+
+	private stored(): string | null {
+		try {
+			return localStorage.getItem(UNITS_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	/** The service connected: tell it the system chosen before, or learn its own. */
+	async sync(): Promise<void> {
+		const wanted = this.stored();
+		try {
+			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			this.systems = res.systems;
+			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
+				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				this.name = set.name;
+			} else this.name = res.name;
+		} catch {
+			// an older service without units: its own SI stands
+		}
+	}
+
+	async choose(name: string): Promise<void> {
+		if (name === this.name) return;
+		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		this.name = res.name;
+		try {
+			localStorage.setItem(UNITS_KEY, res.name);
+		} catch {
+			// not kept between launches; this session still uses it
+		}
+		// what is on screen was drawn in the old system: draw it again
+		for (const r of this.app.analyze.results) void this.app.analyze.rerun(r.id, {});
+		if (this.app.report.name) void this.app.report.show(this.app.report.name);
 	}
 }
 
@@ -826,6 +998,7 @@ export class AppState {
 	readonly project: ProjectState;
 	readonly fit: FitState;
 	readonly report: ReportState;
+	readonly units: UnitsState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -846,6 +1019,7 @@ export class AppState {
 		this.project = new ProjectState(this);
 		this.fit = new FitState(this);
 		this.report = new ReportState(this);
+		this.units = new UnitsState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.

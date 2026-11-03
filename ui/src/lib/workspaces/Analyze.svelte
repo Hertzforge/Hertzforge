@@ -213,6 +213,8 @@
 										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
 										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
 										scope={String(r.id)}
+										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editCell(r.id, i, v.edit!, row, column, value) : undefined}
+										onspan={v.view === 'spectrum' && v.regions?.some((g) => g.drag) ? (k, x0, x1) => a.dragSpan(r.id, v.regions![k].drag!, x0, x1) : undefined}
 									/>
 								</div>
 							{/each}

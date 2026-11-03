@@ -12,7 +12,7 @@ from typing import Any, Literal
 import numpy as np
 
 Scale = Literal['log', 'linear']
-Role = Literal['measured', 'reference', 'tolerance', 'abort', 'drive', 'other']
+Role = Literal['measured', 'reference', 'tolerance', 'abort', 'limit', 'drive', 'other']
 Status = Literal['pass', 'warn', 'fail', 'info']
 Shape = Literal['line', 'steps', 'law']
 
@@ -96,13 +96,28 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
     return out
 
 
-def region(x0: float, x1: float, kind: Literal['frame', 'cut'],
-           label: str | None = None) -> dict[str, Any]:
-    """A span of x shaded behind a spectrum's curves: a `frame` averaged
-    from, or a `cut` left out."""
+def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span'],
+           label: str | None = None, drag: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A span of x behind a spectrum's curves: a `frame` averaged from, a
+    `cut` left out, or a `span` (its edges drawn, nothing shaded). With
+    `drag` (`dragging`) it is moved on the plot: its middle slides it and
+    an edge moves that edge."""
     out: dict[str, Any] = {'x0': float(x0), 'x1': float(x1), 'kind': kind}
     if label:
         out['label'] = label
+    if drag is not None:
+        out['drag'] = drag
+    return out
+
+
+def dragging(op: str, params: dict[str, Any], low: str, high: str | None = None
+             ) -> dict[str, Any]:
+    """What makes a region draggable: the operation that sets the span,
+    run with `params` and the new x0 as `low` and, when `high` is given,
+    the new x1 as `high`. Without `high` only the whole span slides."""
+    out: dict[str, Any] = {'op': op, 'params': dict(params), 'low': low}
+    if high is not None:
+        out['high'] = high
     return out
 
 
@@ -209,13 +224,28 @@ def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
             'value_range': [float(value_range[0]), float(value_range[1])]}
 
 
-def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]]) -> dict[str, Any]:
+def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]],
+          edit: dict[str, Any] | None = None) -> dict[str, Any]:
     """A `table` view: rows of text under column headings, one cell per
-    column."""
+    column. With `edit` ({'op', 'params', 'columns'}, see `editing`) its
+    cells are typed into in place."""
     columns = [str(c) for c in columns]
     rows = [[str(cell) for cell in row] for row in rows]
     for row in rows:
         if len(row) != len(columns):
             raise ValueError(f'table {title!r}: a row of {len(row)} cells under '
                              f'{len(columns)} columns')
-    return {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}
+    out = {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}
+    if edit is not None:
+        if len(edit['columns']) != len(columns):
+            raise ValueError(f'table {title!r}: {len(edit["columns"])} edit keys for '
+                             f'{len(columns)} columns')
+        out['edit'] = edit
+    return out
+
+
+def editing(op: str, params: dict[str, Any], columns: Sequence[str | None]) -> dict[str, Any]:
+    """What makes a `table` view's cells editable: the operation that sets
+    one (taking `row` from 1, `column` and `value` beside `params`), and each
+    column's key, or None for a column that is read only."""
+    return {'op': op, 'params': dict(params), 'columns': list(columns)}

@@ -29,9 +29,13 @@
 		overlay?: number | null;
 		/** The result the view belongs to: a playback `link` ties views within it only. */
 		scope?: string;
+		/** A draggable region released at new edges. */
+		onspan?: (region: number, x0: number, x1: number) => void;
+		/** An editable table's cell typed into; resolves to the refusal's words, or null. */
+		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null, scope }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null, scope, onedit, onspan }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -39,7 +43,7 @@
 </script>
 
 {#if view.view === 'spectrum'}
-	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} />
+	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {onspan} />
 {:else if view.view === 'reading'}
 	<ReadingPane {view} {layout} {showTitle} />
 {:else if view.view === 'shape3d'}
@@ -65,7 +69,7 @@
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {onselect} />
 {:else if view.view === 'table'}
-	<TablePane {view} />
+	<TablePane {view} {onedit} />
 {:else}
 	<p class="unknown" data-testid="view-unknown">This shell has no renderer for the view "{(view as { view: string }).view}".</p>
 {/if}
