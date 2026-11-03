@@ -37,6 +37,7 @@ import type {
 } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
+import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
@@ -1017,6 +1018,8 @@ export class AppState {
 	readonly fit: FitState;
 	readonly report: ReportState;
 	readonly units: UnitsState;
+	/** The run log the keeper writes while a test runs, beside any workspace. */
+	readonly runLog: RunLogState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -1038,6 +1041,7 @@ export class AppState {
 		this.fit = new FitState(this);
 		this.report = new ReportState(this);
 		this.units = new UnitsState(this);
+		this.runLog = new RunLogState(this.analysis);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.

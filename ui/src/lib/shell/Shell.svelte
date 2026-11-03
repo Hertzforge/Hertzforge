@@ -16,6 +16,7 @@
 	import Specify from '$lib/workspaces/Specify.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
 	import Rail from './Rail.svelte';
+	import RunLogPanel from '$lib/runlog/RunLogPanel.svelte';
 	import TopBar from './TopBar.svelte';
 
 	const app = getApp();
@@ -36,6 +37,25 @@
 	$effect(() => {
 		if (!app.config.popout && app.analysis.isOpen) void app.units.sync();
 	});
+
+	// a log opened before the service reconnected is shown again as the service holds it
+	$effect(() => {
+		if (!app.config.popout && app.analysis.isOpen && app.runLog.shown) void app.runLog.sync();
+	});
+
+	/** Drag the run log's edge to size it beside the workspace. */
+	function resizeLog(e: PointerEvent) {
+		const handle = e.currentTarget as HTMLElement;
+		handle.setPointerCapture(e.pointerId);
+		const right = window.innerWidth;
+		const move = (m: PointerEvent) => app.runLog.resize(right - m.clientX);
+		const up = () => {
+			handle.removeEventListener('pointermove', move);
+			handle.removeEventListener('pointerup', up);
+		};
+		handle.addEventListener('pointermove', move);
+		handle.addEventListener('pointerup', up);
+	}
 
 	function onKey(e: KeyboardEvent) {
 		// A display window keeps its own keys (it aborts on Cmd or Ctrl and period too).
@@ -70,9 +90,9 @@
 {:else}
 <div class="shell">
 	<TopBar {app} />
-	<div class="body" class:collapsed={app.railCollapsed}>
+	<div class="body" class:collapsed={app.railCollapsed} class:logged={app.runLog.shown} class:alone={app.runLog.shown && app.runLog.alone} style:--runlog-width="{app.runLog.width}px">
 		{#if !app.railCollapsed}<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
-		<div class="workspace">
+		<div class="workspace" hidden={app.runLog.shown && app.runLog.alone}>
 			{#if app.workspace === 'acquire'}
 				<Acquire {app} />
 			{:else if app.workspace === 'analyze'}
@@ -91,6 +111,15 @@
 				<Placeholder {info} />
 			{/if}
 		</div>
+		{#if app.runLog.shown}
+			<div class="logside">
+				{#if !app.runLog.alone}
+					<!-- svelte-ignore a11y_no_static_element_interactions (a pointer handle; the width is kept between launches) -->
+					<div class="edge" title="Drag to size the run log" onpointerdown={resizeLog}></div>
+				{/if}
+				<RunLogPanel rl={app.runLog} />
+			</div>
+		{/if}
 	</div>
 	<CommandPalette {app} />
 </div>
@@ -112,6 +141,38 @@
 
 	.body.collapsed {
 		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.body.logged {
+		grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--runlog-width);
+	}
+
+	.body.logged.collapsed {
+		grid-template-columns: minmax(0, 1fr) var(--runlog-width);
+	}
+
+	.body.logged.alone {
+		grid-template-columns: var(--rail-width) minmax(0, 1fr);
+	}
+
+	.body.logged.alone.collapsed {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.logside {
+		position: relative;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.edge {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -3px;
+		z-index: 2;
+		width: 6px;
+		cursor: col-resize;
 	}
 
 	.workspace {
