@@ -155,7 +155,9 @@ service's log says how the run ended. Build the app again without `--e2e` before
 
 - Signing, as above; notarization has not been tried.
 - The Windows and Linux installers are built by CI and have not been installed and run.
-- File dialogs, File menu items, drag and drop and the `.hforge` file association: the macOS menu
-  has the standard application, Edit, View and Window menus only.
+- File menu items and the `.hforge` file association: the macOS menu has the standard application,
+  Edit, View and Window menus only. The Open, Import and Save buttons use the native dialogs, and
+  files dropped on the window open or import by their paths (`capabilities/main.json` grants the
+  main window its events and the two dialogs; the display windows get nothing).
 - Intel Macs and Windows on Arm.
 - Updates: there is no updater.

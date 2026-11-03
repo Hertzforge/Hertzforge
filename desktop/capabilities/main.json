@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The shell's window: its own events (a file dropped on it) and the open and save dialogs. The display windows opened from it get nothing.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save"]
+}
