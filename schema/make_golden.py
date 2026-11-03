@@ -408,6 +408,26 @@ TEXT_GOLDENS = {
                       ],
                       'warnings': []}},
     },
+    # a connection's own project: an import, its progress, and the summary back
+    'request_project_import': {
+        'type': 'request', 'id': 31, 'method': 'project.import',
+        'params': {'path': '/Users/someone/tests/bracket/geometry.unv',
+                   'units': {'length_unit': 'mm'}},
+    },
+    'event_project_progress': {
+        'type': 'event', 'topic': 'project.progress', 'seq': 4,
+        'data': {'done': 3, 'total': 4, 'path': '/Users/someone/tests/bracket/geometry.unv'},
+    },
+    'response_project_import': {
+        'type': 'response', 'id': 31,
+        'result': {'added': ['Geometry'], 'project': {
+            'title': 'Bracket Survey', 'file': '/Users/someone/tests/bracket/survey.hforge',
+            'modified': True, 'objects': [
+                {'name': 'FRF', 'kind': 'frf', 'records': 22, 'source': 'SIM',
+                 'units_defined': True, 'groups': ['Group 1']},
+                {'name': 'Geometry', 'kind': 'geometry', 'units_defined': True,
+                 'groups': []}]}},
+    },
 }
 
 

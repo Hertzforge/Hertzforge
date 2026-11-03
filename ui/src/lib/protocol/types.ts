@@ -259,16 +259,45 @@ export interface ParamDescriptor {
 	max?: number;
 	step?: number;
 	options?: ParamOption[];
-	options_from?: 'channels';
+	/** The dataset's channels, or the open project's objects of the kinds named (`objects:psd|frf`). */
+	options_from?: 'channels' | `objects:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
+}
+
+/** One object of the open project (schema/PROTOCOL.md, Projects). */
+export interface ProjectObject {
+	name: string;
+	/** The class in snake case: `frf`, `time_history`, `shape_set`, `geometry`. */
+	kind: string;
+	records?: number;
+	source?: DataSource;
+	/** False for an object imported without its units. */
+	units_defined?: boolean;
+	groups: string[];
+}
+
+/** The connection's own project, as `project.*` and project operations return it. */
+export interface ProjectSummary {
+	title: string;
+	file: string | null;
+	modified: boolean;
+	objects: ProjectObject[];
+}
+
+/** `project.progress`: how far an import has read. */
+export interface ProjectProgress {
+	done: number;
+	total: number;
+	path: string;
 }
 
 export interface OperationDescriptor {
 	id: string;
 	title: string;
 	workspace: Workspace;
-	accepts: DatasetKind;
+	/** A dataset kind, or `project` for an operation on the connection's own project. */
+	accepts: DatasetKind | 'project';
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
@@ -288,7 +317,8 @@ export interface Catalog {
 
 export interface OpenedDataset {
 	handle: string;
-	kind: DatasetKind;
+	/** `project` for the connection's own project, which Analyze shows as a dataset. */
+	kind: DatasetKind | 'project';
 	title: string;
 	summary: Record<string, unknown>;
 	channels: ParamOption[];
@@ -296,6 +326,8 @@ export interface OpenedDataset {
 
 export interface OpResult {
 	views: View[];
+	/** The project's summary, from an operation that runs on it. */
+	project?: ProjectSummary;
 }
 
 // ---------------------------------------------------------------------------------------------

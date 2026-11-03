@@ -354,7 +354,7 @@ def test_console_entry_point_starts_headless_and_answers():
 
         hello, catalog = asyncio.run(ask())
         assert hello['protocol'] == 'sds/1'
-        assert len(catalog['result']['operations']) == 10
+        assert len(catalog['result']['operations']) == 15
     finally:
         process.terminate()
         process.wait(timeout=20)

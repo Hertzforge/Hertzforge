@@ -111,9 +111,13 @@ def test_an_object_of_one_quantity_offers_no_choice(modal_run):
 
 
 def test_the_quantity_param_is_set_in_the_view_not_the_panel():
-    waterfalls = [op.to_json() for op in OPERATIONS if op.outputs == ('waterfall',)]
-    assert len(waterfalls) == 2
-    for op in waterfalls:
+    from hertzforge.service.server import OPERATIONS as ALL
+
+    choosing = [op.to_json() for op in ALL
+                if any(param.name == 'quantity' for param in op.params)]
+    assert [op['id'] for op in choosing] == ['random.waterfall', 'modal_run.waterfall',
+                                             'project.waterfall']
+    for op in choosing:
         (param,) = [p for p in op['params'] if p['name'] == 'quantity']
         assert param['in_view'] is True and param['default'] == ''
 

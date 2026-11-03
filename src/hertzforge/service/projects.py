@@ -1,0 +1,161 @@
+"""A connection's project: the `.hforge` (or new project) its requests
+work on, and the summary the shell draws its tree from
+(schema/PROTOCOL.md, Projects).
+
+Each function here runs on a worker thread and raises a ProtocolError
+with the core's own words when the core refuses a file.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from .protocol import ProtocolError, bad_request, not_found, refused
+
+#: what `project.open` reads as a whole project (`Project.open`); anything
+#: else is a file to import into one
+PROJECT_SUFFIXES = ('.hforge', '.vdyn', '.mat', '.h5', '.hdf5', '.escdf')
+
+
+@dataclass
+class OpenProject:
+    """The project a connection has open, and whether it has changes its
+    file does not."""
+    project: Any
+    modified: bool = False
+
+
+def kind_of(obj: Any) -> str:
+    """An object's kind: its class name in lower case with underscores
+    (`Frf` 'frf', `TimeHistory` 'time_history', `ShapeSet` 'shape_set')."""
+    return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', type(obj).__name__).lower()
+
+
+def summary(state: OpenProject) -> dict[str, Any]:
+    """The project as the shell lists it: title, file, whether it has
+    unsaved changes, and each object with its kind, record count, source,
+    whether its units are declared and the groups it is in."""
+    project = state.project
+    labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
+              for k, group in enumerate(project.object_groups)]
+    objects = []
+    for name, obj in project.items():
+        entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
+        records = getattr(obj, 'num_records', None)
+        if records is not None:
+            entry['records'] = int(records)
+        source = getattr(obj, 'source', None)
+        if source is not None:
+            entry['source'] = str(source)
+        units = getattr(obj, 'units_defined', None)
+        if units is not None:
+            entry['units_defined'] = bool(units)
+        entry['groups'] = [label for label, group
+                           in zip(labels, project.object_groups, strict=True)
+                           if name in group['members']]
+        objects.append(entry)
+    return {'title': project.name, 'file': project.file,
+            'modified': state.modified, 'objects': objects}
+
+
+def _path(params: Mapping[str, Any], method: str) -> str:
+    path = params.get('path')
+    if not isinstance(path, str) or not path:
+        raise bad_request(f'{method} needs "path", the file\'s path on the '
+                          'analysis service\'s machine')
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def _refusal(error: Exception) -> ProtocolError:
+    """The core's refusal of a file as an error response."""
+    if isinstance(error, FileNotFoundError):
+        return not_found(str(error))
+    return refused(str(error))
+
+
+def new(params: Mapping[str, Any]) -> OpenProject:
+    """`project.new`: an empty project named `title`."""
+    import hertzforge as hz
+
+    title = params.get('title', 'Project')
+    if not isinstance(title, str) or not title.strip():
+        raise bad_request('project.new "title" must be a name, not empty')
+    return OpenProject(hz.Project(title.strip()))
+
+
+def open_file(params: Mapping[str, Any]) -> OpenProject:
+    """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
+    file holds. Any other file is refused with a pointer to import it."""
+    import hertzforge as hz
+
+    path = _path(params, 'project.open')
+    if not path.lower().endswith(PROJECT_SUFFIXES):
+        raise refused(f'{os.path.basename(path)} is not a project file '
+                      f'({", ".join(PROJECT_SUFFIXES)}); import it into a '
+                      'project instead')
+    if not os.path.exists(path):
+        raise not_found(f'no file at {path}')
+    try:
+        project = hz.Project.open(path)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    return OpenProject(project)
+
+
+def import_file(state: OpenProject | None, params: Mapping[str, Any],
+                progress: Callable[[int, int], None] | None = None
+                ) -> tuple[OpenProject, list[str]]:
+    """`project.import`: the file's objects added to the open project, or
+    to a new one when none is open; the project and the names added.
+    `units` declares what the file does not state, as `import_file`'s
+    options (`length_unit`, `ordinate_unit` and the rest)."""
+    import hertzforge as hz
+
+    path = _path(params, 'project.import')
+    units = params.get('units', {})
+    if not isinstance(units, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in units.items()):
+        raise bad_request('project.import "units" must be an object of '
+                          'option names to unit strings')
+    if state is None:
+        state = OpenProject(hz.Project())
+    project = state.project
+    call = ', '.join([repr(path)] + [f'{key}={value!r}'
+                                     for key, value in units.items()])
+    try:
+        # journaled as the one call a script makes, without the progress
+        # callable the service passes
+        with project.journal_as(f'project.import_file({call})'):
+            added = project.import_file(path, progress=progress, **units)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    state.modified = True
+    return state, added
+
+
+def save(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.save`: the project written to `path`, or to the file it
+    came from; the path written."""
+    if state is None:
+        raise refused('there is no project open to save')
+    if 'path' in params:
+        path = _path(params, 'project.save')
+    elif state.project.file and not state.project.file.endswith('.vdyn'):
+        path = state.project.file
+    else:
+        raise bad_request('project.save needs "path": this project has no '
+                          'file of its own to save to yet')
+    compress = params.get('compress', False)
+    if not isinstance(compress, bool):
+        raise bad_request('project.save "compress" is true or false')
+    try:
+        written = state.project.save(path, compress=compress)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    state.modified = False
+    return written

@@ -1,0 +1,11 @@
+{
+ "type": "request",
+ "id": 31,
+ "method": "project.import",
+ "params": {
+  "path": "/Users/someone/tests/bracket/geometry.unv",
+  "units": {
+   "length_unit": "mm"
+  }
+ }
+}

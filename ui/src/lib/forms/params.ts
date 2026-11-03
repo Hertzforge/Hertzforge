@@ -3,7 +3,7 @@
  * component stays thin and the rules are testable on their own.
  */
 
-import type { ParamDescriptor, ParamOption } from '$lib/protocol/types';
+import type { ParamDescriptor, ParamOption, ProjectObject } from '$lib/protocol/types';
 
 export type ParamValue = number | string | boolean;
 export type ParamValues = Record<string, ParamValue>;
@@ -13,6 +13,24 @@ export function optionsFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
 	if (p.type !== 'enum') return [];
 	if (p.options_from === 'channels') return channels;
 	return p.options ?? [];
+}
+
+/** The kinds an `objects:` param takes, or none for any other param. */
+export function objectKinds(p: ParamDescriptor): string[] {
+	return p.options_from?.startsWith('objects:') ? p.options_from.slice('objects:'.length).split('|') : [];
+}
+
+/**
+ * The params with each `objects:` param's options filled from the project's objects of its kinds,
+ * in the project's order, so the form and its checks treat it as any other enum.
+ */
+export function withObjects(params: ParamDescriptor[], objects: ProjectObject[]): ParamDescriptor[] {
+	return params.map((p) => {
+		const kinds = objectKinds(p);
+		if (!kinds.length) return p;
+		const options = objects.filter((o) => kinds.includes(o.kind)).map((o) => ({ value: o.name, label: o.name }));
+		return { ...p, options };
+	});
 }
 
 function clamp(v: number, p: ParamDescriptor): number {
@@ -71,7 +89,11 @@ export function validate(p: ParamDescriptor, value: unknown, channels: ParamOpti
 			return typeof value === 'string' ? null : 'Enter text.';
 		case 'enum': {
 			const opts = optionsFor(p, channels);
-			if (opts.length === 0) return p.options_from === 'channels' ? 'Open a dataset to list its channels.' : 'No options.';
+			if (opts.length === 0) {
+				if (p.options_from === 'channels') return 'Open a dataset to list its channels.';
+				const kinds = objectKinds(p);
+				return kinds.length ? `The project has no ${kinds.map((k) => k.replace(/_/g, ' ')).join(' or ')}.` : 'No options.';
+			}
 			return opts.some((o) => o.value === value) ? null : 'Choose one of the options.';
 		}
 	}
