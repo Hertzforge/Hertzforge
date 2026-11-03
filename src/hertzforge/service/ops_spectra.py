@@ -118,14 +118,15 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
     averaging = project.averaging_of(name)
     chosen = params['window']
     if chosen != 'averaged':
-        window, parameter, source = chosen, params['parameter'], 'chosen'
+        window, parameter, source = chosen, params['parameter'] or None, 'chosen'
     elif averaging is not None:
         window, parameter, source = averaging, None, 'the averaging'
     else:
         window, parameter, source = 'hann', None, 'assumed'
     f = np.asarray(psd.abscissa, dtype=float)
+    # blank, or 0 as the shell sends a number left empty: where VD's cursor starts
     frequency = params['frequency']
-    if frequency is None or not f[0] <= frequency <= f[-1]:
+    if not frequency or not f[0] <= frequency <= f[-1]:
         values = np.abs(np.asarray(psd.ordinate[record]))[1:]
         finite = np.isfinite(values)
         frequency = (float(f[1 + int(np.argmax(np.where(finite, values, -np.inf)))])
@@ -184,8 +185,9 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     estimator = str(project.provenance.get(name, {}).get('params', {}).get('method', ''))
     f = np.asarray(reading.frequency, dtype=float)
+    # blank, or 0 as the shell sends a number left empty: where VD's cursor starts
     frequency = params['frequency']
-    if frequency is None or not f[0] <= frequency <= f[-1]:
+    if not frequency or not f[0] <= frequency <= f[-1]:
         values = reading.magnitude[1:]
         finite = np.isfinite(values) & (reading.coherence[1:] >= 0.5)
         frequency = (float(f[1 + int(np.argmax(np.where(finite, values, -np.inf)))])

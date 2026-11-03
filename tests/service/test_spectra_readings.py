@@ -75,6 +75,9 @@ def test_a_sine_reads_its_amplitude_as_a_tone(validate):
     assert found['Tone at']['value'] == pytest.approx(101.3, abs=0.2)
     assert found['Tone']['unit'] == 'm/s²'
     assert found['Window from']['value'].startswith('the averaging')
+    # a number left empty arrives from the shell as 0: read where the cursor starts
+    _view, at_zero = run(project, 'project.tone_readout', spectrum=name, frequency=0.0)
+    assert rows(at_zero)['Tone at']['value'] == pytest.approx(101.3, abs=0.2)
     with pytest.raises(ProtocolError, match='there is no record 2'):
         run(project, 'project.tone_readout', spectrum=name, record=2)
 
