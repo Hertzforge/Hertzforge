@@ -257,7 +257,8 @@ export interface ParamDescriptor {
 	max?: number;
 	step?: number;
 	options?: ParamOption[];
-	options_from?: 'channels';
+	/** The dataset's channels, or the open project's objects of the kinds named (`objects:psd|frf`). */
+	options_from?: 'channels' | `objects:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
 }
@@ -266,7 +267,8 @@ export interface OperationDescriptor {
 	id: string;
 	title: string;
 	workspace: Workspace;
-	accepts: DatasetKind;
+	/** A dataset kind, or `project` for an operation on the connection's own project. */
+	accepts: DatasetKind | 'project';
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
