@@ -768,7 +768,8 @@
 			const d = raycaster.ray.direction;
 			point = placedPoint([o.x, o.y, o.z], [d.x, d.y, d.z], anchor, modelPlane(view.nodes, count));
 		}
-		onpick?.({ x: point[0], y: point[1], z: point[2] });
+		const [scale, offset] = p.to_si ?? [1, 0];
+		onpick?.({ x: point[0] * scale + offset, y: point[1] * scale + offset, z: point[2] * scale + offset });
 	}
 
 	function onPointerDown(e: PointerEvent) {

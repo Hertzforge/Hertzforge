@@ -178,7 +178,8 @@
             "faces": {"$ref": "#/$defs/arrayRef"},
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},
-            "back": {"type": "string"}
+            "back": {"type": "string"},
+            "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
           }
         },
         "motion": {

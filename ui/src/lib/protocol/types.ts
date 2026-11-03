@@ -220,6 +220,8 @@ export interface Pick3D {
 	kept?: number[];
 	out?: string;
 	back?: string;
+	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI. */
+	to_si?: [number, number];
 }
 
 /**
