@@ -39,8 +39,14 @@ def kind_of(obj: Any) -> str:
 def verbs_of(project: Any, name: str) -> list[str]:
     """The core's processing verbs that apply to the object `name`, by the
     table the core offers them by (`Project.verbs`), in its order: what a
-    `verb:` param lists the object under."""
-    return [verb for verb, _summary in project.verbs(name)]
+    `verb:` param lists the object under. A time history that a linked
+    channel table describes also lists `overload_check`, which reads it
+    against that table's ranges: Visual Dynamics offers its Overload
+    reading there and nowhere else."""
+    verbs = [verb for verb, _summary in project.verbs(name)]
+    if kind_of(project[name]) == 'time_history' and project.channel_table_for(name):
+        verbs.append('overload_check')
+    return verbs
 
 
 def summary(state: OpenProject) -> dict[str, Any]:
