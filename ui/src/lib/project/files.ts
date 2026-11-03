@@ -73,6 +73,13 @@ export async function chooseSavePath(title: string): Promise<string | null> {
 	return dialog.save({ title: 'Save Project', defaultPath: `${title}.hforge`, filters: [{ name: 'Hertzforge project', extensions: ['hforge'] }] });
 }
 
+/** A path for a report's page chosen in the native save dialog, or null when cancelled. */
+export async function chooseReportPath(title: string): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	return dialog.save({ title: 'Save Report', defaultPath: `${title}.html`, filters: [{ name: 'Web page', extensions: ['html'] }] });
+}
+
 /**
  * Call `onPaths` with the paths of files dropped on the window. In a browser a drop has no paths,
  * so `onPaths` gets null and the caller says to use the desktop app or type the path; the drop is

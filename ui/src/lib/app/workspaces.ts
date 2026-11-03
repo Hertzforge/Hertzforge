@@ -43,7 +43,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'report',
 		title: 'Report',
 		rail: 'Report',
-		live: false,
+		live: true,
 		summary: 'Reports from every workspace.',
 		moves: ['Test reports', 'Analysis reports', 'Modal survey reports', 'Templates and export']
 	}

@@ -357,6 +357,18 @@
       "type": "object", "required": ["geometry"], "additionalProperties": false,
       "properties": {"geometry": {"type": "string", "minLength": 1}}
     },
+    "reportGenerateResult": {
+      "type": "object", "required": ["name", "project"],
+      "properties": {"name": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
+    },
+    "reportRenderResult": {
+      "type": "object", "required": ["name", "html"],
+      "properties": {"name": {"type": "string"}, "html": {"type": "string"}}
+    },
+    "reportExportResult": {
+      "type": "object", "required": ["path"],
+      "properties": {"path": {"type": "string"}}
+    },
     "projectResult": {
       "type": "object", "required": ["project"],
       "properties": {"project": {"$ref": "#/$defs/project"}}
