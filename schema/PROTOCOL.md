@@ -246,6 +246,42 @@ the selected dataset is of that kind ("tools follow the data").
 | `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
 | `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
 | `op.run` | `{"op","handle","params":{...}}` | `{"views":[view...]}` |
+| `project.new` | `{"title"?}` | `{"project"}` |
+| `project.open` | `{"path"}` | `{"project"}` |
+| `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
+| `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+
+**Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
+has one, and it ends with the connection. A file reaches the service by its path on the service's
+machine; nothing is uploaded. `project.open` replaces the project with the one a `.hforge`, `.vdyn`,
+`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, and refuses any other file with a pointer to
+import it. `project.import` adds a file's objects to the project, making an empty one first when
+none is open. `units` declares what the file does not state, as the core's `import_file` options
+(`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
+project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
+and defaults it to "Project". Project requests on one connection run one at a time, in the order
+they arrive.
+
+The project as the shell lists it:
+
+```
+{"title":"Bracket Survey","file":"/Users/.../survey.hforge"|null,"modified":true,
+ "objects":[{"name":"FRF","kind":"frf","records":22,"source":"SIM",
+             "units_defined":true,"groups":["Group 1"]},
+            {"name":"Geometry","kind":"geometry","units_defined":false,"groups":[]}]}
+```
+
+`kind` is the object's class name in lower case with underscores (`time_history`, `psd`, `frf`,
+`multiple_coherence`, `shape_set`, `geometry`, `channel_table`, `specification` and so on).
+`records` is present for data objects, `source` for measured data, and `units_defined` is false
+for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
+names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
+order. `modified` is true after an import and false after an open or a save.
+
+A reader that can count reports its progress while an import runs, as event topic
+`project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A
+file the core cannot read is refused in the core's own words (`refused`, or `not_found` for a path
+with no file).
 
 **Control service**
 
