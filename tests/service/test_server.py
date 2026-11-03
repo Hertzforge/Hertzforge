@@ -358,3 +358,32 @@ def test_console_entry_point_starts_headless_and_answers():
     finally:
         process.terminate()
         process.wait(timeout=20)
+
+
+def test_with_watch_stdin_the_end_of_standard_input_ends_the_service():
+    """The desktop app stops the service by closing the pipe on its standard
+    input, and the pipe closes by itself if the app dies: the service must
+    end either way, cleanly, and not outlive the app."""
+    process = subprocess.Popen(
+        [sys.executable, '-m', 'hertzforge', 'serve', '--port', '0', '--watch-stdin'],
+        stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 60
+        said = []
+        while time.monotonic() < deadline:
+            line = process.stderr.readline()
+            if not line:
+                break
+            said.append(line)
+            if 'listening on ws://' in line:
+                break
+        assert 'listening on ws://' in ''.join(said), said
+        time.sleep(0.5)
+        assert process.poll() is None, 'the service ended with its input still open'
+        process.stdin.close()
+        assert process.wait(timeout=30) == 0
+        assert 'standard input closed' in process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=20)
