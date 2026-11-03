@@ -199,7 +199,7 @@ def test_a_modes_damping_and_description_are_typed_into_its_row(project):
 
 def test_the_residual_cmif_is_drawn_on_request(project, validate):
     fit = _two_confirmed(project)
-    names = lambda: [s['name'] for s in fitting.state(fit)['view']['series']]  # noqa: E731
+    names = lambda: [s['name'] for s in fitting.state(fit)['view']['series']]
     assert 'CMIF 1, residual' not in names()
     fitting.act(fit, 'fit.residual', {'show': True})
     state = fitting.state(fit)
