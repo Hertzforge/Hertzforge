@@ -92,7 +92,7 @@ Every world has the same life cycle:
 2. Construct the law's state with the test setup and the parameter values. Called once per run.
 3. `seed(inputs)`: called once after system identification; returns the first drive request.
 4. `iterate(inputs)`: called once per control loop with a fresh estimate; returns the next drive request.
-5. `retarget-level(target-rms, feedforward-scale)`: called when the level schedule moves to a new level.
+5. `retarget-level(level-db, ...)`: called when the level schedule moves to a new level; returns the drive request at the new level, checked like any other. `level-db` is the new level relative to the full reference. Single output also passes `target-rms`, the reference's in-band RMS at that level. A failed call keeps the drive in force, which the core carries to the new level itself.
 
 ## 6. Single-output Random (`random-single`)
 
