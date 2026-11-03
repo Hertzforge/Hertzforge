@@ -40,3 +40,59 @@ export function pasteTargets(
 	});
 	return out;
 }
+
+/** A rectangle of cells, inclusive, rows and columns from 0. */
+export interface Block {
+	r0: number;
+	c0: number;
+	r1: number;
+	c1: number;
+}
+
+/** The block two corners span, whichever way round. */
+export function spanned(a: { row: number; col: number }, b: { row: number; col: number }): Block {
+	return { r0: Math.min(a.row, b.row), c0: Math.min(a.col, b.col), r1: Math.max(a.row, b.row), c1: Math.max(a.col, b.col) };
+}
+
+export function inside(block: Block | null, row: number, col: number): boolean {
+	return !!block && row >= block.r0 && row <= block.r1 && col >= block.c0 && col <= block.c1;
+}
+
+/** The selected block as tab-separated text, what Copy puts on the clipboard. */
+export function blockText(rows: string[][], block: Block): string {
+	return rows
+		.slice(block.r0, block.r1 + 1)
+		.map((row) => row.slice(block.c0, block.c1 + 1).join('\t'))
+		.join('\n');
+}
+
+/**
+ * The cells a fill handle dragged from `block` to (row, col) sets: the rectangle the block and that
+ * cell span, less the block itself, each cell taking the block's value at the same place counted
+ * cyclically, so two alternating rows carry the alternation, as a spreadsheet fills. Read-only
+ * columns are left out.
+ */
+export function fillTargets(
+	rows: string[][],
+	block: Block,
+	row: number,
+	col: number,
+	keys: (string | null)[]
+): { row: number; key: string; value: string }[] {
+	const out: { row: number; key: string; value: string }[] = [];
+	const r0 = Math.min(block.r0, row);
+	const r1 = Math.max(block.r1, row);
+	const c0 = Math.min(block.c0, col);
+	const c1 = Math.max(block.c1, col);
+	const height = block.r1 - block.r0 + 1;
+	const width = block.c1 - block.c0 + 1;
+	const mod = (n: number, m: number) => ((n % m) + m) % m;
+	for (let r = r0; r <= r1; r++) {
+		for (let c = c0; c <= c1; c++) {
+			if (inside(block, r, c) || !keys[c]) continue;
+			const value = rows[block.r0 + mod(r - block.r0, height)]?.[block.c0 + mod(c - block.c0, width)] ?? '';
+			out.push({ row: r, key: keys[c] as string, value });
+		}
+	}
+	return out;
+}
