@@ -31,6 +31,7 @@ layout is a mechanical change that comes next.
 | `crates/sds-control/` | Rust | The control service. Runs closed-loop Random on the simulator or on NI-DAQmx hardware, on loopback |
 | `crates/hertzforge-*/`, `modules/`, `abi/` | Rust, C header | The controller: control laws, the hardware abstraction with its Sim and NI backends, data formats, and the module ABI |
 | `ui/` | TypeScript, Svelte 5 | The shell: workspaces, command palette, the viz kit, and panels built from operation descriptors |
+| `desktop/` | Rust | The desktop app: the shell in a window of its own, with both services and a bundled Python |
 | `tools/demo-video/` | JavaScript | A scripted walkthrough of the shell, recorded to video |
 | `tools/e2e-sim/` | JavaScript | Closed-loop Random on the simulator, end to end through the real control service and the shell |
 | `scripts/` | shell | Developer entry points |
@@ -69,6 +70,10 @@ The first line installs the package with the analysis service into the active
 environment, the second fetches the plate data its demonstration datasets read.
 `scripts/dev.sh` then starts the analysis service on 8791, the control service on 8792 and the shell on
 http://127.0.0.1:5191/. `?mock=1` runs the shell alone on synthetic data.
+
+The desktop app (`desktop/`) carries the shell, both services and its own Python, so it needs
+nothing else installed. `desktop/packaging/build.sh` builds it and its installers;
+`docs/desktop-app.md` says what they contain and how the app stops a run when it quits.
 
 The end-to-end check drives Random on the simulator through the real control service, in the
 installed Chrome. It starts both services itself on free ports, takes about three minutes, and is not

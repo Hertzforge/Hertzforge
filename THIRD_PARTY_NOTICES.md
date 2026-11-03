@@ -41,10 +41,56 @@ Hertzforge makes use of facilities provided by the Open CASCADE Technology softw
 
 The numpy and scipy wheels carry libgfortran and libgcc (GPL-3.0 with the GCC Runtime Library
 Exception, which permits this use) and libquadmath (LGPL-2.1-or-later, a separate shared library).
-The OpenCASCADE wheel carries image and compression libraries under their own permissive licenses
+The OpenCASCADE wheel carries image and compression libraries under their own licenses
 (FreeType, libpng, libtiff, zlib and others). None of these are redistributed by this repository
-or the PyPI package. A packaged desktop build would ship them, and Visual Dynamics' `NOTICE.md`
-lists each one with its license text; that list moves here when Hertzforge ships a package.
+or the PyPI package. The desktop app does ship them; see below.
+
+## The desktop app
+
+The desktop app (`desktop/`, `docs/desktop-app.md`) ships the shell, the control service, and a
+Python runtime with the packages above installed as their published wheels.
+
+### Rust crates in the app itself
+
+| Crate | License | Use |
+|---|---|---|
+| tauri, tauri-build, tao, wry, muda and the rest of the Tauri family | Apache-2.0 OR MIT | the window, the menu, serving the shell |
+| tauri-plugin-dialog, rfd | Apache-2.0 OR MIT, MIT | the quit question and error messages |
+| tungstenite | MIT OR Apache-2.0 | asking the control service whether a run is live |
+
+`cargo deny --manifest-path desktop/Cargo.toml --config desktop/deny.toml check` checks every
+crate in the app's own lockfile against the same license policy as the controller's. On Linux the
+app uses the system's WebKitGTK and GTK (LGPL-2.1-or-later, loaded as shared libraries); on Windows,
+the system's WebView2 runtime; on macOS, the system's WebKit.
+
+The Tauri command line (`@tauri-apps/cli`, Apache-2.0 OR MIT) builds the app and is not shipped.
+
+### The Python runtime
+
+CPython 3.13 from python-build-standalone (github.com/astral-sh/python-build-standalone), under
+the Python Software Foundation License (`python/lib/python3.13/LICENSE.txt` in the app). Linked
+into it: OpenSSL 3.5 (Apache-2.0), SQLite (public domain), libffi (MIT), mpdecimal (BSD-2-Clause),
+Expat (MIT), bzip2 (bzip2-1.0.6) and XZ's liblzma (0BSD); on Linux and Windows also zlib (Zlib), and
+on Linux libedit (BSD-3-Clause), ncurses (X11) and libuuid (BSD-3-Clause), which the macOS build
+takes from the system. `readline` is libedit, not GNU readline. The build script removes the Tcl/Tk
+GUI kit, the `dbm` module (its library on some platforms carries a license this project does not
+take; `dbm` falls back to its pure-Python form), pip, the headers and the test suites.
+
+### Libraries inside the Python wheels
+
+Shipped as the wheels ship them, as separate shared libraries (macOS arm64 build, 2026-11-02):
+
+| Wheel | Libraries | Licenses |
+|---|---|---|
+| scipy | libgfortran, libgcc_s, libquadmath | GPL-3.0 with the GCC Runtime Library Exception; LGPL-2.1-or-later |
+| h5py | HDF5, zlib | BSD-3-Clause style (HDF5), Zlib |
+| netCDF4 | netCDF-C, HDF5, HDF4, libcurl, OpenSSL, Kerberos, libssh2, nghttp2, libxml2, libiconv, the AWS C libraries and s2n, libzip, Blosc, Snappy, LZ4, libaec, zstd, bzip2, zlib, libjpeg, libc++ | libiconv is LGPL-2.1-or-later; the rest are permissive (BSD style for netCDF and HDF, curl, Apache-2.0, MIT and MIT style, bzip2-1.0.6, Zlib, IJG) |
+| cadquery-ocp-novtk | OpenCASCADE Technology (above), FreeImage, LibRaw, OpenEXR and Imath, FreeType, libpng, libtiff, libjpeg, JPEG XR, OpenJPEG, OpenJPH, libwebp, Little CMS, LERC, liblzma, zstd, libdeflate, fmt, zlib, libc++ | FreeImage is GPL-2.0 or GPL-3.0 or the FreeImage Public License; LibRaw is LGPL-2.1 or CDDL-1.0; FreeType is the FreeType License or GPL-2.0; the rest are permissive (BSD style, MIT, Apache-2.0, libpng, libtiff, IJG, Zlib) |
+
+The netCDF4 and OpenCASCADE wheels do not include these libraries' license texts, so the app does
+not yet either; Visual Dynamics' `NOTICE.md` collects them and is the model. FreeImage's choice
+among its licenses (the FreeImage Public License is an MPL-1.1 style license, not on this project's
+list as written) is for the maintainers to rule on.
 
 ## Code and data from Visual Dynamics
 

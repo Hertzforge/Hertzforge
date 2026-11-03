@@ -1,0 +1,5 @@
+# Made by the build: the icons (from ../ui/static/favicon.svg, `npm run icons`),
+# Tauri's generated schemas, and the build tools.
+/icons/
+/gen/
+/node_modules/

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hertzforge",
+  "version": "0.1.0",
+  "identifier": "org.hertzforge.app",
+  "build": {
+    "frontendDist": "../ui/build",
+    "devUrl": "http://127.0.0.1:5191"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ipc: http://ipc.localhost ws://127.0.0.1:*",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "license": "MIT",
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "copyright": "Copyright (c) 2026 Brandon Zwink and Kevin Cross",
+    "category": "Utility",
+    "shortDescription": "Structural dynamics testing and analysis",
+    "longDescription": "Hertzforge acquires, controls and analyzes structural dynamics tests: closed-loop Random vibration control on a simulator or NI-DAQmx hardware, and the analysis of what was measured.",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
