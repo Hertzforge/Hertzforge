@@ -22,6 +22,7 @@ import type {
 	ParamDescriptor,
 	FitStateView,
 	ProjectProgress,
+	UnitsTables,
 	ProjectSummary,
 	RunState,
 	Shape3DView,
@@ -524,10 +525,6 @@ class SimState {
 const FILE_TIMEOUT_MS = 600_000;
 
 /**
- * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
- * or importing switches Analyze to it.
- */
-/**
  * The mode fit under way on the project (`fit.*`): Visual Dynamics' fitting loop, one mode at a time
  * on the residual. The x range on screen is the search band Find Mode reads.
  */
@@ -615,12 +612,18 @@ export class FitState {
 	}
 }
 
-class ProjectState {
+/**
+ * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
+ * or importing switches Analyze to it.
+ */
+export class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
 	/** What is being done, in words ("Importing modal.nc4"), or null. */
 	busy = $state<string | null>(null);
 	progress = $state.raw<ProjectProgress | null>(null);
 	error = $state<string | null>(null);
+	/** The object whose units are being declared, and its tables. */
+	units = $state.raw<UnitsTables | null>(null);
 
 	constructor(private readonly app: AppState) {
 		app.analysis.on('project.progress', (data) => {
@@ -631,6 +634,7 @@ class ProjectState {
 	/** A new summary from the service: the tree and Analyze's object choices follow. */
 	apply(summary: ProjectSummary): void {
 		this.summary = summary;
+		if (this.units && !summary.objects.some((o) => o.name === this.units?.name)) this.units = null;
 		this.app.analyze.projectChanged();
 	}
 
@@ -671,6 +675,27 @@ class ProjectState {
 
 	activate(geometry: string): Promise<boolean> {
 		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
+	}
+
+	/** Show the tables `name`'s units are declared in, or close them when they are showing. */
+	async toggleUnits(name: string): Promise<void> {
+		if (this.units?.name === name) {
+			this.units = null;
+			return;
+		}
+		this.error = null;
+		try {
+			this.units = await this.app.analysis.request<UnitsTables>('project.units', { name });
+		} catch (err) {
+			this.error = message(err);
+		}
+	}
+
+	/** Declare units by table and row; the tables are read again to show what converted. */
+	async defineUnits(name: string, units: { side: string; key: string; unit: string }[]): Promise<boolean> {
+		const ok = await this.call(`Declaring units on ${name}`, 'project.define_units', { name, units }, false);
+		if (ok) this.units = await this.app.analysis.request<UnitsTables>('project.units', { name });
+		return ok;
 	}
 
 	private async call(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<boolean> {

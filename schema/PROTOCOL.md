@@ -282,6 +282,8 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.rename` | `{"name","to"}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |
+| `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
+| `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
@@ -296,7 +298,19 @@ and defaults it to "Project". `project.rename` gives the object `name` the name 
 group, provenance record and report block that names it follows; a name in use is refused.
 `project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
 none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
-nothing else names one. Each answers with the project. Project requests on one connection run one
+nothing else names one. Each answers with the project.
+
+Units a file did not state are declared by channel, not by record, as Visual Dynamics' Imported
+Units pane declares them. `project.units` gives an object's tables: a geometry's one row (`side`
+`object`, key `length`), a shape set's (key `mass`), and a data object's channels, one row per
+(DOF, quantity), since a drive point's accelerometer and load cell share a DOF and are two
+channels. An FRF has a `response` and a `reference` table; a cross-spectral matrix and every other
+data object one `channels` table. Each row has `key`, `label` (the DOF), `quantity` (what the
+channel measures, from its dimension or the file's claim, or null), `unit` (null while undeclared)
+and `choices`, the units offered first; any unit Hertzforge reads is accepted. `project.define_units`
+declares units by `side` and `key`. Every unit is read before anything changes. A record converts
+when each of its channels is named, here or before, and one only half named waits; `converted`
+lists the records converted. Project requests on one connection run one
 at a time, in the order they arrive.
 
 The project as the shell lists it:
