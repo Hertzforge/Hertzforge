@@ -114,6 +114,10 @@ pub struct LoopInputs<'a> {
     /// the mean-preserving trim operate over this window only; bins outside carry no
     /// control energy. Derived by the caller from the target profile's support.
     pub band: (usize, usize),
+    /// Statistical degrees of freedom of the estimate behind `measured_psd`
+    /// (0 when there is no measurement, as at the seed). The shipped law does not
+    /// use it; a law that weighs a measurement by its confidence does.
+    pub dof: f64,
 }
 
 impl LoopInputs<'_> {
@@ -212,12 +216,42 @@ pub struct LoopOutputs {
 /// drive. The run core treats it like any other unusable output: it holds the drive
 /// already in force, counts the miss, and stops the run under control when misses
 /// keep coming (see the run service). A law never decides what happens next.
+///
+/// The last four are what a contained law (one loaded from a law file and run in
+/// a sandbox) can come to beyond its own error: its host stopped it, or refused
+/// what it returned. A native law returns only the first two.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LawFault {
     /// The loop inputs failed the law's own checks (a ragged grid, a bad band).
     BadInputs(String),
     /// The law could not compute a drive this call.
     Failed(String),
+    /// The law stopped abnormally while computing (a contained law trapped: a
+    /// panic, an out-of-bounds access, a stack overflow).
+    Crashed(String),
+    /// The law ran past its time budget and was stopped.
+    OverBudget(String),
+    /// The law asked for more memory than its cap and was stopped.
+    OverMemory(String),
+    /// The law returned output that breaks the output rules, as its host judged
+    /// it before the core saw it.
+    BadOutput(OutputFault, String),
+}
+
+/// Which output rule a law's output broke (see [`LawFault::BadOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFault {
+    /// The drive had the wrong number of lines.
+    WrongLength,
+    /// A drive line was not a finite number.
+    NonFinite,
+    /// A drive line was negative.
+    Negative,
+    /// The level command was not a finite number.
+    NonFiniteLevel,
+    /// The diagnostics broke a rule: a line off the grid, an undeclared or
+    /// non-finite value.
+    Diagnostics,
 }
 
 impl std::fmt::Display for LawFault {
@@ -225,6 +259,10 @@ impl std::fmt::Display for LawFault {
         match self {
             LawFault::BadInputs(s) => write!(f, "control law input error: {s}"),
             LawFault::Failed(s) => write!(f, "control law failed: {s}"),
+            LawFault::Crashed(s) => write!(f, "control law stopped while computing: {s}"),
+            LawFault::OverBudget(s) => write!(f, "control law over its time budget: {s}"),
+            LawFault::OverMemory(s) => write!(f, "control law over its memory cap: {s}"),
+            LawFault::BadOutput(_, s) => write!(f, "control law output refused: {s}"),
         }
     }
 }
@@ -723,6 +761,165 @@ impl HinvConfig {
     }
 }
 
+/// What kind of value an operator knob of [`HinvConfig`] takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnobKind {
+    /// A real number.
+    Number,
+    /// A whole number (carried as `f64`, always integral).
+    Integer,
+}
+
+/// One operator knob of [`HinvConfig`]: what a parameter form needs to draw it,
+/// and the range [`HinvConfig::set_knob`] accepts. The current value (the default,
+/// on [`HinvConfig::default`]) comes from [`HinvConfig::knob`].
+///
+/// This is the one declaration of the shipped law's parameters. The law catalog
+/// turns it into the manifest every law, built in or imported, is described by,
+/// and the `hinv` law file declares the same manifest from it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HinvKnob {
+    /// The stable key: the [`HinvConfig`] field it sets.
+    pub key: &'static str,
+    /// Name shown on the form.
+    pub label: &'static str,
+    /// Help text for the form.
+    pub help: &'static str,
+    /// Unit shown next to the box. May be empty.
+    pub unit: &'static str,
+    /// A real or a whole number.
+    pub kind: KnobKind,
+    /// Smallest accepted value.
+    pub min: f64,
+    /// Largest accepted value.
+    pub max: f64,
+    /// How far one step of the box moves the value (a hint for the form).
+    pub step: f64,
+}
+
+impl HinvConfig {
+    /// The operator knobs, in form order: the [`HinvConfig`] fields an operator
+    /// sets today. The rest (`suggest_beta`, the `servo_*` settings) are not
+    /// operator knobs, and `svd_keep` has no effect on a single-output law.
+    ///
+    /// `lambda` is `None` (the suggest policy) when its knob is 0.
+    pub const KNOBS: &'static [HinvKnob] = &[
+        HinvKnob {
+            key: "damping",
+            label: "Correction damping",
+            help: "How many loops a shape correction is spread over: 0 corrects the whole \
+                   error every loop, 10 spreads it over about ten. Higher rides through \
+                   estimation noise; lower converges faster.",
+            unit: "",
+            kind: KnobKind::Number,
+            min: 0.0,
+            max: 10.0,
+            step: 1.0,
+        },
+        HinvKnob {
+            key: "max_correction_db_per_iter",
+            label: "Largest trim step per loop",
+            help: "The most any line's shape may move in one loop.",
+            unit: "dB",
+            kind: KnobKind::Number,
+            min: 0.1,
+            max: 12.0,
+            step: 0.5,
+        },
+        HinvKnob {
+            key: "trust_coherence_floor",
+            label: "Trust coherence floor",
+            help: "A line whose coherence is below this holds its shape this loop instead of \
+                   chasing a measurement that cannot be trusted.",
+            unit: "",
+            kind: KnobKind::Number,
+            min: 0.0,
+            max: 1.0,
+            step: 0.05,
+        },
+        HinvKnob {
+            key: "trust_h_floor_frac",
+            label: "Trust gain floor",
+            help: "A line whose plant gain is below this fraction of the in-band peak holds \
+                   its shape this loop.",
+            unit: "",
+            kind: KnobKind::Number,
+            min: 0.0,
+            max: 0.99,
+            step: 0.01,
+        },
+        HinvKnob {
+            key: "lambda",
+            label: "Inversion regularization",
+            help: "Regularization of the plant inverse the starting drive is shaped from, in \
+                   the plant's power-gain units. 0 chooses it from the plant: the square of a \
+                   twentieth of the peak gain.",
+            unit: "",
+            kind: KnobKind::Number,
+            min: 0.0,
+            max: 1e9,
+            step: 0.001,
+        },
+        HinvKnob {
+            key: "divergence_n",
+            label: "Clamped loops to divergence",
+            help: "A line whose correction is held at the largest step this many loops \
+                   running, the same way each time, is divergent. The run core counts its own \
+                   divergence with the same number.",
+            unit: "loops",
+            kind: KnobKind::Integer,
+            min: 1.0,
+            max: 100.0,
+            step: 1.0,
+        },
+    ];
+
+    /// The current value of the knob `key`, or `None` for a key that is not a
+    /// knob. `lambda` reads 0 when it is `None`.
+    pub fn knob(&self, key: &str) -> Option<f64> {
+        Some(match key {
+            "damping" => self.damping,
+            "max_correction_db_per_iter" => self.max_correction_db_per_iter,
+            "trust_coherence_floor" => self.trust_coherence_floor,
+            "trust_h_floor_frac" => self.trust_h_floor_frac,
+            "lambda" => self.lambda.unwrap_or(0.0),
+            "divergence_n" => f64::from(self.divergence_n),
+            _ => return None,
+        })
+    }
+
+    /// Set the knob `key` to `value`. Rejects a key that is not a knob, a value
+    /// outside the knob's range, and a fractional value for a whole-number knob,
+    /// leaving the config unchanged. `lambda` 0 is the suggest policy (`None`).
+    pub fn set_knob(&mut self, key: &str, value: f64) -> Result<(), ControlError> {
+        let Some(k) = Self::KNOBS.iter().find(|k| k.key == key) else {
+            return Err(ControlError::BadConfig(format!("`{key}` is not a knob")));
+        };
+        if !value.is_finite() || value < k.min || value > k.max {
+            return Err(ControlError::BadConfig(format!(
+                "{key} is {value}; it runs from {} to {}",
+                k.min, k.max
+            )));
+        }
+        if k.kind == KnobKind::Integer && value.fract() != 0.0 {
+            return Err(ControlError::BadConfig(format!(
+                "{key} is {value}; it is a whole number"
+            )));
+        }
+        match key {
+            "damping" => self.damping = value,
+            "max_correction_db_per_iter" => self.max_correction_db_per_iter = value,
+            "trust_coherence_floor" => self.trust_coherence_floor = value,
+            "trust_h_floor_frac" => self.trust_h_floor_frac = value,
+            "lambda" => self.lambda = (value > 0.0).then_some(value),
+            // In range [1, 100] and integral: exact as u32.
+            "divergence_n" => self.divergence_n = value as u32,
+            _ => return Err(ControlError::BadConfig(format!("`{key}` is not a knob"))),
+        }
+        Ok(())
+    }
+}
+
 /// SISO H-inverse random control law. The one law shipped now.
 ///
 /// # Structure (the demo trim, hardened)
@@ -788,6 +985,20 @@ pub struct HinvLaw {
 }
 
 impl HinvLaw {
+    /// The law's name in its manifest.
+    pub const TITLE: &'static str = "H-inverse";
+    /// The law's version in its manifest.
+    pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+    /// The law's author in its manifest.
+    pub const AUTHOR: &'static str = "Hertzforge contributors";
+    /// What the law does, for its manifest.
+    pub const SUMMARY: &'static str = "The default law. The starting drive is shaped by the \
+        regularized inverse of the identified plant, so the response starts on the target \
+        shape. Each loop a level servo holds the in-band RMS on target and a per-line trim \
+        flattens the remaining error while keeping the in-band mean, a damped step at a time \
+        and never more than the largest step. Lines with low coherence or low plant gain hold \
+        their shape instead of chasing noise, and lines the limiter holds down are left alone.";
+
     /// Build the law for a `target` PSD line grid and in-band window `band = [lo,hi)`.
     /// Validates the config; returns [`ControlError`] on a bad knob or band.
     pub fn new(

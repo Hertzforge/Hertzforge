@@ -319,6 +319,8 @@ fn run_loop(
         df_hz: df,
         notched_bins: &empty_notch,
         band,
+        // The seed carries no measurement.
+        dof: 0.0,
     };
     let seed_out = law.init(&seed_inputs).expect("seed inputs are valid");
     let mut drive_psd = seed_out.drive_psd;
@@ -342,6 +344,10 @@ fn run_loop(
 
         // Measure the response PSD.
         let (_freqs, mut measured) = psd_welch(&resp, plant.fs_hz, plant.nfft, plant.overlap);
+        // Two degrees of freedom per Welch segment of this one measurement.
+        let hop = ((plant.nfft as f64) * (1.0 - plant.overlap)).max(1.0) as usize;
+        let segments = resp.len().saturating_sub(plant.nfft) / hop + 1;
+        let dof = 2.0 * segments as f64;
         if measured.len() < nbins {
             measured.resize(nbins, 0.0);
         }
@@ -363,6 +369,7 @@ fn run_loop(
             df_hz: df,
             notched_bins: &notched_mask,
             band,
+            dof,
         };
         let out = law.iterate(&inputs).expect("loop inputs are valid");
         drive_psd = out.drive_psd;

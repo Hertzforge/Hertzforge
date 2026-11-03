@@ -138,6 +138,11 @@ pub enum LawFaultReason {
     Negative,
     /// The level command was not a finite number.
     NonFiniteLevel,
+    /// The law asked for more memory than its cap (a law run contained).
+    OverMemory,
+    /// The law's diagnostics broke a rule: a line off the grid, an undeclared or
+    /// non-finite value (a law run contained).
+    BadDiagnostics,
 }
 
 impl LawFaultReason {
@@ -151,6 +156,8 @@ impl LawFaultReason {
             LawFaultReason::NonFinite => "non_finite",
             LawFaultReason::Negative => "negative",
             LawFaultReason::NonFiniteLevel => "non_finite_level",
+            LawFaultReason::OverMemory => "over_memory",
+            LawFaultReason::BadDiagnostics => "bad_diagnostics",
         }
     }
 
@@ -166,6 +173,8 @@ impl LawFaultReason {
             LawFaultReason::NonFinite => "its drive was not a number",
             LawFaultReason::Negative => "its drive had a negative value",
             LawFaultReason::NonFiniteLevel => "its level was not a number",
+            LawFaultReason::OverMemory => "it asked for more memory than its cap",
+            LawFaultReason::BadDiagnostics => "its diagnostics broke the output rules",
         }
     }
 }

@@ -748,9 +748,11 @@ and its `kind`'s facts. A trip during system identification has `at_loop` 0 and 
 | `law_fault` | `reason`, `consecutive` (unusable law calls in a row) |
 
 A `law_fault` trip's `reason` is what was wrong with the last unusable law output: `error` (the
-law reported one), `panicked`, `over_budget` (the call took longer than its budget, by default a
-quarter of one loop's acquisition time), `wrong_length`, `non_finite`, `negative` (a drive line), or
-`non_finite_level`. Its `outcome` is always `law_fault`, never `aborted`: the drive in force was
+law reported one), `panicked` (for a law loaded from a file: it trapped), `over_budget` (the call
+took longer than its budget, by default a quarter of one loop's acquisition time), `wrong_length`,
+`non_finite`, `negative` (a drive line), `non_finite_level`, or, for a law loaded from a file only,
+`over_memory` (it asked for more memory than its cap) or `bad_diagnostics` (its diagnostics broke
+the output rules). Its `outcome` is always `law_fault`, never `aborted`: the drive in force was
 held through every miss, so the run stops the way an operator stop does.
 
 ### Live Display

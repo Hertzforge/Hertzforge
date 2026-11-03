@@ -768,7 +768,8 @@
          "required": ["consecutive_loops", "divergent_bins"]},
         {"properties": {"kind": {"const": "law_fault"},
                         "reason": {"enum": ["error", "panicked", "over_budget", "wrong_length",
-                                            "non_finite", "negative", "non_finite_level"]},
+                                            "non_finite", "negative", "non_finite_level",
+                                            "over_memory", "bad_diagnostics"]},
                         "consecutive": {"type": "integer", "minimum": 1}},
          "required": ["reason", "consecutive"]}
       ]

@@ -779,7 +779,7 @@ export type Trip = { at_level_db: number; at_loop: number } & (
 );
 
 /** What was wrong with the control law's last unusable output. */
-export type LawFaultReason = 'error' | 'panicked' | 'over_budget' | 'wrong_length' | 'non_finite' | 'negative' | 'non_finite_level';
+export type LawFaultReason = 'error' | 'panicked' | 'over_budget' | 'wrong_length' | 'non_finite' | 'negative' | 'non_finite_level' | 'over_memory' | 'bad_diagnostics';
 
 export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault' | 'law_fault';
 

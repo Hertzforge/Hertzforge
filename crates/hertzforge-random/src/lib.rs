@@ -26,6 +26,11 @@
 //! own divergence count, a time budget, panic containment and a controlled stop
 //! (see [`service`]).
 //!
+//! The run service is the default `service` feature. Without it the crate is the
+//! control core alone, which builds for `wasm32-wasip2`: the built-in `hinv` law
+//! file (`laws/hinv`) is this same `HinvLaw` built that way, so the law that runs
+//! natively and the law file are one implementation.
+//!
 //! # Two hardware paths - which one this crate serves
 //!
 //! Hertzforge has two random paths. **Path A (delegated)**: the DEVICE closes
@@ -50,20 +55,27 @@
 #![forbid(unsafe_code)]
 
 pub mod control;
+#[cfg(feature = "service")]
 pub mod service;
 
 pub use control::{
-    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvLaw, LawFault,
-    LevelCommand, LoopDiagnostics, LoopInputs, LoopOutputs, NotchReport, NotchSet,
+    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvKnob, HinvLaw,
+    KnobKind, LawFault, LevelCommand, LoopDiagnostics, LoopInputs, LoopOutputs, NotchReport,
+    NotchSet, OutputFault,
 };
 
+#[cfg(feature = "service")]
 pub use service::config::{
     CaptureRules, CaptureTrigger, ConfigError, ControlChannel, ControlSet, LawGuards,
     LevelSchedule, LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
 };
+#[cfg(feature = "service")]
 pub use service::engine::{
     GridRefusal, GridSnapshot, KinematicMonitor, LoopConfig, StationAdoption, MIN_CONTROL_LINES,
 };
+#[cfg(feature = "service")]
 pub use service::law::{HinvLawFactory, LawClock, LawFactory, LawSetup, MonotonicClock};
+#[cfg(feature = "service")]
 pub use service::report::{LawFaultReason, ReportData, RunState, Status, TripKind, TripRecord};
+#[cfg(feature = "service")]
 pub use service::{LawGuardStats, RandomService, RandomSnapshotPayload, ServiceError};

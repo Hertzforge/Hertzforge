@@ -107,7 +107,9 @@ export const LAW_FAULT_WORDS: Record<LawFaultReason, string> = {
 	wrong_length: 'The drive had the wrong number of lines',
 	non_finite: 'The drive was not a number',
 	negative: 'The drive had a negative value',
-	non_finite_level: 'The level was not a number'
+	non_finite_level: 'The level was not a number',
+	over_memory: 'The control law asked for more memory than its cap',
+	bad_diagnostics: 'The control law reported diagnostics that broke the output rules'
 };
 
 const AXIS_WORDS = { accel: 'Acceleration', velocity: 'Velocity', displacement: 'Displacement' } as const;

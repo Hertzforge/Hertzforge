@@ -1,0 +1,17 @@
+[package]
+name = "hertzforge-law-hinv"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The default single-output Random law, `HinvLaw`, as a law file. It is the
+# controller's own `hertzforge_random::HinvLaw`, linked without the run
+# service, so the native law and the law file are one implementation. Built to
+# a law file by `scripts/build_laws.sh`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
+hertzforge-random = { path = "../../crates/hertzforge-random", default-features = false }

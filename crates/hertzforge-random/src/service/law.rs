@@ -17,8 +17,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// Everything a law factory is given to build a law for one run: the full-level
-/// target on the line grid, the control band, the line spacing, and the shipped
-/// law's knobs (a law that has its own parameters ignores them).
+/// target on the line grid, the control band, the line spacing, the control
+/// channel count, the time one law call may take, and the shipped law's knobs (a
+/// law that has its own parameters ignores them).
 #[derive(Debug, Clone, Copy)]
 pub struct LawSetup<'a> {
     /// The FULL (0 dB) shaped target PSD on the line grid, zero outside the band.
@@ -29,6 +30,14 @@ pub struct LawSetup<'a> {
     pub df_hz: f64,
     /// The shipped law's configuration (`RandomTestConfig::hinv`).
     pub hinv: &'a HinvConfig,
+    /// Control channels the composite is built from.
+    pub control_channels: usize,
+    /// The time one law call may take, seconds: `law_guards.budget_fraction` of
+    /// one loop's acquisition time. The core measures every call against it; a
+    /// law run contained gives its host the same number as the call's deadline,
+    /// so the host stops a call that will not return at the moment the core
+    /// would stop waiting for it.
+    pub call_budget_s: f64,
 }
 
 impl LawSetup<'_> {

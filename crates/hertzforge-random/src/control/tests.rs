@@ -38,6 +38,8 @@ impl Fixture {
             df_hz: self.df_hz,
             notched_bins: &self.notched,
             band: self.band,
+            // Not modeled here: the synthetic measurement has no estimator.
+            dof: 0.0,
         }
     }
 }
@@ -668,6 +670,7 @@ fn law_reports_ragged_inputs_instead_of_panicking() {
         df_hz: 1.0,
         notched_bins: &[],
         band,
+        dof: 0.0,
     };
     assert!(matches!(law.init(&inputs), Err(LawFault::BadInputs(_))));
     assert!(matches!(law.iterate(&inputs), Err(LawFault::BadInputs(_))));
@@ -730,4 +733,67 @@ fn config_round_trips_through_json() {
     let js = serde_json::to_string(&cfg).unwrap();
     let back: HinvConfig = serde_json::from_str(&js).unwrap();
     assert_eq!(cfg, back);
+}
+
+#[test]
+fn every_operator_knob_reads_and_sets_its_own_field() {
+    let d = HinvConfig::default();
+    assert!(d.validate().is_ok());
+    for k in HinvConfig::KNOBS {
+        let v = d
+            .knob(k.key)
+            .unwrap_or_else(|| panic!("{} is declared but cannot be read", k.key));
+        assert!(
+            v >= k.min && v <= k.max,
+            "{}: default {v} outside [{}, {}]",
+            k.key,
+            k.min,
+            k.max
+        );
+        // Set each knob to a value of its own and read the same value back,
+        // with every other knob unchanged.
+        let want = if k.kind == KnobKind::Integer {
+            (k.min + 1.0).min(k.max)
+        } else {
+            k.min + 0.5 * (k.max - k.min).min(1.0)
+        };
+        let mut c = HinvConfig::default();
+        c.set_knob(k.key, want)
+            .unwrap_or_else(|e| panic!("{}: {e}", k.key));
+        assert_eq!(c.knob(k.key), Some(want), "{}", k.key);
+        for other in HinvConfig::KNOBS.iter().filter(|o| o.key != k.key) {
+            assert_eq!(
+                c.knob(other.key),
+                d.knob(other.key),
+                "{} moved {}",
+                k.key,
+                other.key
+            );
+        }
+    }
+    assert_eq!(d.knob("suggest_beta"), None, "not a knob");
+}
+
+#[test]
+fn a_knob_refuses_what_is_outside_its_declaration() {
+    let mut c = HinvConfig::default();
+    for (key, v) in [
+        ("damping", 10.5),
+        ("damping", -1.0),
+        ("damping", f64::NAN),
+        ("trust_h_floor_frac", 1.0),
+        ("max_correction_db_per_iter", 0.0),
+        ("divergence_n", 2.5),
+        ("divergence_n", 0.0),
+        ("suggest_beta", 0.1),
+    ] {
+        assert!(c.set_knob(key, v).is_err(), "{key} = {v} was accepted");
+    }
+    assert_eq!(c, HinvConfig::default(), "a refused value changes nothing");
+    c.set_knob("lambda", 0.0).unwrap();
+    assert_eq!(c.lambda, None, "0 is the suggest policy");
+    c.set_knob("lambda", 2.5e-3).unwrap();
+    assert_eq!(c.lambda, Some(2.5e-3));
+    c.set_knob("divergence_n", 12.0).unwrap();
+    assert_eq!(c.divergence_n, 12);
 }

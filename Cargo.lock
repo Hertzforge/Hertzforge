@@ -788,6 +788,14 @@ name = "hertzforge-ipc"
 version = "0.1.0"
 
 [[package]]
+name = "hertzforge-law-hinv"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-random",
+]
+
+[[package]]
 name = "hertzforge-law-host"
 version = "0.1.0"
 dependencies = [

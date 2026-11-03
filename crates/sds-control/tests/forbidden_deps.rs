@@ -92,6 +92,7 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// names a backend or the Sim, and the guests can reach nothing but the numbers
 /// the host hands them.
 const LAW_CRATES: &[&str] = &[
+    "hertzforge-law-hinv",
     "hertzforge-law-host",
     "hertzforge-law-ratio",
     "hertzforge-law-ratio-math",

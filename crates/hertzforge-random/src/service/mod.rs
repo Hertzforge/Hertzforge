@@ -42,7 +42,12 @@
 //! - **Containment and time.** The call runs under `catch_unwind` and is timed on an
 //!   injectable [`law::LawClock`] against `law_guards.budget_fraction` of the
 //!   loop's acquisition time (its segment). A panic, an error the law returns, or a
-//!   late answer is a MISS.
+//!   late answer is a MISS. The factory is given the same budget
+//!   ([`law::LawSetup::call_budget_s`]), so a law run contained (a law file) is
+//!   stopped by its host at that budget; what its host reports (a trap, the
+//!   budget, the memory cap, a refused output) is recorded under the reason the
+//!   core gives the same failure in a native law, plus `over_memory` and
+//!   `bad_diagnostics`, which only a contained law can come to.
 //! - **Output checks.** A drive of the wrong length, any non-finite or negative
 //!   line, or a non-finite level is a MISS. Lines outside the band are zeroed.
 //! - **On a miss** the output is not used: the drive in force is held (carried to
@@ -68,7 +73,7 @@ pub mod report;
 
 use crate::control::{
     composite_psd, ControlLaw, LawFault, LevelCommand, LoopInputs, LoopOutputs, NotchReport,
-    NotchSet,
+    NotchSet, OutputFault,
 };
 use config::{CaptureTrigger, ConfigError, RandomTestConfig, RunMode};
 use engine::{DriveSynth, KinematicMonitor, KinematicTrip, LoopConfig, PlantLoop};
@@ -1349,6 +1354,8 @@ impl RandomService {
             band,
             df_hz: df,
             hinv: &self.cfg.hinv,
+            control_channels: self.cfg.control.channels.len(),
+            call_budget_s: self.law_budget_s(),
         };
         let mut law = self
             .law_factory
@@ -1365,6 +1372,8 @@ impl RandomService {
             df_hz: df,
             notched_bins: &empty,
             band,
+            // The seed carries no measurement.
+            dof: 0.0,
         };
         // A fresh run: nothing missed, nothing owed.
         self.law_stats = LawGuardStats::default();
@@ -2468,6 +2477,9 @@ impl RandomService {
             None => None,
         };
         let est_dof = per_loop_dof * f64::from(self.est_loops);
+        // What the law is told: the accumulated estimate's degrees of freedom,
+        // which stop growing once the accumulator holds its configured depth.
+        let law_dof = per_loop_dof * f64::from(self.est_loops).min(windows);
 
         // The operator's FRF pairs, measured from the SAME segment the
         // control loop just consumed - so what the pane shows and what the
@@ -2483,6 +2495,7 @@ impl RandomService {
             df_hz: df,
             notched_bins: &self.notch_mask,
             band,
+            dof: law_dof,
         };
         // The law proposes; the core disposes. A call whose output is not usable
         // leaves the drive in force exactly as it is, and is counted.
@@ -3589,6 +3602,26 @@ impl Miss {
     }
 }
 
+/// The reason a law's own fault is recorded under. A contained law's host can
+/// stop it (a trap, its time budget, its memory cap) or refuse its output before
+/// the core sees it; each lands on the reason the core would give the same
+/// failure in a native law, so a run record reads the same either way.
+fn fault_reason(fault: &LawFault) -> LawFaultReason {
+    match fault {
+        LawFault::BadInputs(_) | LawFault::Failed(_) => LawFaultReason::Error,
+        LawFault::Crashed(_) => LawFaultReason::Panicked,
+        LawFault::OverBudget(_) => LawFaultReason::OverBudget,
+        LawFault::OverMemory(_) => LawFaultReason::OverMemory,
+        LawFault::BadOutput(rule, _) => match rule {
+            OutputFault::WrongLength => LawFaultReason::WrongLength,
+            OutputFault::NonFinite => LawFaultReason::NonFinite,
+            OutputFault::Negative => LawFaultReason::Negative,
+            OutputFault::NonFiniteLevel => LawFaultReason::NonFiniteLevel,
+            OutputFault::Diagnostics => LawFaultReason::BadDiagnostics,
+        },
+    }
+}
+
 /// The time one law call may take, seconds: what the law is allowed of one loop.
 #[derive(Clone, Copy)]
 struct Budget<'a> {
@@ -3620,7 +3653,7 @@ where
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
             return Err(Miss {
-                reason: LawFaultReason::Error,
+                reason: fault_reason(&e),
                 detail: Some(e.to_string()),
             })
         }
