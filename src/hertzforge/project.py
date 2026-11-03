@@ -922,6 +922,22 @@ class Project(dict):
 
         The object as it is now is what the file holds. Edited later, it
         is saved whole instead, since a reference would lose the edit.
+
+        Parameters
+        ----------
+        name : str
+            The object, by its name in this project.
+        reference : Reference
+            The file it is in and its name there.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        KeyError
+            When the project has no object named `name`.
         """
         from .io.native import fingerprint
 

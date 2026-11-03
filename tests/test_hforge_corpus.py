@@ -151,7 +151,7 @@ def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     with h5py.File(newer, 'r+') as f:
         f.attrs[native.STAMP] = native.SCHEMA_VERSION + 1
     with pytest.raises(ValueError, match=(
-            r'newer Hertzforge \(schema 2; this build reads up to 1\)')):
+            r'newer Hertzforge \(schema 3; this build reads up to 2\)')):
         native.load(newer)
 
 
