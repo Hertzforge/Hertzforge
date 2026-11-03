@@ -367,7 +367,8 @@ export type RefusalReason =
 	| 'stale_revision'
 	| 'table_invalid'
 	| 'config_invalid'
-	| 'shaker_record_invalid';
+	| 'shaker_record_invalid'
+	| 'shutting_down';
 
 export type ItemReason =
 	// channel table

@@ -226,7 +226,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	stale_revision: 'The Channel Table Changed',
 	table_invalid: 'The Channel Table Has Errors',
 	config_invalid: 'The Setup Has Errors',
-	shaker_record_invalid: 'The Shaker Record Does Not Read'
+	shaker_record_invalid: 'The Shaker Record Does Not Read',
+	shutting_down: 'The Control Service Is Shutting Down'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {
