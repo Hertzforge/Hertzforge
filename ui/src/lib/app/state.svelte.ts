@@ -24,6 +24,7 @@ import type {
 	ProjectProgress,
 	UnitsTables,
 	ProjectSummary,
+	ReportEditor,
 	RunState,
 	Shape3DView,
 	SimProfile,
@@ -625,6 +626,10 @@ export class ReportState {
 	error = $state<string | null>(null);
 	/** Where the last export went. */
 	exported = $state<string | null>(null);
+	/** The editor's pane for the selection, from the last `report.editor`. */
+	editor = $state.raw<ReportEditor | null>(null);
+	/** How far the page was scrolled, kept across the re-render an edit makes. */
+	scroll = 0;
 
 	constructor(private readonly app: AppState) {}
 
@@ -654,14 +659,44 @@ export class ReportState {
 		});
 	}
 
+	/** Select a block on the page (null for the report itself); its pane follows. */
+	async select(at: number | null): Promise<void> {
+		const name = this.name;
+		if (!name || at === (this.editor?.selected ?? null)) return;
+		// the page framed the block itself: the pane alone comes back
+		await this.act('Selecting', async () => this.take(await this.request('report.editor', { name, selected: at, page: false })));
+	}
+
+	/** One of the editor's operations (`report.operate`); the page and pane follow. */
+	async operate(op: string, params: Record<string, unknown> = {}): Promise<boolean> {
+		const name = this.name;
+		if (!name) return false;
+		let ok = false;
+		await this.act('Editing the report', async () => {
+			const res = await this.request('report.operate', { name, op, selected: this.editor?.selected ?? null, ...params });
+			if (res.project) this.app.project.apply(res.project);
+			this.take(res);
+			ok = true;
+		});
+		return ok;
+	}
+
+	private request(method: string, params: Record<string, unknown>): Promise<ReportEditor> {
+		return this.app.analysis.request<ReportEditor>(method, { ...params, theme: theme.resolved }, { timeoutMs: RUN_TIMEOUT_MS });
+	}
+
+	private take(res: ReportEditor): void {
+		// a pane alone keeps the page and the labels rendered with it
+		this.editor = res.html === undefined ? { ...res, references: this.editor?.references ?? [] } : res;
+		if (res.html !== undefined) this.html = res.html;
+	}
+
 	private async load(name: string): Promise<void> {
-		const res = await this.app.analysis.request<{ name: string; html: string }>(
-			'report.render',
-			{ name, theme: theme.resolved },
-			{ timeoutMs: RUN_TIMEOUT_MS }
-		);
-		this.name = res.name;
-		this.html = res.html;
+		const keep = this.name === name ? (this.editor?.selected ?? null) : null;
+		if (this.name !== name) this.scroll = 0;
+		const res = await this.request('report.editor', { name, selected: keep });
+		this.name = name;
+		this.take(res);
 		this.exported = null;
 	}
 

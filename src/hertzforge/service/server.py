@@ -372,7 +372,10 @@ class Connection:
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
         keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
-                'report.export': ('name', 'path')}
+                'report.export': ('name', 'path'),
+                'report.editor': ('name', 'selected', 'theme', 'page'),
+                'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
+                                   'kind', 'field', 'value')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -386,6 +389,12 @@ class Connection:
             if method == 'report.render':
                 html = await call(reports.render, project, params)
                 return {'name': params['name'], 'html': html}
+            if method == 'report.editor':
+                return await call(reports.edit_page, project, params)
+            if method == 'report.operate':
+                edited = await call(reports.operate, project, params)
+                self.project.modified = True
+                return {**edited, 'project': projects.summary(self.project)}
             return {'path': await call(reports.export, project, params)}
 
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:

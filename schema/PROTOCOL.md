@@ -401,6 +401,8 @@ first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
 | `report.export` | `{"name","path"}` | `{"path"}` |
+| `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
+| `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -409,6 +411,26 @@ gives the report `name` as one HTML document, with its stylesheet, data and view
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
 added when it has another suffix), beside the target first and renamed over it.
+
+`report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
+tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
+and the pane for the selection. A click on a block posts `{"hforgeReport":{"op":"select","at":n}}`
+(`at` null outside every block) to the page's parent, which the shell answers with
+`report.editor` at that block and `"page":false`: the page has framed the block itself, so the
+answer leaves `html` and `references` out and nothing is rendered again. `title`, `marking` and `marking_color` (`ink` or `red`) are the
+report's; `blocks` how many it has; `insert` the Insert menu as `[kind, label]` pairs (Markdown,
+then `core.report.insert_options`); `references` the `[label, caption]` of each numbered figure
+and table, for a text block's `{{figure:<caption>}}` token. `block` is null with nothing selected,
+or the selected block's `index`, `kind` and `mode`, and either its `text` (a text block; `special`
+names a skeleton section, check or requirement block, which has a pane of its own) or its
+`fields` (`{field,label,value,options:[[value,label]...]}`, the objects it may name, symbolic
+bindings such as `@basis:ShapeSet` first) and `caption`.
+
+`report.operate` applies one of VD's editor operations and answers with the editor at the block it
+leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound to the first
+object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
+`value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
+`marking` and `marking_color` (`value`).
 
 **Control service**
 
