@@ -117,3 +117,11 @@ export function listenForDrops(onPaths: (paths: string[] | null) => void): () =>
 		window.removeEventListener('drop', drop);
 	};
 }
+
+/** A PDF chosen in the native open dialog (the one an issue was printed to), or null when cancelled. */
+export async function choosePdf(): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	const chosen = await dialog.open({ title: 'The Issued PDF', multiple: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
+}

@@ -59,9 +59,20 @@ CUT_STOP = Param('stop', 'Stop', 'number', default=1.0, unit='s', step=0.1,
 
 
 def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
-    """The analysis settings an object carries, as the project summary
-    lists them: {'averaging': {...}, 'filtering': {...}, 'truncation':
-    {...}}, each present only when set. What a `setting` param opens on."""
+    """The settings an object carries, as the project summary lists them: a
+    time history's {'averaging': {...}, 'filtering': {...}, 'truncation':
+    {...}}, each present only when set, and a report's {'features': {key:
+    on}} for every report feature and its identification fields
+    {'identity': {key: text}}. What a `setting` param opens on."""
+    from hertzforge.core.report import Report
+
+    if isinstance(obj, Report):
+        from hertzforge.report.features import FEATURES
+        from hertzforge.report.identity import FIELDS, value
+
+        held = set(obj.features)
+        return {'features': {key: key in held for key in FEATURES},
+                'identity': {field.key: _text(value(obj, field.key)) for field in FIELDS}}
     out: dict[str, dict[str, Any]] = {}
     averaging = getattr(obj, 'averaging', None)
     if averaging is not None:
@@ -78,6 +89,12 @@ def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
     if truncation is not None:
         out['truncation'] = {'start': truncation.start, 'stop': truncation.stop}
     return out
+
+
+def _text(held: Any) -> str:
+    """An identification field as the form shows it: a list of people
+    comma-separated."""
+    return ', '.join(map(str, held)) if isinstance(held, list) else str(held or '')
 
 
 def _rate(history: Any) -> float:
