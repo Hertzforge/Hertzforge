@@ -111,8 +111,15 @@
       "properties": {
         "x0": {"type": "number"},
         "x1": {"type": "number"},
-        "kind": {"enum": ["frame", "cut"]},
-        "label": {"type": "string"}
+        "kind": {"enum": ["frame", "cut", "span"]},
+        "label": {"type": "string"},
+        "drag": {
+          "type": "object", "required": ["op", "params", "low"], "additionalProperties": false,
+          "properties": {
+            "op": {"type": "string"}, "params": {"type": "object"},
+            "low": {"type": "string"}, "high": {"type": "string"}
+          }
+        }
       }
     },
     "readingView": {

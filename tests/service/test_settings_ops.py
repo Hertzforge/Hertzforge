@@ -50,8 +50,12 @@ def test_averaging_set_is_stored_read_back_and_listed(state, validate):
                          window='flattop', frames=4, start=0.5)
     wire_views([trace, reading], validate)
     rate = project['Time History'].sample_rate
-    frames = trace['regions']
+    *frames, span = trace['regions']
     assert [r['kind'] for r in frames] == ['frame'] * 4
+    # the span over every frame slides them: the averaging again with the new start
+    assert span['kind'] == 'span' and span['drag']['op'] == 'project.set_averaging'
+    assert span['drag']['low'] == 'start' and 'high' not in span['drag']
+    assert span['drag']['params']['frame_length'] == 2048
     assert frames[0]['x0'] == pytest.approx(0.5, abs=1 / rate)
     assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(1024 / rate)
     assert frames[0]['label'].startswith('Frame 1, ')
@@ -104,9 +108,13 @@ def test_a_truncation_span_lets_apply_truncation_run(state):
     project = state.project
     trace, _reading = run(project, 'project.set_truncation', start=0.5, stop=1.5)
     assert settings(state)['truncation'] == {'start': 0.5, 'stop': 1.5}
-    cut = trace['regions']
+    *cut, kept = trace['regions']
     assert [r['kind'] for r in cut] == ['cut', 'cut']
     assert (cut[0]['x1'], cut[1]['x0']) == (0.5, 1.5)
+    assert (kept['x0'], kept['x1']) == (0.5, 1.5)
+    assert kept['drag'] == {'op': 'project.set_truncation',
+                            'params': {'source': 'Time History', 'record': 1},
+                            'low': 'start', 'high': 'stop'}
     added = project.truncate_data('Time History')
     assert float(project[added].abscissa[-1]) <= 1.5
 
@@ -119,10 +127,21 @@ def test_a_span_outside_the_record_is_refused(state):
 def test_many_frames_shade_as_one_span(state):
     trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
                           overlap=0.0, frames=300)
-    (span,) = trace['regions']
+    span, _drag = trace['regions']
     assert span['label'].startswith('300 frames')
 
 
 def test_the_record_drawn_on_must_be_in_the_history(state):
     with pytest.raises(ProtocolError, match='there is no record 99'):
         run(state.project, 'project.set_truncation', start=0.5, stop=1.5, record=99)
+
+
+def test_a_dragged_frame_span_slides_the_frames_and_keeps_the_rest(state):
+    project = state.project
+    trace, _ = run(project, 'project.set_averaging', frame_length=2048, overlap=0.5,
+                   window='flattop', frames=4, start=0.5)
+    drag = trace['regions'][-1]['drag']
+    run(project, drag['op'], **{**drag['params'], drag['low']: 1.0})
+    averaging = project['Time History'].averaging
+    assert averaging.start == pytest.approx(1.0)
+    assert (averaging.frame_length, averaging.window, averaging.frames) == (2048, 'flattop', 4)

@@ -88,7 +88,11 @@ group; panes with the same `link` share a cursor position on x.
 `regions` (optional) shade spans of x behind the curves, as Visual Dynamics draws a time
 history's settings on it: a `frame` is one frame its spectra are averaged from (frames that
 overlap shade darker where they do), and a `cut` is a span left out, such as the ends a truncation
-discards. `label` is said when the span is hovered. They are not listed in the legend; the
+discards; a `span` draws its edges alone. `label` is said when the span is hovered. A region with
+`"drag":{"op","params","low","high"?}` is moved on the plot: its middle slides it and, with
+`high`, an edge moves that edge. On release the shell runs `op` with `params`, the new x0 as
+`low` and the new x1 as `high`, and the answer's views take the result's place, as Visual
+Dynamics' averaging and truncation regions are dragged. They are not listed in the legend; the
 result's reading says what they are.
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:

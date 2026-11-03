@@ -96,13 +96,28 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
     return out
 
 
-def region(x0: float, x1: float, kind: Literal['frame', 'cut'],
-           label: str | None = None) -> dict[str, Any]:
-    """A span of x shaded behind a spectrum's curves: a `frame` averaged
-    from, or a `cut` left out."""
+def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span'],
+           label: str | None = None, drag: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A span of x behind a spectrum's curves: a `frame` averaged from, a
+    `cut` left out, or a `span` (its edges drawn, nothing shaded). With
+    `drag` (`dragging`) it is moved on the plot: its middle slides it and
+    an edge moves that edge."""
     out: dict[str, Any] = {'x0': float(x0), 'x1': float(x1), 'kind': kind}
     if label:
         out['label'] = label
+    if drag is not None:
+        out['drag'] = drag
+    return out
+
+
+def dragging(op: str, params: dict[str, Any], low: str, high: str | None = None
+             ) -> dict[str, Any]:
+    """What makes a region draggable: the operation that sets the span,
+    run with `params` and the new x0 as `low` and, when `high` is given,
+    the new x1 as `high`. Without `high` only the whole span slides."""
+    out: dict[str, Any] = {'op': op, 'params': dict(params), 'low': low}
+    if high is not None:
+        out['high'] = high
     return out
 
 

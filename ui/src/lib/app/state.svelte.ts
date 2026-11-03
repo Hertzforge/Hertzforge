@@ -28,6 +28,7 @@ import type {
 	RunState,
 	Shape3DView,
 	SimProfile,
+	Region,
 	SimStateResult,
 	TableEdit,
 	View,
@@ -293,6 +294,24 @@ class AnalyzeState {
 			return null;
 		} catch (err) {
 			return message(err);
+		}
+	}
+
+	/** A span dragged on a result's plot: its operation runs with the new edges, and its views take the result's place. */
+	async dragSpan(id: number, drag: NonNullable<Region['drag']>, x0: number, x1: number): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		if (!result || result.busy) return;
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
 		}
 	}
 

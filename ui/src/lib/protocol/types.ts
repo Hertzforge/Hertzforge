@@ -125,9 +125,11 @@ export interface SpectrumView {
 export interface Region {
 	x0: number;
 	x1: number;
-	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out. */
-	kind: 'frame' | 'cut';
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone. */
+	kind: 'frame' | 'cut' | 'span';
 	label?: string;
+	/** Present when the span is dragged: `op` runs with `params`, the new x0 as `low`, x1 as `high`. */
+	drag?: { op: string; params: Record<string, unknown>; low: string; high?: string };
 }
 
 export type Status = 'pass' | 'warn' | 'fail' | 'info';

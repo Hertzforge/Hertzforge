@@ -36,13 +36,15 @@
 		scope?: string;
 		/** A click on the plot (not a drag), with the x it landed on: a cursor the caller places. */
 		onPick?: (x: number) => void;
+		/** A draggable region released at new edges: its index in `view.regions`, and the edges in x. */
+		onspan?: (region: number, x0: number, x1: number) => void;
 		/** The x range on screen, each time it changes: a zoom the caller reads as a band. */
 		onRange?: (low: number, high: number) => void;
 		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
 		marker?: number | null;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, onspan }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -317,11 +319,17 @@
 		markerLine.className = 'marker';
 		plot.over.appendChild(markerLine);
 		placeMarker();
-		regionEls = (view.regions ?? []).map((r) => {
+		regionEls = (view.regions ?? []).map((r, k) => {
 			const el = document.createElement('div');
 			el.className = `region ${r.kind}`;
 			if (r.label) el.title = r.label;
-			plot!.under.appendChild(el);
+			if (r.drag && onspan) {
+				// dragged in the top layer, so the press is the span's and not a zoom
+				el.classList.add('drag');
+				el.addEventListener('mousedown', (e) => e.stopPropagation());
+				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
+				plot!.over.appendChild(el);
+			} else plot!.under.appendChild(el);
 			return el;
 		});
 		placeRegions();
@@ -369,6 +377,44 @@
 		void marker;
 		placeMarker();
 	});
+
+	/** How near an edge, in pixels, a press takes that edge rather than the whole span. */
+	const EDGE_PX = 6;
+
+	/**
+	 * A draggable region pressed: the middle slides it, an edge (when the span has two) moves that
+	 * edge. It follows the pointer and, on release, its new edges in x go to `onspan`.
+	 */
+	function startSpan(e: PointerEvent, k: number, el: HTMLDivElement) {
+		const region = view.regions?.[k];
+		if (!plot || !region?.drag || e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const a = plot.valToPos(region.x0, 'x');
+		const b = plot.valToPos(region.x1, 'x');
+		const at = e.clientX - plot.over.getBoundingClientRect().left;
+		const two = !!region.drag.high;
+		const part = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
+		const x = e.clientX;
+		let left = a;
+		let right = b;
+		const move = (m: PointerEvent) => {
+			const d = m.clientX - x;
+			if (part === 'move') [left, right] = [a + d, b + d];
+			else if (part === 'low') left = Math.min(a + d, right - 2);
+			else right = Math.max(b + d, left + 2);
+			el.style.left = `${left}px`;
+			el.style.width = `${right - left}px`;
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			if (!plot || (left === a && right === b)) return placeRegions();
+			onspan?.(k, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
 
 	/** Shade each region over the part of it on the plot. */
 	function placeRegions() {
@@ -700,6 +746,20 @@
 
 	.plot :global(.region.cut) {
 		background: var(--region-cut);
+	}
+
+	.plot :global(.region.span) {
+		border-left: 1.5px solid var(--region-frame-edge);
+		border-right: 1.5px solid var(--region-frame-edge);
+	}
+
+	.plot :global(.region.drag) {
+		pointer-events: auto;
+		cursor: grab;
+	}
+
+	.plot :global(.region.drag:hover) {
+		background: var(--region-frame);
 	}
 
 	.plot :global(.marker) {
