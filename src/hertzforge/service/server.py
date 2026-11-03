@@ -37,17 +37,20 @@ from .ops_project import OPERATIONS as PROJECT_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .ops_readings import OPERATIONS as READING_OPERATIONS
 from .ops_settings import OPERATIONS as SETTINGS_OPERATIONS
+from .ops_specify import OPERATIONS as SPECIFY_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
 
 OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS
-                                     + SETTINGS_OPERATIONS + MODEL_OPERATIONS + READING_OPERATIONS)
+                                     + SETTINGS_OPERATIONS + MODEL_OPERATIONS
+                                     + SPECIFY_OPERATIONS + READING_OPERATIONS)
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
-                   'project.rename', 'project.remove', 'project.activate')
+                   'project.rename', 'project.remove', 'project.activate',
+                   'project.units', 'project.define_units')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -322,6 +325,14 @@ class Connection:
         edits = {'project.rename': (projects.rename, ('name', 'to')),
                  'project.remove': (projects.remove, ('names',)),
                  'project.activate': (projects.activate, ('geometry',))}
+        if method == 'project.units':
+            _only(params, ('name',), method)
+            return await call(projects.units, self.project, params)
+        if method == 'project.define_units':
+            _only(params, ('name', 'units'), method)
+            converted = await call(projects.define_units, self.project, params)
+            assert self.project is not None
+            return {'converted': converted, 'project': projects.summary(self.project)}
         if method in edits:
             edit, keys = edits[method]
             _only(params, keys, method)

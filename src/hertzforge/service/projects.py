@@ -71,10 +71,18 @@ def summary(state: OpenProject) -> dict[str, Any]:
         if settings:
             entry['settings'] = settings
         objects.append(entry)
-    return {'title': project.name, 'file': project.file,
-            'modified': state.modified, 'objects': objects,
-            'active_geometry': project.active_geometry
-            if project.active_geometry in project else None}
+    out = {'title': project.name, 'file': project.file,
+           'modified': state.modified, 'objects': objects,
+           'active_geometry': project.active_geometry
+           if project.active_geometry in project else None}
+    if project.unresolved:
+        # held by reference to a file that was not found or has changed:
+        # not loaded, and kept for the next save (`Project.unresolved`)
+        out['unresolved'] = [
+            {'name': name, 'kind': reference.kind, 'path': reference.path,
+             'reason': reference.reason}
+            for name, reference in project.unresolved.items()]
+    return out
 
 
 def _path(params: Mapping[str, Any], method: str) -> str:
@@ -216,12 +224,35 @@ def remove(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     if (not isinstance(names, list) or not names
             or not all(isinstance(name, str) for name in names)):
         raise bad_request('project.remove needs "names", a list of object names')
-    missing = [name for name in names if name not in state.project]
+    missing = [name for name in names if name not in state.project
+               and name not in state.project.unresolved]
     if missing:
         raise not_found(f'the project has no object named '
                         f'{", ".join(map(repr, missing))}')
     state.project.remove(*names)
     state.modified = True
+
+
+def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.units`: the tables an object's units are declared in
+    (`service.units.tables`)."""
+    from . import units as declared
+
+    state = _open(state, 'project.units')
+    return declared.tables(state.project, _name(params, 'name', 'project.units'))
+
+
+def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:
+    """`project.define_units`: units declared on an object by table and
+    row (`service.units.define`); the records converted."""
+    from . import units as declared
+
+    state = _open(state, 'project.define_units')
+    name = _name(params, 'name', 'project.define_units')
+    with state.project.journal_as(None):
+        converted = declared.define(state.project, name, params.get('units'))
+    state.modified = True
+    return converted
 
 
 def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:

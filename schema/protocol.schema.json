@@ -294,7 +294,14 @@
         "file": {"type": ["string", "null"]},
         "modified": {"type": "boolean"},
         "objects": {"type": "array", "items": {"$ref": "#/$defs/projectObject"}},
-        "active_geometry": {"type": ["string", "null"]}
+        "active_geometry": {"type": ["string", "null"]},
+        "unresolved": {"type": "array", "items": {
+          "type": "object", "required": ["name", "kind", "path", "reason"],
+          "properties": {
+            "name": {"type": "string"}, "kind": {"type": "string"},
+            "path": {"type": "string"}, "reason": {"enum": ["not found", "changed"]}
+          }
+        }}
       }
     },
     "projectNewParams": {
@@ -333,7 +340,8 @@
           "type": "object", "required": ["frequency", "damping", "description"],
           "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}, "description": {"type": "string"}}
         }},
-        "view": {"$ref": "#/$defs/spectrumView"}
+        "view": {"$ref": "#/$defs/spectrumView"},
+        "mac": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/matrixView"}]}
       }
     },
     "fitResult": {
@@ -356,6 +364,47 @@
     "projectActivateParams": {
       "type": "object", "required": ["geometry"], "additionalProperties": false,
       "properties": {"geometry": {"type": "string", "minLength": 1}}
+    },
+    "projectUnitsParams": {
+      "type": "object", "required": ["name"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}}
+    },
+    "projectUnitsResult": {
+      "type": "object", "required": ["name", "tables"],
+      "properties": {
+        "name": {"type": "string"},
+        "tables": {"type": "array", "items": {
+          "type": "object", "required": ["side", "rows"],
+          "properties": {
+            "side": {"enum": ["object", "channels", "response", "reference"]},
+            "rows": {"type": "array", "items": {
+              "type": "object", "required": ["key", "label", "quantity", "unit", "choices"],
+              "properties": {
+                "key": {"type": "string"}, "label": {"type": "string"},
+                "quantity": {"type": ["string", "null"]}, "unit": {"type": ["string", "null"]},
+                "choices": {"type": "array", "items": {"type": "string"}}
+              }
+            }}
+          }
+        }}
+      }
+    },
+    "projectDefineUnitsParams": {
+      "type": "object", "required": ["name", "units"], "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "units": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["side", "key", "unit"], "additionalProperties": false,
+          "properties": {"side": {"type": "string"}, "key": {"type": "string"}, "unit": {"type": "string", "minLength": 1}}
+        }}
+      }
+    },
+    "projectDefineUnitsResult": {
+      "type": "object", "required": ["converted", "project"],
+      "properties": {
+        "converted": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "project": {"$ref": "#/$defs/project"}
+      }
     },
     "projectResult": {
       "type": "object", "required": ["project"],

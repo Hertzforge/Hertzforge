@@ -282,6 +282,8 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.rename` | `{"name","to"}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |
+| `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
+| `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
@@ -296,7 +298,19 @@ and defaults it to "Project". `project.rename` gives the object `name` the name 
 group, provenance record and report block that names it follows; a name in use is refused.
 `project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
 none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
-nothing else names one. Each answers with the project. Project requests on one connection run one
+nothing else names one. Each answers with the project.
+
+Units a file did not state are declared by channel, not by record, as Visual Dynamics' Imported
+Units pane declares them. `project.units` gives an object's tables: a geometry's one row (`side`
+`object`, key `length`), a shape set's (key `mass`), and a data object's channels, one row per
+(DOF, quantity), since a drive point's accelerometer and load cell share a DOF and are two
+channels. An FRF has a `response` and a `reference` table; a cross-spectral matrix and every other
+data object one `channels` table. Each row has `key`, `label` (the DOF), `quantity` (what the
+channel measures, from its dimension or the file's claim, or null), `unit` (null while undeclared)
+and `choices`, the units offered first; any unit Hertzforge reads is accepted. `project.define_units`
+declares units by `side` and `key`. Every unit is read before anything changes. A record converts
+when each of its channels is named, here or before, and one only half named waits; `converted`
+lists the records converted. Project requests on one connection run one
 at a time, in the order they arrive.
 
 The project as the shell lists it:
@@ -314,7 +328,11 @@ The project as the shell lists it:
 `records` is present for data objects, `source` for measured data, and `units_defined` is false
 for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
 names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
-order. `active_geometry` is the active geometry's name, or null. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
+order. `active_geometry` is the active geometry's name, or null. `unresolved`, present only when
+there are any, lists the objects the project holds by reference to another `.hforge` file that
+was `not found` or has `changed` since: each with its `name`, `kind` and the `path` it was looked
+for at. They are not loaded and no tool lists them; saving keeps their references, and
+`project.remove` drops one. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
 `verb:` params are filled from. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
@@ -362,6 +380,8 @@ frequency order, damping a fraction of critical. `view` is a `spectrum` view, fr
 arrays as `op.run` does: x `Frequency` Hz, y `CMIF` log, `link` `frequency`, the measured CMIF's
 first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`...) each
 `follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
+`mac` is a `matrix` view of the confirmed modes' auto-MAC with the preview's row and column last
+(`New: <f> Hz`), how alike the shapes are; null for fewer than two.
 
 **Control service**
 

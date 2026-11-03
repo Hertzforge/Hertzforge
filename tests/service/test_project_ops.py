@@ -247,6 +247,53 @@ def test_detecting_shocks_marks_the_history_and_counts_as_an_edit(plate, validat
     assert OPS['project.detect_shocks'].edits
 
 
+def test_rigid_body_modes_are_drawn_on_their_geometry(plate, validate):
+    (view,) = run(plate, 'project.generate_rigid_body_modes')
+    wire_views([view], validate)
+    assert view['view'] == 'shape3d' and len(view['modes']) == 6
+    assert 'Geometry Rigid Body Modes' in plate
+
+
+def test_a_transform_the_shapes_cannot_resolve_is_refused_in_the_cores_words(plate):
+    run(plate, 'project.generate_rigid_body_modes')
+    with pytest.raises(ProtocolError, match='resolve only') as error:
+        run(plate, 'project.transform', shapes='Geometry Rigid Body Modes')
+    assert error.value.code == 'refused'
+
+
+def test_solve_modes_draws_a_models_modes_on_it(validate):
+    from test_fem import square_plate
+
+    import hertzforge as hz
+    from hertzforge.core.fem import GroupProperties, Material
+
+    geometry = square_plate(4).geometry()
+    geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(
+        Material('aluminum', youngs_modulus=70e9, density=2700, poissons_ratio=0.3), 0.01)}
+    project = hz.Project('model')
+    project.add('Skin', geometry)
+    project.add('Bare', square_plate(2).geometry())
+    assert projects.verbs_of(project, 'Bare').count('solve_modes') == 0
+    (view,) = run(project, 'project.solve_modes', num_modes=10)
+    wire_views([view], validate)
+    assert view['view'] == 'shape3d' and len(view['modes']) == 10
+    assert view['modes'][6]['frequency_hz'] > 0, 'six rigid-body modes, then elastic'
+
+
+def test_a_set_is_projected_onto_another_sets_dofs(plate):
+    run(plate, 'project.compute_frfs', method='H1')
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
+    run(plate, 'project.generate_rigid_body_modes')
+    fitted = next(n for n in plate if projects.kind_of(plate[n]) == 'shape_set'
+                  and 'Rigid' not in n)
+    (view,) = run(plate, 'project.project_onto_basis', source='Geometry Rigid Body Modes',
+                  onto=fitted)
+    added = [n for n in plate if n.startswith('Geometry Rigid Body Modes') and
+             n != 'Geometry Rigid Body Modes']
+    assert added and plate[added[0]].num_shapes == 6
+    assert view['view'] in ('shape3d', 'reading')
+
+
 def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate):
     run(plate, 'project.compute_frfs', method='H1')
     plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=4)
