@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hertzforge.service import display_units, views as v
+from hertzforge.service import display_units
+from hertzforge.service import views as v
 
 from .test_projects import _exchange
 
@@ -67,7 +68,7 @@ def test_a_connection_starts_in_vds_system_and_chooses_another(validate):
     first, _imported, us, si_set, si, wrong = (got[-1] for got in responses)
     assert first['result']['name'] == display_units.START == US
     assert US in first['result']['systems']
-    rms = lambda r: next(row for row in r['result']['views'][0]['rows'] if row['label'] == 'RMS')  # noqa: E731
+    rms = lambda r: next(row for row in r['result']['views'][0]['rows'] if row['label'] == 'RMS')
     assert rms(us)['unit'] == 'g' and rms(si)['unit'] == 'm/s²'
     assert rms(si)['value'] == pytest.approx(rms(us)['value'] * G)
     assert si_set['result']['name'] == display_units.DEFAULT
