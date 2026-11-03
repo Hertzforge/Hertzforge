@@ -39,8 +39,8 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                        'make_realizable', 'convert_to_specification',
                        'convert_to_psd', 'detect_shocks', 'extract_sine',
                        'set_averaging', 'detect_averaging', 'set_filter',
-                       'set_truncation', 'transform', 'expand',
-                       'generate_rigid_body_modes', 'solve_modes',
+                       'set_truncation', 'view_geometry', 'group_properties', 'merge_coincident_nodes',
+                       'transform', 'expand', 'generate_rigid_body_modes', 'solve_modes',
                        'project_onto_basis'))}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
