@@ -3,18 +3,27 @@ its filter and its truncation span, which Compute Spectra and Compute
 PSDs, Apply Filter and Apply Truncation then read. Visual Dynamics sets
 them in its averaging, filter and truncate views; here each is an
 operation whose params open on the history's own settings (`setting`)
-and whose result reads back what was stored.
+and whose result draws the setting on one record, as VD draws it (the
+frames shaded, the filtered record over the recorded one, the cut ends
+grayed), and reads back what was stored.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .protocol import refused
+from .waterfalls import axes
 
 HISTORY = Param('source', 'Time history', 'enum', options_from='objects:time_history')
+#: the channel the setting is drawn on; not a setting itself
+SHOWN = Param('record', 'Drawn on record', 'integer', default=1, min=1, step=1)
+#: more frames than this are shaded as one span: a frame a few pixels wide says nothing
+MOST_FRAMES_SHADED = 200
 
 FRAME = Param('frame_length', 'Frame', 'integer', default=4096, unit='samples',
               min=2, step=1024, setting='averaging.frame_length')
@@ -75,6 +84,51 @@ def _rate(history: Any) -> float:
     return float(history.sample_rate)
 
 
+def _shown(history: Any, name: str, params: dict[str, Any]) -> int:
+    number = int(params.get('record', 1))
+    if not 1 <= number <= history.num_records:
+        raise refused(f'{name} has {history.num_records} records; there is no record {number}')
+    return number - 1
+
+
+def _trace(history: Any, name: str, record: int, regions: list[dict],
+           filtered: Any = None) -> dict:
+    """One record of a history, peak-decimated, with `regions` shaded
+    behind it, as Visual Dynamics draws a setting on the record it
+    applies to. With `filtered` (the record through a filter) that is
+    drawn over the record, the unfiltered record thin behind it."""
+    import hertzforge as hz
+    from hertzforge.decimate import peak_decimate
+    from hertzforge.drawing.viz.waterfall import POINT_BUDGET, waterfall_arrays
+
+    arrays = waterfall_arrays(history, [record], unit_system=hz.SI, exponents=False,
+                              component='real')
+    x, y = arrays['curves'][0]
+    label = history.record_label(record)
+    if filtered is None:
+        lines = [v.series(label, 'measured', x, y)]
+    else:
+        fx, fy = peak_decimate(np.asarray(history.abscissa, dtype=float), filtered,
+                               POINT_BUDGET)
+        lines = [v.series(f'{label}, filtered', 'measured', fx, fy),
+                 v.series(f'{label}, as recorded', 'drive', x, y)]
+    return v.spectrum(f'{name}, {label}', *axes(history, record, 'real', arrays), lines,
+                      regions=regions)
+
+
+def _frames(history: Any) -> list[dict]:
+    """The frames a history's spectra are averaged from, each a region;
+    one span over all of them when there are too many to see."""
+    rate = _rate(history)
+    origin = float(history.abscissa[0])
+    bounds = history.averaging.frame_bounds(rate, origin)
+    if len(bounds) > MOST_FRAMES_SHADED:
+        return [v.region(bounds[0][0], bounds[-1][1], 'frame',
+                         f'{len(bounds)} frames, {bounds[0][0]:g} to {bounds[-1][1]:g} s')]
+    return [v.region(a, b, 'frame', f'Frame {k + 1}, {a:g} to {b:g} s')
+            for k, (a, b) in enumerate(bounds)]
+
+
 def _averaging_reading(name: str, history: Any) -> dict:
     averaging = history.averaging
     rate = _rate(history)
@@ -110,8 +164,10 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         most = averaging.most_frames(len(history.abscissa), _rate(history))
         raise refused(f'{name} holds {most} such frames from {averaging.start:g} s, '
                       f'not {averaging.frames}')
+    record = _shown(history, name, params)
     history.averaging = averaging
-    return [_averaging_reading(name, history)]
+    return [_trace(history, name, record, _frames(history)),
+            _averaging_reading(name, history)]
 
 
 def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -120,11 +176,13 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     keeping the frame, window and overlap it already has."""
     name = params['source']
     history = project[name]
+    record = _shown(history, name, params)
     try:
         history.averaging = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
-    return [_averaging_reading(name, history)]
+    return [_trace(history, name, record, _frames(history)),
+            _averaging_reading(name, history)]
 
 
 def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -143,11 +201,22 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
         if not hz < nyquist:
             raise refused(f'the {edge} edge ({hz:g} Hz) must be below half the '
                           f'sample rate ({nyquist:g} Hz)')
+    record = _shown(history, name, params)
     try:
-        history.filtering = Filtering(order=params['order'], **edges)
+        filtering = Filtering(order=params['order'], **edges)
     except ValueError as error:
         raise refused(str(error)) from None
-    return [v.reading(f'Filter of {name}', [
+    history.filtering = filtering
+    # the preview is what Apply Filter will make of this record: the same
+    # design, zero phase
+    from scipy.signal import sosfiltfilt
+
+    from hertzforge.core.filters import design
+
+    preview = sosfiltfilt(design(filtering, _rate(history)),
+                          np.real(np.asarray(history.ordinate[record])))
+    return [_trace(history, name, record, [], filtered=preview),
+            v.reading(f'Filter of {name}', [
         v.row('Filter', history.filtering.describe(), None, 'info'),
         v.row('Order', float(history.filtering.order), '', 'info')])]
 
@@ -164,11 +233,16 @@ def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
     if start < first or stop > last:
         raise refused(f'{name} runs from {first:g} s to {last:g} s; the span '
                       f'{start:g} to {stop:g} s is not inside it')
+    record = _shown(history, name, params)
     try:
         history.truncation = Truncation(start, stop)
     except ValueError as error:
         raise refused(str(error)) from None
-    return [v.reading(f'Truncation of {name}', [
+    cut = [v.region(a, b, 'cut', label) for a, b, label in (
+        (first, start, f'Cut, {first:g} to {start:g} s'),
+        (stop, last, f'Cut, {stop:g} to {last:g} s')) if b > a]
+    return [_trace(history, name, record, cut),
+            v.reading(f'Truncation of {name}', [
         v.row('From', start, 's', 'info'), v.row('To', stop, 's', 'info'),
         v.row('Kept', stop - start, 's', 'info')])]
 
@@ -179,25 +253,25 @@ OPERATIONS = (
         accepts='project',
         summary='The frames a time history\'s spectra are averaged from: their '
                 'length, overlap, window, number and start.',
-        params=(HISTORY, FRAME, OVERLAP, WINDOW, FRAMES, START, DETREND),
-        outputs=('reading',), run=set_averaging, edits=True),
+        params=(HISTORY, FRAME, OVERLAP, WINDOW, FRAMES, START, DETREND, SHOWN),
+        outputs=('spectrum', 'reading'), run=set_averaging, edits=True),
     Operation(
         id='project.detect_averaging', title='Detect Averaging', workspace='analyze',
         accepts='project',
         summary='The steady stretch of a time history found, and as many frames '
                 'as fit in it, keeping its frame length, window and overlap.',
-        params=(HISTORY,), outputs=('reading',), run=detect_averaging, edits=True),
+        params=(HISTORY, SHOWN), outputs=('spectrum', 'reading'), run=detect_averaging, edits=True),
     Operation(
         id='project.set_filter', title='Filter', workspace='analyze',
         accepts='project',
         summary='The pass band Apply Filter filters a time history to, at zero '
                 'phase.',
-        params=(HISTORY, PASS, LOW, HIGH, ORDER), outputs=('reading',),
+        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN), outputs=('spectrum', 'reading'),
         run=set_filter, edits=True),
     Operation(
         id='project.set_truncation', title='Truncation', workspace='analyze',
         accepts='project',
         summary='The span of a time history Apply Truncation keeps.',
-        params=(HISTORY, CUT_START, CUT_STOP), outputs=('reading',),
+        params=(HISTORY, CUT_START, CUT_STOP, SHOWN), outputs=('spectrum', 'reading'),
         run=set_truncation, edits=True),
 )

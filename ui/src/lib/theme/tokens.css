@@ -66,6 +66,9 @@
 	--blue-2: #5aa9e6;
 	--blue-3: #2f7fbf;
 	--blue-weak: rgba(90, 169, 230, 0.13);
+	--region-frame: rgba(90, 169, 230, 0.1);
+	--region-frame-edge: rgba(90, 169, 230, 0.35);
+	--region-cut: rgba(128, 128, 128, 0.22);
 	--blue-line: rgba(90, 169, 230, 0.45);
 
 	/* Amber: the attention hue (tolerance, warn, fail, SIM) */
@@ -127,6 +130,9 @@
 		--blue-2: #1f6fb2;
 		--blue-3: #2b86d1;
 		--blue-weak: rgba(31, 111, 178, 0.1);
+		--region-frame: rgba(31, 111, 178, 0.08);
+		--region-frame-edge: rgba(31, 111, 178, 0.3);
+		--region-cut: rgba(110, 110, 110, 0.18);
 		--blue-line: rgba(31, 111, 178, 0.4);
 		--amber-1: #8a5200;
 		--amber-2: #a86400;
@@ -178,6 +184,9 @@
 	--blue-2: #1f6fb2;
 	--blue-3: #2b86d1;
 	--blue-weak: rgba(31, 111, 178, 0.1);
+	--region-frame: rgba(31, 111, 178, 0.08);
+	--region-frame-edge: rgba(31, 111, 178, 0.3);
+	--region-cut: rgba(110, 110, 110, 0.18);
 	--blue-line: rgba(31, 111, 178, 0.4);
 	--amber-1: #8a5200;
 	--amber-2: #a86400;
