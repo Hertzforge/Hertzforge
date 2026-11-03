@@ -109,6 +109,37 @@ def test_elements_are_added_by_family(project, validate):
         run(project, 'project.add_element', family='quads', nodes='101 102 202 9999')
 
 
+def test_a_click_adds_what_the_table_in_hand_holds(project, validate):
+    """Visual Dynamics' Add mode: the view says what a click adds, and
+    running that with what was clicked adds it."""
+    view, _table = run(project, 'project.view_entities', kind='nodes')
+    wire_views([view], validate)
+    assert view['pick']['op'] == 'project.add_node' and view['pick']['target'] == 'point'
+    pick = view['pick']
+    view, table = run(project, pick['op'], **pick['params'], x=0.01, y=0.02, z=0.0)
+    assert cells(table)[-1]['Node'] == '1314'
+    assert view['pick']['op'] == 'project.add_node', 'the next click adds another'
+    view, _table = run(project, 'project.view_entities', kind='coordinate_systems')
+    assert view['pick']['op'] == 'project.add_coordinate_system'
+    _view, table = run(project, 'project.view_entities', kind='groups')
+    assert 'pick' not in _view
+
+
+def test_clicked_nodes_make_an_element_of_the_family_in_hand(project, validate):
+    view, _table = run(project, 'project.view_entities', kind='elements')
+    wire_views([view], validate)
+    pick = view['pick']
+    geometry = project['Geometry']
+    assert pick['target'] == 'nodes' and pick['param'] == 'nodes'
+    assert pick['ids'] == [int(n) for n in geometry.node_id], 'one id a drawn row'
+    assert pick['count'] == 4 and pick['params']['family'] == 'quads'
+    view, table = run(project, 'project.add_element', family='beams', nodes='101 102')
+    pick = view['pick']
+    assert pick['count'] == 0 and pick['params']['family'] == 'beams', 'a chain, then Enter'
+    _view, table = run(project, pick['op'], **pick['params'], nodes='102, 103, 104')
+    assert [row['Type'] for row in cells(table)[-2:]] == ['beam2'] * 2
+
+
 def test_an_element_group_is_added_empty(project):
     _view, table = run(project, 'project.add_element_group', name='brackets')
     assert cells(table)[-1] == {'Element group': '2', 'Name': 'brackets', 'Elements': ''}

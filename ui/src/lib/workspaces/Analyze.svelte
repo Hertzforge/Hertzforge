@@ -215,6 +215,7 @@
 										scope={String(r.id)}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editCell(r.id, i, v.edit!, row, column, value) : undefined}
 										onspan={v.view === 'spectrum' && v.regions?.some((g) => g.drag) ? (k, x0, x1) => a.dragSpan(r.id, v.regions![k].drag!, x0, x1) : undefined}
+										onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickIn(r.id, v.pick!, patch) : undefined}
 									/>
 								</div>
 							{/each}

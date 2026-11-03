@@ -146,6 +146,28 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 `overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
 `matrix` view that `selects` this one (below).
 
+`pick` (optional) says what a click in the view does, as Visual Dynamics' Add mode and its
+planning pane take clicks. A click is a press and release in one place; a drag still turns the
+view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
+the result's place:
+
+```
+"pick":{"op":"project.add_node","params":{"geometry":"Plate"},
+        "target":"point"|"nodes"|"faces",
+        "hint":"Click in the view to place a node",
+        "ids":[1,2,3,...],             the node id of each of the model's own rows, first rows first
+        "count":3,                     nodes: how many make one; 0 takes any number, then Enter
+        "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
+        "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
+        "kept":[1,3],                  faces: the surfaces in use now
+        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+```
+
+A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
+on the model's plane when the model is flat, or else at the depth of the node nearest it. A
+`faces` click names a surface in `kept` in the `out` param and any other in the `back` param,
+taking it out of the other; the shell draws the surfaces not in `kept` muted.
+
 A `shape3d` may instead play measured data back on the mesh: `modes` is empty and `motion` says
 how each measured DOF moves, sample by sample.
 

@@ -107,13 +107,38 @@ def _surface_center(geometry: Any, surface: Any) -> np.ndarray:
     return (centers * weights[:, None]).sum(axis=0) / weights.sum()
 
 
+def _surface_faces(geometry: Any, drawn: np.ndarray, found: Any,
+                   offered: set[int]) -> tuple[np.ndarray, np.ndarray]:
+    """The model's surfaces as triangles of the drawn nodes, each face fanned
+    from its first node, and each triangle's surface: its id when sensors
+    may be offered it (one of the groups planned on), -1 otherwise."""
+    row_of = {int(n): k for k, n in enumerate(geometry.node_id)}
+    at = {int(row): k for k, row in enumerate(drawn)}
+    triangles, owners = [], []
+    for surface in found:
+        owner = surface.id if surface.id in offered else -1
+        for face in surface.faces:
+            corners = [at.get(row_of.get(int(n), -1)) for n in face]
+            if any(c is None for c in corners):
+                continue
+            for k in range(1, len(corners) - 1):
+                triangles.append((corners[0], corners[k], corners[k + 1]))
+                owners.append(owner)
+    return (np.asarray(triangles, dtype=np.int64).reshape(-1, 3),
+            np.asarray(owners, dtype=np.int32))
+
+
 def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
-                 places: Any, placement: Any) -> dict:
+                 places: Any, placement: Any, surfaces: Any = None) -> dict:
     """The model with its measured modes, and each chosen sensor drawn
     as short lines along the directions it measures: a tri-axial one
     its place's three axes, a uni-axial one its single axis. The legs
     are extra nodes and lines of the mesh that ride with the node the
-    sensor sits on, since a `shape3d` has no markers of its own."""
+    sensor sits on, since a `shape3d` has no markers of its own.
+
+    `surfaces` is (found, offered ids, kept ids, params): the model's
+    faces are then its surfaces', and a click on one leaves it out or puts
+    it back, as a click does in Visual Dynamics' pane."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length
 
     drawn, triangles, lines = _mesh(geometry)
@@ -140,8 +165,18 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
                     np.real(_translations(geometry, shapes.coordinate,
                                           shapes.shape_matrix[m], rows)))
              for m in modes]
+    extra: dict[str, Any] = {}
+    if surfaces is not None:
+        found, offered, kept, params = surfaces
+        faces, owners = _surface_faces(geometry, drawn, found, offered)
+        if len(faces):
+            triangles = faces
+            extra['pick'] = v.picking(
+                'project.plan_instrumentation', {**params, 'keep': False}, 'faces',
+                'Click a surface to leave it out of the places sensors may go, or put it back',
+                faces=owners, kept=sorted(kept), out='leave_out', back='put_back')
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, shown,
-                     triangles=triangles,
+                     triangles=triangles, **extra,
                      lines=np.vstack([np.asarray(lines, dtype=np.int64).reshape(-1, 2),
                                       sensor_lines]),
                      normalization='unscaled' if getattr(shapes, 'unscaled', False)
@@ -293,7 +328,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
                       axis(source), mac, 'MAC', (0.0, 1.0))
     view = _sensor_view(f'{base}: {len(placement.triaxial)} tri-axial, '
                         f'{len(placement.uniaxial)} uni-axial on {geometry_name}',
-                        geometry, shapes, modes, places, placement)
+                        geometry, shapes, modes, places, placement,
+                        (found, {s.id for s in offered}, set(kept), params))
     return [view, v.reading(f'Plan Instrumentation: {base}', rows), matrix, sensor_table,
             surface_table]
 

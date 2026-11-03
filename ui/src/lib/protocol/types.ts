@@ -198,6 +198,28 @@ export interface Shape3DView {
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
+	/** What a click in the view does. */
+	pick?: Pick3D;
+}
+
+/** A click in a `shape3d` view: the operation it runs, and what it sends (schema/PROTOCOL.md). */
+export interface Pick3D {
+	op: string;
+	params: Record<string, unknown>;
+	target: 'point' | 'nodes' | 'faces';
+	hint: string;
+	/** nodes: the node id of each pickable row, first rows first. */
+	ids?: number[];
+	/** nodes: how many make one; 0 takes any number, then Enter. */
+	count?: number;
+	/** nodes: the param the ids go in. */
+	param?: string;
+	/** faces: each triangle's surface, -1 for none. */
+	faces?: Int32Array;
+	/** faces: the surfaces in use now. */
+	kept?: number[];
+	out?: string;
+	back?: string;
 }
 
 /**

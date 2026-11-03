@@ -190,14 +190,47 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None) 
     return v.table(title, columns, rows, edit)
 
 
-def _shown(name: str, geometry: Any, kind: str, said: str = '') -> list[dict]:
+def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -> dict | None:
+    """What a click in the view adds, as Visual Dynamics' Add mode does: a
+    node or a coordinate system where the click lands, or an element on the
+    nodes clicked, `element` saying its family, type and group (Add
+    Element's own params, or its defaults)."""
+    ids = [int(n) for n in geometry.node_id]
+    if kind == 'nodes':
+        return v.picking('project.add_node', {'geometry': name}, 'point',
+                         'Click in the view to place a node', ids=ids)
+    if kind == 'coordinate_systems':
+        return v.picking('project.add_coordinate_system', {'geometry': name}, 'point',
+                         'Click in the view to place a coordinate system', ids=ids)
+    if kind != 'elements':
+        return None
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    element = element or {'family': FAMILY.default, 'type': '', 'group': 0}
+    family = element['family']
+    code, count = FAMILY_ADD_TYPES[family]
+    chained = ELEMENT_TYPES[code][2] == 'line'
+    hint = (f'Click nodes in order, then press Enter for the line of {family}' if chained
+            else f'Click {count} node{"s" * (count != 1)} to make one of the {family}')
+    return v.picking('project.add_element', {'geometry': name, **element}, 'nodes', hint,
+                     ids=ids, count=0 if chained else count,
+                     param='nodes')
+
+
+def _shown(name: str, geometry: Any, kind: str, said: str = '',
+           element: dict[str, Any] | None = None) -> list[dict]:
     """The geometry drawn, with its coordinate systems' axes when they are
-    the entities in hand, and the table of `kind`."""
+    the entities in hand and what a click in it adds (`_pick`), and the
+    table of `kind`."""
     words = {'nodes': 'Nodes', 'coordinate_systems': 'Coordinate systems',
              'elements': 'Elements', 'groups': 'Element groups'}[kind]
     extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
     title = f'{words} of {name}' + (f': {said}' if said else '')
-    return [_drawn(name, geometry, *extra), entity_table(geometry, kind, title, name)]
+    drawn = _drawn(name, geometry, *extra)
+    pick = _pick(name, geometry, kind, element)
+    if pick is not None:
+        drawn['pick'] = pick
+    return [drawn, entity_table(geometry, kind, title, name)]
 
 
 # ---- View Entities and the edits ----------------------------------------------------
@@ -348,7 +381,8 @@ def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
                     f'{int(geometry.elem_id[row])}')
     except ValueError as error:
         raise refused(str(error)) from None
-    return _shown(name, geometry, 'elements', said)
+    return _shown(name, geometry, 'elements', said,
+                  {key: params[key] for key in ('family', 'type', 'group')})
 
 
 GROUP_NAME = Param('name', 'Name', 'string', default='')

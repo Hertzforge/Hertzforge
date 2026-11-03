@@ -28,6 +28,7 @@ import type {
 	RunState,
 	Shape3DView,
 	SimProfile,
+	Pick3D,
 	Region,
 	SimStateResult,
 	TableEdit,
@@ -307,6 +308,23 @@ class AnalyzeState {
 		try {
 			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
+		}
+	}
+
+	/** A click in a result's 3-D view: the view's pick operation runs with what was clicked, and its views take the result's place. */
+	async pickIn(id: number, pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		if (!result || result.busy) return;
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			replace({ views: res.views, busy: false });
 		} catch (err) {

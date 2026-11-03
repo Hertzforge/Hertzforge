@@ -165,6 +165,22 @@
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
+        "pick": {
+          "type": "object", "required": ["op", "params", "target", "hint"],
+          "properties": {
+            "op": {"type": "string"},
+            "params": {"type": "object"},
+            "target": {"enum": ["point", "nodes", "faces"]},
+            "hint": {"type": "string"},
+            "ids": {"type": "array", "items": {"type": "integer"}},
+            "count": {"type": "integer", "minimum": 0},
+            "param": {"type": "string"},
+            "faces": {"$ref": "#/$defs/arrayRef"},
+            "kept": {"type": "array", "items": {"type": "integer"}},
+            "out": {"type": "string"},
+            "back": {"type": "string"}
+          }
+        },
         "motion": {
           "type": "object",
           "required": ["label", "unit", "start", "step", "quantity", "value_unit", "node", "direction", "values", "peak"],
