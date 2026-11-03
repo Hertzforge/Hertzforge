@@ -357,7 +357,8 @@ for at. They are not loaded and no tool lists them; saving keeps their reference
 `verb:` params are filled from. `settings` is a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` is
+`features`: each report feature's key, true where it is on. `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic

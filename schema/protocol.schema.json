@@ -301,7 +301,8 @@
           "properties": {
             "averaging": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
             "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
-            "truncation": {"type": "object", "additionalProperties": {"type": "number"}}
+            "truncation": {"type": "object", "additionalProperties": {"type": "number"}},
+            "features": {"type": "object", "additionalProperties": {"type": "boolean"}}
           }
         }
       }

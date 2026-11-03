@@ -59,9 +59,17 @@ CUT_STOP = Param('stop', 'Stop', 'number', default=1.0, unit='s', step=0.1,
 
 
 def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
-    """The analysis settings an object carries, as the project summary
-    lists them: {'averaging': {...}, 'filtering': {...}, 'truncation':
-    {...}}, each present only when set. What a `setting` param opens on."""
+    """The settings an object carries, as the project summary lists them: a
+    time history's {'averaging': {...}, 'filtering': {...}, 'truncation':
+    {...}}, each present only when set, and a report's {'features': {key:
+    on}} for every report feature. What a `setting` param opens on."""
+    from hertzforge.core.report import Report
+
+    if isinstance(obj, Report):
+        from hertzforge.report.features import FEATURES
+
+        held = set(obj.features)
+        return {'features': {key: key in held for key in FEATURES}}
     out: dict[str, dict[str, Any]] = {}
     averaging = getattr(obj, 'averaging', None)
     if averaging is not None:

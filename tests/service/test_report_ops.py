@@ -484,3 +484,19 @@ def test_a_file_that_is_not_a_run_log_is_refused(project, tmp_path):
         run(project, 'project.attach_run_log', path=str(other))
     with pytest.raises(ProtocolError, match='name the run log'):
         run(project, 'project.attach_run_log')
+
+
+def test_the_features_open_on_the_reports_own(validate):
+    """A report's features are in the summary, so the switches open on
+    them and running the form unchanged changes nothing."""
+    from hertzforge.report.features import FEATURES
+    from hertzforge.service import projects as listing
+
+    state, _ = listing.import_file(None, {'path': str(PLATE / 'random.nc4')})
+    name = state.project.generate_report('random', name='R')
+    key = next(iter(FEATURES))
+    state.project.report_features(name, enable=[key])
+    entry = next(o for o in listing.summary(state)['objects'] if o['name'] == name)
+    assert entry['settings']['features'][key] is True
+    assert sum(entry['settings']['features'].values()) == 1
+    validate(listing.summary(state), 'project')

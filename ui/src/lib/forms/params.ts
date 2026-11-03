@@ -86,7 +86,7 @@ export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
  * match or compare start as two sets, not one set twice.
  */
 export function defaultValues(params: ParamDescriptor[], channels: ParamOption[] = []): ParamValues {
-	const taken = new Map<string, Set<string | number>>();
+	const taken = new Map<string, Set<ParamValue>>();
 	return Object.fromEntries(
 		params.map((p) => {
 			let value = defaultFor(p, channels);

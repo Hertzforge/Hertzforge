@@ -299,8 +299,8 @@ export interface ProjectObject {
 	groups: string[];
 	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
 	verbs?: string[];
-	/** A time history's analysis settings, each group present only when set. */
-	settings?: Record<string, Record<string, number | string>>;
+	/** A time history's analysis settings, each group present only when set; a report's features. */
+	settings?: Record<string, Record<string, number | string | boolean>>;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */
