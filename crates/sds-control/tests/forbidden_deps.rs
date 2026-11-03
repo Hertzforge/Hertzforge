@@ -85,6 +85,24 @@ const IMPORTED_MODULES: &[&str] = &["mimo_compile_probe", "random_sim_slice", "s
 /// The repository's own packages that are not controller code.
 const OWN_PACKAGES: &[&str] = &["sds-control"];
 
+/// The control-law host and its guest SDK, the shared ratio-law math, and the
+/// Random law catalog that joins the host to the Random core, written in this
+/// repository rather than imported, and the guest crates built to WebAssembly:
+/// the control laws under `laws/` and the law host's test fixtures. Reviewed
+/// for license and hardware coupling when they came in: none names a backend
+/// (the catalog's tests use the Sim), and the guests can reach nothing but the
+/// numbers the host hands them. This crate reaches none of them yet.
+const LAW_CRATES: &[&str] = &[
+    "hertzforge-law-hinv",
+    "hertzforge-law-host",
+    "hertzforge-law-ratio",
+    "hertzforge-law-ratio-math",
+    "hertzforge-law-sdk",
+    "hertzforge-random-laws",
+    "law-fixture-bad-manifest",
+    "law-fixture-misbehave",
+];
+
 struct Package {
     name: String,
     manifest_path: String,
@@ -241,7 +259,11 @@ fn the_lockfile_holds_only_reviewed_controller_crates_for_any_platform() {
     );
     let unreviewed: Vec<&&str> = names
         .iter()
-        .filter(|n| n.starts_with("hertzforge-") && !IMPORTED_CONTROLLER_CRATES.contains(*n))
+        .filter(|n| {
+            n.starts_with("hertzforge-")
+                && !IMPORTED_CONTROLLER_CRATES.contains(*n)
+                && !LAW_CRATES.contains(*n)
+        })
         .collect();
     assert!(
         unreviewed.is_empty(),
@@ -275,14 +297,15 @@ fn every_package_built_from_this_repository_is_on_a_reviewed_list() {
             let n = n.as_str();
             !(IMPORTED_CONTROLLER_CRATES.contains(&n)
                 || IMPORTED_MODULES.contains(&n)
-                || OWN_PACKAGES.contains(&n))
+                || OWN_PACKAGES.contains(&n)
+                || LAW_CRATES.contains(&n))
         })
         .collect();
     assert!(
         unreviewed.is_empty(),
         "packages built from this repository's source that are on no reviewed list: \
-         {unreviewed:?} (review, then add them to IMPORTED_CONTROLLER_CRATES, IMPORTED_MODULES \
-         or OWN_PACKAGES)"
+         {unreviewed:?} (review, then add them to IMPORTED_CONTROLLER_CRATES, IMPORTED_MODULES, \
+         OWN_PACKAGES or LAW_CRATES)"
     );
     // This crate's allowlist is a subset of what the repository holds.
     let stray: Vec<&&str> = REVIEWED_CONTROLLER_CRATES

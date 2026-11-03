@@ -246,6 +246,52 @@ impl Default for CaptureRules {
     }
 }
 
+/// Default per-loop change cap, dB: how far the core lets any line of a law's
+/// drive move from the drive in force in one law call (a commanded level change
+/// is taken out first). Measured 2026-11-02 across the Random, control-service
+/// and daemon test suites (1,048 calls of the shipped law, including every
+/// ladder rung, the soft start, ramps and the feedforward step at each
+/// retarget): largest change 1.38 dB on a loop, 1.85 dB on a retarget. The
+/// shipped law's own worst case at its default knobs is 5 dB (two trim steps of
+/// `max_correction_db_per_iter` plus one servo step). 6 dB sits 1 dB above that
+/// worst case and 4.1 dB above the largest measured change, and below the
+/// 10 dB a factor-of-ten-per-loop law asks for.
+pub const DEFAULT_LAW_CHANGE_CAP_DB: f64 = 6.0;
+
+/// Default fraction of one loop's acquisition time a law call may take.
+pub const DEFAULT_LAW_BUDGET_FRACTION: f64 = 0.25;
+
+/// Default unusable law calls in a row before the run stops.
+pub const DEFAULT_LAW_MAX_MISSES: u32 = 3;
+
+/// The core's guards on the control law. They apply to every law, the shipped
+/// one included; a law may hold itself to tighter limits, never looser.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LawGuards {
+    /// Largest change, dB, any line of the drive may make in one law call,
+    /// measured from the drive in force rescaled by any commanded level change.
+    /// Never tighter than the shipped law's own worst step at the run's
+    /// `hinv` settings plus 1 dB (see [`RandomTestConfig::law_change_cap_db`]).
+    pub max_change_db: f64,
+    /// Fraction of one loop's acquisition time (the segment the loop measures)
+    /// a law call may take before its output is not used.
+    pub budget_fraction: f64,
+    /// Unusable law calls in a row (an error, a panic, a missed budget or a
+    /// malformed drive) at which the run takes its controlled stop.
+    pub max_misses: u32,
+}
+
+impl Default for LawGuards {
+    fn default() -> Self {
+        LawGuards {
+            max_change_db: DEFAULT_LAW_CHANGE_CAP_DB,
+            budget_fraction: DEFAULT_LAW_BUDGET_FRACTION,
+            max_misses: DEFAULT_LAW_MAX_MISSES,
+        }
+    }
+}
+
 /// The full Random test configuration. Everything
 /// the service needs to run a SISO/multi-point random test on Path B.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -283,7 +329,9 @@ pub struct RandomTestConfig {
     pub hinv: HinvConfig,
     /// Consecutive loops with a non-empty divergent-bin set before the divergence abort
     /// fires (the caller side of the divergence contract). The service owns this
-    /// count; the law owns per-bin divergence.
+    /// count. The divergent set is the union of the lines the core's per-loop change
+    /// cap has held back `hinv.divergence_n` loops running and the lines the law
+    /// reports itself.
     pub divergence_loops: u32,
     /// Abort-envelope breaches TOLERATED per loop before the envelope abort fires
     /// (operator's "max lines out of tolerance", 2026-08-02 spec; default 10).
@@ -383,6 +431,10 @@ pub struct RandomTestConfig {
     pub control_dof: f64,
     /// User-defined metadata.
     pub metadata: Vec<MetaField>,
+    /// The core's guards on the control law. `#[serde(default)]` so a stored
+    /// configuration from before them loads with the defaults.
+    #[serde(default)]
+    pub law_guards: LawGuards,
 }
 
 impl RandomTestConfig {
@@ -425,7 +477,23 @@ impl RandomTestConfig {
             geometry: None,
             crest_factor: hertzforge_shaker_db::DEFAULT_CREST_FACTOR,
             metadata: MetaField::defaults(),
+            law_guards: LawGuards::default(),
         }
+    }
+
+    /// The per-loop change cap the core applies, dB: the configured
+    /// [`LawGuards::max_change_db`], but never tighter than the shipped law's
+    /// own worst step at these `hinv` settings plus 1 dB.
+    ///
+    /// The shipped law can move a line by one trim step, one renormalization of
+    /// the same size and one servo step in a loop:
+    /// `2 * max_correction_db_per_iter + servo_rate_db_per_s` dB. The floor keeps
+    /// the cap from ever clamping the shipped law when an operator widens those
+    /// knobs; at their defaults it is 6 dB, the default cap.
+    pub fn law_change_cap_db(&self) -> f64 {
+        let h = &self.hinv;
+        let hinv_worst = 2.0 * h.max_correction_db_per_iter + h.servo_rate_db_per_s;
+        self.law_guards.max_change_db.max(hinv_worst + 1.0)
     }
 }
 
@@ -548,6 +616,22 @@ impl RandomTestConfig {
         if self.full_level_duration_s < 0.0 || self.full_level_duration_s.is_nan() {
             return Err(ConfigError::BadConfig(
                 "full_level_duration_s must be >= 0".into(),
+            ));
+        }
+        let g = &self.law_guards;
+        if !(g.max_change_db.is_finite() && g.max_change_db > 0.0) {
+            return Err(ConfigError::BadConfig(
+                "law_guards.max_change_db must be a finite value > 0".into(),
+            ));
+        }
+        if !(g.budget_fraction > 0.0 && g.budget_fraction <= 1.0) {
+            return Err(ConfigError::BadConfig(
+                "law_guards.budget_fraction must be in (0, 1]".into(),
+            ));
+        }
+        if g.max_misses == 0 {
+            return Err(ConfigError::BadConfig(
+                "law_guards.max_misses must be >= 1".into(),
             ));
         }
         Ok(())

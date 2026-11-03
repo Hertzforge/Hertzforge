@@ -113,6 +113,9 @@ pub enum Outcome {
     Held,
     /// The loop faulted (or could not start driving).
     Fault,
+    /// The control law stopped producing a usable drive and the run took its
+    /// controlled stop.
+    LawFault,
 }
 
 impl Outcome {
@@ -123,6 +126,7 @@ impl Outcome {
             Outcome::Aborted => "aborted",
             Outcome::Held => "held",
             Outcome::Fault => "fault",
+            Outcome::LawFault => "law_fault",
         }
     }
 
@@ -130,7 +134,7 @@ impl Outcome {
         match self {
             Outcome::Completed | Outcome::OperatorStop => Status::Info,
             Outcome::Held => Status::Warn,
-            Outcome::Aborted | Outcome::Fault => Status::Fail,
+            Outcome::Aborted | Outcome::Fault | Outcome::LawFault => Status::Fail,
         }
     }
 }
@@ -382,7 +386,9 @@ impl SimRun {
 
         let elapsed = self.elapsed_s();
         let control_status = match (finish, snap.control_rms) {
-            (Some(fin), _) if fin.outcome == Outcome::Aborted => Status::Fail,
+            (Some(fin), _) if matches!(fin.outcome, Outcome::Aborted | Outcome::LawFault) => {
+                Status::Fail
+            }
             (_, None) => Status::Info,
             _ if snap.alarm_lines > 0 => Status::Warn,
             _ => Status::Pass,
@@ -497,6 +503,12 @@ pub fn describe_trip(t: &TripRecord) -> String {
         ),
         TripKind::Divergence { consecutive_loops, divergent_bins } => format!(
             "divergence abort: {divergent_bins} lines diverging for {consecutive_loops} consecutive loops {at}"
+        ),
+        TripKind::LawFault { reason, consecutive } => format!(
+            "the control law did not produce a usable drive for {consecutive} {} in a row ({}); \
+             the run stopped {at}",
+            if *consecutive == 1 { "loop" } else { "loops" },
+            reason.words()
         ),
     }
 }
@@ -781,7 +793,9 @@ fn drive(svc: &mut RandomService, ctx: &mut Ctx<'_>) -> Finish {
 
 fn operator_stop(svc: &RandomService, ctx: &Ctx<'_>, when: &str) -> Finish {
     // A trip that fired on the very loop the stop arrived on still wins.
-    if svc.state() == RunState::Aborted {
+    if svc.state() == RunState::Aborted
+        || (svc.state() == RunState::Stopped && svc.trip().is_some())
+    {
         return finish_from_state(svc);
     }
     let level = if ctx.engaged {
@@ -819,6 +833,12 @@ fn finish_from_state(svc: &RandomService) -> Finish {
                 },
                 describe_trip,
             ),
+        },
+        // The controller stopped the run because its control law stopped producing
+        // a usable drive: a controlled stop that carries a trip record.
+        RunState::Stopped if svc.trip().is_some() => Finish {
+            outcome: Outcome::LawFault,
+            reason: svc.trip().map(describe_trip).unwrap_or_default(),
         },
         RunState::Stopped => Finish {
             outcome: Outcome::Completed,

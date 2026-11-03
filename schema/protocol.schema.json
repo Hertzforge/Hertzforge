@@ -88,7 +88,8 @@
         "x": {"$ref": "#/$defs/arrayRef"},
         "y": {"$ref": "#/$defs/arrayRef"},
         "shape": {"enum": ["line", "steps", "law"]},
-        "edges": {"$ref": "#/$defs/arrayRef"}
+        "edges": {"$ref": "#/$defs/arrayRef"},
+        "follows": {"type": "integer", "minimum": 0}
       },
       "if": {"required": ["shape"], "properties": {"shape": {"const": "steps"}}},
       "then": {"required": ["edges"]}
@@ -146,6 +147,7 @@
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
+        "link": {"type": "string"},
         "motion": {
           "type": "object",
           "required": ["label", "unit", "start", "step", "quantity", "value_unit", "node", "direction", "values", "peak"],
@@ -239,7 +241,7 @@
           "items": {"type": "object", "required": ["value", "label"],
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
-        "options_from": {"enum": ["channels"]},
+        "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*)$"},
         "in_view": {"type": "boolean"}
       }
     },
@@ -249,7 +251,7 @@
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
         "workspace": {"enum": ["acquire", "analyze", "modal", "model", "specify", "simulate", "report"]},
-        "accepts": {"enum": ["random_run", "modal_model", "modal_run"]},
+        "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix"]}}
@@ -262,6 +264,68 @@
         "kind": {"enum": ["random_run", "modal_model", "modal_run"]},
         "title": {"type": "string"},
         "description": {"type": "string"}
+      }
+    },
+    "projectObject": {
+      "type": "object", "required": ["name", "kind", "groups"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "records": {"type": "integer", "minimum": 0},
+        "source": {"$ref": "#/$defs/source"},
+        "units_defined": {"type": "boolean"},
+        "groups": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "project": {
+      "type": "object", "required": ["title", "file", "modified", "objects"],
+      "properties": {
+        "title": {"type": "string"},
+        "file": {"type": ["string", "null"]},
+        "modified": {"type": "boolean"},
+        "objects": {"type": "array", "items": {"$ref": "#/$defs/projectObject"}}
+      }
+    },
+    "projectNewParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"title": {"type": "string", "minLength": 1}}
+    },
+    "projectOpenParams": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "properties": {"path": {"type": "string", "minLength": 1}}
+    },
+    "projectImportParams": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "units": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "projectSaveParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"path": {"type": "string", "minLength": 1}, "compress": {"type": "boolean"}}
+    },
+    "projectResult": {
+      "type": "object", "required": ["project"],
+      "properties": {"project": {"$ref": "#/$defs/project"}}
+    },
+    "projectImportResult": {
+      "type": "object", "required": ["added", "project"],
+      "properties": {
+        "added": {"type": "array", "items": {"type": "string"}},
+        "project": {"$ref": "#/$defs/project"}
+      }
+    },
+    "projectSaveResult": {
+      "type": "object", "required": ["path", "project"],
+      "properties": {"path": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
+    },
+    "projectProgress": {
+      "type": "object", "required": ["done", "total", "path"],
+      "properties": {
+        "done": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 0},
+        "path": {"type": "string"}
       }
     },
     "catalog": {
@@ -281,7 +345,7 @@
         "level_db": {"type": "number"},
         "views": {"$ref": "#/$defs/views"},
         "phase": {"type": "string"},
-        "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", null]},
+        "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", "law_fault", null]},
         "reason": {"type": ["string", "null"]}
       }
     },
@@ -750,7 +814,7 @@
     "trip": {
       "type": "object", "required": ["kind", "at_level_db", "at_loop"],
       "properties": {
-        "kind": {"enum": ["envelope", "kinematic", "drive_vrms", "divergence"]},
+        "kind": {"enum": ["envelope", "kinematic", "drive_vrms", "divergence", "law_fault"]},
         "at_level_db": {"type": "number"},
         "at_loop": {"type": "integer", "minimum": 0}
       },
@@ -765,20 +829,26 @@
          "required": ["realized_vrms", "limit_vrms"]},
         {"properties": {"kind": {"const": "divergence"}, "consecutive_loops": {"type": "integer", "minimum": 0},
                         "divergent_bins": {"type": "integer", "minimum": 0}},
-         "required": ["consecutive_loops", "divergent_bins"]}
+         "required": ["consecutive_loops", "divergent_bins"]},
+        {"properties": {"kind": {"const": "law_fault"},
+                        "reason": {"enum": ["error", "panicked", "over_budget", "wrong_length",
+                                            "non_finite", "negative", "non_finite_level",
+                                            "over_memory", "bad_diagnostics"]},
+                        "consecutive": {"type": "integer", "minimum": 1}},
+         "required": ["reason", "consecutive"]}
       ]
     },
     "runEnd": {
       "type": ["object", "null"], "required": ["outcome", "message", "at_s", "level_db", "trip"],
       "additionalProperties": false,
       "properties": {
-        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault"]},
+        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault", "law_fault"]},
         "message": {"type": "string", "minLength": 1},
         "at_s": {"type": ["number", "null"], "minimum": 0},
         "level_db": {"type": ["number", "null"]},
         "trip": {"oneOf": [{"$ref": "#/$defs/trip"}, {"type": "null"}]}
       },
-      "if": {"type": "object", "properties": {"outcome": {"const": "aborted"}}},
+      "if": {"type": "object", "properties": {"outcome": {"enum": ["aborted", "law_fault"]}}},
       "then": {"properties": {"trip": {"type": "object"}}},
       "else": {"properties": {"trip": {"type": "null"}}}
     },

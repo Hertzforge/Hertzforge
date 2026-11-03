@@ -1,10 +1,11 @@
 <script lang="ts">
 	/**
-	 * Analyze: pick a random-run dataset, pick a tool that accepts it, set its parameters, Run.
-	 * Each run adds a result card; spectrum panes that share a `link` share a cursor.
+	 * Analyze: pick a dataset, or open your own project, pick a tool that accepts it, set its
+	 * parameters, Run. Each run adds a result card; spectrum panes that share a `link` share a cursor.
 	 */
 	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
+	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
@@ -54,6 +55,7 @@
 
 <div class="analyze">
 	<aside class="side" aria-label="Dataset and tools">
+		<ProjectPanel {app} />
 		<section class="block">
 			<h2 class="eyebrow">Dataset</h2>
 			{#if !app.catalog}
@@ -81,7 +83,7 @@
 			{/if}
 			{#if a.opening}<p class="muted small">Opening.</p>{/if}
 			{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
-			{#if a.opened}
+			{#if a.opened && !a.onProject}
 				<dl class="chips">
 					{#each summaryChips(a.opened.summary) as c (c.label)}
 						<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
@@ -114,7 +116,7 @@
 				</div>
 				{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
 				<ParamForm
-					params={a.op.params.filter((p) => !p.in_view)}
+					params={a.params.filter((p) => !p.in_view)}
 					bind:values={a.values[a.op.id]}
 					channels={a.opened.channels}
 					showAllErrors={a.triedRun}
@@ -191,6 +193,7 @@
 										onselect={v.view === 'matrix' && v.selects ? (cell) => (pairs[r.id] = cell) : undefined}
 										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
 										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
+										scope={String(r.id)}
 									/>
 								</div>
 							{/each}

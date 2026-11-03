@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "modules/*"]
+# `laws/*` are control laws and `crates/hertzforge-law-host/guests/*` the law
+# host's test fixtures: guest crates built to WebAssembly by
+# scripts/build_laws.sh. They are members so the workspace lints and tests
+# them natively too (a law is plain Rust behind the SDK's trait) and so the
+# one lockfile and `cargo deny` cover their dependencies.
+members = ["crates/*", "modules/*", "laws/*", "crates/hertzforge-law-host/guests/*"]
 
 [workspace.package]
 version = "0.1.0"

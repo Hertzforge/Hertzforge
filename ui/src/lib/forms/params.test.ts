@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ParamDescriptor } from '$lib/protocol/types';
-import { defaultFor, defaultValues, parseNumber, rangeHint, reconcile, validate, validateAll } from './params';
+import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
+import { defaultFor, defaultValues, objectKinds, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
 
 const channels = [
 	{ value: 'ctrl1', label: 'Control 1' },
@@ -90,5 +90,33 @@ describe('parsing and hints', () => {
 		const prev = { channel: 'resp1', tolerance_db: 4 };
 		expect(reconcile([ch, tol], prev, channels)).toEqual({ channel: 'resp1', tolerance_db: 4 });
 		expect(reconcile([ch, tol], prev, [{ value: 'x', label: 'X' }])).toEqual({ channel: 'x', tolerance_db: 4 });
+	});
+});
+
+describe('object params', () => {
+	const data: ParamDescriptor = { name: 'data', label: 'Data', type: 'enum', options_from: 'objects:psd|frf' };
+	const objects: ProjectObject[] = [
+		{ name: 'Channel Table', kind: 'channel_table', groups: [] },
+		{ name: 'Run FRFs', kind: 'frf', groups: [] },
+		{ name: 'Run PSDs', kind: 'psd', groups: [] }
+	];
+
+	it('lists the project\'s objects of the kinds a param takes, in the project\'s order', () => {
+		expect(objectKinds(data)).toEqual(['psd', 'frf']);
+		const [filled] = withObjects([data], objects);
+		expect(filled.options?.map((o) => o.value)).toEqual(['Run FRFs', 'Run PSDs']);
+		expect(defaultFor(filled)).toBe('Run FRFs');
+		expect(validate(filled, 'Run PSDs')).toBeNull();
+		expect(validate(filled, 'Channel Table')).toBe('Choose one of the options.');
+	});
+
+	it('says which kind is missing when the project has none', () => {
+		const [filled] = withObjects([{ ...data, options_from: 'objects:shape_set' }], objects);
+		expect(validate(filled, '')).toBe('The project has no shape set.');
+	});
+
+	it('leaves other params alone', () => {
+		const number: ParamDescriptor = { name: 'n', label: 'N', type: 'number' };
+		expect(withObjects([number], objects)[0]).toBe(number);
 	});
 });

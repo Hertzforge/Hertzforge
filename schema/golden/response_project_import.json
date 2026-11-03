@@ -1,0 +1,32 @@
+{
+ "type": "response",
+ "id": 31,
+ "result": {
+  "added": [
+   "Geometry"
+  ],
+  "project": {
+   "title": "Bracket Survey",
+   "file": "/Users/someone/tests/bracket/survey.hforge",
+   "modified": true,
+   "objects": [
+    {
+     "name": "FRF",
+     "kind": "frf",
+     "records": 22,
+     "source": "SIM",
+     "units_defined": true,
+     "groups": [
+      "Group 1"
+     ]
+    },
+    {
+     "name": "Geometry",
+     "kind": "geometry",
+     "units_defined": true,
+     "groups": []
+    }
+   ]
+  }
+ }
+}

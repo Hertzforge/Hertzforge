@@ -1,0 +1,17 @@
+[package]
+name = "hertzforge-law-sdk"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The guest side of the control-law interface: what a law author depends on
+# to build a law file. Generates the bindings for the `random-single` world
+# of `wit/control-law/` and wraps them in the `RandomLaw` trait and the
+# `export_law!` macro. Builds for the host too (so the workspace lints it and
+# a law's math can be unit-tested natively); a law file is built with
+# `cargo build --target wasm32-wasip2 --release`.
+[dependencies]
+# 0.61 parses WIT with the same wasm-tools line (0.258) as Wasmtime 49, so
+# the build holds one copy of the parser. No async, no flags types.
+wit-bindgen = { version = "0.61", default-features = false, features = ["macros", "realloc", "std"] }

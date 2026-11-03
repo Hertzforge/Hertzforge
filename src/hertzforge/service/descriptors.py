@@ -13,12 +13,15 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .protocol import bad_request
+from .protocol import bad_request, refused
 
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 Workspace = Literal['acquire', 'analyze', 'modal', 'model', 'specify',
                     'simulate', 'report']
 DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
+#: what an operation runs on: a catalog dataset of one kind, or the
+#: connection's own project
+Accepts = DatasetKind | Literal['project']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix']
 
 #: marks a param with no default: the request must give it
@@ -51,10 +54,26 @@ class Param:
     step: float | None = None
     options: Sequence[Option] = ()
     #: an enum whose options are the opened dataset's channels
-    options_from: Literal['channels'] | None = None
+    #: ('channels'), or the open project's objects of some kinds
+    #: ('objects:psd' or 'objects:psd|frf', by `projects.kind_of`)
+    options_from: str | None = None
     #: set from the result's view rather than the panel, which does not
     #: show it (a waterfall's quantity, chosen among the groups it drew)
     in_view: bool = False
+
+    def __post_init__(self) -> None:
+        source = self.options_from
+        if source is not None and source != 'channels' and not (
+                source.startswith('objects:') and all(self.kinds)):
+            raise ValueError(f'options_from {source!r} is "channels" or '
+                             '"objects:<kind>|<kind>"')
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        """The object kinds an `objects:` param takes; empty for any other."""
+        source = self.options_from or ''
+        return (tuple(source.removeprefix('objects:').split('|'))
+                if source.startswith('objects:') else ())
 
     def to_json(self) -> dict[str, Any]:
         """The param as the schema's descriptor writes it. Fields left unset
@@ -147,14 +166,15 @@ def json_type(value: Any) -> str:
 class Operation:
     """An operation's descriptor, plus the function that runs it.
 
-    `run(dataset, params)` receives the opened dataset and the resolved
-    params and returns the result's list of views.
+    `run(dataset, params)` receives the opened dataset (the connection's
+    `Project` when `accepts` is 'project') and the resolved params and
+    returns the result's list of views.
     """
 
     id: str
     title: str
     workspace: Workspace
-    accepts: DatasetKind
+    accepts: Accepts
     summary: str
     params: Sequence[Param]
     outputs: Sequence[ViewKind]
@@ -170,11 +190,13 @@ class Operation:
                 'params': [param.to_json() for param in self.params],
                 'outputs': list(self.outputs)}
 
-    def resolve(self, given: Any,
-                channels: Sequence[str] = ()) -> dict[str, Any]:
+    def resolve(self, given: Any, channels: Sequence[str] = (),
+                objects: Mapping[str, str] | None = None) -> dict[str, Any]:
         """The params to run with: each given value checked, each missing
-        one its default. An `options_from: "channels"` param with no default
-        takes the dataset's first channel."""
+        one its default. An `options_from` param with no default takes the
+        first of its choices: the dataset's channels, or the names in
+        `objects` (name to kind, the project's order) of the kinds it
+        takes."""
         if not isinstance(given, Mapping):
             raise bad_request(f'op.run "params" must be an object, not '
                               f'{json_type(given)}')
@@ -186,13 +208,20 @@ class Operation:
                 f'; it takes {", ".join(map(repr, known)) or "none"}')
         out = {}
         for param in self.params:
-            choices = channels if param.options_from == 'channels' else None
+            choices = (channels if param.options_from == 'channels'
+                       else [name for name, kind in (objects or {}).items()
+                             if kind in param.kinds] if param.kinds
+                       else None)
             if param.name in given:
                 out[param.name] = param.check(given[param.name], choices)
             elif param.default is not REQUIRED:
                 out[param.name] = param.default
             elif choices:
                 out[param.name] = choices[0]
+            elif param.kinds:
+                kinds = ' or '.join(kind.replace('_', ' ') for kind in param.kinds)
+                raise refused(f'{self.title} needs a {kinds} ({param.label}), '
+                              'and the project has none')
             else:
                 raise bad_request(f'{self.id} needs param "{param.name}" '
                                   f'({param.label})')

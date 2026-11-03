@@ -160,6 +160,12 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The control laws and the law host's test fixtures, built to
+      # WebAssembly (the wasm32-wasip2 target rust-toolchain.toml names).
+      # The test passes build them too; this step gives the build its own
+      # log and verdict.
+      - name: Build the guest laws
+        run: bash scripts/build_laws.sh
       # Every test whose verdict does not rest on the wall clock. The timing
       # tests (scripts/rust_timing_tests.txt) run in the `timing` job below.
       - name: Test

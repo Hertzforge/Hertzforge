@@ -37,7 +37,8 @@
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
-	import { advance, movedNodes, NORMAL_SPEED, sampleCount, SPEEDS, writeFrame } from './motion';
+	import { playheadGroup, playheads } from './cursor';
+	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, nodeTravel } from './shape';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
@@ -47,9 +48,15 @@
 		mode?: number;
 		/** Index into `view.overlays`, drawn over the mode; none when null. */
 		overlay?: number | null;
+		/** The result the view belongs to, which its playback `link` is scoped to. */
+		scope?: string;
 	}
 
-	let { view, mode = $bindable(0), overlay = null }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, scope }: Props = $props();
+
+	const paneId = `s3-${Math.random().toString(36).slice(2, 9)}`;
+	/** The playhead group playback is shared through, when the view links one. */
+	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
@@ -243,6 +250,7 @@
 		shownSample = k;
 		sample = k;
 		dirty = true;
+		if (playhead) playheads.set(playhead, motion.start + k * motion.step, paneId);
 	}
 
 	/** Move playback to sample k, as the scrubber does. */
@@ -484,6 +492,19 @@
 	}
 
 	onMount(init);
+
+	// a linked plot's line, dragged, moves playback to it
+	$effect(() => {
+		const group = playhead;
+		if (!group) return;
+		const unsubscribe = playheads.subscribe(group, (state) => {
+			if (motion && state.source !== paneId && state.x !== null) seek(sampleAt(motion, state.x));
+		});
+		return () => {
+			unsubscribe();
+			playheads.clear(group, paneId);
+		};
+	});
 
 	// Mode or view changes: reload the shape buffer, and the overlay scaled to it.
 	$effect(() => {

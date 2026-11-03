@@ -104,6 +104,8 @@ export interface Series {
 	shape?: SeriesShape;
 	/** Bin edges for `steps`: one more than there are y values, ascending. */
 	edges?: NumericArray;
+	/** Index of the series this one follows: a model's prediction of that measurement. */
+	follows?: number;
 }
 
 export type SeriesShape = 'line' | 'steps' | 'law';
@@ -180,6 +182,8 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
+	link?: string;
 	note?: string;
 }
 
@@ -255,16 +259,45 @@ export interface ParamDescriptor {
 	max?: number;
 	step?: number;
 	options?: ParamOption[];
-	options_from?: 'channels';
+	/** The dataset's channels, or the open project's objects of the kinds named (`objects:psd|frf`). */
+	options_from?: 'channels' | `objects:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
+}
+
+/** One object of the open project (schema/PROTOCOL.md, Projects). */
+export interface ProjectObject {
+	name: string;
+	/** The class in snake case: `frf`, `time_history`, `shape_set`, `geometry`. */
+	kind: string;
+	records?: number;
+	source?: DataSource;
+	/** False for an object imported without its units. */
+	units_defined?: boolean;
+	groups: string[];
+}
+
+/** The connection's own project, as `project.*` and project operations return it. */
+export interface ProjectSummary {
+	title: string;
+	file: string | null;
+	modified: boolean;
+	objects: ProjectObject[];
+}
+
+/** `project.progress`: how far an import has read. */
+export interface ProjectProgress {
+	done: number;
+	total: number;
+	path: string;
 }
 
 export interface OperationDescriptor {
 	id: string;
 	title: string;
 	workspace: Workspace;
-	accepts: DatasetKind;
+	/** A dataset kind, or `project` for an operation on the connection's own project. */
+	accepts: DatasetKind | 'project';
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
@@ -284,7 +317,8 @@ export interface Catalog {
 
 export interface OpenedDataset {
 	handle: string;
-	kind: DatasetKind;
+	/** `project` for the connection's own project, which Analyze shows as a dataset. */
+	kind: DatasetKind | 'project';
 	title: string;
 	summary: Record<string, unknown>;
 	channels: ParamOption[];
@@ -292,6 +326,8 @@ export interface OpenedDataset {
 
 export interface OpResult {
 	views: View[];
+	/** The project's summary, from an operation that runs on it. */
+	project?: ProjectSummary;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -776,16 +812,20 @@ export type Trip = { at_level_db: number; at_loop: number } & (
 	| { kind: 'kinematic'; channel: number; axis: 'accel' | 'velocity' | 'displacement'; value: number; limit: number }
 	| { kind: 'drive_vrms'; realized_vrms: number; limit_vrms: number }
 	| { kind: 'divergence'; consecutive_loops: number; divergent_bins: number }
+	| { kind: 'law_fault'; reason: LawFaultReason; consecutive: number }
 );
 
-export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault';
+/** What was wrong with the control law's last unusable output. */
+export type LawFaultReason = 'error' | 'panicked' | 'over_budget' | 'wrong_length' | 'non_finite' | 'negative' | 'non_finite_level' | 'over_memory' | 'bad_diagnostics';
+
+export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault' | 'law_fault';
 
 export interface RunEnd {
 	outcome: RandomOutcome;
 	message: string;
 	at_s: number | null;
 	level_db: number | null;
-	/** Present when `outcome` is `aborted`. */
+	/** Present when `outcome` is `aborted` or `law_fault`. */
 	trip: Trip | null;
 }
 

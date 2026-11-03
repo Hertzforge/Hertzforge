@@ -1,8 +1,9 @@
 """Operations on a modal survey from the controller: its FRFs, coherence
 and time captures as waterfalls, the modes fitted to its FRFs on the
 survey geometry, the operating deflection shape at one frequency, the
-MAC of the fitted modes against each other or the survey's FE model, and a
-time capture played back on the survey geometry.
+MAC of the fitted modes against each other or the survey's FE model, the
+FRFs the fitted modes synthesize against the measured ones, and a time
+capture played back on the survey geometry.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ AT = Param('frequency_hz', 'Frequency', 'number', default=440.0, unit='Hz', min=
            step=2.0)
 REFERENCE = Param('reference', 'Reference', 'integer', default=1, min=1, step=1)
 CAPTURE = Param('capture', 'Capture', 'integer', default=1, min=1, step=1)
+RECORD = Param('record', 'FRF record', 'integer', default=1, min=1, step=1)
 AGAINST = Param('against', 'Against', 'enum', default='model',
                 options=(Option('model', 'FE model'),
                          Option('self', 'Each other (auto-MAC)')))
@@ -260,7 +262,10 @@ def _paired(run: ModalRun, matrix: dict, rows: Any, row_modes: Any,
 
 def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     """`modal_run.motion`: one of the survey's time captures played back on
-    the survey geometry, as a `shape3d` view with no modes and a `motion`.
+    the survey geometry, as a `shape3d` view with no modes and a `motion`,
+    and the records it plays as a time plot under it. The two share the
+    `link` `time`, so the plot marks the sample the geometry shows and
+    dragging the mark moves playback there.
     The records follow Visual Dynamics' animation rules
     (`deform.quantity_records`, `deform.animation_records`): one quantity,
     the one most records measure, and one record per DOF, the first; the
@@ -296,7 +301,8 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     drawn = np.full(geometry.num_nodes, -1, dtype=np.int64)
     drawn[drawn_rows] = np.arange(drawn_rows.size)
     shown = drawn[rows] >= 0
-    values = np.asarray(data.ordinate)[records][used][shown].real
+    played = np.asarray(records)[used][shown]
+    values = np.asarray(data.ordinate)[played].real
     if not values.shape[0]:
         raise refused(f'none of {run.title}\'s {quantity} records lands on '
                       'its geometry')
@@ -312,10 +318,11 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
     dimension = data.known_dim(records[0])
     capture = (f'Capture {number} of {len(captures)}' if captures[0] is not None
                else 'Time History')
-    extra: dict[str, Any] = {'motion': {
+    value_unit = unit_text(dimension) or ''
+    extra: dict[str, Any] = {'link': 'time', 'motion': {
         'label': 'Time', 'unit': 's', 'start': float(abscissa[0]),
         'step': float(abscissa[1] - abscissa[0]) if abscissa.size > 1 else 0.0,
-        'quantity': quantity.capitalize(), 'value_unit': unit_text(dimension) or '',
+        'quantity': quantity.capitalize(), 'value_unit': value_unit,
         'node': drawn[rows[shown]].astype(np.uint32),
         'direction': np.asarray(directions, dtype=np.float32)[shown],
         'values': np.ascontiguousarray(values, np.float32),
@@ -323,10 +330,72 @@ def motion(run: ModalRun, params: dict[str, Any]) -> list[dict]:
                                values).peak_magnitude}}
     if notes:
         extra['note'] = '; '.join(notes)
-    return [v.shape3d(f'{run.title}: {capture}, {quantity.capitalize()}',
-                      'm' if geometry.units_defined else 'undefined',
+    title = f'{run.title}: {capture}, {quantity.capitalize()}'
+    plot = v.spectrum(
+        title, v.axis('Time', 's', 'linear'),
+        v.axis(quantity.capitalize(), value_unit or None, 'linear'),
+        [v.series(data.record_label(i), 'measured', abscissa, values[d])
+         for d, i in enumerate(played)], link='time')
+    return [v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [],
-                      triangles=triangles, lines=lines, **extra)]
+                      triangles=triangles, lines=lines, **extra),
+            plot]
+
+
+def resynthesis(run: ModalRun, params: dict[str, Any]) -> list[dict]:
+    """`modal_run.resynthesis`: the FRFs the modes fitted within a band (the
+    same fit as `modal_run.modes`) synthesize, against the measured ones,
+    as Visual Dynamics' fitting screen draws them. Two `spectrum` views
+    over the band: the CMIF, each measured singular value with the
+    synthesis's following it, and one FRF record's magnitude with its
+    synthesis following it. The fit is rebuilt as the core's fitting
+    session from the fitted set (`ModalFitSession.adopt`, how a published
+    fit is edited), so the curves are the ones that screen draws. An empty
+    band, a survey with no FRFs, a band with no mode and a record past the
+    FRF's are refused."""
+    from hertzforge.core.modal_fit import ModalFitSession
+
+    low, high = float(params['low_hz']), float(params['high_hz'])
+    if not high > low:
+        raise refused(f'the band {low:g} to {high:g} Hz is empty; To must be '
+                      'above From')
+    if 'FRF' not in run.project:
+        raise refused(f'{run.title} has no FRF to fit modes on.')
+    frf = run.project['FRF']
+    record = params['record']
+    if record > frf.num_records:
+        raise refused(f'{run.title} has {frf.num_records} FRF records; there '
+                      f'is no record {record}')
+    shapes = fitted(run, low, high, params['count'])
+    if not shapes.num_shapes:
+        raise refused(f'no mode found between {low:g} and {high:g} Hz')
+    session = ModalFitSession(frf)
+    session.adopt(shapes)
+    f = session.frequencies
+    band = (f >= low) & (f <= high)
+    x = f[band]
+    measured = np.linalg.svd(session.matrix, compute_uv=False).T[:, band]
+    synthesized = session.synthesis_singular_values()[:, band]
+    unit = unit_text(frf.known_dim(record - 1))
+    frequency = v.axis('Frequency', 'Hz', 'linear')
+    count = len(measured)
+    cmif = v.spectrum(
+        f'{run.title}: CMIF of {shapes.num_shapes} Identified Modes',
+        frequency, v.axis('CMIF', unit, 'log'),
+        [v.series(f'CMIF {k + 1}', 'measured', x, measured[k])
+         for k in range(count)]
+        + [v.series(f'CMIF {k + 1}, synthesized', 'measured', x,
+                    synthesized[k], follows=k) for k in range(count)],
+        link='frequency')
+    label = frf.record_label(record - 1)
+    i = session.rows.index(record - 1)
+    response = v.spectrum(
+        f'{run.title}: FRF {label}', frequency, v.axis('FRF', unit, 'log'),
+        [v.series(label, 'measured', x, np.abs(frf.ordinate[record - 1])[band]),
+         v.series(f'{label}, synthesized', 'measured', x,
+                  np.abs(session.synthesis_records()[i])[band], follows=0)],
+        link='frequency')
+    return [cmif, response]
 
 
 OPERATIONS = (
@@ -356,9 +425,16 @@ OPERATIONS = (
                 'band, against the FE model or against each other.',
         params=(LOW, HIGH, COUNT, AGAINST), outputs=('matrix',), run=mac),
     Operation(
+        id='modal_run.resynthesis', title='Resynthesis', workspace='analyze',
+        accepts='modal_run',
+        summary='The FRFs the modes fitted within a band synthesize, dashed over '
+                'the measured CMIF and one measured FRF.',
+        params=(LOW, HIGH, COUNT, RECORD), outputs=('spectrum',),
+        run=resynthesis),
+    Operation(
         id='modal_run.motion', title='Time Animation', workspace='analyze',
         accepts='modal_run',
         summary='One time capture of the survey played back on the survey '
-                'geometry, one record per DOF.',
-        params=(CAPTURE,), outputs=('shape3d',), run=motion),
+                'geometry, one record per DOF, with its time plot.',
+        params=(CAPTURE,), outputs=('shape3d', 'spectrum'), run=motion),
 )

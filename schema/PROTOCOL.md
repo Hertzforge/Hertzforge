@@ -75,7 +75,7 @@ kit. Services never send pixels and the shell never computes the numbers.
  "y":{"label":"PSD","unit":"g²/Hz","scale":"log"|"linear"},
  "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
-            "shape":"line"|"steps"|"law", "edges":{"$array":..}}],
+            "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
  "link":"frequency"}
 ```
 
@@ -83,6 +83,11 @@ kit. Services never send pixels and the shell never computes the numbers.
 dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
 ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
+
+`follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
+a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
+dashed in its measurement's color, above it, and left out of the legend, as Visual Dynamics draws
+it. It names an earlier series that is not itself a follower.
 
 `shape` (optional, default `line`) says how the points mean to be drawn, and the service that
 computed the data decides it. Spectral content is plotted the way it is calculated:
@@ -148,6 +153,10 @@ of every node keeps a large mesh with a few sensors as small as the sensors' dat
 DOF stay where they are. Several DOFs may move one node (X, Y and Z, say). The shell plays a
 record through in about 10 s at normal speed, from an eighth to eight times that, as Visual
 Dynamics does, and colors each node by how far it is from rest at that sample.
+
+`link` (optional) ties playback to a `spectrum` of the same result with the same `link`: the
+spectrum marks the time the mesh shows with a line, and dragging that line moves playback there.
+The tie holds within one result; the hover cursor `link` names is shared as for any spectrum.
 
 **`waterfall`** (many records of one quantity, each at its own depth)
 
@@ -224,6 +233,12 @@ Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose 
 on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
 `channels` list returned by `dataset.open`.
 
+An `enum` that names one of the project's objects sets `"options_from":"objects:<kind>"`, or
+`"objects:<kind>|<kind>"` for more than one kind; the shell fills it with the names of the open
+project's objects of those kinds, in the project's order. Left out, it takes the first of them.
+An operation run when the project has none of the kinds a required param takes is refused, and
+the refusal names the kind.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -231,7 +246,12 @@ the person picks one there.
 
 `workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
 `accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
-the selected dataset is of that kind ("tools follow the data").
+the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
+on the connection's own project: `op.run` names no `handle`, and is refused while no project is
+open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`, and
+the project counts as modified when the operation added an object. These operations are the
+core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes so far). A view drawn
+by a verb that adds an object offers no in-view choice, since choosing would run the verb again.
 
 ## Methods
 
@@ -241,7 +261,43 @@ the selected dataset is of that kind ("tools follow the data").
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
 | `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
-| `op.run` | `{"op","handle","params":{...}}` | `{"views":[view...]}` |
+| `op.run` | `{"op","handle"?,"params":{...}}` | `{"views":[view...],"project"?}` |
+| `project.new` | `{"title"?}` | `{"project"}` |
+| `project.open` | `{"path"}` | `{"project"}` |
+| `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
+| `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+
+**Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
+has one, and it ends with the connection. A file reaches the service by its path on the service's
+machine; nothing is uploaded. `project.open` replaces the project with the one a `.hforge`, `.vdyn`,
+`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, and refuses any other file with a pointer to
+import it. `project.import` adds a file's objects to the project, making an empty one first when
+none is open. `units` declares what the file does not state, as the core's `import_file` options
+(`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
+project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
+and defaults it to "Project". Project requests on one connection run one at a time, in the order
+they arrive.
+
+The project as the shell lists it:
+
+```
+{"title":"Bracket Survey","file":"/Users/.../survey.hforge"|null,"modified":true,
+ "objects":[{"name":"FRF","kind":"frf","records":22,"source":"SIM",
+             "units_defined":true,"groups":["Group 1"]},
+            {"name":"Geometry","kind":"geometry","units_defined":false,"groups":[]}]}
+```
+
+`kind` is the object's class name in lower case with underscores (`time_history`, `psd`, `frf`,
+`multiple_coherence`, `shape_set`, `geometry`, `channel_table`, `specification` and so on).
+`records` is present for data objects, `source` for measured data, and `units_defined` is false
+for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
+names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
+order. `modified` is true after an import and false after an open or a save.
+
+A reader that can count reports its progress while an import runs, as event topic
+`project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A
+file the core cannot read is refused in the core's own words (`refused`, or `not_found` for a path
+with no file).
 
 **Control service**
 
@@ -267,8 +323,8 @@ The service runs one test at a time. `sim.start` is refused with reason `run_act
 Event topic `random.display`, about 4 to 10 per second while running:
 `{"run_id","source":"SIM","state","elapsed_s","level_db","views":[spectrum, reading],
 "phase","outcome","reason"}`. `phase` is the controller's own phase name. Once `state` is
-`stopped`, `outcome` is one of `completed`, `operator_stop`, `aborted`, `held`, `fault`, and
-`reason` says why in words; the shell shows any outcome other than `completed` or
+`stopped`, `outcome` is one of `completed`, `operator_stop`, `aborted`, `held`, `fault`,
+`law_fault`, and `reason` says why in words; the shell shows any outcome other than `completed` or
 `operator_stop` as an abort with that reason.
 `source` is always present on control data; the shell shows it as a badge. A simulated run is
 never presented as a hardware result.
@@ -750,10 +806,11 @@ or abort was asked for (a controlled stop's ramp-down starts there), or where th
 | `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
 | `sysid_level_unreachable` | System identification could not bring the control response to `pretest.level_db` within its drive ceiling, or the response did not settle on it; the run never drove at test level |
 | `fault` | The loop or the station failed; `message` is the controller's words |
+| `law_fault` | The control law did not produce a usable drive for several loops in a row (3 by default); the run took its controlled stop, with its shutdown ramp. `trip` says why |
 
 The shell shows every outcome but `completed` and `operator_stop` as an abort with `message`.
-`trip` is null unless `outcome` is `aborted`, and then has `at_level_db`, `at_loop` and its
-`kind`'s facts. A trip during system identification has `at_loop` 0 and `at_level_db`
+`trip` is null unless `outcome` is `aborted` or `law_fault`, and then has `at_level_db`, `at_loop`
+and its `kind`'s facts. A trip during system identification has `at_loop` 0 and `at_level_db`
 `pretest.level_db`, and `message` says it came during system identification:
 
 | `kind` | Facts |
@@ -762,6 +819,15 @@ The shell shows every outcome but `completed` and `operator_stop` as an abort wi
 | `kinematic` | `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
 | `drive_vrms` | `realized_vrms`, `limit_vrms` |
 | `divergence` | `consecutive_loops`, `divergent_bins` |
+| `law_fault` | `reason`, `consecutive` (unusable law calls in a row) |
+
+A `law_fault` trip's `reason` is what was wrong with the last unusable law output: `error` (the
+law reported one), `panicked` (for a law loaded from a file: it trapped), `over_budget` (the call
+took longer than its budget, by default a quarter of one loop's acquisition time), `wrong_length`,
+`non_finite`, `negative` (a drive line), `non_finite_level`, or, for a law loaded from a file only,
+`over_memory` (it asked for more memory than its cap) or `bad_diagnostics` (its diagnostics broke
+the output rules). Its `outcome` is always `law_fault`, never `aborted`: the drive in force was
+held through every miss, so the run stops the way an operator stop does.
 
 ### Live Display
 

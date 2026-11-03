@@ -1,0 +1,13 @@
+[package]
+name = "hertzforge-law-ratio-math"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The math of the per-line ratio control law, with nothing around it: no
+# dependencies, plain slices in and plain numbers out. The law file
+# (`laws/ratio`, built to WebAssembly) and the controller's built-in native
+# `ratio` law (`hertzforge-random-laws`) both run this code, so they are one
+# implementation of one law.
+[dependencies]
