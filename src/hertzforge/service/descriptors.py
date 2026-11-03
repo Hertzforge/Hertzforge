@@ -22,7 +22,7 @@ DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
 #: what an operation runs on: a catalog dataset of one kind, or the
 #: connection's own project
 Accepts = DatasetKind | Literal['project']
-ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix']
+ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it
 REQUIRED = object()

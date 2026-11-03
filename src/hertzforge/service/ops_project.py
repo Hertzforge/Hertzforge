@@ -189,6 +189,49 @@ def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
     return views
 
 
+SPACING = Param('spacing', 'Line spacing, 0 for the one its sheet remembers', 'number',
+                default=0.0, unit='Hz', min=0.0, step=1.0)
+
+
+def convert_to_psd(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.convert_to_psd`: a specification read as a plain PSD or
+    CPSD under its own name, its limits left out
+    (`Project.convert_to_psd`). One written at breakpoints is read onto
+    evenly spaced lines at the spacing given, or the one its sheet
+    remembers (`core.author.read_onto_lines`); one on lines converts as it
+    is. Drawn with what Visual Dynamics' Convert pane gives: the
+    breakpoints, the range, the lines and the sheet's notes."""
+    from hertzforge.core.author import read_onto_lines
+
+    name = params['source']
+    spec = project[name]
+    f = np.asarray(spec.abscissa, dtype=float)
+    breakpoints = spec.interpolation != 'bin'
+    spacing = params['spacing'] or None
+    used = (spacing or project.remembered_spacing(name)) if breakpoints else None
+    notes: list[str] = []
+    if used is not None:
+        try:
+            _lines, notes = read_onto_lines(spec, float(used))
+        except ValueError as error:
+            raise refused(str(error)) from None
+    limits = spec.has_limits
+    kind = 'PSD' if spec.is_autospectrum() else 'CPSD'
+    views = _derived(project, lambda: project.convert_to_psd(name, spacing))
+    lines = len(project[name].abscissa)
+    rows = [v.row('Breakpoints' if breakpoints else 'Lines as written', float(f.size), '',
+                  'info'),
+            v.row('Range', f'{f[0]:g} to {f[-1]:g} Hz', None, 'info'),
+            v.row('Lines', float(lines), '', 'info')]
+    if used is not None:
+        rows.append(v.row('Spacing', float(used), 'Hz', 'info'))
+    if limits:
+        rows.append(v.row('Limits', 'its warning and abort limits were left out', None,
+                          'warn'))
+    rows += [v.row('Note', note[0].upper() + note[1:], None, 'info') for note in notes if note]
+    return [*views, v.reading(f'{name} converted to a {kind}', rows)]
+
+
 def _geometry(project: Any) -> str | None:
     """The geometry data is drawn on: the active one, else the first."""
     from hertzforge.core.geometry import Geometry
@@ -400,8 +443,14 @@ VERB_OPERATIONS = (
              'have it.', (KEEP_DIAGONAL,)),
     _derives('convert_to_specification', 'Convert to Specification',
              'A PSD read as a requirement, which a test is controlled to.'),
-    _derives('convert_to_psd', 'Convert to PSD',
-             'A specification read as a PSD, its limits left out.'),
+    Operation(
+        id='project.convert_to_psd', title='Convert to PSD', workspace='analyze',
+        accepts='project',
+        summary='A specification read as a PSD, its limits left out; one written at '
+                'breakpoints is read onto lines at a spacing, 0 for the one its sheet '
+                'remembers.',
+        params=(_source('convert_to_psd'), SPACING), outputs=('waterfall', 'reading'),
+        run=convert_to_psd, edits=True),
     Operation(
         id='project.detect_shocks', title='Detect Shocks', workspace='analyze',
         accepts='project',
