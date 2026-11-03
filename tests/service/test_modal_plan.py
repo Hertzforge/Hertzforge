@@ -82,6 +82,23 @@ def test_a_plan_is_the_cores_choice_and_reads_as_the_pane_does(plate, validate):
     assert 'Not kept' in rows and len(list(plate)) == 4
 
 
+def test_a_click_on_a_surface_leaves_it_out_or_puts_it_back(plate, validate):
+    shape, *_rest, surfaces = run(plate, 'project.plan_instrumentation', uniaxial=8,
+                                  edge_distance=0.0)
+    wire_views([shape], validate)
+    pick = shape['pick']
+    assert pick['target'] == 'faces' and pick['out'] == 'leave_out'
+    assert len(pick['faces']) == len(shape['triangles']), 'a surface a triangle'
+    kept = [int(row[0]) for row in surfaces['rows'] if row[-1] == 'yes']
+    assert pick['kept'] == kept and set(kept) <= set(np.asarray(pick['faces']).tolist())
+    assert pick['params']['keep'] is False, 'a click previews; it never keeps'
+    assert kept == [1], 'the plate is one surface'
+    with pytest.raises(ProtocolError, match='0 directions'):
+        run(plate, pick['op'], **{**pick['params'], 'leave_out': '1'})
+    shape, *_rest = run(plate, pick['op'], **{**pick['params'], 'put_back': '1'})
+    assert shape['pick']['params']['put_back'] == '1' and shape['pick']['kept'] == [1]
+
+
 def test_keep_adds_the_plans_three_objects(plate):
     (_shape, reading, *_rest) = run(plate, 'project.plan_instrumentation', triaxial=8,
                                     edge_distance=0.0, keep=True, name='Layout')

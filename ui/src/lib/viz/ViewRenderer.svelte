@@ -33,9 +33,11 @@
 		onspan?: (region: number, x0: number, x1: number) => void;
 		/** An editable table's cell typed into; resolves to the refusal's words, or null. */
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
+		/** A click in a 3-D view with `pick`: what it chose, to run the pick's operation with. */
+		onpick?: (patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null, scope, onedit, onspan }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null, scope, onedit, onspan, onpick }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -51,7 +53,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: Shape3DPane }}
 		{#key view}
-			<Shape3DPane {view} bind:mode {overlay} {scope} />
+			<Shape3DPane {view} bind:mode {overlay} {scope} {onpick} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>

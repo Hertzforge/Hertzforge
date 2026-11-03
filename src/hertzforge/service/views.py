@@ -121,6 +121,24 @@ def dragging(op: str, params: dict[str, Any], low: str, high: str | None = None
     return out
 
 
+def picking(op: str, params: dict[str, Any], target: Literal['point', 'nodes', 'faces'],
+            hint: str, **fields: Any) -> dict[str, Any]:
+    """What a click in a `shape3d` view does: run `op` with `params` and
+    what was clicked. A 'point' click sends the place it lands as `x`, `y`
+    and `z`, on the model's surface or plane. `ids` is the node id of each
+    of the first rows, the model's own nodes. A 'nodes' click picks the
+    node under it of those, and `count` of them (0: as many as wanted,
+    then Enter) go as `param`, a list such as '4, 7, 9'. A 'faces' click
+    toggles the surface its
+    triangle belongs to (`faces`, one owner a triangle, -1 for none): a
+    surface in `kept` is named in the `out` param, any other in `back`.
+    `hint` says what a click does."""
+    out: dict[str, Any] = {'op': op, 'params': dict(params), 'target': target, 'hint': hint}
+    for key, value in fields.items():
+        out[key] = np.asarray(value, np.int32) if key == 'faces' else value
+    return out
+
+
 def row(label: str, value: float | str, unit: str | None,
         status: Status) -> dict[str, Any]:
     """One row of a `reading` view. A non-finite float is a ValueError:
