@@ -33,6 +33,7 @@ from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
 from .ops_model import OPERATIONS as MODEL_OPERATIONS
+from .ops_objects import OPERATIONS as OBJECT_OPERATIONS
 from .ops_project import OPERATIONS as PROJECT_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .ops_readings import OPERATIONS as READING_OPERATIONS
@@ -45,11 +46,13 @@ log = logging.getLogger('hertzforge.service')
 OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS
                                      + SETTINGS_OPERATIONS + MODEL_OPERATIONS
-                                     + SPECIFY_OPERATIONS + READING_OPERATIONS)
+                                     + SPECIFY_OPERATIONS + READING_OPERATIONS
+                                     + OBJECT_OPERATIONS)
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.activate',
+                   'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units')
 
 #: the largest frame a client may send; requests are small
@@ -324,7 +327,9 @@ class Connection:
             return {'added': added, 'project': projects.summary(self.project)}
         edits = {'project.rename': (projects.rename, ('name', 'to')),
                  'project.remove': (projects.remove, ('names',)),
-                 'project.activate': (projects.activate, ('geometry',))}
+                 'project.activate': (projects.activate, ('geometry',)),
+                 'project.duplicate': (projects.duplicate, ('names',)),
+                 'project.refresh': (projects.refresh, ('names',))}
         if method == 'project.units':
             _only(params, ('name',), method)
             return await call(projects.units, self.project, params)

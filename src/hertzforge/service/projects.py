@@ -47,10 +47,12 @@ def summary(state: OpenProject) -> dict[str, Any]:
     """The project as the shell lists it: title, file, whether it has
     unsaved changes, and each object with its kind, record count, source,
     whether its units are declared, the groups it is in, the core verbs
-    that apply to it and the analysis settings it carries."""
+    that apply to it, the analysis settings it carries, and why it is
+    stale when its source's settings changed after it was computed."""
     project = state.project
     labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
               for k, group in enumerate(project.object_groups)]
+    stale = project.stale()
     objects = []
     for name, obj in project.items():
         entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
@@ -70,6 +72,8 @@ def summary(state: OpenProject) -> dict[str, Any]:
         settings = settings_of(obj)
         if settings:
             entry['settings'] = settings
+        if name in stale:
+            entry['stale'] = stale[name]
         objects.append(entry)
     out = {'title': project.name, 'file': project.file,
            'modified': state.modified, 'objects': objects,
@@ -230,6 +234,44 @@ def remove(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         raise not_found(f'the project has no object named '
                         f'{", ".join(map(repr, missing))}')
     state.project.remove(*names)
+    state.modified = True
+
+
+def _names(params: Mapping[str, Any], method: str, empty: bool = False) -> list[str]:
+    names = params.get('names')
+    if (not isinstance(names, list) or not (names or empty)
+            or not all(isinstance(name, str) for name in names)):
+        raise bad_request(f'{method} needs "names", a list of object names')
+    return names
+
+
+def duplicate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.duplicate`: a copy of each object named added beside it,
+    '<name> copy' (`Project.duplicate`), as Copy and Paste do in Visual
+    Dynamics' tree. A copy's arrays are its own; it is in no group."""
+    state = _open(state, 'project.duplicate')
+    names = _names(params, 'project.duplicate')
+    missing = [name for name in names if name not in state.project]
+    if missing:
+        raise not_found(f'the project has no object named {", ".join(map(repr, missing))}')
+    state.project.duplicate(*names)
+    state.modified = True
+
+
+def refresh(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.refresh`: each derived object named computed again from its
+    source in place, under its own name (`Project.refresh`); with no names,
+    every stale object, sources first (`Project.refresh_stale`)."""
+    state = _open(state, 'project.refresh')
+    names = _names(params, 'project.refresh', empty=True)
+    try:
+        if names:
+            for name in names:
+                state.project.refresh(name)
+        else:
+            state.project.refresh_stale()
+    except (KeyError, ValueError) as error:
+        raise refused(str(error).strip("'")) from None
     state.modified = True
 
 
