@@ -993,6 +993,7 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-recorder",
+ "hertzforge-sdm",
  "hertzforge-shock-common",
  "hertzforge-shock-host",
  "hertzforge-sine",

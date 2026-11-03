@@ -27,6 +27,8 @@ hertzforge-hal = { path = "../hertzforge-hal" }
 # construct. Banned everywhere else (deny.toml + the sim-leak lint).
 hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
 hertzforge-hal-ni = { path = "../hertzforge-hal-ni" }
+# `MatrixStack`, the FRF a Sim station can be asked to play (`SimPlant::Frf`).
+hertzforge-sdm = { path = "../hertzforge-sdm" }
 # `StationClass` - the class the factory hands each module's arm gate.
 hertzforge-module-abi = { path = "../hertzforge-module-abi" }
 # The channel table's `physical` column is what binds NI rows.
