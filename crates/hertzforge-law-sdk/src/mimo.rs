@@ -55,6 +55,11 @@ pub use hertzforge_sdm::law::{
 };
 pub use hertzforge_sdm::{Complex, HermitianStack, MatrixStack, ShapeError, C64};
 
+/// Per-line linear algebra on the stacks (eigen and singular value
+/// decompositions, the regularized pseudo-inverse, congruences, PSD repair):
+/// `hertzforge-sdm`'s, the same the controller uses.
+pub use hertzforge_sdm::linalg;
+
 /// The interface's own MIMO types, as generated from the WIT. A law rarely
 /// needs them: the conversions in this module turn them into
 /// `hertzforge-sdm`'s types and back.
