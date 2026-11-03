@@ -18,7 +18,7 @@ from websockets.exceptions import ConnectionClosed
 
 from hertzforge.service import __main__ as entry
 from hertzforge.service import frames
-from hertzforge.service.server import SWITCH_INTERVAL, Service, preload, start
+from hertzforge.service.server import OPERATIONS, SWITCH_INTERVAL, Service, preload, start
 
 
 class Client:
@@ -354,7 +354,7 @@ def test_console_entry_point_starts_headless_and_answers():
 
         hello, catalog = asyncio.run(ask())
         assert hello['protocol'] == 'sds/1'
-        assert len(catalog['result']['operations']) == 35
+        assert len(catalog['result']['operations']) == len(OPERATIONS)
     finally:
         process.terminate()
         process.wait(timeout=20)
