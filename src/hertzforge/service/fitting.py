@@ -24,14 +24,19 @@ from typing import Any
 import numpy as np
 
 from . import views as v
+from .projects import kind_of
 from .protocol import bad_request, not_found, refused
 from .waterfalls import unit_text
 
 FIT_METHODS = ('fit.start', 'fit.find', 'fit.move', 'fit.damping', 'fit.fit',
-               'fit.confirm', 'fit.refine', 'fit.publish', 'fit.end')
+               'fit.confirm', 'fit.refine', 'fit.delete', 'fit.edit', 'fit.residual',
+               'fit.publish', 'fit.end')
 
 #: the most measured singular values drawn: the rest are noise floor
 CMIF_LINES = 4
+
+#: the kinds a fit can be weighted by
+COHERENCES = ('coherence', 'multiple_coherence')
 
 
 @dataclass
@@ -44,6 +49,10 @@ class Fit:
     shapes: str | None
     #: the measured CMIF (k, lines), computed once
     measured: np.ndarray = field(repr=False)
+    #: the coherence the least squares is weighted by, or None
+    coherence: str | None = None
+    #: whether the view draws the residual's own CMIF
+    residual: bool = False
 
 
 def _number(params: Mapping[str, Any], key: str, method: str) -> float:
@@ -72,14 +81,19 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
     if shapes is not None and (not isinstance(shapes, str) or shapes not in project
                                or not isinstance(project[shapes], ShapeSet)):
         raise refused(f'{shapes!r} is not a shape set in the project')
+    coherence = params.get('coherence')
+    if coherence is not None and (not isinstance(coherence, str) or coherence not in project
+                                  or kind_of(project[coherence]) not in COHERENCES):
+        raise refused(f'{coherence!r} is not a coherence in the project')
     try:
-        session = ModalFitSession(project[name])
+        session = ModalFitSession(project[name], coherence=None if coherence is None
+                                  else project[coherence])
         if shapes is not None:
             session.adopt(project[shapes])
     except ValueError as error:
         raise refused(str(error)) from None
     measured = np.linalg.svd(session.matrix, compute_uv=False).T
-    return Fit(session, name, shapes, measured[:CMIF_LINES])
+    return Fit(session, name, shapes, measured[:CMIF_LINES], coherence)
 
 
 def act(fit: Fit, method: str, params: Mapping[str, Any]) -> None:
@@ -107,8 +121,63 @@ def act(fit: Fit, method: str, params: Mapping[str, Any]) -> None:
             if not session.modes:
                 raise refused('there are no confirmed modes to refine')
             session.refine_residues()
+        elif method == 'fit.delete':
+            delete(session, _indices(params, method, len(session.modes)))
+        elif method == 'fit.edit':
+            edit(session, params)
+        elif method == 'fit.residual':
+            show = params.get('show')
+            if not isinstance(show, bool):
+                raise bad_request('fit.residual needs "show", true or false')
+            fit.residual = show
     except ValueError as error:
         raise refused(str(error)) from None
+
+
+def _indices(params: Mapping[str, Any], method: str, count: int) -> list[int]:
+    modes = params.get('modes')
+    if (not isinstance(modes, list) or not modes
+            or not all(isinstance(k, int) and not isinstance(k, bool) for k in modes)):
+        raise bad_request(f'{method} needs "modes", a list of mode indices from 0')
+    outside = [k for k in modes if not 0 <= k < count]
+    if outside:
+        raise refused(f'the fit has {count} confirmed mode{"s" * (count != 1)}; '
+                      f'there is no mode {outside[0] + 1}')
+    return modes
+
+
+def delete(session: Any, indices: list[int]) -> None:
+    """`fit.delete`: confirmed modes taken back, as Visual Dynamics' fit
+    table deletes rows: each leaves the modes and the replay list, and the
+    preview, fitted against a residual that is gone, is dropped."""
+    for k in sorted(set(indices), reverse=True):
+        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        if pick in session.confirmed:
+            session.confirmed.remove(pick)
+        del session.modes[k]
+    session.preview = None
+
+
+def edit(session: Any, params: Mapping[str, Any]) -> None:
+    """`fit.edit`: a confirmed mode's damping (a fraction of critical,
+    above 0 and up to 1) or description typed into its row, as Visual
+    Dynamics' fit table takes them."""
+    k = params.get('mode')
+    if isinstance(k, bool) or not isinstance(k, int):
+        raise bad_request('fit.edit needs "mode", a mode index from 0')
+    _indices({'modes': [k]}, 'fit.edit', len(session.modes))
+    damping, description = params.get('damping'), params.get('description')
+    if damping is None and description is None:
+        raise bad_request('fit.edit needs "damping" or "description"')
+    if damping is not None:
+        value = _number(params, 'damping', 'fit.edit')
+        if not 0.0 < value <= 1.0:
+            raise refused('damping is a fraction of critical, above 0 and up to 1 (100 %)')
+        session.modes[k]['damping'] = value
+    if description is not None:
+        if not isinstance(description, str):
+            raise bad_request('fit.edit "description" is text')
+        session.modes[k]['description'] = description.strip()
 
 
 def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
@@ -156,8 +225,26 @@ def state(fit: Fit) -> dict[str, Any]:
                    'description': str(mode.get('description') or '')}
                   for mode in session.modes],
         'view': _view(fit),
-        'mac': _mac(fit)}
+        'mac': _mac(fit),
+        'coherence': fit.coherence,
+        'residual': fit.residual,
+        'half_power': _half_power(fit)}
     return out
+
+
+def _half_power(fit: Fit) -> dict[str, Any]:
+    """The half-power reading of the residual CMIF peak under the cursor
+    (`ModalFitSession.half_power`), as Visual Dynamics shows it beside the
+    fit: the peak's frequency, the two crossings, Q and the damping they
+    give, or why it could not be read."""
+    reading = fit.session.half_power(warn=False)
+
+    def number(value: Any) -> float | None:
+        return None if value is None or not np.isfinite(value) else float(value)
+
+    return {'frequency': float(reading.frequency), 'low': number(reading.low),
+            'high': number(reading.high), 'q': number(reading.q),
+            'damping': number(reading.damping), 'notes': list(reading.notes)}
 
 
 def _mac(fit: Fit) -> dict[str, Any] | None:
@@ -192,6 +279,13 @@ def _view(fit: Fit) -> dict[str, Any]:
         for k in range(min(len(synthesized), len(fit.measured))):
             lines.append(v.series(f'CMIF {k + 1}, synthesized', 'measured',
                                   *_finite(f, synthesized[k]), follows=k))
+    if fit.residual and session.modes:
+        residual = np.linalg.svd(session.residual_matrix(), compute_uv=False).T
+        floor = residual.max() * 1e-10
+        for k in range(min(len(residual), CMIF_LINES)):
+            if residual[k].max() > floor:
+                lines.append(v.series(f'CMIF {k + 1}, residual', 'drive',
+                                      *_finite(f, residual[k])))
     curve = session.pending_curve()
     if curve is not None and len(curve[0]):
         lines.append(v.series('Pending mode', 'reference', *_finite(*curve)))

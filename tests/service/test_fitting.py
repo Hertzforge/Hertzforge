@@ -158,3 +158,74 @@ def test_the_fits_mac_holds_the_confirmed_modes_and_the_preview_last(project, va
     assert mac['rows']['ticks'][-1].startswith('New: ')
     values = np.asarray(mac['values'])
     assert values.shape == (2, 2) and np.allclose(np.diag(values), 1.0)
+
+
+def _two_confirmed(project):
+    fit = fitting.start(project, {'frf': 'FRF'})
+    for _ in range(2):
+        fitting.act(fit, 'fit.confirm', {})
+        fitting.act(fit, 'fit.find', {})
+    assert len(fit.session.modes) == 2
+    return fit
+
+
+def test_a_confirmed_mode_is_taken_back(project, validate):
+    fit = _two_confirmed(project)
+    kept = fit.session.modes[1]['frequency']
+    fitting.act(fit, 'fit.fit', {})
+    fitting.act(fit, 'fit.delete', {'modes': [0]})
+    after = fitting.state(fit)
+    validate(frames.to_wire(after)[0], 'fitState')
+    assert [m['frequency'] for m in after['modes']] == [kept]
+    assert after['preview'] is None, 'fitted against a residual that is gone'
+    assert len(fit.session.confirmed) == 1
+    with pytest.raises(ProtocolError, match='there is no mode 3'):
+        fitting.act(fit, 'fit.delete', {'modes': [2]})
+
+
+def test_a_modes_damping_and_description_are_typed_into_its_row(project):
+    fit = _two_confirmed(project)
+    residual = fit.session.residual_matrix().copy()
+    fitting.act(fit, 'fit.edit', {'mode': 0, 'damping': 0.05, 'description': ' twist '})
+    mode = fitting.state(fit)['modes'][0]
+    assert mode['damping'] == pytest.approx(0.05) and mode['description'] == 'twist'
+    assert not np.allclose(residual, fit.session.residual_matrix()), \
+        'the typed damping moves the residual'
+    with pytest.raises(ProtocolError, match='above 0 and up to 1'):
+        fitting.act(fit, 'fit.edit', {'mode': 0, 'damping': 1.5})
+    with pytest.raises(ProtocolError, match='"damping" or "description"'):
+        fitting.act(fit, 'fit.edit', {'mode': 0})
+
+
+def test_the_residual_cmif_is_drawn_on_request(project, validate):
+    fit = _two_confirmed(project)
+    names = lambda: [s['name'] for s in fitting.state(fit)['view']['series']]
+    assert 'CMIF 1, residual' not in names()
+    fitting.act(fit, 'fit.residual', {'show': True})
+    state = fitting.state(fit)
+    validate(frames.to_wire(state)[0], 'fitState')
+    assert state['residual'] and 'CMIF 1, residual' in names()
+
+
+def test_the_half_power_reading_is_under_the_cursor(project):
+    fit = fitting.start(project, {'frf': 'FRF'})
+    reading = fitting.state(fit)['half_power']
+    assert reading['frequency'] == pytest.approx(fit.session.pending['frequency'],
+                                                 rel=0.05)
+    if reading['q'] is not None:
+        assert reading['damping'] == pytest.approx(0.5 / reading['q'])
+        assert reading['low'] < reading['frequency'] < reading['high']
+
+
+def test_a_fit_weighted_by_coherence(validate):
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    project = state.project
+    frf = project.compute_frfs('Time History')
+    coherence = project.compute_multiple_coherence('Time History')
+    fit = fitting.start(project, {'frf': frf, 'coherence': coherence})
+    assert fit.session.weights is not None
+    out = fitting.state(fit)
+    validate(frames.to_wire(out)[0], 'fitState')
+    assert out['coherence'] == coherence
+    with pytest.raises(ProtocolError, match='is not a coherence'):
+        fitting.start(project, {'frf': frf, 'coherence': 'Time History'})

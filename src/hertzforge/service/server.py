@@ -57,6 +57,7 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.activate',
+                   'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units')
 
 #: the largest frame a client may send; requests are small
@@ -334,7 +335,9 @@ class Connection:
             return {'added': added, 'project': projects.summary(self.project)}
         edits = {'project.rename': (projects.rename, ('name', 'to')),
                  'project.remove': (projects.remove, ('names',)),
-                 'project.activate': (projects.activate, ('geometry',))}
+                 'project.activate': (projects.activate, ('geometry',)),
+                 'project.duplicate': (projects.duplicate, ('names',)),
+                 'project.refresh': (projects.refresh, ('names',))}
         if method == 'project.units':
             _only(params, ('name',), method)
             return await call(projects.units, self.project, params)
@@ -452,7 +455,7 @@ class Connection:
                 raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'fit.start':
-                _only(params, ('frf', 'shapes'), method)
+                _only(params, ('frf', 'shapes', 'coherence'), method)
                 self.fit = await call(fitting.start, project, params)
                 return {'fit': await call(self.fit_state, self.fit)}
             if method == 'fit.end':
@@ -473,7 +476,9 @@ class Connection:
                 return {'name': name, 'project': projects.summary(self.project),
                         'fit': await call(self.fit_state, fit)}
             keys = {'fit.find': ('low', 'high'), 'fit.move': ('frequency',),
-                    'fit.damping': ('damping',), 'fit.confirm': ('description',)}
+                    'fit.damping': ('damping',), 'fit.confirm': ('description',),
+                    'fit.delete': ('modes',), 'fit.edit': ('mode', 'damping', 'description'),
+                    'fit.residual': ('show',)}
             _only(params, keys.get(method, ()), method)
             await call(fitting.act, fit, method, params)
             return {'fit': await call(self.fit_state, fit)}

@@ -20,11 +20,14 @@
 	const objects = $derived(app.project.summary?.objects ?? []);
 	const frfs = $derived(objects.filter((o) => o.kind === 'frf').map((o) => o.name));
 	const shapeSets = $derived(objects.filter((o) => o.kind === 'shape_set').map((o) => o.name));
+	const coherences = $derived(objects.filter((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence').map((o) => o.name));
 	let frf = $state('');
 	let from = $state('');
+	let weight = $state('');
 	$effect(() => {
 		if (!frfs.includes(frf)) frf = frfs[0] ?? '';
 		if (from && !shapeSets.includes(from)) from = '';
+		if (weight && !coherences.includes(weight)) weight = '';
 	});
 
 	// The first model opens on arrival, so the view is never empty when there is something to show.
@@ -70,7 +73,14 @@
 						{#each shapeSets as name (name)}<option value={name}>Edit Fit of {name}</option>{/each}
 					</select>
 				{/if}
-				<button class="btn primary sm start" data-testid="fit-begin" onclick={() => app.fit.start(frf, from || undefined)} disabled={!frf || app.fit.busy !== null}>
+				{#if coherences.length}
+					<label class="lbl" for="fit-weight">Weight by</label>
+					<select id="fit-weight" class="field" bind:value={weight} data-testid="fit-weight" title="Weight each response at each line by its coherence, γ²/(1-γ²)">
+						<option value="">No weighting</option>
+						{#each coherences as name (name)}<option value={name}>{name}</option>{/each}
+					</select>
+				{/if}
+				<button class="btn primary sm start" data-testid="fit-begin" onclick={() => app.fit.start(frf, from || undefined, weight || undefined)} disabled={!frf || app.fit.busy !== null}>
 					{from ? 'Edit Fit' : 'Fit Modes'}
 				</button>
 				{#if app.fit.error && !app.fit.state}<p class="error" role="alert">{app.fit.error}</p>{/if}

@@ -1,7 +1,8 @@
 """The Model workspace's tools on the connection's project: a geometry seen
-on its own, what its element groups are made of, and its coincident nodes
-merged, the steps between importing a mesh and Solve Modes, as Visual
-Dynamics' Model screen takes them.
+on its own, its element groups listed, set, merged, deleted and tied,
+parts meshed apart aligned and their coincident nodes merged, the steps
+between importing a mesh and Solve Modes, as Visual Dynamics' Model
+screen takes them.
 """
 
 from __future__ import annotations
@@ -28,6 +29,10 @@ def _materials() -> tuple[Option, ...]:
 MATERIAL = Param('material', 'Material', 'enum', default='6061-T6', options=_materials())
 THICKNESS = Param('thickness', 'Plate thickness', 'number', default=3.0, unit='mm',
                   min=0.0, step=0.5)
+GROUPS_TO_MERGE = Param('groups', 'Element groups', 'string', default='')
+ELEMENTS = Param('elements', 'Elements', 'string', default='')
+TIE_TO = Param('to', 'Tie to', 'string', default='')
+REACH = Param('reach', 'Reach', 'number', default=0.0, unit='mm', min=0.0, step=0.1)
 TOLERANCE = Param('tolerance', 'Tolerance', 'number', default=0.0, unit='m', min=0.0,
                   step=0.0001)
 
@@ -142,6 +147,124 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
         v.row('Nodes now', float(after), '', 'info')])]
 
 
+def _ids(text: str, what: str) -> list[int]:
+    """The ids '3, 7-9' names, in the order named."""
+    out: list[int] = []
+    for part in text.replace(' ', '').split(','):
+        if not part:
+            continue
+        first, dash, last = part.partition('-')
+        try:
+            low, high = int(first), int(last) if dash else int(first)
+        except ValueError:
+            raise refused(f'{part!r} is not {what} or a range such as 3-6') from None
+        out.extend(range(low, high + 1))
+    return list(dict.fromkeys(out))
+
+
+def element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.element_groups`: a geometry's element groups as Visual
+    Dynamics' Element Groups table lists them: each group's id, name,
+    what its elements are, how many, and what it is made of."""
+    name = params['geometry']
+    geometry = project[name]
+    rows = []
+    for group, label in zip(geometry.groups.ids, geometry.groups.names, strict=True):
+        group = int(group)
+        held = geometry.group_properties.get(group)
+        material = held.material.name if held is not None and held.material else ''
+        thickness = (f'{held.thickness * 1000:g}' if held is not None
+                     and held.thickness is not None else '')
+        rows.append([str(group), label, _family(geometry, group) or 'empty',
+                     str(len(geometry.elements_in(group))), material, thickness])
+    return [v.table(f'Element groups of {name}',
+                    ['Group', 'Name', 'Elements are', 'Count', 'Material', 'Thickness [mm]'],
+                    rows)]
+
+
+def merge_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.merge_element_groups`: two or more of a geometry's element
+    groups merged into the first named, which keeps its id, name and
+    properties (`Project.merge_groups`)."""
+    name = params['geometry']
+    chosen = _groups(project[name], params['groups'])
+    if len(chosen) < 2:
+        raise refused('name two or more element groups to merge, such as 1, 3')
+    try:
+        project.merge_groups(name, chosen)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return element_groups(project, params)
+
+
+def delete_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.delete_element_groups`: element groups deleted with their
+    elements and the nodes only they used, except nodes where data in the
+    project is measured or solved (`Project.delete_element_groups`)."""
+    name = params['geometry']
+    geometry = project[name]
+    if not params['groups'].strip():
+        raise refused('name the element groups to delete, such as 2, 4')
+    chosen = _groups(geometry, params['groups'])
+    if len(chosen) == len(geometry.groups.ids):
+        raise refused('that is every element group: delete the geometry instead')
+    try:
+        project.delete_element_groups(name, chosen)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return element_groups(project, params)
+
+
+def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.tie_elements`: a patch of a geometry's elements tied
+    rigidly to the part under it, each node by a rigid link to the
+    nearest node of an element group or a second patch
+    (`Project.tie_elements`), as for a bolted joint modeled from the
+    elements its washer covers."""
+    name = params['geometry']
+    geometry = project[name]
+    patch = _ids(params['elements'], 'an element id')
+    if not patch:
+        raise refused('name the elements of the patch, such as 101-104')
+    target_text = params['to'].strip()
+    if not target_text:
+        raise refused('name what the patch ties to: an element group, by name or '
+                      'number, or a second patch of elements')
+    names = list(geometry.groups.names)
+    if target_text in names:
+        target: Any = target_text
+    else:
+        numbers = _ids(target_text, 'an element group or element id')
+        target = numbers[0] if len(numbers) == 1 and numbers[0] in geometry.groups.ids \
+            else numbers
+    try:
+        found = project.tie_elements(name, patch, target)
+    except (ValueError, KeyError) as error:
+        raise refused(str(error).strip("'")) from None
+    return [v.reading(f'Tie on {name}', [
+        v.row('Links added', float(found['links']), '', 'info'),
+        v.row('Nodes already shared', float(found['shared']), '', 'info'),
+        v.row('Links in group', str(found['group']), None, 'info')])]
+
+
+def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.align_meshes`: where parts meshed apart meet, the coarser
+    mesh's nodes moved onto the finer mesh's nearest nodes within a
+    reach (`Project.align_meshes`), so Merge Coincident Nodes can join
+    them next. 0 reaches half the coarsest piece's spacing."""
+    name = params['geometry']
+    geometry = project[name]
+    groups = _groups(geometry, params['groups']) if params['groups'].strip() else None
+    reach = params['reach'] / 1000.0 or None
+    try:
+        found = project.align_meshes(name, reach, groups)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return [v.reading(f'Aligned meshes of {name}', [
+        v.row('Nodes moved', float(found['moved']), '', 'info'),
+        v.row('Farthest move', float(found['farthest']) * 1000.0, 'mm', 'info')])]
+
+
 OPERATIONS = (
     Operation(
         id='project.view_geometry', title='View Geometry', workspace='model',
@@ -162,4 +285,37 @@ OPERATIONS = (
                 'apart are joined; 0 for the core\'s own tolerance.',
         params=(GEOMETRY, TOLERANCE), outputs=('reading',),
         run=merge_coincident_nodes, edits=True),
+    Operation(
+        id='project.element_groups', title='Element Groups', workspace='model',
+        accepts='project',
+        summary='A geometry\'s element groups: each one\'s name, what its elements are, '
+                'how many, and what it is made of.',
+        params=(GEOMETRY,), outputs=('table',), run=element_groups),
+    Operation(
+        id='project.merge_element_groups', title='Merge Element Groups', workspace='model',
+        accepts='project',
+        summary='Two or more element groups merged into the first named, which keeps its '
+                'name and properties, such as "1, 3".',
+        params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=merge_element_groups,
+        edits=True),
+    Operation(
+        id='project.delete_element_groups', title='Delete Element Groups', workspace='model',
+        accepts='project',
+        summary='Element groups deleted with their elements and the nodes only they used, '
+                'keeping nodes where the project has data.',
+        params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=delete_element_groups,
+        edits=True),
+    Operation(
+        id='project.tie_elements', title='Tie', workspace='model', accepts='project',
+        summary='A patch of elements tied rigidly to the part under it, each node to the '
+                'nearest node of an element group or a second patch.',
+        params=(GEOMETRY, ELEMENTS, TIE_TO), outputs=('reading',), run=tie_elements,
+        edits=True),
+    Operation(
+        id='project.align_meshes', title='Align Meshes', workspace='model', accepts='project',
+        summary='Where parts meshed apart meet, the coarser mesh\'s nodes moved onto the '
+                'finer one\'s, so Merge Coincident Nodes can join them; reach 0 for half '
+                'the coarsest spacing.',
+        params=(GEOMETRY, GROUPS, REACH), outputs=('reading',), run=align_meshes,
+        edits=True),
 )
