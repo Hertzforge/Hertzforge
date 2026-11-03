@@ -40,7 +40,7 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                        'convert_to_psd', 'detect_shocks', 'extract_sine',
                        'set_averaging', 'detect_averaging', 'set_filter',
                        'set_truncation', 'view_geometry', 'group_properties',
-                       'merge_coincident_nodes'))}
+                       'merge_coincident_nodes', 'derive_specification'))}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}

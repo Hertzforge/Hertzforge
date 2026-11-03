@@ -34,7 +34,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'specify',
 		title: 'Specify',
 		rail: 'Specify',
-		live: false,
+		live: true,
 		summary: 'Environmental test specification tools.',
 		moves: ['Profile authoring', 'Enveloping and derivation', 'Fatigue damage equivalence', 'Specification library']
 	},
