@@ -40,6 +40,7 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-hal-sim",
     "hertzforge-module-abi",
     "hertzforge-random",
+    "hertzforge-sdm",
     "hertzforge-shaker-db",
     "hertzforge-station",
 ];
@@ -47,6 +48,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
 /// license and hardware coupling when it was imported. A controller crate not on this
 /// list fails the lockfile check; adding one is a review, then a line here.
+///
+/// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
+/// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
+/// names no backend and reaches no hardware; it builds for WebAssembly.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-automation",
     "hertzforge-backendd",
@@ -73,6 +78,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-shaker-db",
     "hertzforge-shock-common",
     "hertzforge-shock-host",
+    "hertzforge-sdm",
     "hertzforge-sine",
     "hertzforge-srs",
     "hertzforge-station",
@@ -91,15 +97,25 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// the control laws under `laws/` and the law host's test fixtures. Reviewed
 /// for license and hardware coupling when they came in: none names a backend
 /// (the catalog's tests use the Sim), and the guests can reach nothing but the
-/// numbers the host hands them. This crate reaches none of them yet.
+/// numbers the host hands them. This crate reaches none of them yet. The
+/// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
+/// reviewed the same way: pure math on the stacks, no backend, synthetic plants
+/// in its tests.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
+    "hertzforge-law-mimo-buzz",
+    "hertzforge-law-mimo-open-loop",
+    "hertzforge-law-mimo-pinv",
+    "hertzforge-law-mimo-shape",
+    "hertzforge-law-mimo-zero",
     "hertzforge-law-ratio",
     "hertzforge-law-ratio-math",
     "hertzforge-law-sdk",
+    "hertzforge-mimo-laws",
     "hertzforge-random-laws",
     "law-fixture-bad-manifest",
+    "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
 ];
 
