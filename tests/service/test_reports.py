@@ -72,3 +72,77 @@ def test_a_report_over_the_socket(validate, tmp_path):
     validate(written['result'], 'reportExportResult')
     assert (tmp_path / 'out.html').exists()
     assert unnamed['error']['code'] == 'bad_request'
+
+
+@pytest.fixture
+def edited(project):
+    name = reports.generate(project, {'template': 'modal', 'name': 'R'})
+    return project, name
+
+
+def test_the_editor_gives_the_edit_page_and_the_reports_pane(edited, validate):
+    project, name = edited
+    out = reports.edit_page(project, {'name': name})
+    validate(out, 'reportEditorResult')
+    assert 'hforgeReport' in out['html'] and 'qt.webChannelTransport' in out['html']
+    assert out['block'] is None and out['title'] == project[name].title
+    assert out['insert'][0] == ['markdown', 'Markdown']
+    assert out['blocks'] == project[name].num_blocks
+
+
+def test_inserting_markdown_and_typing_into_it(edited, validate):
+    project, name = edited
+    count = project[name].num_blocks
+    out = reports.operate(project, {'name': name, 'op': 'insert', 'kind': 'markdown', 'at': 0})
+    validate(out, 'reportEditorResult')
+    assert out['selected'] == 0 and out['block']['kind'] == 'text'
+    assert project[name].num_blocks == count + 1
+    reports.operate(project, {'name': name, 'op': 'text', 'at': 0, 'value': '# Setup'})
+    assert project[name].blocks[0]['text'] == '# Setup'
+
+
+def test_a_result_inserted_binds_to_the_first_object_it_can_show(edited):
+    project, name = edited
+    out = reports.operate(project, {'name': name, 'op': 'insert', 'kind': 'cmif'})
+    block = project[name].blocks[out['selected']]
+    assert block['kind'] == 'plot' and block['mode'] == 'cmif' and block['source'] == 'FRF'
+    fields = {f['field']: f for f in out['block']['fields']}
+    assert fields['source']['value'] == 'FRF'
+    assert ['FRF', 'FRF'] in fields['source']['options']
+
+
+def test_a_block_is_moved_captioned_repointed_and_removed(edited):
+    project, name = edited
+    report = project[name]
+    first = report.blocks[0]
+    out = reports.operate(project, {'name': name, 'op': 'move', 'from': 0, 'to': 2})
+    assert report.blocks[1] is first and out['selected'] == 1
+    at = reports.operate(project, {'name': name, 'op': 'insert', 'kind': 'cmif'})['selected']
+    reports.operate(project, {'name': name, 'op': 'field', 'at': at, 'field': 'caption',
+                              'value': 'The CMIF'})
+    assert report.blocks[at]['caption'] == 'The CMIF'
+    with pytest.raises(ProtocolError, match='is not something block'):
+        reports.operate(project, {'name': name, 'op': 'field', 'at': at, 'field': 'source',
+                                  'value': 'Nothing'})
+    count = report.num_blocks
+    out = reports.operate(project, {'name': name, 'op': 'remove', 'at': at})
+    assert report.num_blocks == count - 1 and out['selected'] is None
+
+
+def test_the_title_and_marking_are_the_reports(edited):
+    project, name = edited
+    reports.operate(project, {'name': name, 'op': 'title', 'value': ' Plate survey '})
+    reports.operate(project, {'name': name, 'op': 'marking', 'value': ''})
+    out = reports.operate(project, {'name': name, 'op': 'marking_color', 'value': 'red'})
+    assert (out['title'], out['marking'], out['marking_color']) == ('Plate survey', '', 'red')
+    with pytest.raises(ProtocolError, match='needs a title'):
+        reports.operate(project, {'name': name, 'op': 'title', 'value': ' '})
+    with pytest.raises(ProtocolError, match='there is no block 999'):
+        reports.operate(project, {'name': name, 'op': 'remove', 'at': 998})
+
+
+def test_a_selection_from_the_page_comes_back_without_the_page(edited, validate):
+    project, name = edited
+    out = reports.edit_page(project, {'name': name, 'selected': 0, 'page': False})
+    validate(out, 'reportEditorResult')
+    assert 'html' not in out and out['block']['index'] == 0

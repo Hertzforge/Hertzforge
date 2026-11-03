@@ -16,7 +16,8 @@ from typing import Any
 
 from .protocol import bad_request, not_found, refused
 
-REPORT_METHODS = ('report.generate', 'report.render', 'report.export')
+REPORT_METHODS = ('report.generate', 'report.render', 'report.export', 'report.editor',
+                  'report.operate')
 
 #: the starter templates, as VD offers them; 'empty' starts blank
 TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'empty')
@@ -85,3 +86,38 @@ def export(project: Any, params: Mapping[str, Any]) -> str:
             os.remove(partial)
         raise refused(f'could not write {path}: {error.strerror or error}') from None
     return path
+
+
+def _selected(params: Mapping[str, Any], method: str) -> int | None:
+    selected = params.get('selected')
+    if selected is not None and (isinstance(selected, bool) or not isinstance(selected, int)):
+        raise bad_request(f'{method} "selected" is a block index, or null')
+    return selected
+
+
+def edit_page(project: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`report.editor`: the report's edit page and its pane
+    (`report_editor.editor`)."""
+    from . import report_editor
+
+    name = _report(project, params, 'report.editor')
+    theme = params.get('theme')
+    if theme is not None and theme not in THEMES:
+        raise bad_request('report.editor "theme" is light or dark')
+    page = params.get('page', True)
+    if not isinstance(page, bool):
+        raise bad_request('report.editor "page" is true or false')
+    return report_editor.editor(project, name, _selected(params, 'report.editor'), theme, page)
+
+
+def operate(project: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`report.operate`: one of the editor's operations, then the edit
+    page and pane again with the block it leaves selected."""
+    from . import report_editor
+
+    name = _report(project, params, 'report.operate')
+    _selected(params, 'report.operate')
+    selected = report_editor.operate(project, name, params)
+    theme = params.get('theme')
+    return report_editor.editor(project, name, selected,
+                                theme if theme in THEMES else None)
