@@ -285,11 +285,24 @@ pub fn law_bytes(name: &str) -> Vec<u8> {
 
 pub const BUDGET: Duration = Duration::from_secs(20);
 
+/// The law file `name`, compiled once per test binary (compiling a law is
+/// the slow part, and a loaded law instantiates as often as needed).
 pub fn load(name: &str) -> LoadedMimoLaw {
-    LawHost::new(HostConfig::default())
-        .expect("the host starts")
-        .load_mimo(&law_bytes(name))
-        .unwrap_or_else(|e| panic!("{name} loads: {e}"))
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static HOST: OnceLock<LawHost> = OnceLock::new();
+    static LAWS: OnceLock<Mutex<HashMap<String, LoadedMimoLaw>>> = OnceLock::new();
+    let host = HOST.get_or_init(|| LawHost::new(HostConfig::default()).expect("the host starts"));
+    let mut laws = LAWS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    laws.entry(name.to_string())
+        .or_insert_with(|| {
+            host.load_mimo(&law_bytes(name))
+                .unwrap_or_else(|e| panic!("{name} loads: {e}"))
+        })
+        .clone()
 }
 
 /// The law file `name` built for `setup` with `params`, as the controller's
@@ -422,4 +435,211 @@ pub fn parity(
         csd = cross(&s.plant, &last);
     }
     p
+}
+
+// -------------------------------------------------------------------------
+// Plants and references built to order
+// -------------------------------------------------------------------------
+
+/// A plant with the given singular values on every line and random singular
+/// vectors: `H = U diag(s) V^H`, `nc` by `nd`. `s` has `min(nc, nd)` values.
+pub fn plant_with_singular_values(
+    seed: u64,
+    nc: usize,
+    nd: usize,
+    lines: usize,
+    s: &[f64],
+) -> MatrixStack {
+    let mut rng = Rng::new(seed ^ 0xabcd);
+    let mut a = MatrixStack::zeros(lines, nc, nd);
+    for v in a.data_mut() {
+        *v = rng.cnormal();
+    }
+    let svd = hertzforge_sdm::linalg::svd(&a).expect("svd");
+    let k = svd.k();
+    assert_eq!(s.len(), k);
+    let mut h = MatrixStack::zeros(lines, nc, nd);
+    for line in 0..lines {
+        let (u, v) = (svd.u.line(line), svd.v.line(line));
+        for r in 0..nc {
+            for c in 0..nd {
+                let mut x = C64::new(0.0, 0.0);
+                for j in 0..k {
+                    x += u[r * k + j] * s[j] * v[c * k + j].conj();
+                }
+                h.set(line, r, c, x);
+            }
+        }
+    }
+    h
+}
+
+/// A well-conditioned plant: singular values spread evenly over [1, 2]
+/// (condition number 2) on every line.
+pub fn well_conditioned(seed: u64, nc: usize, nd: usize, lines: usize) -> MatrixStack {
+    let k = nc.min(nd);
+    let s: Vec<f64> = (0..k)
+        .map(|j| 2.0 - j as f64 / (k.max(2) - 1) as f64)
+        .collect();
+    plant_with_singular_values(seed, nc, nd, lines, &s)
+}
+
+/// A random positive semi-definite `n` by `n` matrix of full rank, row-major,
+/// scaled to a mean diagonal of `level`.
+pub fn random_psd(rng: &mut Rng, n: usize, level: f64) -> Vec<C64> {
+    let a: Vec<C64> = (0..n * n).map(|_| rng.cnormal()).collect();
+    let mut g = matmul(&a, &ctrans(&a, n, n), n, n, n);
+    let mean = (0..n).map(|i| g[i * n + i].re).sum::<f64>() / n as f64;
+    for v in &mut g {
+        *v *= level / mean;
+    }
+    g
+}
+
+/// A reference the plant can reach: `H X H^H` with `X` a random full-rank
+/// drive SDM, in band only.
+pub fn reachable_reference(plant: &MatrixStack, seed: u64, band: (usize, usize)) -> HermitianStack {
+    let (lines, _, nd) = plant.dims();
+    let mut rng = Rng::new(seed ^ 0x5eed);
+    let mut x = HermitianStack::zeros(lines, nd);
+    for line in band.0..band.1 {
+        let g = random_psd(&mut rng, nd, 1e-2 * (1.0 + 0.5 * (0.2 * line as f64).sin()));
+        for r in 0..nd {
+            for c in r..nd {
+                x.set(line, r, c, g[r * nd + c]);
+            }
+        }
+    }
+    congruence(plant, &x)
+}
+
+/// The plant estimate with a relative complex error of size `rel` on every
+/// element.
+pub fn perturbed(plant: &MatrixStack, seed: u64, rel: f64) -> MatrixStack {
+    let mut rng = Rng::new(seed ^ 0xfeed);
+    let mut h = plant.clone();
+    for v in h.data_mut() {
+        *v *= C64::new(1.0, 0.0) + rng.cnormal() * rel;
+    }
+    h
+}
+
+/// The plant estimate off by one complex gain `g` on every line (the singular
+/// vectors are kept).
+pub fn scaled(plant: &MatrixStack, g: C64) -> MatrixStack {
+    let mut h = plant.clone();
+    for v in h.data_mut() {
+        *v *= g;
+    }
+    h
+}
+
+/// A run on `plant` with `reference` and the law handed `frf`.
+pub fn run_on(
+    seed: u64,
+    plant: MatrixStack,
+    frf: MatrixStack,
+    reference: HermitianStack,
+    band: (usize, usize),
+    eps: f64,
+) -> Synthetic {
+    let mut s = Synthetic::with_plant(seed, plant, band, eps);
+    s.frf = frf;
+    s.setup.reference = reference;
+    s
+}
+
+/// What a closed-loop run produced: every drive (the seed's first) and every
+/// output.
+pub struct Run {
+    pub outputs: Vec<MimoLoopOutputs>,
+}
+
+impl Run {
+    pub fn drives(&self) -> impl Iterator<Item = &HermitianStack> {
+        self.outputs.iter().map(|o| &o.drive)
+    }
+
+    pub fn last(&self) -> &HermitianStack {
+        &self.outputs.last().expect("a loop ran").drive
+    }
+
+    pub fn scalar(&self, l: usize, key: &str) -> f64 {
+        match self.outputs[l]
+            .diagnostics
+            .iter()
+            .find(|d| d.key == key)
+            .map(|d| &d.data)
+        {
+            Some(DiagnosticData::Scalar(v)) => *v,
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+
+    pub fn per_line(&self, l: usize, key: &str) -> Vec<f64> {
+        match self.outputs[l]
+            .diagnostics
+            .iter()
+            .find(|d| d.key == key)
+            .map(|d| &d.data)
+        {
+            Some(DiagnosticData::PerLine(v)) => v.clone(),
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+}
+
+/// Run `law` closed loop on `s` for `loops` iterations after the seed: each
+/// loop the response is measured through the true plant (with the run's
+/// perturbation) from the drive the law returned last.
+pub fn closed_loop(law: &mut dyn MimoControlLaw, s: &Synthetic, loops: usize) -> Run {
+    let needs = law.needs().to_vec();
+    let mut response = s.sysid_response.clone();
+    let mut last = s.sysid_drive.clone();
+    let mut csd = cross(&s.plant, &last);
+    let mut outputs = Vec::new();
+    for l in 0..=loops as u64 {
+        let inputs = s.inputs(&response, &last, &csd, l, &needs);
+        let out = if l == 0 {
+            law.seed(&inputs)
+        } else {
+            law.iterate(&inputs)
+        }
+        .unwrap_or_else(|e| panic!("loop {l}: {e}"));
+        last = out.drive.clone();
+        response = s.respond(&last, l + 1);
+        csd = cross(&s.plant, &last);
+        outputs.push(out);
+    }
+    Run { outputs }
+}
+
+/// The worst `|10 log10(response / reference)|` over every control on every
+/// in-band line, for the noiseless response of `drive` through the true plant.
+pub fn worst_db(s: &Synthetic, drive: &HermitianStack) -> f64 {
+    let y = congruence(&s.plant, drive);
+    let mut worst: f64 = 0.0;
+    for line in s.setup.band.0..s.setup.band.1 {
+        for c in 0..s.setup.controls {
+            let (a, b) = (y.get(line, c, c).re, s.setup.reference.get(line, c, c).re);
+            worst = worst.max((10.0 * (a / b).log10()).abs());
+        }
+    }
+    worst
+}
+
+/// The smallest eigenvalue relative to the largest, over every line of `g`
+/// (0 for an all-zero line).
+pub fn worst_eigen_ratio(g: &HermitianStack) -> f64 {
+    let e = hertzforge_sdm::linalg::eigh(g).expect("eigh");
+    let n = g.n();
+    let mut worst: f64 = 0.0;
+    for line in 0..g.lines() {
+        let v = &e.values[line * n..(line + 1) * n];
+        let max = v.iter().copied().fold(0.0f64, f64::max);
+        if max > 0.0 {
+            worst = worst.min(v[0] / max);
+        }
+    }
+    worst
 }
