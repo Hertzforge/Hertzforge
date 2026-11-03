@@ -228,6 +228,37 @@ export interface WaterfallView {
 	/** The value of the quantity drawn. */
 	quantity?: string;
 	note?: string;
+	/** A stage: the depth axis's labels, front to back, in place of the records'. */
+	stations?: string[];
+	/** Each record's station; two records can share one. */
+	depths?: number[];
+	/** Each record's pen: 'measured' is colored by level, any other role in its color. */
+	roles?: Role[];
+	/** Limit bands; one with no `outer` runs to the stage's top or floor. */
+	zones?: StageZone[];
+	/** Lines past an abort limit: one rectangle each, from the limit to the top or floor. */
+	exceed?: StageExceed[];
+	/** One abscissa a station each: translucent walls from floor to top. */
+	walls?: Float32Array[];
+	/** The records are one surface, each on the same abscissa. */
+	surface?: boolean;
+}
+
+export interface StageZone {
+	station: number;
+	kind: 'warning' | 'abort';
+	side: 'upper' | 'lower';
+	x: Float32Array;
+	inner: Float32Array;
+	outer?: Float32Array;
+}
+
+export interface StageExceed {
+	station: number;
+	side: 'upper' | 'lower';
+	x0: Float32Array;
+	x1: Float32Array;
+	z: Float32Array;
 }
 
 /** One value per row and column, such as a MAC (schema/PROTOCOL.md, `matrix`). */

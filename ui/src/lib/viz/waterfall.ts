@@ -149,3 +149,118 @@ export function pickedPoint(pixels: Uint8Array, size: number): number | null {
 	}
 	return best;
 }
+
+/**
+ * Triangle indices for a surface: record r and r + 1 are joined between points i and i + 1 when
+ * the two records have as many points and all four corners are drawable. A scalogram's rows are
+ * on one clock, so every row pair joins.
+ */
+export function surfaceIndex(
+	offsets: ArrayLike<number>,
+	x: ArrayLike<number>,
+	z: ArrayLike<number>,
+	logX: boolean,
+	logZ: boolean
+): Uint32Array {
+	const out: number[] = [];
+	const ok = (i: number) => drawable(x[i], logX) && drawable(z[i], logZ);
+	for (let r = 0; r + 2 < offsets.length; r++) {
+		const a = offsets[r];
+		const b = offsets[r + 1];
+		const n = b - a;
+		if (offsets[r + 2] - b !== n) continue;
+		for (let i = 0; i + 1 < n; i++) {
+			const p = a + i;
+			const q = b + i;
+			if (ok(p) && ok(p + 1) && ok(q) && ok(q + 1)) out.push(p, p + 1, q + 1, p, q + 1, q);
+		}
+	}
+	return Uint32Array.from(out);
+}
+
+/** The station each point stands at: its record's, from `depths`, or the record itself. */
+export function stationOf(offsets: ArrayLike<number>, points: number, depths?: ArrayLike<number>): Float32Array {
+	const out = recordOf(offsets, points);
+	if (depths) for (let i = 0; i < points; i++) out[i] = depths[out[i]];
+	return out;
+}
+
+/** Where a value lands on the stage: x across, z up (null past the axis), station back. */
+export interface StageMap {
+	x(v: number): number | null;
+	z(v: number): number | null;
+	depth(station: number): number;
+}
+
+/** A map onto `STAGE` for these ranges; a level past the range is held at the top or floor. */
+export function stageMap(xRange: [number, number], logX: boolean, zRange: [number, number], logZ: boolean, stations: number): StageMap {
+	return {
+		x: (v) => (drawable(v, logX) ? fraction(v, xRange, logX) * STAGE.x : null),
+		z: (v) => (drawable(v, logZ) ? Math.min(1, Math.max(0, fraction(v, zRange, logZ))) * STAGE.z : null),
+		depth: (s) => (stations > 1 ? (s / (stations - 1)) * STAGE.y : 0)
+	};
+}
+
+function quad(out: number[], a: number[], b: number[], c: number[], d: number[]) {
+	out.push(...a, ...b, ...c, ...a, ...c, ...d);
+}
+
+/**
+ * A limit band's triangles at its station, between `inner` and `outer`, or out to the top (an
+ * upper band) or floor (a lower one) when there is no `outer`. A segment with a gap at either end
+ * is left out.
+ */
+export function zoneTriangles(
+	zone: { station: number; side: 'upper' | 'lower'; x: ArrayLike<number>; inner: ArrayLike<number>; outer?: ArrayLike<number> },
+	map: StageMap,
+	out: number[] = []
+): number[] {
+	const y = map.depth(zone.station);
+	const edge = zone.side === 'upper' ? STAGE.z : 0;
+	const at = (i: number): [number, number, number] | null => {
+		const x = map.x(zone.x[i]);
+		const a = map.z(zone.inner[i]);
+		const b = zone.outer ? map.z(zone.outer[i]) : edge;
+		return x === null || a === null || b === null ? null : [x, a, b];
+	};
+	for (let i = 0; i + 1 < zone.x.length; i++) {
+		const p = at(i);
+		const q = at(i + 1);
+		if (!p || !q) continue;
+		quad(out, [p[0], y, p[1]], [q[0], y, q[1]], [q[0], y, q[2]], [p[0], y, p[2]]);
+	}
+	return out;
+}
+
+/** Each line past an abort limit as a rectangle across its bin, from the limit to the top or floor. */
+export function exceedTriangles(
+	hit: { station: number; side: 'upper' | 'lower'; x0: ArrayLike<number>; x1: ArrayLike<number>; z: ArrayLike<number> },
+	map: StageMap,
+	out: number[] = []
+): number[] {
+	const y = map.depth(hit.station);
+	const edge = hit.side === 'upper' ? STAGE.z : 0;
+	for (let i = 0; i < hit.x0.length; i++) {
+		const a = map.x(hit.x0[i]);
+		const b = map.x(hit.x1[i]);
+		const z = map.z(hit.z[i]);
+		if (a === null || b === null || z === null) continue;
+		const lo = Math.max(0, Math.min(STAGE.x, a));
+		const hi = Math.max(0, Math.min(STAGE.x, b));
+		if (hi > lo) quad(out, [lo, y, z], [hi, y, z], [hi, y, edge], [lo, y, edge]);
+	}
+	return out;
+}
+
+/** A wall from floor to top through one abscissa a station, as a scalogram's cone is drawn. */
+export function wallTriangles(wall: ArrayLike<number>, map: StageMap, out: number[] = []): number[] {
+	for (let k = 0; k + 1 < wall.length; k++) {
+		const a = map.x(wall[k]);
+		const b = map.x(wall[k + 1]);
+		if (a === null || b === null) continue;
+		const ya = map.depth(k);
+		const yb = map.depth(k + 1);
+		quad(out, [a, ya, 0], [b, yb, 0], [b, yb, STAGE.z], [a, ya, STAGE.z]);
+	}
+	return out;
+}

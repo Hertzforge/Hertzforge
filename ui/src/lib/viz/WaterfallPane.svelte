@@ -15,17 +15,26 @@
 	 * Hovering reads the point under the cursor by drawing the curves once more, into a few pixels
 	 * around it, with each vertex writing its own index as its color; one small draw however many
 	 * points there are, where a search on the CPU would visit every segment.
+	 *
+	 * The same pane draws Visual Dynamics' stages: records standing at named stations (two
+	 * densities paired at each channel, a specification's limits beside its target), drawn in
+	 * their role's color where they are not the measurement, with translucent limit bands, the
+	 * lines past an abort limit as rectangles, and a scalogram as a surface inside the walls of
+	 * its cone of influence.
 	 */
 	import { onDestroy, onMount } from 'svelte';
 	import {
 		BufferAttribute,
 		BufferGeometry,
 		Color,
+		DoubleSide,
 		DataTexture,
 		GLSL3,
 		LinearFilter,
 		LineBasicMaterial,
 		LineSegments,
+		Mesh,
+		MeshBasicMaterial,
 		NoBlending,
 		PerspectiveCamera,
 		RawShaderMaterial,
@@ -38,11 +47,27 @@
 	} from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import type { ParamValues } from '$lib/forms/params';
-	import type { WaterfallView } from '$lib/protocol/types';
+	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
 	import { formatCount, formatNumber, formatTick, withUnit } from './format';
-	import { STAGE, axisTicks, fraction, levelRange, namedRecords, pickedPoint, recordOf, segmentIndex } from './waterfall';
+	import { ROLE_STYLES } from './roles';
+	import {
+		STAGE,
+		axisTicks,
+		exceedTriangles,
+		fraction,
+		levelRange,
+		namedRecords,
+		pickedPoint,
+		recordOf,
+		segmentIndex,
+		stageMap,
+		stationOf,
+		surfaceIndex,
+		wallTriangles,
+		zoneTriangles
+	} from './waterfall';
 
 	interface Props {
 		view: WaterfallView;
@@ -54,6 +79,20 @@
 
 	/** Side of the square read back around the cursor, in pixels: lines are one pixel wide. */
 	const PICK = 9;
+
+	/** The roles drawn in their own color, in the order of the shader's `uTones`; 'measured' is 0, by level. */
+	const TONES: Role[] = ['reference', 'tolerance', 'abort', 'limit', 'drive', 'other'];
+
+	/** The stage's marks, by what they mean: their color variable and how much they show through. */
+	const MARKS = {
+		warning: { colorVar: '--series-tolerance', opacity: 0.12, label: 'Between warning and abort' },
+		over: { colorVar: '--series-abort', opacity: 0.1, label: 'Past abort, above' },
+		under: { colorVar: '--blue-2', opacity: 0.1, label: 'Past abort, below' },
+		overHit: { colorVar: '--series-abort', opacity: 0.6, label: 'Lines above the abort limit' },
+		underHit: { colorVar: '--blue-2', opacity: 0.6, label: 'Lines below the abort limit' },
+		wall: { colorVar: '--text-3', opacity: 0.14, label: 'Cone of influence' }
+	} as const;
+	type MarkKind = keyof typeof MARKS;
 
 	type Facing = 'perspective' | 'top' | 'front';
 
@@ -74,6 +113,9 @@
 	});
 
 	const recordCount = $derived(view.records.length);
+	/** The depth axis: the stations when the view names them, else one a record. */
+	const stationCount = $derived(view.stations?.length ?? view.records.length);
+	const depthLabels = $derived(view.stations ?? view.records);
 	const pointCount = $derived(view.x_values.length);
 	const xRange = $derived.by((): [number, number] => {
 		const [a, b] = view.x_range;
@@ -88,7 +130,17 @@
 	const zRange = $derived(levelRange(view.z_values, logZ, view.z_range));
 	const xTicks = $derived(axisTicks(xRange, logX).filter((t) => t >= xRange[0] && t <= xRange[1]));
 	const zTicks = $derived(axisTicks(zRange, logZ).filter((t) => t >= zRange[0] * (1 - 1e-9) && t <= zRange[1] * (1 + 1e-9)));
-	const named = $derived(namedRecords(recordCount));
+	const named = $derived(namedRecords(stationCount));
+	/** The marks this view has, for the key beside the legend. */
+	const markKinds = $derived.by((): MarkKind[] => {
+		const kinds = new Set<MarkKind>();
+		for (const z of view.zones ?? []) kinds.add(z.kind === 'warning' ? 'warning' : z.side === 'upper' ? 'over' : 'under');
+		for (const e of view.exceed ?? []) kinds.add(e.side === 'upper' ? 'overHit' : 'underHit');
+		if (view.walls?.length) kinds.add('wall');
+		return [...kinds];
+	});
+	/** The roles drawn in a color of their own, for the key. */
+	const toneRoles = $derived(TONES.filter((r) => view.roles?.includes(r)));
 
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
@@ -96,7 +148,8 @@
 	let camera: PerspectiveCamera;
 	let controls: OrbitControls;
 	let geometry: BufferGeometry;
-	let curves: LineSegments;
+	let curves: LineSegments | Mesh;
+	const marks = new Map<MarkKind, Mesh>();
 	let frame: LineSegments | null = null;
 	let colorTexture: DataTexture;
 	const materials: Material[] = [];
@@ -106,7 +159,8 @@
 		uXLog: { value: 0 },
 		uZLog: { value: 0 },
 		uDepth: { value: 0 },
-		uMap: { value: null as DataTexture | null }
+		uMap: { value: null as DataTexture | null },
+		uTones: { value: TONES.map(() => new Color()) }
 	};
 	let raf = 0;
 	let dirty = true;
@@ -127,6 +181,8 @@
 		in float ax;
 		in float az;
 		in float arec;
+		in float atone;
+		flat out float vTone;
 		uniform mat4 modelViewMatrix;
 		uniform mat4 projectionMatrix;
 		uniform vec2 uX;
@@ -143,6 +199,7 @@
 			float tz = clamp((z - uZ.x) / (uZ.y - uZ.x), 0.0, 1.0);
 			float depth = uDepth > 0.0 ? arec / uDepth : 0.0;
 			vLevel = tz;
+			vTone = atone;
 			#ifdef PICKING
 			vId = uint(gl_VertexID) + 1u;
 			#endif
@@ -153,16 +210,20 @@
 	const fragmentShader = /* glsl */ `
 		precision highp float;
 		uniform sampler2D uMap;
+		uniform vec3 uTones[${TONES.length}];
 		in float vLevel;
+		flat in float vTone;
 		out vec4 outColor;
 		void main() {
-			outColor = vec4(texture(uMap, vec2(vLevel, 0.5)).rgb, 1.0);
+			int tone = int(vTone + 0.5);
+			outColor = vec4(tone > 0 ? uTones[tone - 1] : texture(uMap, vec2(vLevel, 0.5)).rgb, 1.0);
 		}`;
 
 	// a vertex's index, plus one so that zero is "nothing here", in four bytes
 	const pickFragmentShader = /* glsl */ `
 		precision highp float;
 		flat in uint vId;
+		flat in float vTone;
 		out vec4 outColor;
 		void main() {
 			outColor = vec4(uvec4(vId, vId >> 8u, vId >> 16u, vId >> 24u) & 255u) / 255.0;
@@ -196,8 +257,10 @@
 		uniforms.uZ.value = span(zRange, logZ);
 		uniforms.uXLog.value = logX ? 1 : 0;
 		uniforms.uZLog.value = logZ ? 1 : 0;
-		geometry.setIndex(new BufferAttribute(segmentIndex(view.offsets, view.x_values, view.z_values, logX, logZ), 1));
+		const index = view.surface ? surfaceIndex : segmentIndex;
+		geometry.setIndex(new BufferAttribute(index(view.offsets, view.x_values, view.z_values, logX, logZ), 1));
 		buildFrame();
+		buildMarks();
 		dirty = true;
 	}
 
@@ -236,9 +299,43 @@
 
 	let frameMaterial: LineBasicMaterial;
 
+	/** The bands, the exceedances and the walls, one translucent mesh for each kind, rebuilt on a scale change. */
+	function buildMarks() {
+		const map = stageMap(xRange, logX, zRange, logZ, stationCount);
+		const found = new Map<MarkKind, number[]>();
+		const into = (kind: MarkKind) => found.get(kind) ?? (found.set(kind, []), found.get(kind)!);
+		for (const z of view.zones ?? []) zoneTriangles(z, map, into(z.kind === 'warning' ? 'warning' : z.side === 'upper' ? 'over' : 'under'));
+		for (const e of view.exceed ?? []) exceedTriangles(e, map, into(e.side === 'upper' ? 'overHit' : 'underHit'));
+		for (const w of view.walls ?? []) wallTriangles(w, map, into('wall'));
+		for (const [kind, mesh] of marks) {
+			scene.remove(mesh);
+			mesh.geometry.dispose();
+			(mesh.material as Material).dispose();
+			marks.delete(kind);
+		}
+		for (const [kind, positions] of found) {
+			if (!positions.length) continue;
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+			const material = new MeshBasicMaterial({
+				color: new Color(cssVar(MARKS[kind].colorVar)),
+				transparent: true,
+				opacity: MARKS[kind].opacity,
+				side: DoubleSide,
+				depthWrite: false
+			});
+			const mesh = new Mesh(g, material);
+			mesh.renderOrder = 1;
+			scene.add(mesh);
+			marks.set(kind, mesh);
+		}
+	}
+
 	function applyTheme() {
 		if (!renderer) return;
 		frameMaterial.color = new Color(cssVar('--line-2'));
+		TONES.forEach((role, k) => uniforms.uTones.value[k].set(cssVar(ROLE_STYLES[role].colorVar)));
+		for (const [kind, mesh] of marks) (mesh.material as MeshBasicMaterial).color.set(cssVar(MARKS[kind].colorVar));
 		dirty = true;
 	}
 
@@ -291,13 +388,16 @@
 		geometry.setAttribute('ax', new BufferAttribute(view.x_values, 1));
 		geometry.setAttribute('az', new BufferAttribute(view.z_values, 1));
 		records = recordOf(view.offsets, view.x_values.length);
-		geometry.setAttribute('arec', new BufferAttribute(records, 1));
+		geometry.setAttribute('arec', new BufferAttribute(stationOf(view.offsets, view.x_values.length, view.depths), 1));
+		const tones = new Float32Array(view.x_values.length);
+		if (view.roles) for (let i = 0; i < tones.length; i++) tones[i] = TONES.indexOf(view.roles[records[i]]) + 1;
+		geometry.setAttribute('atone', new BufferAttribute(tones, 1));
 		colorTexture = mapTexture();
 		uniforms.uMap.value = colorTexture;
-		uniforms.uDepth.value = Math.max(0, recordCount - 1);
-		curveMaterial = new RawShaderMaterial({ glslVersion: GLSL3, vertexShader, fragmentShader, uniforms });
+		uniforms.uDepth.value = Math.max(0, stationCount - 1);
+		curveMaterial = new RawShaderMaterial({ glslVersion: GLSL3, vertexShader, fragmentShader, uniforms, side: DoubleSide });
 		materials.push(curveMaterial);
-		curves = new LineSegments(geometry, curveMaterial);
+		curves = view.surface ? new Mesh(geometry, curveMaterial) : new LineSegments(geometry, curveMaterial);
 		curves.frustumCulled = false;
 		scene.add(curves);
 		pickMaterial = new RawShaderMaterial({
@@ -306,7 +406,8 @@
 			fragmentShader: pickFragmentShader,
 			uniforms,
 			defines: { PICKING: 1 },
-			blending: NoBlending
+			blending: NoBlending,
+			side: DoubleSide
 		});
 		materials.push(pickMaterial);
 		pickTarget = new WebGLRenderTarget(PICK, PICK);
@@ -383,6 +484,7 @@
 		camera.setViewOffset(w, h, px - half, py - half, PICK, PICK);
 		curves.material = pickMaterial;
 		if (frame) frame.visible = false;
+		for (const mesh of marks.values()) mesh.visible = false;
 		renderer.setRenderTarget(pickTarget);
 		renderer.clear();
 		renderer.render(scene, camera);
@@ -390,6 +492,7 @@
 		renderer.readRenderTargetPixels(pickTarget, 0, 0, PICK, PICK, pickPixels);
 		curves.material = curveMaterial;
 		if (frame) frame.visible = true;
+		for (const mesh of marks.values()) mesh.visible = true;
 		camera.clearViewOffset();
 		const point = pickedPoint(pickPixels, PICK);
 		if (point === null || point >= records.length) {
@@ -397,10 +500,11 @@
 			return;
 		}
 		const record = records[point];
+		const station = view.depths ? view.depths[record] : record;
 		probe
 			.set(
 				fraction(view.x_values[point], xRange, logX) * STAGE.x,
-				recordCount > 1 ? (record / (recordCount - 1)) * STAGE.y : 0,
+				stationCount > 1 ? (station / (stationCount - 1)) * STAGE.y : 0,
 				Math.min(1, Math.max(0, fraction(view.z_values[point], zRange, logZ))) * STAGE.z
 			)
 			.project(camera);
@@ -464,6 +568,10 @@
 		controls.dispose();
 		geometry.dispose();
 		frame?.geometry.dispose();
+		for (const mesh of marks.values()) {
+			mesh.geometry.dispose();
+			(mesh.material as Material).dispose();
+		}
 		colorTexture.dispose();
 		pickTarget.dispose();
 		for (const m of materials) m.dispose();
@@ -499,7 +607,7 @@
 	// the level axis stands at the back right, where a spectrum's levels are usually lowest, so
 	// the curves rarely pass in front of its labels
 	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
-	const recordAt = (r: number) => `${STAGE.x + 0.03},${recordCount > 1 ? (r / (recordCount - 1)) * STAGE.y : 0},0`;
+	const recordAt = (r: number) => `${STAGE.x + 0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
 
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
@@ -549,7 +657,7 @@
 			{/each}
 		{/if}
 		{#each named as r (r)}
-			<span class="tick rec" data-at={recordAt(r)}>{view.records[r]}</span>
+			<span class="tick rec" data-at={recordAt(r)}>{depthLabels[r]}</span>
 		{/each}
 		<span class="title" data-at="{STAGE.x / 2},-0.11,0">{withUnit(view.x.label, view.x.unit)}</span>
 	</div>
@@ -603,8 +711,19 @@
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
 			</div>
 		</div>
+		{#if markKinds.length || toneRoles.length}
+			<ul class="key" aria-label="Key" data-testid="waterfall-key">
+				{#each toneRoles as role (role)}
+					<li><span class="line" style:background="var({ROLE_STYLES[role].colorVar})"></span>{role === 'reference' ? 'Reference' : role === 'tolerance' ? 'Warning limits' : role === 'abort' ? 'Abort limits' : role}</li>
+				{/each}
+				{#each markKinds as kind (kind)}
+					<li><span class="swatch" style:background="var({MARKS[kind].colorVar})" style:opacity={Math.max(0.45, MARKS[kind].opacity)}></span>{MARKS[kind].label}</li>
+				{/each}
+			</ul>
+		{/if}
 		<div class="stats num" aria-live="off">
 			{#if view.page}<span data-testid="waterfall-page">Page {view.page.number} of {view.page.count}, {formatCount(view.page.records)} records</span>{/if}
+			{#if view.stations && !view.surface}<span>{formatCount(stationCount)} stations</span>{/if}
 			<span>{formatCount(recordCount)} records</span>
 			<span>{formatCount(pointCount)} points</span>
 		</div>
@@ -778,6 +897,34 @@
 		margin-top: 3px;
 		font-size: var(--text-2xs);
 		color: var(--text-2);
+	}
+
+	.key {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px var(--sp-3);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--text-2xs);
+		color: var(--text-2);
+	}
+
+	.key li {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+	}
+
+	.key .line {
+		width: 14px;
+		height: 2px;
+	}
+
+	.key .swatch {
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
 	}
 
 	.stats {

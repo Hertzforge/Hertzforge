@@ -201,6 +201,30 @@ and level. Records that do not fit one
 scene are on later pages, never drawn coarser. This is Visual Dynamics' 3-D data view
 (`hertzforge.drawing.viz.waterfall`).
 
+A waterfall can also be one of Visual Dynamics' stages, with these optional fields:
+
+```
+ "stations":["101Z+","102Z+",...],          the depth axis's labels, front to back
+ "depths":[0,0,1,1,...],                    each record's station: two records can share one
+ "roles":["reference","measured",...],      each record's pen; "measured" is colored by level,
+                                            any other role is drawn in that role's color
+ "zones":[{"station":0,"kind":"warning"|"abort","side":"upper"|"lower",
+           "x":{"$array"..},"inner":{"$array"..},"outer":{"$array"..}}],
+                                            a limit band; no outer runs it to the top or floor
+ "exceed":[{"station":0,"side":"upper"|"lower","x0":..,"x1":..,"z":..}],
+                                            lines past an abort limit: one rectangle each, from
+                                            its limit's level to the top (upper) or floor (lower)
+ "walls":[{"$array"..}],                    one abscissa a station: a translucent wall
+ "surface":true                             the records are one surface, each on the same
+                                            abscissa, rather than separate lines
+ "note":"..."                               optional words under the toolbar
+```
+
+With `stations` the depth axis is the stations, not the records; `records` still names each
+curve for hovering. The paired stage overlays two densities at each channel they share, the
+banded stage draws a specification's bands with or without a measurement, and a scalogram is a
+surface with its cone of influence as two walls.
+
 **`matrix`** (one value per row and column, such as a MAC)
 
 ```

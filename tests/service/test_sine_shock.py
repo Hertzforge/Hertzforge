@@ -292,7 +292,7 @@ def test_a_tone_rides_its_own_ridge(validate):
     t = np.arange(8192) / rate
     project = Project()
     project.add('Tone', history(t, 3.0 * np.sin(2.0 * np.pi * 64.0 * t), ['1Z+']))
-    picture, ridge, reading = run(project, 'project.wavelet')
+    _surface, picture, ridge, reading = run(project, 'project.wavelet')
     wire_views([picture, ridge, reading], validate)
     assert picture['values'].shape == (len(picture['rows']['ticks']),
                                        len(picture['columns']['ticks']))
