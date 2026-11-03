@@ -653,7 +653,8 @@ class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				this.app.workspace = 'analyze';
+				// the workspaces with the project panel keep the window; any other goes to Analyze
+				if (this.app.workspace !== 'model') this.app.workspace = 'analyze';
 				this.app.analyze.selectProject();
 			}
 			return true;
