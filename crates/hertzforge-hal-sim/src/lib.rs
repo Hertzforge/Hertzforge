@@ -915,6 +915,7 @@ impl Backend for SimBackend {
         let mut plant_index = std::mem::take(&mut map_mut.plant_index);
         let mut drive_now = std::mem::take(&mut self.drive_now);
         let mut resp = std::mem::take(&mut self.resp);
+        let single_path = resp.len() == 1;
         let plant = self.plant.as_mut().expect("configure built the plant");
 
         for f in 0..frames {
@@ -938,12 +939,25 @@ impl Backend for SimBackend {
             // the commanded reference, not the plant response); every measurement
             // input reads its plant response. Deliberate, simple convention.
             let reference = drive_now.first().copied().unwrap_or(0.0);
-            for (c, (role, &k)) in roles.iter().zip(&plant_index).enumerate() {
-                let sample = match role {
-                    ChannelRole::Reference => reference,
-                    _ => resp[k],
-                };
-                out[f * n_ch + c] = sample as f32;
+            let row = &mut out[f * n_ch..(f + 1) * n_ch];
+            if single_path {
+                // One response for every measurement input. Kept as cheap per input as
+                // the loop it replaced: wide tables run this in unoptimized builds
+                // against the engine's wall-clock period check.
+                let response = resp[0];
+                for (o, role) in row.iter_mut().zip(roles.iter()) {
+                    *o = match role {
+                        ChannelRole::Reference => reference,
+                        _ => response,
+                    } as f32;
+                }
+            } else {
+                for (o, (role, &k)) in row.iter_mut().zip(roles.iter().zip(&plant_index)) {
+                    *o = match role {
+                        ChannelRole::Reference => reference,
+                        _ => resp[k],
+                    } as f32;
+                }
             }
         }
         let map_mut = self.map.as_mut().expect("checked above");

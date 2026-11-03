@@ -224,6 +224,11 @@ impl Default for RandomModalSpec {
 /// The width of the residual's locality kernel, metres.
 const KERNEL_M: f64 = 0.05;
 
+/// Kernel values below this are exactly zero, so the residual is sparse (sensors near a
+/// drive) and the plant steps only what matters. Part of the model, so the exact FRF and
+/// the stepped plant agree; the conditioning bounds are computed on the cut kernel.
+const KERNEL_CUT: f64 = 1e-6;
+
 fn uniform(rng: &mut Xorshift64, lo: f64, hi: f64) -> f64 {
     lo + (hi - lo) * rng.next_unit()
 }
@@ -321,7 +326,12 @@ pub fn random_modal(spec: &RandomModalSpec) -> NamedPlant {
     // The residual's kernel, and the bounds that size it.
     let kernel = |a: &[f64; 3], b: &[f64; 3]| -> f64 {
         let d2: f64 = (0..3).map(|k| (a[k] - b[k]).powi(2)).sum();
-        (-d2 / (KERNEL_M * KERNEL_M)).exp()
+        let v = (-d2 / (KERNEL_M * KERNEL_M)).exp();
+        if v < KERNEL_CUT {
+            0.0
+        } else {
+            v
+        }
     };
     let k_full: Vec<f64> = input_pos
         .iter()
