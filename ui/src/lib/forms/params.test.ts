@@ -38,6 +38,17 @@ describe('defaults', () => {
 		expect(defaultValues(one)).toEqual({ first: 'A', second: 'A', geometry: 'G' });
 	});
 
+	it('offers (none) first for an optional object param, and does not hide the tool for want of one', () => {
+		const levels: ParamDescriptor = { name: 'levels', label: 'Q read off', type: 'enum', default: '', options_from: 'objects:sine_level_set' };
+		const [filled] = withObjects([levels], [{ name: 'Levels', kind: 'sine_level_set', groups: [] }]);
+		expect(filled.options).toEqual([
+			{ value: '', label: '(none)' },
+			{ value: 'Levels', label: 'Levels' }
+		]);
+		expect(defaultValues([filled])).toEqual({ levels: '' });
+		expect(hasObjectsFor(withObjects([levels], []))).toBe(true);
+	});
+
 	it('falls back sensibly when a default is missing or invalid', () => {
 		expect(defaultFor({ ...tol, default: undefined })).toBe(0.5);
 		expect(defaultFor({ ...tol, default: 99 })).toBe(6);

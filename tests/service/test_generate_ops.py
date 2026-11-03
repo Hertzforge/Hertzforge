@@ -321,3 +321,27 @@ def test_realizability_reads_a_cpsd(validate):
     assert found['This line']['value'] == 'realizable'
     with pytest.raises(ProtocolError, match='the matrix is incomplete'):
         run(project, 'project.realizability', data='Specification')
+
+
+def test_an_optional_object_param_takes_none_or_a_tracked_level(validate):
+    """Sweep Rate's tracked level is optional: '' runs without one, and one
+    named reads a Q off it at each mode on each of its channels."""
+    from .test_sine_shock import _sweep
+
+    op = OPS['project.sweep_rate']
+    levels = next(p for p in op.params if p.name == 'levels')
+    assert levels.optional and levels.to_json()['default'] == ''
+    project = _sweep()
+    (added,) = project.extract_sine('Sweep')
+    kinds = {name: projects.kind_of(obj) for name, obj in project.items()}
+    alone = op.resolve({'specification': 'Profile', 'modes': '300 20'}, objects=kinds)
+    assert alone['levels'] == ''
+    *_views, reading = op.run(project, alone)
+    assert not any('Hz' in row['label'] and ',' in row['label'] and 'Z+' in row['label']
+                   for row in reading['rows'])
+    named = op.resolve({'specification': 'Profile', 'modes': '300 20', 'levels': added},
+                       objects=kinds)
+    *_views, reading = op.run(project, named)
+    assert any(row['label'] == '101Z+, 300 Hz' for row in reading['rows'])
+    with pytest.raises(ProtocolError, match='not one of the choices'):
+        op.resolve({'specification': 'Profile', 'levels': 'Nothing'}, objects=kinds)

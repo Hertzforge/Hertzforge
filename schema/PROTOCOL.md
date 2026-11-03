@@ -266,6 +266,9 @@ project's objects of those kinds, in the project's order. Left out, it takes the
 An operation run when the project has none of the kinds a required param takes is refused, and
 the refusal names the kind.
 
+An `objects:` or `verb:` enum whose `default` is `""` is optional: `""` names no object, the shell
+offers it first as "(none)", and the tool is shown even when the project has no such object.
+
 An `enum` that names an object a core verb takes sets `"options_from":"verb:<verb>"`, such as
 `verb:integrate`; the shell fills it with the objects whose `verbs` (in the project summary) list
 that verb. Which verb applies to what is the core's own table (`Project.verbs`): Integrate takes a

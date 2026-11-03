@@ -443,13 +443,51 @@ def _cell(value: Any, places: int | None = None) -> str:
     return str(value)
 
 
+SWEPT_LEVELS = Param('levels', 'Q read off', 'enum', default='',
+                     options_from='objects:sine_level_set|sine_level')
+
+
+def _swept_q(project: Any, params: dict[str, Any], spec: Any, modes: list) -> list[dict]:
+    """With a tracked sine level named, the Q read off it at each mode on
+    each of its channels, judged against the rate it was swept at
+    (`core.sweep_rate.read_swept_q`), as Visual Dynamics lists them under
+    the passes when levels of the tone are selected."""
+    from hertzforge.core.sweep_rate import read_swept_q
+
+    name = params.get('levels') or ''
+    if not name:
+        return []
+    level = project[name]
+    tone = spec.tones[params['tone'] - 1]
+    if hasattr(level, 'tone'):
+        # a set of an extraction's levels: this tone's
+        if tone.name not in level.tone_names:
+            raise refused(f'{name} holds the tones {", ".join(level.tone_names)}; not '
+                          f'{tone.name}')
+        level = level.tone(tone.name)
+    rows = []
+    for record in range(level.num_records):
+        dof = str(level.response_dof[record])
+        for frequency, _q in modes:
+            reading = _core(lambda f=frequency, r=record: read_swept_q(
+                level, spec, f, record=r, margin=params['margin']))
+            if reading is None:
+                rows.append(v.row(f'{dof}, {frequency:g} Hz', 'no peak to read there', None,
+                                  'info'))
+            else:
+                rows.append(v.row(f'{dof}, {frequency:g} Hz', _sentence(reading.describe()),
+                                  None, 'warn' if reading.flagged else 'pass'))
+    return rows
+
+
 def sweep_rate(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.sweep_rate`: one tone of a sine specification checked
     against typed modes (`core.sweep_rate.check_sweep_rate`): its path as
     frequency against time with each mode's half-power band across it,
     each pass through a band marked, too fast where its rate is over the
     margin times the rule's, and every pass in Visual Dynamics' sweep-rate
-    table."""
+    table. With a tracked level named, the Q read off it at each mode is
+    judged as well (`_swept_q`)."""
     from hertzforge.core.sweep_rate import check_sweep_rate, half_power_band
 
     name = params['specification']
@@ -495,6 +533,7 @@ def sweep_rate(project: Any, params: dict[str, Any]) -> list[dict]:
         rows.append(v.row('Note', 'No mode lies inside this tone\'s sweep', None, 'info'))
     rows += [v.row(f'{c.frequency:.4g} Hz, {c.direction}', _sentence(c.describe()), None,
                    'fail' if c.too_fast else 'pass') for c in checks]
+    rows += _swept_q(project, params, spec, modes)
     table = v.table(
         f'Sweep rate of {name}, {tone.name}',
         ('Tone', 'Mode [Hz]', 'Q', 'Pass', 'Rate', "Rule's rate", '× Rule', 'In band [s]',
@@ -993,7 +1032,7 @@ OPERATIONS = (
         summary='One tone of a sine specification against typed modes, each a frequency and '
                 'a Q: every pass through a mode\'s half-power band, and whether it is swept '
                 'too fast for the mode to build.',
-        params=(SWEEP, SWEEP_TONE, SWEEP_MODES, MARGIN),
+        params=(SWEEP, SWEEP_TONE, SWEEP_MODES, MARGIN, SWEPT_LEVELS),
         outputs=('spectrum', 'table', 'reading'), run=sweep_rate),
     Operation(
         id='project.fatigue', title='Fatigue', workspace='specify', accepts='project',

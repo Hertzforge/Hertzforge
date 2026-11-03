@@ -36,17 +36,18 @@ export function withObjects(params: ParamDescriptor[], objects: ProjectObject[])
 		const verb = objectVerb(p);
 		if (!kinds.length && !verb) return p;
 		const taken = objects.filter((o) => (verb ? (o.verbs ?? []).includes(verb) : kinds.includes(o.kind)));
-		return { ...p, options: taken.map((o) => ({ value: o.name, label: o.name })) };
+		const none = p.default === '' ? [{ value: '', label: '(none)' }] : [];
+		return { ...p, options: [...none, ...taken.map((o) => ({ value: o.name, label: o.name }))] };
 	});
 }
 
 /**
  * Whether a project tool has something to run on: every param filled from the project's objects
- * (after `withObjects`) lists at least one. A tool that does not is not shown, as Visual Dynamics
+ * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does not is not shown, as Visual Dynamics
  * offers a verb only where it applies.
  */
 export function hasObjectsFor(params: ParamDescriptor[]): boolean {
-	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || (p.options ?? []).length > 0);
+	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || p.default === '' || (p.options ?? []).length > 0);
 }
 
 function clamp(v: number, p: ParamDescriptor): number {
