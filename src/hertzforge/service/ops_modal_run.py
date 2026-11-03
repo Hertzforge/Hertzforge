@@ -226,18 +226,24 @@ def mac(run: ModalRun, params: dict[str, Any]) -> list[dict]:
 
 def _paired(run: ModalRun, matrix: dict, rows: Any, row_modes: Any,
             columns: Any, column_modes: Any) -> list[dict]:
-    """The MAC `matrix` and, when the survey has a geometry, the `shape3d`
+    """`paired` on the survey's geometry, when it has one."""
+    return paired(run.project.get('Geometry'), matrix, rows, row_modes, columns,
+                  column_modes)
+
+
+def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
+           columns: Any, column_modes: Any) -> list[dict]:
+    """The MAC `matrix` and, with a `geometry`, the `shape3d`
     view it `selects`: the row set's modes as `modes` and the column set's
     as `overlays`, each a translation per survey node, with each pair's
     `overlay_phase`, the angle that aligns the column mode with the row
     mode (`core.shapes.alignment_factor`: a real mode is defined only up to
-    its sign, a complex one up to a rotation). Without a geometry the
+    its sign, a complex one up to a rotation), as translations of the geometry's nodes. Without a geometry the
     matrix comes alone."""
     from hertzforge.core.shapes import alignment_factor
 
-    if 'Geometry' not in run.project:
+    if geometry is None:
         return [matrix]
-    geometry = run.project['Geometry']
     drawn, triangles, lines = _mesh(geometry)
 
     def on_survey(shapes: Any, k: int) -> np.ndarray:

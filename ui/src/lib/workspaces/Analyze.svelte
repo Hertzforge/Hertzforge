@@ -4,6 +4,7 @@
 	 * parameters, Run. Each run adds a result card; spectrum panes that share a `link` share a cursor.
 	 */
 	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
+	import type { Workspace } from '$lib/protocol/types';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
@@ -11,10 +12,23 @@
 
 	interface Props {
 		app: AppState;
+		/**
+		 * Show only the project's tools of this workspace (the Model workspace's), with no dataset to
+		 * pick: the same runner, the same results.
+		 */
+		only?: Workspace;
 	}
-	let { app }: Props = $props();
+	let { app, only }: Props = $props();
 
 	const a = $derived(app.analyze);
+	const tools = $derived(only ? a.tools.filter((o) => o.workspace === only) : a.tools);
+
+	// a workspace of its own works on the project, and on one of its own tools
+	$effect(() => {
+		if (!only) return;
+		if (app.project.summary && !a.onProject) a.selectProject();
+		if (a.onProject && tools.length && !tools.some((o) => o.id === a.opId)) a.selectOp(tools[0].id);
+	});
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
@@ -59,6 +73,7 @@
 <div class="analyze">
 	<aside class="side" aria-label="Dataset and tools">
 		<ProjectPanel {app} />
+		{#if !only}
 		<section class="block">
 			<h2 class="eyebrow">Dataset</h2>
 			{#if !app.catalog}
@@ -95,12 +110,13 @@
 				</dl>
 			{/if}
 		</section>
+		{/if}
 
 		{#if a.opened}
 			<section class="block">
 				<h2 class="eyebrow">Tools <span class="for">for {a.opened.kind.replace('_', ' ')} data</span></h2>
 				<div class="tools" role="radiogroup" aria-label="Tool" data-testid="tool-list">
-					{#each a.tools as op (op.id)}
+					{#each tools as op (op.id)}
 						<button class="tool" data-testid="tool-{op.id}" role="radio" aria-checked={a.opId === op.id} class:on={a.opId === op.id} onclick={() => a.selectOp(op.id)}>
 							<Icon name="tool" size={15} />
 							<span class="ttitle">{op.title}</span>
@@ -111,7 +127,7 @@
 			</section>
 		{/if}
 
-		{#if a.op && a.opened}
+		{#if a.op && a.opened && tools.includes(a.op)}
 			<section class="block panel" aria-labelledby="op-title">
 				<div class="phead">
 					<h2 id="op-title">{a.op.title}</h2>

@@ -16,7 +16,7 @@ from .datasets import _mesh
 from .descriptors import Operation, Option, Param
 from .ops_modal_run import _translations
 from .protocol import refused
-from .waterfalls import COMPONENTS, QUANTITY, waterfall_view
+from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
 #: the data objects a waterfall draws, by kind
 DATA_KINDS = ('time_history', 'psd', 'frf', 'coherence', 'multiple_coherence',
@@ -44,6 +44,56 @@ def waterfall(project: Any, params: dict[str, Any]) -> list[dict]:
     name = params['data']
     return [waterfall_view(name, project[name], params['page'],
                            params['component'], params['quantity'])]
+
+
+RECORDS = Param('records', 'Records', 'string', default='')
+
+#: the records a plot draws when none are named
+FIRST_RECORDS = 8
+
+
+def chosen_records(text: str, count: int) -> list[int]:
+    """The 0-based records '1-3, 7' names, numbered from 1 as the shell
+    shows them; the first `FIRST_RECORDS` when `text` is blank."""
+    if not text.strip():
+        return list(range(min(count, FIRST_RECORDS)))
+    out: list[int] = []
+    for part in text.replace(' ', '').split(','):
+        first, dash, last = part.partition('-')
+        try:
+            low, high = int(first), int(last) if dash else int(first)
+        except ValueError:
+            raise refused(f'{part!r} is not a record number or a range such as '
+                          '3-6') from None
+        if not 1 <= low <= high <= count:
+            raise refused(f'records run from 1 to {count}; {part} is outside them')
+        out.extend(range(low - 1, high))
+    return list(dict.fromkeys(out))
+
+
+def plot(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.plot`: chosen records of a data object as curves on one
+    plot, as Visual Dynamics' data pane draws the records picked in the
+    tree. Records of another quantity than the first are left out, since
+    they do not share an axis; the view's title says how many."""
+    import hertzforge as hz
+    from hertzforge.drawing.viz.waterfall import waterfall_arrays
+
+    name = params['data']
+    data = project[name]
+    records = chosen_records(params['records'], data.num_records)
+    arrays = waterfall_arrays(data, records, unit_system=hz.SI, exponents=False,
+                              component=params['component'])
+    if not arrays['drawn']:
+        raise refused(f'{name} has no records to draw.')
+    lines = []
+    for record, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True):
+        kept = np.isfinite(x) & np.isfinite(y)
+        lines.append(v.series(data.record_label(record), 'measured', x[kept], y[kept]))
+    left = len(records) - len(arrays['drawn'])
+    title = name if not left else f'{name} ({left} of another quantity left out)'
+    return [v.spectrum(title, *axes(data, arrays['drawn'][0], params['component'], arrays),
+                       lines)]
 
 
 def _derived(project: Any, call: Any) -> list[dict]:
@@ -188,6 +238,40 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
         for k in range(shapes.num_shapes)])]
 
 
+FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
+SECOND = Param('second', 'Columns', 'enum', options_from='objects:shape_set')
+
+
+def mac(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.mac`: the Modal Assurance Criterion of one shape set's
+    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    or a set against itself. With a geometry the matrix selects the pair it
+    shows, the column mode overlaid on the row mode, as Visual Dynamics
+    shows two shape sets' MAC."""
+    from hertzforge.core.shapes import cross_mac
+
+    from .ops_modal_run import paired
+
+    first, second = params['first'], params['second']
+    rows, columns = project[first], project[second]
+    if not rows.num_shapes or not columns.num_shapes:
+        raise refused(f'{first if not rows.num_shapes else second} has no modes')
+    try:
+        values = rows.auto_mac() if first == second else cross_mac(rows, columns)
+    except ValueError as error:
+        raise refused(str(error)) from None
+
+    def axis(name: str, shapes: Any) -> dict:
+        return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
+
+    title = f'Auto-MAC of {first}' if first == second else f'MAC of {first} Against {second}'
+    matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
+                      (0.0, 1.0))
+    geometry = _geometry(project)
+    return paired(None if geometry is None else project[geometry], matrix, rows,
+                  range(rows.num_shapes), columns, range(columns.num_shapes))
+
+
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mode_shapes`: a shape set's modes on a geometry."""
     return [_shape_view(project, params['shapes'], params['geometry'])]
@@ -268,6 +352,12 @@ OPERATIONS = (
         params=(DATA, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
         run=waterfall),
     Operation(
+        id='project.plot', title='Plot Records', workspace='analyze',
+        accepts='project',
+        summary='Chosen records of any data object as curves on one plot, '
+                'numbered from 1 as "1-3, 7"; the first eight when none are named.',
+        params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
+    Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='analyze',
         accepts='project',
         summary='PSDs from a time history\'s averages, added to the project.',
@@ -285,6 +375,11 @@ OPERATIONS = (
                 'project as a shape set and drawn on its geometry.',
         params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
         run=fit_modes),
+    Operation(
+        id='project.mac', title='MAC', workspace='analyze', accepts='project',
+        summary='One shape set\'s modes against another\'s, or a set against '
+                'itself; with a geometry, a cell shows that pair overlaid.',
+        params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
     Operation(
         id='project.mode_shapes', title='Mode Shapes', workspace='analyze',
         accepts='project',

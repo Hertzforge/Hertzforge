@@ -54,6 +54,31 @@ def unit_text(dimension: str) -> str | None:
     return None if text == '1' else text
 
 
+def axes(data: Any, first: int, component: str,
+         arrays: dict[str, Any]) -> tuple[dict, dict]:
+    """The abscissa and value axes of `data`'s records as `waterfall_arrays`
+    drew them, labeled by the first drawn record's quantity."""
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.drawing.viz.waterfall import quantity_label
+    from hertzforge.names import display_name
+
+    signed = component != 'magnitude' and data.ordinate.dtype.kind == 'c'
+    if isinstance(data, TimeHistory):
+        label = quantity_label((data.ordinate_dim[first],
+                                data.dimension_hint[first])).capitalize()
+    else:
+        label = display_name(type(data).__name__)
+    unit = unit_text(data.ordinate_dim[first])
+    if signed and component == 'phase':
+        label, unit = f'{label} phase', 'deg'
+    elif signed:
+        label = f'{label}, {COMPONENTS[component].lower()}'
+    x = v.axis(data.abscissa_dim.capitalize(), unit_text(data.abscissa_dim),
+               'log' if arrays['log_abscissa'] else 'linear')
+    z = v.axis(label, unit, 'log' if arrays['log_scaled'] else 'linear')
+    return x, z
+
+
 def waterfall_view(title: str, data: Any, page: int = 1,
                    component: str = 'magnitude',
                    quantity: str = '') -> dict[str, Any]:
@@ -69,14 +94,12 @@ def waterfall_view(title: str, data: Any, page: int = 1,
     shell to offer, as Visual Dynamics' quantity box does. An object with
     no records is refused."""
     import hertzforge as hz
-    from hertzforge.core.data import TimeHistory
     from hertzforge.drawing.viz.waterfall import (
         drawn_span,
         quantity_label,
         waterfall_arrays,
         waterfall_groups,
     )
-    from hertzforge.names import display_name
 
     arrays = waterfall_arrays(data, unit_system=hz.SI, exponents=False,
                               component=component, page=int(page) - 1,
@@ -85,19 +108,7 @@ def waterfall_view(title: str, data: Any, page: int = 1,
         raise refused(f'{title} has no records to draw.')
     first = arrays['drawn'][0]
     signed = component != 'magnitude' and data.ordinate.dtype.kind == 'c'
-    if isinstance(data, TimeHistory):
-        label = quantity_label((data.ordinate_dim[first],
-                                data.dimension_hint[first])).capitalize()
-    else:
-        label = display_name(type(data).__name__)
-    unit = unit_text(data.ordinate_dim[first])
-    if signed and component == 'phase':
-        label, unit = f'{label} phase', 'deg'
-    elif signed:
-        label = f'{label}, {COMPONENTS[component].lower()}'
-    x = v.axis(data.abscissa_dim.capitalize(), unit_text(data.abscissa_dim),
-               'log' if arrays['log_abscissa'] else 'linear')
-    z = v.axis(label, unit, 'log' if arrays['log_scaled'] else 'linear')
+    x, z = axes(data, first, component, arrays)
     limits = getattr(data, 'ordinate_limits', None)
     pages = arrays['pages']
     view = v.waterfall(

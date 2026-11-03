@@ -20,6 +20,7 @@ import type {
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
+	FitStateView,
 	ProjectProgress,
 	ProjectSummary,
 	RunState,
@@ -496,9 +497,93 @@ class SimState {
 const FILE_TIMEOUT_MS = 600_000;
 
 /**
- * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
- * or importing switches Analyze to it.
+ * The mode fit under way on the project (`fit.*`): Visual Dynamics' fitting loop, one mode at a time
+ * on the residual. The x range on screen is the search band Find Mode reads.
  */
+export class FitState {
+	state = $state.raw<FitStateView | null>(null);
+	busy = $state<string | null>(null);
+	error = $state<string | null>(null);
+	/** The frequencies on screen, [low, high] Hz, or null for the whole range. */
+	range: [number, number] | null = null;
+
+	constructor(private readonly app: AppState) {}
+
+	start(frf: string, shapes?: string): Promise<boolean> {
+		this.range = null;
+		return this.step('Starting the fit', 'fit.start', shapes ? { frf, shapes } : { frf });
+	}
+
+	find(): Promise<boolean> {
+		return this.step('Finding a mode', 'fit.find', this.range ? { low: this.range[0], high: this.range[1] } : {});
+	}
+
+	move(frequency: number): Promise<boolean> {
+		return this.step('Moving the cursor', 'fit.move', { frequency });
+	}
+
+	holdDamping(damping: number): Promise<boolean> {
+		return this.step('Holding the damping', 'fit.damping', { damping });
+	}
+
+	fit(): Promise<boolean> {
+		return this.step('Fitting the mode', 'fit.fit', {});
+	}
+
+	confirm(description?: string): Promise<boolean> {
+		return this.step('Confirming the mode', 'fit.confirm', description ? { description } : {});
+	}
+
+	refine(): Promise<boolean> {
+		return this.step('Refining the residues', 'fit.refine', {});
+	}
+
+	async publish(name?: string): Promise<boolean> {
+		this.busy = 'Publishing';
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ name: string; project: ProjectSummary; fit: FitStateView }>(
+				'fit.publish',
+				name ? { name } : {},
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.state = res.fit;
+			this.app.project.apply(res.project);
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+
+	async end(): Promise<void> {
+		this.state = null;
+		this.error = null;
+		try {
+			await this.app.analysis.request('fit.end', {});
+		} catch {
+			// the fit is gone either way
+		}
+	}
+
+	private async step(doing: string, method: string, params: Record<string, unknown>): Promise<boolean> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ fit: FitStateView }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
+			this.state = res.fit;
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+}
+
 /**
  * The project's reports (`report.*`): Visual Dynamics' report, generated from a starter template and
  * shown as the page the core writes.
@@ -564,6 +649,10 @@ export class ReportState {
 	}
 }
 
+/**
+ * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
+ * or importing switches Analyze to it.
+ */
 class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
 	/** What is being done, in words ("Importing modal.nc4"), or null. */
@@ -630,7 +719,8 @@ class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				this.app.workspace = 'analyze';
+				// the workspaces with the project panel keep the window; any other goes to Analyze
+				if (this.app.workspace !== 'model') this.app.workspace = 'analyze';
 				this.app.analyze.selectProject();
 			}
 			return true;
@@ -658,6 +748,7 @@ export class AppState {
 
 	readonly analyze: AnalyzeState;
 	readonly project: ProjectState;
+	readonly fit: FitState;
 	readonly report: ReportState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
@@ -677,6 +768,7 @@ export class AppState {
 		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
 		this.analyze = new AnalyzeState(this);
 		this.project = new ProjectState(this);
+		this.fit = new FitState(this);
 		this.report = new ReportState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);

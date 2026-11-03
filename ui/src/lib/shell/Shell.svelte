@@ -12,6 +12,7 @@
 	import CommandPalette from './CommandPalette.svelte';
 	import DisplayWindow from './DisplayWindow.svelte';
 	import Placeholder from './Placeholder.svelte';
+	import Model from '$lib/workspaces/Model.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
 	import Rail from './Rail.svelte';
 	import TopBar from './TopBar.svelte';
@@ -74,6 +75,8 @@
 				<Modal {app} />
 			{:else if app.workspace === 'simulate'}
 				<Simulate {app} />
+			{:else if app.workspace === 'model'}
+				<Model {app} />
 			{:else if app.workspace === 'report'}
 				<Report {app} />
 			{:else}
