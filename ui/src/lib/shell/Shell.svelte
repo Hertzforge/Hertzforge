@@ -13,6 +13,7 @@
 	import DisplayWindow from './DisplayWindow.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import Model from '$lib/workspaces/Model.svelte';
+	import Specify from '$lib/workspaces/Specify.svelte';
 	import Rail from './Rail.svelte';
 	import TopBar from './TopBar.svelte';
 
@@ -76,6 +77,8 @@
 				<Simulate {app} />
 			{:else if app.workspace === 'model'}
 				<Model {app} />
+			{:else if app.workspace === 'specify'}
+				<Specify {app} />
 			{:else}
 				<Placeholder {info} />
 			{/if}
