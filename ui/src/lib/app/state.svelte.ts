@@ -20,6 +20,8 @@ import type {
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
+	ProjectProgress,
+	ProjectSummary,
 	RunState,
 	Shape3DView,
 	SimProfile,
@@ -27,7 +29,8 @@ import type {
 	View,
 	Workspace
 } from '$lib/protocol/types';
-import { defaultValues, reconcile, validateAll, type ParamValues } from '$lib/forms/params';
+import { defaultValues, reconcile, validateAll, withObjects, type ParamValues } from '$lib/forms/params';
+import { baseName, isProjectFile } from '$lib/project/files';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
 
@@ -54,6 +57,9 @@ export interface AnalyzeResult {
 	/** A rerun from the view is under way. */
 	busy?: boolean;
 }
+
+/** The dataset id Analyze uses for the connection's own project. */
+export const PROJECT = 'project';
 
 class AnalyzeState {
 	datasetId = $state<string | null>(null);
@@ -90,6 +96,19 @@ class AnalyzeState {
 		return this.tools.find((o) => o.id === this.opId) ?? null;
 	}
 
+	get onProject(): boolean {
+		return this.datasetId === PROJECT;
+	}
+
+	/** An operation's params as the form shows them: object params list the project's objects. */
+	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
+		return op.accepts === 'project' ? withObjects(op.params, this.app.project.summary?.objects ?? []) : op.params;
+	}
+
+	get params(): ParamDescriptor[] {
+		return this.op ? this.paramsOf(this.op) : [];
+	}
+
 	get currentValues(): ParamValues {
 		return (this.opId && this.values[this.opId]) || {};
 	}
@@ -97,10 +116,38 @@ class AnalyzeState {
 	get errors(): Record<string, string> {
 		const op = this.op;
 		if (!op) return {};
-		return validateAll(op.params, this.currentValues, this.opened?.channels ?? []);
+		return validateAll(this.paramsOf(op), this.currentValues, this.opened?.channels ?? []);
+	}
+
+	/** Work on the connection's own project, as a dataset whose tools take its objects. */
+	selectProject(): void {
+		const summary = this.app.project.summary;
+		if (!summary) return;
+		++this.openSeq;
+		this.datasetId = PROJECT;
+		this.opening = false;
+		this.openError = null;
+		this.projectChanged();
+		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
+	}
+
+	/** The project's objects changed: its title, and every form's object choices, follow. */
+	projectChanged(): void {
+		const summary = this.app.project.summary;
+		if (!this.onProject) return;
+		if (!summary) {
+			this.datasetId = null;
+			this.opened = null;
+			return;
+		}
+		this.opened = { handle: '', kind: 'project', title: summary.title, summary: {}, channels: [] };
+		const next = { ...this.values };
+		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
+		this.values = next;
 	}
 
 	async selectDataset(id: string): Promise<void> {
+		if (id === PROJECT) return this.selectProject();
 		if (this.datasetId === id && this.opened) return;
 		const seq = ++this.openSeq;
 		this.datasetId = id;
@@ -129,12 +176,12 @@ class AnalyzeState {
 		this.runError = null;
 		this.triedRun = false;
 		const op = this.op;
-		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(op.params, this.opened?.channels ?? []);
+		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
 	}
 
 	resetParams(): void {
 		const op = this.op;
-		if (op) this.values[op.id] = defaultValues(op.params, this.opened?.channels ?? []);
+		if (op) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
 		this.triedRun = false;
 	}
 
@@ -145,17 +192,19 @@ class AnalyzeState {
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
+		const shown = this.paramsOf(op);
 		this.running = true;
 		this.runError = null;
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, handle: opened.handle, params }, { timeoutMs: 30_000 });
+			const res = await this.app.analysis.request<OpResult>('op.run', target(op, opened.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
 			this.results = [
 				{
 					id: this.nextResult++,
 					opId: op.id,
 					opTitle: op.title,
 					datasetTitle: opened.title,
-					paramSummary: summarize(op.params, params, opened.channels),
+					paramSummary: summarize(shown, params, opened.channels),
 					views: res.views,
 					at: new Date(),
 					params,
@@ -184,8 +233,9 @@ class AnalyzeState {
 			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
 		replace({ busy: true });
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, handle: result.handle, params }, { timeoutMs: 30_000 });
-			replace({ views: res.views, params, paramSummary: summarize(op.params, params, this.opened?.channels ?? []), busy: false });
+			const res = await this.app.analysis.request<OpResult>('op.run', target(op, result.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, params, paramSummary: summarize(this.paramsOf(op), params, this.opened?.channels ?? []), busy: false });
 		} catch (err) {
 			replace({ busy: false });
 			this.runError = message(err);
@@ -199,6 +249,14 @@ class AnalyzeState {
 	clearResults(): void {
 		this.results = [];
 	}
+}
+
+/** How long an operation may take: fitting or computing on a large project is not quick. */
+const RUN_TIMEOUT_MS = 120_000;
+
+/** `op.run`'s params: a project operation names no handle, since it runs on the connection's project. */
+function target(op: OperationDescriptor, handle: string, params: ParamValues): Record<string, unknown> {
+	return op.accepts === 'project' ? { op: op.id, params } : { op: op.id, handle, params };
 }
 
 function summarize(params: ParamDescriptor[], values: ParamValues, channels: { value: string | number; label: string }[]): string {
@@ -408,6 +466,83 @@ class SimState {
 
 // ---------------------------------------------------------------------------------------------
 
+/** How long opening or importing a file may take before the shell stops waiting. */
+const FILE_TIMEOUT_MS = 600_000;
+
+/**
+ * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
+ * or importing switches Analyze to it.
+ */
+class ProjectState {
+	summary = $state.raw<ProjectSummary | null>(null);
+	/** What is being done, in words ("Importing modal.nc4"), or null. */
+	busy = $state<string | null>(null);
+	progress = $state.raw<ProjectProgress | null>(null);
+	error = $state<string | null>(null);
+
+	constructor(private readonly app: AppState) {
+		app.analysis.on('project.progress', (data) => {
+			if (this.busy) this.progress = data as unknown as ProjectProgress;
+		});
+	}
+
+	/** A new summary from the service: the tree and Analyze's object choices follow. */
+	apply(summary: ProjectSummary): void {
+		this.summary = summary;
+		this.app.analyze.projectChanged();
+	}
+
+	/**
+	 * Open or import each path, as a drop or a dialog gives them: a project file opens (replacing
+	 * the project), anything else is imported into it. Stops at the first refusal and says why.
+	 */
+	async openPaths(paths: string[]): Promise<void> {
+		for (const path of paths) {
+			const ok = isProjectFile(path) ? await this.open(path) : await this.importFile(path);
+			if (!ok) return;
+		}
+	}
+
+	open(path: string): Promise<boolean> {
+		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
+	}
+
+	importFile(path: string, units?: Record<string, string>): Promise<boolean> {
+		return this.call(`Importing ${baseName(path)}`, 'project.import', units ? { path, units } : { path });
+	}
+
+	save(path?: string): Promise<boolean> {
+		return this.call('Saving', 'project.save', path ? { path } : {}, false);
+	}
+
+	newProject(title: string): Promise<boolean> {
+		return this.call('Starting a project', 'project.new', { title });
+	}
+
+	private async call(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<boolean> {
+		this.busy = doing;
+		this.progress = null;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
+			this.apply(res.project);
+			if (show) {
+				this.app.workspace = 'analyze';
+				this.app.analyze.selectProject();
+			}
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+			this.progress = null;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+
 export class AppState {
 	readonly config: ShellConfig;
 	readonly analysis: ServiceClient;
@@ -419,6 +554,7 @@ export class AppState {
 	catalogError = $state<string | null>(null);
 
 	readonly analyze: AnalyzeState;
+	readonly project: ProjectState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -436,6 +572,7 @@ export class AppState {
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
 		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
 		this.analyze = new AnalyzeState(this);
+		this.project = new ProjectState(this);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.

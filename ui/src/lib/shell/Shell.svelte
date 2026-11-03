@@ -2,6 +2,7 @@
 	/** The shell frame: top bar, workspace rail, the active workspace, and the command palette. */
 	import { onMount } from 'svelte';
 	import { getApp } from '$lib/app/state.svelte';
+	import { listenForDrops } from '$lib/project/files';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import Acquire from '$lib/workspaces/Acquire.svelte';
@@ -20,6 +21,12 @@
 		if (app.config.popout) return;
 		theme.init(app.config.theme);
 		app.start();
+		// files dropped anywhere on the window open or import by their paths (the desktop app)
+		return listenForDrops((paths) => {
+			if (paths) return void app.project.openPaths(paths);
+			app.go('analyze');
+			app.project.error = 'A browser gives the shell a dropped file\'s contents but not its path. Drop files on the desktop app, or give the path under Project.';
+		});
 	});
 
 	function onKey(e: KeyboardEvent) {
