@@ -33,6 +33,12 @@
 		if (first && !m.datasetId) void m.select(first.id);
 	});
 
+	/** Show `name`'s modes: the fit ends first, since the stage shows one or the other. */
+	async function showShapes(name: string) {
+		if (app.fit.state) await app.fit.end();
+		await m.selectShapes(name);
+	}
+
 	function onTableKey(e: KeyboardEvent) {
 		const n = m.view?.modes.length ?? 0;
 		if (!n) return;
@@ -80,6 +86,14 @@
 				<p class="muted">The analysis service lists no modal models.</p>
 			{:else}
 				<div class="choices" role="radiogroup" aria-label="Model" data-testid="model-picker">
+					{#if app.project.summary?.active_geometry}
+						{#each shapeSets as name (name)}
+							<button class="choice" data-testid="shapes-{name}" role="radio" aria-checked={m.datasetId === `project:${name}`} class:on={m.datasetId === `project:${name}`} onclick={() => showShapes(name)}>
+								<span class="ctitle">{name}</span>
+								<span class="cdesc">Your project's modes, on {app.project.summary.active_geometry}.</span>
+							</button>
+						{/each}
+					{/if}
 					{#each m.datasets as ds (ds.id)}
 						<button class="choice" data-testid="dataset-{ds.id}" role="radio" aria-checked={m.datasetId === ds.id} class:on={m.datasetId === ds.id} onclick={() => m.select(ds.id)}>
 							<span class="ctitle">{ds.title}</span>

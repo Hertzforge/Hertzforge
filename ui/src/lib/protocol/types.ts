@@ -293,6 +293,21 @@ export interface ProjectSummary {
 	active_geometry?: string | null;
 }
 
+/** One row of `project.units`: a channel, or the object itself, and its unit. */
+export interface UnitsRow {
+	key: string;
+	label: string;
+	quantity: string | null;
+	unit: string | null;
+	choices: string[];
+}
+
+/** `project.units`: the tables an object's units are declared in. */
+export interface UnitsTables {
+	name: string;
+	tables: { side: 'object' | 'channels' | 'response' | 'reference'; rows: UnitsRow[] }[];
+}
+
 /** A mode of a fit: confirmed, or the preview. */
 export interface FitMode {
 	frequency: number;
@@ -310,6 +325,8 @@ export interface FitStateView {
 	preview: FitMode | null;
 	modes: FitMode[];
 	view: SpectrumView;
+	/** The confirmed modes' auto-MAC, the preview last; null for fewer than two. */
+	mac?: MatrixView | null;
 }
 
 /** `project.progress`: how far an import has read. */

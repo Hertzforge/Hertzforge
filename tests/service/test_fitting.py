@@ -132,3 +132,18 @@ def test_a_fit_ends_when_its_frf_leaves_the_project():
     assert gone['error']['code'] == 'refused'
     assert 'no longer in the project' in gone['error']['message']
     assert 'needs a fit under way' in after['error']['message'], 'the fit ended'
+
+
+def test_the_fits_mac_holds_the_confirmed_modes_and_the_preview_last(project, validate):
+    fit = fitting.start(project, {'frf': 'FRF'})
+    assert fitting.state(fit)['mac'] is None, 'one mode is no matrix'
+    fitting.act(fit, 'fit.confirm', {})
+    fitting.act(fit, 'fit.find', {})
+    fitting.act(fit, 'fit.fit', {})
+    state = fitting.state(fit)
+    validate(frames.to_wire(state)[0], 'fitState')
+    mac = state['mac']
+    assert mac['rows']['ticks'][0].startswith('1: ')
+    assert mac['rows']['ticks'][-1].startswith('New: ')
+    values = np.asarray(mac['values'])
+    assert values.shape == (2, 2) and np.allclose(np.diag(values), 1.0)
