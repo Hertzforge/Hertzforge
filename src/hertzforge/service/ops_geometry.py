@@ -1,0 +1,1275 @@
+"""Editing a geometry and what is drawn on it, and the project's own
+structure: Visual Dynamics' entity tables, the coordinate system gizmo,
+the DOF arrows and sensors of the 3-D view, the project type and its
+Automatic work-up, channel roles and DOF names, a channel table's
+control loops, and the object groups.
+
+A geometry's nodes, coordinate systems, elements and element groups are
+added, set and deleted through the geometry's own methods
+(`core.entities.VERBS`), and elements and element groups are deleted
+through the project's, which keep the nodes data is measured at. Each
+edit returns the geometry drawn and the table of that kind of entity,
+the columns of Visual Dynamics' entity tables. A `shape3d` has no
+markers, so a coordinate system's axes, a DOF arrow and a sensor's body
+are drawn as extra nodes and lines of the mesh, as the instrumentation
+planner draws its sensors.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+from . import views as v
+from .datasets import _mesh
+from .descriptors import Operation, Option, Param
+from .ops_files import SAVED_KINDS
+from .ops_project import DATA_KINDS
+from .protocol import refused
+
+ANY = 'objects:' + '|'.join(SAVED_KINDS)
+
+GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
+KIND = Param('kind', 'Entities', 'enum', default='nodes', options=(
+    Option('nodes', 'Nodes'), Option('coordinate_systems', 'Coordinate systems'),
+    Option('elements', 'Elements'), Option('groups', 'Element groups')))
+
+LABELS = {'nodes': 'node', 'coordinate_systems': 'coordinate system',
+          'elements': 'element', 'groups': 'element group'}
+ID_ARRAYS = {'nodes': 'node_id', 'coordinate_systems': 'cs_id', 'elements': 'elem_id',
+             'groups': 'group_id'}
+
+
+# ---- drawing ------------------------------------------------------------------------
+
+def _extent(points: np.ndarray) -> float:
+    """How far the farthest point is from their center: the size an
+    arrow or an axis is drawn against, as Visual Dynamics' view takes it."""
+    if not len(points):
+        return 1.0
+    return float(np.sqrt(((points - points.mean(axis=0)) ** 2).sum(axis=1).max())) or 1.0
+
+
+def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
+           extra_lines: Any = None) -> dict:
+    """The geometry with every node, its faces and lines, and `extra_nodes`
+    joined by `extra_lines` (indices into `extra_nodes`): the axes, arrows
+    or bodies drawn on it, which a `shape3d` has no markers for."""
+    used, triangles, lines = _mesh(geometry)
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    nodes = xyz
+    lines = used[lines].reshape(-1, 2)
+    if extra_nodes is not None and len(extra_nodes):
+        nodes = np.vstack([xyz, np.asarray(extra_nodes, dtype=float).reshape(-1, 3)])
+        lines = np.vstack([lines, np.asarray(extra_lines, dtype=np.int64).reshape(-1, 2)
+                           + len(xyz)])
+    return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
+                     triangles=used[triangles], lines=lines)
+
+
+def _triads(geometry: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Each coordinate system's three axes from its origin, as extra
+    nodes and lines: what the view's triad shows of a system."""
+    matrices = np.asarray(geometry.cs_matrix, dtype=float).reshape(-1, 4, 3)
+    points = np.vstack([np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3),
+                        matrices[:, 3]])
+    length = 0.15 * _extent(points)
+    nodes, lines = [], []
+    for matrix in matrices:
+        base = len(nodes)
+        nodes.append(matrix[3])
+        for axis in range(3):
+            nodes.append(matrix[3] + length * matrix[axis])
+            lines.append((base, base + 1 + axis))
+    return np.asarray(nodes).reshape(-1, 3), np.asarray(lines).reshape(-1, 2)
+
+
+def _arrow(start: np.ndarray, end: np.ndarray, nodes: list, lines: list) -> None:
+    """A shaft from `start` to `end` and a head of two barbs at `end`."""
+    along = end - start
+    length = float(np.linalg.norm(along))
+    if not length > 0:
+        return
+    unit = along / length
+    side = np.cross(unit, (0.0, 0.0, 1.0) if abs(unit[2]) < 0.9 else (1.0, 0.0, 0.0))
+    side /= np.linalg.norm(side)
+    base = len(nodes)
+    nodes += [start, end, end - 0.25 * length * unit + 0.12 * length * side,
+              end - 0.25 * length * unit - 0.12 * length * side]
+    lines += [(base, base + 1), (base + 1, base + 2), (base + 1, base + 3)]
+
+
+# ---- tables -------------------------------------------------------------------------
+
+def id_runs_text(ids: Any) -> str:
+    """Ids as sorted runs without repeats, `[1,2,3,7,9,10]` as
+    '1-3 7 9-10', as Visual Dynamics lists an element group's elements."""
+    ids = np.unique(np.asarray(list(ids), dtype=np.int64))
+    if not len(ids):
+        return ''
+    runs, start, previous = [], int(ids[0]), int(ids[0])
+    for value in (int(i) for i in ids[1:]):
+        if value == previous + 1:
+            previous = value
+            continue
+        runs.append((start, previous))
+        start = previous = value
+    runs.append((start, previous))
+    return ' '.join(str(a) if a == z else f'{a}-{z}' for a, z in runs)
+
+
+def parse_id_runs(text: str) -> list[int]:
+    """'1-3, 7 9-10' as [1, 2, 3, 7, 9, 10]; a run either way round."""
+    found: list[int] = []
+    for part in str(text).replace(',', ' ').split():
+        try:
+            if '-' in part[1:]:
+                head, _, tail = part[1:].partition('-')
+                low, high = sorted((int(part[0] + head), int(tail)))
+                found.extend(range(low, high + 1))
+            else:
+                found.append(int(part))
+        except ValueError:
+            raise refused(f'{part!r} is not an id or a run of ids such as 3-6') from None
+    return found
+
+
+def _group_label(geometry: Any, row: int) -> str:
+    """An element group's name, or 'element group N' when it has none."""
+    name = geometry.group_name[row].strip()
+    return name or f'element group {int(geometry.group_id[row])}'
+
+
+def _number(value: Any) -> str:
+    return f'{float(value):.6g}'
+
+
+def entity_table(geometry: Any, kind: str, title: str) -> dict:
+    """One kind of a geometry's entities as Visual Dynamics' entity
+    tables list them (`gui.object_tables.ENTITY_TABLES`), lengths in the
+    geometry's stored unit: meters once its units are declared."""
+    from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
+    from hertzforge.rotate import angles_of
+
+    unit = 'm' if geometry.units_defined else 'units undefined'
+    if kind == 'nodes':
+        columns = ['Node', f'X [{unit}]', f'Y [{unit}]', f'Z [{unit}]', 'Placement CS',
+                   'Displacement CS']
+        rows = [[str(int(node)), *(_number(c) for c in xyz), str(int(placed)),
+                 str(int(moved))]
+                for node, xyz, placed, moved in zip(
+                    geometry.node_id, np.asarray(geometry.node_xyz).reshape(-1, 3),
+                    geometry.node_def_cs, geometry.node_disp_cs, strict=True)]
+    elif kind == 'coordinate_systems':
+        columns = ['CS', 'Name', 'Type', *(f'Origin {a} [{unit}]' for a in 'XYZ'),
+                   *(f'Rotation {a} [°]' for a in 'XYZ')]
+        rows = [[str(int(cs)), name, CS_TYPES.get(int(kind_code), 'cartesian'),
+                 *(_number(c) for c in matrix[3]), *(_number(a) for a in angles_of(matrix))]
+                for cs, name, kind_code, matrix in zip(
+                    geometry.cs_id, geometry.cs_name, geometry.cs_type,
+                    np.asarray(geometry.cs_matrix).reshape(-1, 4, 3), strict=True)]
+    elif kind == 'elements':
+        labels = {int(g): _group_label(geometry, k) for k, g in enumerate(geometry.group_id)}
+        columns = ['Element', 'Type', 'Element group', 'Nodes']
+        rows = [[str(int(elem)), ELEMENT_TYPES.get(int(code), ('unknown',))[0],
+                 labels.get(int(group), ''), ' '.join(str(int(n)) for n in conn)]
+                for elem, code, group, conn in zip(
+                    geometry.elem_id, geometry.elem_type, geometry.elem_group,
+                    geometry.elem_conn, strict=True)]
+    else:
+        elem_group = np.asarray(geometry.elem_group)
+        columns = ['Element group', 'Name', 'Elements']
+        rows = [[str(int(group)), geometry.group_name[k],
+                 id_runs_text(np.asarray(geometry.elem_id)[elem_group == int(group)])]
+                for k, group in enumerate(geometry.group_id)]
+    return v.table(title, columns, rows)
+
+
+def _shown(name: str, geometry: Any, kind: str, said: str = '') -> list[dict]:
+    """The geometry drawn, with its coordinate systems' axes when they are
+    the entities in hand, and the table of `kind`."""
+    words = {'nodes': 'Nodes', 'coordinate_systems': 'Coordinate systems',
+             'elements': 'Elements', 'groups': 'Element groups'}[kind]
+    extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
+    title = f'{words} of {name}' + (f': {said}' if said else '')
+    return [_drawn(name, geometry, *extra), entity_table(geometry, kind, title)]
+
+
+# ---- View Entities and the edits ----------------------------------------------------
+
+def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.view_entities`: one kind of a geometry's entities as its
+    table, beside the geometry drawn, as Visual Dynamics' Edit shows them
+    before anything is changed."""
+    name = params['geometry']
+    return _shown(name, project[name], params['kind'])
+
+
+def _optional_id(value: int) -> int | None:
+    return int(value) or None
+
+
+def _system(geometry: Any, cs: int) -> int:
+    """`cs` when the geometry has it, its first system for 0."""
+    if not cs:
+        return int(geometry.cs_id[0]) if len(geometry.cs_id) else 1
+    if cs not in {int(c) for c in geometry.cs_id}:
+        raise refused(f'no coordinate system {cs}; the geometry has '
+                      + ', '.join(str(int(c)) for c in geometry.cs_id))
+    return cs
+
+
+X = Param('x', 'X', 'number', default=0.0, unit='m', step=0.001)
+Y = Param('y', 'Y', 'number', default=0.0, unit='m', step=0.001)
+Z = Param('z', 'Z', 'number', default=0.0, unit='m', step=0.001)
+NODE_ID = Param('id', 'Id (0: one more than the highest)', 'integer', default=0, min=0,
+                step=1)
+PLACEMENT_CS = Param('placement_cs', 'Placement CS (0: the first)', 'integer', default=0,
+                     min=0, step=1)
+DISPLACEMENT_CS = Param('displacement_cs', 'Displacement CS (0: the first)', 'integer',
+                        default=0, min=0, step=1)
+
+
+def add_node(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_node`: a node at typed coordinates
+    (`Geometry.add_node`), where Visual Dynamics places one at a click in
+    the view. The coordinates are the geometry's stored length unit,
+    meters once its units are declared."""
+    name = params['geometry']
+    geometry = project[name]
+    placed = _system(geometry, params['placement_cs'])
+    moved = _system(geometry, params['displacement_cs'])
+    try:
+        node = geometry.add_node((params['x'], params['y'], params['z']),
+                                 node_id=_optional_id(params['id']), def_cs=placed,
+                                 disp_cs=moved)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return _shown(name, geometry, 'nodes', f'added node {node}')
+
+
+RX = Param('rx', 'Rotation about X', 'number', default=0.0, unit='°', step=1.0)
+RY = Param('ry', 'Rotation about Y', 'number', default=0.0, unit='°', step=1.0)
+RZ = Param('rz', 'Rotation about Z', 'number', default=0.0, unit='°', step=1.0)
+CS_NAME = Param('name', 'Name', 'string', default='')
+CS_TYPE = Param('type', 'Type', 'enum', default='cartesian', options=(
+    Option('cartesian', 'Cartesian'), Option('cylindrical', 'Cylindrical'),
+    Option('spherical', 'Spherical')))
+
+
+def add_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_coordinate_system`: a coordinate system at a typed
+    origin, turned by angles about the fixed X, then Y, then Z axes, the
+    convention of the table's Rotation columns
+    (`rotate.frame_from_angles`, `Geometry.add_coordinate_system`)."""
+    from hertzforge.core.geometry import CS_TYPES
+    from hertzforge.rotate import frame_from_angles
+
+    name = params['geometry']
+    geometry = project[name]
+    code = next(c for c, word in CS_TYPES.items() if word == params['type'])
+    frame = frame_from_angles((params['rx'], params['ry'], params['rz']))
+    try:
+        cs = geometry.add_coordinate_system(
+            origin=(params['x'], params['y'], params['z']), rotation=frame[:3],
+            cs_id=_optional_id(params['id']), name=params['name'], cs_type=code)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return _shown(name, geometry, 'coordinate_systems', f'added coordinate system {cs}')
+
+
+#: what an element added to a family is: (type code, node count), Visual
+#: Dynamics' `FAMILY_ADD_TYPES`
+FAMILY_ADD_TYPES = {'beams': (21, 2), 'triangles': (41, 3), 'quads': (44, 4),
+                    'tetras': (111, 4), 'wedges': (112, 6), 'hexes': (115, 8),
+                    'pyramids': (201, 5), 'points': (161, 1)}
+FAMILY = Param('family', 'Family', 'enum', default='quads', options=tuple(
+    Option(family, family.capitalize()) for family in FAMILY_ADD_TYPES))
+ELEMENT_TYPE = Param('type', 'Type (blank: the family\'s own)', 'string', default='')
+NODES = Param('nodes', 'Nodes, in order', 'string', default='')
+GROUP = Param('group', 'Element group (0: the family\'s first, or a new one)', 'integer',
+              default=0, min=0, step=1)
+
+
+def _element_code(family: str, text: str, count: int) -> int | None:
+    """The type the element is made as: the family's own when its node
+    count fits, or the type named, which must be of the family and take
+    that many nodes; None lets the core fit the count, as Visual
+    Dynamics does when fewer nodes are picked than the family takes."""
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
+
+    if not text.strip():
+        code, takes = FAMILY_ADD_TYPES[family]
+        return code if count == takes or ELEMENT_TYPES[code][2] == 'line' else None
+    wanted = text.strip().lower()
+    code = next((c for c, (word, _n, _r) in ELEMENT_TYPES.items() if word == wanted), None)
+    if code is None:
+        raise refused(f'{text!r} is not an element type; the {family} are '
+                      + ', '.join(word for c, (word, _n, _r) in ELEMENT_TYPES.items()
+                                  if element_family(c) == family))
+    if element_family(code) != family:
+        raise refused(f'a {wanted} is one of the {element_family(code)}, not the {family}')
+    takes = ELEMENT_TYPES[code][1]
+    if ELEMENT_TYPES[code][2] != 'line' and count != takes:
+        raise refused(f'a {wanted} joins {takes} nodes; {count} are named')
+    return code
+
+
+def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_element`: an element of a family on named nodes
+    (`Geometry.add_element`), or for a family of lines the chain of
+    elements through every node named (`Geometry.add_beams`), where
+    Visual Dynamics takes them from clicks on the nodes in the view."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    name = params['geometry']
+    geometry = project[name]
+    nodes = parse_id_runs(params['nodes'])
+    family = params['family']
+    least = 1 if FAMILY_ADD_TYPES[family][1] == 1 else 2
+    if len(nodes) < least:
+        raise refused(f'name the nodes the element joins, in order: {least} at least')
+    code = _element_code(family, params['type'], len(nodes))
+    group = params['group'] or None
+    try:
+        if ELEMENT_TYPES[code or FAMILY_ADD_TYPES[family][0]][2] == 'line':
+            held = geometry.add_beams(nodes, group=group,
+                                      elem_type=code or FAMILY_ADD_TYPES[family][0])
+            said = (f'added {len(nodes) - 1} element{"s" * (len(nodes) != 2)} through '
+                    f'{len(nodes)} nodes in element group {held}')
+        else:
+            row = geometry.add_element(nodes, elem_type=code, group=group)
+            said = (f'added {ELEMENT_TYPES[int(geometry.elem_type[row])][0]} element '
+                    f'{int(geometry.elem_id[row])}')
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return _shown(name, geometry, 'elements', said)
+
+
+GROUP_NAME = Param('name', 'Name', 'string', default='')
+
+
+def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_element_group`: an empty element group
+    (`Geometry.add_group`), which Visual Dynamics' + adds outright since
+    an element group is not placed in space."""
+    name = params['geometry']
+    geometry = project[name]
+    try:
+        group = geometry.add_group(params['name'], _optional_id(params['id']))
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return _shown(name, geometry, 'groups', f'added element group {group}')
+
+
+ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
+FIELDS = {
+    'nodes': ('id', 'x', 'y', 'z', 'placement_cs', 'displacement_cs'),
+    'coordinate_systems': ('id', 'name', 'type', 'origin_x', 'origin_y', 'origin_z',
+                           'rotation_x', 'rotation_y', 'rotation_z'),
+    'elements': ('id', 'type', 'group', 'nodes'),
+    'groups': ('id', 'name', 'elements'),
+}
+FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
+    Option(key, label) for key, label in (
+        ('id', 'Id'), ('x', 'X'), ('y', 'Y'), ('z', 'Z'),
+        ('placement_cs', 'Placement CS'), ('displacement_cs', 'Displacement CS'),
+        ('name', 'Name'), ('type', 'Type'), ('origin_x', 'Origin X'),
+        ('origin_y', 'Origin Y'), ('origin_z', 'Origin Z'), ('rotation_x', 'Rotation X (°)'),
+        ('rotation_y', 'Rotation Y (°)'), ('rotation_z', 'Rotation Z (°)'),
+        ('group', 'Element group'), ('nodes', 'Nodes'), ('elements', 'Elements'))))
+VALUE = Param('value', 'Value', 'string', default='')
+
+
+def _row(geometry: Any, kind: str, entity: int) -> int:
+    ids = [int(i) for i in getattr(geometry, ID_ARRAYS[kind])]
+    if entity not in ids:
+        shown = id_runs_text(ids) or 'none'
+        raise refused(f'no {LABELS[kind]} {entity}; the geometry has {shown}')
+    return ids.index(entity)
+
+
+def _whole(text: str, least: int | None = None) -> int:
+    value = int(float(text))
+    if least is not None and value < least:
+        raise ValueError(f'must be at least {least}')
+    return value
+
+
+def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> None:
+    """One cell of an entity table written, as Visual Dynamics' table
+    writes it (`gui.object_tables`): an id that others refer to is
+    renumbered by the geometry, a coordinate system a node names must
+    exist, an element group takes the elements named into it."""
+    from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
+    from hertzforge.rotate import angles_of
+
+    if kind == 'nodes':
+        if field == 'id':
+            geometry.renumber_node(row, _whole(text, 1))
+        elif field in ('x', 'y', 'z'):
+            geometry.node_xyz[row, 'xyz'.index(field)] = float(text)
+        else:
+            cs = _whole(text)
+            if cs not in {int(c) for c in geometry.cs_id}:
+                raise ValueError(f'no coordinate system {cs}')
+            array = 'node_def_cs' if field == 'placement_cs' else 'node_disp_cs'
+            getattr(geometry, array)[row] = cs
+    elif kind == 'coordinate_systems':
+        if field == 'id':
+            geometry.renumber_coordinate_system(row, _whole(text, 1))
+        elif field == 'name':
+            geometry.cs_name[row] = text
+        elif field == 'type':
+            wanted = text.strip().lower()
+            codes = [c for c, word in CS_TYPES.items() if word == wanted]
+            if not codes:
+                raise ValueError(f'expected one of {sorted(CS_TYPES.values())}')
+            geometry.cs_type[row] = codes[0]
+        elif field.startswith('origin'):
+            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = float(text)
+        else:
+            angles = list(angles_of(geometry.cs_matrix[row]))
+            angles['xyz'.index(field[-1])] = float(text)
+            geometry.place_coordinate_system(int(geometry.cs_id[row]), angles=angles)
+    elif kind == 'elements':
+        if field == 'id':
+            geometry.elem_id[row] = _whole(text, 1)
+        elif field == 'type':
+            wanted = text.strip().lower()
+            codes = [c for c, (word, _n, _r) in ELEMENT_TYPES.items() if word == wanted]
+            if not codes:
+                raise ValueError(f'unknown element type {text!r}')
+            geometry.elem_type[row] = codes[0]
+        elif field == 'group':
+            wanted = text.strip()
+            for k, group in enumerate(geometry.group_id):
+                if wanted in (_group_label(geometry, k), geometry.group_name[k].strip(),
+                              str(int(group))):
+                    geometry.elem_group[row] = int(group)
+                    return
+            raise ValueError(f'no element group {wanted!r}; add it first')
+        else:
+            nodes = [int(part) for part in text.replace(',', ' ').split()]
+            missing = set(nodes) - set(geometry.node_id.tolist())
+            if missing:
+                raise ValueError(f'unknown nodes {sorted(missing)}')
+            geometry.elem_conn[row] = np.asarray(nodes, dtype=np.int64)
+    else:
+        if field == 'id':
+            geometry.renumber_group(row, _whole(text, 1))
+        elif field == 'name':
+            geometry.group_name[row] = text
+        else:
+            _set_group_elements(geometry, row, text)
+
+
+def _set_group_elements(geometry: Any, row: int, text: str) -> None:
+    """Claim the elements named for this element group: an element named
+    leaves the group it was in, and one left out that would be in no
+    group is refused, since every element is in exactly one."""
+    wanted = parse_id_runs(text)
+    known = {int(i) for i in geometry.elem_id}
+    missing = sorted(set(wanted) - known)
+    if missing:
+        raise ValueError(f'unknown elements {missing}')
+    group = int(geometry.group_id[row])
+    here = {int(i) for i in geometry.elem_id[geometry.elem_group == group]}
+    dropped = sorted(here - set(wanted))
+    if dropped:
+        shown = ', '.join(str(i) for i in dropped[:4])
+        more = f' (and {len(dropped) - 4} more)' if len(dropped) > 4 else ''
+        raise ValueError(f'element {shown}{more} would be left with no element group; '
+                         'name it in the element group it belongs in instead')
+    if wanted:
+        geometry.elem_group[np.isin(geometry.elem_id, wanted)] = group
+
+
+def _snapshot(geometry: Any) -> dict[str, Any]:
+    names = ('node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'cs_id', 'cs_type',
+             'cs_matrix', 'elem_id', 'elem_type', 'elem_group', 'group_id')
+    held = {name: np.array(getattr(geometry, name), copy=True) for name in names}
+    held['cs_name'] = list(geometry.cs_name)
+    held['group_name'] = list(geometry.group_name)
+    held['elem_conn'] = [np.array(c, copy=True) for c in geometry.elem_conn]
+    return held
+
+
+def _restore(geometry: Any, held: dict[str, Any]) -> None:
+    for name, value in held.items():
+        setattr(geometry, name, value)
+
+
+def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_entity`: one field of one entity written, a cell of
+    Visual Dynamics' entity table typed over. The geometry is checked
+    after (`Geometry.validate`) and left as it was when the edit would
+    make it inconsistent: an element given a type of another family than
+    its group's, say."""
+    name = params['geometry']
+    geometry = project[name]
+    kind, field = params['kind'], params['field']
+    if field not in FIELDS[kind]:
+        raise refused(f'a {LABELS[kind]} has the fields {", ".join(FIELDS[kind])}; '
+                      f'not {field}')
+    entity = params['entity']
+    row = _row(geometry, kind, entity)
+    held = _snapshot(geometry)
+    try:
+        _set_field(geometry, kind, row, field, params['value'])
+        geometry.validate()
+    except (ValueError, KeyError) as error:
+        _restore(geometry, held)
+        raise refused(f'{LABELS[kind]} {entity}, {field}: {str(error).strip(chr(39))}') from None
+    return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
+
+
+IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
+
+
+def delete_entities(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.delete_entities`: entities deleted by id, as Delete does
+    on the rows of Visual Dynamics' entity table. Nodes go with the
+    elements that use them (`Geometry.delete_nodes`), and a node some
+    data in the project is measured or solved at is refused, by the
+    project's own list of them; coordinate systems go through
+    `Geometry.delete_coordinate_systems`, which refuses the last one;
+    elements and element groups through the project's
+    `delete_elements` and `delete_element_groups`, which keep the nodes
+    data is measured at."""
+    name = params['geometry']
+    geometry = project[name]
+    kind = params['kind']
+    ids = parse_id_runs(params['ids'])
+    if not ids:
+        raise refused(f'name the {LABELS[kind]}s to delete, such as 1-3, 7')
+    known = {int(i) for i in getattr(geometry, ID_ARRAYS[kind])}
+    unknown = sorted(set(ids) - known)
+    if unknown:
+        raise refused(f'{name} has no {LABELS[kind]} {id_runs_text(unknown)}')
+    try:
+        if kind == 'nodes':
+            measured = sorted(set(ids) & project._data_nodes())
+            if measured:
+                raise ValueError(f'data in the project is measured at node '
+                                 f'{id_runs_text(measured)}; delete or rename those '
+                                 'channels first')
+            report = geometry.delete_nodes(ids)
+        elif kind == 'coordinate_systems':
+            report = geometry.delete_coordinate_systems(ids)
+        elif kind == 'elements':
+            report = project.delete_elements(name, ids)
+        else:
+            report = project.delete_element_groups(name, ids)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    words = {'nodes': 'Nodes', 'elements': 'Elements', 'groups': 'Element groups',
+             'coordinate_systems': 'Coordinate systems',
+             'nodes_reassigned': 'Node references moved to the first system'}
+    rows = [v.row(words.get(key, key.replace('_', ' ').capitalize()), float(count), '',
+                  'info')
+            for key, count in report.items()]
+    singular = {'nodes': 'node', 'elements': 'element', 'groups': 'element group',
+                'coordinate_systems': 'coordinate system'}
+    removed = ', '.join(f'{count} {singular[key]}{"s" * (count != 1)}'
+                        for key, count in report.items() if count and key in singular)
+    return [*_shown(name, geometry, kind, f'removed {removed}' if removed else ''),
+            v.reading(f'Deleted from {name}', rows)]
+
+
+# ---- turning and sliding a coordinate system ----------------------------------------
+
+CS = Param('cs', 'Coordinate system (0: the first)', 'integer', default=0, min=0, step=1)
+AXIS = Param('axis', 'About its own axis', 'enum', default='z', options=(
+    Option('x', 'X'), Option('y', 'Y'), Option('z', 'Z')))
+SLIDE_AXIS = Param('axis', 'Along its own axis', 'enum', default='x', options=(
+    Option('x', 'X'), Option('y', 'Y'), Option('z', 'Z')))
+ANGLE = Param('angle', 'Angle', 'number', default=0.0, unit='°', step=1.0)
+DISTANCE = Param('distance', 'Distance', 'number', default=0.0, unit='m', step=0.001)
+
+
+def _frame(geometry: Any, cs: int) -> tuple[int, np.ndarray]:
+    cs = _system(geometry, cs)
+    row = [int(c) for c in geometry.cs_id].index(cs)
+    return cs, np.asarray(geometry.cs_matrix[row], dtype=float)
+
+
+def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.rotate_coordinate_system`: a coordinate system turned by
+    a typed angle about one of its own axes (`rotate.rotate_frame`) and
+    placed there (`Geometry.place_coordinate_system`), as Visual
+    Dynamics' rings do with an angle typed in their box."""
+    from hertzforge.rotate import angles_of, rotate_frame
+
+    name = params['geometry']
+    geometry = project[name]
+    cs, matrix = _frame(geometry, params['cs'])
+    turned = rotate_frame(matrix, 'xyz'.index(params['axis']), np.radians(params['angle']))
+    geometry.place_coordinate_system(cs, angles=angles_of(turned))
+    return _shown(name, geometry, 'coordinate_systems',
+                  f'turned {cs} {params["angle"]:+g}° about its {params["axis"].upper()}')
+
+
+def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.slide_coordinate_system`: a coordinate system's origin
+    moved a typed distance along one of its own axes
+    (`rotate.translate_frame`, `Geometry.place_coordinate_system`), as
+    Visual Dynamics' arrows do when dragged. The distance is in the
+    geometry's stored length unit, meters once its units are declared."""
+    from hertzforge.rotate import translate_frame
+
+    name = params['geometry']
+    geometry = project[name]
+    cs, matrix = _frame(geometry, params['cs'])
+    moved = translate_frame(matrix, 'xyz'.index(params['axis']), params['distance'])
+    geometry.place_coordinate_system(cs, origin=moved[3])
+    return _shown(name, geometry, 'coordinate_systems',
+                  f'moved {cs} {params["distance"]:+g} along its {params["axis"].upper()}')
+
+
+def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.reset_rotation`: a coordinate system set back to no
+    rotation, keeping its origin (`rotate.identity_frame`, placed with
+    `Geometry.place_coordinate_system`)."""
+    from hertzforge.rotate import angles_of, identity_frame
+
+    name = params['geometry']
+    geometry = project[name]
+    cs, matrix = _frame(geometry, params['cs'])
+    geometry.place_coordinate_system(cs, angles=angles_of(identity_frame(matrix)))
+    return _shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset')
+
+
+# ---- DOF arrows and sensors ---------------------------------------------------------
+
+#: past this many nodes a geometry's own arrows hide it (Visual Dynamics'
+#: `viz.geometry.DOF_ARROW_NODE_LIMIT`)
+DOF_ARROW_NODE_LIMIT = 300
+MARKED = ('geometry', 'channel_table', *DATA_KINDS)
+MARKED_SOURCE = Param('source', 'DOFs of', 'enum', options_from='objects:' + '|'.join(MARKED))
+QUANTITY = Param('measured', 'Quantity (blank: the first the data measures)', 'string',
+                 default='')
+ROLE = Param('role', 'Channels of a table', 'enum', default='all', options=(
+    Option('all', 'All channels'), Option('control', 'Control channels'),
+    Option('reference', 'References'), Option('response', 'Responses'),
+    Option('monitor', 'Monitors')))
+
+
+def _home(project: Any, name: str) -> tuple[str, Any]:
+    from hertzforge.core.geometry import Geometry
+
+    if isinstance(project[name], Geometry):
+        return name, project[name]
+    found = project.geometry_for(name)
+    if found is None:
+        raise refused(f'{name} has no geometry to draw on; link one')
+    return found
+
+
+def _marked_dofs(project: Any, name: str, params: dict[str, Any], geometry: Any
+                 ) -> tuple[list[str], list[bool], str]:
+    """The DOFs to mark, whether each points in, and what they are:
+    a geometry's every node X, Y and Z; a channel table's channels in a
+    role (`ChannelTable.chosen`), a force or a drive voltage pointing in
+    (Visual Dynamics' `viz.geometry.channel_dofs`); or the DOFs data
+    measures as a quantity (`core.report.series_quantity_dofs`)."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.report import (
+        EXCITATION_QUANTITIES,
+        series_dof_quantities,
+        series_quantity_dofs,
+    )
+
+    obj = project[name]
+    if isinstance(obj, Geometry):
+        if obj.num_nodes > DOF_ARROW_NODE_LIMIT:
+            raise refused(f'no DOF arrows on {obj.num_nodes:,} nodes: past '
+                          f'{DOF_ARROW_NODE_LIMIT} they hide the model; pick data with it '
+                          'to see the DOFs it measures')
+        dofs = [f'{int(node)}{axis}' for node in obj.node_id for axis in ('X+', 'Y+', 'Z+')]
+        return dofs, [False] * len(dofs), 'every node\'s X, Y and Z'
+    if isinstance(obj, ChannelTable):
+        try:
+            rows = obj.chosen(params['role'])
+        except ValueError as error:
+            raise refused(str(error)) from None
+        dofs, types = obj.dof_strings(), obj.types()
+        return ([dofs[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows],
+                {o.value: o.label for o in ROLE.options}[params['role']].lower())
+    series = [(name, obj, None)]
+    quantities = series_dof_quantities(series)
+    quantity = params['measured'].strip().lower().replace(' ', '_')
+    if not quantities:
+        raise refused(f'{name} measures no quantity at a DOF; declare its units first')
+    if not quantity:
+        quantity = quantities[0]
+    elif quantity not in quantities:
+        raise refused(f'{name} measures {", ".join(quantities)} at its DOFs; not {quantity}')
+    dofs = series_quantity_dofs(series, quantity)
+    return dofs, [quantity in EXCITATION_QUANTITIES] * len(dofs), quantity.replace('_', ' ')
+
+
+def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.dof_arrows`: an arrow at each DOF on the geometry the
+    source is linked with, along that axis of the node's displacement
+    coordinate system (`drawing.viz.geometry.dof_arrow_vectors`), all
+    one length (`dof_arrow_length`), as Visual Dynamics' DOF arrows mark
+    them; a force points in and ends on its node. The arrows are extra
+    nodes and lines of the mesh, a shaft and a head of two barbs, since
+    a `shape3d` has no markers, and their table lists each DOF and where
+    it points."""
+    from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+
+    name = params['source']
+    home, geometry = _home(project, name)
+    dofs, incoming, what = _marked_dofs(project, name, params, geometry)
+    if not dofs:
+        raise refused(f'{name} has no {what} to mark')
+    found = dof_arrow_vectors(geometry, dofs)
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    drawn = [(dof, into, hit) for dof, into, hit in zip(dofs, incoming, found, strict=True)
+             if hit is not None]
+    nodes: list = []
+    lines: list = []
+    if drawn:
+        length = dof_arrow_length(xyz[[hit[0] for _d, _i, hit in drawn]], _extent(xyz))
+        for _dof, into, (row, vector, _axis) in drawn:
+            at = xyz[row]
+            if into:
+                _arrow(at - length * vector, at, nodes, lines)
+            else:
+                _arrow(at, at + length * vector, nodes, lines)
+    rows = []
+    for dof, into, hit in zip(dofs, incoming, found, strict=True):
+        if hit is None:
+            rows.append([dof, '', 'not drawn: no such node or direction on ' + home])
+            continue
+        row, vector, _axis = hit
+        rows.append([dof, ' '.join(f'{c:+.3f}' for c in vector),
+                     'in, ending on the node' if into else 'out from the node'])
+    missing = len(dofs) - len(drawn)
+    title = (f'DOFs of {name} on {home}: {what}, {len(drawn)} arrow'
+             f'{"s" * (len(drawn) != 1)}'
+             + (f'; {missing} of {len(dofs)} have none' if missing else ''))
+    return [_drawn(f'{home}, DOFs of {name}', geometry, nodes, lines),
+            v.table(title, ['DOF', 'Direction (global)', 'Arrow'], rows)]
+
+
+TABLE = Param('table', 'Channel table', 'enum', options_from='objects:channel_table')
+#: Visual Dynamics' `SENSOR_SIZES`: a multiple of true size, since a 6 mm
+#: sensor on a 2 m structure is a speck
+SIZE = Param('size', 'Drawn at', 'enum', default=1, options=tuple(
+    Option(factor, label) for label, factor in (
+        ('True size', 1), ('×2', 2), ('×5', 5), ('×10', 10), ('×20', 20), ('×50', 50),
+        ('×100', 100))))
+#: with the geometry's units undefined, a millimeter is drawn as this
+#: fraction of the model's size (Visual Dynamics' `viz.sensors.NOMINAL_MM`)
+NOMINAL_MM = 0.0015
+_CORNERS = np.array([(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
+_EDGES = [(a, b) for a in range(8) for b in range(a + 1, 8)
+          if np.count_nonzero(_CORNERS[a] != _CORNERS[b]) == 1]
+
+
+def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.sensors`: the sensors a channel table places on its
+    geometry (`Project.sensors`, `core.sensors.place`), each centered on
+    its node and turned into its frame, at a multiple of true size, as
+    Visual Dynamics' Sensors draws them. Each body is drawn as the
+    outline of its box, from the catalog's size, with its sensing axes
+    from the node out past its faces: a triax's X, Y and Z, a uniaxial
+    accelerometer's or a force transducer's one axis. These are extra
+    nodes and lines of the mesh, since a `shape3d` has no solids of its
+    own beside the model's."""
+    name = params['table']
+    try:
+        placed, notes = project.sensors(name)
+    except (TypeError, ValueError) as error:
+        raise refused(str(error)) from None
+    if not placed:
+        raise refused(f'{name} names no sensor model at a node of its geometry'
+                      + (f': {notes[0]}' if notes else ''))
+    home, geometry = project.geometry_for(name)
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    if geometry.units_defined:
+        per_mm = 1e-3
+    else:
+        span = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0))) if len(xyz) else 1.0
+        per_mm = NOMINAL_MM * (span or 1.0)
+        notes = [*notes, ('the geometry\'s units are not defined, so the sensors are drawn '
+                 'at a size proportional to the model, not true size')]
+    scale = per_mm * float(params['size'])
+    nodes: list = []
+    lines: list = []
+    rows = []
+    for sensor in placed:
+        half = 0.5 * np.asarray(sensor.entry.size, dtype=float) * scale
+        base = len(nodes)
+        nodes += list(sensor.center + (_CORNERS * half) @ sensor.frame.T)
+        lines += [(base + a, base + b) for a, b in _EDGES]
+        axes = (0, 1, 2) if sensor.kind == 'triax' else (2,)
+        for axis in axes:
+            _arrow(np.asarray(sensor.center, dtype=float),
+                   sensor.center + 2.0 * half[axis] * sensor.frame[:, axis], nodes, lines)
+        rows.append([str(sensor.node), sensor.model or 'none named', sensor.kind,
+                     ' '.join(str(r + 1) for r in sensor.rows),
+                     ' × '.join(f'{s:g}' for s in sensor.entry.size) + ' mm',
+                     'generic body' if sensor.generic else ''])
+    readings = [v.row('Sensors', float(len(placed)), '', 'info'),
+                v.row('Drawn at', f'{params["size"]} × true size', None, 'info')]
+    readings += [v.row('Note', note, None, 'warn') for note in notes]
+    return [_drawn(f'{home}, sensors of {name}', geometry, nodes, lines),
+            v.table(f'Sensors of {name} on {home}',
+                    ['Node', 'Model', 'Kind', 'Channels', 'Body', 'Note'], rows),
+            v.reading(f'Sensors of {name}', readings)]
+
+
+# ---- project type and Automatic -----------------------------------------------------
+
+def _project_types() -> tuple[Option, ...]:
+    from hertzforge.core.report import PROJECT_TYPES
+
+    return (*(Option(t, t) for t in PROJECT_TYPES), Option('none', 'None'))
+
+
+PROJECT_TYPE = Param('type', 'Project type', 'enum', default='none', options=_project_types())
+
+
+def _still_missing(project: Any) -> list[dict]:
+    still = [label for label, _cls, _icon, _n, optional, _side in project.missing()
+             if not optional]
+    if not still:
+        return [v.row('Missing', 'nothing: everything a report needs is here', None,
+                      'pass')]
+    return [v.row('Missing', label, None, 'warn') for label in still]
+
+
+def _place_basis(project: Any) -> list[str]:
+    """The project type's Basis slots filled from the objects that
+    satisfy them (`core.report.expectation_satisfiers`), each placed in
+    the Basis group (`Project.place`) unless it is already in another
+    group: what Visual Dynamics' window does when a type is set. Returns
+    what was placed, or the core's refusal of a placement."""
+    from hertzforge.core.report import expectation_satisfiers
+
+    placed = project.sides()
+    members = expectation_satisfiers(project.project_type, dict(project.items()),
+                                     placed).get('Basis', [])
+    elsewhere = {name for group in project.object_groups if group['role'] != 'Basis'
+                 for name in group['members']}
+    here = set(placed.get('Basis', ()))
+    moved = []
+    for name in members:
+        if name in elsewhere or name in here:
+            continue
+        try:
+            project.place(name, 'Basis')
+        except (ValueError, KeyError) as error:
+            return [*moved, f'not placed: {str(error).strip(chr(39))}']
+        moved.append(name)
+    return moved
+
+
+def set_project_type(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_project_type`: the kind of test the project is,
+    which decides the objects a finished project holds, the slots the
+    tree shows gray, and what Automatic fills. As in Visual Dynamics, the
+    objects that satisfy the type's Basis slots are placed in the Basis
+    group as the type is set; the window does that from core calls, and
+    so does this. The reading lists what is still missing."""
+    project.project_type = None if params['type'] == 'none' else params['type']
+    if project.project_type is None:
+        return [v.reading('Project type', [v.row('Type', 'none', None, 'info')]),
+                groups_table(project)]
+    rows = [v.row('Type', project.project_type, None, 'info')]
+    moved = _place_basis(project)
+    if moved:
+        rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
+    return [v.reading(f'{project.project_type} project', rows + _still_missing(project)),
+            groups_table(project)]
+
+
+def work_up(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.work_up`: Automatic, every missing object the project's
+    type expects computed from what is loaded, the report last
+    (`Project.work_up`), and what is still missing after it, as Visual
+    Dynamics' status bar says."""
+    try:
+        added = project.work_up()
+    except ValueError as error:
+        raise refused(str(error)) from None
+    rows = ([v.row('Added', name, None, 'pass') for name in added]
+            or [v.row('Added', 'nothing to compute', None, 'info')])
+    return [v.reading(f'Automatic, {project.project_type} project',
+                      rows + _still_missing(project))]
+
+
+# ---- channel roles and DOF names ----------------------------------------------------
+
+ROLE_SOURCE = Param('source', 'Time history or channel table', 'enum',
+                    options_from='objects:time_history|channel_table')
+RECORD = Param('record', 'Channel', 'integer', default=1, min=1, step=1)
+CHANNEL_ROLE = Param('role', 'Role', 'enum', default='response', options=(
+    Option('reference', 'Reference: drives the structure'),
+    Option('response', 'Response: measured on the structure'),
+    Option('monitor', 'Monitor: recorded, not analyzed')))
+RENAMED = ('channel_table', *DATA_KINDS, 'transient_specification', 'shock_specification')
+RENAME_SOURCE = Param('source', 'Object', 'enum', options_from='objects:' + '|'.join(RENAMED))
+OLD = Param('old', 'DOF', 'string', default='')
+NEW = Param('new', 'New DOF', 'string', default='')
+RENAME_QUANTITY = Param('measured', 'Quantity (blank: every channel at the DOF)', 'string',
+                        default='')
+
+
+def channels_table(project: Any, name: str, title: str) -> dict:
+    """An object's channels as a table: a channel table's own columns
+    (`core.tables.table_of`), or a data object's records with each one's
+    DOF, reference, quantity and, for a time history, role."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.core.tables import table_of
+
+    obj = project[name]
+    if isinstance(obj, ChannelTable):
+        home = project.geometry_for(name)
+        headers, rows = table_of(obj, geometry=None if home is None else home[1])
+        return v.table(title, headers, rows)
+    references = obj.reference_dof
+    roles = obj.channel_roles() if isinstance(obj, TimeHistory) else None
+    headers = ['Record', 'DOF', *(['Reference'] if references is not None else []),
+               'Quantity', *(['Role'] if roles is not None else [])]
+    rows = []
+    for i in range(obj.num_records):
+        dof = str(obj.response_dof[i])
+        row = [str(i + 1), dof]
+        if references is not None:
+            row.append(str(references[i]))
+        row.append(obj.known_dim(i).replace('_', ' '))
+        if roles is not None:
+            row.append(roles.get((dof, str(obj.ordinate_dim[i])), ''))
+        rows.append(row)
+    return v.table(title, headers, rows)
+
+
+def set_channel_role(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_channel_role`: one channel made a reference, a
+    response or a monitor (`Project.set_channel_role`), on a time
+    history or a channel table and on what is linked with it, as Visual
+    Dynamics' grid Role column sets it. The channel is the record, or
+    the table's row, counted from 1."""
+    from hertzforge.core.data import TimeHistory
+
+    name = params['source']
+    obj = project[name]
+    count = obj.num_records if isinstance(obj, TimeHistory) else obj.num_channels
+    if params['record'] > count:
+        raise refused(f'{name} has {count} channels; there is no channel {params["record"]}')
+    index = params['record'] - 1
+    if isinstance(obj, TimeHistory):
+        dof, quantity = str(obj.response_dof[index]), str(obj.ordinate_dim[index])
+    else:
+        dof, quantity = obj.identities()[index]
+    try:
+        changed = project.set_channel_role(name, dof, quantity, params['role'])
+    except (ValueError, TypeError) as error:
+        raise refused(f'{name}: {error}') from None
+    said = f'{dof} ({quantity}) is a {params["role"]} on {", ".join(changed)}'
+    histories = [n for n in changed if isinstance(project[n], TimeHistory)]
+    if histories:
+        roles = list(project[histories[0]].channel_roles().values())
+        counts = [sum(r == kind for r in roles) for kind in ('reference', 'response',
+                                                             'monitor')]
+        said += (f': {counts[0]} reference{"s" * (counts[0] != 1)}, {counts[1]} '
+                 f'response{"s" * (counts[1] != 1)}, {counts[2]} monitor'
+                 f'{"s" * (counts[2] != 1)}')
+    return [channels_table(project, name, said)]
+
+
+def rename_dof(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.rename_dof`: a channel's coordinate corrected on an object
+    and on every object derived from it (`Project.rename_dof`), the
+    channel and not the point: with a quantity, only that channel at the
+    DOF moves, as Visual Dynamics' grid does when its row label is typed
+    over."""
+    name = params['source']
+    old, new = params['old'].strip(), params['new'].strip()
+    if not old or not new:
+        raise refused('name the DOF as it is and the DOF to give it, such as 101Z+')
+    quantity = params['measured'].strip().lower().replace(' ', '_') or None
+    try:
+        changed = project.rename_dof(name, old, new, quantity)
+    except (ValueError, TypeError) as error:
+        raise refused(f'{name}: {error}') from None
+    what = f'{old} ({quantity.replace("_", " ")})' if quantity else old
+    return [channels_table(project, name, f'{what} is now {new} on {", ".join(changed)}'),
+            v.reading(f'Renamed {old}', [v.row('Changed', changed_name, None, 'info')
+                                         for changed_name in changed])]
+
+
+# ---- a channel table's control loops ------------------------------------------------
+
+ENVIRONMENT = Param('environment', 'Environment (blank: the first)', 'string', default='')
+FORM = Param('form', 'View', 'enum', default='channels', options=(
+    Option('channels', 'Channels'), Option('response', 'Response transformation'),
+    Option('reference', 'Reference transformation')))
+CONTROL = Param('control', 'Control', 'boolean', default=True)
+
+
+def _environment(table: Any, text: str) -> str | None:
+    loops = list(table.environments)
+    if not text.strip():
+        return loops[0] if loops else None
+    if text.strip() not in loops:
+        held = ', '.join(loops) if loops else 'none'
+        raise refused(f'the table\'s environments are {held}; not {text.strip()!r}')
+    return text.strip()
+
+
+def channel_table_view(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.channel_table_view`: a channel table in one of its control
+    loops, as Visual Dynamics' two drop-downs show it: its channels with
+    the Control column of that environment (`core.tables.table_of`), or
+    what the controller put over them, the response transformation (a
+    row per controlled response over the control channels) or the
+    reference transformation over the drives
+    (`core.tables.transformation_table`)."""
+    from hertzforge.core.tables import table_of, transformation_table
+
+    name = params['table']
+    table = project[name]
+    environment = _environment(table, params['environment'])
+    form = params['form']
+    if form == 'channels':
+        home = project.geometry_for(name)
+        headers, rows = table_of(table, geometry=None if home is None else home[1],
+                                 environment=environment)
+        title = name + (f', control channels of {environment}' if environment else '')
+        return [v.table(title, headers, rows)]
+    if environment is None:
+        raise refused(f'{name} has no control loops, so no transformation')
+    try:
+        headers, rows = transformation_table(table, environment, form)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return [v.table(f'{name}, {environment}, {form} transformation', headers, rows)]
+
+
+def set_control(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_control`: Control checked or cleared on one channel
+    of one control loop (`ChannelTable.set_control`), the Control column
+    of Visual Dynamics' table in that environment; a table with no loops
+    has its own Control column, written as a cell (`set_cell`). The
+    channel is the table's row, counted from 1."""
+    name = params['table']
+    table = project[name]
+    if params['record'] > table.num_channels:
+        raise refused(f'{name} has {table.num_channels} channels; there is no channel '
+                      f'{params["record"]}')
+    environment = _environment(table, params['environment'])
+    row = params['record'] - 1
+    try:
+        if environment is None:
+            table.set_cell('control', row, params['control'])
+        else:
+            table.set_control(environment, row, params['control'])
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return channel_table_view(project, {**params, 'form': 'channels'})
+
+
+# ---- object groups ------------------------------------------------------------------
+
+OBJECT = Param('object', 'Object', 'enum', options_from=ANY)
+FIRST = Param('first', 'Object', 'enum', options_from=ANY)
+SECOND = Param('second', 'Linked with', 'enum', options_from=ANY)
+MORE = Param('more', 'And (names, comma separated)', 'string', default='')
+LINK_NAME = Param('name', 'Group name (blank: keep it)', 'string', default='')
+GROUP_ROLE = Param('role', 'Role', 'enum', default='Basis', options=(
+    Option('Basis', 'Basis of comparisons'), Option('none', 'None')))
+SIDE = Param('side', 'Into', 'enum', default='Basis', options=(
+    Option('Basis', 'The Basis'), Option('other', 'The other group')))
+NEW_NAME = Param('name', 'Name (blank: remove it)', 'string', default='')
+
+
+def groups_table(project: Any, said: str = '') -> dict:
+    """The project's object groups: each one's name, role, members, and
+    whether comparisons are made against it."""
+    rows = [[str(k + 1), group.get('name', ''), group['role'] or '',
+             ', '.join(group['members']), 'yes' if group['role'] == 'Basis' else '']
+            for k, group in enumerate(project.object_groups)]
+    return v.table('Object groups' + (f': {said}' if said else ''),
+                   ['Group', 'Name', 'Role', 'Members', 'Basis'], rows)
+
+
+def _grouped(call: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return call(*args, **kwargs)
+    except (ValueError, KeyError) as error:
+        raise refused(str(error).strip("'")) from None
+
+
+def link(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.link`: objects linked into one group, merging the groups
+    they are in (`Project.link`), which refuses a second geometry and a
+    member the group's geometry cannot carry."""
+    names = [params['first'], params['second'],
+             *(n.strip() for n in params['more'].split(',') if n.strip())]
+    if len(set(names)) < 2:
+        raise refused('linking takes two or more different objects')
+    members = _grouped(project.link, *dict.fromkeys(names), name=params['name'].strip() or None)
+    return [groups_table(project, 'linked ' + ', '.join(members))]
+
+
+def unlink(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.unlink`: an object taken out of its group, a group left
+    with one member dissolved unless it has a role (`Project.unlink`)."""
+    name = params['object']
+    if project.object_group_of(name) is None:
+        raise refused(f'{name} is in no object group')
+    project.unlink(name)
+    return [groups_table(project, f'unlinked {name}')]
+
+
+def set_basis(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_basis`: an object's group made the Basis, the group
+    comparisons are made against (`Project.set_basis`); the Basis is
+    unique, so any other group loses it."""
+    name = params['object']
+    _grouped(project.set_basis, name)
+    return [groups_table(project, f'the group of {name} is the Basis')]
+
+
+def set_role(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_role`: the role of an object's group set or cleared
+    (`Project.set_role`), the bracket menu's Basis of Comparisons
+    checked or not."""
+    name = params['object']
+    role = None if params['role'] == 'none' else params['role']
+    _grouped(project.set_role, name, role)
+    return [groups_table(project, f'the group of {name} has role {role or "none"}')]
+
+
+def place(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.place`: one object put into the Basis or the other
+    group, the group made when there is none (`Project.place`), as a
+    drop on a gray slot of Visual Dynamics' tree does."""
+    name = params['object']
+    role = None if params['side'] == 'other' else params['side']
+    _grouped(project.place, name, role)
+    return [groups_table(project, f'placed {name} in '
+                         + ('the Basis' if role else 'the other group'))]
+
+
+def name_object_group(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.name_object_group`: the group an object is in named, or
+    its name removed when blank (`Project.name_object_group`); a named
+    group exports as an activity of that name."""
+    name, given = params['object'], params['name'].strip()
+    _grouped(project.name_object_group, name, given or None)
+    return [groups_table(project, f'group named {given!r}' if given else 'group name removed')]
+
+
+# ---- descriptors --------------------------------------------------------------------
+
+def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
+           edits: bool = True) -> Operation:
+    return Operation(id=id_, title=title, workspace='model', accepts='project',
+                     summary=summary, params=params, outputs=outputs, run=run, edits=edits)
+
+
+def _analyze(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
+             edits: bool = True) -> Operation:
+    return Operation(id=id_, title=title, workspace='analyze', accepts='project',
+                     summary=summary, params=params, outputs=outputs, run=run, edits=edits)
+
+
+DRAWN = ('shape3d', 'table')
+GROUPS = ('table',)
+
+OPERATIONS = (
+    _model('project.view_entities', 'View Entities',
+           'A geometry\'s nodes, coordinate systems, elements or element groups as a '
+           'table, beside the geometry drawn.',
+           (GEOMETRY, KIND), DRAWN, view_entities, edits=False),
+    _model('project.add_node', 'Add Node',
+           'A node at typed coordinates, in meters once the geometry\'s units are '
+           'declared.',
+           (GEOMETRY, X, Y, Z, NODE_ID, PLACEMENT_CS, DISPLACEMENT_CS), DRAWN, add_node),
+    _model('project.add_coordinate_system', 'Add Coordinate System',
+           'A coordinate system at a typed origin, turned about the fixed X, then Y, then '
+           'Z axes.',
+           (GEOMETRY, X, Y, Z, RX, RY, RZ, CS_NAME, CS_TYPE, NODE_ID), DRAWN,
+           add_coordinate_system),
+    _model('project.add_element', 'Add Element',
+           'An element of a family on the nodes named, in order; for beams, the chain of '
+           'elements through every node named.',
+           (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP), DRAWN, add_element),
+    _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
+           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group),
+    _model('project.set_entity', 'Set Entity',
+           'One field of a node, coordinate system, element or element group, as a cell '
+           'of its table is typed over.',
+           (GEOMETRY, KIND, ENTITY, FIELD, VALUE), DRAWN, set_entity),
+    _model('project.delete_entities', 'Delete Entities',
+           'Nodes, coordinate systems, elements or element groups deleted by id; nodes '
+           'data is measured at, and the last coordinate system, are kept.',
+           (GEOMETRY, KIND, IDS), (*DRAWN, 'reading'), delete_entities),
+    _model('project.rotate_coordinate_system', 'Rotate Coordinate System',
+           'A coordinate system turned by a typed angle about one of its own axes.',
+           (GEOMETRY, CS, AXIS, ANGLE), DRAWN, rotate_coordinate_system),
+    _model('project.slide_coordinate_system', 'Slide Coordinate System',
+           'A coordinate system\'s origin moved a typed distance along one of its own '
+           'axes.',
+           (GEOMETRY, CS, SLIDE_AXIS, DISTANCE), DRAWN, slide_coordinate_system),
+    _model('project.reset_rotation', 'Reset Rotation',
+           'A coordinate system set back to no rotation, keeping its origin.',
+           (GEOMETRY, CS), DRAWN, reset_rotation),
+    _model('project.dof_arrows', 'DOF Arrows',
+           'An arrow at each DOF on the geometry: every node\'s X, Y and Z, a channel '
+           'table\'s channels in a role, or what data measures as one quantity.',
+           (MARKED_SOURCE, QUANTITY, ROLE), DRAWN, dof_arrows, edits=False),
+    _model('project.sensors', 'Sensors',
+           'The sensors a channel table names, centered on their nodes and turned as the '
+           'table says, at a multiple of true size.',
+           (TABLE, SIZE), (*DRAWN, 'reading'), sensors, edits=False),
+    _analyze('project.set_project_type', 'Set Project Type',
+             'The kind of test the project is, which says what a finished project holds; '
+             'the objects that fill its Basis are placed there.',
+             (PROJECT_TYPE,), ('reading', 'table'), set_project_type),
+    _analyze('project.work_up', 'Automatic',
+             'Every object the project\'s type expects computed from what is loaded, the '
+             'report last.',
+             (), ('reading',), work_up),
+    _analyze('project.set_channel_role', 'Set Channel Role',
+             'One channel made a reference, a response or a monitor, on a time history or '
+             'channel table and on what is linked with it.',
+             (ROLE_SOURCE, RECORD, CHANNEL_ROLE), ('table',), set_channel_role),
+    _analyze('project.rename_dof', 'Rename DOF',
+             'A channel\'s DOF corrected on an object and on everything derived from it; '
+             'with a quantity, only that channel at the DOF.',
+             (RENAME_SOURCE, OLD, RENAME_QUANTITY, NEW), ('table', 'reading'), rename_dof),
+    _analyze('project.channel_table_view', 'Channel Table View',
+             'A channel table in one control loop: its channels with that loop\'s Control '
+             'column, or the loop\'s response or reference transformation.',
+             (TABLE, ENVIRONMENT, FORM), ('table',), channel_table_view, edits=False),
+    _analyze('project.set_control', 'Set Control',
+             'Control checked or cleared on one channel of one control loop.',
+             (TABLE, ENVIRONMENT, RECORD, CONTROL), ('table',), set_control),
+    _analyze('project.link', 'Link', 'Objects linked into one group, merging the groups '
+             'they are in.', (FIRST, SECOND, MORE, LINK_NAME), GROUPS, link),
+    _analyze('project.unlink', 'Unlink', 'An object taken out of its group.',
+             (OBJECT,), GROUPS, unlink),
+    _analyze('project.set_basis', 'Basis of Comparisons',
+             'An object\'s group made the Basis, the group the others are compared against.',
+             (OBJECT,), GROUPS, set_basis),
+    _analyze('project.place', 'Place',
+             'One object put into the Basis or the other group.', (OBJECT, SIDE), GROUPS,
+             place),
+    _analyze('project.set_role', 'Set Group Role',
+             'The role of an object\'s group set, or cleared.', (OBJECT, GROUP_ROLE),
+             GROUPS, set_role),
+    _analyze('project.name_object_group', 'Name Object Group',
+             'The group an object is in named, or its name removed.',
+             (OBJECT, NEW_NAME), GROUPS, name_object_group),
+)
