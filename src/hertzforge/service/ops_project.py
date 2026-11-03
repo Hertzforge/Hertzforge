@@ -188,6 +188,40 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
         for k in range(shapes.num_shapes)])]
 
 
+FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
+SECOND = Param('second', 'Columns', 'enum', options_from='objects:shape_set')
+
+
+def mac(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.mac`: the Modal Assurance Criterion of one shape set's
+    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    or a set against itself. With a geometry the matrix selects the pair it
+    shows, the column mode overlaid on the row mode, as Visual Dynamics
+    shows two shape sets' MAC."""
+    from hertzforge.core.shapes import cross_mac
+
+    from .ops_modal_run import paired
+
+    first, second = params['first'], params['second']
+    rows, columns = project[first], project[second]
+    if not rows.num_shapes or not columns.num_shapes:
+        raise refused(f'{first if not rows.num_shapes else second} has no modes')
+    try:
+        values = rows.auto_mac() if first == second else cross_mac(rows, columns)
+    except ValueError as error:
+        raise refused(str(error)) from None
+
+    def axis(name: str, shapes: Any) -> dict:
+        return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
+
+    title = f'Auto-MAC of {first}' if first == second else f'MAC of {first} Against {second}'
+    matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
+                      (0.0, 1.0))
+    geometry = _geometry(project)
+    return paired(None if geometry is None else project[geometry], matrix, rows,
+                  range(rows.num_shapes), columns, range(columns.num_shapes))
+
+
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mode_shapes`: a shape set's modes on a geometry."""
     return [_shape_view(project, params['shapes'], params['geometry'])]
@@ -285,6 +319,11 @@ OPERATIONS = (
                 'project as a shape set and drawn on its geometry.',
         params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
         run=fit_modes),
+    Operation(
+        id='project.mac', title='MAC', workspace='analyze', accepts='project',
+        summary='One shape set\'s modes against another\'s, or a set against '
+                'itself; with a geometry, a cell shows that pair overlaid.',
+        params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
     Operation(
         id='project.mode_shapes', title='Mode Shapes', workspace='analyze',
         accepts='project',

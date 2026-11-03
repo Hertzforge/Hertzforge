@@ -245,3 +245,27 @@ def test_detecting_shocks_marks_the_history_and_counts_as_an_edit(plate, validat
     wire_views([reading], validate)
     assert reading['rows'][0]['value'] == len(plate['Time History'].shocks) > 0
     assert OPS['project.detect_shocks'].edits
+
+
+def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate):
+    run(plate, 'project.compute_frfs', method='H1')
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=4)
+    fitted = next(name for name in plate if projects.kind_of(plate[name]) == 'shape_set')
+    matrix, shape = run(plate, 'project.mac', first=fitted, second=fitted)
+    wire_views([matrix, shape], validate)
+    assert matrix['title'] == f'Auto-MAC of {fitted}' and matrix['selects'] == 'shape3d'
+    assert np.allclose(np.diag(np.asarray(matrix['values'])), 1.0)
+    assert len(shape['overlays']) == len(shape['modes'])
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
+    other = [name for name in plate if projects.kind_of(plate[name]) == 'shape_set'][-1]
+    (matrix, _) = run(plate, 'project.mac', first=fitted, second=other)
+    assert np.asarray(matrix['values']).shape == (plate[fitted].num_shapes,
+                                                  plate[other].num_shapes)
+
+
+def test_mac_without_a_geometry_is_the_matrix_alone(plate):
+    run(plate, 'project.compute_frfs', method='H1')
+    plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
+    plate.remove(*[name for name in plate if projects.kind_of(plate[name]) == 'geometry'])
+    fitted = next(name for name in plate if projects.kind_of(plate[name]) == 'shape_set')
+    assert [v['view'] for v in run(plate, 'project.mac', first=fitted, second=fitted)] == ['matrix']
