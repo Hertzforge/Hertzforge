@@ -535,7 +535,7 @@ whether it computes something as it is typed (`live`). It is opened at `taken`, 
 as HH:MM:SS. Each box's text goes back as typed in `values`, by field, and the service reads it by
 its box kind; `preview` is what a `live` form computes from it (the projection to full level, a
 sweep's current against its rating, a shot's checks and pulses, a notch's place in the plan, the
-hold a deviation answers). `runlog.write` writes it as its entries, the event time read from
+hold a deviation answers), with the predictions drawn for the connection's project beside what is read: the notch Notch Prediction cut beside a notch, and the drives Drive Prediction asked for beside the level row. `runlog.write` writes it as its entries, the event time read from
 `time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
 what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
 

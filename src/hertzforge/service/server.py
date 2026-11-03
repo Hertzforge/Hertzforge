@@ -561,8 +561,9 @@ class Connection:
                                             'result': self.units_request(params)})
             elif method in run_logs.RUN_LOG_METHODS:
                 async with self.run_log_lock:
+                    project = self.project.project if self.project is not None else None
                     result = await self.service.in_worker(run_logs.request, self.run_log,
-                                                          method, params)
+                                                          method, params, project, self.system)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
             elif method in fitting.FIT_METHODS:

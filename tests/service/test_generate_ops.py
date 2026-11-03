@@ -345,3 +345,57 @@ def test_an_optional_object_param_takes_none_or_a_tracked_level(validate):
     assert any(row['label'] == '101Z+, 300 Hz' for row in reading['rows'])
     with pytest.raises(ProtocolError, match='not one of the choices'):
         op.resolve({'specification': 'Profile', 'levels': 'Nothing'}, objects=kinds)
+
+
+def test_a_drawn_notch_prediction_is_read_beside_a_notch_in_the_run_log(tmp_path):
+    """Visual Dynamics' dock shows the notch its window predicted beside the
+    notch observed; here the prediction drawn for a project is the one its
+    connection's run log shows."""
+    from hertzforge.service import run_logs
+
+    project = _notch_project(0.18)
+    keeper = run_logs.Keeper()
+    try:
+        call = lambda method, **params: run_logs.request(keeper, method, params, project)
+        call('runlog.new', path=str(tmp_path / 'notch.hflog'))
+        spec = call('runlog.form', form='open test')
+        call('runlog.write', form='open test', values={'test_kind': 'Random Vibration'},
+             taken=spec['taken'], author='BZ')
+        call('runlog.write', form='run start', values={}, taken=spec['taken'], author='BZ')
+        before = call('runlog.preview', form='notch', values={'band': '240-260'})['text']
+        assert before.endswith('Predicted: no prediction in a project')
+        run(project, 'project.notch_prediction', frf='T', specification='Spec',
+            profiles='Spec')
+        said = call('runlog.preview', form='notch', values={'band': '240-260',
+                                                            'depth_db': '3'})['text']
+        assert 'Predicted (from Spec through T): ' in said
+        assert '3.0 dB' in said and said.endswith('Observed: 240 to 260 Hz, 3 dB deep')
+        apart = call('runlog.preview', form='notch', values={'band': '900-950'})['text']
+        assert 'no notch from 900 to 950 Hz' in apart
+        other = run_logs.request(keeper, 'runlog.preview',
+                                 {'form': 'notch', 'values': {'band': '240-260'}}, None)
+        assert other['text'].endswith('no prediction in a project'), 'another project drew none'
+    finally:
+        keeper.close()
+
+
+def test_a_drawn_drive_prediction_is_read_beside_the_level_row(tmp_path):
+    from hertzforge.service import run_logs
+
+    project = opened('random_spectra.nc4')
+    project.convert_to_specification('PSD')
+    run(project, 'project.drive_prediction', frf='FRF', specification='PSD', drive_limit=5.0)
+    keeper = run_logs.Keeper()
+    try:
+        call = lambda method, **params: run_logs.request(keeper, method, params, project)
+        call('runlog.new', path=str(tmp_path / 'drive.hflog'))
+        spec = call('runlog.form', form='open test')
+        call('runlog.write', form='open test',
+             values={'test_kind': 'Random Vibration', 'drive_window': '0.1, 0.8'},
+             taken=spec['taken'], author='BZ')
+        said = call('runlog.preview', form='level row',
+                    values={'level_db': '-6', 'drive_fraction': '0.2'})['text']
+        assert 'Predicted drive (from PSD through FRF): ' in said
+        assert 'Read drive: 0.2 of the range at -6 dB; ' in said
+    finally:
+        keeper.close()

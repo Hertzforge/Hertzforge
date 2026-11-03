@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from . import run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_sine_shock import STROKE_RATINGS, _flat, _trace
@@ -721,6 +722,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         tolerance=params['tolerance'], weight=params['weight'],
         duration=params['duration'], drive_limit=params['drive_limit'] or None,
         shakers=shakers))
+    run_logs.offer(project, 'drive', prediction, f'{spec_name} through {frf_name}')
     f = np.asarray(prediction.frequency, dtype=float)
     if params['response'] > len(prediction.rows):
         raise refused(f'the FRF has {len(prediction.rows)} response channels; there is no '
@@ -806,6 +808,7 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     profiles = None if profiles_name == spec_name else project[profiles_name]
     prediction = _core(lambda: predict_limits(project[frf_name], project[spec_name],
                                               profiles, tolerance=params['tolerance']))
+    run_logs.offer(project, 'limit', prediction, f'{spec_name} through {frf_name}')
     f = np.asarray(prediction.frequency, dtype=float)
     half = np.gradient(f) / 2.0 if f.size > 1 else np.zeros_like(f)
     unit = unit_text(prediction.dimension)
