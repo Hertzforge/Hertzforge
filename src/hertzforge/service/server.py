@@ -39,6 +39,7 @@ from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .ops_readings import OPERATIONS as READING_OPERATIONS
 from .ops_settings import OPERATIONS as SETTINGS_OPERATIONS
 from .ops_specify import OPERATIONS as SPECIFY_OPERATIONS
+from .ops_spectra import OPERATIONS as SPECTRA_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
@@ -47,7 +48,7 @@ OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
                                      + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS
                                      + SETTINGS_OPERATIONS + MODEL_OPERATIONS
                                      + SPECIFY_OPERATIONS + READING_OPERATIONS
-                                     + HISTORY_OPERATIONS)
+                                     + HISTORY_OPERATIONS + SPECTRA_OPERATIONS)
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
