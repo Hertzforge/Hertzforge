@@ -291,6 +291,8 @@ export interface ProjectSummary {
 	objects: ProjectObject[];
 	/** The geometry data is drawn on when nothing else names one. */
 	active_geometry?: string | null;
+	/** Objects held by reference to a file that was not found or has changed: not loaded, kept. */
+	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
 /** One row of `project.units`: a channel, or the object itself, and its unit. */
