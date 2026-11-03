@@ -1204,8 +1204,10 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-law-ratio-math",
+ "hertzforge-mimo-laws",
  "hertzforge-module-abi",
  "hertzforge-random",
+ "hertzforge-sdm",
  "serde",
  "serde_json",
 ]
