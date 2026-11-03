@@ -1,5 +1,8 @@
 //! The law catalog: every Random control law an operator can choose from, the
 //! built-in laws first, then the laws imported into the data root.
+//! Single-output laws ([`LawCatalog::entries`]) and multiple-output laws
+//! ([`LawCatalog::mimo_entries`]) are listed apart: a law file says which world
+//! it implements when it is loaded, and each list holds only its own.
 //!
 //! An imported law lives at `<data_root>/laws/<sha256>.wasm`, named by the
 //! SHA-256 of its bytes, with its check record (if any) beside it at
@@ -10,7 +13,11 @@
 
 use crate::builtin::BuiltinLaw;
 use crate::check::{is_sha256, CheckRecord};
-use hertzforge_law_host::{law_file_sha256, HostConfig, LawHost, LawIdentity, LoadedLaw, Manifest};
+use crate::mimo::builtin_mimo_manifest;
+use hertzforge_law_host::{
+    law_file_sha256, AnyLaw, HostConfig, LawHost, LawIdentity, Manifest, MimoManifest,
+};
+use hertzforge_mimo_laws::BuiltinMimo;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -36,11 +43,20 @@ pub enum CheckStatus {
     Unreadable(String),
 }
 
+/// Which test type a law is for: the world its file implements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LawWorld {
+    /// Single-output Random (`random-single`).
+    Single,
+    /// Multiple-output Random (`random-mimo`).
+    Mimo,
+}
+
 /// One law the operator can choose.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogEntry {
-    /// What a choice names the law by: the built-in id (`hinv`, `ratio`) or an
-    /// imported file's SHA-256.
+    /// What a choice names the law by: the built-in id (`hinv`, `ratio`,
+    /// `pinv_closed`, ...) or an imported file's SHA-256.
     pub id: String,
     /// Name, version and author from the manifest, and the file's SHA-256
     /// (empty for a built-in law).
@@ -51,6 +67,12 @@ pub struct CatalogEntry {
     pub builtin: bool,
     /// Where the law stands on its check.
     pub check: CheckStatus,
+    /// The test type the law is for.
+    pub world: LawWorld,
+    /// For a multiple-output law, its whole manifest: the shapes it supports,
+    /// the optional inputs it reads and the layout of each diagnostic (its
+    /// `law` is [`Self::manifest`]).
+    pub mimo: Option<MimoManifest>,
 }
 
 /// A file in the laws folder that is not in the catalog, and why.
@@ -104,9 +126,9 @@ impl fmt::Display for CatalogError {
 
 impl std::error::Error for CatalogError {}
 
-/// An imported law file, loaded.
+/// An imported law file, loaded, of either world.
 pub(crate) struct Imported {
-    pub(crate) law: LoadedLaw,
+    pub(crate) law: AnyLaw,
     pub(crate) check: CheckStatus,
 }
 
@@ -211,27 +233,51 @@ impl LawCatalog {
                 "its contents have the SHA-256 {sha}, not the one it is named by"
             ));
         }
-        let law = self.host.load(&bytes).map_err(|e| e.to_string())?;
+        let law = self.host.load_any(&bytes).map_err(|e| e.to_string())?;
         Ok(Imported {
             check: check_status(&self.laws_dir, &sha),
             law,
         })
     }
 
-    /// Every law, the built-in laws first (the default first of all), then the
-    /// imported laws by name, version and hash.
+    /// Every single-output law, the built-in laws first (the default first of
+    /// all), then the imported single-output laws by name, version and hash.
     pub fn entries(&self) -> Vec<CatalogEntry> {
         BuiltinLaw::ALL
             .into_iter()
             .map(builtin_entry)
-            .chain(self.imported.iter().map(imported_entry))
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Single(_)))
+                    .map(imported_entry),
+            )
             .collect()
     }
 
-    /// The law with `id`.
+    /// Every multiple-output law, the built-in laws first (the default,
+    /// `pinv_closed`, first of all), then the imported multiple-output laws by
+    /// name, version and hash.
+    pub fn mimo_entries(&self) -> Vec<CatalogEntry> {
+        BuiltinMimo::ALL
+            .into_iter()
+            .map(builtin_mimo_entry)
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Mimo(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// The law with `id`, of either world.
     pub fn entry(&self, id: &str) -> Option<CatalogEntry> {
         if let Some(b) = BuiltinLaw::from_id(id) {
             return Some(builtin_entry(b));
+        }
+        if let Some(b) = BuiltinMimo::from_id(id) {
+            return Some(builtin_mimo_entry(b));
         }
         self.imported_law(id).map(imported_entry)
     }
@@ -240,17 +286,20 @@ impl LawCatalog {
         self.imported.iter().find(|i| i.law.identity().sha256 == id)
     }
 
-    /// Import the law file at `path`: load it with the host (which compiles it
-    /// and checks that it is a single-output Random law with a sound manifest),
-    /// then copy it into the laws folder under its SHA-256. Importing a file
-    /// already in the catalog returns its entry and copies nothing. The file at
-    /// `path` is not changed.
+    /// Import the law file at `path`: load it with the host (which compiles
+    /// it, finds which world it implements, single-output or multiple-output
+    /// Random, and checks its manifest), then copy it into the laws folder
+    /// under its SHA-256. Importing a file already in the catalog returns its
+    /// entry and copies nothing. The file at `path` is not changed.
     pub fn import(&mut self, path: &Path) -> Result<CatalogEntry, CatalogError> {
         let bytes = read_capped(path)?;
-        let law = self.host.load(&bytes).map_err(|e| CatalogError::NotALaw {
-            path: path.to_path_buf(),
-            reason: e.to_string(),
-        })?;
+        let law = self
+            .host
+            .load_any(&bytes)
+            .map_err(|e| CatalogError::NotALaw {
+                path: path.to_path_buf(),
+                reason: e.to_string(),
+            })?;
         let sha = law.identity().sha256.clone();
         if let Some(existing) = self.imported_law(&sha) {
             return Ok(imported_entry(existing));
@@ -298,16 +347,46 @@ fn builtin_entry(b: BuiltinLaw) -> CatalogEntry {
         manifest: b.manifest(),
         builtin: true,
         check: CheckStatus::BuiltIn,
+        world: LawWorld::Single,
+        mimo: None,
+    }
+}
+
+fn builtin_mimo_entry(b: BuiltinMimo) -> CatalogEntry {
+    let m = builtin_mimo_manifest(b);
+    CatalogEntry {
+        id: b.id().to_string(),
+        identity: LawIdentity {
+            name: m.law.name.clone(),
+            version: m.law.version.clone(),
+            author: m.law.author.clone(),
+            sha256: String::new(),
+        },
+        manifest: m.law.clone(),
+        builtin: true,
+        check: CheckStatus::BuiltIn,
+        world: LawWorld::Mimo,
+        mimo: Some(m),
     }
 }
 
 fn imported_entry(i: &Imported) -> CatalogEntry {
+    let (manifest, world, mimo) = match &i.law {
+        AnyLaw::Single(l) => (l.manifest().clone(), LawWorld::Single, None),
+        AnyLaw::Mimo(l) => (
+            l.manifest().law.clone(),
+            LawWorld::Mimo,
+            Some(l.manifest().clone()),
+        ),
+    };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),
         identity: i.law.identity().clone(),
-        manifest: i.law.manifest().clone(),
+        manifest,
         builtin: false,
         check: i.check.clone(),
+        world,
+        mimo,
     }
 }
 
