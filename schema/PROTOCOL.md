@@ -76,13 +76,20 @@ kit. Services never send pixels and the shell never computes the numbers.
  "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
             "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
- "link":"frequency"}
+ "link":"frequency",
+ "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}]}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
 dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
 ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
+
+`regions` (optional) shade spans of x behind the curves, as Visual Dynamics draws a time
+history's settings on it: a `frame` is one frame its spectra are averaged from (frames that
+overlap shade darker where they do), and a `cut` is a span left out, such as the ends a truncation
+discards. `label` is said when the span is hovered. They are not listed in the legend; the
+result's reading says what they are.
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
 a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
