@@ -888,11 +888,21 @@ def wavelet(project: Any, params: dict[str, Any]) -> list[dict]:
                        {'label': 'Time', 'ticks': [f'{t:.4g} s' for t in clock]},
                        magnitude[::-1], f'{history.ordinate_dim[row]}'
                        + (f' [{unit}]' if unit else ''), (0.0, top if top > 0.0 else 1.0))
+    surface = v.waterfall(
+        f'Scalogram of {name}, {label}', v.axis('Time', 's', 'linear'),
+        v.axis(str(history.ordinate_dim[row]).capitalize(), unit, 'linear'),
+        [f'{f:.4g} Hz' for f in frequencies], [(clock, m) for m in magnitude],
+        (float(clock[0]), float(clock[-1])))
+    start, end = float(clock[0]), float(clock[-1])
+    cones = cwt.cone_of_influence(frequencies, rate, omega0)
+    walls = [np.clip(start + cones, start, end), np.clip(end - cones, start, end)]
+    v.staged(surface, [f'{f:.4g} Hz' for f in frequencies], range(frequencies.size),
+             ['measured'] * frequencies.size, walls=walls, surface=True)
     ridge = v.spectrum(f'Ridge of {name}, {label}: the frequency of the largest magnitude',
                        v.axis('Time', 's', 'linear'), v.axis('Frequency', 'Hz', 'log'),
                        [v.series(label, 'measured', clock, cwt.ridge(magnitude, frequencies))],
                        link='time')
-    return [picture, ridge, v.reading(f'Wavelet of {name}, {label}', rows)]
+    return [surface, picture, ridge, v.reading(f'Wavelet of {name}, {label}', rows)]
 
 
 # ---- the shock windows ------------------------------------------------------------------------
@@ -1057,10 +1067,11 @@ OPERATIONS = (
         run=replication_fit),
     Operation(
         id='project.wavelet', title='Wavelet', workspace='analyze', accepts='project',
-        summary='Where one channel\'s frequencies are, moment by moment: its scalogram, the '
-                'ridge it follows and how much of the range is cone of influence.',
+        summary='Where one channel\'s frequencies are, moment by moment: its scalogram as a '
+                'surface and flat, the ridge it follows and how much of the range is cone of '
+                'influence.',
         params=(HISTORY, RECORD, LOW_HZ, HIGH_HZ, PER_OCTAVE, OMEGA0),
-        outputs=('matrix', 'spectrum', 'reading'), run=wavelet),
+        outputs=('waterfall', 'matrix', 'spectrum', 'reading'), run=wavelet),
     Operation(
         id='project.set_shock', title='Shock Window', workspace='analyze', accepts='project',
         summary='One shock window typed by its start and stop on the record\'s clock, held '

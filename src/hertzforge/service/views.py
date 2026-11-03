@@ -189,6 +189,38 @@ def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
     return out
 
 
+def staged(view: dict[str, Any], stations: Sequence[str], depths: Sequence[int],
+           roles: Sequence[str], zones: Sequence[dict] = (), exceed: Sequence[dict] = (),
+           walls: Sequence[Any] = (), surface: bool = False) -> dict[str, Any]:
+    """A `waterfall` view turned into one of Visual Dynamics' stages: its
+    records stand at named `stations` (`depths`, one station index a
+    record, so two records can share one) and are drawn by `roles` (a
+    'measured' record colored by level, any other in its role's color).
+
+    `zones` are a station's limit bands, each {station, kind 'warning' or
+    'abort', side 'upper' or 'lower', x, inner, outer}, with no `outer`
+    when the band runs to the stage's top or floor. `exceed` are the lines
+    a measurement went past an abort limit, each {station, side, x0, x1,
+    z}: one rectangle a line from its limit to the top or the floor.
+    `walls` are curves of one abscissa a station, drawn as translucent
+    walls from floor to top (a scalogram's cone of influence). `surface`
+    draws the records as one surface, every record on the same abscissa."""
+    view['stations'] = [str(s) for s in stations]
+    view['depths'] = [int(d) for d in depths]
+    view['roles'] = list(roles)
+    if zones:
+        view['zones'] = [{**z, **{k: np.asarray(z[k], np.float32)
+                                  for k in ('x', 'inner', 'outer') if k in z}} for z in zones]
+    if exceed:
+        view['exceed'] = [{**e, **{k: np.asarray(e[k], np.float32) for k in ('x0', 'x1', 'z')}}
+                          for e in exceed]
+    if len(walls):
+        view['walls'] = [np.asarray(w, np.float32) for w in walls]
+    if surface:
+        view['surface'] = True
+    return view
+
+
 def mode(index: int, frequency_hz: float, damping: float | None,
          shape: np.ndarray, label: str | None = None) -> dict[str, Any]:
     """One mode of a `shape3d` view: its 1-based index, frequency,

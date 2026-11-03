@@ -230,6 +230,39 @@
           }
         },
         "quantity": {"type": "string"},
+        "note": {"type": "string"},
+        "stations": {"type": "array", "items": {"type": "string"}},
+        "depths": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "roles": {"type": "array", "items": {"enum": ["measured", "reference", "tolerance", "abort", "limit", "drive", "other"]}},
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["station", "kind", "side", "x", "inner"],
+            "properties": {
+              "station": {"type": "integer", "minimum": 0},
+              "kind": {"enum": ["warning", "abort"]},
+              "side": {"enum": ["upper", "lower"]},
+              "x": {"$ref": "#/$defs/arrayRef"},
+              "inner": {"$ref": "#/$defs/arrayRef"},
+              "outer": {"$ref": "#/$defs/arrayRef"}
+            }
+          }
+        },
+        "exceed": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["station", "side", "x0", "x1", "z"],
+            "properties": {
+              "station": {"type": "integer", "minimum": 0},
+              "side": {"enum": ["upper", "lower"]},
+              "x0": {"$ref": "#/$defs/arrayRef"},
+              "x1": {"$ref": "#/$defs/arrayRef"},
+              "z": {"$ref": "#/$defs/arrayRef"}
+            }
+          }
+        },
+        "walls": {"type": "array", "items": {"$ref": "#/$defs/arrayRef"}},
+        "surface": {"type": "boolean"},
         "page": {
           "type": "object", "required": ["number", "count", "records"],
           "properties": {

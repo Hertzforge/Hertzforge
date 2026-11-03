@@ -11,7 +11,7 @@ value * scale + offset) and labeled by it. Text the map does not hold, and
 anything without a unit, is left as it is.
 
 Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
-and regions; a `reading`'s rows; a `waterfall`'s axes and values; a
+and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
 `table`'s columns headed "<name> [<SI unit>]", each number in them, except
 a column typed into (`edit`), which stays in SI so a value typed means what
 the operation reads. A `shape3d` is drawn as it is, its coordinates and
@@ -185,4 +185,18 @@ def convert(views: list[dict], name: str) -> list[dict]:
                 view['z_values'] = _values(view['z_values'], z)
                 if 'z_range' in view:
                     view['z_range'] = [float(_values(v, z)) for v in view['z_range']]
+            for zone in view.get('zones', []):
+                if x is not None:
+                    zone['x'] = _values(zone['x'], x)
+                if z is not None:
+                    for key in ('inner', 'outer'):
+                        if key in zone:
+                            zone[key] = _values(zone[key], z)
+            for hit in view.get('exceed', []):
+                if x is not None:
+                    hit['x0'], hit['x1'] = _values(hit['x0'], x), _values(hit['x1'], x)
+                if z is not None:
+                    hit['z'] = _values(hit['z'], z)
+            if x is not None and 'walls' in view:
+                view['walls'] = [_values(wall, x) for wall in view['walls']]
     return views

@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { axisTicks, fraction, levelRange, linearTicks, namedRecords, pickedPoint, recordOf, segmentIndex } from './waterfall';
+import {
+	STAGE,
+	axisTicks,
+	exceedTriangles,
+	fraction,
+	levelRange,
+	linearTicks,
+	namedRecords,
+	pickedPoint,
+	recordOf,
+	segmentIndex,
+	stageMap,
+	stationOf,
+	surfaceIndex,
+	wallTriangles,
+	zoneTriangles
+} from './waterfall';
 
 describe('segmentIndex', () => {
 	const offsets = [0, 4, 8];
@@ -115,5 +131,46 @@ describe('pickedPoint', () => {
 	it('reads all four bytes, for scenes of millions of points', () => {
 		expect(pickedPoint(pixels([[2, 2, 9_876_543 + 1]]), 5)).toBe(9_876_543);
 		expect(pickedPoint(pixels([[2, 2, 2 ** 31 + 5]]), 5)).toBe(2 ** 31 + 4);
+	});
+});
+
+describe('stages', () => {
+	const map = stageMap([0, 10], false, [0, 1], false, 3);
+
+	it('stands records at their stations', () => {
+		expect(Array.from(stationOf([0, 2, 4, 6], 6, [0, 0, 1]))).toEqual([0, 0, 0, 0, 1, 1]);
+		expect(Array.from(stationOf([0, 2, 4], 4))).toEqual([0, 0, 1, 1]);
+	});
+
+	it('joins two rows of one clock into a surface and skips a gap', () => {
+		const offsets = [0, 3, 6];
+		const x = [0, 1, 2, 0, 1, 2];
+		expect(Array.from(surfaceIndex(offsets, x, [1, 1, 1, 1, 1, 1], false, false))).toEqual([0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4]);
+		expect(surfaceIndex(offsets, x, [1, NaN, 1, 1, 1, 1], false, false).length).toBe(0);
+		expect(surfaceIndex([0, 3, 5], x, [1, 1, 1, 1, 1, 1], false, false).length).toBe(0);
+	});
+
+	it('runs a band with no outer edge to the top or the floor', () => {
+		const upper = zoneTriangles({ station: 1, side: 'upper', x: [0, 10], inner: [0.5, 0.5] }, map);
+		expect(upper).toHaveLength(18);
+		const heights = upper.filter((_v, i) => i % 3 === 2);
+		expect(Math.max(...heights)).toBeCloseTo(STAGE.z);
+		expect(upper[1]).toBeCloseTo(STAGE.y / 2);
+		const lower = zoneTriangles({ station: 0, side: 'lower', x: [0, 10], inner: [0.5, 0.5] }, map);
+		expect(Math.min(...lower.filter((_v, i) => i % 3 === 2))).toBe(0);
+		const between = zoneTriangles({ station: 0, side: 'upper', x: [0, 10], inner: [0.2, 0.2], outer: [0.4, 0.4] }, map);
+		expect(Math.max(...between.filter((_v, i) => i % 3 === 2))).toBeCloseTo(0.4 * STAGE.z);
+	});
+
+	it('draws a rectangle across each bin past the limit, and skips a gap', () => {
+		const hits = exceedTriangles({ station: 2, side: 'upper', x0: [1, 3], x1: [2, 4], z: [0.5, NaN] }, map);
+		expect(hits).toHaveLength(18);
+		expect(hits[0]).toBeCloseTo(0.1 * STAGE.x);
+		expect(hits[3]).toBeCloseTo(0.2 * STAGE.x);
+	});
+
+	it('stands a wall through one abscissa a station', () => {
+		expect(wallTriangles([1, 2, 3], map)).toHaveLength(36);
+		expect(wallTriangles([1, NaN, 3], map)).toHaveLength(0);
 	});
 });
