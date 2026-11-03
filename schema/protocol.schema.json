@@ -293,7 +293,8 @@
         "title": {"type": "string"},
         "file": {"type": ["string", "null"]},
         "modified": {"type": "boolean"},
-        "objects": {"type": "array", "items": {"$ref": "#/$defs/projectObject"}}
+        "objects": {"type": "array", "items": {"$ref": "#/$defs/projectObject"}},
+        "active_geometry": {"type": ["string", "null"]}
       }
     },
     "projectNewParams": {
@@ -343,6 +344,18 @@
       "type": "object", "required": ["name", "project", "fit"],
       "properties": {"name": {"type": "string"}, "project": {"$ref": "#/$defs/project"},
                      "fit": {"$ref": "#/$defs/fitState"}}
+    },
+    "projectRenameParams": {
+      "type": "object", "required": ["name", "to"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
+    },
+    "projectRemoveParams": {
+      "type": "object", "required": ["names"], "additionalProperties": false,
+      "properties": {"names": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}
+    },
+    "projectActivateParams": {
+      "type": "object", "required": ["geometry"], "additionalProperties": false,
+      "properties": {"geometry": {"type": "string", "minLength": 1}}
     },
     "projectResult": {
       "type": "object", "required": ["project"],

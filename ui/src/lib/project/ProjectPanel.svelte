@@ -5,6 +5,7 @@
 	 * path, since a browser never gives the shell a file's path (files.ts).
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
+	import Icon from '$lib/shell/Icon.svelte';
 	import { formatCount } from '$lib/viz/format';
 	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
 
@@ -47,6 +48,30 @@
 		if (!path || !asking) return;
 		const ok = asking === 'save' ? await p.save(path) : asking === 'open' ? await p.open(path) : await p.importFile(path);
 		if (ok) asking = null;
+	}
+
+	/** The object being renamed, and the name typed for it. */
+	let renaming = $state<string | null>(null);
+	let newName = $state('');
+	/** The object whose removal waits on a second click. */
+	let confirming = $state<string | null>(null);
+
+	function startRename(name: string) {
+		confirming = null;
+		renaming = name;
+		newName = name;
+	}
+
+	async function commitRename() {
+		const name = renaming;
+		const to = newName.trim();
+		renaming = null;
+		if (name && to && to !== name) await p.rename(name, to);
+	}
+
+	function focusAndSelect(node: HTMLInputElement) {
+		node.focus();
+		node.select();
 	}
 
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
@@ -107,10 +132,42 @@
 		{#if p.summary.objects.length}
 			<ul class="objects" aria-label="Objects" data-testid="project-objects">
 				{#each p.summary.objects as o (o.name)}
-					<li>
-						<span class="oname">{o.name}</span>
-						{#if o.units_defined === false}<span class="badge" title="Imported without its units">units?</span>{/if}
-						<span class="okind">{o.kind.replace(/_/g, ' ')}{o.records !== undefined ? `, ${formatCount(o.records)}` : ''}</span>
+					{@const active = o.name === p.summary.active_geometry}
+					<li data-testid="object-{o.name}">
+						{#if renaming === o.name}
+							<input
+								class="field mono rename"
+								aria-label="New name for {o.name}"
+								data-testid="rename-field"
+								bind:value={newName}
+								use:focusAndSelect
+								onkeydown={(e) => {
+									if (e.key === 'Enter') void commitRename();
+									if (e.key === 'Escape') renaming = null;
+								}}
+								onblur={() => (renaming = null)}
+							/>
+						{:else if confirming === o.name}
+							<span class="oname">Remove {o.name}?</span>
+							<span class="row-actions shown">
+								<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { confirming = null; void p.remove([o.name]); }}>Remove</button>
+								<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
+							</span>
+						{:else}
+							<span class="oname">{o.name}</span>
+							{#if active}<span class="mark" title="Data is drawn on this geometry when nothing else names one">active</span>{/if}
+							{#if o.units_defined === false}<span class="badge" title="Imported without its units">units?</span>{/if}
+							<span class="okind">{o.kind.replace(/_/g, ' ')}{o.records !== undefined ? `, ${formatCount(o.records)}` : ''}</span>
+							<span class="row-actions">
+								{#if o.kind === 'geometry' && !active}
+									<button class="link" data-testid="activate-{o.name}" title="Draw data on this geometry" onclick={() => p.activate(o.name)} disabled={p.busy !== null}>Make active</button>
+								{/if}
+								<button class="link" data-testid="rename-{o.name}" onclick={() => startRename(o.name)} disabled={p.busy !== null}>Rename</button>
+								<button class="icon" data-testid="remove-{o.name}" title="Remove {o.name}" aria-label="Remove {o.name}" onclick={() => { renaming = null; confirming = o.name; }} disabled={p.busy !== null}>
+									<Icon name="trash" size={12} />
+								</button>
+							</span>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -269,6 +326,45 @@
 		margin-left: auto;
 		color: var(--text-4);
 		white-space: nowrap;
+	}
+
+	.mark {
+		font-size: 10px;
+		color: var(--text-3);
+	}
+
+	.row-actions {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+		opacity: 0;
+	}
+
+	.objects li:hover .row-actions,
+	.objects li:focus-within .row-actions,
+	.row-actions.shown {
+		opacity: 1;
+	}
+
+	.row-actions .link,
+	.row-actions .icon {
+		padding: 0;
+		font-size: 10px;
+		color: var(--text-3);
+		background: none;
+		border: none;
+		cursor: pointer;
+	}
+
+	.row-actions .link:hover,
+	.row-actions .icon:hover {
+		color: var(--text-1);
+	}
+
+	.rename {
+		flex: 1;
+		min-width: 0;
+		font-size: var(--text-xs);
 	}
 
 	.badge {
