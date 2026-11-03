@@ -34,7 +34,9 @@ def plate():
 def run(project, op_id, **given):
     op = OPS[op_id]
     values = op.resolve(given, objects={name: projects.kind_of(obj)
-                                        for name, obj in project.items()})
+                                        for name, obj in project.items()},
+                        verbs={name: projects.verbs_of(project, name)
+                               for name in project})
     return op.run(project, values)
 
 
@@ -179,3 +181,67 @@ def test_a_computed_object_offers_no_quantity_to_rerun_with():
     assert len({history.known_dim(i) for i in range(history.num_records)}) > 1
     (view,) = run(state.project, 'project.compute_psds')
     assert 'quantities' not in view and 'quantity' not in view
+
+
+def test_a_verb_param_lists_the_objects_the_core_offers_the_verb_on():
+    param = Param('source', 'Source', 'enum', options_from='verb:integrate')
+    assert param.verb == 'integrate' and param.kinds == ()
+    op = OPS['project.integrate']
+    verbs = {'Forces': ['filter_data'], 'Accels': ['integrate', 'filter_data']}
+    assert op.resolve({}, verbs=verbs)['source'] == 'Accels'
+    with pytest.raises(ProtocolError, match='not one of the choices'):
+        op.resolve({'source': 'Forces'}, verbs=verbs)
+    with pytest.raises(ProtocolError, match='Integrate applies to none') as error:
+        op.resolve({}, verbs={'Forces': ['filter_data']})
+    assert error.value.code == 'refused'
+
+
+def test_the_summary_lists_each_objects_verbs_from_the_cores_table(plate):
+    state = projects.OpenProject(plate)
+    listed = {o['name']: o['verbs'] for o in projects.summary(state)['objects']}
+    assert listed['Time History'] == [verb for verb, _ in plate.verbs('Time History')]
+    assert 'compute_frfs' in listed['Time History']
+    assert 'compute_frfs' not in listed['Channel Table']
+
+
+@pytest.mark.parametrize(('op_id', 'given', 'kind'), [
+    ('project.integrate', {}, 'time_history'),
+    ('project.filter_data', {}, 'time_history'),
+    ('project.resample', {'rate': 1024.0}, 'time_history'),
+    ('project.compute_spectra', {}, 'spectrum'),
+    ('project.compute_cpsds', {}, 'psd'),
+    ('project.compute_multiple_coherence', {}, 'multiple_coherence'),
+    ('project.compute_srs', {'per_octave': 6, 'q': 20.0}, 'srs'),
+])
+def test_a_verb_on_the_time_history_adds_its_result(plate, validate, op_id, given, kind):
+    before = set(plate)
+    (view,) = run(plate, op_id, **given)
+    wire_views([view], validate)
+    (added,) = set(plate) - before
+    assert view['title'] == added and projects.kind_of(plate[added]) == kind
+
+
+def test_the_verbs_chain_as_the_cores_table_allows(plate):
+    run(plate, 'project.integrate', drift_corner=0.0)
+    velocity = next(name for name in plate if name.startswith('Time History') and name != 'Time History')
+    assert plate.provenance[velocity]['params'].get('drift_corner') is None
+    assert 'differentiate' in projects.verbs_of(plate, velocity)
+    run(plate, 'project.compute_psds')
+    psd = next(name for name in plate if projects.kind_of(plate[name]) == 'psd')
+    run(plate, 'project.compute_octave', source=psd, per_octave=3)
+    run(plate, 'project.convert_to_specification', source=psd)
+    spec = next(name for name in plate if projects.kind_of(plate[name]) == 'specification')
+    run(plate, 'project.convert_to_psd', source=spec)
+
+
+def test_a_verb_the_core_refuses_is_refused_in_its_words(plate):
+    with pytest.raises(ProtocolError, match='no span set') as error:
+        run(plate, 'project.truncate_data')
+    assert error.value.code == 'refused'
+
+
+def test_detecting_shocks_marks_the_history_and_counts_as_an_edit(plate, validate):
+    (reading,) = run(plate, 'project.detect_shocks')
+    wire_views([reading], validate)
+    assert reading['rows'][0]['value'] == len(plate['Time History'].shocks) > 0
+    assert OPS['project.detect_shocks'].edits

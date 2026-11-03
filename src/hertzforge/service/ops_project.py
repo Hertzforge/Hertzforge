@@ -26,10 +26,11 @@ DATA = Param('data', 'Data', 'enum', options_from='objects:' + '|'.join(DATA_KIN
 COMPONENT = Param('component', 'Component', 'enum', default='magnitude',
                   options=tuple(Option(key, label) for key, label in COMPONENTS.items()))
 PAGE = Param('page', 'Page', 'integer', default=1, min=1, step=1)
-HISTORY = Param('history', 'Time history', 'enum', options_from='objects:time_history')
+HISTORY = Param('history', 'Time history', 'enum', options_from='verb:compute_psds')
+FRF_HISTORY = Param('history', 'Time history', 'enum', options_from='verb:compute_frfs')
 METHOD = Param('method', 'Estimator', 'enum', default='Hv',
                options=(Option('Hv', 'Hv'), Option('H1', 'H1'), Option('H2', 'H2')))
-FRF = Param('frf', 'FRF', 'enum', options_from='objects:frf')
+FRF = Param('frf', 'FRF', 'enum', options_from='verb:fit_modes')
 LOW = Param('low_hz', 'From', 'number', default=0.0, unit='Hz', min=0.0, step=10.0)
 HIGH = Param('high_hz', 'To', 'number', default=1000.0, unit='Hz', min=0.0, step=10.0)
 COUNT = Param('count', 'Modes, at most', 'integer', default=10, min=1, max=60, step=1)
@@ -72,6 +73,70 @@ def compute_frfs(project: Any, params: dict[str, Any]) -> list[dict]:
     response and drive, added to the project (`Project.compute_frfs`)."""
     source = params['history']
     return _derived(project, lambda: project.compute_frfs(source, params['method']))
+
+
+def _source(verb: str, label: str = 'Source') -> Param:
+    """The object a verb runs on, listed by the core's table of what it
+    applies to."""
+    return Param('source', label, 'enum', options_from='verb:' + verb)
+
+
+def _verb(verb: str, **fixed: Any) -> Any:
+    """An operation's run that calls the core verb on `source` with the
+    other params as its keywords, and draws what it added. A param named
+    in `fixed` is converted first: `fixed[name](value)`."""
+    def run(project: Any, params: dict[str, Any]) -> list[dict]:
+        keywords = {name: fixed.get(name, lambda value: value)(value)
+                    for name, value in params.items() if name != 'source'}
+        return _derived(project, lambda: getattr(project, verb)(
+            params['source'], **keywords))
+    return run
+
+
+DRIFT = Param('drift_corner', 'Drift high-pass', 'number', default=2.0,
+              unit='Hz', min=0.0, step=0.5)
+RATE = Param('rate', 'New sample rate', 'number', unit='Hz', min=0.0, step=100.0)
+ANTI_ALIAS = Param('anti_alias', 'Anti-alias filter', 'boolean', default=True)
+SRS_PER_OCTAVE = Param('per_octave', 'Lines per octave', 'integer', default=12,
+                       min=1, max=48, step=1)
+Q = Param('q', 'Q', 'number', default=10.0, min=0.5, step=1.0)
+SRS_KIND = Param('kind', 'Peak', 'enum', default='maximax', options=(
+    Option('maximax', 'Maximax'), Option('positive', 'Positive'),
+    Option('negative', 'Negative')))
+BANDS = Param('per_octave', 'Bands per octave', 'enum', default=6, options=tuple(
+    Option(n, label) for n, label in ((1, 'Full octave'), (3, 'Third octave'),
+                                      (6, 'Sixth octave'), (12, 'Twelfth octave'),
+                                      (24, '24th octave'))))
+KEEP_DIAGONAL = Param('keep_diagonal', 'Keep the diagonal', 'boolean', default=True)
+
+
+def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.detect_shocks`: mark the shocks found on a time history
+    (`Project.detect_shocks`), which Compute SRS then reads."""
+    source = params['source']
+    try:
+        count = project.detect_shocks(source)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return [v.reading(f'Shocks on {source}', [
+        v.row('Shocks marked', float(count), '', 'info')])]
+
+
+def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.extract_sine`: the levels of each tone of the project's
+    sine specification found in a time history (`Project.extract_sine`),
+    one sine-level set added per tone."""
+    try:
+        added = project.extract_sine(params['source'])
+    except ValueError as error:
+        raise refused(str(error)) from None
+    views = []
+    for name in added:
+        view = waterfall_view(name, project[name])
+        view.pop('quantities', None)
+        view.pop('quantity', None)
+        views.append(view)
+    return views
 
 
 def _geometry(project: Any) -> str | None:
@@ -128,6 +193,72 @@ def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     return [_shape_view(project, params['shapes'], params['geometry'])]
 
 
+def _derives(verb: str, title: str, summary: str, params: tuple = (),
+             **fixed: Any) -> Operation:
+    """A project operation that runs one core verb on an object it
+    applies to and draws what it added."""
+    return Operation(id=f'project.{verb}', title=title, workspace='analyze',
+                     accepts='project', summary=summary,
+                     params=(_source(verb), *params), outputs=('waterfall',),
+                     run=_verb(verb, **fixed))
+
+
+VERB_OPERATIONS = (
+    _derives('integrate', 'Integrate',
+             'Accelerations become velocities and velocities displacements, '
+             'with a high-pass after so a sensor bias does not become a ramp '
+             '(0 Hz for none).', (DRIFT,),
+             drift_corner=lambda hz: hz or None),
+    _derives('differentiate', 'Differentiate',
+             'Displacements become velocities and velocities accelerations.'),
+    _derives('filter_data', 'Apply Filter',
+             'The time history filtered at zero phase with its own filter '
+             'settings, or a low-pass at a tenth of the sample rate when it '
+             'has none.'),
+    _derives('truncate_data', 'Apply Truncation',
+             'The time history cut to its truncation span.'),
+    _derives('resample', 'Resample',
+             'The time history at a lower sample rate, a whole division of '
+             'its own, through a zero-phase anti-alias filter.',
+             (RATE, ANTI_ALIAS)),
+    _derives('compute_spectra', 'Compute Spectra',
+             'Linear spectra from a time history\'s averages.'),
+    _derives('compute_cpsds', 'Compute CPSDs',
+             'The cross-spectral matrix of a time history\'s channels, from '
+             'its averages.'),
+    _derives('compute_srs', 'Compute SRS',
+             'Shock response spectra, one curve per channel per shock marked '
+             'on the history (detected first when none is marked).',
+             (SRS_PER_OCTAVE, Q, SRS_KIND)),
+    _derives('compute_multiple_coherence', 'Compute Multiple Coherence',
+             'How much of each response the references explain, frequency by '
+             'frequency.'),
+    _derives('compute_octave', 'Compute Octave Bands',
+             'A PSD or specification integrated onto proportional octave '
+             'bands, its total power unchanged.', (BANDS,)),
+    _derives('make_realizable', 'Make Realizable',
+             'A cross-spectral matrix repaired where no set of signals could '
+             'have it.', (KEEP_DIAGONAL,)),
+    _derives('convert_to_specification', 'Convert to Specification',
+             'A PSD read as a requirement, which a test is controlled to.'),
+    _derives('convert_to_psd', 'Convert to PSD',
+             'A specification read as a PSD, its limits left out.'),
+    Operation(
+        id='project.detect_shocks', title='Detect Shocks', workspace='analyze',
+        accepts='project',
+        summary='Mark the shocks in a time history, which Compute SRS reads.',
+        params=(_source('detect_shocks'),), outputs=('reading',),
+        run=detect_shocks, edits=True),
+    Operation(
+        id='project.extract_sine', title='Extract Sine', workspace='analyze',
+        accepts='project',
+        summary='The level of each tone of the project\'s sine specification '
+                'in a time history, as a sine-level set per tone.',
+        params=(_source('extract_sine'),), outputs=('waterfall',),
+        run=extract_sine),
+)
+
+
 OPERATIONS = (
     Operation(
         id='project.waterfall', title='Waterfall', workspace='analyze',
@@ -146,7 +277,7 @@ OPERATIONS = (
         accepts='project',
         summary='FRFs from a time history, one for each response and drive, '
                 'added to the project.',
-        params=(HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
+        params=(FRF_HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
     Operation(
         id='project.fit_modes', title='Fit Modes', workspace='analyze',
         accepts='project',
@@ -159,4 +290,5 @@ OPERATIONS = (
         accepts='project',
         summary='A shape set\'s modes on a geometry, one translation per node.',
         params=(SHAPES, GEOMETRY), outputs=('shape3d',), run=mode_shapes),
+    *VERB_OPERATIONS,
 )

@@ -329,11 +329,14 @@ class Connection:
                 raise refused(f'{op.title} works on a project, and none is open; '
                               'project.open or project.import opens one')
             project = state.project
-            values = op.resolve(params.get('params', {}), objects={
-                name: projects.kind_of(obj) for name, obj in project.items()})
+            values = op.resolve(
+                params.get('params', {}),
+                objects={name: projects.kind_of(obj)
+                         for name, obj in project.items()},
+                verbs={name: projects.verbs_of(project, name) for name in project})
             before = list(project)
             views = await self.service.in_worker(op.run, project, values)
-            if list(project) != before:
+            if op.edits or list(project) != before:
                 state.modified = True
             return {'views': views, 'project': projects.summary(state)}
 

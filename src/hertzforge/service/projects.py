@@ -35,10 +35,18 @@ def kind_of(obj: Any) -> str:
     return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', type(obj).__name__).lower()
 
 
+def verbs_of(project: Any, name: str) -> list[str]:
+    """The core's processing verbs that apply to the object `name`, by the
+    table the core offers them by (`Project.verbs`), in its order: what a
+    `verb:` param lists the object under."""
+    return [verb for verb, _summary in project.verbs(name)]
+
+
 def summary(state: OpenProject) -> dict[str, Any]:
     """The project as the shell lists it: title, file, whether it has
     unsaved changes, and each object with its kind, record count, source,
-    whether its units are declared and the groups it is in."""
+    whether its units are declared, the groups it is in and the core verbs
+    that apply to it."""
     project = state.project
     labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
               for k, group in enumerate(project.object_groups)]
@@ -57,6 +65,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
         entry['groups'] = [label for label, group
                            in zip(labels, project.object_groups, strict=True)
                            if name in group['members']]
+        entry['verbs'] = verbs_of(project, name)
         objects.append(entry)
     return {'title': project.name, 'file': project.file,
             'modified': state.modified, 'objects': objects}

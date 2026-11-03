@@ -9,7 +9,7 @@ param and what it accepts.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -54,8 +54,10 @@ class Param:
     step: float | None = None
     options: Sequence[Option] = ()
     #: an enum whose options are the opened dataset's channels
-    #: ('channels'), or the open project's objects of some kinds
-    #: ('objects:psd' or 'objects:psd|frf', by `projects.kind_of`)
+    #: ('channels'), the open project's objects of some kinds
+    #: ('objects:psd' or 'objects:psd|frf', by `projects.kind_of`), or
+    #: the objects a core verb applies to ('verb:integrate', by
+    #: `Project.verbs`, the table the verbs themselves are offered by)
     options_from: str | None = None
     #: set from the result's view rather than the panel, which does not
     #: show it (a waterfall's quantity, chosen among the groups it drew)
@@ -64,9 +66,10 @@ class Param:
     def __post_init__(self) -> None:
         source = self.options_from
         if source is not None and source != 'channels' and not (
-                source.startswith('objects:') and all(self.kinds)):
-            raise ValueError(f'options_from {source!r} is "channels" or '
-                             '"objects:<kind>|<kind>"')
+                source.startswith('objects:') and all(self.kinds)
+                or source.startswith('verb:') and self.verb):
+            raise ValueError(f'options_from {source!r} is "channels", '
+                             '"objects:<kind>|<kind>" or "verb:<verb>"')
 
     @property
     def kinds(self) -> tuple[str, ...]:
@@ -74,6 +77,13 @@ class Param:
         source = self.options_from or ''
         return (tuple(source.removeprefix('objects:').split('|'))
                 if source.startswith('objects:') else ())
+
+    @property
+    def verb(self) -> str:
+        """The core verb a `verb:` param's objects must take; '' for any
+        other."""
+        source = self.options_from or ''
+        return source.removeprefix('verb:') if source.startswith('verb:') else ''
 
     def to_json(self) -> dict[str, Any]:
         """The param as the schema's descriptor writes it. Fields left unset
@@ -180,6 +190,10 @@ class Operation:
     outputs: Sequence[ViewKind]
     run: Callable[[Any, dict[str, Any]], list[dict[str, Any]]] = field(
         repr=False, compare=False)
+    #: a project operation that changes an object in place (marks shocks
+    #: on a history), so the project has unsaved changes even when no
+    #: object was added or removed
+    edits: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`
@@ -191,12 +205,15 @@ class Operation:
                 'outputs': list(self.outputs)}
 
     def resolve(self, given: Any, channels: Sequence[str] = (),
-                objects: Mapping[str, str] | None = None) -> dict[str, Any]:
+                objects: Mapping[str, str] | None = None,
+                verbs: Mapping[str, Collection[str]] | None = None
+                ) -> dict[str, Any]:
         """The params to run with: each given value checked, each missing
         one its default. An `options_from` param with no default takes the
-        first of its choices: the dataset's channels, or the names in
+        first of its choices: the dataset's channels, the names in
         `objects` (name to kind, the project's order) of the kinds it
-        takes."""
+        takes, or the names in `verbs` (name to the verbs that apply to
+        it) its verb applies to."""
         if not isinstance(given, Mapping):
             raise bad_request(f'op.run "params" must be an object, not '
                               f'{json_type(given)}')
@@ -211,6 +228,8 @@ class Operation:
             choices = (channels if param.options_from == 'channels'
                        else [name for name, kind in (objects or {}).items()
                              if kind in param.kinds] if param.kinds
+                       else [name for name, applies in (verbs or {}).items()
+                             if param.verb in applies] if param.verb
                        else None)
             if param.name in given:
                 out[param.name] = param.check(given[param.name], choices)
@@ -222,6 +241,9 @@ class Operation:
                 kinds = ' or '.join(kind.replace('_', ' ') for kind in param.kinds)
                 raise refused(f'{self.title} needs a {kinds} ({param.label}), '
                               'and the project has none')
+            elif param.verb:
+                raise refused(f'{self.title} applies to none of the project\'s '
+                              f'objects ({param.label})')
             else:
                 raise bad_request(f'{self.id} needs param "{param.name}" '
                                   f'({param.label})')

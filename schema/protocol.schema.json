@@ -241,7 +241,7 @@
           "items": {"type": "object", "required": ["value", "label"],
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
-        "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*)$"},
+        "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
         "in_view": {"type": "boolean"}
       }
     },
@@ -274,7 +274,8 @@
         "records": {"type": "integer", "minimum": 0},
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
-        "groups": {"type": "array", "items": {"type": "string"}}
+        "groups": {"type": "array", "items": {"type": "string"}},
+        "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}
       }
     },
     "project": {

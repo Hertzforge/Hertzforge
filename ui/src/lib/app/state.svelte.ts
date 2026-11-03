@@ -29,7 +29,7 @@ import type {
 	View,
 	Workspace
 } from '$lib/protocol/types';
-import { defaultValues, reconcile, validateAll, withObjects, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
@@ -85,11 +85,16 @@ class AnalyzeState {
 		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
 	}
 
-	/** Tools follow the data: only operations that accept the open dataset's kind. */
+	/**
+	 * Tools follow the data: only operations that accept the open dataset's kind, and on the project
+	 * only those with an object to run on.
+	 */
 	get tools(): OperationDescriptor[] {
 		const kind = this.opened?.kind;
 		if (!kind) return [];
-		return (this.app.catalog?.operations ?? []).filter((o) => o.accepts === kind);
+		return (this.app.catalog?.operations ?? []).filter(
+			(o) => o.accepts === kind && (kind !== PROJECT || hasObjectsFor(this.paramsOf(o)))
+		);
 	}
 
 	get op(): OperationDescriptor | null {
@@ -144,6 +149,7 @@ class AnalyzeState {
 		const next = { ...this.values };
 		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
 		this.values = next;
+		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
 	}
 
 	async selectDataset(id: string): Promise<void> {

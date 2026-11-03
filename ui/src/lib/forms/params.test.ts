@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
-import { defaultFor, defaultValues, objectKinds, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
+import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
 
 const channels = [
 	{ value: 'ctrl1', label: 'Control 1' },
@@ -118,5 +118,27 @@ describe('object params', () => {
 	it('leaves other params alone', () => {
 		const number: ParamDescriptor = { name: 'n', label: 'N', type: 'number' };
 		expect(withObjects([number], objects)[0]).toBe(number);
+	});
+
+	it('lists the objects a verb applies to, by the verbs the summary gives each', () => {
+		const source: ParamDescriptor = { name: 'source', label: 'Source', type: 'enum', options_from: 'verb:integrate' };
+		const histories: ProjectObject[] = [
+			{ name: 'Forces', kind: 'time_history', groups: [], verbs: ['filter_data'] },
+			{ name: 'Accels', kind: 'time_history', groups: [], verbs: ['integrate', 'filter_data'] },
+			{ name: 'Older', kind: 'time_history', groups: [] }
+		];
+		expect(objectVerb(source)).toBe('integrate');
+		const [filled] = withObjects([source], histories);
+		expect(filled.options?.map((o) => o.value)).toEqual(['Accels']);
+		const [none] = withObjects([source], histories.slice(0, 1));
+		expect(validate(none, '')).toBe('Nothing in the project takes this.');
+	});
+
+	it('says a tool has nothing to run on when an object param lists nothing', () => {
+		const rate: ParamDescriptor = { name: 'rate', label: 'Rate', type: 'number' };
+		expect(hasObjectsFor(withObjects([data, rate], objects))).toBe(true);
+		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'objects:shape_set' }, rate], objects))).toBe(false);
+		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'verb:integrate' }], objects))).toBe(false);
+		expect(hasObjectsFor([rate])).toBe(true);
 	});
 });
