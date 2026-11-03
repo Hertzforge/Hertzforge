@@ -24,6 +24,7 @@ use hertzforge_mimo_laws::{
     buzz_reference, BuiltinMimo, BuiltinMimoLaw, BuzzMatchedLaw, OpenLoopLaw, ParamVal,
     PseudoInverseLaw, ShapeConstrainedLaw,
 };
+use hertzforge_sdm::law::MimoControlLaw;
 use hertzforge_sdm::linalg::{self, Regularization};
 use hertzforge_sdm::{HermitianStack, C64};
 
@@ -545,5 +546,75 @@ fn each_law_declares_what_it_reports() {
             assert_eq!(keys, declared, "{law:?}");
         }
         assert_eq!(BuiltinMimo::from_id(law.id()), Some(law));
+    }
+}
+
+// -------------------------------------------------------------------------
+// The FRF updated during the run
+// -------------------------------------------------------------------------
+
+#[test]
+fn the_closed_loop_carries_its_correction_across_an_frf_update() {
+    // The estimate changes at loop 10 (the controller's FRF update): the law
+    // forms its inverse and its coordinates again and carries the factor over
+    // from the drive in force, so the drive does not jump and the loop goes on
+    // converging. On a 6 x 4 plant the reduced coordinates themselves rotate.
+    for (nc, nd, seed) in [(4usize, 4usize, 700u64), (6, 4, 701)] {
+        let plant = well_conditioned(seed, nc, nd, LINES);
+        let reference = reachable_reference(&plant, seed, BAND);
+        let first = perturbed(&plant, seed, 0.05);
+        let second = perturbed(&plant, seed + 1, 0.05);
+        let s = run_on(seed, plant, first, reference, BAND, 0.01);
+        let mut s2 = Synthetic::with_plant(seed, s.plant.clone(), BAND, 0.01);
+        s2.frf = second;
+        s2.setup.reference = s.setup.reference.clone();
+        let mut law = PseudoInverseLaw::with_params(&s.setup, &[]).expect("builds");
+        let mut response = s.sysid_response.clone();
+        let mut last = s.sysid_drive.clone();
+        let mut outputs = Vec::new();
+        for l in 0..=LOOPS as u64 {
+            let run = if l < 10 { &s } else { &s2 };
+            let csd = cross(&run.plant, &last);
+            let inputs = run.inputs(&response, &last, &csd, l, &[]);
+            let out = if l == 0 {
+                law.seed(&inputs)
+            } else {
+                law.iterate(&inputs)
+            }
+            .expect("runs");
+            last = out.drive.clone();
+            response = run.respond(&last, l + 1);
+            outputs.push(out);
+        }
+        let run = Run { outputs };
+        assert_psd("FRF update", &run);
+        let before = worst_db(&s, &run.outputs[9].drive);
+        let jump = run.scalar(10, "correction_db");
+        let last_db = worst_db(&s, run.last());
+        // What starting over would have done: the new estimate's seed drive,
+        // against the drive in force.
+        let mut fresh = PseudoInverseLaw::with_params(&s2.setup, &[]).expect("builds");
+        let csd = cross(&s2.plant, &s2.sysid_drive);
+        let restart = fresh
+            .seed(&s2.inputs(&s2.sysid_response, &s2.sysid_drive, &csd, 0, &[]))
+            .expect("seeds")
+            .drive;
+        let mut restart_jump: f64 = 0.0;
+        for line in BAND.0..BAND.1 {
+            let (a, b) = (run.outputs[9].drive.diagonal(line), restart.diagonal(line));
+            for (x, y) in a.iter().zip(&b) {
+                restart_jump = restart_jump.max((10.0 * (y / x).log10()).abs());
+            }
+        }
+        println!(
+            "{nc} x {nd}, FRF updated at loop 10: {before:.3} dB before, a {jump:.3} dB drive \
+             change at the update (starting over: {restart_jump:.3} dB), {last_db:.3} dB after \
+             {LOOPS} loops"
+        );
+        assert!(
+            jump < 0.5 * restart_jump,
+            "the update did not carry the correction: {jump} dB against {restart_jump} dB"
+        );
+        assert!(last_db < 0.5, "{last_db} dB after the update");
     }
 }
