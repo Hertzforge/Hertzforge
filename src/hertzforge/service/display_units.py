@@ -14,8 +14,12 @@ Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
 and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
 `table`'s columns headed "<name> [<SI unit>]", each number in them, except
 a column typed into (`edit`), which stays in SI so a value typed means what
-the operation reads. A `shape3d` is drawn as it is, its coordinates and
-shapes being a picture, and a `matrix` carries its own words.
+the operation reads. A `shape3d`'s coordinates are put in the system's
+length unit, as Visual Dynamics draws a geometry (`display_points`), and a
+measured motion's values in their own; its shapes are a picture and stay as
+they are, and a click that places a point (`pick`) says how to take its
+coordinates back to SI. A geometry whose units are undefined is drawn in
+its file's own numbers. A `matrix` carries its own words.
 """
 
 from __future__ import annotations
@@ -143,6 +147,23 @@ def _table(view: dict, system: Any) -> None:
             row[k] = _cell(row[k], change)
 
 
+def _shape(view: dict, system: Any) -> None:
+    change = _change(view.get('unit'), system)
+    if change is not None:
+        view['nodes'] = _values(view['nodes'], change)
+        view['unit'] = change[2]
+        pick = view.get('pick')
+        if pick is not None and pick.get('target') == 'point':
+            pick['to_si'] = [change[0], change[1]]
+    motion = view.get('motion')
+    if motion is not None:
+        values = _change(motion.get('value_unit'), system)
+        if values is not None:
+            motion['values'] = _values(motion['values'], values)
+            motion['peak'] = abs(float(_values(motion['peak'], values)))
+            motion['value_unit'] = values[2]
+
+
 def convert(views: list[dict], name: str) -> list[dict]:
     """`views` put into the system `name`, in place; returned for chaining.
     SI leaves them untouched."""
@@ -175,6 +196,8 @@ def convert(views: list[dict], name: str) -> list[dict]:
                     row['value'] = float(_values(row['value'], change))
         elif kind == 'table':
             _table(view, system)
+        elif kind == 'shape3d':
+            _shape(view, system)
         elif kind == 'waterfall':
             x = _axis(view['x'], system)
             z = _axis(view['z'], system)

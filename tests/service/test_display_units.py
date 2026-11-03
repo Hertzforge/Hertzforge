@@ -82,3 +82,38 @@ def test_a_tables_unit_columns_are_converted_but_not_the_ones_typed_into():
     (out,) = display_units.convert([view], US)
     assert out['columns'] == ['Node', 'X [in]', 'Y [m]', 'Note [in]']
     assert out['rows'][0] == ['1', '1', '0.0508', 'here']
+
+
+def _plate(unit):
+    nodes = np.array([[0.0, 0.0, 0.0], [0.0254, 0.0, 0.0], [0.0, 0.0508, 0.0]])
+    shape = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 2.0], [0.0, 0.0, 3.0]])
+    view = v.shape3d('Plate', unit, nodes, [v.mode(1, 10.0, None, shape)],
+                     triangles=np.array([[0, 1, 2]]))
+    view['pick'] = v.picking('project.add_node', {'geometry': 'Plate'}, 'point', 'place')
+    return view
+
+
+def test_a_geometry_is_drawn_in_the_systems_length_and_a_click_goes_back_to_si():
+    (out,) = display_units.convert([_plate('m')], US)
+    assert out['unit'] == 'in'
+    assert np.asarray(out['nodes'])[1:, :2].max() == pytest.approx(2.0)
+    assert np.asarray(out['nodes'])[1, 0] == pytest.approx(1.0)
+    assert np.asarray(out['modes'][0]['shape'])[2, 2] == 3.0, 'a shape is a picture'
+    scale, offset = out['pick']['to_si']
+    assert 1.0 * scale + offset == pytest.approx(0.0254), 'an inch clicked is 0.0254 m'
+    (raw,) = display_units.convert([_plate('undefined')], US)
+    assert raw['unit'] == 'undefined' and 'to_si' not in raw['pick']
+    assert np.asarray(raw['nodes'])[1, 0] == pytest.approx(0.0254), 'a file\'s own numbers'
+
+
+def test_measured_motion_plays_in_the_systems_units():
+    view = _plate('m')
+    view['motion'] = {'label': 'Time', 'unit': 's', 'start': 0.0, 'step': 0.001,
+                      'quantity': 'Acceleration', 'value_unit': 'm/s²',
+                      'node': np.array([1], np.uint32), 'direction': np.array([[0, 0, 1.0]]),
+                      'values': np.array([[G, -2 * G]], np.float32), 'peak': 2 * G}
+    (out,) = display_units.convert([view], US)
+    motion = out['motion']
+    assert motion['value_unit'] == 'g' and motion['peak'] == pytest.approx(2.0)
+    assert np.asarray(motion['values']).ravel() == pytest.approx([1.0, -2.0], rel=1e-6)
+    assert motion['unit'] == 's' and motion['step'] == 0.001
