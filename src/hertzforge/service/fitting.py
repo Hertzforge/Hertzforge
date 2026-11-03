@@ -117,6 +117,9 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
     if not fit.session.modes:
         raise refused('confirm a mode before publishing the fit')
     shapes = fit.session.shape_set()
+    # what a simulated run gives is simulated, however far it is carried
+    if getattr(project[fit.frf], 'source', None) is not None:
+        shapes.source = project[fit.frf].source
     if fit.shapes is not None and fit.shapes in project:
         project[fit.shapes] = shapes
         return fit.shapes
@@ -124,6 +127,12 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
     if not isinstance(name, str) or not name.strip():
         raise bad_request('fit.publish "name" is a name')
     added = project.add(name.strip(), shapes)
+    # in the FRF's group, as the core's own fit is (`Project.fit_modes`), so
+    # it animates on that group's geometry
+    try:
+        project.link(fit.frf, added)
+    except ValueError:
+        pass
     fit.shapes = added
     return added
 

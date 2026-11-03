@@ -132,3 +132,14 @@ def test_a_fit_ends_when_its_frf_leaves_the_project():
     assert gone['error']['code'] == 'refused'
     assert 'no longer in the project' in gone['error']['message']
     assert 'needs a fit under way' in after['error']['message'], 'the fit ended'
+
+
+def test_a_published_fit_joins_its_frfs_group_as_the_cores_fit_does(project):
+    projects.import_file(projects.OpenProject(project), {'path': str(PLATE / 'geometry.unv')})
+    project.link('FRF', 'Geometry')
+    fit = fitting.start(project, {'frf': 'FRF'})
+    fitting.act(fit, 'fit.confirm', {})
+    name = fitting.publish(project, fit, {})
+    assert any({'FRF', name, 'Geometry'} <= set(group['members'])
+               for group in project.object_groups)
+    assert project.geometry_for(name)[0] == 'Geometry'
