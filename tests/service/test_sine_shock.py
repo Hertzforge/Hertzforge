@@ -313,10 +313,10 @@ def test_a_shock_window_is_typed_added_and_removed():
     data = project['Time History']
     data.shocks = ()
     origin = float(data.abscissa[0])
-    (reading,) = run(project, 'project.set_shock', history='Time History', start=origin + 0.5,
-                     stop=origin + 0.7)
-    (reading,) = run(project, 'project.set_shock', history='Time History', shock=2,
-                     start=origin + 0.2, stop=origin + 0.6)
+    *_views, reading = run(project, 'project.set_shock', history='Time History',
+                           start=origin + 0.5, stop=origin + 0.7)
+    *_views, reading = run(project, 'project.set_shock', history='Time History', shock=2,
+                           start=origin + 0.2, stop=origin + 0.6)
     assert [s.start for s in data.shocks] == pytest.approx([0.2, 0.5])
     assert data.shocks[0].stop == pytest.approx(0.5), 'held off its neighbor'
     assert rows(reading)['Shocks']['value'].startswith('2 shocks')
@@ -324,7 +324,35 @@ def test_a_shock_window_is_typed_added_and_removed():
         run(project, 'project.set_shock', history='Time History', shock=4)
     with pytest.raises(ProtocolError, match='some length'):
         run(project, 'project.set_shock', history='Time History', start=1.0, stop=1.0)
-    (reading,) = run(project, 'project.remove_shock', history='Time History', shock=1)
+    *_views, reading = run(project, 'project.remove_shock', history='Time History', shock=1)
     assert [s.start for s in data.shocks] == pytest.approx([0.5])
     with pytest.raises(ProtocolError, match='there is no shock 2'):
         run(project, 'project.remove_shock', history='Time History', shock=2)
+
+
+def test_the_shock_windows_drag_on_the_record_and_on_its_stage(validate):
+    """Visual Dynamics' shock windows: spans on the record and on the 3-D
+    stage, each dragged to move it through Shock Window."""
+    from .test_ops import wire_views
+
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
+    project = state.project
+    data = project['Time History']
+    data.shocks = ()
+    origin = float(data.abscissa[0])
+    run(project, 'project.set_shock', history='Time History', start=origin + 0.2,
+        stop=origin + 0.4)
+    trace, stage, reading = run(project, 'project.shocks', history='Time History', record=2)
+    wire_views([trace, stage, reading], validate)
+    assert trace['view'] == 'spectrum' and stage['view'] == 'waterfall'
+    (span,) = trace['regions']
+    assert stage['regions'] == trace['regions'], 'the same window on the stage'
+    assert (span['x0'], span['x1']) == (pytest.approx(origin + 0.2), pytest.approx(origin + 0.4))
+    drag = span['drag']
+    assert drag['op'] == 'project.set_shock' and (drag['low'], drag['high']) == ('start', 'stop')
+    assert drag['params'] == {'history': 'Time History', 'shock': 1, 'record': 2}
+    trace, stage, _reading = run(project, drag['op'], **drag['params'], start=origin + 0.3,
+                                 stop=origin + 0.6)
+    assert data.shocks[0].start == pytest.approx(0.3) and data.shocks[0].stop == pytest.approx(0.6)
+    assert stage['regions'][0]['x1'] == pytest.approx(origin + 0.6)
+    assert trace['title'].endswith(data.record_label(1)), 'the record dragged on stays shown'

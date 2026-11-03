@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** How each result's stage was left: a drag or a choice in it replaces the view, and the view belongs to the person, so the new one opens as they left it. */
+	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front'; logX: boolean; logZ: boolean }>();
+</script>
+
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
@@ -20,9 +25,12 @@
 	 * densities paired at each channel, a specification's limits beside its target), drawn in
 	 * their role's color where they are not the measurement, with translucent limit bands, the
 	 * lines past an abort limit as rectangles, and a scalogram as a surface inside the walls of
-	 * its cone of influence.
+	 * its cone of influence. `regions` stand across the whole stage on the floor and the back wall,
+	 * as a spectrum's do behind its curves, and one that drags is moved the way it is on the plot:
+	 * its middle slides it and an edge moves that edge, as Visual Dynamics' shock windows move on
+	 * its stage.
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
 		BufferAttribute,
 		BufferGeometry,
@@ -63,8 +71,11 @@
 		recordOf,
 		segmentIndex,
 		stageMap,
+		onStage,
+		regionMarks,
 		stationOf,
 		surfaceIndex,
+		unfraction,
 		wallTriangles,
 		zoneTriangles
 	} from './waterfall';
@@ -73,9 +84,15 @@
 		view: WaterfallView;
 		/** Run the view's operation again with these params: a quantity chosen here. */
 		onparams?: (patch: ParamValues) => void;
+		/** A draggable region released at new edges: its index in `view.regions`, and the edges. */
+		onspan?: (region: number, x0: number, x1: number) => void;
+		/** The result the view belongs to: its stage reopens as it was left within it. */
+		scope?: string;
 	}
 
-	let { view, onparams }: Props = $props();
+	let { view, onparams, onspan, scope }: Props = $props();
+	// read once: the pane is made again for each view it shows
+	const saved = untrack(() => (scope ? poses.get(scope) : undefined));
 
 	/** Side of the square read back around the cursor, in pixels: lines are one pixel wide. */
 	const PICK = 9;
@@ -108,8 +125,8 @@
 
 	// The service says how each axis reads; the viewer may change it afterward.
 	$effect.pre(() => {
-		logX = view.x.scale === 'log';
-		logZ = view.z.scale === 'log';
+		logX = saved?.logX ?? view.x.scale === 'log';
+		logZ = saved?.logZ ?? view.z.scale === 'log';
 	});
 
 	const recordCount = $derived(view.records.length);
@@ -150,6 +167,11 @@
 	let geometry: BufferGeometry;
 	let curves: LineSegments | Mesh;
 	const marks = new Map<MarkKind, Mesh>();
+	/** The regions' shading and edges, rebuilt on a scale change or as one is dragged. */
+	let regionFaces: Mesh | null = null;
+	let regionEdges: LineSegments | null = null;
+	/** A region being dragged, with its edges as they stand. */
+	let draggingRegion: { k: number; x0: number; x1: number } | null = null;
 	let frame: LineSegments | null = null;
 	let colorTexture: DataTexture;
 	const materials: Material[] = [];
@@ -261,6 +283,7 @@
 		geometry.setIndex(new BufferAttribute(index(view.offsets, view.x_values, view.z_values, logX, logZ), 1));
 		buildFrame();
 		buildMarks();
+		buildRegions();
 		dirty = true;
 	}
 
@@ -299,6 +322,101 @@
 
 	let frameMaterial: LineBasicMaterial;
 
+	/** Each region on the floor and the back wall, the one being dragged at its edges as they stand. */
+	function buildRegions() {
+		for (const old of [regionFaces, regionEdges]) {
+			if (!old) continue;
+			scene.remove(old);
+			old.geometry.dispose();
+			(old.material as Material).dispose();
+		}
+		regionFaces = regionEdges = null;
+		const regions = view.regions ?? [];
+		if (!regions.length) return;
+		const faces: number[] = [];
+		const edges: number[] = [];
+		regions.forEach((r, k) => {
+			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
+			const m = regionMarks(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x);
+			faces.push(...m.faces);
+			edges.push(...m.edges);
+		});
+		const f = new BufferGeometry();
+		f.setAttribute('position', new BufferAttribute(new Float32Array(faces), 3));
+		regionFaces = new Mesh(f, new MeshBasicMaterial({ color: new Color(cssVar('--blue-2')), transparent: true, opacity: 0.16, side: DoubleSide, depthWrite: false }));
+		regionFaces.renderOrder = 1;
+		const e = new BufferGeometry();
+		e.setAttribute('position', new BufferAttribute(new Float32Array(edges), 3));
+		regionEdges = new LineSegments(e, new LineBasicMaterial({ color: new Color(cssVar('--blue-2')), transparent: true, opacity: 0.9, depthTest: false }));
+		regionEdges.renderOrder = 2;
+		scene.add(regionFaces, regionEdges);
+		dirty = true;
+	}
+
+	/** Where the pointer meets the stage: the abscissa there, and the depth it met at. */
+	function pointerOnStage(e: PointerEvent): { x: number; depth: number } | null {
+		const box = canvasHost.getBoundingClientRect();
+		const ndc = new Vector3(((e.clientX - box.left) / box.width) * 2 - 1, -((e.clientY - box.top) / box.height) * 2 + 1, 0.5).unproject(camera);
+		const dir = ndc.sub(camera.position).normalize();
+		const hit = onStage([camera.position.x, camera.position.y, camera.position.z], [dir.x, dir.y, dir.z]);
+		if (!hit) return null;
+		return { x: unfraction(hit[0] / STAGE.x, xRange, logX), depth: hit[1] };
+	}
+
+	/** How far stage x `a` lies from the pointer on screen, at the depth the pointer met the stage. */
+	function pixelsFrom(x: number, depth: number, e: PointerEvent): number {
+		const box = canvasHost.getBoundingClientRect();
+		probe.set(fraction(x, xRange, logX) * STAGE.x, depth, 0).project(camera);
+		return Math.hypot(((probe.x + 1) / 2) * box.width - (e.clientX - box.left), ((1 - probe.y) / 2) * box.height - (e.clientY - box.top));
+	}
+
+	/**
+	 * A press on a draggable region takes it from the camera: the middle slides it, an edge (when
+	 * the span has two) moves that edge, and on release its new edges go to `onspan`.
+	 */
+	function onRegionPress(e: PointerEvent) {
+		if (!renderer || !onspan || e.button !== 0 || !view.regions?.length) return;
+		const at = pointerOnStage(e);
+		if (!at) return;
+		const k = view.regions.findIndex(
+			(r) => r.drag && ((at.x >= Math.min(r.x0, r.x1) && at.x <= Math.max(r.x0, r.x1)) || pixelsFrom(r.x0, at.depth, e) <= EDGE_PX || pixelsFrom(r.x1, at.depth, e) <= EDGE_PX)
+		);
+		if (k < 0) return;
+		const r = view.regions[k];
+		const two = !!r.drag!.high;
+		const part = two && pixelsFrom(r.x0, at.depth, e) <= EDGE_PX ? 'low' : two && pixelsFrom(r.x1, at.depth, e) <= EDGE_PX ? 'high' : 'move';
+		e.preventDefault();
+		e.stopPropagation();
+		controls.enabled = false;
+		hover = null;
+		const start = at.x;
+		draggingRegion = { k, x0: r.x0, x1: r.x1 };
+		const move = (m: PointerEvent) => {
+			const now = pointerOnStage(m);
+			if (!now || !draggingRegion) return;
+			if (part === 'move') {
+				const d = now.x - start;
+				draggingRegion = { k, x0: r.x0 + d, x1: r.x1 + d };
+			} else if (part === 'low') draggingRegion = { k, x0: Math.min(now.x, r.x1), x1: r.x1 };
+			else draggingRegion = { k, x0: r.x0, x1: Math.max(now.x, r.x0) };
+			buildRegions();
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			controls.enabled = true;
+			const done = draggingRegion;
+			draggingRegion = null;
+			if (!done || (done.x0 === r.x0 && done.x1 === r.x1)) return buildRegions();
+			onspan?.(k, done.x0, done.x1);
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
+
+	/** How near a region's edge, in pixels, a press takes that edge rather than the whole span. */
+	const EDGE_PX = 8;
+
 	/** The bands, the exceedances and the walls, one translucent mesh for each kind, rebuilt on a scale change. */
 	function buildMarks() {
 		const map = stageMap(xRange, logX, zRange, logZ, stationCount);
@@ -336,6 +454,7 @@
 		frameMaterial.color = new Color(cssVar('--line-2'));
 		TONES.forEach((role, k) => uniforms.uTones.value[k].set(cssVar(ROLE_STYLES[role].colorVar)));
 		for (const [kind, mesh] of marks) (mesh.material as MeshBasicMaterial).color.set(cssVar(MARKS[kind].colorVar));
+		for (const r of [regionFaces, regionEdges]) if (r) (r.material as MeshBasicMaterial | LineBasicMaterial).color.set(cssVar('--blue-2'));
 		dirty = true;
 	}
 
@@ -428,7 +547,13 @@
 		resizeObs = new ResizeObserver(resize);
 		resizeObs.observe(canvasHost);
 		resize();
-		face(facing);
+		face(saved?.facing ?? facing);
+		if (saved) {
+			camera.position.fromArray(saved.position);
+			camera.up.fromArray(saved.up);
+			controls.target.fromArray(saved.target);
+			controls.update();
+		}
 		raf = requestAnimationFrame(loop);
 	}
 
@@ -534,6 +659,8 @@
 		dirty = false;
 		renderer.render(scene, camera);
 		placeLabels();
+		// kept as it is drawn, not as the pane goes: the view that replaces it is made first
+		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing, logX, logZ });
 	}
 
 	onMount(init);
@@ -568,7 +695,8 @@
 		controls.dispose();
 		geometry.dispose();
 		frame?.geometry.dispose();
-		for (const mesh of marks.values()) {
+		for (const mesh of [...marks.values(), regionFaces, regionEdges]) {
+			if (!mesh) continue;
 			mesh.geometry.dispose();
 			(mesh.material as Material).dispose();
 		}
@@ -633,6 +761,7 @@
 		class="canvas"
 		data-testid="waterfall-canvas"
 		bind:this={canvasHost}
+		onpointerdowncapture={onRegionPress}
 		onpointermove={onPointerMove}
 		onpointerleave={() => ((pendingPick = null), (hover = null))}
 	></div>
@@ -658,6 +787,9 @@
 		{/if}
 		{#each named as r (r)}
 			<span class="tick rec" data-at={recordAt(r)}>{depthLabels[r]}</span>
+		{/each}
+		{#each view.regions ?? [] as r, i (i)}
+			{#if r.label}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
 		{/each}
 		<span class="title" data-at="{STAGE.x / 2},-0.11,0">{withUnit(view.x.label, view.x.unit)}</span>
 	</div>
@@ -788,6 +920,11 @@
 
 	.tick.z {
 		translate: 4px -50%;
+	}
+
+	.tick.region {
+		translate: -50% -100%;
+		color: var(--blue-1);
 	}
 
 	.tick.rec {

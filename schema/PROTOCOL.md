@@ -239,6 +239,8 @@ A waterfall can also be one of Visual Dynamics' stages, with these optional fiel
  "walls":[{"$array"..}],                    one abscissa a station: a translucent wall
  "surface":true                             the records are one surface, each on the same
                                             abscissa, rather than separate lines
+ "regions":[region...]                      spans of the abscissa across the whole stage, as a
+                                            spectrum's regions are, dragged the same way
  "note":"..."                               optional words under the toolbar
 ```
 

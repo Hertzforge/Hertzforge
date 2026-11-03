@@ -279,6 +279,7 @@
           }
         },
         "walls": {"type": "array", "items": {"$ref": "#/$defs/arrayRef"}},
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
         "surface": {"type": "boolean"},
         "page": {
           "type": "object", "required": ["number", "count", "records"],

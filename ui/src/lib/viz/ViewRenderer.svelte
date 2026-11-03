@@ -63,7 +63,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: WaterfallPane }}
 		{#key view}
-			<WaterfallPane {view} {onparams} />
+			<WaterfallPane {view} {onparams} {onspan} {scope} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>

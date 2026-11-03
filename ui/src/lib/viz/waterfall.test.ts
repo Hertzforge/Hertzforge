@@ -7,12 +7,15 @@ import {
 	levelRange,
 	linearTicks,
 	namedRecords,
+	onStage,
 	pickedPoint,
+	regionMarks,
 	recordOf,
 	segmentIndex,
 	stageMap,
 	stationOf,
 	surfaceIndex,
+	unfraction,
 	wallTriangles,
 	zoneTriangles
 } from './waterfall';
@@ -172,5 +175,28 @@ describe('stages', () => {
 	it('stands a wall through one abscissa a station', () => {
 		expect(wallTriangles([1, 2, 3], map)).toHaveLength(36);
 		expect(wallTriangles([1, NaN, 3], map)).toHaveLength(0);
+	});
+});
+
+describe('regions on the stage', () => {
+	it('maps a place back to its value, linear or in decades', () => {
+		expect(unfraction(0.5, [0, 10], false)).toBeCloseTo(5);
+		expect(unfraction(0.5, [1, 100], true)).toBeCloseTo(10);
+		expect(unfraction(fraction(42, [1, 1000], true), [1, 1000], true)).toBeCloseTo(42);
+	});
+
+	it('meets the floor, or the back wall when the view looks along the floor', () => {
+		expect(onStage([0.5, 0.2, 1], [0, 0, -1])).toEqual([0.5, 0.2, 0]);
+		const wall = onStage([0.5, -1, 0.2], [0, 1, 0])!;
+		expect(wall[1]).toBeCloseTo(STAGE.y);
+		expect(onStage([0.5, 0.2, 1], [0, 0, 1])).toBeNull();
+	});
+
+	it('shades the floor and back wall between its edges, held on the stage', () => {
+		const { faces, edges } = regionMarks(0.2, 0.4);
+		expect(faces).toHaveLength(36);
+		expect(edges).toHaveLength(24);
+		expect(regionMarks(-1, -0.5).faces).toHaveLength(0);
+		expect(Math.max(...regionMarks(1, 9).faces.filter((_v, i) => i % 3 === 0))).toBeCloseTo(STAGE.x);
 	});
 });
