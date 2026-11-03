@@ -228,6 +228,12 @@ Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose 
 on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
 `channels` list returned by `dataset.open`.
 
+An `enum` that names one of the project's objects sets `"options_from":"objects:<kind>"`, or
+`"objects:<kind>|<kind>"` for more than one kind; the shell fills it with the names of the open
+project's objects of those kinds, in the project's order. Left out, it takes the first of them.
+An operation run when the project has none of the kinds a required param takes is refused, and
+the refusal names the kind.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -235,7 +241,12 @@ the person picks one there.
 
 `workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
 `accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
-the selected dataset is of that kind ("tools follow the data").
+the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
+on the connection's own project: `op.run` names no `handle`, and is refused while no project is
+open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`, and
+the project counts as modified when the operation added an object. These operations are the
+core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes so far). A view drawn
+by a verb that adds an object offers no in-view choice, since choosing would run the verb again.
 
 ## Methods
 
@@ -245,7 +256,7 @@ the selected dataset is of that kind ("tools follow the data").
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
 | `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
-| `op.run` | `{"op","handle","params":{...}}` | `{"views":[view...]}` |
+| `op.run` | `{"op","handle"?,"params":{...}}` | `{"views":[view...],"project"?}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |

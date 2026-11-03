@@ -32,13 +32,14 @@ from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .ops_modal import OPERATIONS as MODAL_OPERATIONS
 from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
+from .ops_project import OPERATIONS as PROJECT_OPERATIONS
 from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
 
 OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
-                                     + MODAL_RUN_OPERATIONS)
+                                     + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS)
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save')
@@ -193,15 +194,20 @@ class Service:
                 'summary': data.summary(),
                 'channels': [c.to_json() for c in data.channels]}
 
-    async def op_run(self, params: Mapping[str, Any],
-                     handles: dict[str, Handle]) -> dict[str, Any]:
-        """The result of one operation; the caller frames it in a worker,
-        since a dense model's shapes are megabytes."""
+    def operation(self, params: Any) -> Operation:
+        """The operation an `op.run` names."""
         _only(params, ('op', 'handle', 'params'), 'op.run')
         op = self.operations.get(params.get('op'))
         if op is None:
             raise not_found(f'No operation named {params.get("op")!r}; '
                             'catalog.list names the ones that exist.')
+        return op
+
+    async def op_run(self, params: Mapping[str, Any],
+                     handles: dict[str, Handle]) -> dict[str, Any]:
+        """The result of one operation; the caller frames it in a worker,
+        since a dense model's shapes are megabytes."""
+        op = self.operation(params)
         handle = handles.get(params.get('handle'))
         if handle is None:
             raise not_found(f'No open handle {params.get("handle")!r} on this '
@@ -309,6 +315,28 @@ class Connection:
         assert self.project is not None
         return {'path': written, 'project': projects.summary(self.project)}
 
+    async def project_op(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """An operation on this connection's project: its views and the
+        project's summary, which counts as modified when the operation
+        added or removed an object."""
+        op = self.service.operation(params)
+        if 'handle' in params:
+            raise bad_request(f'{op.id} works on the connection\'s project and '
+                              'takes no "handle"')
+        async with self.project_lock:
+            state = self.project
+            if state is None:
+                raise refused(f'{op.title} works on a project, and none is open; '
+                              'project.open or project.import opens one')
+            project = state.project
+            values = op.resolve(params.get('params', {}), objects={
+                name: projects.kind_of(obj) for name, obj in project.items()})
+            before = list(project)
+            views = await self.service.in_worker(op.run, project, values)
+            if list(project) != before:
+                state.modified = True
+            return {'views': views, 'project': projects.summary(state)}
+
     async def serve(self) -> None:
         """Send `hello`, then answer each request in its own task until the
         client goes. A frame that will not decode closes the connection with
@@ -356,6 +384,11 @@ class Connection:
                 result = await self.service.dataset_open(params, self.handles)
                 frame = frames.pack({'type': 'response', 'id': ident,
                                      'result': result})
+            elif method == 'op.run' and self.service.operation(params).accepts == 'project':
+                result = await self.project_op(params)
+                frame = await self.service.in_worker(
+                    frames.pack, {'type': 'response', 'id': ident,
+                                  'result': result})
             elif method == 'op.run':
                 result = await self.service.op_run(params, self.handles)
                 frame = await self.service.in_worker(

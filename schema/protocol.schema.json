@@ -240,7 +240,7 @@
           "items": {"type": "object", "required": ["value", "label"],
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
-        "options_from": {"enum": ["channels"]},
+        "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*)$"},
         "in_view": {"type": "boolean"}
       }
     },
@@ -250,7 +250,7 @@
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
         "workspace": {"enum": ["acquire", "analyze", "modal", "model", "specify", "simulate", "report"]},
-        "accepts": {"enum": ["random_run", "modal_model", "modal_run"]},
+        "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix"]}}
