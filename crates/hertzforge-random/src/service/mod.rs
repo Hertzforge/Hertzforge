@@ -1,6 +1,7 @@
 //! `RandomService` - the Path-B run orchestration + the level ladder state machine.
 //!
-//! The service owns a [`crate::control::ControlLaw`] (the shipped [`crate::control::HinvLaw`]),
+//! The service owns a [`crate::control::ControlLaw`] (built by a [`law::LawFactory`]; by
+//! default the shipped [`crate::control::HinvLaw`]),
 //! a persistent Sim [`engine::PlantLoop`], the protection engines, the capture sink,
 //! and the [`report::EventLog`]. It runs the state machine
 //! (`Idle -> Feasibility -> SysId -> CoherenceGate -> Engaged -> FullLevel -> Stopped`,
@@ -32,13 +33,48 @@
 //! (with the band + the previous loop's notch mask), call `law.iterate`, then run every
 //! protection engine (envelope alarm/abort, kinematic tri-field abort, drive-Vrms
 //! clamp+abort, divergence abort, overload proxy).
+//!
+//! # The law proposes, the core disposes
+//!
+//! Every law call (the seed, each loop, each commanded level change) is guarded the
+//! same way, whichever law the factory built:
+//!
+//! - **Containment and time.** The call runs under `catch_unwind` and is timed on an
+//!   injectable [`law::LawClock`] against `law_guards.budget_fraction` of the
+//!   loop's acquisition time (its segment). A panic, an error the law returns, or a
+//!   late answer is a MISS. The factory is given the same budget
+//!   ([`law::LawSetup::call_budget_s`]), so a law run contained (a law file) is
+//!   stopped by its host at that budget; what its host reports (a trap, the
+//!   budget, the memory cap, a refused output) is recorded under the reason the
+//!   core gives the same failure in a native law, plus `over_memory` and
+//!   `bad_diagnostics`, which only a contained law can come to.
+//! - **Output checks.** A drive of the wrong length, any non-finite or negative
+//!   line, or a non-finite level is a MISS. Lines outside the band are zeroed.
+//! - **On a miss** the output is not used: the drive in force is held (carried to
+//!   any commanded level by the core itself), the miss is logged and counted, and
+//!   a usable call resets the count. At `law_guards.max_misses` in a row the run
+//!   records [`report::TripKind::LawFault`] and takes the same ramped controlled
+//!   stop as an operator stop (the drive in force is sound, so it is not an
+//!   abort). The law is not called again.
+//! - **Per-loop change cap.** No in-band line of a usable drive may move more than
+//!   [`config::RandomTestConfig::law_change_cap_db`] from the drive in force. A
+//!   commanded level change first carries the drive in force to the new level, so
+//!   a commanded step is never clamped.
+//! - **The core's own divergence.** A line the cap holds back `hinv.divergence_n`
+//!   loops running is divergent whatever the law reports; the divergence abort
+//!   judges the UNION of those lines and the law's own `divergent_bins`.
 
 pub mod config;
 pub mod engine;
+mod guard;
+pub mod law;
 pub mod ramp;
 pub mod report;
 
-use crate::control::{composite_psd, ControlLaw, HinvLaw, LoopInputs, NotchReport, NotchSet};
+use crate::control::{
+    composite_psd, ControlLaw, LawFault, LevelCommand, LoopInputs, LoopOutputs, NotchReport,
+    NotchSet, OutputFault,
+};
 use config::{CaptureTrigger, ConfigError, RandomTestConfig, RunMode};
 use engine::{DriveSynth, KinematicMonitor, KinematicTrip, LoopConfig, PlantLoop};
 use hertzforge_breakpoints::{Envelope, LineSpectrum};
@@ -47,11 +83,12 @@ use hertzforge_capture::{
 };
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_shaker_db::{FeasibilityCalculator, FeasibilityReport};
+use law::{LawClock, LawFactory, LawSetup};
 use ramp::DriveRamp;
 use report::{
     ChannelRow, CompositeModeRecord, EventKind, EventLog, FeasibilityDigest, Honesty,
-    LevelHistoryEntry, LimitProfileRow, ReportData, RunSettings, RunState, Status, TripKind,
-    TripRecord,
+    LawFaultReason, LevelHistoryEntry, LimitProfileRow, ReportData, RunSettings, RunState, Status,
+    TripKind, TripRecord,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -189,6 +226,22 @@ pub struct FrfPairResult {
     pub phase: Vec<f64>,
 }
 
+/// What the core's guards have done to the control law's output in one run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct LawGuardStats {
+    /// Law calls made (seed, loops and level changes).
+    pub calls: u64,
+    /// Law calls whose output was not used (an error, a panic, a missed budget
+    /// or a malformed drive).
+    pub misses: u64,
+    /// The largest change, dB, any line of a proposed drive asked for in one
+    /// call, measured as the per-loop cap measures it (from the drive in force,
+    /// rescaled by any commanded level change). Before the cap is applied.
+    pub peak_change_db: f64,
+    /// Lines the per-loop change cap held back, summed over the run.
+    pub capped_lines: u64,
+}
+
 /// Soft-start climb duration when the operator set no explicit level ramp.
 const DEFAULT_SOFT_START_S: f64 = 5.0;
 
@@ -241,7 +294,34 @@ pub struct RandomService {
     band_coherence: f64,
 
     // --- control law + loop state ---------------------------------------------------
-    law: Option<HinvLaw>,
+    /// Builds the run's control law at system identification (default: the shipped
+    /// `HinvLaw` from `cfg.hinv`). See [`law`].
+    law_factory: Arc<dyn LawFactory>,
+    /// The clock every law call is timed on.
+    law_clock: Arc<dyn LawClock>,
+    /// The law, once system identification has seeded it.
+    law: Option<Box<dyn ControlLaw + Send>>,
+    /// The drive the core last ACCEPTED from the law: the drive in force, on the
+    /// line grid, at [`Self::law_drive_level_db`]. Each loop synthesizes from it.
+    /// Empty before the seed.
+    law_drive: Vec<f64>,
+    /// The level `law_drive` is at, dB (0 dB at the seed; every commanded level
+    /// change moves it).
+    law_drive_level_db: f64,
+    /// What the guards have done this run.
+    law_stats: LawGuardStats,
+    /// Unusable law calls in a row (reset by a usable one).
+    law_misses: u32,
+    /// Set when `law_misses` reaches `law_guards.max_misses`: the reason the
+    /// controlled stop is owed, taken at the next point the loop can stop.
+    law_stop_due: Option<LawFaultReason>,
+    /// Once the run is stopping for a law fault the law is not called again: the
+    /// core holds the drive in force and the ramp takes it down.
+    law_retired: bool,
+    /// Per line: consecutive law outputs the change cap held back. A line at
+    /// `hinv.divergence_n` is divergent by the core's own count, whatever the law
+    /// reports.
+    law_cap_streak: Vec<u32>,
     /// The current schedule level in dB (the feedforward rung).
     schedule_level_db: f64,
     /// The current level table index (AUTO) or the manual step position within the
@@ -513,7 +593,16 @@ impl RandomService {
             h_mag2: vec![0.0; nbins],
             coherence: vec![0.0; nbins],
             band_coherence: 0.0,
+            law_factory: law::default_factory(),
+            law_clock: law::default_clock(),
             law: None,
+            law_drive: Vec::new(),
+            law_drive_level_db: 0.0,
+            law_stats: LawGuardStats::default(),
+            law_misses: 0,
+            law_stop_due: None,
+            law_retired: false,
+            law_cap_streak: Vec::new(),
             schedule_level_db: 0.0,
             level_index: 0,
             auto_resume_at_rung: false,
@@ -566,7 +655,38 @@ impl RandomService {
         })
     }
 
+    /// Build the run's control law with `factory` instead of the shipped
+    /// `HinvLaw`. Configure-time: the law is built at the next system
+    /// identification. Every core guard applies to whatever it builds.
+    pub fn with_law_factory(mut self, factory: Arc<dyn LawFactory>) -> Self {
+        self.law_factory = factory;
+        self
+    }
+
+    /// Time law calls on `clock` instead of the monotonic wall clock (a test makes
+    /// a law slow deterministically this way). Configure-time.
+    pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
+    }
+
     // --- introspection --------------------------------------------------------------
+
+    /// The drive PSD the last loop synthesized (after the notch and the drive
+    /// ceiling), on the line grid; `None` before the first loop.
+    pub fn last_drive_psd(&self) -> Option<&[f64]> {
+        self.last_drive_psd.as_deref()
+    }
+
+    /// What the core's guards have done to the control law's output this run.
+    pub fn law_guard_stats(&self) -> LawGuardStats {
+        self.law_stats
+    }
+
+    /// The name the run's control law gives itself, once it is built.
+    pub fn law_name(&self) -> Option<&str> {
+        self.law.as_ref().map(|l| l.name())
+    }
 
     pub fn state(&self) -> RunState {
         self.state
@@ -643,7 +763,9 @@ impl RandomService {
     pub fn full_target_grms(&self) -> f64 {
         Self::inband_rms(&self.full_target, self.band, self.df_hz)
     }
-    /// The trip record if the run aborted.
+    /// The trip record if the run aborted, or stopped because its control law
+    /// stopped producing a usable drive ([`TripKind::LawFault`], with the run
+    /// `Stopped`).
     pub fn trip(&self) -> Option<&TripRecord> {
         self.trip.as_ref()
     }
@@ -1226,21 +1348,58 @@ impl RandomService {
             .sum::<f64>()
             / n as f64;
 
-        // Seed the control law from the sysID H.
-        let mut law = HinvLaw::new(self.cfg.hinv.clone(), &self.full_target, band, df)
+        // Build the control law and seed it from the sysID H.
+        let setup = LawSetup {
+            target_psd: &self.full_target,
+            band,
+            df_hz: df,
+            hinv: &self.cfg.hinv,
+            control_channels: self.cfg.control.channels.len(),
+            call_budget_s: self.law_budget_s(),
+        };
+        let mut law = self
+            .law_factory
+            .build(&setup)
             .map_err(|e| ServiceError::Config(ConfigError::BadControl(e.to_string())))?;
         let empty: Vec<bool> = Vec::new();
+        let zeros = vec![0.0; nbins];
         let seed_inputs = LoopInputs {
             target_psd: &self.full_target,
-            measured_psd: &vec![0.0; nbins],
+            measured_psd: &zeros,
             h_mag2: &self.h_mag2,
             coherence: &self.coherence,
             current_level_db: 0.0,
             df_hz: df,
             notched_bins: &empty,
             band,
+            // The seed carries no measurement.
+            dof: 0.0,
         };
-        let _ = law.init(&seed_inputs);
+        // A fresh run: nothing missed, nothing owed.
+        self.law_stats = LawGuardStats::default();
+        self.law_misses = 0;
+        self.law_stop_due = None;
+        self.law_retired = false;
+        self.law_cap_streak = vec![0; nbins];
+        self.law_stats.calls += 1;
+        // The seed goes through the same checks as every loop. A law that cannot
+        // seed is refused like a law that cannot be built: nothing engages.
+        let budget = Budget {
+            clock: self.law_clock.as_ref(),
+            seconds: self.law_budget_s(),
+        };
+        let seed = match guarded_call(law.as_mut(), budget, nbins, band, |l| l.init(&seed_inputs)) {
+            Ok(seed) => seed,
+            Err(miss) => {
+                self.law_stats.misses += 1;
+                return Err(ServiceError::Config(ConfigError::BadControl(format!(
+                    "the control law could not be seeded: {}",
+                    miss.words()
+                ))));
+            }
+        };
+        self.law_drive = seed.drive_psd;
+        self.law_drive_level_db = 0.0;
         self.law = Some(law);
 
         let _ = df; // silence if the grid becomes implicit later
@@ -1688,11 +1847,45 @@ impl RandomService {
             }
         }
         let full_rms = self.full_target_grms();
-        if let Some(law) = self.law.as_mut() {
-            // Re-target the law's scalar servo to the scheduled rung and set the
-            // feedforward scale so the drive starts at the rung (the servo trims around
-            // it). This is the ONLY place the service reaches the servo.
-            law.retarget_level(full_rms * scale, scale);
+        if self.law.is_some() {
+            // The drive in force, carried to the commanded level by the core. A
+            // commanded step is the schedule's, not the law's: whatever the law
+            // proposes is judged against this, and a law that cannot answer leaves
+            // the drive here.
+            let ratio = 10f64.powf((level_db - self.law_drive_level_db) / 10.0);
+            let rebased: Vec<f64> = self.law_drive.iter().map(|p| p * ratio).collect();
+            // Re-target the law to the scheduled rung (for the shipped law: its
+            // scalar servo's target, with the feedforward scale set so the drive
+            // starts at the rung and the servo trims around it). This is the ONLY
+            // place the service moves the law's level.
+            let cmd = LevelCommand {
+                level_db,
+                target_rms: full_rms * scale,
+            };
+            let (nbins, band) = (self.loop_cfg.nbins(), self.band);
+            let budget_s = self.law_budget_s();
+            let result = match self.law.as_mut() {
+                Some(law) if !self.law_retired => Some(guarded_call(
+                    law.as_mut(),
+                    Budget {
+                        clock: self.law_clock.as_ref(),
+                        seconds: budget_s,
+                    },
+                    nbins,
+                    band,
+                    |l| l.retarget_level(cmd),
+                )),
+                _ => None,
+            };
+            self.law_drive = rebased;
+            self.law_drive_level_db = level_db;
+            match result {
+                Some(Ok(out)) => {
+                    self.accept_law_output(out);
+                }
+                Some(Err(miss)) => self.law_missed(miss),
+                None => {}
+            }
         }
         // The service's own consecutive-divergent-loop counter restarts with the
         // law's per-bin streaks: same rationale, one level up (see
@@ -1993,18 +2186,26 @@ impl RandomService {
                 self.state
             )));
         }
+        // A law-fault stop owed from a level change made between loops starts
+        // before anything else is synthesized.
+        if let Some(reason) = self.law_stop_due.take() {
+            self.stop_for_law(reason);
+            if !matches!(self.state, RunState::Engaged | RunState::FullLevel) {
+                return Ok(false);
+            }
+        }
         let nbins = self.loop_cfg.nbins();
         let band = self.band;
         let df = self.df_hz;
         // Everything from here to the next acquisition is AO-unfed.
         self.pre_segment_start = Some(std::time::Instant::now());
 
-        // 1. The law's current drive PSD (built from its shape * servo scale).
-        let mut drive_psd = self
-            .law
-            .as_ref()
-            .map(|l| l.drive_psd())
-            .unwrap_or_else(|| vec![0.0; nbins]);
+        // 1. The drive in force: the law's last accepted output.
+        let mut drive_psd = if self.law_drive.len() == nbins {
+            self.law_drive.clone()
+        } else {
+            vec![0.0; nbins]
+        };
 
         // 2. Build the notch from the limit profiles (notch seam) and apply AFTER synthesis.
         let notch = self.build_notch();
@@ -2276,6 +2477,9 @@ impl RandomService {
             None => None,
         };
         let est_dof = per_loop_dof * f64::from(self.est_loops);
+        // What the law is told: the accumulated estimate's degrees of freedom,
+        // which stop growing once the accumulator holds its configured depth.
+        let law_dof = per_loop_dof * f64::from(self.est_loops).min(windows);
 
         // The operator's FRF pairs, measured from the SAME segment the
         // control loop just consumed - so what the pane shows and what the
@@ -2291,15 +2495,38 @@ impl RandomService {
             df_hz: df,
             notched_bins: &self.notch_mask,
             band,
+            dof: law_dof,
         };
-        let out = self
-            .law
-            .as_mut()
-            .expect("law present while running")
-            .iterate(&inputs);
+        // The law proposes; the core disposes. A call whose output is not usable
+        // leaves the drive in force exactly as it is, and is counted.
+        let budget_s = self.law_budget_s();
+        let result = if self.law_retired {
+            None
+        } else {
+            let law = self
+                .law
+                .as_mut()
+                .ok_or_else(|| ServiceError::BadState("no control law while running".into()))?;
+            let budget = Budget {
+                clock: self.law_clock.as_ref(),
+                seconds: budget_s,
+            };
+            Some(guarded_call(law.as_mut(), budget, nbins, band, |l| {
+                l.iterate(&inputs)
+            }))
+        };
+        let out = match result {
+            Some(Ok(out)) => Some(self.accept_law_output(out)),
+            Some(Err(miss)) => {
+                self.law_missed(miss);
+                None
+            }
+            None => None,
+        };
 
         // 9. Divergence abort (divergence caller contract): count consecutive loops with a
-        //    non-empty divergent-bin set; abort at divergence_loops.
+        //    non-empty divergent-bin set; abort at divergence_loops. Judged only on a
+        //    loop whose law output was used; a miss is the law-fault count's.
         //
         //    A GUARD BAND of EDGE_GUARD_BINS on each band edge is EXCLUDED from
         //    the abort set (first full-ladder hardware run, 2026-08-01):
@@ -2313,38 +2540,52 @@ impl RandomService {
         //    Guard-band bins are still CONTROLLED (clamped, notched, enveloped);
         //    they just cannot be the sole reason a run dies. Divergence anywhere
         //    in the interior still aborts exactly as before.
-        const EDGE_GUARD_BINS: usize = 2;
-        let interior_divergent = out
-            .diagnostics
-            .divergent_bins
-            .iter()
-            .filter(|&&b| b >= band.0 + EDGE_GUARD_BINS && b + EDGE_GUARD_BINS < band.1)
-            .count();
-        // Bench diagnostic, env-gated: WHICH bins are diverging, in Hz. The trip
-        // record carries only a count, and an earlier false-Divergence hunt burned two
-        // guesses on where the divergent bin sat; this prints the answer instead.
-        if interior_divergent > 0 && std::env::var_os("HERTZFORGE_DIVERGE_DEBUG").is_some() {
-            let hz: Vec<f64> = out
-                .diagnostics
-                .divergent_bins
+        //
+        //    The abort set is the UNION of the core's own divergent lines (lines the
+        //    per-loop change cap has held back `hinv.divergence_n` loops running)
+        //    and the lines the law reports. A law's report can add lines, never
+        //    take the core's away: a law that reports nothing is still caught.
+        if let Some(out) = out.as_ref() {
+            const EDGE_GUARD_BINS: usize = 2;
+            let mut divergent = vec![false; nbins];
+            let divergence_n = self.cfg.hinv.divergence_n;
+            for (d, &s) in divergent.iter_mut().zip(self.law_cap_streak.iter()) {
+                *d = s >= divergence_n;
+            }
+            for &b in &out.diagnostics.divergent_bins {
+                if let Some(d) = divergent.get_mut(b) {
+                    *d = true;
+                }
+            }
+            let divergent_bins: Vec<usize> = (0..nbins).filter(|&k| divergent[k]).collect();
+            let interior_divergent = divergent_bins
                 .iter()
-                .map(|&b| b as f64 * self.df_hz)
-                .collect();
-            eprintln!(
-                "[diverge-debug] bins {:?} = {:?} Hz (band {:?}, df {:.3})",
-                out.diagnostics.divergent_bins, hz, band, self.df_hz
-            );
-        }
-        if interior_divergent == 0 {
-            self.divergence_streak = 0;
-        } else {
-            self.divergence_streak += 1;
-            if self.divergence_streak >= self.cfg.divergence_loops {
-                self.abort(TripKind::Divergence {
-                    consecutive_loops: self.divergence_streak,
-                    divergent_bins: interior_divergent,
-                });
-                return Ok(false);
+                .filter(|&&b| b >= band.0 + EDGE_GUARD_BINS && b + EDGE_GUARD_BINS < band.1)
+                .count();
+            // Bench diagnostic, env-gated: WHICH bins are diverging, in Hz. The trip
+            // record carries only a count, and an earlier false-Divergence hunt burned
+            // two guesses on where the divergent bin sat; this prints the answer.
+            if interior_divergent > 0 && std::env::var_os("HERTZFORGE_DIVERGE_DEBUG").is_some() {
+                let hz: Vec<f64> = divergent_bins
+                    .iter()
+                    .map(|&b| b as f64 * self.df_hz)
+                    .collect();
+                eprintln!(
+                    "[diverge-debug] bins {:?} = {:?} Hz (band {:?}, df {:.3})",
+                    divergent_bins, hz, band, self.df_hz
+                );
+            }
+            if interior_divergent == 0 {
+                self.divergence_streak = 0;
+            } else {
+                self.divergence_streak += 1;
+                if self.divergence_streak >= self.cfg.divergence_loops {
+                    self.abort(TripKind::Divergence {
+                        consecutive_loops: self.divergence_streak,
+                        divergent_bins: interior_divergent,
+                    });
+                    return Ok(false);
+                }
             }
         }
 
@@ -2352,6 +2593,18 @@ impl RandomService {
         //     against the frequency-domain envelope.
         if !self.check_envelope(&composite, est_dof, fresh_judged.as_deref()) {
             return Ok(false); // aborted inside check_envelope
+        }
+
+        // 10b. The law missed its limit of loops in a row: the controlled stop.
+        //      The protections above judged this loop first; the ladder does not
+        //      advance under a stop.
+        if let Some(reason) = self.law_stop_due.take() {
+            self.stop_for_law(reason);
+            if !matches!(self.state, RunState::Engaged | RunState::FullLevel) {
+                return Ok(false);
+            }
+            self.advance_capture_clocks();
+            return Ok(true);
         }
 
         // 11. Capture/save clocks + AUTO ladder advance + full-duration stop.
@@ -2603,6 +2856,93 @@ impl RandomService {
                 });
             }
         }
+    }
+
+    // --- the control law's output: used, or held and counted -----------------------
+
+    /// The time budget of one law call, seconds: `law_guards.budget_fraction` of
+    /// the acquisition time one loop measures (its segment).
+    fn law_budget_s(&self) -> f64 {
+        self.cfg.law_guards.budget_fraction * self.loop_cfg.segment_seconds()
+    }
+
+    /// A law output that passed the checks becomes the drive in force, through
+    /// the per-loop change cap: each in-band line may move at most
+    /// [`RandomTestConfig::law_change_cap_db`] from the drive in force (which a
+    /// commanded level change has already carried to the new level, so a
+    /// commanded step is never clamped). Lines the cap holds back extend their
+    /// streak toward the core's divergence count; lines it leaves alone reset it.
+    /// Returns the output as used (capped).
+    fn accept_law_output(&mut self, mut out: LoopOutputs) -> LoopOutputs {
+        self.law_stats.calls += 1;
+        self.law_misses = 0;
+        let cap_db = self.cfg.law_change_cap_db();
+        let capped = guard::cap_change(&mut out.drive_psd, &self.law_drive, self.band, cap_db);
+        self.law_stats.peak_change_db = self.law_stats.peak_change_db.max(capped.peak_db);
+        self.law_stats.capped_lines += capped.bound.len() as u64;
+        let n = out.drive_psd.len();
+        if self.law_cap_streak.len() != n {
+            self.law_cap_streak = vec![0; n];
+        }
+        let mut held = vec![false; n];
+        for &k in &capped.bound {
+            held[k] = true;
+        }
+        let (lo, hi) = (self.band.0.min(n), self.band.1.min(n));
+        for (streak, &h) in self.law_cap_streak[lo..hi].iter_mut().zip(&held[lo..hi]) {
+            *streak = if h { streak.saturating_add(1) } else { 0 };
+        }
+        self.law_drive = out.drive_psd.clone();
+        out
+    }
+
+    /// A law call whose output was not used. The drive in force stays as it is;
+    /// the miss is logged and counted, and at `law_guards.max_misses` in a row the
+    /// controlled stop is owed.
+    fn law_missed(&mut self, miss: Miss) {
+        self.law_stats.calls += 1;
+        self.law_stats.misses += 1;
+        self.law_misses = self.law_misses.saturating_add(1);
+        self.log.push(EventKind::Note {
+            text: format!(
+                "The control law's output was not used: {}. The drive in force is held.",
+                miss.words()
+            ),
+        });
+        if self.law_misses >= self.cfg.law_guards.max_misses && self.law_stop_due.is_none() {
+            self.law_stop_due = Some(miss.reason);
+        }
+    }
+
+    /// Stop the run because the law stopped producing a usable drive: record the
+    /// trip, retire the law, and take the SAME ramped controlled stop an operator
+    /// stop takes (the drive in force is sound, so this is not an abort).
+    fn stop_for_law(&mut self, reason: LawFaultReason) {
+        if self.law_retired {
+            return;
+        }
+        self.law_retired = true;
+        let consecutive = self.law_misses;
+        let record = TripRecord {
+            kind: TripKind::LawFault {
+                reason,
+                consecutive,
+            },
+            at_level_db: self.schedule_level_db,
+            at_loop: self.loop_count,
+        };
+        self.log.push(EventKind::Trip {
+            record: record.clone(),
+        });
+        self.log.push(EventKind::Note {
+            text: format!(
+                "The control law did not produce a usable drive for {consecutive} {} in a row; \
+                 the run is stopping.",
+                if consecutive == 1 { "loop" } else { "loops" }
+            ),
+        });
+        self.trip = Some(record);
+        let _ = self.request_stop();
     }
 
     /// Latch an abort: record the trip, stop the plant, transition to Aborted, and stop
@@ -3067,6 +3407,7 @@ impl RandomService {
             divergence_loops: self.cfg.divergence_loops,
             overload_fraction: self.cfg.overload_fraction,
             hinv: self.cfg.hinv.clone(),
+            law_guards: self.cfg.law_guards.clone(),
         }
     }
 
@@ -3242,6 +3583,106 @@ impl RandomService {
             .max(0.0)
             .sqrt()
     }
+}
+
+/// Why one law call's output was not used, with the law's own words when it gave
+/// any.
+#[derive(Debug, Clone)]
+struct Miss {
+    reason: LawFaultReason,
+    detail: Option<String>,
+}
+
+impl Miss {
+    fn words(&self) -> String {
+        match &self.detail {
+            Some(d) => format!("{} ({d})", self.reason.words()),
+            None => self.reason.words().to_string(),
+        }
+    }
+}
+
+/// The reason a law's own fault is recorded under. A contained law's host can
+/// stop it (a trap, its time budget, its memory cap) or refuse its output before
+/// the core sees it; each lands on the reason the core would give the same
+/// failure in a native law, so a run record reads the same either way.
+fn fault_reason(fault: &LawFault) -> LawFaultReason {
+    match fault {
+        LawFault::BadInputs(_) | LawFault::Failed(_) => LawFaultReason::Error,
+        LawFault::Crashed(_) => LawFaultReason::Panicked,
+        LawFault::OverBudget(_) => LawFaultReason::OverBudget,
+        LawFault::OverMemory(_) => LawFaultReason::OverMemory,
+        LawFault::BadOutput(rule, _) => match rule {
+            OutputFault::WrongLength => LawFaultReason::WrongLength,
+            OutputFault::NonFinite => LawFaultReason::NonFinite,
+            OutputFault::Negative => LawFaultReason::Negative,
+            OutputFault::NonFiniteLevel => LawFaultReason::NonFiniteLevel,
+            OutputFault::Diagnostics => LawFaultReason::BadDiagnostics,
+        },
+    }
+}
+
+/// The time one law call may take, seconds: what the law is allowed of one loop.
+#[derive(Clone, Copy)]
+struct Budget<'a> {
+    clock: &'a dyn LawClock,
+    seconds: f64,
+}
+
+/// One call into the control law, guarded: the output comes back only if the
+/// call returned within its time budget and the output passes the core's checks
+/// ([`guard::check_output`]); otherwise the reason it was not usable.
+fn guarded_call<F>(
+    law: &mut (dyn ControlLaw + Send),
+    budget: Budget<'_>,
+    nbins: usize,
+    band: (usize, usize),
+    call: F,
+) -> Result<LoopOutputs, Miss>
+where
+    F: FnOnce(&mut (dyn ControlLaw + Send)) -> Result<LoopOutputs, LawFault>,
+{
+    let started = budget.clock.now_s();
+    // A panic inside the law is the law's fault, never the run's: it is caught
+    // here and becomes a miss like any other. `AssertUnwindSafe` is sound because
+    // nothing the core relies on is borrowed into the call except the law itself,
+    // and a law that panicked is only ever asked again for a fresh output, which
+    // is checked like this one. (The workspace keeps `panic = "unwind"` for
+    // exactly this kind of containment; see the workspace Cargo.toml.)
+    let out = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(law))) {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            return Err(Miss {
+                reason: fault_reason(&e),
+                detail: Some(e.to_string()),
+            })
+        }
+        Err(_) => {
+            return Err(Miss {
+                reason: LawFaultReason::Panicked,
+                detail: None,
+            })
+        }
+    };
+    // A late answer is not used even when it is a good one: the loop cannot wait
+    // for a law, and a law that is late once is not to be trusted to be on time
+    // next loop. (A call that never returns is the plug-in host's to interrupt;
+    // a native law runs on the loop thread and is trusted not to hang.)
+    let took = budget.clock.now_s() - started;
+    if took.is_nan() || took > budget.seconds {
+        return Err(Miss {
+            reason: LawFaultReason::OverBudget,
+            detail: Some(format!(
+                "{:.0} ms against {:.0} ms",
+                took * 1e3,
+                budget.seconds * 1e3
+            )),
+        });
+    }
+    guard::check_output(out, nbins, band).map_err(|reason| Miss {
+        reason,
+        detail: None,
+    })
 }
 
 /// Human unit label for the report.

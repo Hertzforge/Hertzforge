@@ -20,7 +20,16 @@
 //! duration -> stop), the alarm/abort envelope engine, the reactive kinematic monitor,
 //! the drive-Vrms clamp/abort, the divergence abort, the overload proxy, the capture
 //! rules, periodic save, and the serde report + status surface. It closes the loop
-//! around the control core exactly as the adversarial fixtures do.
+//! around the control core exactly as the adversarial fixtures do. It holds the law
+//! as a `Box<dyn ControlLaw + Send>` built by a [`service::law::LawFactory`] and
+//! guards every call to it the same way: output checks, a per-loop change cap, its
+//! own divergence count, a time budget, panic containment and a controlled stop
+//! (see [`service`]).
+//!
+//! The run service is the default `service` feature. Without it the crate is the
+//! control core alone, which builds for `wasm32-wasip2`: the built-in `hinv` law
+//! file (`laws/hinv`) is this same `HinvLaw` built that way, so the law that runs
+//! natively and the law file are one implementation.
 //!
 //! # Two hardware paths - which one this crate serves
 //!
@@ -46,19 +55,27 @@
 #![forbid(unsafe_code)]
 
 pub mod control;
+#[cfg(feature = "service")]
 pub mod service;
 
 pub use control::{
-    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvLaw, LoopDiagnostics,
-    LoopInputs, LoopOutputs, NotchReport, NotchSet,
+    composite_psd, CompositeMode, ControlError, ControlLaw, HinvConfig, HinvKnob, HinvLaw,
+    KnobKind, LawFault, LevelCommand, LoopDiagnostics, LoopInputs, LoopOutputs, NotchReport,
+    NotchSet, OutputFault,
 };
 
+#[cfg(feature = "service")]
 pub use service::config::{
-    CaptureRules, CaptureTrigger, ConfigError, ControlChannel, ControlSet, LevelSchedule,
-    LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
+    CaptureRules, CaptureTrigger, ConfigError, ControlChannel, ControlSet, LawGuards,
+    LevelSchedule, LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
 };
+#[cfg(feature = "service")]
 pub use service::engine::{
     GridRefusal, GridSnapshot, KinematicMonitor, LoopConfig, StationAdoption, MIN_CONTROL_LINES,
 };
-pub use service::report::{ReportData, RunState, Status, TripKind, TripRecord};
-pub use service::{RandomService, RandomSnapshotPayload, ServiceError};
+#[cfg(feature = "service")]
+pub use service::law::{HinvLawFactory, LawClock, LawFactory, LawSetup, MonotonicClock};
+#[cfg(feature = "service")]
+pub use service::report::{LawFaultReason, ReportData, RunState, Status, TripKind, TripRecord};
+#[cfg(feature = "service")]
+pub use service::{LawGuardStats, RandomService, RandomSnapshotPayload, ServiceError};

@@ -7,7 +7,7 @@
 //! and an honesty section carried verbatim into every report.
 
 use crate::control::{CompositeMode, HinvConfig};
-use crate::service::config::{LimitKind, MetaField, RunMode};
+use crate::service::config::{LawGuards, LimitKind, MetaField, RunMode};
 use crate::service::engine::KinematicTrip;
 use hertzforge_breakpoints::LineSpectrum;
 use hertzforge_shaker_db::FeasibilityReport;
@@ -108,6 +108,75 @@ pub enum TripKind {
         consecutive_loops: u32,
         divergent_bins: usize,
     },
+    /// The control law did not produce a usable drive for `consecutive` law calls
+    /// in a row, so the run stopped. NOT an abort: the drive in force was sound
+    /// (the core held it through every miss), so the run takes the same ramped
+    /// controlled stop as an operator stop and ends `Stopped` with this record.
+    LawFault {
+        /// What was wrong with the last miss.
+        reason: LawFaultReason,
+        /// Unusable law calls in a row when the run stopped.
+        consecutive: u32,
+    },
+}
+
+/// Why the core did not use a control law's output on one call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LawFaultReason {
+    /// The law reported that it could not compute a drive.
+    Error,
+    /// The law panicked; the core caught it.
+    Panicked,
+    /// The call took longer than its time budget.
+    OverBudget,
+    /// The drive had the wrong number of lines.
+    WrongLength,
+    /// The drive held a value that is not a finite number.
+    NonFinite,
+    /// The drive held a negative power.
+    Negative,
+    /// The level command was not a finite number.
+    NonFiniteLevel,
+    /// The law asked for more memory than its cap (a law run contained).
+    OverMemory,
+    /// The law's diagnostics broke a rule: a line off the grid, an undeclared or
+    /// non-finite value (a law run contained).
+    BadDiagnostics,
+}
+
+impl LawFaultReason {
+    /// The stable wire name (the serde name).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LawFaultReason::Error => "error",
+            LawFaultReason::Panicked => "panicked",
+            LawFaultReason::OverBudget => "over_budget",
+            LawFaultReason::WrongLength => "wrong_length",
+            LawFaultReason::NonFinite => "non_finite",
+            LawFaultReason::Negative => "negative",
+            LawFaultReason::NonFiniteLevel => "non_finite_level",
+            LawFaultReason::OverMemory => "over_memory",
+            LawFaultReason::BadDiagnostics => "bad_diagnostics",
+        }
+    }
+
+    /// What went wrong, in plain words for the operator, said of the control law
+    /// ("it", "its"): "The control law's output was not used: its drive was not
+    /// a number."
+    pub fn words(self) -> &'static str {
+        match self {
+            LawFaultReason::Error => "it reported an error",
+            LawFaultReason::Panicked => "it failed while computing",
+            LawFaultReason::OverBudget => "it took longer than its time budget",
+            LawFaultReason::WrongLength => "its drive had the wrong number of lines",
+            LawFaultReason::NonFinite => "its drive was not a number",
+            LawFaultReason::Negative => "its drive had a negative value",
+            LawFaultReason::NonFiniteLevel => "its level was not a number",
+            LawFaultReason::OverMemory => "it asked for more memory than its cap",
+            LawFaultReason::BadDiagnostics => "its diagnostics broke the output rules",
+        }
+    }
 }
 
 /// A record of the trip that aborted the run.
@@ -304,6 +373,10 @@ pub struct RunSettings {
     pub divergence_loops: u32,
     pub overload_fraction: f64,
     pub hinv: HinvConfig,
+    /// The core's guards on the control law (absent in a report written before
+    /// they existed).
+    #[serde(default)]
+    pub law_guards: LawGuards,
 }
 
 /// One channel's row in the report's channel table digest.

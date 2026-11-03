@@ -9,6 +9,10 @@
 # Anything after the pass name goes to `cargo test` before its `--`, such as
 # `--no-fail-fast` or `--release`.
 #
+# Each pass first builds the guest control laws to WebAssembly
+# (scripts/build_laws.sh): the law host's tests load them and fail when one
+# is missing.
+#
 # The timing tests are listed in scripts/rust_timing_tests.txt, which says
 # what belongs there. Each pass checks its count against that list, so an
 # entry that no longer names exactly one test (renamed, removed, listed under
@@ -44,6 +48,10 @@ total() {
 }
 
 entries >/dev/null || fail "fix $LIST"
+
+laws() {
+  bash "$ROOT/scripts/build_laws.sh" || fail "the guest laws did not build (scripts/build_laws.sh)"
+}
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 
@@ -54,6 +62,7 @@ parallel() {
     n=$((n + 1))
   done < <(entries)
   [ "$n" -gt 0 ] || fail "$LIST lists no tests"
+  laws
   echo "rust_tests: the workspace, without the $n timing tests"
   cargo test --workspace --locked ${CARGO_ARGS[@]+"${CARGO_ARGS[@]}"} -- --exact "${skips[@]}" \
     </dev/null 2>&1 | tee "$LOG"
@@ -70,6 +79,7 @@ parallel() {
 
 timing() {
   local status=0 n=0 passed=0 failed=0 ignored=0 broken="" pkg target name names sel s p f i
+  laws
   # One cargo invocation per package and test target, in the order listed. A
   # failing target does not stop the ones after it.
   while read -r pkg target <&3; do

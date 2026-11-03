@@ -89,6 +89,11 @@ hertzforge-engine  test:scale_400ch  four_hundred_channels_run_clean_at_the_deri
 hertzforge-insight  lib  jobs::tests::single_job_policy_and_lifecycle
 hertzforge-insight  lib  jobs::tests::cancel_reaches_the_worker_and_marks_failed
 
+# The law host on the real clock: a spinning law stopped within a tick of its
+# budget, and the cost of one call on a 1,000-line grid
+hertzforge-law-host  test:law_host  the_deadline_stops_a_spinning_law_within_a_tick_of_its_budget
+hertzforge-law-host  test:law_host  iterate_on_a_1000_line_grid_takes_well_under_a_loop
+
 # The shock pacer on the real clock
 hertzforge-shock-host  lib  service::pacer::tests::the_real_pacer_treats_pulse_start_as_an_ordinary_read
 hertzforge-shock-host  test:service_sim  g_the_default_pacer_is_the_real_clock

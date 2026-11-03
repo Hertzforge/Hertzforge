@@ -758,6 +758,17 @@ impl Actor {
             Ok(more) => {
                 self.view.loops += 1;
                 self.view.drive_level_db = Some(base);
+                // The controller started its own controlled stop (its control law
+                // stopped producing a usable drive): show the ramp-down as one.
+                let law_stop = more
+                    && self.view.state == State::Running
+                    && self.svc.as_ref().and_then(law_fault_trip).is_some();
+                if law_stop {
+                    if let Some(svc) = self.svc.as_ref() {
+                        self.view.level_db = Some(svc.commanded_level_db());
+                    }
+                    self.set(State::Stopping, "ramping_down");
+                }
                 self.after_loop();
                 if !more {
                     self.finish_from_controller();
@@ -773,6 +784,15 @@ impl Actor {
     /// stop reached its floor, or a protection tripped.
     fn finish_from_controller(&mut self) {
         let Some(svc) = self.svc.as_ref() else { return };
+        // The controller stopped the run itself because its control law stopped
+        // producing a usable drive: a controlled stop with a trip record. It wins
+        // over an operator stop that arrived during its ramp-down.
+        if let (RunState::Stopped, Some(t)) = (svc.state(), law_fault_trip(svc)) {
+            let (json, message) = trip_facts(&t, false);
+            self.shared.add_log("trip", message.clone());
+            self.end("law_fault", "stopped", Some(json), Some(message));
+            return;
+        }
         match svc.state() {
             RunState::Aborted => {
                 let trip = svc.trip().cloned();
@@ -1124,7 +1144,7 @@ impl Actor {
                 .and_then(|s| s.stop_requested_db())
                 .or_else(|| self.shared.requested_level.lock().ok().and_then(|l| *l)),
             "operator_abort" => self.shared.requested_level.lock().ok().and_then(|l| *l),
-            "aborted" => trip
+            "aborted" | "law_fault" => trip
                 .as_ref()
                 .and_then(|t| t.get("at_level_db"))
                 .and_then(Value::as_f64),
@@ -1270,6 +1290,13 @@ impl Actor {
 /// The phase of a driving run: `full_level` once the loop runs at full level, and
 /// `engaged` before, including while a level change toward full level ramps (the
 /// controller's own state turns full level when the change is commanded).
+/// The run's trip record when it is the law-fault controlled stop.
+fn law_fault_trip(svc: &RandomService) -> Option<hertzforge_random::TripRecord> {
+    svc.trip()
+        .filter(|t| matches!(t.kind, TripKind::LawFault { .. }))
+        .cloned()
+}
+
 fn driving_phase(svc: &RandomService) -> &'static str {
     let arrived = (svc.schedule_level_db() - svc.commanded_level_db()).abs() < 0.05;
     match svc.state() {
@@ -1431,6 +1458,16 @@ fn trip_facts(t: &hertzforge_random::TripRecord, during_sysid: bool) -> (Value, 
                 at_words(t.at_level_db)
             ),
         ),
+        TripKind::LawFault { reason, consecutive } => (
+            json!({"kind": "law_fault", "reason": reason.as_str(), "consecutive": consecutive}),
+            format!(
+                "The control law did not produce a usable drive for {consecutive} {} in a row \
+                 ({}); the run stopped {}.",
+                if *consecutive == 1 { "loop" } else { "loops" },
+                reason.words(),
+                at_words(t.at_level_db)
+            ),
+        ),
     };
     if let Value::Object(m) = &mut facts {
         m.insert("at_level_db".into(), num(at));
@@ -1504,6 +1541,29 @@ mod tests {
     /// The bench's run 7: a 0.0312 g peak against a 0.03 g limit read "accel 0.03
     /// against a 0.03 limit", which reads as no exceedance (2026-11-01, fix
     /// verification observation 2). Three significant digits show it.
+    #[test]
+    fn a_law_fault_trip_says_why_and_that_the_run_stopped() {
+        let t = TripRecord {
+            kind: TripKind::LawFault {
+                reason: hertzforge_random::LawFaultReason::OverBudget,
+                consecutive: 3,
+            },
+            at_level_db: -6.0,
+            at_loop: 14,
+        };
+        let (facts, message) = trip_facts(&t, false);
+        assert_eq!(
+            facts,
+            json!({"kind": "law_fault", "reason": "over_budget", "consecutive": 3,
+                   "at_level_db": -6, "at_loop": 14})
+        );
+        assert_eq!(
+            message,
+            "The control law did not produce a usable drive for 3 loops in a row (it took \
+             longer than its time budget); the run stopped at -6.0 dB."
+        );
+    }
+
     #[test]
     fn a_kinematic_trip_shows_three_significant_digits() {
         let (facts, message) = trip_facts(&kinematic(0.031_24, 0.03), true);

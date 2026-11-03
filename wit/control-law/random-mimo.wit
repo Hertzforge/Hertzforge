@@ -1,0 +1,136 @@
+package hertzforge:control-law@0.1.0;
+
+// UNSTABLE. This file is a draft of the multiple-input, multiple-output
+// Random interface. It is published so its shape can be discussed; the host
+// does not load it, and it will change before multiple-output Random is
+// built. Do not build a law against it.
+//
+// Conventions (see docs/control-law-spec.md):
+// - One call covers the whole band: every line, in line order.
+// - A complex value is a record of two f64, `re` and `im`.
+// - A matrix is row-major within a line, and lines follow one another in
+//   order. Hermitian matrices are passed in full, both triangles.
+// - Spectral density matrices (SDMs) are in the channel's units squared per
+//   hertz; drive SDMs are in V^2/Hz.
+
+/// UNSTABLE draft: types for multiple-output Random.
+interface mimo-types {
+    use types.{band, diagnostic-value, manifest};
+
+    record complex {
+        re: f64,
+        im: f64,
+    }
+
+    /// One complex matrix per line, stacked: `lines` matrices of `rows` by
+    /// `cols`, row-major within a line, line after line. `data` holds
+    /// `lines * rows * cols` values.
+    record matrix-stack {
+        lines: u32,
+        rows: u32,
+        cols: u32,
+        data: list<complex>,
+    }
+
+    /// The control-to-drive shapes a law supports.
+    enum mimo-shape {
+        /// As many control channels as drives.
+        square,
+        /// More control channels than drives.
+        more-controls-than-drives,
+        /// Fewer control channels than drives.
+        fewer-controls-than-drives,
+    }
+
+    /// What a multiple-output law says about itself: the shared manifest and
+    /// the shapes it supports. The host refuses a run whose shape is not
+    /// listed.
+    record mimo-manifest {
+        law: manifest,
+        shapes: list<mimo-shape>,
+    }
+
+    /// What a multiple-output law is built for: fixed for the run.
+    record mimo-setup {
+        /// Control channels.
+        controls: u32,
+        /// Drive outputs.
+        drives: u32,
+        /// Lines on the grid.
+        lines: u32,
+        df-hz: f64,
+        band: band,
+        /// The reference SDM at 0 dB, controls by controls per line.
+        reference: matrix-stack,
+    }
+
+    /// Everything a multiple-output law sees on one loop.
+    record mimo-inputs {
+        /// The reference SDM at 0 dB, controls by controls per line.
+        reference: matrix-stack,
+        /// The scheduled level in dB (0 dB is the full reference).
+        current-level-db: f64,
+        /// The measured control response SDM, controls by controls per line,
+        /// at the running level.
+        response: matrix-stack,
+        /// Statistical degrees of freedom of `response`.
+        response-dof: f64,
+        /// The frequency response estimate, controls by drives per line.
+        frf: matrix-stack,
+        /// This loop's measured response-to-drive cross spectrum, controls
+        /// by drives per line, so a law can adapt its own estimate of the
+        /// plant.
+        response-drive-csd: matrix-stack,
+        /// The drive SDM of the last loop as it was played (after the
+        /// controller's limits), drives by drives per line.
+        last-drive: matrix-stack,
+        /// Multiple coherence of each control channel per line:
+        /// `lines * controls` values, line after line.
+        multiple-coherence: list<f64>,
+        /// System identification: the control response SDM with the drives
+        /// off (the noise floor), controls by controls per line.
+        sysid-noise: matrix-stack,
+        /// System identification: the control response SDM, controls by
+        /// controls per line.
+        sysid-response: matrix-stack,
+        /// System identification: the drive SDM, drives by drives per line.
+        sysid-drive: matrix-stack,
+        df-hz: f64,
+        band: band,
+        /// 0 for the seed, then 1, 2, ... for each iteration.
+        loop-index: u64,
+    }
+
+    /// One loop's result.
+    record mimo-outputs {
+        /// The next drive SDM, drives by drives per line, V^2/Hz: Hermitian
+        /// and positive semi-definite on every line.
+        drive: matrix-stack,
+        /// The law's declared diagnostics, by key.
+        values: list<diagnostic-value>,
+    }
+}
+
+/// UNSTABLE draft: the multiple-output law resource.
+interface random-mimo-law {
+    use types.{param};
+    use mimo-types.{mimo-setup, mimo-inputs, mimo-outputs};
+
+    resource law {
+        constructor(setup: mimo-setup, params: list<param>) -> result<law, string>;
+        seed: func(inputs: mimo-inputs) -> result<mimo-outputs, string>;
+        iterate: func(inputs: mimo-inputs) -> result<mimo-outputs, string>;
+        /// The scheduled level moved to `level-db`, dB relative to the
+        /// reference (0 dB is full level): return the drive at the new level.
+        retarget-level: func(level-db: f64) -> result<mimo-outputs, string>;
+    }
+}
+
+/// UNSTABLE draft: the world a multiple-output Random law would implement.
+world random-mimo {
+    use mimo-types.{mimo-manifest};
+
+    export describe: func() -> mimo-manifest;
+
+    export random-mimo-law;
+}

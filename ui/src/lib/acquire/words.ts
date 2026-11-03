@@ -8,6 +8,7 @@
 import { RequestError } from '$lib/protocol/client.svelte';
 import type {
 	Alarm,
+	LawFaultReason,
 	LogKind,
 	RandomLiveHead,
 	RandomOutcome,
@@ -79,7 +80,8 @@ export const OUTCOME_WORDS: Record<RandomOutcome, string> = {
 	aborted: 'Aborted by a Protection',
 	held: 'Held at the Coherence Check',
 	sysid_level_unreachable: 'Stopped: Identification Level Not Reached',
-	fault: 'Stopped on a Fault'
+	fault: 'Stopped on a Fault',
+	law_fault: 'Stopped: No Usable Drive From the Control Law'
 };
 
 /** Every outcome but a completed schedule and the operator's own stop is shown as an abort. */
@@ -93,7 +95,21 @@ export const TRIP_WORDS: Record<Trip['kind'], string> = {
 	envelope: 'Envelope Abort',
 	kinematic: 'Kinematic Abort',
 	drive_vrms: 'Drive Abort',
-	divergence: 'Divergence Abort'
+	divergence: 'Divergence Abort',
+	law_fault: 'Control Law Stop'
+};
+
+/** What was wrong with the control law's last unusable output, in words. */
+export const LAW_FAULT_WORDS: Record<LawFaultReason, string> = {
+	error: 'The control law reported an error',
+	panicked: 'The control law failed while computing',
+	over_budget: 'The control law took longer than its time budget',
+	wrong_length: 'The drive had the wrong number of lines',
+	non_finite: 'The drive was not a number',
+	negative: 'The drive had a negative value',
+	non_finite_level: 'The level was not a number',
+	over_memory: 'The control law asked for more memory than its cap',
+	bad_diagnostics: 'The control law reported diagnostics that broke the output rules'
 };
 
 const AXIS_WORDS = { accel: 'Acceleration', velocity: 'Velocity', displacement: 'Displacement' } as const;
@@ -120,6 +136,8 @@ export function tripFacts(trip: Trip): { label: string; value: string }[] {
 			return [{ label: 'Drive', value: `${formatNumber(trip.realized_vrms, 4)} V rms` }, { label: 'Limit', value: `${formatNumber(trip.limit_vrms, 4)} V rms` }, ...common];
 		case 'divergence':
 			return [{ label: 'Loops in a row', value: String(trip.consecutive_loops) }, { label: 'Diverging lines', value: String(trip.divergent_bins) }, ...common];
+		case 'law_fault':
+			return [{ label: 'Loops in a row', value: String(trip.consecutive) }, { label: 'Last problem', value: LAW_FAULT_WORDS[trip.reason] ?? trip.reason }, ...common];
 	}
 	return common;
 }

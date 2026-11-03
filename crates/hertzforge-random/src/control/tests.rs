@@ -38,6 +38,8 @@ impl Fixture {
             df_hz: self.df_hz,
             notched_bins: &self.notched,
             band: self.band,
+            // Not modeled here: the synthetic measurement has no estimator.
+            dof: 0.0,
         }
     }
 }
@@ -273,8 +275,8 @@ fn config_svd_keep_is_accepted_but_inert_for_siso() {
         df_hz: 1.0,
         band,
     };
-    let out_none = law_none.init(&fx.inputs());
-    let out_svd = law_svd.init(&fx.inputs());
+    let out_none = law_none.init(&fx.inputs()).expect("valid inputs");
+    let out_svd = law_svd.init(&fx.inputs()).expect("valid inputs");
     assert_eq!(
         out_none.drive_psd, out_svd.drive_psd,
         "svd_keep changed SISO seed drive"
@@ -313,7 +315,7 @@ fn init_seed_matches_target_over_flat_unit_plant() {
         df_hz: 2.0,
         band,
     };
-    let out = law.init(&fx.inputs());
+    let out = law.init(&fx.inputs()).expect("valid inputs");
     // In-band bins ~ target. Not EXACT: the Tikhonov seed softens the divide, so with
     // the default beta=0.05 on a unit plant the drive is target/(1+eps)^2 with
     // eps=(0.05)^2, i.e. ~0.5% low. That softening is intended Tikhonov behavior, not error;
@@ -359,7 +361,7 @@ fn trust_gate_holds_low_coherence_and_low_h_bins() {
         df_hz: 1.0,
         band,
     };
-    law.init(&fx0.inputs());
+    law.init(&fx0.inputs()).expect("valid inputs");
     let shape_before = law.shape().to_vec();
 
     // Measure a NON-UNIFORM error (bin 3 is 4x high, others on target). A uniform
@@ -378,7 +380,7 @@ fn trust_gate_holds_low_coherence_and_low_h_bins() {
         df_hz: 1.0,
         band,
     };
-    let out = law.iterate(&fx.inputs());
+    let out = law.iterate(&fx.inputs()).expect("valid inputs");
     assert!(out.diagnostics.untrusted_bins.contains(&5));
     assert!(out.diagnostics.untrusted_bins.contains(&9));
     // Held bins' shape is unchanged; the differentially-errored trusted bin moved.
@@ -417,7 +419,7 @@ fn correction_clamp_bounds_the_per_iter_step() {
         df_hz: 1.0,
         band,
     };
-    law.init(&fx0.inputs());
+    law.init(&fx0.inputs()).expect("valid inputs");
     let shape_before = law.shape().to_vec();
 
     // Measured is 100x LOW at bin 4 (target/meas = 100 => would want +20 dB); clamp
@@ -434,7 +436,7 @@ fn correction_clamp_bounds_the_per_iter_step() {
         df_hz: 1.0,
         band,
     };
-    let out = law.iterate(&fx.inputs());
+    let out = law.iterate(&fx.inputs()).expect("valid inputs");
     assert!(out.diagnostics.clamped_bins.contains(&4));
     // The pre-renormalization step was clamped to 10^(0.2) ~= 1.585. Renormalization
     // scales the whole set slightly, but the bin-4 growth is bounded well under 100x.
@@ -468,7 +470,7 @@ fn divergence_reported_after_n_consecutive_clamped_iters() {
         df_hz: 1.0,
         band,
     };
-    law.init(&fx0.inputs());
+    law.init(&fx0.inputs()).expect("valid inputs");
 
     // Persistently report bin 4 as far below target every loop -> clamps every loop.
     let mut measured = target.clone();
@@ -485,7 +487,7 @@ fn divergence_reported_after_n_consecutive_clamped_iters() {
             df_hz: 1.0,
             band,
         };
-        let out = law.iterate(&fx.inputs());
+        let out = law.iterate(&fx.inputs()).expect("valid inputs");
         assert!(out.diagnostics.clamped_bins.contains(&4));
         if out.diagnostics.divergent_bins.contains(&4) && divergent_at.is_none() {
             divergent_at = Some(loop_i);
@@ -521,7 +523,7 @@ fn a_non_clamping_iter_resets_the_divergence_streak() {
         df_hz: 1.0,
         band,
     };
-    law.init(&base.inputs());
+    law.init(&base.inputs()).expect("valid inputs");
 
     let mut clamped = target.clone();
     clamped[4] = target[4] / 1000.0;
@@ -544,7 +546,7 @@ fn a_non_clamping_iter_resets_the_divergence_streak() {
             df_hz: 1.0,
             band,
         };
-        let out = law.iterate(&fx.inputs());
+        let out = law.iterate(&fx.inputs()).expect("valid inputs");
         if out.diagnostics.divergent_bins.contains(&4) {
             ever_divergent = true;
         }
@@ -577,7 +579,7 @@ fn notched_bins_are_excluded_from_renormalization() {
         df_hz: 1.0,
         band,
     };
-    law.init(&fx0.inputs());
+    law.init(&fx0.inputs()).expect("valid inputs");
     let shape_before = law.shape().to_vec();
 
     // Notch bin 5; measure a uniform error so trusted bins want to move.
@@ -594,7 +596,7 @@ fn notched_bins_are_excluded_from_renormalization() {
         df_hz: 1.0,
         band,
     };
-    law.iterate(&fx.inputs());
+    law.iterate(&fx.inputs()).expect("valid inputs");
     // Notched bin held exactly.
     assert!(
         (law.shape()[5] - shape_before[5]).abs() < 1e-12,
@@ -622,7 +624,7 @@ fn servo_fault_hold_on_dead_measurement() {
         df_hz: 1.0,
         band,
     };
-    let seed = law.init(&fx0.inputs());
+    let seed = law.init(&fx0.inputs()).expect("valid inputs");
     let level_before = seed.level_cmd_db;
 
     // Measured PSD is essentially zero (dead channel): RMS << target*fault_fraction.
@@ -637,7 +639,7 @@ fn servo_fault_hold_on_dead_measurement() {
         df_hz: 1.0,
         band,
     };
-    let out = law.iterate(&fx.inputs());
+    let out = law.iterate(&fx.inputs()).expect("valid inputs");
     assert!(
         out.diagnostics.servo_faulted,
         "dead measurement did not latch fault"
@@ -650,9 +652,10 @@ fn servo_fault_hold_on_dead_measurement() {
 }
 
 #[test]
-fn law_does_not_panic_on_ragged_inputs() {
-    // A ragged grid must be absorbed (no panic in library paths), returning a safe
-    // zero/hold drive rather than indexing out of bounds.
+fn law_reports_ragged_inputs_instead_of_panicking() {
+    // A ragged grid must be absorbed (no panic in library paths): the law reports
+    // it as a typed fault instead of indexing out of bounds, and its own state is
+    // left untouched so the core can hold the drive already in force.
     let n = 8;
     let band = (2, 6);
     let target = flat_target(n, band.0, band.1, 1.0);
@@ -667,11 +670,49 @@ fn law_does_not_panic_on_ragged_inputs() {
         df_hz: 1.0,
         notched_bins: &[],
         band,
+        dof: 0.0,
     };
-    let out = law.init(&inputs);
-    assert_eq!(out.drive_psd.len(), n);
-    let out2 = law.iterate(&inputs);
-    assert_eq!(out2.drive_psd.len(), n);
+    assert!(matches!(law.init(&inputs), Err(LawFault::BadInputs(_))));
+    assert!(matches!(law.iterate(&inputs), Err(LawFault::BadInputs(_))));
+    assert_eq!(law.drive_psd().len(), n, "the law's own drive is intact");
+}
+
+#[test]
+fn retarget_moves_the_drive_by_exactly_the_commanded_scale() {
+    // A commanded level change, straight after the seed, scales the whole drive by
+    // the commanded power ratio: the servo starts AT the new level (its feedforward),
+    // so nothing but the command moves the drive. The run core's change cap rebases
+    // on exactly this, so a commanded step is never clamped.
+    let n = 16;
+    let band = (2, 12);
+    let target = flat_target(n, band.0, band.1, 1.0);
+    let mut law = HinvLaw::new(HinvConfig::default(), &target, band, 1.0).unwrap();
+    let fx = Fixture {
+        target: target.clone(),
+        measured: vec![0.0; n],
+        h_mag2: vec![2.0; n],
+        coherence: vec![1.0; n],
+        notched: vec![],
+        level_db: 0.0,
+        df_hz: 1.0,
+        band,
+    };
+    let seed = law.init(&fx.inputs()).expect("valid inputs");
+    let cmd = LevelCommand {
+        level_db: -12.0,
+        target_rms: law.target_inband_rms() * 10f64.powf(-12.0 / 20.0),
+    };
+    let out = law.retarget_level(cmd).expect("retarget");
+    let ratio = 10f64.powf(-12.0 / 10.0);
+    for k in band.0..band.1 {
+        let want = seed.drive_psd[k] * ratio;
+        assert!(
+            (out.drive_psd[k] - want).abs() <= 1e-12 * want.max(1e-300),
+            "bin {k}: {} vs {want}",
+            out.drive_psd[k]
+        );
+    }
+    assert!((out.level_cmd_db + 12.0).abs() < 1e-9);
 }
 
 #[test]
@@ -692,4 +733,67 @@ fn config_round_trips_through_json() {
     let js = serde_json::to_string(&cfg).unwrap();
     let back: HinvConfig = serde_json::from_str(&js).unwrap();
     assert_eq!(cfg, back);
+}
+
+#[test]
+fn every_operator_knob_reads_and_sets_its_own_field() {
+    let d = HinvConfig::default();
+    assert!(d.validate().is_ok());
+    for k in HinvConfig::KNOBS {
+        let v = d
+            .knob(k.key)
+            .unwrap_or_else(|| panic!("{} is declared but cannot be read", k.key));
+        assert!(
+            v >= k.min && v <= k.max,
+            "{}: default {v} outside [{}, {}]",
+            k.key,
+            k.min,
+            k.max
+        );
+        // Set each knob to a value of its own and read the same value back,
+        // with every other knob unchanged.
+        let want = if k.kind == KnobKind::Integer {
+            (k.min + 1.0).min(k.max)
+        } else {
+            k.min + 0.5 * (k.max - k.min).min(1.0)
+        };
+        let mut c = HinvConfig::default();
+        c.set_knob(k.key, want)
+            .unwrap_or_else(|e| panic!("{}: {e}", k.key));
+        assert_eq!(c.knob(k.key), Some(want), "{}", k.key);
+        for other in HinvConfig::KNOBS.iter().filter(|o| o.key != k.key) {
+            assert_eq!(
+                c.knob(other.key),
+                d.knob(other.key),
+                "{} moved {}",
+                k.key,
+                other.key
+            );
+        }
+    }
+    assert_eq!(d.knob("suggest_beta"), None, "not a knob");
+}
+
+#[test]
+fn a_knob_refuses_what_is_outside_its_declaration() {
+    let mut c = HinvConfig::default();
+    for (key, v) in [
+        ("damping", 10.5),
+        ("damping", -1.0),
+        ("damping", f64::NAN),
+        ("trust_h_floor_frac", 1.0),
+        ("max_correction_db_per_iter", 0.0),
+        ("divergence_n", 2.5),
+        ("divergence_n", 0.0),
+        ("suggest_beta", 0.1),
+    ] {
+        assert!(c.set_knob(key, v).is_err(), "{key} = {v} was accepted");
+    }
+    assert_eq!(c, HinvConfig::default(), "a refused value changes nothing");
+    c.set_knob("lambda", 0.0).unwrap();
+    assert_eq!(c.lambda, None, "0 is the suggest policy");
+    c.set_knob("lambda", 2.5e-3).unwrap();
+    assert_eq!(c.lambda, Some(2.5e-3));
+    c.set_knob("divergence_n", 12.0).unwrap();
+    assert_eq!(c.divergence_n, 12);
 }

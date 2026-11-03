@@ -345,7 +345,7 @@
         "level_db": {"type": "number"},
         "views": {"$ref": "#/$defs/views"},
         "phase": {"type": "string"},
-        "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", null]},
+        "outcome": {"enum": ["completed", "operator_stop", "aborted", "held", "fault", "law_fault", null]},
         "reason": {"type": ["string", "null"]}
       }
     },
@@ -814,7 +814,7 @@
     "trip": {
       "type": "object", "required": ["kind", "at_level_db", "at_loop"],
       "properties": {
-        "kind": {"enum": ["envelope", "kinematic", "drive_vrms", "divergence"]},
+        "kind": {"enum": ["envelope", "kinematic", "drive_vrms", "divergence", "law_fault"]},
         "at_level_db": {"type": "number"},
         "at_loop": {"type": "integer", "minimum": 0}
       },
@@ -829,20 +829,26 @@
          "required": ["realized_vrms", "limit_vrms"]},
         {"properties": {"kind": {"const": "divergence"}, "consecutive_loops": {"type": "integer", "minimum": 0},
                         "divergent_bins": {"type": "integer", "minimum": 0}},
-         "required": ["consecutive_loops", "divergent_bins"]}
+         "required": ["consecutive_loops", "divergent_bins"]},
+        {"properties": {"kind": {"const": "law_fault"},
+                        "reason": {"enum": ["error", "panicked", "over_budget", "wrong_length",
+                                            "non_finite", "negative", "non_finite_level",
+                                            "over_memory", "bad_diagnostics"]},
+                        "consecutive": {"type": "integer", "minimum": 1}},
+         "required": ["reason", "consecutive"]}
       ]
     },
     "runEnd": {
       "type": ["object", "null"], "required": ["outcome", "message", "at_s", "level_db", "trip"],
       "additionalProperties": false,
       "properties": {
-        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault"]},
+        "outcome": {"enum": ["completed", "operator_stop", "operator_abort", "safe_stop", "aborted", "held", "sysid_level_unreachable", "fault", "law_fault"]},
         "message": {"type": "string", "minLength": 1},
         "at_s": {"type": ["number", "null"], "minimum": 0},
         "level_db": {"type": ["number", "null"]},
         "trip": {"oneOf": [{"$ref": "#/$defs/trip"}, {"type": "null"}]}
       },
-      "if": {"type": "object", "properties": {"outcome": {"const": "aborted"}}},
+      "if": {"type": "object", "properties": {"outcome": {"enum": ["aborted", "law_fault"]}}},
       "then": {"properties": {"trip": {"type": "object"}}},
       "else": {"properties": {"trip": {"type": "null"}}}
     },
