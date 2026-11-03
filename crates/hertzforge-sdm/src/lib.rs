@@ -10,9 +10,9 @@
 //! - A [`MatrixStack`] holds one `rows` by `cols` complex matrix per line, row-major
 //!   within a line, lines in order: `data[(line * rows + r) * cols + c]`.
 //! - A [`HermitianStack`] holds one `n` by `n` Hermitian matrix per line as its
-//!   packed upper triangle, row-major: for `r <= c`, `data[line * packed_len + r * n
-//!   - r * (r - 1) / 2 + (c - r)]`. An element below the diagonal is the conjugate of
-//!   its mirror. Diagonals are real.
+//!   packed upper triangle, row-major. For `r <= c` the offset inside a line is
+//!   `r * (2 * n - r + 1) / 2 + (c - r)` (see [`HermitianStack::packed_index`]). An
+//!   element below the diagonal is the conjugate of its mirror. Diagonals are real.
 //! - Units: a response SDM is in the channel's units squared per hertz; a drive SDM in
 //!   volts squared per hertz; an FRF in response units per volt.
 //!
