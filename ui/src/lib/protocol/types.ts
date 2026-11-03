@@ -243,7 +243,16 @@ export interface MatrixView {
 	selects?: 'shape3d';
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView;
+/** Rows of text under column headings, such as a mode table. */
+export interface TableView {
+	view: 'table';
+	title: string;
+	columns: string[];
+	/** One cell per column, as text. */
+	rows: string[][];
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------

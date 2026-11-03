@@ -18,10 +18,12 @@ import asyncio
 import importlib
 import itertools
 import logging
+import pkgutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from websockets.asyncio.server import Server, ServerConnection, serve
@@ -30,28 +32,27 @@ from websockets.exceptions import ConnectionClosed
 from . import fitting, frames, projects, reports
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
-from .ops_compare import OPERATIONS as COMPARE_OPERATIONS
-from .ops_history import OPERATIONS as HISTORY_OPERATIONS
-from .ops_modal import OPERATIONS as MODAL_OPERATIONS
-from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
-from .ops_model import OPERATIONS as MODEL_OPERATIONS
-from .ops_project import OPERATIONS as PROJECT_OPERATIONS
-from .ops_random import OPERATIONS as RANDOM_OPERATIONS
-from .ops_readings import OPERATIONS as READING_OPERATIONS
-from .ops_settings import OPERATIONS as SETTINGS_OPERATIONS
-from .ops_sine_shock import OPERATIONS as SINE_SHOCK_OPERATIONS
-from .ops_specify import OPERATIONS as SPECIFY_OPERATIONS
-from .ops_spectra import OPERATIONS as SPECTRA_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
 
-OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
-                                     + MODAL_RUN_OPERATIONS + PROJECT_OPERATIONS
-                                     + SETTINGS_OPERATIONS + MODEL_OPERATIONS
-                                     + SPECIFY_OPERATIONS + READING_OPERATIONS
-                                     + HISTORY_OPERATIONS + SPECTRA_OPERATIONS
-                                     + SINE_SHOCK_OPERATIONS + COMPARE_OPERATIONS)
+#: the operation modules served first, in this order; every other `ops_*` module of this package
+#: follows, by name, so a module of operations is served by being added
+FIRST_MODULES = ('ops_random', 'ops_modal', 'ops_modal_run', 'ops_project', 'ops_settings',
+                 'ops_model', 'ops_specify', 'ops_readings')
+
+
+def _operations() -> tuple[Operation, ...]:
+    """Every `ops_*` module's `OPERATIONS`, the `FIRST_MODULES` first."""
+    found = [m.name for m in pkgutil.iter_modules([str(Path(__file__).parent)])
+             if m.name.startswith('ops_')]
+    ordered = [n for n in FIRST_MODULES if n in found] + sorted(
+        n for n in found if n not in FIRST_MODULES)
+    return tuple(op for name in ordered
+                 for op in importlib.import_module(f'{__package__}.{name}').OPERATIONS)
+
+
+OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
