@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
-import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
+import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
 
 const channels = [
 	{ value: 'ctrl1', label: 'Control 1' },
@@ -140,5 +140,26 @@ describe('object params', () => {
 		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'objects:shape_set' }, rate], objects))).toBe(false);
 		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'verb:integrate' }], objects))).toBe(false);
 		expect(hasObjectsFor([rate])).toBe(true);
+	});
+});
+
+describe('setting params', () => {
+	const params: ParamDescriptor[] = [
+		{ name: 'source', label: 'Source', type: 'enum', options_from: 'objects:time_history' },
+		{ name: 'frame_length', label: 'Frame', type: 'integer', default: 4096, min: 2, setting: 'averaging.frame_length' },
+		{ name: 'window', label: 'Window', type: 'enum', default: 'hann', setting: 'averaging.window', options: [{ value: 'hann', label: 'Hann' }, { value: 'flattop', label: 'Flat top' }] }
+	];
+	const run: ProjectObject = { name: 'Run', kind: 'time_history', groups: [], settings: { averaging: { frame_length: 8192, window: 'flattop' } } };
+
+	it('opens on the settings the source object holds', () => {
+		const out = withSettings(params, { source: 'Run', frame_length: 4096, window: 'hann' }, run);
+		expect(out).toEqual({ source: 'Run', frame_length: 8192, window: 'flattop' });
+	});
+
+	it('keeps the values where the object has no such setting, or one the param would refuse', () => {
+		const bare: ProjectObject = { name: 'Bare', kind: 'time_history', groups: [] };
+		expect(withSettings(params, { source: 'Bare', frame_length: 2048, window: 'hann' }, bare).frame_length).toBe(2048);
+		const odd: ProjectObject = { ...run, settings: { averaging: { frame_length: 1, window: 'bartlett' } } };
+		expect(withSettings(params, { source: 'Run', frame_length: 2048, window: 'hann' }, odd)).toEqual({ source: 'Run', frame_length: 2048, window: 'hann' });
 	});
 });

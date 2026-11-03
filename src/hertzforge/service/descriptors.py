@@ -62,6 +62,11 @@ class Param:
     #: set from the result's view rather than the panel, which does not
     #: show it (a waterfall's quantity, chosen among the groups it drew)
     in_view: bool = False
+    #: the setting of the object the operation's `source` param names that
+    #: the param opens on, as '<group>.<field>' in the summary's
+    #: `settings` ('averaging.frame_length'); the default when the object
+    #: has none
+    setting: str | None = None
 
     def __post_init__(self) -> None:
         source = self.options_from
@@ -105,6 +110,8 @@ class Param:
             out['options_from'] = self.options_from
         if self.in_view:
             out['in_view'] = True
+        if self.setting is not None:
+            out['setting'] = self.setting
         return out
 
     def check(self, value: Any, choices: Sequence[Any] | None) -> Any:

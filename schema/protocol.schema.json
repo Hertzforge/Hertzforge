@@ -242,7 +242,8 @@
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
         "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
-        "in_view": {"type": "boolean"}
+        "in_view": {"type": "boolean"},
+        "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
       }
     },
     "operation": {
@@ -275,7 +276,15 @@
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
         "groups": {"type": "array", "items": {"type": "string"}},
-        "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}
+        "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
+        "settings": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "averaging": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
+            "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
+            "truncation": {"type": "object", "additionalProperties": {"type": "number"}}
+          }
+        }
       }
     },
     "project": {

@@ -143,6 +143,21 @@ export function rangeHint(p: ParamDescriptor): string | null {
 }
 
 /** Keep values that are still valid after the descriptor or channels change; reset the rest. */
+/**
+ * The values with each `setting` param taken from the source object's settings, where the object
+ * has that setting and it is a valid value; every other value is left as it was.
+ */
+export function withSettings(params: ParamDescriptor[], values: ParamValues, source: ProjectObject | undefined): ParamValues {
+	const out = { ...values };
+	for (const p of params) {
+		if (!p.setting) continue;
+		const [group, field] = p.setting.split('.');
+		const held = source?.settings?.[group]?.[field];
+		if (held !== undefined && validate(p, held) === null) out[p.name] = held;
+	}
+	return out;
+}
+
 export function reconcile(params: ParamDescriptor[], previous: ParamValues | undefined, channels: ParamOption[] = []): ParamValues {
 	const out = defaultValues(params, channels);
 	if (!previous) return out;

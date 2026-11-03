@@ -29,7 +29,7 @@ import type {
 	View,
 	Workspace
 } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
@@ -134,6 +134,25 @@ class AnalyzeState {
 		this.openError = null;
 		this.projectChanged();
 		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
+	}
+
+	/** Per operation, the source and its settings its form was last filled from. */
+	private filledFrom: Record<string, string> = {};
+
+	/**
+	 * Open the current form on its source object's settings: each `setting` param takes the value
+	 * the object holds. Done again only when the source, or its settings, change, so a value typed
+	 * after it stays.
+	 */
+	followSource(): void {
+		const op = this.op;
+		if (!op || !this.onProject || !op.params.some((p) => p.setting)) return;
+		const values = this.currentValues;
+		const source = this.app.project.summary?.objects.find((o) => o.name === values.source);
+		const key = `${values.source}\u0000${JSON.stringify(source?.settings ?? {})}`;
+		if (this.filledFrom[op.id] === key) return;
+		this.filledFrom[op.id] = key;
+		this.values = { ...this.values, [op.id]: withSettings(this.paramsOf(op), values, source) };
 	}
 
 	/** The project's objects changed: its title, and every form's object choices, follow. */
