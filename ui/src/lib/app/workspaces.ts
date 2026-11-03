@@ -26,7 +26,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'model',
 		title: 'Model',
 		rail: 'Model',
-		live: false,
+		live: true,
 		summary: 'Finite element models of the test article and fixtures.',
 		moves: ['Meshing', 'Modal solver', 'Frequency response solver', 'Model to test correlation']
 	},
