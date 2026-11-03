@@ -15,6 +15,7 @@ binaries.
 | tracing family | MIT | logging |
 | tokio / tokio-tungstenite / futures-util | MIT | hertzforge-backendd daemon and the control service |
 | hound | Apache-2.0 | WAV read/write (hertzforge-formats, Insight). NOTICE: Apache-2.0 only, not dual |
+| num-complex | MIT OR Apache-2.0 | complex numbers in the spectral density matrix stacks (hertzforge-sdm) |
 
 ## npm packages shipped in the shell
 
