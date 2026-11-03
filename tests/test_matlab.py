@@ -131,7 +131,7 @@ def test_matlab_sees_structs_cells_and_columns(tmp_path):
     export_file(project, path)
     variables = loadmat(path, squeeze_me=True, struct_as_record=False,
                         chars_as_strings=True)
-    assert variables['hertzforge_schema'] == native.SCHEMA_VERSION
+    assert variables['hertzforge_schema'] == native.BASE_SCHEMA
     assert variables['test_name'] == project.name
     objects = variables['objects']
     assert len(objects) == len(project)

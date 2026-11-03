@@ -519,7 +519,7 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Any:
                 f'variable; it holds {found}). A struct built to the '
                 'documented layout of one object is read too.')
         kind, fields = bare
-        variables = {STAMP: native.SCHEMA_VERSION, kind: fields}
+        variables = {STAMP: native.BASE_SCHEMA, kind: fields}
     shown = variables.pop(SYSTEM, None)
     with _memory_file() as f:
         _write_tree(f, variables)

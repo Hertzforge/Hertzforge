@@ -16,13 +16,22 @@ A `.hforge` file is a `.vdyn` file of schema 3 under a new stamp, with
 the element-group fields and the object groups under their current
 names (`VDYN_NAMES`). A `.vdyn` file is read, by its own stamp, and
 never written: saving it again writes `.hforge`.
+
+A project can hold an object by reference to another `.hforge` file
+instead of a copy (schema 2): the object's group names the file and the
+object, with the file's size and SHA-256, and the reader reads the
+object from there (`Reference`).
 """
 
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import hashlib
+import mmap
 import os
+import uuid
+import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +44,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
     from ..core.channel_table import ChannelTable
     from ..core.data import DataArray
+    from ..core.data_index import Reference
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
@@ -47,12 +57,29 @@ if TYPE_CHECKING:                                    # pragma: no cover
 #: the root attribute every file written here is stamped with
 STAMP = 'hertzforge_schema'
 
-#: the newest .hforge schema this build reads, and the one it writes.
-#: Schema 1 holds everything `.vdyn` schema 3 held. The schema grows by
-#: addition, and a file is stamped with the earliest version that holds
-#: everything in it, so an older build opens every file that does not
-#: need a later one.
-SCHEMA_VERSION = 1
+#: the newest .hforge schema this build reads. Schema 1 holds everything
+#: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
+#: another file. The schema grows by addition, and a file is stamped
+#: with the earliest version that holds everything in it, so an older
+#: build opens every file that does not need a later one.
+SCHEMA_VERSION = 2
+
+#: the stamp of a file with no object held by reference
+BASE_SCHEMA = 1
+
+#: the stamp of a file with one or more objects held by reference
+REFERENCE_SCHEMA = 2
+
+#: the smallest object, in bytes stored, that a project imported from
+#: another `.hforge` holds by reference rather than copying: the size a
+#: run is mapped from rather than read (`MAP_FROM_BYTES`), where a
+#: second copy starts to cost
+REFERENCE_FROM_BYTES = 64 * 2**20
+
+#: how many references deep the reader follows a chain (a project
+#: referring to a project that refers to the run) before calling it
+#: broken; a loop would otherwise never end
+REFERENCE_DEPTH = 8
 
 #: the stamp of a Visual Dynamics file
 VDYN_STAMP = 'visualdynamics_schema'
@@ -75,6 +102,11 @@ CHUNK_BYTES = 1024 * 1024
 #: whether the save in progress compresses its large arrays (`compressed`)
 _compressing: contextvars.ContextVar[bool] = contextvars.ContextVar(
     'compressing', default=False)
+
+#: whether the save in progress is a fingerprint (`fingerprint`), which
+#: names a mapped array by where it is mapped instead of copying it
+_fingerprinting: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    'fingerprinting', default=False)
 
 
 @contextlib.contextmanager
@@ -145,6 +177,11 @@ def _write_array(group: h5py.Group, name: str, data: Any) -> None:
     """A numeric dataset, compressed when the save asks and the array is
     large enough (`compressed`)."""
     array = np.asarray(data)
+    if _fingerprinting.get() and (mapped := _mapping_of(array)) is not None:
+        group.attrs[f'{name}@mapped'] = (
+            f'{id(mapped)} {array.__array_interface__["data"][0]} '
+            f'{array.shape} {array.strides} {array.dtype.str}')
+        return
     if (not _compressing.get() or array.nbytes < COMPRESS_FROM_BYTES
             or array.dtype.kind not in 'biufc'):
         group.create_dataset(name, data=array)
@@ -153,6 +190,17 @@ def _write_array(group: h5py.Group, name: str, data: Any) -> None:
     chunks = (*(1,) * (array.ndim - 1), min(array.shape[-1], run))
     group.create_dataset(name, data=array, chunks=chunks, compression='gzip',
                          compression_opts=1, shuffle=True)
+
+
+def _mapping_of(array: np.ndarray) -> mmap.mmap | None:
+    """The file mapping `array`'s bytes are in, or None for an array
+    in memory."""
+    base = array
+    while base is not None:
+        if isinstance(base, mmap.mmap):
+            return base
+        base = getattr(base, 'base', None)
+    return None
 
 
 def _write_ragged(group: h5py.Group, name: str,
@@ -1227,8 +1275,167 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs[STAMP] = SCHEMA_VERSION
+    f.attrs[STAMP] = BASE_SCHEMA
     saver(obj, f.create_group(group_name))
+
+
+def fingerprint(obj: Any) -> str:
+    """A digest of everything saving `obj` would write, with each mapped
+    array named by where it is mapped rather than read.
+
+    Two fingerprints of one object differ when anything a save would
+    write has changed: a unit, a name, a value in memory, or an array
+    replaced by another. A project compares them to tell an object it
+    holds by reference that is still the one in the other file from one
+    edited since, which a reference would lose. A mapped array costs
+    nothing here, so a run of any size is fingerprinted in the time its
+    small fields take. Within one session only: the mapping's address
+    is part of the name.
+
+    What it cannot see is a value changed inside a mapped array in
+    place, since the array is named, not read. The core never does that
+    without also changing a unit or a name (`DataArray.define_units`
+    rescales in place and records the unit); a script that writes into
+    a referenced run's samples should copy the array first.
+    """
+    import h5py
+
+    group_name, saver = _saver_for(obj)
+    token = _fingerprinting.set(True)
+    try:
+        with h5py.File(f'fingerprint-{uuid.uuid4().hex}', 'w', driver='core',
+                       backing_store=False) as f:
+            saver(obj, f.create_group(group_name))
+            return _tree_digest(f)
+    finally:
+        _fingerprinting.reset(token)
+
+
+def _tree_digest(f: h5py.File) -> str:
+    import h5py
+
+    hasher = hashlib.sha256()
+
+    def add(value: Any) -> None:
+        if isinstance(value, np.ndarray) and value.dtype.kind != 'O':
+            hasher.update(value.dtype.str.encode())
+            hasher.update(repr(value.shape).encode())
+            hasher.update(np.ascontiguousarray(value).tobytes())
+        elif isinstance(value, np.ndarray):
+            hasher.update(repr(value.tolist()).encode())
+        else:
+            hasher.update(repr(value).encode())
+
+    names: list[str] = []
+    f.visit(names.append)
+    for name in ['', *sorted(names)]:
+        item = f[name] if name else f
+        hasher.update(f'\0{name}\0'.encode())
+        for key in sorted(item.attrs):
+            hasher.update(f'@{key}='.encode())
+            add(item.attrs[key])
+        if isinstance(item, h5py.Dataset):
+            add(item[()])
+    return hasher.hexdigest()
+
+
+def object_sizes(path: str | os.PathLike) -> dict[str, tuple[str, int]]:
+    """{object name: (kind, bytes stored)} for the objects in a
+    `.hforge` file, with '' as the name of a file's single object. An
+    object the file itself holds by reference stores nothing."""
+    import h5py
+
+    def stored(group: h5py.Group) -> int:
+        sizes: list[int] = []
+        group.visititems(lambda _name, item: sizes.append(
+            item.id.get_storage_size()) if isinstance(item, h5py.Dataset)
+            else None)
+        return sum(sizes)
+
+    with h5py.File(path, 'r') as f:
+        if 'objects' in f:
+            return {group.attrs['name']: (group.attrs['kind'], stored(group))
+                    for group in f['objects'].values()}
+        kind = next((kind for kind in _LOADERS if kind in f), None)
+        return {} if kind is None else {'': (kind, stored(f[kind]))}
+
+
+def _write_reference(group: h5py.Group, reference: Reference,
+                     folder: str) -> None:
+    """An object held by reference: where the file is, relative to the
+    project's folder and in full, the object's name in it, and the
+    file's size, SHA-256 and modification time when it was referenced."""
+    try:
+        relative = os.path.relpath(reference.path, folder) if folder else ''
+    except ValueError:
+        # another drive, on Windows: there is no relative path
+        relative = ''
+    group.attrs['reference_path'] = (relative.replace(os.sep, '/')
+                                     or reference.path)
+    group.attrs['reference_absolute'] = reference.path
+    group.attrs['reference_object'] = reference.object
+    group.attrs['reference_size'] = int(reference.size)
+    group.attrs['reference_sha256'] = reference.sha256
+    group.attrs['reference_modified_ns'] = int(reference.modified_ns)
+
+
+def _follow(group: h5py.Group, folder: str, depth: int = 0
+            ) -> tuple[Any, Reference]:
+    """The object a reference group names, and its reference as found.
+
+    The file is looked for by the path relative to `folder` (the
+    project's), then at its absolute path, then by its name in `folder`.
+    A file with the size and modification time recorded is taken as
+    the one referenced; one with another time is hashed, and taken when
+    the SHA-256 matches, since a copied or moved file keeps its bytes.
+    When no candidate is the file, the object is None and the reference
+    says why (`NOT_FOUND`, `CHANGED`)."""
+    import h5py
+
+    from ..core.data_index import CHANGED, NOT_FOUND, Reference, digest, file_state
+
+    attrs = group.attrs
+    relative = str(attrs['reference_path'])
+    absolute = str(attrs['reference_absolute'])
+    expected = Reference(
+        os.path.join(folder, *relative.split('/'))
+        if folder and not os.path.isabs(relative) else absolute,
+        str(attrs['reference_object']), str(attrs['kind']),
+        int(attrs['reference_size']), str(attrs['reference_sha256']),
+        int(attrs['reference_modified_ns']))
+    candidates = [expected.path, absolute]
+    if folder:
+        candidates.append(os.path.join(folder, relative.split('/')[-1]))
+    found = False
+    for where in dict.fromkeys(os.path.abspath(c) for c in candidates):
+        if not os.path.isfile(where):
+            continue
+        found = True
+        size, modified = file_state(where)
+        if size != expected.size:
+            continue
+        if (modified != expected.modified_ns
+                and digest(where)[1] != expected.sha256):
+            continue
+        with h5py.File(where, 'r') as f:
+            if expected.object:
+                target = next((g for g in f.get('objects', {}).values()
+                               if g.attrs['name'] == expected.object), None)
+            else:
+                target = f.get(expected.kind)
+            if target is None:
+                continue
+            if 'reference_sha256' in target.attrs:
+                if depth >= REFERENCE_DEPTH:
+                    continue
+                return _follow(target, os.path.dirname(where), depth + 1)
+            reference = Reference(where, expected.object, expected.kind,
+                                  size, expected.sha256, modified)
+            return _LOADERS[expected.kind](target), reference
+    reason = CHANGED if found else NOT_FOUND
+    return None, Reference(expected.path, expected.object, expected.kind,
+                           expected.size, expected.sha256,
+                           expected.modified_ns, reason)
 
 
 # A whole test read back from one file is a Project: {name: object} in
@@ -1246,7 +1453,8 @@ def save_test(path: str | os.PathLike, name: str,
               object_groups: Sequence[Mapping[str, Any]] | None = None,
               provenance: Mapping[str, Any] | None = None,
               data_index: Sequence[Mapping[str, Any]] | None = None,
-              compress: bool = False) -> None:
+              compress: bool = False,
+              references: Mapping[str, Reference] | None = None) -> None:
     """Save a whole test, every named object, to one .hforge file.
 
     Objects go in numbered groups with the name as an attribute, so a
@@ -1260,13 +1468,20 @@ def save_test(path: str | os.PathLike, name: str,
     added to `path` when it is not there, and a `.vdyn` path raises
     ValueError. `compress` writes the large arrays with gzip
     (`compressed`), for archiving.
+
+    `references` are the objects written as references to other files
+    rather than copied, by name (`Reference`): a name in `objects` is
+    written as its reference in its place, and any other is written
+    after the objects, as a reference kept for an object that is not
+    loaded. A file with any reference is stamped schema 2, and one
+    without, schema 1.
     """
     import h5py
 
     with (_replaced(hforge_path(path)) as partial,
           h5py.File(partial, 'w') as f, compressed(compress)):
         save_test_into(f, name, objects, active_geometry, project_type,
-                       object_groups, provenance, data_index)
+                       object_groups, provenance, data_index, references)
 
 
 def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
@@ -1274,10 +1489,13 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    project_type: str | None = None,
                    object_groups: Sequence[Mapping[str, Any]] | None = None,
                    provenance: Mapping[str, Any] | None = None,
-                   data_index: Sequence[Mapping[str, Any]] | None = None
+                   data_index: Sequence[Mapping[str, Any]] | None = None,
+                   references: Mapping[str, Reference] | None = None
                    ) -> None:
-    """`save_test` into an open, empty HDF5 file (see `save_into`)."""
-    f.attrs[STAMP] = SCHEMA_VERSION
+    """`save_test` into an open, empty HDF5 file (see `save_into`).
+    References are written relative to the folder the file is in."""
+    references = dict(references or {})
+    f.attrs[STAMP] = REFERENCE_SCHEMA if references else BASE_SCHEMA
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
@@ -1298,12 +1516,19 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
         f.create_dataset('data_index', data=json.dumps(list(data_index)),
                          dtype=h5py.string_dtype('utf-8'))
     container = f.create_group('objects')
-    for i, (obj_name, obj) in enumerate(objects.items()):
-        kind, saver = _saver_for(obj)
+    folder = (os.path.dirname(os.path.abspath(f.filename))
+              if f.driver != 'core' else '')
+    names = [*objects, *(name for name in references if name not in objects)]
+    for i, obj_name in enumerate(names):
         group = container.create_group(f'{i:04d}')
         group.attrs['name'] = obj_name
+        if obj_name in references:
+            group.attrs['kind'] = references[obj_name].kind
+            _write_reference(group, references[obj_name], folder)
+            continue
+        kind, saver = _saver_for(objects[obj_name])
         group.attrs['kind'] = kind
-        saver(obj, group)
+        saver(objects[obj_name], group)
 
 
 def load(path: str | os.PathLike,
@@ -1348,6 +1573,8 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
               path: str = '') -> Any:
     """`load` from an open HDF5 file (see `save_into`). `path` names the
     file in error messages."""
+    from ..core.data_index import NOT_FOUND
+
     # A newer stamp means a newer Hertzforge wrote fields this
     # reader has no idea exist, and half-loading someone's project
     # quietly is worse than telling them to update. A missing stamp
@@ -1367,13 +1594,24 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
             f'{newest}). Update Hertzforge to open it.')
     if 'objects' in f:
         objects = {}
+        followed: dict[str, Reference] = {}
+        unresolved: dict[str, Reference] = {}
+        folder = os.path.dirname(os.path.abspath(path)) if path else ''
         keys = sorted(f['objects'])
         if progress is not None:
             progress(0, len(keys))
         for done, key in enumerate(keys, start=1):
             group = f['objects'][key]
-            objects[group.attrs['name']] = (
-                _LOADERS[group.attrs['kind']](group))
+            name = group.attrs['name']
+            if 'reference_sha256' in group.attrs:
+                obj, reference = _follow(group, folder)
+                if obj is None:
+                    unresolved[name] = reference
+                else:
+                    objects[name] = obj
+                    followed[name] = reference
+            else:
+                objects[name] = _LOADERS[group.attrs['kind']](group)
             if progress is not None:
                 progress(done, len(keys))
         import json
@@ -1382,13 +1620,25 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
             raw = f['data_index'][()]
             indexed = json.loads(raw.decode('utf-8') if isinstance(raw, bytes)
                                  else raw)
-        return Project(f.attrs['test_name'], objects,
-                       f.attrs['active_geometry'] or None,
-                       f.attrs['project_type'] or None,
-                       json.loads(f.attrs['links' if VDYN_STAMP in f.attrs
-                                          else 'object_groups']),
-                       provenance=json.loads(f.attrs['provenance']),
-                       data_index=indexed)
+        project = Project(f.attrs['test_name'], objects,
+                          f.attrs['active_geometry'] or None,
+                          f.attrs['project_type'] or None,
+                          json.loads(f.attrs['links' if VDYN_STAMP in f.attrs
+                                             else 'object_groups']),
+                          provenance=json.loads(f.attrs['provenance']),
+                          data_index=indexed)
+        for name, reference in followed.items():
+            project.hold_by_reference(name, reference)
+        project.unresolved = unresolved
+        for name, reference in unresolved.items():
+            said = ('was not found' if reference.reason == NOT_FOUND
+                    else 'has changed since the project referred to it')
+            warnings.warn(
+                f'{name} is held in {reference.path}, which {said}, so the '
+                'project opened without it. Its reference is kept: put the '
+                'file back, or beside the project, and open the project again.',
+                stacklevel=3)
+        return project
     for group_name, loader in _LOADERS.items():
         if group_name in f:
             return loader(f[group_name])
