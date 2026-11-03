@@ -351,7 +351,18 @@
           "properties": {"frequency": {"type": "number"}, "damping": {"type": "number"}, "description": {"type": "string"}}
         }},
         "view": {"$ref": "#/$defs/spectrumView"},
-        "mac": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/matrixView"}]}
+        "mac": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/matrixView"}]},
+        "coherence": {"type": ["string", "null"]},
+        "residual": {"type": "boolean"},
+        "half_power": {
+          "type": "object", "required": ["frequency", "low", "high", "q", "damping", "notes"],
+          "properties": {
+            "frequency": {"type": "number"},
+            "low": {"type": ["number", "null"]}, "high": {"type": ["number", "null"]},
+            "q": {"type": ["number", "null"]}, "damping": {"type": ["number", "null"]},
+            "notes": {"type": "array", "items": {"type": "string"}}
+          }
+        }
       }
     },
     "fitResult": {
