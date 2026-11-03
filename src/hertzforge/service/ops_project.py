@@ -53,7 +53,7 @@ def _derived(project: Any, call: Any) -> list[dict]:
     The Waterfall operation draws the others."""
     try:
         added = call()
-    except ValueError as error:
+    except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     view = waterfall_view(added, project[added])
     view.pop('quantities', None)
@@ -188,6 +188,49 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
         for k in range(shapes.num_shapes)])]
 
 
+PARTNER = Param('shapes', 'Shape set', 'enum', options_from='objects:shape_set')
+MODES = Param('num_modes', 'Modes', 'integer', default=20, min=1, max=200, step=1)
+ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+
+
+def _added_shapes(project: Any, call: Any) -> list[dict]:
+    """Run a verb that adds a shape set, refusing in the core's words, and
+    draw the set on the geometry it belongs to, or list its modes when it
+    has none."""
+    try:
+        added = call()
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    found = project.geometry_for(added)
+    geometry = found[0] if found else _geometry(project)
+    if geometry is not None:
+        return [_shape_view(project, added, geometry)]
+    shapes = project[added]
+    return [v.reading(f'{added}: {shapes.num_shapes} modes', [
+        v.row(f'Mode {k + 1}', float(shapes.frequency[k]), 'Hz', 'info')
+        for k in range(shapes.num_shapes)])]
+
+
+def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.generate_rigid_body_modes`: the six rigid-body shapes of a
+    geometry about its reference point (`Project.generate_rigid_body_modes`)."""
+    return _added_shapes(project, lambda: project.generate_rigid_body_modes(params['source']))
+
+
+def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.solve_modes`: the normal modes of a geometry whose element
+    groups have properties, free-free (`Project.solve_modes`)."""
+    return _added_shapes(project, lambda: project.solve_modes(
+        params['source'], num_modes=params['num_modes']))
+
+
+def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.project_onto_basis`: a shape set sampled at another set's
+    DOFs, or at a channel table's (`Project.project_onto_basis`)."""
+    return _added_shapes(project, lambda: project.project_onto_basis(
+        params['source'], onto=params['onto']))
+
+
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mode_shapes`: a shape set's modes on a geometry."""
     return [_shape_view(project, params['shapes'], params['geometry'])]
@@ -201,6 +244,38 @@ def _derives(verb: str, title: str, summary: str, params: tuple = (),
                      accepts='project', summary=summary,
                      params=(_source(verb), *params), outputs=('waterfall',),
                      run=_verb(verb, **fixed))
+
+
+MODAL_VERB_OPERATIONS = (
+    _derives('transform', 'Transform to Modal Coordinates',
+             'A record\'s channels through a shape set to modal coordinates, one '
+             'record per mode; with a geometry\'s rigid-body shapes this is the '
+             'virtual point transformation.', (PARTNER,)),
+    _derives('expand', 'Expand to Physical Responses',
+             'Modal responses back through the shape set they were transformed '
+             'through, at every DOF it covers.', (PARTNER,)),
+    Operation(
+        id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
+        workspace='modal', accepts='project',
+        summary='The six rigid-body shapes of a geometry, three translations and '
+                'three rotations about its reference point.',
+        params=(_source('generate_rigid_body_modes', 'Geometry'),),
+        outputs=('shape3d', 'reading'), run=rigid_body_modes),
+    Operation(
+        id='project.solve_modes', title='Solve Modes', workspace='model',
+        accepts='project',
+        summary='The normal modes of a geometry whose element groups have '
+                'properties, solved free-free.',
+        params=(_source('solve_modes', 'Geometry'), MODES),
+        outputs=('shape3d', 'reading'), run=solve_modes),
+    Operation(
+        id='project.project_onto_basis', title='Project onto Basis DOFs',
+        workspace='modal', accepts='project',
+        summary='A shape set sampled at another set\'s DOFs, or at a channel '
+                'table\'s sensors, by the nearest node and its direction.',
+        params=(_source('project_onto_basis', 'Shape set'), ONTO),
+        outputs=('shape3d', 'reading'), run=onto_basis),
+)
 
 
 VERB_OPERATIONS = (
@@ -291,4 +366,5 @@ OPERATIONS = (
         summary='A shape set\'s modes on a geometry, one translation per node.',
         params=(SHAPES, GEOMETRY), outputs=('shape3d',), run=mode_shapes),
     *VERB_OPERATIONS,
+    *MODAL_VERB_OPERATIONS,
 )
