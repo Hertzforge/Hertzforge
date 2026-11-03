@@ -72,7 +72,9 @@ def summary(state: OpenProject) -> dict[str, Any]:
             entry['settings'] = settings
         objects.append(entry)
     return {'title': project.name, 'file': project.file,
-            'modified': state.modified, 'objects': objects}
+            'modified': state.modified, 'objects': objects,
+            'active_geometry': project.active_geometry
+            if project.active_geometry in project else None}
 
 
 def _path(params: Mapping[str, Any], method: str) -> str:
@@ -172,3 +174,68 @@ def save(state: OpenProject | None, params: Mapping[str, Any]) -> str:
         raise _refusal(error) from None
     state.modified = False
     return written
+
+
+def _open(state: OpenProject | None, method: str) -> OpenProject:
+    if state is None:
+        raise refused(f'{method} works on a project, and none is open')
+    return state
+
+
+def _name(params: Mapping[str, Any], key: str, method: str) -> str:
+    value = params.get(key)
+    if not isinstance(value, str) or not value:
+        raise bad_request(f'{method} needs "{key}", an object\'s name')
+    return value
+
+
+def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.rename`: the object `name` called `to`, and every group,
+    provenance record and report block that names it following
+    (`Project.rename`)."""
+    state = _open(state, 'project.rename')
+    old = _name(params, 'name', 'project.rename')
+    new = _name(params, 'to', 'project.rename').strip()
+    if old not in state.project:
+        raise not_found(f'the project has no object named {old!r}')
+    if new == old:
+        return
+    try:
+        state.project.rename(old, new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.modified = True
+
+
+def remove(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.remove`: the objects named taken out of the project and its
+    groups (`Project.remove`). A name the project does not have is
+    refused before anything is removed."""
+    state = _open(state, 'project.remove')
+    names = params.get('names')
+    if (not isinstance(names, list) or not names
+            or not all(isinstance(name, str) for name in names)):
+        raise bad_request('project.remove needs "names", a list of object names')
+    missing = [name for name in names if name not in state.project]
+    if missing:
+        raise not_found(f'the project has no object named '
+                        f'{", ".join(map(repr, missing))}')
+    state.project.remove(*names)
+    state.modified = True
+
+
+def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.activate`: the geometry data is drawn on when nothing else
+    names one."""
+    from hertzforge.core.geometry import Geometry
+
+    state = _open(state, 'project.activate')
+    name = _name(params, 'geometry', 'project.activate')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    if not isinstance(state.project[name], Geometry):
+        raise refused(f'{name} is a {kind_of(state.project[name]).replace("_", " ")}, '
+                      'not a geometry')
+    if state.project.active_geometry != name:
+        state.project.active_geometry = name
+        state.modified = True

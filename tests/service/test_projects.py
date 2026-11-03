@@ -29,7 +29,7 @@ def test_a_new_project_is_empty_and_named(validate):
     summary = projects.summary(state)
     validate(summary, 'project')
     assert summary == {'title': 'Bracket Survey', 'file': None,
-                       'modified': False, 'objects': []}
+                       'modified': False, 'objects': [], 'active_geometry': None}
 
 
 def test_importing_a_run_lists_its_objects_and_reports_progress(validate):
@@ -223,3 +223,48 @@ def test_the_project_goldens_validate_and_round_trip(name, validate):
     validate(message[part[0]], part[1])
     assert frames.pack(message) == json.dumps(message, separators=(',', ':'),
                                               ensure_ascii=False)
+
+
+def test_objects_are_renamed_removed_and_a_geometry_made_active_over_the_socket(validate):
+    responses = asyncio.run(_exchange([
+        ('project.import', {'path': str(PLATE / 'modal.nc4')}),
+        ('project.import', {'path': str(PLATE / 'geometry.unv')}),
+        ('project.import', {'path': str(PLATE / 'geometry.unv')}),
+        ('project.rename', {'name': 'Time History', 'to': 'Hammer Run'}),
+        ('project.activate', {'geometry': 'Geometry (2)'}),
+        ('project.remove', {'names': ['Geometry']}),
+        ('project.rename', {'name': 'Hammer Run', 'to': 'Channel Table'}),
+        ('project.remove', {'names': ['Hammer Run', 'Nothing']}),
+        ('project.activate', {'geometry': 'Hammer Run'}),
+    ]))
+    results = [got[-1] for got in responses]
+    for response in results[3:6]:
+        validate(response['result'], 'projectResult')
+    renamed = results[3]['result']['project']
+    names = [o['name'] for o in renamed['objects']]
+    assert 'Hammer Run' in names and 'Time History' not in names
+    assert renamed['modified']
+    assert results[4]['result']['project']['active_geometry'] == 'Geometry (2)'
+    removed = results[5]['result']['project']
+    assert 'Geometry' not in [o['name'] for o in removed['objects']]
+    assert removed['active_geometry'] == 'Geometry (2)'
+    assert results[6]['error']['code'] == 'refused', 'a name in use'
+    assert results[7]['error']['code'] == 'not_found'
+    assert results[8]['error']['code'] == 'refused', 'not a geometry'
+
+
+def test_a_refused_remove_removes_nothing():
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    before = list(state.project)
+    with pytest.raises(ProtocolError):
+        projects.remove(state, {'names': [before[0], 'Nothing']})
+    assert list(state.project) == before
+
+
+def test_edits_need_an_open_project_and_well_formed_params():
+    with pytest.raises(ProtocolError, match='none is open'):
+        projects.rename(None, {'name': 'a', 'to': 'b'})
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    with pytest.raises(ProtocolError, match='"names"') as error:
+        projects.remove(state, {'names': 'Time History'})
+    assert error.value.code == 'bad_request'
