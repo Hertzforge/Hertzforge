@@ -31,7 +31,7 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                    'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
                    'modal_run.resynthesis',
                    'project.waterfall', 'project.compute_psds', 'project.compute_frfs',
-                   'project.fit_modes', 'project.mode_shapes', 'project.plot',
+                   'project.fit_modes', 'project.mode_shapes', 'project.mac', 'project.plot',
                    *(f'project.{verb}' for verb in (
                        'integrate', 'differentiate', 'filter_data', 'truncate_data',
                        'resample', 'compute_spectra', 'compute_cpsds', 'compute_srs',
@@ -39,7 +39,8 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                        'make_realizable', 'convert_to_specification',
                        'convert_to_psd', 'detect_shocks', 'extract_sine',
                        'set_averaging', 'detect_averaging', 'set_filter',
-                       'set_truncation'))}
+                       'set_truncation', 'view_geometry', 'group_properties',
+                       'merge_coincident_nodes'))}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}

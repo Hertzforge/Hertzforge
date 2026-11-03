@@ -81,6 +81,8 @@
 	const triCount = $derived((view.triangles?.length ?? 0) / 3);
 	const current = $derived(view.modes[Math.min(Math.max(0, mode), view.modes.length - 1)]);
 	const motion = $derived(view.motion);
+	/** Whether anything moves: a geometry on its own has no play, amplitude, ghost or legend to offer. */
+	const moves = $derived(view.modes.length > 0 || !!motion);
 	const shown = $derived(overlay !== null && view.overlays ? view.overlays[overlay] : undefined);
 	const samples = $derived(motion ? sampleCount(motion) : 0);
 	let speedIndex = $state(NORMAL_SPEED);
@@ -589,6 +591,7 @@
 
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Mode shape display">
+			{#if moves}
 			<button
 				class="btn icon sm"
 				data-testid="shape3d-play"
@@ -608,14 +611,17 @@
 				<input type="range" data-testid="shape3d-amplitude" min="0" max="1" step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
+			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
 				<button role="radio" data-testid="shape3d-surface" aria-checked={!wireframe} class:on={!wireframe} onclick={() => (wireframe = false)} title="Surface (W)">Surface</button>
 				<button role="radio" data-testid="shape3d-wireframe" aria-checked={wireframe} class:on={wireframe} onclick={() => (wireframe = true)} title="Wireframe (W)">Wireframe</button>
 			</div>
+			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-ghost" class:on={ghost} aria-pressed={ghost} onclick={() => (ghost = !ghost)} title="Undeformed ghost (G)">
 				<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="5" width="12" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6" /></svg>
 				Ghost
 			</button>
+			{/if}
 			<button class="btn icon sm" data-testid="shape3d-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
 				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
@@ -677,6 +683,7 @@
 	</div>
 
 	<div class="bottom">
+		{#if moves}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
 				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
@@ -686,6 +693,7 @@
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
 			</div>
 		</div>
+		{/if}
 
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">

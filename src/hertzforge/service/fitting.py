@@ -155,8 +155,29 @@ def state(fit: Fit) -> dict[str, Any]:
                    'damping': float(mode['damping']),
                    'description': str(mode.get('description') or '')}
                   for mode in session.modes],
-        'view': _view(fit)}
+        'view': _view(fit),
+        'mac': _mac(fit)}
     return out
+
+
+def _mac(fit: Fit) -> dict[str, Any] | None:
+    """The auto-MAC of the confirmed modes, with the preview's row and
+    column last, as VD shows it beside the fit: how alike the modes'
+    shapes are, which a close pair or a mode split in two shows off the
+    diagonal. None for fewer than two."""
+    from hertzforge.core.shapes import mac_matrix
+
+    session = fit.session
+    modes = list(session.modes)
+    ticks = [f'{k + 1}: {mode["frequency"]:.1f} Hz' for k, mode in enumerate(modes)]
+    if session.preview is not None:
+        modes.append(session.preview)
+        ticks.append(f'New: {session.preview["frequency"]:.1f} Hz')
+    if len(modes) < 2:
+        return None
+    values = mac_matrix(np.array([mode['shape'] for mode in modes]))
+    axis = {'label': 'Mode', 'ticks': ticks}
+    return v.matrix(f'{fit.frf}: MAC of the fit', axis, axis, values, 'MAC', (0.0, 1.0))
 
 
 def _view(fit: Fit) -> dict[str, Any]:

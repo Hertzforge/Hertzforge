@@ -362,6 +362,8 @@ frequency order, damping a fraction of critical. `view` is a `spectrum` view, fr
 arrays as `op.run` does: x `Frequency` Hz, y `CMIF` log, `link` `frequency`, the measured CMIF's
 first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`...) each
 `follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
+`mac` is a `matrix` view of the confirmed modes' auto-MAC with the preview's row and column last
+(`New: <f> Hz`), how alike the shapes are; null for fewer than two.
 
 **Control service**
 
