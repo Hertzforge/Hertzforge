@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * x-y line view (spectra and anything else on two axes), drawn with uPlot.
 	 *
@@ -152,6 +153,14 @@
 		if (!measureCtx) return text.length * 7;
 		measureCtx.font = f;
 		return measureCtx.measureText(text).width;
+	}
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The plot, axes and curves, as an image on the clipboard. */
+	async function copyImage() {
+		if (!plot) return;
+		copiedImage = await copyCanvas(plot.ctx.canvas, plotBackground(plotEl), undefined, view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
 	}
 
 	/** The marker line, placed at `marker`. */
@@ -505,6 +514,7 @@
 			<span class="xval">{xReadout ?? '-'}</span>
 			<span class="xunit">{view.x.unit ?? ''}</span>
 		</div>
+		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 	</div>
 	<ul class="legend" aria-label="Legend">
 		{#each styled as { series, style, colorVar, color, follows }, i (i)}
@@ -533,6 +543,11 @@
 </div>
 
 <style>
+	.copyimg {
+		flex: none;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.spectrum {
 		display: flex;
 		flex-direction: column;

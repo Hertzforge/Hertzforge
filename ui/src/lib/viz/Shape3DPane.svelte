@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * Mode shape view, drawn with three.js.
 	 *
@@ -57,6 +58,15 @@
 	const paneId = `s3-${Math.random().toString(36).slice(2, 9)}`;
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
+	async function copyImage() {
+		const drawer = renderer;
+		if (!drawer) return;
+		copiedImage = await copyCanvas(drawer.domElement, plotBackground(drawer.domElement), () => drawer.render(scene, camera), view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
 
 	/** The gray a geometry is drawn in when nothing moves, as Visual Dynamics draws one undeformed. */
 	const REST_GRAY = 0.62;
@@ -627,6 +637,7 @@
 				Ghost
 			</button>
 			{/if}
+<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 			<button class="btn icon sm" data-testid="shape3d-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
 				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
@@ -720,6 +731,11 @@
 </div>
 
 <style>
+	.copyimg {
+		flex: none;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.shape3d {
 		position: relative;
 		height: 100%;

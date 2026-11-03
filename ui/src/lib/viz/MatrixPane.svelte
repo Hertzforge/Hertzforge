@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * One colored cell per value (a MAC, say), drawn on a 2-D canvas: a few thousand cells at most,
 	 * redrawn only on resize, theme change or hover. Color is the sequential colormap over the
@@ -178,10 +179,21 @@
 		void view;
 		draw();
 	});
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The cells, as an image on the clipboard. */
+	async function copyImage() {
+		if (!canvas) return;
+		copiedImage = await copyCanvas(canvas, plotBackground(canvas), undefined, view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
 </script>
 
 <section class="matrix" data-testid="view-matrix" aria-label={view.title}>
-	{#if showTitle}<h3 class="title">{view.title}</h3>{/if}
+	<div class="mhead">
+		{#if showTitle}<h3 class="title">{view.title}</h3>{/if}
+		<button class="btn ghost sm copyimg" data-testid="matrix-copy-image" onclick={copyImage} title="Copy the matrix as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
+	</div>
 	<div class="plot" bind:this={host}>
 		<canvas
 			bind:this={canvas}
@@ -217,6 +229,13 @@
 </section>
 
 <style>
+	.mhead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-2);
+	}
+
 	.matrix {
 		display: flex;
 		flex-direction: column;
