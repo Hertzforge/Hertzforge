@@ -16,8 +16,10 @@
 //! - Units: a response SDM is in the channel's units squared per hertz; a drive SDM in
 //!   volts squared per hertz; an FRF in response units per volt.
 //!
-//! This crate carries types and shape checks only. Linear algebra (factorizations,
-//! pseudo-inverses, repairs) lives in the crates built on top of it.
+//! The stack types and their shape checks are here; the per-line linear algebra on
+//! them (eigendecomposition, positive semi-definite repair, square-root and
+//! Cholesky factors, SVD, regularized pseudo-inverses, congruence transforms, H1,
+//! multiple coherence) is in [`linalg`].
 
 #![forbid(unsafe_code)]
 
@@ -30,6 +32,7 @@ pub use num_complex::Complex;
 pub type C64 = Complex<f64>;
 
 pub mod law;
+pub mod linalg;
 
 /// A dimension mismatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
