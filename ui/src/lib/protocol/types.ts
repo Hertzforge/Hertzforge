@@ -263,6 +263,8 @@ export interface ParamDescriptor {
 	options_from?: 'channels' | `objects:${string}` | `verb:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
+	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
+	setting?: string;
 }
 
 /** One object of the open project (schema/PROTOCOL.md, Projects). */
@@ -277,6 +279,8 @@ export interface ProjectObject {
 	groups: string[];
 	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
 	verbs?: string[];
+	/** A time history's analysis settings, each group present only when set. */
+	settings?: Record<string, Record<string, number | string>>;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */

@@ -246,6 +246,12 @@ time history whose channels are accelerations or velocities, Compute FRFs one wh
 both a response and a reference side, and so on, which no list of kinds can say. Left out, it
 takes the first of them, and an operation run when no object takes the verb is refused.
 
+A param with `"setting":"<group>.<field>"` opens on that setting of the object the operation's
+`source` param names, from the object's `settings` in the project summary, such as
+`averaging.frame_length`; when the object has no such setting, it opens on its default. The shell
+fills it again each time the source changes, so the form shows what the object holds before it is
+changed.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -301,7 +307,10 @@ The project as the shell lists it:
 for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
 names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
 order. `verbs` are the core's processing verbs that apply to the object, in the core's order, which
-`verb:` params are filled from. `modified` is true after an import or an operation that added,
+`verb:` params are filled from. `settings` is a time history's analysis settings, each group
+present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
+`frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
+has them, `order`) and `truncation` (`start`, `stop` in seconds). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
 
 A reader that can count reports its progress while an import runs, as event topic

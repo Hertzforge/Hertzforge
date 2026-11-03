@@ -37,7 +37,9 @@ def test_catalog_names_every_operation_and_dataset(catalog):
                        'resample', 'compute_spectra', 'compute_cpsds', 'compute_srs',
                        'compute_multiple_coherence', 'compute_octave',
                        'make_realizable', 'convert_to_specification',
-                       'convert_to_psd', 'detect_shocks', 'extract_sine'))}
+                       'convert_to_psd', 'detect_shocks', 'extract_sine',
+                       'set_averaging', 'detect_averaging', 'set_filter',
+                       'set_truncation'))}
     kinds = {d['kind'] for d in catalog['datasets']}
     assert kinds == {'random_run', 'modal_model', 'modal_run'}
     assert 'plate-random' in {d['id'] for d in catalog['datasets']}

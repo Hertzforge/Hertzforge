@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .ops_settings import settings_of
 from .protocol import ProtocolError, bad_request, not_found, refused
 
 #: what `project.open` reads as a whole project (`Project.open`); anything
@@ -45,8 +46,8 @@ def verbs_of(project: Any, name: str) -> list[str]:
 def summary(state: OpenProject) -> dict[str, Any]:
     """The project as the shell lists it: title, file, whether it has
     unsaved changes, and each object with its kind, record count, source,
-    whether its units are declared, the groups it is in and the core verbs
-    that apply to it."""
+    whether its units are declared, the groups it is in, the core verbs
+    that apply to it and the analysis settings it carries."""
     project = state.project
     labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
               for k, group in enumerate(project.object_groups)]
@@ -66,6 +67,9 @@ def summary(state: OpenProject) -> dict[str, Any]:
                            in zip(labels, project.object_groups, strict=True)
                            if name in group['members']]
         entry['verbs'] = verbs_of(project, name)
+        settings = settings_of(obj)
+        if settings:
+            entry['settings'] = settings
         objects.append(entry)
     return {'title': project.name, 'file': project.file,
             'modified': state.modified, 'objects': objects}

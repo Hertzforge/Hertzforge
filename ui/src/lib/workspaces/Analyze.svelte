@@ -16,6 +16,9 @@
 
 	const a = $derived(app.analyze);
 
+	// a settings form opens on what its source object holds, and follows it when the source changes
+	$effect(() => a.followSource());
+
 	/**
 	 * The cell chosen in each result's MAC, by result id. A matrix that `selects` the result's
 	 * shape view shows that row's mode with that column's overlaid; the first cell to begin.
