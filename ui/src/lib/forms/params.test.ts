@@ -27,6 +27,17 @@ describe('defaults', () => {
 		expect(defaultValues([tol, avg, ch, flag], channels)).toEqual({ tolerance_db: 3, averages: 64, channel: 'resp1', unity: true });
 	});
 
+	it('starts a second object param of the same objects on another object', () => {
+		const sets: ParamDescriptor[] = [
+			{ name: 'first', label: 'Basis', type: 'enum', options_from: 'objects:shape_set', options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }] },
+			{ name: 'second', label: 'Compared', type: 'enum', options_from: 'objects:shape_set', options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }] },
+			{ name: 'geometry', label: 'Geometry', type: 'enum', options_from: 'objects:geometry', options: [{ value: 'G', label: 'G' }] }
+		];
+		expect(defaultValues(sets)).toEqual({ first: 'A', second: 'B', geometry: 'G' });
+		const one = sets.map((p) => (p.options_from === 'objects:shape_set' ? { ...p, options: [{ value: 'A', label: 'A' }] } : p));
+		expect(defaultValues(one)).toEqual({ first: 'A', second: 'A', geometry: 'G' });
+	});
+
 	it('falls back sensibly when a default is missing or invalid', () => {
 		expect(defaultFor({ ...tol, default: undefined })).toBe(0.5);
 		expect(defaultFor({ ...tol, default: 99 })).toBe(6);
