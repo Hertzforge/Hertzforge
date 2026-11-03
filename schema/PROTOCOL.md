@@ -75,7 +75,7 @@ kit. Services never send pixels and the shell never computes the numbers.
  "y":{"label":"PSD","unit":"g²/Hz","scale":"log"|"linear"},
  "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
-            "shape":"line"|"steps"|"law", "edges":{"$array":..}}],
+            "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
  "link":"frequency"}
 ```
 
@@ -83,6 +83,11 @@ kit. Services never send pixels and the shell never computes the numbers.
 dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
 ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
+
+`follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
+a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
+dashed in its measurement's color, above it, and left out of the legend, as Visual Dynamics draws
+it. It names an earlier series that is not itself a follower.
 
 `shape` (optional, default `line`) says how the points mean to be drawn, and the service that
 computed the data decides it. Spectral content is plotted the way it is calculated:

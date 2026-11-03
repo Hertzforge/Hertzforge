@@ -88,7 +88,8 @@
         "x": {"$ref": "#/$defs/arrayRef"},
         "y": {"$ref": "#/$defs/arrayRef"},
         "shape": {"enum": ["line", "steps", "law"]},
-        "edges": {"$ref": "#/$defs/arrayRef"}
+        "edges": {"$ref": "#/$defs/arrayRef"},
+        "follows": {"type": "integer", "minimum": 0}
       },
       "if": {"required": ["shape"], "properties": {"shape": {"const": "steps"}}},
       "then": {"required": ["edges"]}

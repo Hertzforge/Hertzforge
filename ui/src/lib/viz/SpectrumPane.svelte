@@ -18,7 +18,7 @@
 	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
 	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
-	import { ROLE_STYLES, dashArray, roleColorVar } from './roles';
+	import { dashArray, seriesLooks } from './roles';
 	import { stepsPath } from './steps';
 
 	interface Props {
@@ -60,13 +60,10 @@
 	const logX = $derived(view.x.scale === 'log');
 	const logY = $derived(view.y.scale === 'log');
 
-	/** Per-series style, with measured series stepping through the blue family. */
+	/** Per-series style, with measured series stepping through the blue family and followers dashed. */
 	const styled = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		return view.series.map((s, i) => {
-			const nth = (counts[s.role] = (counts[s.role] ?? -1) + 1);
-			return { series: s, index: i, style: ROLE_STYLES[s.role] ?? ROLE_STYLES.other, colorVar: roleColorVar(s.role, nth) };
-		});
+		const looks = seriesLooks(view.series);
+		return view.series.map((s, i) => ({ series: s, index: i, ...looks[i] }));
 	});
 
 	/** Plot order: draw low-z roles first so the measured line stays on top. */
@@ -435,7 +432,8 @@
 		</div>
 	</div>
 	<ul class="legend" aria-label="Legend">
-		{#each styled as { series, style, colorVar }, i (i)}
+		{#each styled as { series, style, colorVar, follows }, i (i)}
+			{#if !follows}
 			<li title={legendLabel(series, style.styleName)} onmouseenter={() => focusSeries(i)} onmouseleave={() => focusSeries(null)}>
 				<svg class="swatch" viewBox="0 0 26 8" width="26" height="8" aria-hidden="true">
 					<line
@@ -453,6 +451,7 @@
 				<span class="style">{style.styleName}</span>
 				<span class="val num">{readoutText(readouts[i])}</span>
 			</li>
+			{/if}
 		{/each}
 	</ul>
 	<div class="plot" bind:this={plotEl} style:min-height="{minHeight}px"></div>

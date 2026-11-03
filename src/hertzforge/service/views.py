@@ -23,11 +23,13 @@ def axis(label: str, unit: str | None, scale: Scale) -> dict[str, Any]:
 
 
 def series(name: str, role: Role, x: Any, y: Any, shape: Shape = 'line',
-           edges: Any = None) -> dict[str, Any]:
+           edges: Any = None, follows: int | None = None) -> dict[str, Any]:
     """One curve. f64 is kept for spectra, which are short.
 
     `shape` is how the points mean to be drawn (schema/PROTOCOL.md, Views);
-    'steps' needs `edges`, one more than there are values.
+    'steps' needs `edges`, one more than there are values. `follows` makes
+    the curve a follower of the view's series at that index: a model's
+    prediction of that measurement, drawn dashed in its colour.
     """
     x = np.ascontiguousarray(x, dtype=np.float64)
     y = np.ascontiguousarray(y, dtype=np.float64)
@@ -43,6 +45,8 @@ def series(name: str, role: Role, x: Any, y: Any, shape: Shape = 'line',
         out.update(shape='steps', edges=edges)
     elif shape != 'line':
         out['shape'] = shape
+    if follows is not None:
+        out['follows'] = follows
     return out
 
 

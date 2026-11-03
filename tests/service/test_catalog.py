@@ -29,6 +29,7 @@ def test_catalog_names_every_operation_and_dataset(catalog):
     assert ids == {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
                    'modal.modes', 'modal_run.waterfall', 'modal_run.modes',
                    'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
+                   'modal_run.resynthesis',
                    'project.waterfall', 'project.compute_psds', 'project.compute_frfs',
                    'project.fit_modes', 'project.mode_shapes'}
     kinds = {d['kind'] for d in catalog['datasets']}

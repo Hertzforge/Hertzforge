@@ -359,6 +359,84 @@ def test_an_empty_band_is_refused_a_mac(modal_run):
         run('modal_run.mac', modal_run, low_hz=900.0, high_hz=800.0)
 
 
+# ---- modal_run.resynthesis ------------------------------------------------------
+
+def test_resynthesis_draws_the_cmif_and_one_frf_with_their_followers(modal_run, validate):
+    """Two spectra over the fitted band: each measured CMIF singular value
+    and FRF magnitude, then a synthesized curve following each."""
+    views = run('modal_run.resynthesis', modal_run)
+    wire_views(views, validate)
+    cmif, response = views
+    assert [view['view'] for view in views] == ['spectrum', 'spectrum']
+    assert cmif['link'] == response['link'] == 'frequency'
+    assert cmif['y'] == {'label': 'CMIF', 'unit': '(m/s²)/N', 'scale': 'log'}
+    assert [(s['name'], s.get('follows')) for s in cmif['series']] == [
+        ('CMIF 1', None), ('CMIF 2', None),
+        ('CMIF 1, synthesized', 0), ('CMIF 2, synthesized', 1)]
+    assert [(s['name'], s.get('follows')) for s in response['series']] == [
+        ('101Z+/101Z+', None), ('101Z+/101Z+, synthesized', 0)]
+    for line in cmif['series'] + response['series']:
+        assert line['x'][0] >= 300.0 and line['x'][-1] <= 1300.0
+
+
+def test_the_measured_cmif_is_the_frf_matrix_singular_values(modal_run):
+    from hertzforge.core.modal_fit import ModalFitSession
+
+    cmif, _ = run('modal_run.resynthesis', modal_run)
+    frf = modal_run.project['FRF']
+    matrix = ModalFitSession(frf).matrix
+    f = np.asarray(frf.abscissa, dtype=float)
+    band = (f >= 300.0) & (f <= 1300.0)
+    expected = np.linalg.svd(matrix[band], compute_uv=False)
+    for k in range(2):
+        np.testing.assert_allclose(cmif['series'][k]['y'], expected[:, k], rtol=1e-12)
+
+
+def test_the_synthesized_frf_is_the_fitted_modes_prediction(modal_run):
+    """The follower is what the core's resynthesis overlay predicts for the
+    record, from the same fit `modal_run.modes` draws, and the synthesized
+    CMIF is that prediction's singular values."""
+    from hertzforge.core.shapes import synthesize_overlay
+    from hertzforge.service.ops_modal_run import fitted
+
+    shapes = fitted(modal_run, 300.0, 1300.0, 5)
+    frf = modal_run.project['FRF']
+    f = np.asarray(frf.abscissa, dtype=float)
+    band = (f >= 300.0) & (f <= 1300.0)
+    overlay = synthesize_overlay(shapes, frf)
+    for record in (1, 4):
+        _, response = run('modal_run.resynthesis', modal_run, record=record)
+        np.testing.assert_allclose(response['series'][1]['y'],
+                                   np.abs(overlay.ordinate[record - 1])[band], rtol=1e-9)
+    cmif, _ = run('modal_run.resynthesis', modal_run)
+    responses = list(dict.fromkeys(frf.response_dof))
+    references = list(dict.fromkeys(frf.reference_dof))
+    matrix = np.zeros((band.sum(), len(responses), len(references)), dtype=complex)
+    for i in range(frf.num_records):
+        matrix[:, responses.index(frf.response_dof[i]),
+               references.index(frf.reference_dof[i])] = overlay.ordinate[i][band]
+    expected = np.linalg.svd(matrix, compute_uv=False)
+    for k in range(2):
+        np.testing.assert_allclose(cmif['series'][2 + k]['y'], expected[:, k], rtol=1e-9,
+                                   atol=1e-9 * expected.max())
+
+
+def test_the_record_is_chosen_and_named(modal_run):
+    frf = modal_run.project['FRF']
+    _, response = run('modal_run.resynthesis', modal_run, record=4)
+    assert response['title'].endswith(f'FRF {frf.record_label(3)}')
+    assert response['series'][0]['name'] == frf.record_label(3)
+
+
+@pytest.mark.parametrize(('params', 'words'), [
+    ({'low_hz': 900.0, 'high_hz': 800.0}, 'the band 900 to 800 Hz is empty'),
+    ({'record': 23}, 'has 22 FRF records; there is no record 23'),
+])
+def test_resynthesis_refuses(modal_run, params, words):
+    with pytest.raises(ProtocolError, match=words):
+        run('modal_run.resynthesis', modal_run, **params)
+
+
 # ---- modal_run.motion -----------------------------------------------------------
 
 def test_a_capture_plays_back_its_accelerations(modal_run, validate):
