@@ -127,6 +127,27 @@ It declares three number parameters and two diagnostics. Its math is a plain Rus
 carries values across the interface: a pattern worth copying, because the math can then be used and
 tested anywhere.
 
+## Built-in laws
+
+Hertzforge has two single-output Random laws built in: `hinv`, the default (an H-inverse starting
+drive, a level servo and a per-line shape trim), and `ratio`, the law above. Each is described by
+the same kind of manifest a law file declares, so the form for a built-in law is drawn the way it is
+for an imported one. Each also exists as a law file built from the same code
+([`laws/hinv/`](../laws/hinv/), [`laws/ratio/`](../laws/ratio/)), and the tests run each law both
+ways through a whole test on the simulator and hold the two to the same result.
+
+## Importing a law
+
+A law file is imported from a path. Hertzforge loads it (which checks that it is a single-output
+Random law with a sound manifest) and copies it into the `laws` folder of the local data root,
+named by the SHA-256 of its bytes: `laws/<sha256>.wasm`. The data root is the folder Hertzforge
+keeps its runs in, on the local disk.
+
+The simulator runs any law. Hardware runs a built-in law, or an imported law only when a check
+record for its exact file says it passed: `laws/<sha256>.check.json`, beside the law file. The
+record names the file by its hash, so changing a single byte of a law file sends it back to the
+simulator.
+
 ## Responsibility for imported laws
 
 Hertzforge stands behind the controller's protections and the laws it ships. A law imported from a
@@ -146,9 +167,13 @@ its file. Nothing loads it yet, and it will change.
 ## Building and testing in this repository
 
 The workspace holds the law host (`crates/hertzforge-law-host`), the SDK
-(`crates/hertzforge-law-sdk`), the laws (`laws/*`) and the host's test fixtures
+(`crates/hertzforge-law-sdk`), the laws (`laws/*`), the host's test fixtures
 (`crates/hertzforge-law-host/guests/*`): small laws that trap, loop forever, grow memory, try to
-open files, sleep or return a bad drive on purpose. The laws and fixtures are workspace members,
+open files, sleep or return a bad drive on purpose, and the Random law catalog
+(`crates/hertzforge-random-laws`), which lists the built-in and imported laws, resolves the
+operator's choice of law, and runs a law file as a Random control law under the controller's
+guards. Its tests run the misbehaving fixtures through a whole Random run on the simulator and
+show each ends in the controller's controlled stop. The laws and fixtures are workspace members,
 so `cargo clippy --workspace` and `cargo test --workspace` build and check them natively, and the
 one lockfile and `cargo deny` cover their dependencies.
 

@@ -862,6 +862,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-random-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-law-ratio-math",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-recorder"
 version = "0.1.0"
 dependencies = [

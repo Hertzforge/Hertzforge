@@ -1,0 +1,32 @@
+[package]
+name = "hertzforge-random-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The Random control laws an operator can choose from, and the door every one
+# of them goes through: the built-in laws (`hinv`, the default, and `ratio`),
+# the laws imported from files into the data root, the adapter that runs a law
+# file as a Random control law under the run core's guards, the choice of law
+# for a run, and the check records that decide whether a law may drive
+# hardware. `hertzforge-random` itself does not depend on the law host (or on
+# Wasmtime); this crate joins the two.
+[dependencies]
+hertzforge-random = { path = "../hertzforge-random" }
+hertzforge-law-host = { path = "../hertzforge-law-host" }
+hertzforge-law-ratio-math = { path = "../hertzforge-law-ratio-math" }
+# `default_data_root()`: law files live in the local data root, never in a
+# synced folder.
+hertzforge-capture = { path = "../hertzforge-capture" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The tests run the Random service on the Sim plant through the real engine,
+# as hertzforge-random's own guard tests do.
+hertzforge-breakpoints = { path = "../hertzforge-breakpoints" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }

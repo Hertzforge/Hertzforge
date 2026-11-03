@@ -144,7 +144,7 @@ interface types {
     }
 
     /// Everything a single-output Random law sees on one loop. The fields up
-    /// to `band` match the controller's own loop boundary one for one.
+    /// to `dof` match the controller's own loop boundary one for one.
     record loop-inputs {
         /// The full-level target, as in the setup.
         target-psd: list<f64>,

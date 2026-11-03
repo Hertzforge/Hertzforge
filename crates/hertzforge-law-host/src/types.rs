@@ -177,8 +177,9 @@ pub struct Setup<'a> {
     pub control_channels: usize,
 }
 
-/// Everything a law sees on one loop. The fields through `band` match the
-/// controller's `LoopInputs` one for one; `dof` and `loop_index` are added.
+/// Everything a law sees on one loop. The fields through `dof` match the
+/// controller's `LoopInputs` one for one; `loop_index` is added (the adapter
+/// counts the loops).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LoopInputs<'a> {
     /// Full-level target PSD, `g^2/Hz`. Zero out of band.
@@ -255,7 +256,8 @@ pub struct LoopOutputs {
 }
 
 /// Which law this is: its declared name, version and author, and the SHA-256
-/// of the exact file it was loaded from.
+/// of the exact file it was loaded from. (A controller's built-in law, which
+/// is part of the program and loaded from no file, carries an empty hash.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LawIdentity {
     /// From the manifest.
@@ -264,7 +266,8 @@ pub struct LawIdentity {
     pub version: String,
     /// From the manifest.
     pub author: String,
-    /// SHA-256 of the law file, 64 lower-case hex digits.
+    /// SHA-256 of the law file, 64 lower-case hex digits. Empty for a law
+    /// built into the program.
     pub sha256: String,
 }
 
