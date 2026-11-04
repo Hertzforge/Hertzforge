@@ -1710,10 +1710,11 @@ impl MimoRandomService {
         if let Some(p) = self.plant_loop.as_mut() {
             p.suspend();
         }
-        self.finish_records();
         if self.state != MimoState::Aborted {
             self.transition(MimoState::Stopped);
         }
+        // After the transition, so the report records the state the run ended in.
+        self.finish_records();
     }
 
     /// The operator's abort: the drive to zero at once.
@@ -1722,8 +1723,8 @@ impl MimoRandomService {
         if let Some(p) = self.plant_loop.as_mut() {
             p.suspend();
         }
-        self.finish_records();
         self.transition(MimoState::Aborted);
+        self.finish_records();
     }
 
     fn abort(&mut self, kind: MimoTripKind) {
@@ -1739,8 +1740,8 @@ impl MimoRandomService {
         if let Some(p) = self.plant_loop.as_mut() {
             p.suspend();
         }
-        self.finish_records();
         self.transition(MimoState::Aborted);
+        self.finish_records();
     }
 
     fn stop_for_law(&mut self, reason: MimoFaultReason) {
