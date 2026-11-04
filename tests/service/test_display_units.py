@@ -90,6 +90,8 @@ def _plate(unit):
     view = v.shape3d('Plate', unit, nodes, [v.mode(1, 10.0, None, shape)],
                      triangles=np.array([[0, 1, 2]]))
     view['pick'] = v.picking('project.add_node', {'geometry': 'Plate'}, 'point', 'place')
+    view['marks'] = {'nodes': np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0254]], dtype=np.float32),
+                     'lines': np.array([[0, 1]], dtype=np.uint32)}
     return view
 
 
@@ -101,6 +103,10 @@ def test_a_geometry_is_drawn_in_the_systems_length_and_a_click_goes_back_to_si()
     assert np.asarray(out['modes'][0]['shape'])[2, 2] == 3.0, 'a shape is a picture'
     scale, offset = out['pick']['to_si']
     assert 1.0 * scale + offset == pytest.approx(0.0254), 'an inch clicked is 0.0254 m'
+    marks = out['marks']
+    assert marks['nodes'].dtype == np.float32 and marks['nodes'][1, 2] == pytest.approx(1.0), \
+        'the arrows over the model move with it'
+    assert marks['lines'].dtype == np.uint32
     (raw,) = display_units.convert([_plate('undefined')], US)
     assert raw['unit'] == 'undefined' and 'to_si' not in raw['pick']
     assert np.asarray(raw['nodes'])[1, 0] == pytest.approx(0.0254), 'a file\'s own numbers'

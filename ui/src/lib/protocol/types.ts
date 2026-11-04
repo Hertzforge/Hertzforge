@@ -195,6 +195,8 @@ export interface Shape3DView {
 	node_ids?: Uint32Array;
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
+	/** Static line work over the model in its own coordinates: DOF arrows, sensor bodies. */
+	marks?: { nodes: Float32Array; lines: Uint32Array };
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
@@ -425,7 +427,18 @@ export interface Shown {
 	/** What was left out or could not be drawn, in a sentence; empty when nothing. */
 	note: string;
 	/** Which of the bar's choices this selection takes. */
-	offers?: { flat: boolean; complex: boolean; frequency: boolean; projection: boolean };
+	offers?: {
+		flat: boolean;
+		complex: boolean;
+		frequency: boolean;
+		projection: boolean;
+		/** A lone shape set: its three views and where its values are read. */
+		shapes: boolean;
+		values_dofs: string[];
+		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
+		arrows: boolean;
+		sensors: boolean;
+	};
 }
 
 /** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
@@ -437,6 +450,15 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
+	/** A lone shape set's three views, one always up, and where and in what form its values are read. */
+	mode_table: boolean;
+	mac: boolean;
+	shape_values: boolean;
+	values_dofs: string;
+	values_form: 'shapes' | 'response' | 'reference';
+	/** DOF arrows and the channel table's sensors over every stage. */
+	arrows: boolean;
+	sensors: boolean;
 	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */

@@ -431,7 +431,14 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the second set projected onto the
-first's geometry; `project.add_matches` keeps picked squares as matched modes.
+first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's three
+views are `prefs.mode_table`, `prefs.mac` and `prefs.shape_values` (one always up; `offers.shapes`), the
+values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in
+`offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
+set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
+`prefs.sensors` (offered as `arrows` and `sensors`) put DOF arrows and the channel table's sensors over
+every stage as `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the geometry's
+coordinates and `lines` u32 [L, 2] indexing them.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:

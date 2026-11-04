@@ -88,7 +88,8 @@ def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, valida
     project.add('Modes', shapes)
     try:
         out = shown(plate, 'Modes', validate=validate)
-        assert [v['view'] for v in out['views']] == ['shape3d', 'table'], 'on the active geometry'
+        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix'], \
+            'on the active geometry, the auto-MAC beside the list'
         both = shown(plate, 'Modes', named(plate, 'geometry'), records={'Modes': [1]})
         assert [v['view'] for v in both['views']] == ['shape3d', 'table']
         project.add('Modes 2', shapes)
@@ -232,7 +233,10 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     frf, history = named(plate, 'frf'), named(plate, 'time_history')
     stage = shown(plate, frf, validate=validate)
     assert stage['views'][0]['view'] == 'waterfall'
-    assert stage['offers'] == {'flat': True, 'complex': True, 'frequency': True, 'projection': False}
+    def data_offers(out):
+        return {k: out['offers'][k] for k in ('flat', 'complex', 'frequency', 'projection')}
+
+    assert data_offers(stage) == {'flat': True, 'complex': True, 'frequency': True, 'projection': False}
     flat = shown(plate, frf, prefs={'flat': True}, validate=validate)
     (plot,) = flat['views']
     assert plot['view'] == 'spectrum' and len(plot['series']) == plate.project[frf].num_records
@@ -242,9 +246,9 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     phase = shown(plate, frf, prefs={'flat': True, 'component': 'phase'})
     assert 'phase' in phase['views'][0]['y']['label'].lower() or phase['views'][0]['y']['unit'] in ('°', 'deg', 'rad')
     time = shown(plate, history, validate=validate)
-    assert time['offers'] == {'flat': True, 'complex': False, 'frequency': False,
-                              'projection': False}
-    assert shown(plate, named(plate, 'geometry'))['offers'] == {'flat': False, 'complex': False,
+    assert data_offers(time) == {'flat': True, 'complex': False, 'frequency': False,
+                                 'projection': False}
+    assert data_offers(shown(plate, named(plate, 'geometry'))) == {'flat': False, 'complex': False,
                                                                   'frequency': False, 'projection': False}
     with pytest.raises(ProtocolError, match='"prefs"'):
         projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
@@ -370,3 +374,80 @@ def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
             project.remove(name)
         project.remove('Set B')
         project.remove('Set A')
+
+
+def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    project.add('Lone', ShapeSet(frequency=[10.0, 20.0], damping=[0.01, 0.01],
+                                 shape_matrix=np.arange(12.0).reshape(2, 6), coordinate=dofs))
+    try:
+        out = shown(plate, 'Lone', validate=validate)
+        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix']
+        assert out['offers']['shapes'] is True and out['offers']['values_dofs'] == ['all']
+        off = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False}, validate=validate)
+        assert [v['view'] for v in off['views']] == ['shape3d', 'table'], 'one view always up'
+        values = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False,
+                                             'shape_values': True}, validate=validate)
+        assert [v['view'] for v in values['views']] == ['shape3d', 'table']
+        table = values['views'][1]
+        assert table['title'] == 'Lone, shapes' and table['columns'] == ['DOF', 'M1', 'M2']
+        assert len(table['rows']) == 6
+        response = shown(plate, 'Lone', prefs={'shape_values': True, 'values_form': 'response'})
+        assert response['views'][-1]['title'] == 'Lone, response transformation'
+        assert len(response['views'][-1]['rows']) == 2, 'a row per mode'
+        chosen = shown(plate, 'Lone', prefs={'shape_values': True, 'values_dofs': 'control'})
+        assert 'shape values:' in chosen['note'] and 'channel table' in chosen['note']
+        with pytest.raises(ProtocolError, match='"values_form"'):
+            projects.show(plate, {'objects': ['Lone'], 'prefs': {'values_form': 'inverse'}})
+        with pytest.raises(ProtocolError, match='"mac"'):
+            projects.show(plate, {'objects': ['Lone'], 'prefs': {'mac': 'yes'}})
+    finally:
+        project.remove('Lone')
+
+
+def test_an_frf_beside_a_shape_set_shows_its_resynthesis(plate, validate):
+    project = plate.project
+    frf = project[named(plate, 'frf')]
+    dofs = list(dict.fromkeys(frf.response_dof))[:5]
+    rng = np.random.default_rng(5)
+    project.add('Fit', ShapeSet(frequency=[300.0, 900.0], damping=[0.02, 0.02],
+                                shape_matrix=rng.normal(size=(2, len(dofs))), coordinate=dofs))
+    try:
+        out = shown(plate, named(plate, 'frf'), 'Fit', validate=validate)
+        (plot,) = out['views']
+        assert plot['view'] == 'spectrum' and 'resynthesized' in plot['title']
+        followers = [s for s in plot['series'] if 'follows' in s]
+        assert followers and all(s['name'].endswith(', synthesized') for s in followers)
+        assert all(0 <= s['follows'] < len(plot['series']) - len(followers) for s in followers)
+        assert 'resynthesized from 2 modes' in out['note']
+        one = shown(plate, named(plate, 'frf'), 'Fit', records={'Fit': [0]})
+        assert 'from 1 mode' in one['note']
+    finally:
+        project.remove('Fit')
+
+
+def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
+    project = plate.project
+    geometry, history = named(plate, 'geometry'), named(plate, 'time_history')
+    plain = shown(plate, geometry, history, validate=validate)
+    assert plain['offers']['arrows'] is True and plain['offers']['sensors'] is False
+    assert 'marks' not in plain['views'][0]
+    marked = shown(plate, geometry, history, prefs={'arrows': True}, validate=validate)
+    stage = marked['views'][0]
+    assert stage['view'] == 'shape3d' and stage['marks']['nodes'].shape[1] == 3
+    assert stage['marks']['lines'].dtype == np.uint32 and len(stage['marks']['lines']) > 0
+    assert 'DOF arrows' in marked['note']
+    table_name = next(n for n, o in project.items() if projects.kind_of(o) == 'channel_table')
+    table = project[table_name]
+    was = table['model'][0]
+    table.set_cell('model', 0, 'generic')
+    try:
+        offered = shown(plate, geometry, history)
+        assert offered['offers']['sensors'] is True
+        with_sensors = shown(plate, geometry, history, prefs={'sensors': True, 'arrows': False},
+                             validate=validate)
+        assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
+    finally:
+        table.set_cell('model', 0, was)

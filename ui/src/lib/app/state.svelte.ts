@@ -247,7 +247,20 @@ class AnalyzeState {
 					objects: selection.objects,
 					records: selection.records,
 					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
-					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component, line: this.line, projection: this.prefs.projection }
+					prefs: {
+						flat: this.prefs.flat,
+						log_frequency: this.prefs.log_frequency,
+						component: this.prefs.component,
+						line: this.line,
+						projection: this.prefs.projection,
+						mode_table: this.prefs.mode_table,
+						mac: this.prefs.mac,
+						shape_values: this.prefs.shape_values,
+						values_dofs: this.prefs.values_dofs,
+						values_form: this.prefs.values_form,
+						arrows: this.prefs.arrows,
+						sensors: this.prefs.sensors
+					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
@@ -1084,12 +1097,29 @@ export class UnitsState {
 const PREFS_KEY = 'hertzforge.show.prefs';
 
 function readPrefs(): ShowPrefs {
-	const prefs: ShowPrefs = { flat: false, log_frequency: false, component: 'magnitude', projection: false, bars: true, overlay: true };
+	const prefs: ShowPrefs = {
+		flat: false,
+		log_frequency: false,
+		component: 'magnitude',
+		projection: false,
+		bars: true,
+		overlay: true,
+		mode_table: true,
+		mac: true,
+		shape_values: false,
+		values_dofs: 'all',
+		values_form: 'shapes',
+		arrows: false,
+		sensors: true
+	};
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay'] as const) if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
+		for (const key of ['projection', 'bars', 'overlay', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
+		}
+		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
 		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
 	} catch {
 		// nothing kept, or no storage

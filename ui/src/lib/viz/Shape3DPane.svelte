@@ -240,6 +240,8 @@
 	let outline: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
+	/** The view's `marks`: DOF arrows and sensors, drawn still. */
+	let markLines: LineSegments | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
 	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
@@ -391,6 +393,7 @@
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
 	}
 
@@ -494,6 +497,23 @@
 				overlayOutline.visible = false;
 				scene.add(overlayOutline);
 			}
+		}
+
+		if (view.marks && view.marks.lines.length) {
+			// DOF arrows and sensor bodies: line work that stays put while the model moves
+			const g = new BufferGeometry();
+			const { nodes: mn, lines: ml } = view.marks;
+			const segs = new Float32Array(ml.length * 3);
+			for (let i = 0; i < ml.length; i++) {
+				const n = ml[i] * 3;
+				segs[i * 3] = mn[n];
+				segs[i * 3 + 1] = mn[n + 1];
+				segs[i * 3 + 2] = mn[n + 2];
+			}
+			g.setAttribute('position', new BufferAttribute(segs, 3));
+			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
+			markLines.frustumCulled = false;
+			scene.add(markLines);
 		}
 
 		if (view.lines && view.lines.length) {
@@ -706,6 +726,10 @@
 	});
 
 	onDestroy(() => {
+		if (markLines) {
+			markLines.geometry.dispose();
+			(markLines.material as Material).dispose();
+		}
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
