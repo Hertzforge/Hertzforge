@@ -320,3 +320,114 @@ export function readMimoPlot(v: unknown): MimoPlotSpec | null {
 		points: typeof o.points === 'number' ? clampPoints(o.points) : DEFAULT_POINTS
 	};
 }
+
+// ---- the MIMO run views' pages ----------------------------------------------------------------
+
+/**
+ * The four kinds of page the MIMO run view offers. A page of each kind draws its own view and
+ * holds its own choices (the grid's window, the heatmap's mode, the pair a plant plot shows); the
+ * plots it subscribes to follow from those choices and its size on screen.
+ */
+export type MimoPageKind = 'grid' | 'heatmap' | 'plant' | 'geometry';
+
+export const MIMO_PAGE_KINDS: MimoPageKind[] = ['grid', 'heatmap', 'plant', 'geometry'];
+
+export const MIMO_PAGE_WORDS: Record<MimoPageKind, string> = {
+	grid: 'Matrix Grid',
+	heatmap: 'Error Heatmap',
+	plant: 'Drive and Plant',
+	geometry: 'Geometry'
+};
+
+export interface MimoPageSpec {
+	id: string;
+	name: string;
+	kind: MimoPageKind;
+	/** The page's own choices, plain data; read through the views' settings functions. */
+	settings: Record<string, unknown>;
+}
+
+export interface MimoLayout {
+	version: 1;
+	pages: MimoPageSpec[];
+	/** Display updates per second this window asks for, 0.5 to 10. */
+	rate: number;
+	/** The last number given to a page; never given twice. */
+	serial: number;
+}
+
+/** A default layout and the page each window opens on, first the main window. */
+export interface MimoWindows {
+	layout: MimoLayout;
+	windows: string[];
+}
+
+export const MIMO_RATES = [1, 2, 5, 10];
+export const MIMO_DEFAULT_RATE = 5;
+export const MAX_MIMO_PAGES = 12;
+
+/**
+ * The MIMO Random pages until the operator changes them: the four views, one page each. On one
+ * monitor the window opens on the error heatmap, the overview of every control at once. On two,
+ * the main window opens on the matrix grid and the second on the heatmap, so the overview stays
+ * up while the grid is worked; a third and fourth monitor take the drive and plant page and the
+ * geometry.
+ */
+export function defaultMimoLayout(monitors = 1): MimoWindows {
+	const layout: MimoLayout = {
+		version: 1,
+		rate: MIMO_DEFAULT_RATE,
+		serial: 4,
+		pages: [
+			{ id: 'mp-1', name: MIMO_PAGE_WORDS.heatmap, kind: 'heatmap', settings: {} },
+			{ id: 'mp-2', name: MIMO_PAGE_WORDS.grid, kind: 'grid', settings: {} },
+			{ id: 'mp-3', name: MIMO_PAGE_WORDS.plant, kind: 'plant', settings: {} },
+			{ id: 'mp-4', name: MIMO_PAGE_WORDS.geometry, kind: 'geometry', settings: {} }
+		]
+	};
+	const m = Math.min(4, Math.max(1, Math.round(monitors) || 1));
+	const windows = m === 1 ? ['mp-1'] : ['mp-2', 'mp-1', 'mp-3', 'mp-4'].slice(0, m);
+	return { layout, windows };
+}
+
+/** A MIMO layout read from storage, checked field by field; null when it is not one. */
+export function readMimoLayout(raw: unknown): MimoLayout | null {
+	if (typeof raw !== 'object' || raw === null) return null;
+	const o = raw as Record<string, unknown>;
+	if (o.version !== 1 || !Array.isArray(o.pages)) return null;
+	const ids = new Set<string>();
+	const pages: MimoPageSpec[] = [];
+	for (const v of o.pages.slice(0, MAX_MIMO_PAGES)) {
+		if (typeof v !== 'object' || v === null) continue;
+		const p = v as Record<string, unknown>;
+		if (typeof p.id !== 'string' || !p.id || p.id.length > 64 || ids.has(p.id)) continue;
+		if (typeof p.kind !== 'string' || !MIMO_PAGE_KINDS.includes(p.kind as MimoPageKind)) continue;
+		const name = typeof p.name === 'string' ? p.name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+		if (!name) continue;
+		ids.add(p.id);
+		const settings = typeof p.settings === 'object' && p.settings !== null && !Array.isArray(p.settings) ? (p.settings as Record<string, unknown>) : {};
+		pages.push({ id: p.id, name, kind: p.kind as MimoPageKind, settings });
+	}
+	if (!pages.length) return null;
+	const rate = typeof o.rate === 'number' && MIMO_RATES.includes(o.rate) ? o.rate : MIMO_DEFAULT_RATE;
+	let used = 0;
+	for (const p of pages) {
+		const m = Number(p.id.replace(/^[a-z]+-/, ''));
+		if (Number.isInteger(m) && m > used) used = m;
+	}
+	return { version: 1, pages, rate, serial: Math.max(used, Number.isInteger(o.serial) ? (o.serial as number) : 0) };
+}
+
+/** The text a MIMO layout is saved as, fields in one order so equal layouts save equal text. */
+export function mimoLayoutToSaved(l: MimoLayout): string {
+	return JSON.stringify({ version: 1, pages: l.pages.map((p) => ({ id: p.id, name: p.name, kind: p.kind, settings: p.settings })), rate: l.rate, serial: l.serial });
+}
+
+export function mimoLayoutFromSaved(text: string | null): MimoLayout | null {
+	if (!text) return null;
+	try {
+		return readMimoLayout(JSON.parse(text));
+	} catch {
+		return null;
+	}
+}
