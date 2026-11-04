@@ -360,7 +360,8 @@
                "reference_not_hermitian", "reference_not_psd", "reference_repaired",
                "reference_rank_above_drives", "reference_file_unread", "law_unknown",
                "law_wrong_world", "law_shape_not_supported", "law_param_unknown",
-               "law_param_invalid", "backend_not_selected"]
+               "law_param_invalid", "backend_not_selected", "reference_invalid", "reference_file",
+               "geometry", "transform_rank", "transform_condition", "tolerance"]
     },
     "reportItem": {
       "type": "object", "required": ["reason", "message"], "additionalProperties": false,
@@ -1099,8 +1100,19 @@
               "properties": {
                 "channel": {"type": "integer", "minimum": 0},
                 "ceiling_vrms": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
-                "abort_vrms": {"type": ["number", "null"], "exclusiveMinimum": 0}
-              }}}
+                "abort_vrms": {"type": ["number", "null"], "exclusiveMinimum": 0},
+                "peak_v": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                "shaker": {"type": ["object", "null"]},
+                "moving_mass_lb": {"type": "number", "minimum": 0}
+              }}},
+            "limits": {"type": "array", "items": {
+              "type": "object", "required": ["channel", "ceiling"], "additionalProperties": false,
+              "properties": {
+                "channel": {"type": "integer", "minimum": 0},
+                "ceiling": {"type": "number", "exclusiveMinimum": 0},
+                "abort_margin_db": {"type": "number", "exclusiveMinimum": 0}
+              }}},
+            "article_mass_lb": {"type": "number", "minimum": 0}
           }
         },
         "space": {
@@ -1161,6 +1173,11 @@
           "type": "object", "additionalProperties": false,
           "properties": {
             "frf": {"enum": ["hold", "update"]},
+            "frf_blend": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "cap_up_db": {"type": "number", "exclusiveMinimum": 0, "maximum": 6},
+            "cap_down_db": {"type": "number", "exclusiveMinimum": 0, "maximum": 60},
+            "law_budget": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "law_misses": {"type": "integer", "minimum": 1, "maximum": 100},
             "level_ramp_s": {"type": "number", "minimum": 0, "maximum": 60},
             "shutdown_ramp_s": {"type": "number", "minimum": 0, "maximum": 60},
             "max_loops_out": {"type": "integer", "minimum": 0}
@@ -1508,6 +1525,145 @@
     "lawsImportResult": {
       "type": "object", "required": ["law"], "additionalProperties": false,
       "properties": {"law": {"$ref": "#/$defs/lawEntry"}}
+    },
+    "mimoGrid": {
+      "type": "object", "required": ["fs_hz", "n_pts"], "additionalProperties": false,
+      "properties": {
+        "fs_hz": {"type": "number", "minimum": 256, "maximum": 204800},
+        "n_pts": {"type": "integer", "minimum": 64}
+      }
+    },
+    "mimoPairValue": {"oneOf": [
+      {"type": "number"},
+      {"type": "array", "minItems": 1, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}}]},
+    "mimoPreviewPair": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}},
+    "mimoReferenceBuildParams": {
+      "type": "object", "required": ["grid", "tables"], "additionalProperties": false,
+      "properties": {
+        "grid": {"$ref": "#/$defs/mimoGrid"},
+        "unit": {"type": "string"},
+        "tables": {"type": "array", "minItems": 1, "maxItems": 72, "items": {
+          "type": "object", "required": ["label", "rows"], "additionalProperties": false,
+          "properties": {
+            "label": {"type": "string", "minLength": 1},
+            "rows": {"type": "array", "items": {"$ref": "#/$defs/breakpoint"}}
+          }}},
+        "pairs": {"type": "array", "items": {
+          "type": "object", "required": ["row", "col"], "additionalProperties": false,
+          "properties": {
+            "row": {"type": "integer", "minimum": 0},
+            "col": {"type": "integer", "minimum": 0},
+            "coherence": {"$ref": "#/$defs/mimoPairValue"},
+            "phase_deg": {"$ref": "#/$defs/mimoPairValue"}
+          }}},
+        "unspecified": {"enum": ["independent", "fully_coherent"]},
+        "alarm_db": {"$ref": "#/$defs/bandDb"},
+        "abort_db": {"$ref": "#/$defs/bandDb"},
+        "repair": {"type": "boolean"},
+        "preview_pair": {"$ref": "#/$defs/mimoPreviewPair"}
+      }
+    },
+    "mimoReferenceImportParams": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "pair_path": {"type": ["string", "null"]},
+        "grid": {"$ref": "#/$defs/mimoGrid"},
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "unit": {"type": "string"},
+        "repair": {"type": "boolean"},
+        "preview_pair": {"$ref": "#/$defs/mimoPreviewPair"}
+      }
+    },
+    "mimoReferenceValidateParams": {
+      "type": "object", "required": ["reference"], "additionalProperties": false,
+      "properties": {
+        "reference": {"type": "object"},
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "unit": {"type": "string"},
+        "preview_pair": {"$ref": "#/$defs/mimoPreviewPair"}
+      }
+    },
+    "mimoTransformOut": {
+      "type": ["object", "null"], "required": ["rows", "cols", "values", "row_labels", "col_labels", "condition"],
+      "additionalProperties": false,
+      "properties": {
+        "rows": {"type": "integer", "minimum": 1},
+        "cols": {"type": "integer", "minimum": 1},
+        "values": {"type": "array", "items": {"type": "number"}},
+        "row_labels": {"type": "array", "items": {"type": "string"}},
+        "col_labels": {"type": "array", "items": {"type": "string"}},
+        "condition": {"type": ["number", "null"]}
+      }
+    },
+    "mimoReferenceResult": {
+      "type": "object",
+      "required": ["ok", "reference", "labels", "unit", "df_hz", "band_hz", "lines", "errors", "warnings",
+                   "psd", "transforms", "provenance", "views"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {"type": "boolean"},
+        "reference": {"type": ["object", "null"]},
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "unit": {"type": "string"},
+        "df_hz": {"type": "number", "exclusiveMinimum": 0},
+        "band_hz": {"oneOf": [{"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}, {"type": "null"}]},
+        "lines": {"type": "integer", "minimum": 0},
+        "errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "psd": {
+          "type": "object",
+          "required": ["violations", "min_eigenvalue_ratio", "worst_hz", "lines_hz", "repair", "repair_accepted"],
+          "additionalProperties": false,
+          "properties": {
+            "violations": {"type": "integer", "minimum": 0},
+            "min_eigenvalue_ratio": {"type": ["number", "null"]},
+            "worst_hz": {"type": ["number", "null"]},
+            "lines_hz": {"type": "array", "items": {"type": "number"}},
+            "repair": {"type": ["object", "null"]},
+            "repair_accepted": {"type": "boolean"}
+          }
+        },
+        "transforms": {
+          "type": "object", "required": ["response", "drive"], "additionalProperties": false,
+          "properties": {"response": {"$ref": "#/$defs/mimoTransformOut"}, "drive": {"$ref": "#/$defs/mimoTransformOut"}}
+        },
+        "provenance": {"type": ["object", "null"]},
+        "views": {"$ref": "#/$defs/views"}
+      }
+    },
+    "mimoRigidParams": {
+      "type": "object", "required": ["sensors"], "additionalProperties": false,
+      "properties": {
+        "sensors": {"type": "array", "items": {
+          "type": "object", "required": ["label", "position", "direction"], "additionalProperties": false,
+          "properties": {
+            "label": {"type": "string"},
+            "position": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+            "direction": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}
+          }}},
+        "reference_point": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "unit": {"type": "string"},
+        "length_unit": {"type": "string"}
+      }
+    },
+    "mimoRigidResult": {
+      "type": "object",
+      "required": ["ok", "errors", "dofs", "dof_units", "transform", "condition", "singular_values", "sensors"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": {"type": "boolean"},
+        "errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}},
+        "dofs": {"type": "array", "items": {"type": "string"}},
+        "dof_units": {"type": ["array", "null"], "items": {"type": "string"}},
+        "transform": {"$ref": "#/$defs/mimoTransformOut"},
+        "condition": {"type": ["number", "null"]},
+        "singular_values": {"type": "array", "items": {"type": "number"}},
+        "sensors": {"type": "array", "items": {
+          "type": "object", "required": ["label", "check_share"], "additionalProperties": false,
+          "properties": {"label": {"type": "string"}, "check_share": {"type": "number", "minimum": 0, "maximum": 1}}}}
+      }
     },
     "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "drive_psd", "drive_coh",
                               "frf", "sv", "cond", "mcoh", "cap", "dof_rms", "trace", "pred_drive_rms",

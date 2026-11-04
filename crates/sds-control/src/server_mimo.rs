@@ -409,6 +409,30 @@ impl Service {
         json!({"report": run.and_then(|r| r.report()).unwrap_or(Value::Null)})
     }
 
+    /// `mimo_random.reference.build_breakpoints`, `validate` and `import`: computed
+    /// on a blocking thread (a 72-control reference is a few thousand
+    /// eigendecompositions), open to every connection. A large reference is written
+    /// into the data folder by its content hash.
+    pub(super) async fn mimo_reference(
+        &self,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<(Value, Arrays), MethodError> {
+        use crate::mimo::reference;
+        let root = self.opts.data_root.clone();
+        let params = params.clone();
+        let method = method.to_owned();
+        tokio::task::spawn_blocking(move || match method.as_str() {
+            "mimo_random.reference.build_breakpoints" => {
+                reference::build_breakpoints(&params, &root)
+            }
+            "mimo_random.reference.validate" => reference::validate(&params, &root),
+            _ => reference::import(&params, &root),
+        })
+        .await
+        .map_err(|e| MethodError::internal(format!("the reference task failed: {e}")))?
+    }
+
     pub(super) async fn laws_list(
         &self,
         params: &Map<String, Value>,

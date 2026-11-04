@@ -976,6 +976,10 @@ what every index on the wire counts.
 | `mimo_random.status` | `{}` | any | status |
 | `mimo_random.report` | `{}` | any | `{"report"}` |
 | `mimo_random.subscribe` | see "MIMO Random Display" | any | as there |
+| `mimo_random.reference.build_breakpoints` | see "MIMO Random Reference" | any | the reference result |
+| `mimo_random.reference.build_rigid_body` | as there | any | the rigid-body result |
+| `mimo_random.reference.validate` | as there | any | the reference result |
+| `mimo_random.reference.import` | as there | any | the reference result |
 
 "status" is the `mimo_random.status` object below.
 
@@ -999,13 +1003,15 @@ what every index on the wire counts.
 | Field | Default | Meaning |
 |---|---|---|
 | `channels.controls` | (required) | The control channels, by their table `index` (each an enabled `control` row), each with its own `alarm_db` and `abort_db` bands (`[below, above]` in positive dB, defaults `[3,3]` and `[6,6]`) |
-| `channels.drives` | (required) | The drives, by table `index` (each an enabled `drive` row), each with its own `ceiling_vrms` (above 0, at most 10) and optional `abort_vrms` (above the ceiling) |
+| `channels.drives` | (required) | The drives, by table `index` (each an enabled `drive` row), each with its own `ceiling_vrms` (above 0, at most 10) and optional `abort_vrms` (above the ceiling), `peak_v` (the clip level, at least the ceiling and at most 10; default 3 times the ceiling, at most 10), `shaker` (the shaker record, as Random's feasibility takes it; absent: feasibility not evaluated for that drive) and `moving_mass_lb` (that shaker's own moving mass, default 0) |
+| `channels.limits` | none | Monitored responses the core holds under a ceiling: each an enabled `monitor` row by `index`, with its PSD `ceiling` (above 0, the unit squared per hertz, at full level) and `abort_margin_db` (above 0, default 3): a measured PSD that far above the ceiling aborts. `limit_unknown_channel` otherwise |
+| `channels.article_mass_lb` | 0 | The test article's mass, split equally across the shakers for feasibility |
 | `space` | physical | `{"kind":"physical"}`: control the channels themselves. `{"kind":"virtual","dofs":[names],"response_transform","drive_transform"}`: control the named degrees of freedom; `response_transform` is degrees of freedom by control channels, `drive_transform` (optional) drives by virtual drives. A transformation is `{"rows","cols","values"}`, real, row by row |
 | `reference` | (required) | Inline, for a small reference: `{"kind":"inline","freqs_hz","n","re","im"}`, the packed matrices of `n` channels (or degrees of freedom) on the lines `freqs_hz` (at least 8, rising), at most 262,144 values. By file, for a large one: `{"kind":"file","path","sha256"}`, a native reference file on the computer that runs the test, named with the SHA-256 of its bytes; the run reads it when it starts and refuses a file whose hash differs |
 | `law` | `{"id":"pinv_closed"}` | The control law, by its catalog `id` (see "Control Laws"), and values for the parameters its manifest declares |
 | `estimation` | as shown | The frame (`fs_hz` 256 to 204,800, `n_pts` a power of two from 64), frames per loop (1 to 1024), window (`hann` or `rectangular`), overlap (0 to 0.75) and how many loops the estimate remembers (1 to 64) |
 | `identification` | as shown | The identification level (-60 to 0 dB relative to the reference), its frames and the noise-floor frames, the gates (the smallest multiple coherence over the band, `coherence_floor`, and the largest FRF condition number, `condition_limit`), and whether to hold for review afterwards |
-| `control` | as shown | `frf` `hold` (the FRF from identification) or `update` (re-estimated each loop); ramp times; consecutive loops out of tolerance before the divergence abort |
+| `control` | as shown | `frf` `hold` (the FRF from identification) or `update` (re-estimated each loop); ramp times; consecutive loops out of tolerance before the divergence abort; `frf_blend` (under `update`, the weight of each loop's estimate against identification's, above 0 and at most 1, default 0.5); `cap_up_db` and `cap_down_db` (the core's per-loop rise and fall caps on each drive's PSD, default 3.5 and 6 dB, the rise at most 6); `law_budget` (the law call's time budget, a fraction of the loop, default 0.25) and `law_misses` (unusable law calls in a row that stop the run, 1 to 100, default 3) |
 | `schedule` | (required) | Single-output Random's schedule |
 | `backend` | the selected station | `{"kind":"sim"}` or `{"kind":"ni"}`; must be the station selected (`backend_not_selected` otherwise) |
 
@@ -1113,6 +1119,69 @@ gate was overridden. `faults` lists `{"kind","message"}`.
  "drives":[{"channel","label","rms_v","ceiling_vrms","min_cap"}],
  "gates","override","end"}
 ```
+
+### MIMO Random Reference
+
+The reference is built, read and checked by the service, so a client shows what the controller
+computes and repeats none of its math. Every method here only computes or reads; none needs
+control, and none replaces a setup. A reference small enough for a setup (at most 262,144 packed
+values, at least 8 lines) comes back inline, ready to send as the setup's `reference`; a larger
+one is written once into the data folder as a reference folder named by its content hash and
+comes back as `{"kind":"file","path","sha256"}`.
+
+| Method | Params |
+|---|---|
+| `mimo_random.reference.build_breakpoints` | `{"grid":{"fs_hz","n_pts"},"unit","tables":[{"label","rows":[breakpoint...]}],"pairs":[{"row","col","coherence","phase_deg"}],"unspecified","alarm_db","abort_db","repair","preview_pair"}` |
+| `mimo_random.reference.build_rigid_body` | `{"sensors":[{"label","position","direction"}],"reference_point","unit","length_unit"}` |
+| `mimo_random.reference.validate` | `{"reference","labels","unit","preview_pair"}`: an inline reference or a reference folder |
+| `mimo_random.reference.import` | `{"path","pair_path","grid","labels","unit","repair","preview_pair"}` |
+
+- `grid` is the test's frame; the lines run every `fs_hz / n_pts` hertz up to `fs_hz / 2.56`.
+- `tables` hold one PSD breakpoint table per controlled quantity (control channel or degree of
+  freedom), in order, with Random's breakpoint rows. A pair's `coherence` (squared, 0 to 1) and
+  `phase_deg` (of `G_row,col`) are each a number or `[[frequency, value], ...]` joined by straight
+  lines and held beyond the ends. Pairs not listed are `independent` (coherence 0) or
+  `fully_coherent` (coherence 1, phase 0). `preview_pair` (default `[0,1]`) is the pair the
+  preview draws.
+- A line whose coherences and phases cannot all hold (the matrix has a negative eigenvalue) is
+  an error, `reference_not_psd`, and the result describes the repair: each negative eigenvalue
+  set to zero and the result scaled back to the PSDs entered. With `repair: true` the repaired
+  reference is accepted (warned `reference_repaired`).
+- `import` reads, by full path on the computer that runs the test, a reference folder, an `.npz`
+  specification (needs `grid`; cross terms are conjugated on the way in) or the CSV layout (a
+  PSD table, and a pair table at `pair_path`; needs `grid`). A `.mat` or `.hforge`
+  specification is converted to a reference folder first. A relative path is `bad_params`;
+  anything else that fails is an error item, `reference_file`.
+
+The reference result:
+
+```
+{"ok":false,"reference":null,"labels":["Front","Rear","Side"],"unit":"g","df_hz":8,
+ "band_hz":[24,496],"lines":60,"errors":[{"reason":"reference_not_psd","field":"reference","message":"..."}],
+ "warnings":[],
+ "psd":{"violations":60,"min_eigenvalue_ratio":-0.46,"worst_hz":24,"lines_hz":[24,32,...],
+        "repair":{"lines":60,"clamped":60,"max_change":0.37,
+                  "pairs":[{"row":1,"col":2,"labels":["Rear","Side"],"before":0.9,"after":0.53,"freq_hz":24}]},
+        "repair_accepted":false},
+ "transforms":{"response":null,"drive":null},"provenance":null,"views":[...]}
+```
+
+`ok` is true exactly when a reference was accepted. `psd.min_eigenvalue_ratio` is the most
+negative eigenvalue of the matrix as entered relative to its line's largest. `transforms` carry a
+response or drive transformation the reference brings (`{"rows","cols","values","row_labels",
+"col_labels","condition"}`), and `provenance` how it was made. `views` are four `spectrum` views
+on the band lines, reduced to at most 512 points (each point the chunk's extreme): every PSD on
+one plot, the smallest eigenvalue per line against the refusal threshold, and the preview pair's
+coherence and phase (as entered and, when a repair was accepted, after it). A result with views
+travels as a binary frame.
+
+The rigid-body result: `{"ok","errors","warnings","dofs","dof_units","transform","condition",
+"singular_values","sensors":[{"label","check_share"}]}`. `transform` is the response
+transformation onto `X, Y, Z, RX, RY, RZ` at the reference point (6 by the sensors); fewer than six
+sensors, or a geometry that resolves fewer than six degrees of freedom, is an error item
+`geometry` naming the rank. `check_share` is how much of each sensor's reading the others can
+check (the residual projector's diagonal, 0 to 1); a sensor at 0 is the only one in its
+direction, and a departure there from rigid motion cannot be seen.
 
 ### MIMO Random Display
 

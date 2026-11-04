@@ -27,6 +27,9 @@ hertzforge-random.workspace = true
 hertzforge-random-laws.workspace = true
 # The law catalog's manifest types (parameters, MIMO shapes and diagnostics).
 hertzforge-law-host.workspace = true
+# The reference builders and readers behind `mimo_random.reference.*` (breakpoints,
+# rigid body, import, validation), so the shell never repeats their math.
+hertzforge-reference.workspace = true
 # Packed spectral matrix stacks and their per-line checks (ranks, eigenvalues).
 hertzforge-sdm.workspace = true
 hertzforge-shaker-db.workspace = true

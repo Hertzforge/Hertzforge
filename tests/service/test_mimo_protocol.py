@@ -24,6 +24,11 @@ PAYLOADS = {
     'response_laws_list': ('result', 'lawsListResult'),
     'request_laws_import': ('params', 'lawsImportParams'),
     'response_laws_import': ('result', 'lawsImportResult'),
+    'request_mimo_random_reference_build_breakpoints': ('params', 'mimoReferenceBuildParams'),
+    'request_mimo_random_reference_build_rigid_body': ('params', 'mimoRigidParams'),
+    'response_mimo_random_reference_build_rigid_body': ('result', 'mimoRigidResult'),
+    'request_mimo_random_reference_import': ('params', 'mimoReferenceImportParams'),
+    'response_mimo_random_reference_import': ('result', 'mimoReferenceResult'),
 }
 
 
@@ -176,3 +181,24 @@ def test_a_decimated_series_is_an_envelope(validate):
               'y_min': {'$array': 'a2'}, 'shape': 'steps', 'edges': {'$array': 'a3'}}
     validate(series, 'series')
     _refused(validate, {**series, 'y_min': [1, 2]}, 'series')
+
+
+def test_a_rigid_body_answer_shares_the_spare_readings(validate):
+    """Seven sensors, six degrees of freedom: the check shares sum to one spare reading."""
+    result = _text('response_mimo_random_reference_build_rigid_body')['result']
+    assert result['ok'] is True
+    assert result['transform']['rows'] == 6
+    assert result['transform']['cols'] == len(result['sensors']) == 7
+    assert sum(s['check_share'] for s in result['sensors']) == pytest.approx(1.0)
+
+
+def test_the_setup_extensions_are_checked(validate):
+    setup = copy.deepcopy(_text('request_mimo_random_setup')['params']['setup'])
+    setup['channels']['drives'][0].update({'peak_v': 6, 'shaker': None, 'moving_mass_lb': 12.5})
+    setup['channels']['limits'] = [{'channel': 5, 'ceiling': 0.2}]
+    setup['control'].update(
+        {'frf_blend': 0.5, 'cap_up_db': 3.5, 'law_budget': 0.25, 'law_misses': 3})
+    validate(setup, 'mimoSetup')
+    bad = copy.deepcopy(setup)
+    bad['control']['cap_up_db'] = 7
+    _refused(validate, bad, 'mimoSetup')

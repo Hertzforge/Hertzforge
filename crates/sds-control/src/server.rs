@@ -64,7 +64,9 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     random.clear, random.state, random.config, random.log, random.subscribe, mimo_random.setup, \
     mimo_random.validate, mimo_random.start, mimo_random.proceed, mimo_random.override, \
     mimo_random.iterate_prediction, mimo_random.stop, mimo_random.abort, mimo_random.status, \
-    mimo_random.report, mimo_random.subscribe, laws.list, laws.import, sim.profiles, sim.start, \
+    mimo_random.report, mimo_random.subscribe, mimo_random.reference.build_breakpoints, \
+    mimo_random.reference.build_rigid_body, mimo_random.reference.validate, \
+    mimo_random.reference.import, laws.list, laws.import, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -604,6 +606,9 @@ impl Service {
         match method {
             "random.configure" => self.random_configure(conn, params).await,
             "random.config" => Ok(self.random_config().await),
+            "mimo_random.reference.build_breakpoints"
+            | "mimo_random.reference.validate"
+            | "mimo_random.reference.import" => self.mimo_reference(method, params).await,
             _ => self
                 .call_plain(conn, method, params)
                 .await
@@ -675,6 +680,9 @@ impl Service {
             "mimo_random.status" => Ok(self.mimo_status_now().await),
             "mimo_random.report" => Ok(self.mimo_report().await),
             "mimo_random.subscribe" => self.mimo_subscribe(conn, params).await,
+            "mimo_random.reference.build_rigid_body" => {
+                crate::mimo::reference::build_rigid_body(params)
+            }
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             other => Err(MethodError::new(

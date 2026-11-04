@@ -2228,6 +2228,7 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",
+ "hertzforge-reference",
  "hertzforge-sdm",
  "hertzforge-shaker-db",
  "hertzforge-station",

@@ -40,6 +40,9 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-hal-sim",
     "hertzforge-module-abi",
     "hertzforge-random",
+    // The reference builders and readers behind `mimo_random.reference.*`, reviewed
+    // 2026-11-03: pure computation and file reading (zip, sha2, both MIT), no backend.
+    "hertzforge-reference",
     "hertzforge-sdm",
     "hertzforge-shaker-db",
     "hertzforge-station",
@@ -69,7 +72,7 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 ///
 /// `hertzforge-reference` was written here too: reference SDM builders, validation
 /// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
-/// reaches no hardware. The control service does not depend on it yet.
+/// reaches no hardware. The control service reaches it for `mimo_random.reference.*`.
 ///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
