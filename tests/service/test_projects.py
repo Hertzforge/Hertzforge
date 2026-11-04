@@ -298,3 +298,84 @@ def test_a_reference_that_did_not_resolve_is_listed_and_can_be_removed(tmp_path,
                        'reason': 'not found'}
     projects.remove(state, {'names': ['Run']})
     assert 'unresolved' not in projects.summary(state)
+
+
+# ---- photos and parts -----------------------------------------------------------
+
+
+def tiny_png(color: tuple[int, int, int] = (255, 0, 0), size: tuple[int, int] = (2, 2)) -> bytes:
+    """A valid PNG of one color, a few hundred bytes, for a photo."""
+    import struct
+    import zlib
+
+    width, height = size
+    raw = b''.join(b'\x00' + bytes([*color, 255]) * width for _ in range(height))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body) & 0xffffffff)
+
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
+def test_a_picture_imports_into_photos_renamed_and_deleted_by_index(tmp_path, validate):
+    """A png or jpeg is a photo: it goes into the project's Photos object,
+    made on first use; a photo is renamed by index and deleted as a part,
+    each journaled as the call a script would make (VD's photos)."""
+    setup = tmp_path / 'setup.png'
+    setup.write_bytes(tiny_png())
+    closeup = tmp_path / 'closeup.png'
+    closeup.write_bytes(tiny_png((0, 0, 255)))
+    state, added = projects.import_file(None, {'path': str(setup)})
+    assert added == ['Photos'] and state.modified
+    _state, added = projects.import_file(state, {'path': str(closeup)})
+    assert added == ['Photos'], 'the second picture joins the same object'
+    photos = state.project['Photos']
+    assert photos.names == ['setup', 'closeup'] and photos.formats == ['png', 'png']
+    held = projects.children(state, {'name': 'Photos'})
+    validate(held, 'children')
+    assert held == {'kind': 'photos', 'photos': ['setup', 'closeup']}
+    summary = projects.summary(state)
+    validate(summary, 'project')
+    assert [o['kind'] for o in summary['objects']] == ['photos']
+
+    projects.rename(state, {'name': 'Photos', 'to': 'instrumentation', 'index': 1})
+    assert photos.names == ['setup', 'instrumentation']
+    with pytest.raises(ProtocolError) as error:
+        projects.rename(state, {'name': 'Photos', 'to': 'setup', 'index': 1})
+    assert error.value.code == 'refused', 'a name in use'
+    with pytest.raises(ProtocolError) as error:
+        projects.rename(state, {'name': 'Photos', 'to': 'x', 'index': 5})
+    assert error.value.code == 'not_found'
+
+    with pytest.raises(ProtocolError) as error:
+        projects.delete_parts(state, {'parts': {'Photos': [0, 1]}})
+    assert error.value.code == 'refused' and 'delete the object' in error.value.message
+    assert photos.num_photos == 2, 'a refused delete deletes nothing'
+    projects.delete_parts(state, {'parts': {'Photos': [0]}})
+    assert photos.names == ['instrumentation']
+    lines = list(state.project.journal)
+    assert "project.add('Photos', Photos())" in lines
+    assert any(line.startswith("project['Photos'].add_file(") for line in lines)
+    assert "project['Photos'].rename(1, 'instrumentation')" in lines
+    assert "project['Photos'].delete_photos([0])" in lines
+
+
+def test_parts_of_data_are_deleted_and_every_record_is_refused():
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    history = next(name for name, obj in state.project.items()
+                   if projects.kind_of(obj) == 'time_history')
+    count = state.project[history].num_records
+    projects.delete_parts(state, {'parts': {history: [0, 2]}})
+    assert state.project[history].num_records == count - 2
+    assert f"project['{history}'].delete_records([0, 2])" in state.project.journal
+    with pytest.raises(ProtocolError) as error:
+        projects.delete_parts(state, {'parts': {history: list(range(count - 2))}})
+    assert error.value.code == 'refused'
+    with pytest.raises(ProtocolError) as error:
+        projects.delete_parts(state, {'parts': {history: [count + 3]}})
+    assert error.value.code == 'not_found'
+    with pytest.raises(ProtocolError) as error:
+        projects.delete_parts(state, {'parts': {}})
+    assert error.value.code == 'bad_request'

@@ -334,7 +334,16 @@ export interface TableEdit {
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;
+/** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
+export interface ImageView {
+	view: 'image';
+	title: string;
+	format: 'png' | 'jpeg';
+	/** u8 [N]: the encoded file. */
+	bytes: Uint8Array;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView | ImageView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------
@@ -450,6 +459,9 @@ export interface Shown {
 		/** A lone channel table: its control loops, and the views the picked one holds. */
 		environments: string[];
 		table_views: string[];
+		/** A sine specification or level set: its tones, and with both the Level Error reading. */
+		tones: string[];
+		sine_readings: boolean;
 	};
 }
 
@@ -474,6 +486,9 @@ export interface ShowPrefs {
 	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
 	environment: string | null;
 	table_view: 'channels' | 'response' | 'reference';
+	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
+	tone: string | null;
+	sine_reading: 'curves' | 'bars';
 	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */

@@ -190,6 +190,19 @@ def children(project: Any, name: str) -> dict[str, Any]:
             for dof, quantity in zip(obj.dof_strings(), types, strict=True)]}
     if isinstance(obj, Photos):
         return {'kind': 'photos', 'photos': list(obj.names)}
+    from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
+
+    if isinstance(obj, (SineSweepSpecification, SineLevelSet)):
+        # the rows under a sine object are its control DOFs (VD, 2026-09-25:
+        # the tones were the rows once, which inverted the rest of the tree)
+        from .ops_sine_shock import sine_dofs
+
+        quantity = (obj.ordinate_dim if isinstance(obj, SineSweepSpecification)
+                    else next((str(level.ordinate_dim[0]) for level in obj.levels
+                               if level.num_records), ''))
+        return {'kind': 'channels', 'channels': [
+            {'dof': dof, 'quantity': quantity if quantity in QUANTITIES else ''}
+            for dof in sine_dofs(obj)]}
     if isinstance(obj, MatchedModes):
         return {'kind': 'matches', 'matches': [
             {'first': int(first) + 1, 'second': int(second) + 1, 'mac': float(mac)}

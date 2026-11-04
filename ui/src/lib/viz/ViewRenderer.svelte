@@ -5,6 +5,7 @@
 	 */
 	import type { ParamValues } from '$lib/forms/params';
 	import type { View } from '$lib/protocol/types';
+	import ImagePane from './ImagePane.svelte';
 	import MatrixPane from './MatrixPane.svelte';
 	import ReadingPane from './ReadingPane.svelte';
 	import SpectrumPane from './SpectrumPane.svelte';
@@ -85,6 +86,8 @@
 	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
 	<TablePane {view} {onedit} />
+{:else if view.view === 'image'}
+	<ImagePane {view} {showTitle} />
 {:else}
 	<p class="unknown" data-testid="view-unknown">This shell has no renderer for the view "{(view as { view: string }).view}".</p>
 {/if}

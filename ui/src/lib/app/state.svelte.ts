@@ -270,7 +270,9 @@ class AnalyzeState {
 						arrows: this.prefs.arrows,
 						sensors: this.prefs.sensors,
 						environment: this.prefs.environment,
-						table_view: this.prefs.table_view
+						table_view: this.prefs.table_view,
+						tone: this.prefs.tone,
+						sine_reading: this.prefs.sine_reading
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
@@ -1064,7 +1066,9 @@ function readPrefs(): ShowPrefs {
 		arrows: false,
 		sensors: true,
 		environment: null,
-		table_view: 'channels'
+		table_view: 'channels',
+		tone: null,
+		sine_reading: 'curves'
 	};
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
@@ -1097,6 +1101,8 @@ export class ProjectState {
 	children = $state.raw<Record<string, ProjectChildren>>({});
 	/** The object being renamed in the tree, or null. */
 	renaming = $state<string | null>(null);
+	/** The photo being renamed in place: its object and index, or null. */
+	renamingPart = $state<{ name: string; index: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the strip: the member it is reached by, or null. */
@@ -1154,6 +1160,7 @@ export class ProjectState {
 	private selected(next: Selection): void {
 		this.selection = next;
 		this.renaming = null;
+		this.renamingPart = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
@@ -1280,12 +1287,50 @@ export class ProjectState {
 		return ok;
 	}
 
-	/** Remove what is selected, once confirmed. */
+	/** The sub-items picked in the tree, by object: what Delete takes when any are picked. */
+	get pickedParts(): Record<string, number[]> {
+		const parts: Record<string, number[]> = {};
+		for (const [name, picks] of Object.entries(this.selection.records)) if (picks.length) parts[name] = picks;
+		return parts;
+	}
+
+	/**
+	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
+	 * co-selected object is context, not a target, as in Visual Dynamics), else the objects.
+	 */
 	async removeSelected(): Promise<boolean> {
 		const names = [...this.selection.objects];
+		const parts = this.pickedParts;
 		this.confirming = false;
+		if (Object.keys(parts).length) return this.deleteParts(parts);
 		if (!names.length) return false;
 		return this.remove(names);
+	}
+
+	/** Delete sub-items by index: records, modes, channels or photos (`project.delete_parts`). */
+	async deleteParts(parts: Record<string, number[]>): Promise<boolean> {
+		const what = Object.entries(parts).map(([name, picks]) => `${picks.length} of ${name}`).join(', ');
+		const ok = await this.call(`Deleting ${what}`, 'project.delete_parts', { parts }, false);
+		if (ok) {
+			const records = { ...this.selection.records };
+			for (const name of Object.keys(parts)) {
+				delete records[name];
+				if (this.expanded.has(name)) void this.loadChildren(name);
+			}
+			this.selection = { ...this.selection, records };
+			void this.app.analyze.showSelection();
+		}
+		return ok;
+	}
+
+	/** Rename one photo in place (`project.rename` with `index`). */
+	async renamePart(name: string, index: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming photo ${index + 1} of ${name}`, 'project.rename', { name, to, index }, false);
+		if (ok) {
+			if (this.expanded.has(name)) void this.loadChildren(name);
+			void this.app.analyze.showSelection();
+		}
+		return ok;
 	}
 
 	/** An act on the groups, run as the operation it is; the project it answers with is applied. */

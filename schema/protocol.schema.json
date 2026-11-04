@@ -122,6 +122,15 @@
         }
       }
     },
+    "imageView": {
+      "type": "object", "required": ["view", "title", "format", "bytes"], "additionalProperties": false,
+      "properties": {
+        "view": {"const": "image"},
+        "title": {"type": "string"},
+        "format": {"enum": ["png", "jpeg"]},
+        "bytes": {"$ref": "#/$defs/arrayRef"}
+      }
+    },
     "readingView": {
       "type": "object", "required": ["view", "title", "rows"],
       "properties": {
@@ -299,7 +308,7 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/tableView"}]},
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/tableView"}, {"$ref": "#/$defs/imageView"}]},
     "tableView": {
       "type": "object", "required": ["view", "title", "columns", "rows"], "additionalProperties": false,
       "properties": {
@@ -352,7 +361,7 @@
         "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
-        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table"]}}
+        "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}
       }
     },
     "dataset": {
@@ -443,7 +452,7 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "complex", "frequency", "projection", "shapes", "values_dofs", "arrows", "sensors", "environments", "table_views"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "complex", "frequency", "projection", "shapes", "values_dofs", "arrows", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"},
           "projection": {"type": "boolean"},
           "shapes": {"type": "boolean"},
@@ -451,7 +460,9 @@
           "arrows": {"type": "boolean"},
           "sensors": {"type": "boolean"},
           "environments": {"type": "array", "items": {"type": "string"}},
-          "table_views": {"type": "array", "items": {"enum": ["channels", "response", "reference"]}}}
+          "table_views": {"type": "array", "items": {"enum": ["channels", "response", "reference"]}},
+          "tones": {"type": "array", "items": {"type": "string"}},
+          "sine_readings": {"type": "boolean"}}
         }
       }
     },
