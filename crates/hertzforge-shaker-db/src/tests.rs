@@ -416,3 +416,46 @@ fn assess_defaults_crest_factor_when_nonpositive() {
         .iter()
         .any(|a| a.contains("Crest factor = 3.00")));
 }
+
+// --- several shakers on one article ---------------------------------------------
+
+/// The article's mass is shared: one shaker carrying a heavy article alone is
+/// exceeded, and four shakers sharing it each carry a quarter and pass. Each
+/// drive's report is the single-shaker assessment of its own mass and profile.
+#[test]
+fn a_shared_article_splits_its_mass_across_the_shakers() {
+    let (_t, spec) = six_grms_profile();
+    let rec = t2000_class(RatingBasis::Peak);
+    let own = mass_totaling(200.0);
+    // 6 gRMS at peak 3x: about 18 g peak; 20,000 lbf / 18 g is about 1,100 lb.
+    let article_lb = 3_000.0;
+    let alone = FeasibilityCalculator::assess_shared(
+        &[(rec.clone(), own)],
+        article_lb,
+        std::slice::from_ref(&spec),
+        3.0,
+    );
+    assert!(
+        alone.exceeded(),
+        "one shaker under the whole article: {:?}",
+        alone.overall
+    );
+    let four: Vec<(ShakerRecord, MovingMass)> = (0..4).map(|_| (rec.clone(), own)).collect();
+    let shared =
+        FeasibilityCalculator::assess_shared(&four, article_lb, &vec![spec.clone(); 4], 3.0);
+    assert_eq!(shared.drives.len(), 4);
+    assert!(
+        !shared.exceeded(),
+        "four shakers sharing it: {:?}",
+        shared.overall
+    );
+    let mut quarter = own;
+    quarter.test_article_lb += article_lb / 4.0;
+    let single = FeasibilityCalculator::assess(&rec, quarter, None, &spec, 3.0);
+    assert_eq!(shared.drives[2], single);
+    // An empty list is not evaluated.
+    assert_eq!(
+        FeasibilityCalculator::assess_shared(&[], 0.0, &[], 3.0).overall,
+        Verdict::NotEvaluated
+    );
+}

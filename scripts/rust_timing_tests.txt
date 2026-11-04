@@ -88,6 +88,10 @@ hertzforge-engine  test:safety_gates  an_intermittent_but_delivering_stream_is_n
 hertzforge-engine  test:scale_400ch  four_hundred_channels_run_clean_at_the_derived_block_and_ring
 hertzforge-engine  test:scale_mimo  mimo_24_drives_96_inputs_run_clean_on_a_modal_plant_with_a_matrix_step
 
+# Multiple-output Random at full scale (72 controls, 24 drives, 1,600 lines): the
+# compute per loop against the loop period (release builds only, as above)
+hertzforge-mimo-random  test:timing  a5_compute_per_loop_at_72_by_24_by_1600_lines
+
 # A job that must still be running when the second start arrives, and a cancel
 # inside a real-time window
 hertzforge-insight  lib  jobs::tests::single_job_policy_and_lifecycle

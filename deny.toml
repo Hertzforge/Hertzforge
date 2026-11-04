@@ -80,6 +80,7 @@ deny = [
     "hertzforge-explorer-host",
     "hertzforge-random",
     "hertzforge-random-laws",
+    "hertzforge-mimo-random",
     "hertzforge-recorder",
     "hertzforge-shock-host",
     "hertzforge-sine",
