@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { flagOn, tableHtml } from './table';
 import { blockText, fillTargets, numeric, parseTsv, pasteTargets, spanned, tableText } from './table';
 
 describe('table', () => {
@@ -65,5 +66,19 @@ describe('table', () => {
 			{ row: 1, key: 'b', value: '7' },
 			{ row: 1, key: 'c', value: '7' }
 		]);
+	});
+});
+
+describe('tableHtml', () => {
+	it('puts the headings in a thead and escapes the cells', () => {
+		const html = tableHtml({ columns: ['DOF', 'Note'], rows: [['1Z+', 'a < b & c']] });
+		expect(html).toBe('<table><thead><tr><th>DOF</th><th>Note</th></tr></thead><tbody><tr><td>1Z+</td><td>a &lt; b &amp; c</td></tr></tbody></table>');
+	});
+});
+
+describe('flagOn', () => {
+	it('reads the table\'s True and a file\'s yes or 1 as set', () => {
+		expect(['True', 'true', 'yes', '1'].every(flagOn)).toBe(true);
+		expect(['False', '', 'no', '0'].some(flagOn)).toBe(false);
 	});
 });

@@ -11,6 +11,9 @@
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
 
+	/** A channel table's views, as VD's drop-down names them. */
+	const TABLE_VIEWS: Record<string, string> = { channels: 'Channels', response: 'Response transformation', reference: 'Reference transformation' };
+
 	/** Where a shape set's values are read, as VD names the choices. */
 	const VALUES_CHOICES: Record<string, string> = {
 		all: 'All DOFs',
@@ -335,6 +338,16 @@
 									</select>
 								{/if}
 							{/if}
+							{#if offers.environments.length > 1}
+								<select class="field sm" aria-label="Environment" data-testid="read-environment" value={a.prefs.environment ?? offers.environments[0]} onchange={(e) => a.setPref('environment', (e.currentTarget as HTMLSelectElement).value)} title="Which environment's control channels the Control column shows, and whose transformation the view drop-down offers">
+									{#each offers.environments as loop (loop)}<option value={loop}>{loop}</option>{/each}
+								</select>
+							{/if}
+							{#if offers.table_views.length > 1}
+								<select class="field sm" aria-label="Table view" data-testid="read-table-view" value={a.prefs.table_view} onchange={(e) => a.setPref('table_view', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.table_view)} title="The channels, or what the controller put over them: the response transformation, a row per controlled response over the control channels, or the reference transformation over the drives">
+									{#each offers.table_views as form (form)}<option value={form}>{TABLE_VIEWS[form] ?? form}</option>{/each}
+								</select>
+							{/if}
 							{#if offers.arrows}
 								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
 							{/if}
@@ -370,6 +383,7 @@
 									bars={v.view === 'matrix' && a.prefs.bars}
 									mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
 									overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
+									onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 								/>
 							</div>
 						{/each}

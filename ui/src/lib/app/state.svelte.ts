@@ -259,7 +259,9 @@ class AnalyzeState {
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
-						sensors: this.prefs.sensors
+						sensors: this.prefs.sensors,
+						environment: this.prefs.environment,
+						table_view: this.prefs.table_view
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
@@ -500,6 +502,23 @@ class AnalyzeState {
 					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
 				);
 			}
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
+	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			const table = res.views.find((v) => v.view === 'table');
+			if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
 			return null;
 		} catch (err) {
 			return message(err);
@@ -1110,7 +1129,9 @@ function readPrefs(): ShowPrefs {
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
-		sensors: true
+		sensors: true,
+		environment: null,
+		table_view: 'channels'
 	};
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;

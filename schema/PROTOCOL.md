@@ -438,7 +438,12 @@ values read at `prefs.values_dofs` (`all` or a channel choice of the table in it
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
 `prefs.sensors` (offered as `arrows` and `sensors`) put DOF arrows and the channel table's sensors over
 every stage as `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the geometry's
-coordinates and `lines` u32 [L, 2] indexing them.
+coordinates and `lines` u32 [L, 2] indexing them. A lone channel table shows typed into, its cells
+edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
+date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the
+Control column shows (`offers.environments`) and `prefs.table_view` the table or one of that loop's
+transformations (`offers.table_views`). `project.save_as` takes `units`: `display` for the connection's
+display unit system (the server puts its name in), `si` for the stored values.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
