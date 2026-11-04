@@ -12,9 +12,6 @@
 # a prompt nobody is there to answer. Apple's Developer ID intermediate goes in
 # beside it, because an exported .p12 carries the leaf alone. The runner is thrown
 # away after the job, keychain and all.
-#
-# Not run yet: the desktop workflow calls it only when the repository variable
-# HERTZFORGE_SIGN_MACOS is "true" (docs/desktop-app.md, "Signing").
 set -euo pipefail
 : "${MACOS_CERTIFICATE:?the .p12, base64}" "${MACOS_CERTIFICATE_PASSWORD:?its password}"
 keychain="$RUNNER_TEMP/signing.keychain-db"

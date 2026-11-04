@@ -109,13 +109,14 @@ folder (`~/Library/Caches/org.hertzforge.app/` on macOS). The control service's 
 
 ## Unsigned Builds
 
-The builds CI makes are not signed yet. What a user sees because of it:
+The Windows and Linux builds are not signed, and neither is a Mac build from `build.sh` alone. What a
+user sees because of it:
 
-- **macOS.** The app is signed ad hoc (no developer identity), which Apple silicon requires before it
-  will start an app at all. A downloaded copy is refused the first time it is opened, with a warning
-  that it could not be verified; the user allows it once under System Settings, Privacy & Security,
-  Open Anyway (on older macOS versions, Open from the Finder's context menu does the same). This was
-  not tried on a downloaded copy: the copy tested here was built on the same Mac.
+- **macOS.** An unsigned build is signed ad hoc (no developer identity), which Apple silicon requires
+  before it will start an app at all. A downloaded copy is refused the first time it is opened, with a
+  warning that it could not be verified; the user allows it once under System Settings, Privacy &
+  Security, Open Anyway (on older macOS versions, Open from the Finder's context menu does the same).
+  The images CI makes are signed and notarized, so this does not apply to them.
 - **Windows.** SmartScreen warns about an unrecognized app; More info, then Run anyway, installs it.
   The installer is per user, with no administrator prompt. The app uses the system's WebView2
   runtime, present on Windows 11 and current Windows 10; where it is missing, the installer
@@ -139,12 +140,29 @@ bundled Python, under the hardened runtime with Visual Dynamics' entitlements, i
 pandas, netCDF4, h5py and the CAD kernel and computed a PSD from the plate data. The signed app is not
 yet tried as a copy downloaded on another Mac.
 
-Signing in CI is prepared and not enabled. `desktop/packaging/ci_signing.sh` puts a Developer ID
-certificate from repository secrets into a keychain of the runner's own, and the desktop workflow then
-runs `sign_macos.sh`. To enable it: set the secrets `MACOS_CERTIFICATE` (the .p12 with its private key,
-base64), `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_APPLE_ID`, `NOTARY_PASSWORD` (an app-specific password)
-and `NOTARY_TEAM_ID`, and the repository variable `HERTZFORGE_SIGN_MACOS` to `true`. Windows stays
-unsigned, as Visual Dynamics' builds are.
+## Signing on the Runners
+
+The desktop workflow builds the macOS images on GitHub's runners, one for Apple silicon and one for
+Intel, signs and notarizes them with `sign_macos.sh`, and fails if Apple has not accepted both the app
+and the image. Pushing a tag `v*` also drafts a GitHub release with the two images and their
+`SHA256SUMS` on it. Nothing is public until the draft is published, and publishing it is what starts
+`release.yml`. A run started by hand on main builds the same images as a test and leaves them as
+artifacts for 14 days. Windows stays unsigned, as Visual Dynamics' builds are, and the Windows and Linux
+installers are artifacts of either run, not on the release.
+
+The credentials are secrets of the `release` environment, which admits only `v*` tags and main, so a
+workflow on another branch cannot read them. An admin of the repository can change that rule. The
+maintainer who owns the certificate sets them from their own terminal; no agent handles them:
+
+- `MACOS_CERTIFICATE`: the Developer ID Application certificate with its private key, exported from
+  Keychain Access as a `.p12` with a password, in base64;
+- `MACOS_CERTIFICATE_PASSWORD`: that password;
+- `NOTARY_APPLE_ID` and `NOTARY_PASSWORD`: the Apple ID and an app-specific password made for the
+  runners alone, so it can be revoked without touching the one on the developer's Mac;
+- `NOTARY_TEAM_ID`: the team the certificate belongs to.
+
+`desktop/packaging/ci_signing.sh` puts the certificate in a keychain of the job's own, and the runner is
+thrown away after the job.
 
 ## The Local Proof
 

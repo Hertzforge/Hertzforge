@@ -1,14 +1,14 @@
 name: desktop
 
 # The desktop app (desktop/, docs/desktop-app.md): its own lint, tests and
-# dependency checks, and its installers for macOS, Windows and Linux as artifacts.
-# It runs on every push to the desktop branch and on demand, and is not a required
-# check: it makes builds for the maintainers to install. The builds are unsigned;
-# macOS signing and notarization run only when the repository variable
-# HERTZFORGE_SIGN_MACOS is "true" and the signing secrets are set (see the docs).
+# dependency checks, and its installers for macOS, Windows and Linux. It is not a
+# required check. A tag v* builds them and drafts a release with the signed macOS
+# images on it, to be looked at and published by hand (publishing is what starts
+# release.yml). A run started by hand on main builds them as a test and publishes
+# nothing; its images are artifacts, for a maintainer to try.
 on:
   push:
-    branches: [feature/desktop-app]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -62,7 +62,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: macos-latest, bundles: 'app,dmg', name: macos-arm64}
           - {os: windows-latest, bundles: nsis, name: windows-x64}
           # The oldest supported Ubuntu runner, so the .deb and the AppImage start
           # on the distributions newer than the one that built them.
@@ -90,28 +89,12 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
       - name: Build the app and its installers
         run: bash desktop/packaging/build.sh --bundles '${{ matrix.bundles }}'
-      # Prepared, not enabled: set the repository variable HERTZFORGE_SIGN_MACOS to
-      # "true" once the secrets below exist. It signs every binary in the app with
-      # the hardened runtime, notarizes and staples the app, then makes, signs and
-      # notarizes the disk image in place of the unsigned one.
-      - name: Sign and notarize (macOS)
-        if: runner.os == 'macOS' && vars.HERTZFORGE_SIGN_MACOS == 'true'
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-        run: |
-          bash desktop/packaging/ci_signing.sh
-          dmg=$(ls target/release/bundle/dmg/*.dmg)
-          bash desktop/packaging/sign_macos.sh target/release/bundle/macos/Hertzforge.app "$dmg"
       - name: Sizes
         run: |
           {
             echo "## ${{ matrix.name }}"
             find target/release/bundle -maxdepth 2 -type f \
-              \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.deb' -o -name '*.AppImage' \) \
+              \( -name '*-setup.exe' -o -name '*.deb' -o -name '*.AppImage' \) \
               -exec du -h {} \;
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
@@ -120,7 +103,78 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            target/release/bundle/dmg/*.dmg
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/deb/*.deb
             target/release/bundle/appimage/*.AppImage
+
+  # One job per architecture, each on a runner of that architecture. The `release`
+  # environment holds the signing secrets and admits only a v* tag or main, so a
+  # workflow on any other branch cannot read them. They reach only the signing step,
+  # after everything the build downloads has run. HERTZFORGE_REQUIRE_NOTARIZED stops
+  # the job if Apple has not accepted both the app and the image.
+  macos:
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-latest, name: macos-arm64}
+          - {os: macos-26-intel, name: macos-x64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: Build the app and its image
+        run: bash desktop/packaging/build.sh --bundles app,dmg
+      - name: Sign and notarize
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          HERTZFORGE_REQUIRE_NOTARIZED: '1'
+        run: |
+          bash desktop/packaging/ci_signing.sh
+          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          bash desktop/packaging/sign_macos.sh target/release/bundle/macos/Hertzforge.app "$dmg"
+      - name: Size
+        run: du -h target/release/bundle/dmg/*.dmg | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hertzforge-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: target/release/bundle/dmg/*.dmg
+
+  # Waits for both images, so a draft is never missing one. The draft is not public
+  # until someone publishes it.
+  draft:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hertzforge-macos-*
+          merge-multiple: true
+          path: images
+      - name: Checksums
+        run: cd images && sha256sum *.dmg > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: images/*
+          draft: true
+          generate_release_notes: true
