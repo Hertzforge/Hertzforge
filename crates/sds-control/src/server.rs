@@ -64,7 +64,8 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     random.clear, random.state, random.config, random.log, random.subscribe, mimo_random.setup, \
     mimo_random.validate, mimo_random.start, mimo_random.proceed, mimo_random.override, \
     mimo_random.iterate_prediction, mimo_random.stop, mimo_random.abort, mimo_random.status, \
-    mimo_random.report, mimo_random.subscribe, laws.list, laws.import, sim.profiles, sim.start, \
+    mimo_random.report, mimo_random.subscribe, mimo_random.identification.save, \
+    mimo_random.identification.load, laws.list, laws.import, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -101,9 +102,21 @@ pub struct ServiceOptions {
     pub sim_speed: f64,
     /// What the hardware lock names as this service's address.
     pub bind: String,
-    /// Makes the driver of a MIMO run (`None`: the simulated driver, paced at
-    /// `sim_speed`).
+    /// Makes the driver of a MIMO run (`None`: the controller's MIMO Random service
+    /// through [`crate::mimo::adapter::ServiceDriver`]). Tests that need no real run
+    /// give [`simulated_mimo_driver`].
     pub mimo_driver: Option<DriverFactory>,
+}
+
+/// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
+/// simulated seconds per wall second: for wire tests that exercise the protocol
+/// without the controller's service. A run never uses it unless given it here.
+pub fn simulated_mimo_driver(speed: f64) -> DriverFactory {
+    Arc::new(move |_ctx| {
+        Box::new(crate::mimo::sim::SimulatedMimoDriver::new(
+            crate::mimo::sim::SimClock::wall(speed),
+        ))
+    })
 }
 
 impl Default for ServiceOptions {
@@ -675,6 +688,10 @@ impl Service {
             "mimo_random.status" => Ok(self.mimo_status_now().await),
             "mimo_random.report" => Ok(self.mimo_report().await),
             "mimo_random.subscribe" => self.mimo_subscribe(conn, params).await,
+            "mimo_random.identification.save" => {
+                self.mimo_identification(conn, params, false).await
+            }
+            "mimo_random.identification.load" => self.mimo_identification(conn, params, true).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             other => Err(MethodError::new(

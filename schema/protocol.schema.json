@@ -336,7 +336,7 @@
                "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
-               "shaker_record_invalid", "setup_invalid", "gate_failed", "law_import_failed",
+               "shaker_record_invalid", "setup_invalid", "gate_failed", "identification_mismatch", "law_import_failed",
                "catalog_unavailable"]
     },
     "itemReason": {
@@ -1272,6 +1272,24 @@
       "type": "object", "required": ["ack"], "additionalProperties": false,
       "properties": {"ack": {"type": "string", "minLength": 1, "pattern": "\\S"}}
     },
+    "mimoIdentificationParams": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "properties": {"path": {"type": "string", "minLength": 1}}
+    },
+    "mimoIdentificationResult": {
+      "type": "object", "required": ["identification"], "additionalProperties": false,
+      "properties": {"identification": {
+        "type": "object", "required": ["path", "setup_hash", "frames", "level_db", "drive_vrms"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "setup_hash": {"type": "string", "minLength": 1},
+          "frames": {"type": "integer", "minimum": 0},
+          "level_db": {"type": ["number", "null"]},
+          "drive_vrms": {"type": "array", "items": {"type": ["number", "null"]}}
+        }
+      }}
+    },
     "mimoIterateParams": {
       "type": "object", "additionalProperties": false,
       "properties": {"law": {"oneOf": [{"$ref": "#/$defs/mimoLawChoice"}, {"type": "null"}]}}
@@ -1509,7 +1527,7 @@
       "type": "object", "required": ["law"], "additionalProperties": false,
       "properties": {"law": {"$ref": "#/$defs/lawEntry"}}
     },
-    "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "drive_psd", "drive_coh",
+    "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "coh_error", "drive_psd", "drive_coh",
                               "frf", "sv", "cond", "mcoh", "cap", "dof_rms", "trace", "pred_drive_rms",
                               "pred_error_db", "law_diag", "sdm", "readings"]},
     "mimoPosition": {"type": "integer", "minimum": 0},
@@ -1548,7 +1566,7 @@
          "then": {"properties": {"pair": false, "rows": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "pred_error_db"}}},
          "then": {"required": ["index"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false, "key": false}}},
-        {"if": {"properties": {"quantity": {"const": "error_db"}}},
+        {"if": {"properties": {"quantity": {"enum": ["error_db", "coh_error"]}}},
          "then": {"properties": {"index": false, "pair": false, "diagonal": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "sdm"}}},
          "then": {"required": ["block"], "properties": {"index": false, "pair": false, "rows": false, "diagonal": false, "key": false}}},

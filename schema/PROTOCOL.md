@@ -368,6 +368,7 @@ plain words: it never names a protocol method.
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
 | `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` engages anyway | `gates` |
+| `identification_mismatch` | `refused` | `mimo_random.identification.load` (or the start that loads it) with a set measured on another setup | `setup_hash`, `identification_hash` |
 | `law_import_failed` | `refused` | The file is not a control law this program can run, or cannot be read | `path` |
 | `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
 
@@ -976,8 +977,20 @@ what every index on the wire counts.
 | `mimo_random.status` | `{}` | any | status |
 | `mimo_random.report` | `{}` | any | `{"report"}` |
 | `mimo_random.subscribe` | see "MIMO Random Display" | any | as there |
+| `mimo_random.identification.save` | `{"path"}` | after identification | `{"identification"}` |
+| `mimo_random.identification.load` | `{"path"}` | `configured` | `{"identification"}` |
 
 "status" is the `mimo_random.status` object below.
+
+An identification set (the FRF, coherences, conditioning and spectral matrices measured during
+identification, with the setup hash they were measured on) can be kept and used again.
+`mimo_random.identification.save` copies the present run's set into the folder `path` (any
+time after identification, the finished run included). `mimo_random.identification.load` names
+a saved set before `mimo_random.start`: it is checked against the setup and the channel table as
+they stand (the channels, their sensitivities, the transformations and the grid), refused
+`identification_mismatch` when they differ, and the start that follows skips the noise floor and
+identification and goes to the gates. `{"identification"}` is
+`{"path","setup_hash","frames","level_db","drive_vrms"}`. Both are the controller's.
 
 ### MIMO Random Setup
 
@@ -1155,6 +1168,7 @@ once when the run has streamed.
 | `phase` | `pair` | one `spectrum`: the phase of `G_ij`, degrees, against the reference's |
 | `csd_mag` | `pair` | one `spectrum`, stepped: the cross-spectrum magnitude against the reference's |
 | `error_db` | `rows` | one `heatmap`: each control's dB error against the reference per line |
+| `coh_error` | `rows` | one `heatmap`: each control's coherence error per line, the rms over its partners of the measured squared coherence minus the reference's (0 to 1; 0 with one control) |
 | `drive_psd` | `index` or `diagonal` | one `spectrum`, stepped, V²/Hz |
 | `drive_coh` | `pair` | one `spectrum`: the coherence of two drives |
 | `frf` | `pair` (`[control, drive]`) | two `spectrum`s: the FRF's magnitude and phase |

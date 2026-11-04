@@ -61,7 +61,9 @@ pub fn options(
         capture_root: Some(dir),
         sim_speed: speed,
         bind: "ws://127.0.0.1:0/".into(),
-        mimo_driver: None,
+        // The protocol tests run MIMO on the simulated driver; the wire runs on the
+        // controller's service set their own (tests/mimo_service.rs).
+        mimo_driver: Some(server::simulated_mimo_driver(speed)),
     }
 }
 
