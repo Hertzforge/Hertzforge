@@ -1,9 +1,9 @@
 /**
  * The brackets down the tree's left edge that join the objects of one object group, as Visual
  * Dynamics paints them (`gui/project_tree.py`): the Basis blue and bold, each other group a color
- * of its own from the curve palette (never the Basis blue), neighboring groups interleaved on
- * columns so two brackets never run on top of each other (a group inside or across another takes a
- * column of its own; Brandon, 2026-11-04), and a named group's name along its line.
+ * of its own from the curve palette (never the Basis blue), neighboring groups interleaved on two
+ * columns so they read apart, and a named group's name along its line. Brackets never nest: the
+ * tree lists a group's members together (`order.ts`), as VD's does.
  */
 
 import type { ProjectSummary } from '$lib/protocol/types';
@@ -18,7 +18,7 @@ export interface Span {
 	color: string;
 	bold: boolean;
 	name: string;
-	/** Which gutter column the bracket runs in: neighbors alternate, overlapping groups spread. */
+	/** 0 or 1: which of the two gutter columns the bracket runs in; neighbors alternate. */
 	column: number;
 }
 
@@ -36,19 +36,7 @@ export function spans(links: ProjectSummary['links'] | undefined, order: string[
 		out.push({ rows, color, bold: basis, name: group.name, column: 0 });
 	}
 	out.sort((a, b) => order.indexOf(a.rows[0]) - order.indexOf(b.rows[0]));
-	// the lowest column free of every bracket still running, and never the one just used, so
-	// neighbors read apart and a bracket inside or across another never runs on top of it
-	const busyUntil: number[] = [];
-	let previous = -1;
-	for (const span of out) {
-		const first = order.indexOf(span.rows[0]);
-		const last = order.indexOf(span.rows[span.rows.length - 1]);
-		let column = 0;
-		while (column === previous || (column < busyUntil.length && busyUntil[column] >= first)) column++;
-		busyUntil[column] = last;
-		span.column = column;
-		previous = column;
-	}
+	out.forEach((span, k) => (span.column = k % 2));
 	return out;
 }
 

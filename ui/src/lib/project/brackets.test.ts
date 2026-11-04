@@ -39,25 +39,4 @@ describe('the link brackets', () => {
 		expect(a[1].column).toBe(1);
 	});
 
-	it('a group inside or across another takes a column of its own, never on top of it', () => {
-		const painted = spans(
-			[
-				{ members: ['Geometry', 'Table', 'Time', 'PSD', 'FRF', 'Modes', 'FEM Modes'], role: 'Basis', name: '' },
-				{ members: ['Table', 'Time'], role: null, name: '' },
-				{ members: ['PSD', 'FRF'], role: null, name: '' },
-				{ members: ['Modes', 'FEM Modes'], role: null, name: '' }
-			],
-			order
-		);
-		expect(painted.map((s) => s.column)).toEqual([0, 1, 2, 1]);
-		const after = spans(
-			[
-				{ members: ['Geometry', 'Table'], role: null, name: '' },
-				{ members: ['Time', 'PSD'], role: null, name: '' },
-				{ members: ['FRF', 'Modes'], role: null, name: '' }
-			],
-			order
-		);
-		expect(after.map((s) => s.column)).toEqual([0, 1, 0]);
-	});
 });
