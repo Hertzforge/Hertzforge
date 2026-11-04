@@ -90,7 +90,7 @@
 
 use crate::support::{
     band_hermitian, gram_packed, inverse_diagnostics, largest_change_db, matmul_adj_into,
-    matmul_into, row_power, Inverse, InverseCache, InverseRule, ZERO,
+    matmul_into, over_line_chunks, row_power, Inverse, InverseCache, InverseRule, ZERO,
 };
 use hertzforge_sdm::law::{LawError, MimoSetup};
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
@@ -232,6 +232,9 @@ fn factor_with_zeros(g: &[C64], n: usize, r: &mut [C64], pivot: &mut [bool]) {
     }
 }
 
+/// One line's slots of the target, its factor, `Z` and the pivots.
+type LineSlots<'a> = (&'a mut [C64], &'a mut [C64], &'a mut [C64], &'a mut [bool]);
+
 /// The factor loop for one run.
 pub(crate) struct FactorLoop {
     lines: usize,
@@ -301,49 +304,64 @@ impl FactorLoop {
         let inv = self.cache.current().expect("formed above");
         let tol = self.settings.rank_tol;
         let nb = self.band.1 - self.band.0;
-        self.maps = (0..nb).map(|i| LineMap::new(inv, i, tol)).collect();
-        let mut c = vec![ZERO; nc * nc];
-        let mut tmp = vec![ZERO; nc * nd];
-        let mut piv = vec![false; nc];
-        let mut d = vec![ZERO; nd * nd];
-        for i in 0..nb {
-            let map = &self.maps[i];
-            let q = map.q;
-            let slot = i * nc * nc..(i + 1) * nc * nc;
-            map.reduce(&self.target, i, nc, &mut self.gt[slot.clone()]);
-            factor_with_zeros(
-                &self.gt[slot.clone()],
-                q,
-                &mut self.r[slot.clone()],
-                &mut self.pivot[i * nc..i * nc + q],
-            );
-            for p in &mut self.pivot[i * nc + q..(i + 1) * nc] {
-                *p = false;
+        // Each line's coordinates, its target and factor, and `Z`, over threads:
+        // the lines are independent.
+        let mut maps: Vec<Option<LineMap>> = vec![None; nb];
+        over_line_chunks(&mut maps, 1, nb, |first, chunk| {
+            for (k, m) in chunk.iter_mut().enumerate() {
+                *m = Some(LineMap::new(inv, first + k, tol));
             }
-            let z = &mut self.z[slot.clone()];
-            match (&self.last, carry) {
-                (Some(last), true) => {
-                    // A^+ G_uu A^+^H, factored.
-                    for r in 0..nd {
-                        for col in 0..nd {
-                            d[r * nd + col] = last.get(self.band.0 + i, r, col);
+        });
+        self.maps = maps.into_iter().map(|m| m.expect("every line")).collect();
+        let per = nc * nc;
+        let (maps, target, last, band) = (&self.maps, &self.target, &self.last, self.band);
+        // Each line's slots of the four per-line arrays, chunked together.
+        let mut slots: Vec<LineSlots<'_>> = self
+            .gt
+            .chunks_mut(per)
+            .zip(self.r.chunks_mut(per))
+            .zip(self.z.chunks_mut(per))
+            .zip(self.pivot.chunks_mut(nc))
+            .map(|(((g, r), z), p)| (g, r, z, p))
+            .collect();
+        over_line_chunks(&mut slots, 1, nb, |first, chunk| {
+            let mut c = vec![ZERO; nc * nc];
+            let mut tmp = vec![ZERO; nc * nd];
+            let mut piv = vec![false; nc];
+            let mut d = vec![ZERO; nd * nd];
+            for (k, (gt, r, z, pivot)) in chunk.iter_mut().enumerate() {
+                let i = first + k;
+                let map = &maps[i];
+                let q = map.q;
+                map.reduce(target, i, nc, gt);
+                factor_with_zeros(gt, q, r, &mut pivot[..q]);
+                for p in &mut pivot[q..] {
+                    *p = false;
+                }
+                match (last, carry) {
+                    (Some(last), true) => {
+                        // A^+ G_uu A^+^H, factored.
+                        for row in 0..nd {
+                            for col in 0..nd {
+                                d[row * nd + col] = last.get(band.0 + i, row, col);
+                            }
+                        }
+                        matmul_into(&map.a_pinv, &d, q, nd, nd, &mut tmp[..q * nd]);
+                        matmul_adj_into(&tmp[..q * nd], &map.a_pinv, q, nd, q, &mut c[..q * q]);
+                        factor_with_zeros(&c, q, z, &mut piv);
+                    }
+                    _ => z[..q * q].copy_from_slice(&r[..q * q]),
+                }
+                // Only the target's sources are live.
+                for j in 0..q {
+                    if !pivot[j] {
+                        for k in j..q {
+                            z[k * q + j] = ZERO;
                         }
                     }
-                    matmul_into(&map.a_pinv, &d, q, nd, nd, &mut tmp[..q * nd]);
-                    matmul_adj_into(&tmp[..q * nd], &map.a_pinv, q, nd, q, &mut c[..q * q]);
-                    factor_with_zeros(&c, q, z, &mut piv);
-                }
-                _ => z[..q * q].copy_from_slice(&self.r[slot.start..slot.start + q * q]),
-            }
-            // Only the target's sources are live.
-            for j in 0..q {
-                if !self.pivot[i * nc + j] {
-                    for k in j..q {
-                        z[k * q + j] = ZERO;
-                    }
                 }
             }
-        }
+        });
         self.generation = generation;
         Ok(())
     }
@@ -357,14 +375,24 @@ impl FactorLoop {
         let inv = self.cache.get(frf, self.band, &self.target, self.rule)?;
         let per = HermitianStack::packed_len(nd);
         let mut data = vec![ZERO; self.lines * per];
-        let mut b = vec![ZERO; nd * nc];
-        for (i, line) in (self.band.0..self.band.1).enumerate() {
-            let map = &self.maps[i];
-            let q = map.q;
-            let z = &self.z[i * nc * nc..i * nc * nc + q * q];
-            matmul_into(&map.a, z, nd, q, q, &mut b[..nd * q]);
-            gram_packed(&b[..nd * q], nd, q, &mut data[line * per..(line + 1) * per]);
-        }
+        let (lo, hi) = self.band;
+        let (maps, zs) = (&self.maps, &self.z);
+        over_line_chunks(
+            &mut data[lo * per..hi * per],
+            per,
+            hi - lo,
+            |first, chunk| {
+                let mut b = vec![ZERO; nd * nc];
+                for (k, out) in chunk.chunks_mut(per).enumerate() {
+                    let i = first + k;
+                    let map = &maps[i];
+                    let q = map.q;
+                    let z = &zs[i * nc * nc..i * nc * nc + q * q];
+                    matmul_into(&map.a, z, nd, q, q, &mut b[..nd * q]);
+                    gram_packed(&b[..nd * q], nd, q, out);
+                }
+            },
+        );
         let (cond, kept) = inverse_diagnostics(inv, self.lines, self.band);
         let drive = HermitianStack::from_packed(self.lines, nd, data)?;
         Ok((drive, cond, kept))
@@ -404,146 +432,156 @@ impl FactorLoop {
         let down = 10f64.powf(-s.cap_down_db / 20.0);
         let psd_up = up * up * (1.0 + 1e-12);
         let psd_down = down * down * (1.0 - 1e-12);
-        let mut clamped = 0;
-
-        let mut measured = vec![ZERO; nc * nc];
-        let mut err = vec![ZERO; nc * nc];
-        let mut delta = vec![ZERO; nc * nc];
-        let mut second = vec![false; nc * nc];
-        let mut znew = vec![ZERO; nc * nc];
-        let mut ztry = vec![ZERO; nc * nc];
-        let mut b = vec![ZERO; nd * nc];
-        let mut power = vec![0.0; nd];
-        for (i, line) in (self.band.0..self.band.1).enumerate() {
-            let map = &self.maps[i];
-            let q = map.q;
-            let slot = i * nc * nc;
-            let gt = &self.gt[slot..slot + q * q];
-            let pivot = &self.pivot[i * nc..i * nc + q];
-            let zl = &mut self.z[slot..slot + q * q];
-            let gmax = (0..q).map(|k| gt[k * q + k].re).fold(0.0f64, f64::max);
-            if gmax <= 0.0 || q == 0 {
-                continue;
-            }
-            let minz = FLOOR_TOL * gmax.sqrt();
-            map.reduce(response, line, nc, &mut measured);
-            for idx in 0..q * q {
-                err[idx] = gt[idx] - measured[idx];
-            }
-
-            // The correction, column by column.
-            delta[..q * q].fill(ZERO);
-            second[..q * q].fill(false);
-            for j in 0..q {
-                if !pivot[j] {
+        let nb = self.band.1 - self.band.0;
+        let band0 = self.band.0;
+        let (maps, gts, pivots) = (&self.maps, &self.gt, &self.pivot);
+        // Each line's correction is independent of every other line's, so the
+        // lines are corrected over threads; each line's arithmetic is unchanged.
+        let counts = over_line_chunks(&mut self.z, nc * nc, nb, |first, chunk| {
+            let mut clamped = 0usize;
+            let mut measured = vec![ZERO; nc * nc];
+            let mut err = vec![ZERO; nc * nc];
+            let mut delta = vec![ZERO; nc * nc];
+            let mut second = vec![false; nc * nc];
+            let mut znew = vec![ZERO; nc * nc];
+            let mut ztry = vec![ZERO; nc * nc];
+            let mut b = vec![ZERO; nd * nc];
+            let mut power = vec![0.0; nd];
+            for (k, zline) in chunk.chunks_mut(nc * nc).enumerate() {
+                let i = first + k;
+                let line = band0 + i;
+                let map = &maps[i];
+                let q = map.q;
+                let slot = i * nc * nc;
+                let gt = &gts[slot..slot + q * q];
+                let pivot = &pivots[i * nc..i * nc + q];
+                let zl = &mut zline[..q * q];
+                let gmax = (0..q).map(|k| gt[k * q + k].re).fold(0.0f64, f64::max);
+                if gmax <= 0.0 || q == 0 {
                     continue;
                 }
-                let zjj = zl[j * q + j].re;
-                let div = zjj.max(minz);
-                let mut sjj = err[j * q + j].re;
-                for t in 0..j {
-                    sjj -= 2.0 * (delta[j * q + t] * zl[j * q + t].conj()).re;
+                let minz = FLOOR_TOL * gmax.sqrt();
+                map.reduce(response, line, nc, &mut measured);
+                for idx in 0..q * q {
+                    err[idx] = gt[idx] - measured[idx];
                 }
-                let djj = sjj / (2.0 * div);
-                delta[j * q + j] = C64::new(djj, 0.0);
-                for k in (j + 1)..q {
-                    let mut t = err[k * q + j];
-                    for m in 0..j {
-                        t -= delta[k * q + m] * zl[j * q + m].conj()
-                            + zl[k * q + m] * delta[j * q + m].conj();
-                    }
-                    t -= zl[k * q + j] * djj;
-                    let mut dkj = t / div;
-                    let ekk = err[k * q + k].re;
-                    let zkj = zl[k * q + j];
-                    if ekk < 0.0 && (zkj + dkj * e).norm() > zkj.norm() {
-                        let gkk = gt[k * q + k].re;
-                        dkj = if gkk <= 0.0 || -ekk >= 0.5 * gkk {
-                            -zkj * 0.5
-                        } else {
-                            zkj * (ekk / (2.0 * gkk))
-                        };
-                        second[k * q + j] = true;
-                    }
-                    delta[k * q + j] = dkj;
-                }
-            }
 
-            // The diagonal clamp, per column: a column whose diagonal would move
-            // by more than the cap has its first-form terms scaled down until it
-            // does not. Second-form terms are already bounded (at most half the
-            // element, toward zero) and are applied as they are.
-            for j in 0..q {
-                if !pivot[j] {
-                    continue;
+                // The correction, column by column.
+                delta[..q * q].fill(ZERO);
+                second[..q * q].fill(false);
+                for j in 0..q {
+                    if !pivot[j] {
+                        continue;
+                    }
+                    let zjj = zl[j * q + j].re;
+                    let div = zjj.max(minz);
+                    let mut sjj = err[j * q + j].re;
+                    for t in 0..j {
+                        sjj -= 2.0 * (delta[j * q + t] * zl[j * q + t].conj()).re;
+                    }
+                    let djj = sjj / (2.0 * div);
+                    delta[j * q + j] = C64::new(djj, 0.0);
+                    for k in (j + 1)..q {
+                        let mut t = err[k * q + j];
+                        for m in 0..j {
+                            t -= delta[k * q + m] * zl[j * q + m].conj()
+                                + zl[k * q + m] * delta[j * q + m].conj();
+                        }
+                        t -= zl[k * q + j] * djj;
+                        let mut dkj = t / div;
+                        let ekk = err[k * q + k].re;
+                        let zkj = zl[k * q + j];
+                        if ekk < 0.0 && (zkj + dkj * e).norm() > zkj.norm() {
+                            let gkk = gt[k * q + k].re;
+                            dkj = if gkk <= 0.0 || -ekk >= 0.5 * gkk {
+                                -zkj * 0.5
+                            } else {
+                                zkj * (ekk / (2.0 * gkk))
+                            };
+                            second[k * q + j] = true;
+                        }
+                        delta[k * q + j] = dkj;
+                    }
                 }
-                let zjj = zl[j * q + j].re;
-                let step = e * delta[j * q + j].re;
-                let (lo, hi) = (zjj * (down - 1.0), zjj * (up - 1.0));
-                if step > hi || step < lo {
-                    clamped += 1;
-                    let c = if step > hi { hi / step } else { lo / step };
-                    for k in j..q {
-                        if !second[k * q + j] {
-                            delta[k * q + j] *= c;
+
+                // The diagonal clamp, per column: a column whose diagonal would move
+                // by more than the cap has its first-form terms scaled down until it
+                // does not. Second-form terms are already bounded (at most half the
+                // element, toward zero) and are applied as they are.
+                for j in 0..q {
+                    if !pivot[j] {
+                        continue;
+                    }
+                    let zjj = zl[j * q + j].re;
+                    let step = e * delta[j * q + j].re;
+                    let (lo, hi) = (zjj * (down - 1.0), zjj * (up - 1.0));
+                    if step > hi || step < lo {
+                        clamped += 1;
+                        let c = if step > hi { hi / step } else { lo / step };
+                        for k in j..q {
+                            if !second[k * q + j] {
+                                delta[k * q + j] *= c;
+                            }
                         }
                     }
                 }
-            }
 
-            // The update, with the floor.
-            for idx in 0..q * q {
-                znew[idx] = zl[idx] + delta[idx] * e;
-            }
-            for j in 0..q {
-                if !pivot[j] {
-                    continue;
-                }
-                let d = znew[j * q + j].re;
-                if d < minz {
-                    let old = zl[j * q + j].re;
-                    let f = if old > 0.0 {
-                        (d.max(0.0) / old).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    for k in (j + 1)..q {
-                        znew[k * q + j] = zl[k * q + j] * f;
-                    }
-                    znew[j * q + j] = C64::new(minz, 0.0);
-                }
-            }
-
-            // The drive cap: halve the step until every drive PSD is inside it.
-            let old = last.diagonal(line);
-            let top = old.iter().copied().fold(0.0f64, f64::max);
-            let floor = 1e-6 * top;
-            let mut alpha = 1.0;
-            let mut accepted = false;
-            for _ in 0..=HALVINGS {
+                // The update, with the floor.
                 for idx in 0..q * q {
-                    ztry[idx] = zl[idx] + (znew[idx] - zl[idx]) * alpha;
+                    znew[idx] = zl[idx] + delta[idx] * e;
                 }
-                if top <= 0.0 {
-                    accepted = true;
-                    break;
+                for j in 0..q {
+                    if !pivot[j] {
+                        continue;
+                    }
+                    let d = znew[j * q + j].re;
+                    if d < minz {
+                        let old = zl[j * q + j].re;
+                        let f = if old > 0.0 {
+                            (d.max(0.0) / old).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        for k in (j + 1)..q {
+                            znew[k * q + j] = zl[k * q + j] * f;
+                        }
+                        znew[j * q + j] = C64::new(minz, 0.0);
+                    }
                 }
-                matmul_into(&map.a, &ztry[..q * q], nd, q, q, &mut b[..nd * q]);
-                row_power(&b[..nd * q], nd, q, &mut power);
-                let inside = power.iter().zip(&old).all(|(p, o)| {
-                    let ratio = p / o.max(floor);
-                    ratio <= psd_up && ratio >= psd_down
-                });
-                if inside {
-                    accepted = true;
-                    break;
+
+                // The drive cap: halve the step until every drive PSD is inside it.
+                let old = last.diagonal(line);
+                let top = old.iter().copied().fold(0.0f64, f64::max);
+                let floor = 1e-6 * top;
+                let mut alpha = 1.0;
+                let mut accepted = false;
+                for _ in 0..=HALVINGS {
+                    for idx in 0..q * q {
+                        ztry[idx] = zl[idx] + (znew[idx] - zl[idx]) * alpha;
+                    }
+                    if top <= 0.0 {
+                        accepted = true;
+                        break;
+                    }
+                    matmul_into(&map.a, &ztry[..q * q], nd, q, q, &mut b[..nd * q]);
+                    row_power(&b[..nd * q], nd, q, &mut power);
+                    let inside = power.iter().zip(&old).all(|(p, o)| {
+                        let ratio = p / o.max(floor);
+                        ratio <= psd_up && ratio >= psd_down
+                    });
+                    if inside {
+                        accepted = true;
+                        break;
+                    }
+                    alpha *= 0.5;
                 }
-                alpha *= 0.5;
+                if accepted {
+                    zl.copy_from_slice(&ztry[..q * q]);
+                }
             }
-            if accepted {
-                zl.copy_from_slice(&ztry[..q * q]);
-            }
-        }
+            clamped
+        });
+        let clamped: usize = counts.into_iter().sum();
         let (drive, condition, kept) = self.drive(frf)?;
         let correction_db = largest_change_db(&last, &drive, self.band);
         self.last = Some(drive.clone());

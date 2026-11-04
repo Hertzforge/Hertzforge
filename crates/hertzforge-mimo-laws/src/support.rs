@@ -510,6 +510,92 @@ impl InverseCache {
 }
 
 // ---------------------------------------------------------------------------
+// Lines over threads
+// ---------------------------------------------------------------------------
+
+/// Below this many in-band lines a law's per-line work stays on the calling
+/// thread: spawning would cost more than it saves.
+pub(crate) const MIN_PARALLEL_LINES: usize = 64;
+
+std::thread_local! {
+    /// A test's limit on the worker threads, for this thread's calls only.
+    static THREAD_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Run `f` with the laws' per-line work held to `n` threads (1: the calling
+/// thread only) on this thread. For tests that compare the threaded and the
+/// single-threaded results.
+#[doc(hidden)]
+pub fn with_threads<R>(n: usize, f: impl FnOnce() -> R) -> R {
+    let before = THREAD_LIMIT.with(|c| c.replace(Some(n.max(1))));
+    let out = f();
+    THREAD_LIMIT.with(|c| c.set(before));
+    out
+}
+
+/// How many threads a law's per-line work may use: the machine's cores, at most
+/// eight; one on a target without threads (a law file).
+pub(crate) fn workers() -> usize {
+    if let Some(n) = THREAD_LIMIT.with(|c| c.get()) {
+        return n;
+    }
+    if cfg!(target_family = "wasm") {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(8)
+}
+
+/// Lines per chunk when `nb` lines are split over the workers.
+pub(crate) fn chunk_lines(nb: usize) -> usize {
+    let w = workers();
+    if w <= 1 || nb < MIN_PARALLEL_LINES {
+        nb.max(1)
+    } else {
+        nb.div_ceil(w)
+    }
+}
+
+/// Run `work(first_line, chunk)` on consecutive chunks of `data`, `per_line`
+/// elements per line and `nb` lines in all, each chunk on its own thread (the
+/// calling thread when there is one chunk). The lines are independent, so each
+/// line's arithmetic, and so its result, is the same however the lines are
+/// split. Results come back in line order; a panic in a worker is raised here.
+pub(crate) fn over_line_chunks<D, T, F>(
+    data: &mut [D],
+    per_line: usize,
+    nb: usize,
+    work: F,
+) -> Vec<T>
+where
+    D: Send,
+    T: Send,
+    F: Fn(usize, &mut [D]) -> T + Sync,
+{
+    let cl = chunk_lines(nb);
+    let span = (cl * per_line).max(1);
+    if cl >= nb {
+        return vec![work(0, data)];
+    }
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = data
+            .chunks_mut(span)
+            .enumerate()
+            .map(|(k, chunk)| {
+                let work = &work;
+                scope.spawn(move || work(k * cl, chunk))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
+            .collect()
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Per-line products
 // ---------------------------------------------------------------------------
 

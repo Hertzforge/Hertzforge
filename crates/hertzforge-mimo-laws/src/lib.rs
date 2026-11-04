@@ -45,6 +45,7 @@ pub use open_loop::{OpenLoopConfig, OpenLoopLaw};
 pub use pinv::{PseudoInverseConfig, PseudoInverseLaw};
 pub use shape::{ShapeConfig, ShapeConstrainedLaw};
 pub use spec::{DiagDecl, DiagKind, LawSpec, ParamDecl, ParamKindDecl, ParamVal};
+pub use support::with_threads;
 pub use zero::ZeroLaw;
 
 use hertzforge_sdm::law::{LawError, MimoControlLaw, MimoSetup};
