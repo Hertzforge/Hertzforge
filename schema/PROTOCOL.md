@@ -370,9 +370,24 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.duplicate` | `{"names"}` | `{"project"}` |
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
+| `project.children` | `{"name"}` | what the object holds (below) |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**The tree.** Each object in the summary carries `holds`, a few words on what it contains, and
+`banded` when a PSD or a specification is on proportional bands, which changes its icon.
+`project.children` answers what one object opens into, as Visual Dynamics' tree opens it, by
+`kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
+`families` (every family, each with the element `groups` holding elements of it and their counts),
+its `solids` (a boolean's operands as its `children`) and its `mates`; a data object is a `grid`,
+`rows` of a DOF and a quantity (a time history's with a `role`), `columns` of what tells one record
+from another (reference DOFs, capture labels, or one blank), `cells` of record indices (-1 for a
+hole), one icon key per record in `icons` (a quantity, two as `response/reference`, or empty for
+the object's own icon) and the records whose units are `undefined`; a shape set lists its `modes`;
+a channel table its `channels`; photographs their names; matched modes their `matches`; anything
+else is `none`. The answer describes the object as it stands and is asked again when the project
+changes.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts

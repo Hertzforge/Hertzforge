@@ -6,8 +6,8 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
-	import { formatCount } from '$lib/viz/format';
 	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
+	import ProjectTree from './ProjectTree.svelte';
 	import UnitsEditor from './UnitsEditor.svelte';
 
 	interface Props {
@@ -51,29 +51,8 @@
 		if (ok) asking = null;
 	}
 
-	/** The object being renamed, and the name typed for it. */
-	let renaming = $state<string | null>(null);
-	let newName = $state('');
 	/** The object whose removal waits on a second click. */
 	let confirming = $state<string | null>(null);
-
-	function startRename(name: string) {
-		confirming = null;
-		renaming = name;
-		newName = name;
-	}
-
-	async function commitRename() {
-		const name = renaming;
-		const to = newName.trim();
-		renaming = null;
-		if (name && to && to !== name) await p.rename(name, to);
-	}
-
-	function focusAndSelect(node: HTMLInputElement) {
-		node.focus();
-		node.select();
-	}
 
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
 </script>
@@ -134,77 +113,59 @@
 			<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
 		</button>
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
-			<ul class="objects" aria-label="Objects" data-testid="project-objects">
-				{#each p.summary.objects as o (o.name)}
-					{@const active = o.name === p.summary.active_geometry}
-					<li data-testid="object-{o.name}">
-						{#if renaming === o.name}
-							<input
-								class="field mono rename"
-								aria-label="New name for {o.name}"
-								data-testid="rename-field"
-								bind:value={newName}
-								use:focusAndSelect
-								onkeydown={(e) => {
-									if (e.key === 'Enter') void commitRename();
-									if (e.key === 'Escape') renaming = null;
-								}}
-								onblur={() => (renaming = null)}
-							/>
-						{:else if confirming === o.name}
-							<span class="oname">Remove {o.name}?</span>
-							<span class="row-actions shown">
-								<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { confirming = null; void p.remove([o.name]); }}>Remove</button>
-								<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
-							</span>
-						{:else}
-							<span class="oname">{o.name}</span>
-							{#if active}<span class="mark" title="Data is drawn on this geometry when nothing else names one">active</span>{/if}
-							{#if o.stale}<span class="mark stale" data-testid="stale-{o.name}" title={o.stale}>stale</span>{/if}
-							{#if o.units_defined === false}
-								<button class="badge" data-testid="units-badge-{o.name}" title="Imported without its units: declare them" onclick={() => p.toggleUnits(o.name)}>units?</button>
+			{#if p.summary.objects.length}
+				{@const picked = p.selection.objects}
+				{@const one = picked.length === 1 ? p.summary.objects.find((o) => o.name === picked[0]) : undefined}
+				<div class="strip" data-testid="selection-strip" aria-label="Acts on the selection">
+					{#if confirming && picked.includes(confirming)}
+						<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
+						<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { const names = [...picked]; confirming = null; void p.remove(names); }}>Remove</button>
+						<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
+					{:else if picked.length === 0}
+						<span class="hint">Select an object to act on it. Cmd-click adds, Shift-click extends.</span>
+					{:else}
+						{#if one?.kind === 'geometry' && one.name !== p.summary.active_geometry}
+							<button class="link" data-testid="activate-{one.name}" title="Draw data on this geometry" onclick={() => p.activate(one.name)} disabled={p.busy !== null}>Make active</button>
+						{/if}
+						{#if one?.units_defined !== undefined}
+							<button class="link" class:on={p.units?.name === one.name} data-testid="units-{one.name}" onclick={() => p.toggleUnits(one.name)} disabled={p.busy !== null}>Units</button>
+						{/if}
+						{#if picked.some((n) => p.summary?.objects.find((o) => o.name === n)?.stale)}
+							<button class="link" data-testid="refresh-{picked[0]}" title="Compute again from the source" onclick={() => p.refresh(picked.filter((n) => p.summary?.objects.find((o) => o.name === n)?.stale))} disabled={p.busy !== null}>Recompute</button>
+						{/if}
+						<button class="link" data-testid="duplicate-{picked[0]}" title="Add a copy" onclick={() => p.duplicate([...picked])} disabled={p.busy !== null}>Copy</button>
+						{#if one}
+							<button class="link" data-testid="rename-{one.name}" onclick={() => (p.renaming = one.name)} disabled={p.busy !== null}>Rename</button>
+						{/if}
+						<button class="link danger" data-testid="remove-{picked[0]}" onclick={() => (confirming = picked[0])} disabled={p.busy !== null}>Remove</button>
+					{/if}
+				</div>
+				<ProjectTree {app} />
+			{/if}
+			{#if p.summary.unresolved?.length}
+				<ul class="objects" aria-label="Unresolved references" data-testid="project-unresolved">
+					{#each p.summary.unresolved as u (u.name)}
+						<li class="unresolved" data-testid="unresolved-{u.name}" title="Held in {u.path}">
+							{#if confirming === u.name}
+								<span class="oname">Drop {u.name}?</span>
+								<span class="row-actions shown">
+									<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { confirming = null; void p.remove([u.name]); }}>Drop</button>
+									<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
+								</span>
+							{:else}
+								<span class="oname">{u.name}</span>
+								<span class="badge">{u.reason}</span>
+								<span class="okind">{u.path.split(/[\\/]/).pop()}</span>
+								<span class="row-actions">
+									<button class="icon" data-testid="remove-{u.name}" title="Drop the reference to {u.name}" aria-label="Drop the reference to {u.name}" onclick={() => (confirming = u.name)} disabled={p.busy !== null}>
+										<Icon name="trash" size={12} />
+									</button>
+								</span>
 							{/if}
-							<span class="okind">{o.kind.replace(/_/g, ' ')}{o.records !== undefined ? `, ${formatCount(o.records)}` : ''}</span>
-							<span class="row-actions">
-								{#if o.kind === 'geometry' && !active}
-									<button class="link" data-testid="activate-{o.name}" title="Draw data on this geometry" onclick={() => p.activate(o.name)} disabled={p.busy !== null}>Make active</button>
-								{/if}
-								{#if o.units_defined !== undefined}
-									<button class="link" data-testid="units-{o.name}" onclick={() => p.toggleUnits(o.name)} disabled={p.busy !== null}>Units</button>
-								{/if}
-								{#if o.stale}
-									<button class="link" data-testid="refresh-{o.name}" title="Compute {o.name} again from its source: {o.stale}" onclick={() => p.refresh([o.name])} disabled={p.busy !== null}>Recompute</button>
-								{/if}
-								<button class="link" data-testid="duplicate-{o.name}" title="Add a copy of {o.name}" onclick={() => p.duplicate([o.name])} disabled={p.busy !== null}>Copy</button>
-								<button class="link" data-testid="rename-{o.name}" onclick={() => startRename(o.name)} disabled={p.busy !== null}>Rename</button>
-								<button class="icon" data-testid="remove-{o.name}" title="Remove {o.name}" aria-label="Remove {o.name}" onclick={() => { renaming = null; confirming = o.name; }} disabled={p.busy !== null}>
-									<Icon name="trash" size={12} />
-								</button>
-							</span>
-						{/if}
-					</li>
-				{/each}
-				{#each p.summary.unresolved ?? [] as u (u.name)}
-					<li class="unresolved" data-testid="unresolved-{u.name}" title="Held in {u.path}">
-						{#if confirming === u.name}
-							<span class="oname">Drop {u.name}?</span>
-							<span class="row-actions shown">
-								<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { confirming = null; void p.remove([u.name]); }}>Drop</button>
-								<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
-							</span>
-						{:else}
-							<span class="oname">{u.name}</span>
-							<span class="badge">{u.reason}</span>
-							<span class="okind">{u.path.split(/[\\/]/).pop()}</span>
-							<span class="row-actions">
-								<button class="icon" data-testid="remove-{u.name}" title="Drop the reference to {u.name}" aria-label="Drop the reference to {u.name}" onclick={() => (confirming = u.name)} disabled={p.busy !== null}>
-									<Icon name="trash" size={12} />
-								</button>
-							</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 			{#if p.summary.unresolved?.length}
 				<p class="hint" data-testid="unresolved-hint">
 					Held in files that were not found or have changed. Saving keeps them; put the file back, or beside the project, and open it again.
@@ -344,6 +305,40 @@
 		border-radius: 50%;
 	}
 
+	.strip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		min-height: 22px;
+		margin-top: var(--sp-2);
+		padding: 2px 4px;
+		font-size: var(--text-xs);
+	}
+
+	.strip .link {
+		padding: 0;
+		font-size: 11px;
+		color: var(--text-2);
+		background: none;
+		border: none;
+		cursor: pointer;
+	}
+
+	.strip .link:hover,
+	.strip .link.on {
+		color: var(--text-1);
+	}
+
+	.strip .link.danger:hover {
+		color: var(--status-bad, var(--amber-2));
+	}
+
+	.strip .link:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
 	.objects {
 		margin-top: var(--sp-2);
 		padding-left: 10px;
@@ -372,15 +367,6 @@
 		color: var(--text-3);
 	}
 
-	.mark {
-		font-size: 10px;
-		color: var(--text-3);
-	}
-
-	.mark.stale {
-		color: var(--status-warn);
-	}
-
 	.row-actions {
 		display: flex;
 		gap: 6px;
@@ -394,7 +380,6 @@
 		opacity: 1;
 	}
 
-	.row-actions .link,
 	.row-actions .icon {
 		padding: 0;
 		font-size: 10px;
@@ -404,15 +389,8 @@
 		cursor: pointer;
 	}
 
-	.row-actions .link:hover,
 	.row-actions .icon:hover {
 		color: var(--text-1);
-	}
-
-	.rename {
-		flex: 1;
-		min-width: 0;
-		font-size: var(--text-xs);
 	}
 
 	.badge {

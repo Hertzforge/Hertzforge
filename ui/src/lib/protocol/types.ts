@@ -366,6 +366,10 @@ export interface ProjectObject {
 	source?: DataSource;
 	/** False for an object imported without its units. */
 	units_defined?: boolean;
+	/** A PSD or a specification on proportional bands, which changes its icon. */
+	banded?: boolean;
+	/** A few words on what the object holds: its size, not its name. */
+	holds?: string;
 	/** Why a derived object no longer matches its source; absent while it does. */
 	stale?: string;
 	groups: string[];
@@ -385,6 +389,39 @@ export interface ProjectSummary {
 	active_geometry?: string | null;
 	/** Objects held by reference to a file that was not found or has changed: not loaded, kept. */
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
+}
+
+/** `project.children`: what an object opens into in the tree, by what it is. */
+export type ProjectChildren =
+	| {
+			kind: 'geometry';
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number }[];
+			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
+			solids: SolidRow[];
+			mates: { id: number; label: string }[];
+	  }
+	| {
+			kind: 'grid';
+			rows: { label: string; dof: string; quantity: string; role?: 'reference' | 'response' | 'monitor' }[];
+			columns: string[];
+			/** A record index per row and column, -1 for a hole. */
+			cells: number[][];
+			/** Each record's icon key: a quantity, `response/reference`, or empty for the object's own icon. */
+			icons: string[];
+			/** The records whose units are not declared. */
+			undefined: number[];
+	  }
+	| { kind: 'modes'; modes: { index: number; frequency: number; damping: number; description: string }[] }
+	| { kind: 'channels'; channels: { dof: string; quantity: string }[] }
+	| { kind: 'photos'; photos: string[] }
+	| { kind: 'matches'; matches: { first: number; second: number; mac: number }[] }
+	| { kind: 'none' };
+
+export interface SolidRow {
+	id: number;
+	label: string;
+	kind: string;
+	children: SolidRow[];
 }
 
 /** One row of `project.units`: a channel, or the object itself, and its unit. */

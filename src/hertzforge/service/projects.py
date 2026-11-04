@@ -14,6 +14,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from hertzforge.project import describe
+
+from . import tree
 from .ops_settings import settings_of
 from .protocol import ProtocolError, bad_request, not_found, refused
 
@@ -75,6 +78,9 @@ def summary(state: OpenProject) -> dict[str, Any]:
                            in zip(labels, project.object_groups, strict=True)
                            if name in group['members']]
         entry['verbs'] = verbs_of(project, name)
+        if tree.banded(obj):
+            entry['banded'] = True
+        entry['holds'] = describe(obj)
         settings = settings_of(obj)
         if settings:
             entry['settings'] = settings
@@ -288,6 +294,16 @@ def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any
 
     state = _open(state, 'project.units')
     return declared.tables(state.project, _name(params, 'name', 'project.units'))
+
+
+def children(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.children`: what an object holds, for the tree to open it
+    into (`service.tree.children`)."""
+    state = _open(state, 'project.children')
+    name = _name(params, 'name', 'project.children')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    return tree.children(state.project, name)
 
 
 def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:

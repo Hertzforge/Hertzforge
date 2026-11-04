@@ -58,7 +58,7 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.activate',
                    'project.duplicate', 'project.refresh',
-                   'project.units', 'project.define_units')
+                   'project.units', 'project.define_units', 'project.children')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -345,6 +345,9 @@ class Connection:
         if method == 'project.units':
             _only(params, ('name',), method)
             return await call(projects.units, self.project, params)
+        if method == 'project.children':
+            _only(params, ('name',), method)
+            return await call(projects.children, self.project, params)
         if method == 'project.define_units':
             _only(params, ('name', 'units'), method)
             converted = await call(projects.define_units, self.project, params)
