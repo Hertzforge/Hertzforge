@@ -61,6 +61,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// license and hardware coupling when it was imported. A controller crate not on this
 /// list fails the lockfile check; adding one is a review, then a line here.
 ///
+/// `hertzforge-reference` was written here too: reference SDM builders, validation
+/// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
+/// reaches no hardware. The control service does not depend on it yet.
+///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
 /// names no backend and reaches no hardware; it builds for WebAssembly.
@@ -87,6 +91,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-protocol",
     "hertzforge-random",
     "hertzforge-recorder",
+    "hertzforge-reference",
     "hertzforge-shaker-db",
     "hertzforge-shock-common",
     "hertzforge-shock-host",
