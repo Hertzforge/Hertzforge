@@ -147,8 +147,9 @@ Intel, signs and notarizes them with `sign_macos.sh`, and fails if Apple has not
 and the image. Pushing a tag `v*` also drafts a GitHub release with the two images and their
 `SHA256SUMS` on it. Nothing is public until the draft is published, and publishing it is what starts
 `release.yml`. A run started by hand on main builds the same images as a test and leaves them as
-artifacts for 14 days. Windows stays unsigned, as Visual Dynamics' builds are, and the Windows and Linux
-installers are artifacts of either run, not on the release.
+artifacts for 14 days. A push to `feature/desktop-app` on a maintainer's fork still builds the images,
+unsigned, because a fork has no certificate. Windows stays unsigned, as Visual Dynamics' builds are, and
+the Windows and Linux installers are artifacts of every run, not on the release.
 
 The credentials are secrets of the `release` environment, which admits only `v*` tags and main, so a
 workflow on another branch cannot read them. An admin of the repository can change that rule. The

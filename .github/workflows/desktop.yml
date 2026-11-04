@@ -5,9 +5,11 @@ name: desktop
 # required check. A tag v* builds them and drafts a release with the signed macOS
 # images on it, to be looked at and published by hand (publishing is what starts
 # release.yml). A run started by hand on main builds them as a test and publishes
-# nothing; its images are artifacts, for a maintainer to try.
+# nothing; its images are artifacts, for a maintainer to try. A push to the desktop
+# branch on a maintainer's fork builds them too, unsigned: a fork has no certificate.
 on:
   push:
+    branches: [feature/desktop-app]
     tags: ['v*']
   workflow_dispatch:
 
@@ -137,6 +139,7 @@ jobs:
       - name: Build the app and its image
         run: bash desktop/packaging/build.sh --bundles app,dmg
       - name: Sign and notarize
+        if: github.repository == 'Hertzforge/Hertzforge'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
