@@ -12,6 +12,13 @@ package hertzforge:control-law@0.1.0;
 //   order. Hermitian matrices are passed in full, both triangles.
 // - Spectral density matrices (SDMs) are in the channel's units squared per
 //   hertz; drive SDMs are in V^2/Hz.
+// - Proposed, open for review (spec section 7, open question 11): an SDM's
+//   off-diagonal entry (i, j) is E[Z_i conj(Z_j)], with Z the spectrum under
+//   the negative-exponent forward transform, so that S_yy = H S_vv H^H with H
+//   response over drive and H^H its conjugate transpose. This is the form
+//   Rattlesnake and SDynPy hold. Hertzforge's analysis files and the core's
+//   estimator hold the conjugate, E[conj(Z_i) Z_j]; the host converts at this
+//   boundary, and a law does not.
 
 /// UNSTABLE draft: types for multiple-output Random.
 interface mimo-types {
@@ -78,8 +85,9 @@ interface mimo-types {
         /// The frequency response estimate, controls by drives per line.
         frf: matrix-stack,
         /// This loop's measured response-to-drive cross spectrum, controls
-        /// by drives per line, so a law can adapt its own estimate of the
-        /// plant.
+        /// by drives per line, entry (c, d) = E[Y_c conj(V_d)] in the form
+        /// above, so a law can adapt its own estimate of the plant as
+        /// H = S_yv inv(S_vv).
         response-drive-csd: matrix-stack,
         /// The drive SDM of the last loop as it was played (after the
         /// controller's limits), drives by drives per line.

@@ -131,6 +131,18 @@ The single-output law supplies magnitude only. The drive synthesizer draws a ran
 - SDMs are one-sided. Complex values are pairs of 64-bit floats (real, imaginary). Each line's
   matrix is stored row-major, and lines are in order. Hermitian matrices are passed in full.
 - FRFs are response over drive, `n_c` by `n_d`.
+- Cross terms, proposed (open question 11). The off-diagonal entry `(i, j)` of an SDM is
+  `S_ij = E[Z_i conj(Z_j)]`, where `Z` is the spectrum under the textbook forward transform,
+  `Z[k] = sum_n z[n] exp(-j 2 pi k n / N)`. The angle of `S_ij` is then the phase of channel `i`
+  minus the phase of channel `j`, and a response SDM follows from a drive SDM as
+  `S_yy = H S_vv H^H`, with `H` response over drive and `H^H` its conjugate transpose. The
+  response-to-drive cross spectrum has entries `E[Y_c conj(V_d)]`, so `H = S_yv inv(S_vv)`.
+- The other form, `E[conj(Z_i) Z_j]`, is the conjugate of this one, and under it the same relation
+  reads `S_yy = conj(H) S_vv transpose(H)`. Rattlesnake and SDynPy hold the proposed form, so a law
+  ported from Rattlesnake needs no conjugation. Hertzforge's analysis side stores the other form in
+  its files, and so does the core's estimator, because its FFT has a positive exponent, which
+  conjugates every spectrum (see `h_estimate_hv` in `hertzforge-dsp`). The core would convert at
+  this boundary; a law should not.
 
 **Inputs, per call.**
 
@@ -141,7 +153,7 @@ The single-output law supplies magnitude only. The drive synthesizer draws a ran
 | Measured response SDM | `n_c` x `n_c` | The latest control estimate |
 | Degrees of freedom | scalar | Of the measured estimate |
 | FRF | `n_c` x `n_d` | The core's current estimate, response over drive (EU/V) |
-| Measured cross spectrum | `n_c` x `n_d` | Response to drive, this loop, so a law can adapt its own FRF estimate |
+| Measured cross spectrum | `n_c` x `n_d` | Response to drive, `E[Y_c conj(V_d)]`, this loop, so a law can adapt its own FRF estimate |
 | Last drive SDM | `n_d` x `n_d` | The drive actually played last loop, after the core's limiting (V²/Hz) |
 | Multiple coherence | `n_c` | Of each control channel on all drives |
 | Noise SDM | `n_c` x `n_c` | Control responses measured with the drives off, during system identification |
@@ -220,3 +232,8 @@ for now. A law should pass `law check` before it is used on hardware.
    allow?
 9. **Transport.** Pass Hermitian matrices in full (as proposed), or the upper triangle only?
 10. **Cadence.** One call per control loop. Does any law need a different cadence?
+11. **Cross-term form.** Section 7 proposes `S_ij = E[Z_i conj(Z_j)]` under the negative-exponent
+    transform, so that `S_yy = H S_vv H^H` and a law ported from Rattlesnake needs no conjugation.
+    Hertzforge's analysis files and the core's estimator hold the conjugate form, so the core would
+    convert at this boundary. Is the boundary the right place for that conversion, or should it
+    carry Hertzforge's stored form and leave the conjugation to laws?
