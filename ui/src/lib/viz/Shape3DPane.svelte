@@ -13,7 +13,7 @@
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, type Snippet } from 'svelte';
 	import {
 		AmbientLight,
 		BufferAttribute,
@@ -47,9 +47,16 @@
 		mode?: number;
 		/** Index into `view.overlays`, drawn over the mode; none when null. */
 		overlay?: number | null;
+		/**
+		 * Each node's own color, sRGB 0 to 1, f32 [N, 3], in place of the travel colormap: a view
+		 * that colors its nodes by another quantity (a run's control error). Updated in place.
+		 */
+		colors?: Float32Array | null;
+		/** The legend drawn in place of the travel colormap's, with `colors`. */
+		legend?: Snippet;
 	}
 
-	let { view, mode = $bindable(0), overlay = null }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, colors = null, legend }: Props = $props();
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
@@ -164,7 +171,18 @@
 		return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 	}
 
+	/** The caller's own node colors, over whatever the shape or the motion painted. */
+	function paintColors() {
+		if (!renderer || !colors) return;
+		const out = colorAttr.array as Float32Array;
+		const n = Math.min(out.length, colors.length);
+		for (let i = 0; i < n; i++) out[i] = srgbToLinear(colors[i]);
+		colorAttr.needsUpdate = true;
+		dirty = true;
+	}
+
 	function loadMode() {
+		if (renderer && !current) paintColors();
 		if (!renderer || !current) return;
 		const re = current.shape;
 		const im = current.shape_imag;
@@ -185,6 +203,7 @@
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		dirty = true;
+		paintColors();
 	}
 
 	/**
@@ -499,6 +518,11 @@
 	});
 
 	$effect(() => {
+		void colors;
+		paintColors();
+	});
+
+	$effect(() => {
 		if (!renderer) return;
 		for (const m of [surface.material as MeshLambertMaterial]) m.wireframe = wireframe;
 		ghostSurface.visible = ghost;
@@ -656,6 +680,9 @@
 	</div>
 
 	<div class="bottom">
+		{#if colors && legend}
+			<div class="legend" aria-label="Color legend">{@render legend()}</div>
+		{:else}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
 				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
@@ -665,6 +692,7 @@
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
 			</div>
 		</div>
+		{/if}
 
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
