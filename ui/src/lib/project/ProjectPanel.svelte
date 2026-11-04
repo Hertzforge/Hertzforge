@@ -51,8 +51,14 @@
 		if (ok) asking = null;
 	}
 
-	/** The object whose removal waits on a second click. */
+	/** An unresolved reference whose drop waits on a second click. */
 	let confirming = $state<string | null>(null);
+	/** The group name being typed in the strip. */
+	let groupName = $state('');
+	function focusField(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
 
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
 </script>
@@ -117,10 +123,15 @@
 				{@const picked = p.selection.objects}
 				{@const one = picked.length === 1 ? p.summary.objects.find((o) => o.name === picked[0]) : undefined}
 				<div class="strip" data-testid="selection-strip" aria-label="Acts on the selection">
-					{#if confirming && picked.includes(confirming)}
+					{#if p.confirming && picked.length}
 						<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
-						<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { const names = [...picked]; confirming = null; void p.remove(names); }}>Remove</button>
-						<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
+						<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Remove</button>
+						<button class="btn ghost sm" onclick={() => (p.confirming = false)}>Keep</button>
+					{:else if p.namingGroup && one}
+						<form class="row" onsubmit={(e) => { e.preventDefault(); const text = groupName; p.namingGroup = null; void p.nameGroup(one.name, text); }}>
+							<input class="field" aria-label="Name for the group of {one.name}" data-testid="group-name" bind:value={groupName} use:focusField placeholder="Group name; blank removes it" onkeydown={(e) => e.key === 'Escape' && (p.namingGroup = null)} />
+							<button class="btn primary sm" type="submit">Name</button>
+						</form>
 					{:else if picked.length === 0}
 						<span class="hint">Select an object to act on it. Cmd-click adds, Shift-click extends.</span>
 					{:else}
@@ -142,12 +153,13 @@
 							{#if group?.role !== 'Basis'}
 								<button class="link" data-testid="basis-{one.name}" title="Make its group the Basis of comparisons" onclick={() => p.setBasis(one.name)} disabled={p.busy !== null}>Basis</button>
 							{/if}
+							<button class="link" data-testid="name-group-{one.name}" title={group?.name ? `Rename the group "${group.name}"` : 'Name its group; a named group exports as an activity'} onclick={() => { groupName = group?.name ?? ''; p.namingGroup = one.name; }} disabled={p.busy !== null}>{group?.name ? 'Rename group' : 'Name group'}</button>
 						{/if}
 						<button class="link" data-testid="duplicate-{picked[0]}" title="Add a copy" onclick={() => p.duplicate([...picked])} disabled={p.busy !== null}>Copy</button>
 						{#if one}
 							<button class="link" data-testid="rename-{one.name}" onclick={() => (p.renaming = one.name)} disabled={p.busy !== null}>Rename</button>
 						{/if}
-						<button class="link danger" data-testid="remove-{picked[0]}" onclick={() => (confirming = picked[0])} disabled={p.busy !== null}>Remove</button>
+						<button class="link danger" data-testid="remove-{picked[0]}" onclick={() => (p.confirming = true)} disabled={p.busy !== null}>Remove</button>
 					{/if}
 				</div>
 				<ProjectTree {app} />

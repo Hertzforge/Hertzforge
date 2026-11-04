@@ -200,3 +200,28 @@ def test_the_server_sends_the_selections_views_with_their_arrays():
         assert answer['result']['title'] == geometry
 
     asyncio.run(_session(check))
+
+
+def test_two_geometries_are_one_scene_and_a_report_says_where_it_opens(plate, validate):
+    project = plate.project
+    first = named(plate, 'geometry')
+    projects.import_file(plate, {'path': str(PLATE / 'geometry.unv'),
+                                 'units': {'length_unit': 'mm'}})
+    second = next(n for n, o in project.items() if projects.kind_of(o) == 'geometry' and n != first)
+    try:
+        out = shown(plate, first, second, validate=validate)
+        (scene,) = out['views']
+        assert scene['view'] == 'shape3d' and scene['title'] == f'{second} over {first}'
+        assert len(scene['nodes']) == len(project[first].node_id) + len(project[second].node_id)
+        assert out['note'] == ''
+    finally:
+        project.remove(second)
+    from hertzforge.core.report import Report
+
+    project.add('Report', Report(title='Plate survey'))
+    try:
+        out = shown(plate, 'Report', validate=validate)
+        assert out['views'][0]['view'] == 'reading'
+        assert any(r['value'] == 'the Report workspace' for r in out['views'][0]['rows'])
+    finally:
+        project.remove('Report')
