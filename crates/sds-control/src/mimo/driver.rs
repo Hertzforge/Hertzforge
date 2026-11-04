@@ -236,8 +236,15 @@ pub struct StartContext {
 pub trait MimoRunDriver: Send {
     /// Take the setup and check what only a run can: ranks and conditioning of the
     /// transformations, the reference's positive semi-definiteness, feasibility per
-    /// drive. Nothing is opened or driven.
-    fn configure(&mut self, setup: Arc<MimoSetup>, law: LawRef) -> super::check::Validation;
+    /// drive. `items` are the setup's own findings (channels, law, ranges), which the
+    /// report carries first; `law` is `None` when the setup's law is not in the
+    /// catalog. Nothing is opened or driven.
+    fn configure(
+        &mut self,
+        setup: Arc<MimoSetup>,
+        law: Option<LawRef>,
+        items: crate::table::Report,
+    ) -> super::check::Validation;
     /// Arm and start: identification, its gates, then the review hold or the loop.
     fn start(&mut self, ctx: &StartContext) -> Result<(), MethodError>;
     /// Release the review hold after identification passed its gates.
@@ -256,6 +263,11 @@ pub trait MimoRunDriver: Send {
     fn abort(&mut self, by: &str);
     /// The run's state now.
     fn status(&mut self) -> MimoStatus;
+    /// Only the run's state, for the service's run-exclusion checks (cheap where
+    /// [`Self::status`] is not).
+    fn state(&mut self) -> State {
+        self.status().state
+    }
     /// One quantity at full resolution, or `None` when it is not measured yet or
     /// does not exist on this run (an index past the end, say).
     fn quantity(&mut self, q: &QuantitySelector) -> Option<Series>;

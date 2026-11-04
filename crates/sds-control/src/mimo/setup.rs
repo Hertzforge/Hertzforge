@@ -958,7 +958,7 @@ fn station_word(kind: &str) -> &'static str {
 /// Check the law choice: it exists, it is a multiple-output law, it admits the
 /// test's shape, and every parameter is one it declares, of the right kind and in
 /// range.
-fn check_law(
+pub fn check_law(
     law: &LawSetup,
     info: Option<LawInfo>,
     shape: MimoShape,
