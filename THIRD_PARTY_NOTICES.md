@@ -31,7 +31,7 @@ its own license. `tools/check_licenses.py` reads every installed package's licen
 | Package | License | Notes |
 |---|---|---|
 | pypardiso, the sparse modal solve's link to PARDISO (x86-64 Windows and Linux only) | BSD-3-Clause | keep the copyright notice |
-| Intel oneMKL and TBB, which pypardiso brings: `mkl`, `tbb`, `tcmlib` (x86-64 Windows and Linux only) | Proprietary: the Intel Simplified Software License | the desktop app carries only the libraries PARDISO loads, Intel's unmodified binaries, with this notice; reverse engineering, decompiling or disassembling them is not permitted. Taken on November 3, 2026, as Visual Dynamics took it, so a large model solves in minutes rather than an hour |
+| Intel oneMKL and TBB, which pypardiso brings: `mkl`, `tbb`, `tcmlib` and, on Windows, `onemkl-license`, the license text as a package (x86-64 Windows and Linux only) | Proprietary: the Intel Simplified Software License | the desktop app carries only the libraries PARDISO loads, Intel's unmodified binaries, with this notice; reverse engineering, decompiling or disassembling them is not permitted. Taken on November 3, 2026, as Visual Dynamics took it, so a large model solves in minutes rather than an hour |
 | `intel-openmp`, `intel-cmplr-lib-ur` and `umf`, which a pip install of oneMKL brings as well | Proprietary: the Intel End User License Agreement for Developer Tools | not in the desktop app: oneMKL is threaded through TBB, which needs none of them. A pip install downloads them from Intel's own packages; nothing here redistributes them |
 
 | Package | License | Use |
