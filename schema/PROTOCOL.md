@@ -371,6 +371,11 @@ plain words: it never names a protocol method.
 | `identification_mismatch` | `refused` | `mimo_random.identification.load` (or the start that loads it) with a set measured on another setup | `setup_hash`, `identification_hash` |
 | `law_import_failed` | `refused` | The file is not a control law this program can run, or cannot be read | `path` |
 | `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
+| `law_unknown` | `not_found` | `laws.check` names an id the catalog does not hold | `id` |
+| `law_params_invalid` | `bad_request` | `laws.check` parameter values the law does not accept | `id` |
+| `law_check_unsupported` | `refused` | `laws.check` names a single-output law | |
+| `law_check_running` | `refused` | `laws.check` while another check runs | |
+| `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -1280,6 +1285,7 @@ built into the program, and law files imported into the local data folder.
 |---|---|---|
 | `laws.list` | `{"world"}` (optional: `single`, `mimo`, or absent for both) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
 | `laws.import` | `{"path"}` | `{"law":entry}` |
+| `laws.check` | `{"id"}` or `{"path"}`, and `{"params"}` (optional) | `{"law":entry,"report":{"passed","recorded","tool_version","cases":[case...]}}` |
 
 ```
 {"id":"pinv_closed","world":"mimo","builtin":true,"name":"pseudo-inverse, closed loop",
@@ -1311,3 +1317,40 @@ built into the program, and law files imported into the local data folder.
   Importing a file already in the catalog returns its entry. It needs control. Refusals:
   `bad_params` (no path, or a relative one), `not_controller`, `law_import_failed`,
   `catalog_unavailable`.
+- **`laws.check`** runs a MIMO law on the simulator's check set before it may drive hardware:
+  the well-conditioned 4 x 4 and 12 x 6 modal plants, the ill-conditioned 12 x 6, the rigid
+  plate, the 4 x 4 with measurement noise 30 dB under the response, and the 12 x 6 on a level
+  ladder from -20 dB to full level. Each case is a whole run in the controller, from
+  identification to full level, with the law under the core's own guards, against a reference
+  the plant can reach. The law is named by catalog `id`, or by the `path` of a law file, which
+  is imported first; `params` are its parameter values by key (defaults fill the rest). Every
+  case asks that every call is answered, in time, with a drive the core can use, and that no
+  protection trips; then `requirement` says the rest: `converge` (every control within
+  +/- 1 dB within 20 loops at full level; the square plants), `settle` (converge, or hold a
+  steady drive: no control's error moving more than 0.5 dB loop to loop over the last 3 loops,
+  every control within 6 dB; the plants with more controls than drives, where the documented
+  methods aim at different compromises), `survive` (as `settle`, or the run ended by the core's
+  own divergence judgement, reported in `trip`; the ill-conditioned plant). A law file's result
+  is recorded against its SHA-256 (`recorded` true) and its entry's `check` comes back with the
+  record; a passed record is what lets an imported law drive hardware. A built-in law is
+  checked but not recorded: it is cleared already. While it runs, one `laws.check` event goes
+  out as each case starts (`state` `running`, `result` null) and one as it ends (`state`
+  `done`, `result` the case). It needs control, refuses while a run is live, and runs one at
+  a time. Refusals: `bad_params` (neither `id` nor `path`, or both; `params` not an object; a
+  relative path), `not_controller`, `run_active`, `law_unknown`, `law_check_unsupported` (a
+  single-output law), `law_params_invalid`, `law_import_failed`, `law_check_running`,
+  `law_check_not_recorded`, `catalog_unavailable`.
+
+```
+{"name":"ill-conditioned 12 x 6","plant":"modal-12x6-ill","requirement":"survive","passed":true,
+ "detail":"every call answered; the core ended the run by its own judgement (...)",
+ "loops_to_converge":null,"loops_at_full":2,"final_error_db":6.32,"worst_line_db":10.55,
+ "settle_db":null,"trip":"The change cap held drive 4 back ...","misses":0,"rejected":0,
+ "repaired_lines":0,"capped_lines":7210,"calls":5,"worst_call_ms":32.3,"budget_ms":2125,
+ "gate_passed":false}
+```
+
+`misses` counts loop calls whose drive was not used, `rejected` those refused at an output
+check (the core's, or the law host's at a law file's boundary), `repaired_lines` and
+`capped_lines` the drive-lines the core repaired and held back, `budget_ms` a call's time
+budget.

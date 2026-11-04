@@ -24,6 +24,9 @@ PAYLOADS = {
     'response_laws_list': ('result', 'lawsListResult'),
     'request_laws_import': ('params', 'lawsImportParams'),
     'response_laws_import': ('result', 'lawsImportResult'),
+    'request_laws_check': ('params', 'lawsCheckParams'),
+    'response_laws_check': ('result', 'lawsCheckResult'),
+    'event_laws_check': ('data', 'lawsCheckEvent'),
     'request_mimo_random_subscribe_coh_error': ('params', 'mimoSubscribeParams'),
     'request_mimo_random_identification_load': ('params', 'mimoIdentificationParams'),
     'response_mimo_random_identification_load': ('result', 'mimoIdentificationResult'),
@@ -126,7 +129,8 @@ def test_every_new_refusal_is_a_listed_reason(validate):
     error = _text('response_error_setup_invalid')
     validate(error)
     for reason in ('gate_failed', 'law_import_failed', 'catalog_unavailable',
-                   'identification_mismatch'):
+                   'identification_mismatch', 'law_unknown', 'law_params_invalid',
+                   'law_check_unsupported', 'law_check_running', 'law_check_not_recorded'):
         e = copy.deepcopy(error)
         e['error']['reason'] = reason
         validate(e)
@@ -206,3 +210,17 @@ def test_the_setup_extensions_are_checked(validate):
     bad = copy.deepcopy(setup)
     bad['control']['cap_up_db'] = 7
     _refused(validate, bad, 'mimoSetup')
+
+
+def test_a_law_check_reports_every_case_and_clears_the_law(validate):
+    result = _text('response_laws_check')['result']
+    report, law = result['report'], result['law']
+    assert report['passed'] and report['recorded'] and len(report['cases']) == 6
+    assert law['check']['status'] == 'passed' and law['check']['hardware']
+    assert [c['name'] for c in law['check']['cases']] == [c['name'] for c in report['cases']]
+    _refused(validate, {**report['cases'][0], 'requirement': 'converged'}, 'lawCheckCase')
+    event = _text('event_laws_check')['data']
+    assert event['result'] == report['cases'][event['index']]
+    _refused(validate, {**event, 'state': 'running'}, 'lawsCheckEvent')
+    validate({**event, 'state': 'running', 'result': None}, 'lawsCheckEvent')
+    _refused(validate, {'id': 'pinv_open', 'level': 3}, 'lawsCheckParams')

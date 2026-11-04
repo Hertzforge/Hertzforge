@@ -61,6 +61,7 @@
 
 #![allow(dead_code)]
 
+pub mod bench_network;
 pub mod plant;
 pub mod plants;
 
