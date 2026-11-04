@@ -213,7 +213,8 @@
         "values": {"$ref": "#/$defs/arrayRef"},
         "value_label": {"type": "string"},
         "value_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
-        "selects": {"const": "shape3d"}
+        "selects": {"const": "shape3d"},
+        "matched": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2}}
       }
     },
     "matrixAxis": {
@@ -435,8 +436,9 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "complex", "frequency"], "additionalProperties": false,
-          "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"}}
+          "type": "object", "required": ["flat", "complex", "frequency", "projection"], "additionalProperties": false,
+          "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"},
+          "projection": {"type": "boolean"}}
         }
       }
     },

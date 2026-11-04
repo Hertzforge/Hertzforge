@@ -294,6 +294,21 @@
 									<option value="phase">Phase</option>
 								</select>
 							{/if}
+							{#if a.shown?.views.some((v) => v.view === 'matrix')}
+								<div class="seg" role="radiogroup" aria-label="Bars or grid">
+									<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
+									<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
+								</div>
+							{/if}
+							{#if a.shown?.views.some((v) => v.view === 'shape3d' && v.overlays?.length)}
+								<button class="btn ghost sm" class:on={a.prefs.overlay} aria-pressed={a.prefs.overlay} data-testid="read-overlay" title="Animate the picked pair of modes over each other, the second phase-aligned to the first" onclick={() => a.setPref('overlay', !a.prefs.overlay)}>Overlay</button>
+							{/if}
+							{#if offers.projection}
+								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
+							{/if}
+							{#if a.comparison && a.picks.length}
+								<button class="btn sm" data-testid="add-matches" title="Add the picked MAC squares to the matched modes for this pair of sets; created on first use" onclick={() => void a.addMatches()}>Add Matches</button>
+							{/if}
 						</div>
 					{/if}
 					{#if app.project.selection.objects.length === 1 && app.project.summary?.objects.find((o) => o.name === app.project.selection.objects[0])?.kind === 'report'}
@@ -304,10 +319,23 @@
 					</button>
 				</header>
 				{#if a.shown}
+					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
 					<div class="svviews" class:pair={a.shown.views.length === 2}>
 						{#each a.shown.views as v, i (i)}
 							<div class="view {v.view}">
-								<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} scope="selection" />
+								<ViewRenderer
+									view={v}
+									layout="strip"
+									showTitle={v.view === 'spectrum'}
+									minHeight={240}
+									scope="selection"
+									selected={v.view === 'matrix' && v.selects ? a.pair : null}
+									picks={v.view === 'matrix' && v.selects ? a.picks : []}
+									onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
+									bars={v.view === 'matrix' && a.prefs.bars}
+									mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
+									overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
+								/>
 							</div>
 						{/each}
 					</div>

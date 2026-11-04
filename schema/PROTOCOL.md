@@ -427,7 +427,11 @@ data object, `complex` for complex frequency data, `frequency` for anything on a
 so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
 the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD
 on a geometry shows its principal shape, or the shape relative to one reference when one column of its
-grid is picked.
+grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC and, on a
+geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
+pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
+`projection` when the two sets are on different geometries) animates the second set projected onto the
+first's geometry; `project.add_matches` keeps picked squares as matched modes.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
