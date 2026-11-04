@@ -1170,6 +1170,36 @@ export class ProjectState {
 		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
 	}
 
+	/** Link the selected objects into one group, as VD's Link does; the group merges any they are in. */
+	link(names: string[]): Promise<boolean> {
+		const [first, second, ...more] = names;
+		return this.act(`Linking ${names.join(', ')}`, 'project.link', { first, second, more: more.join(', '), name: '' });
+	}
+
+	unlink(name: string): Promise<boolean> {
+		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
+	}
+
+	setBasis(name: string): Promise<boolean> {
+		return this.act(`Making the group of ${name} the Basis`, 'project.set_basis', { object: name });
+	}
+
+	/** An act on the groups, run as the operation it is; the project it answers with is applied. */
+	private async act(doing: string, op: string, params: Record<string, unknown>): Promise<boolean> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ project?: ProjectSummary }>('op.run', { op, params }, { timeoutMs: FILE_TIMEOUT_MS });
+			if (res.project) this.apply(res.project);
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+
 	/** Show the tables `name`'s units are declared in, or close them when they are showing. */
 	async toggleUnits(name: string): Promise<void> {
 		if (this.units?.name === name) {

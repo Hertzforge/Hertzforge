@@ -391,6 +391,16 @@ a channel table its `channels`; photographs their names; matched modes their `ma
 else is `none`. The answer describes the object as it stands and is asked again when the project
 changes.
 
+**Links and what fits.** The summary's `links` are the project's object groups as Visual Dynamics
+brackets them down the tree: each group's `members`, its `role` (`Basis`, the group comparisons are
+made against, or null) and its `name` (blank when it has none). An object that does not fit the
+geometry it answers to (its group's, else the active one), or a modal object with no shape set to
+answer to, carries `issue`: the `message` to show, and the `sub_items` (record, mode or channel
+indices) at fault, for the grid to mark. Incompatibility warns and never blocks, so a linked object
+with an issue is still linked. `project.link`, `project.unlink`, `project.set_basis`,
+`project.place`, `project.set_role` and `project.name_object_group` are operations (run by `op.run`)
+and answer with the project, as every act does.
+
 **The selection shows.** `project.show` answers what a selection in the tree shows, as Visual
 Dynamics' window shows it: `objects` are the selected objects' names, `records` maps an object's name
 to the record indices picked in its grid (a mode's or a channel's index for a shape set or a channel

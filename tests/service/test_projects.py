@@ -29,7 +29,7 @@ def test_a_new_project_is_empty_and_named(validate):
     summary = projects.summary(state)
     validate(summary, 'project')
     assert summary == {'title': 'Bracket Survey', 'file': None,
-                       'modified': False, 'objects': [], 'active_geometry': None}
+                       'modified': False, 'objects': [], 'active_geometry': None, 'links': []}
 
 
 def test_importing_a_run_lists_its_objects_and_reports_progress(validate):
