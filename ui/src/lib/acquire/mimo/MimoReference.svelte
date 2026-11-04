@@ -252,7 +252,7 @@
 						<li>Import it here, under Import.</li>
 					</ol>
 					<div class="aq-actions">
-						<button class="btn sm" onclick={onanalyze} data-testid="ref-field-analyze">Open the Analysis Workspace</button>
+						<button class="btn sm" onclick={onanalyze} data-testid="ref-field-analyze">Open the Signals Module</button>
 						<button class="btn sm ghost" disabled={locked} onclick={() => mimo.setMethod('import')}>Go to Import</button>
 					</div>
 				</section>

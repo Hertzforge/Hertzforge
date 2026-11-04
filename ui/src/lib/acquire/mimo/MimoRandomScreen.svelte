@@ -198,7 +198,7 @@
 							<MimoSpace {mimo} />
 						</div>
 					{:else if section === 'reference'}
-						<MimoReference {mimo} onanalyze={() => app.go('analyze')} />
+						<MimoReference {mimo} onanalyze={() => app.go('signals')} />
 					{:else if section === 'control'}
 						<MimoControl {mimo} />
 					{:else if section === 'schedule'}

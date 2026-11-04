@@ -227,13 +227,13 @@ coherence and phase), and the test controls the six DOFs.
 ### From Field Data
 
 A reference can come from measured records, from the field or from flight. The route runs through
-the analysis workspace: open the records there, compute the full cross-spectral density matrix of
-the control sensors (in the same order as the controls here, on the test's line spacing), export
-it as a random specification `.npz`, and import that file under Import. **Open the Analysis
-Workspace** and **Go to Import** on the tab lead to the two ends of the route. The import's
-conjugation matches what the analysis workspace writes, and the validation and repair apply as for
-any import, so a matrix estimated from too few averages, or combined from several records in a way
-that broke its definiteness, is caught before the test.
+the Signals module: open the records there, compute the full cross-spectral density matrix of the
+control sensors (in the same order as the controls here, on the test's line spacing), export it as a
+random specification `.npz`, and import that file under Import. **Open the Signals Module** and **Go
+to Import** on the tab lead to the two ends of the route. The import's conjugation matches what the
+Signals module writes, and the validation and repair apply as for any import, so a matrix estimated
+from too few averages, or combined from several records in a way that broke its definiteness, is
+caught before the test.
 
 ## Control Settings
 
