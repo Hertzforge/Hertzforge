@@ -40,12 +40,27 @@
 	let pairs = $state<Record<number, { row: number; column: number }>>({});
 	const pairOf = (r: AnalyzeResult) => pairs[r.id] ?? { row: 0, column: 0 };
 	const linked = (r: AnalyzeResult) => r.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d');
+	/**
+	 * The one result filling the results area, by id, the others kept as they were behind it. A
+	 * result removed lets go of it, and a new one does too, so it is not run out of sight.
+	 */
+	let maximized = $state<number | null>(null);
+	const big = $derived(a.results.some((r) => r.id === maximized) ? maximized : null);
+	let newest = 0;
+	$effect(() => {
+		const top = Math.max(0, ...a.results.map((r) => r.id));
+		if (top > newest) maximized = null;
+		newest = top;
+	});
+
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 			e.preventDefault();
 			void a.run();
+		} else if (e.key === 'Escape' && big !== null && !(e.target as HTMLElement | null)?.closest?.('input, textarea, select')) {
+			maximized = null;
 		}
 	}
 
@@ -185,9 +200,9 @@
 				</p>
 			</div>
 		{:else}
-			<div class="grid">
+			<div class="grid" class:one={big !== null}>
 				{#each a.results as r (r.id)}
-					<article class="card" data-testid="result-card" data-op={r.opId} aria-label="{r.opTitle} result">
+					<article class="card" class:big={r.id === big} class:tucked={big !== null && r.id !== big} data-testid="result-card" data-op={r.opId} aria-label="{r.opTitle} result">
 						<header>
 							<div class="ctext">
 								<h3>{r.opTitle}</h3>
@@ -195,6 +210,11 @@
 								<p class="meta params">{r.paramSummary}</p>
 							</div>
 							<span class="at num">{time(r.at)}</span>
+							<button class="btn ghost icon sm" data-testid="result-maximize" onclick={() => (maximized = r.id === big ? null : r.id)}
+								aria-pressed={r.id === big} aria-label={r.id === big ? 'Back to all the results' : 'Fill the results area with this result'}
+								title={r.id === big ? 'Back to all the results (Esc)' : 'Fill the results area'}>
+								<Icon name={r.id === big ? 'restore' : 'maximize'} size={14} />
+							</button>
 							<button class="btn ghost icon sm" data-testid="result-remove" onclick={() => a.removeResult(r.id)} aria-label="Remove this result" title="Remove">
 								<Icon name="close" size={14} />
 							</button>
@@ -492,6 +512,42 @@
 		align-items: start;
 	}
 
+	.grid.one {
+		flex: 1;
+		min-height: 0;
+		grid-template-columns: minmax(0, 1fr);
+		grid-auto-rows: minmax(0, 1fr);
+		align-items: stretch;
+	}
+
+	.card.tucked {
+		display: none;
+	}
+
+	.card.big {
+		min-height: 0;
+	}
+
+	.card.big .views {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+	}
+
+	/* what can draw at any size takes the room; a table or a reading keeps its own height */
+	.card.big .view {
+		flex: none;
+	}
+
+	.card.big .view.spectrum,
+	.card.big .view.waterfall,
+	.card.big .view.shape3d,
+	.card.big .view.matrix {
+		flex: 1 1 0;
+		height: auto;
+		min-height: 320px;
+	}
+
 	.card {
 		display: flex;
 		flex-direction: column;
@@ -549,12 +605,13 @@
 		height: 340px;
 	}
 
+	/* the 3-D views grow with the window; a plot keeps its height, which suits a column of them */
 	.view.waterfall {
-		height: 480px;
+		height: clamp(480px, 64vh, 960px);
 	}
 
 	.view.shape3d {
-		height: 440px;
+		height: clamp(440px, 64vh, 960px);
 	}
 
 	.view.matrix {
