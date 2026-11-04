@@ -1161,6 +1161,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-random"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-mimo-laws",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-module-abi"
 version = "0.1.0"
 dependencies = [

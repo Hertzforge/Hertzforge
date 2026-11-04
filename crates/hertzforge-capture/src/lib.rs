@@ -759,7 +759,9 @@ impl SidecarBase {
         let sidecar = self.snapshot(shared, complete);
         let json = serde_json::to_string_pretty(&sidecar)
             .map_err(|e| io::Error::other(format!("sidecar serialize: {e}")))?;
-        std::fs::write(self.run_dir.join(SIDECAR_FILE), json)?;
+        // Atomic: a reader (or a crash) sees the previous sidecar or this one,
+        // never a torn one.
+        write_atomic(&self.run_dir.join(SIDECAR_FILE), json.as_bytes())?;
         Ok(sidecar)
     }
 }
@@ -1156,6 +1158,82 @@ fn f32_as_le_bytes(samples: &[f32]) -> &[u8] {
             std::mem::size_of_val(samples),
         )
     }
+}
+
+// =============================================================================
+// Binary records with a JSON sidecar
+// =============================================================================
+
+/// Write `bytes` to `path` atomically: a temporary file in the same folder,
+/// synced, then renamed over the target, so a reader never sees a half-written
+/// file and a crash leaves the old one or the new one.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "record".into());
+    let tmp = dir.join(format!(".{name}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_data()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+/// A binary record: `<dir>/<name>.bin` holds the payload and `<dir>/<name>.json`
+/// the sidecar that says what is in it (the caller's serializable header). Both
+/// are written atomically, the payload first, so a sidecar never names a payload
+/// that is not there. Matrix records too large for JSON (spectral matrices of a
+/// multiple-output run) are kept this way. Returns the payload's path.
+pub fn write_binary_record<S: Serialize>(
+    dir: &Path,
+    name: &str,
+    sidecar: &S,
+    payload: &[u8],
+) -> io::Result<PathBuf> {
+    let bin = dir.join(format!("{name}.bin"));
+    write_atomic(&bin, payload)?;
+    let json = serde_json::to_vec_pretty(sidecar)
+        .map_err(|e| io::Error::other(format!("record sidecar: {e}")))?;
+    write_atomic(&dir.join(format!("{name}.json")), &json)?;
+    Ok(bin)
+}
+
+/// Append `chunk` to `<dir>/<name>.bin` and rewrite its sidecar atomically (a
+/// record that grows every loop). The sidecar is written after the chunk, so it
+/// never counts more than the payload holds.
+pub fn append_binary_record<S: Serialize>(
+    dir: &Path,
+    name: &str,
+    sidecar: &S,
+    chunk: &[u8],
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let bin = dir.join(format!("{name}.bin"));
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&bin)?;
+        f.write_all(chunk)?;
+        f.sync_data()?;
+    }
+    let json = serde_json::to_vec_pretty(sidecar)
+        .map_err(|e| io::Error::other(format!("record sidecar: {e}")))?;
+    write_atomic(&dir.join(format!("{name}.json")), &json)?;
+    Ok(bin)
+}
+
+/// Read a binary record back: its sidecar and its payload.
+pub fn read_binary_record(dir: &Path, name: &str) -> io::Result<(serde_json::Value, Vec<u8>)> {
+    let json = std::fs::read(dir.join(format!("{name}.json")))?;
+    let sidecar = serde_json::from_slice(&json)
+        .map_err(|e| io::Error::other(format!("record sidecar {name}.json: {e}")))?;
+    let payload = std::fs::read(dir.join(format!("{name}.bin")))?;
+    Ok((sidecar, payload))
 }
 
 #[cfg(test)]

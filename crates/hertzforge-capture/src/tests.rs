@@ -747,3 +747,33 @@ fn the_first_fault_is_the_one_reported() {
     shared.fault("write failed (consequence)");
     assert_eq!(shared.fault_text().as_deref(), Some("disk full"));
 }
+
+// --- binary records ---------------------------------------------------------------
+
+/// A binary record round-trips, an appended record grows by its chunks with the
+/// sidecar rewritten each time, and no temporary file is left behind.
+#[test]
+fn binary_records_round_trip_and_append() {
+    let dir = tmp("binary-records");
+    let payload: Vec<u8> = (0..=255u8).collect();
+    let header = serde_json::json!({"kind": "test", "len": 256});
+    let path = write_binary_record(&dir, "one", &header, &payload).unwrap();
+    assert!(path.ends_with("one.bin"));
+    let (side, back) = read_binary_record(&dir, "one").unwrap();
+    assert_eq!(back, payload);
+    assert_eq!(side["len"], 256);
+    for k in 0..3u8 {
+        let side = serde_json::json!({"chunks": k + 1});
+        append_binary_record(&dir, "grow", &side, &[k; 4]).unwrap();
+    }
+    let (side, back) = read_binary_record(&dir, "grow").unwrap();
+    assert_eq!(back, vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]);
+    assert_eq!(side["chunks"], 3);
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
