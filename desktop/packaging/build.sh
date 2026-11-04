@@ -18,8 +18,8 @@
 # --e2e builds with the `e2e` feature, for the local proof only (packaging/e2e/);
 # never ship that build.
 #
-# Unsigned. packaging/sign_macos.sh is the macOS signing and notarization step,
-# prepared and not yet run (docs/desktop-app.md).
+# Unsigned. packaging/sign_macos.sh is the macOS signing and notarization step
+# (docs/desktop-app.md).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DESKTOP="$ROOT/desktop"

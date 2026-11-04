@@ -20,7 +20,8 @@
 #
 # The team is NOTARY_TEAM_ID, or else the one the identity's name ends with.
 # Without credentials that answer, the app and image are signed and not
-# notarized, and the script says so.
+# notarized, and the script says so; with HERTZFORGE_REQUIRE_NOTARIZED set, as the
+# desktop workflow sets it, the script stops instead.
 #
 # Adapted from the signing half of Visual Dynamics' packaging/build_macos.sh (MIT,
 # Brandon Zwink). What carries over, each learned there: sign inside out, every
@@ -31,8 +32,7 @@
 # sign, notarize and staple the image.
 #
 # Run on the developer's Mac after a build (first on November 3, 2026, notarized on
-# the first try), and the step the desktop workflow runs when HERTZFORGE_SIGN_MACOS
-# is "true", which it is not yet (docs/desktop-app.md).
+# the first try), and by the desktop workflow's macos job (docs/desktop-app.md).
 set -euo pipefail
 trap 'echo "sign_macos.sh: stopped at line $LINENO (exit $?)" >&2' ERR
 APP="${1:?usage: sign_macos.sh <app> <dmg>}"
@@ -97,6 +97,7 @@ if notarize "$ZIP"; then
 else
   echo "sign_macos.sh: warning: no notary credentials; signed but not notarized" >&2
   notarized=
+  [[ -z ${HERTZFORGE_REQUIRE_NOTARIZED:-} ]] || exit 1
 fi
 rm -f "$ZIP"
 
@@ -110,5 +111,8 @@ codesign --force --timestamp --sign "$SIGN" "$DMG"
 if [[ -n $notarized ]] && notarize "$DMG"; then
   xcrun stapler staple -q "$DMG"
   spctl --assess --type open --context context:primary-signature -v "$DMG"
+elif [[ -n ${HERTZFORGE_REQUIRE_NOTARIZED:-} ]]; then
+  echo "sign_macos.sh: the image was not notarized" >&2
+  exit 1
 fi
 echo "sign_macos.sh: $DMG ($(du -sh "$DMG" | cut -f1))"
