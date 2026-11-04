@@ -9,6 +9,7 @@
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import { cursors } from '$lib/viz/cursor';
 
 	interface Props {
 		app: AppState;
@@ -32,6 +33,13 @@
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
+
+	// a stage that reads at a line follows the frequency cursor of the plot beside it
+	$effect(() => {
+		const follows = a.shown?.views.some((v) => v.view === 'shape3d' && v.cursor === 'frequency');
+		if (!follows) return;
+		return cursors.subscribe('frequency', (state) => a.moveLine(state.x));
+	});
 
 	/**
 	 * The cell chosen in each result's MAC, by result id. A matrix that `selects` the result's

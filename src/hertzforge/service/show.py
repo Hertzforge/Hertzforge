@@ -83,7 +83,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: how the window reads data, kept across selections as Visual Dynamics keeps
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
-PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude'}
+PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None}
 
 
 def _alone(project: Any, name: str, picks: list[int],
@@ -122,7 +122,9 @@ def _alone(project: Any, name: str, picks: list[int],
             return _run(project, 'project.plot', data=name,
                         records=_runs(list(range(int(obj.num_records)))),
                         component=component), []
-        return _run(project, 'project.waterfall', data=name, component=component), []
+        views = _run(project, 'project.waterfall', data=name, component=component)
+        _faced(views, obj)
+        return views, []
     from hertzforge.core.report import Report
 
     if isinstance(obj, Report):
@@ -132,6 +134,108 @@ def _alone(project: Any, name: str, picks: list[int],
             v.row('Blocks', float(blocks), '', 'info'),
             v.row('Edited in', 'the Report workspace', None, 'info')])], []
     return [], [f'{name} ({_kind(obj).replace("_", " ")}) has no view of its own here yet']
+
+
+def _faced(views: list[dict], obj: Any) -> None:
+    """A coherence opens on the map, the stage seen from above with the
+    channels down and frequency across, as VD's coherence does; the bar's
+    Curves is the perspective."""
+    from hertzforge.core.data import Coherence, MultipleCoherence
+
+    if isinstance(obj, (Coherence, MultipleCoherence)):
+        for view in views:
+            if view.get('view') == 'waterfall':
+                view['facing'] = 'top'
+
+
+#: how many records a cross-object stage stacks before standing down: the
+#: stack copies the rows drawn, and two whole surveys would be gigabytes
+STACK_LIMIT = 500
+
+
+def _stacked(project: Any, names: list[str], prefs: dict[str, Any]
+             ) -> tuple[list[dict], list[str]] | None:
+    """Several data objects of one type on one stage, as VD's
+    `_stacked_entry` draws two SRS or an FRF from each of two surveys
+    station by station: the same concrete type and the same abscissa,
+    their records stacked into one object for the drawing only. Nothing
+    is merged or stored, so the merge rules' refusals (duplicate pairs,
+    mixed capture counts) do not apply: they protect stored objects from
+    telling false stories, and a drawing tells none. None otherwise, and
+    the caller shows each on its own."""
+    from .waterfalls import waterfall_view
+
+    objects = [project[name] for name in names]
+    if len(objects) < 2 or not all(_is_data(obj) for obj in objects):
+        return None
+    first = objects[0]
+    if any(type(obj) is not type(first) for obj in objects):
+        return None
+    if any(not np.array_equal(obj.abscissa, first.abscissa) for obj in objects[1:]):
+        return None
+    if sum(int(obj.num_records) for obj in objects) > STACK_LIMIT:
+        return None
+    referenced = first.reference_dof is not None
+    rows: list[Any] = []
+    resp: list[str] = []
+    ref: list[str] = []
+    dims: list[str] = []
+    units: list[Any] = []
+    runits: list[Any] = []
+    hints: list[Any] = []
+    for data in objects:
+        ordinate = np.asarray(data.ordinate)
+        n = int(data.num_records)
+        for i in range(n):
+            rows.append(ordinate[i])
+            resp.append(data.response_dof[i])
+            if referenced:
+                ref.append(data.reference_dof[i])
+            dims.append(data.ordinate_dim[i])
+            units.append((data.ordinate_unit or [None] * n)[i])
+            runits.append((data.reference_unit or [None] * n)[i])
+            hints.append((data.dimension_hint or [None] * n)[i])
+    stacked = type(first)(first.abscissa, np.asarray(rows), response_dof=resp,
+                          reference_dof=ref if referenced else None, ordinate_dim=dims,
+                          ordinate_unit=units, reference_unit=runits, dimension_hint=hints)
+    title = ' + '.join(dict.fromkeys(names))
+    note = f'{len(objects)} objects on one stage'
+    if prefs['flat']:
+        import hertzforge as hz
+        from hertzforge.drawing.viz.waterfall import waterfall_arrays
+
+        from .waterfalls import axes
+
+        records = list(range(int(stacked.num_records)))
+        arrays = waterfall_arrays(stacked, records, unit_system=hz.SI, exponents=False,
+                                  component=prefs['component'])
+        lines = [v.series(stacked.record_label(r), 'measured', x, y)
+                 for r, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True)]
+        return [v.spectrum(title, *axes(stacked, arrays['drawn'][0], prefs['component'], arrays),
+                           lines)], [note]
+    view = waterfall_view(title, stacked, component=prefs['component'])
+    _faced([view], first)
+    return [view], [note]
+
+
+def _column(data: Any, picks: list[int]) -> list[int] | None:
+    """The picked records as one CPSD reference column, or None: a column
+    against one reference carries each response's magnitude and phase
+    relative to it, an honest complex shape; a whole CPSD has no
+    reference chosen and the diagonal is the autos (VD's `_cpsd_column`)."""
+    from hertzforge.core.data import channel_quantities
+
+    if len(picks) < 2 or data.reference_dof is None or not np.iscomplexobj(data.ordinate):
+        return None
+    quantities = [channel_quantities(data.known_dim(i)) for i in picks]
+    references = {(data.reference_dof[i], quantities[k][1]) for k, i in enumerate(picks)}
+    if len(references) != 1:
+        return None
+    if all(data.response_dof[i] == data.reference_dof[i] for i in picks):
+        return None
+    kinds = [response for response, _reference in quantities]
+    wanted = max(set(kinds), key=kinds.count)
+    return [i for i, kind in zip(picks, kinds, strict=True) if kind == wanted]
 
 
 def _drawn_rows(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -202,27 +306,58 @@ def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
     return [stage, plot], notes
 
 
-def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
-             ) -> tuple[list[dict], list[str]]:
+def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
+             prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]]:
     """Frequency data on a geometry: the operating deflection shape of
-    complex data at its loudest line (`deform.OdsDeflection`), or a
-    PSD's envelope there (`deform.EnvelopeDeflection`), each as one shape
-    the view sweeps, beside the records as curves."""
+    complex data (`deform.OdsDeflection`); a CPSD's principal shape, the
+    cross-spectral matrix's dominant eigenvector per line, or, with one
+    reference column picked, the shape relative to that reference; a PSD's
+    envelope (`deform.EnvelopeDeflection`). At the line the plot's cursor
+    asks for (`prefs['line']`, Hz), else the loudest. One shape the view
+    sweeps, beside the records as curves, the two sharing the frequency
+    cursor."""
     from hertzforge.core.data import Psd
     from hertzforge.deform import EnvelopeDeflection, OdsDeflection
 
+    prefs = {**PREFS, **(prefs or {})}
     geometry, data = project[geometry_name], project[data_name]
-    records, _quantity, notes = _played(data, picks)
-    dofs = [data.response_dof[i] for i in records]
-    ordinate = np.asarray(data.ordinate)[records]
+    notes: list[str] = []
+    flavor = 'ODS'
+    envelope = False
+    column = _column(data, picks) if isinstance(data, Psd) else None
+    if column is not None:
+        records = column
+        dofs = [data.response_dof[i] for i in records]
+        ordinate = np.asarray(data.ordinate)[records]
+        notes.append(f'relative to reference {data.reference_dof[records[0]]}')
+    elif isinstance(data, Psd) and data.reference_dof is not None:
+        try:
+            dofs, ordinate, used = data.principal_shapes()
+            records = [i for i in range(int(data.num_records))
+                       if data.response_dof[i] == data.reference_dof[i]]
+            flavor = f'Principal {used} shape'
+        except ValueError as why:
+            records, _quantity, notes = _played(data, picks)
+            dofs = [data.response_dof[i] for i in records]
+            ordinate = np.asarray(data.ordinate)[records]
+            envelope = True
+            notes.append(f'the envelope: {why}')
+    else:
+        records, _quantity, notes = _played(data, picks)
+        dofs = [data.response_dof[i] for i in records]
+        ordinate = np.asarray(data.ordinate)[records]
+        envelope = isinstance(data, Psd)
     drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
-    envelope = isinstance(data, Psd)
     deflection = (EnvelopeDeflection if envelope else OdsDeflection)(geometry, dofs, ordinate)
     if not len(deflection.rows) or not deflection.num_lines:
         return [], [f'none of {data_name}\'s records lands on {geometry_name}']
-    line = deflection.strongest_line
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    if prefs.get('line') is not None:
+        line = int(np.argmin(np.abs(abscissa - float(prefs['line']))))
+    else:
+        line = deflection.strongest_line
     deflection.line = line
-    frequency = float(np.asarray(data.abscissa, dtype=float)[line])
+    frequency = float(abscissa[line])
     shape = np.zeros((drawn_rows.size, 3), dtype=complex)
     at = drawn[deflection.rows]
     kept = at >= 0
@@ -231,7 +366,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
         label = f'Envelope at {frequency:.4g} Hz'
     else:
         shape[at[kept]] = (deflection.offsets(0.0) - 1j * deflection.offsets(np.pi / 2))[kept]
-        label = f'ODS at {frequency:.4g} Hz'
+        label = f'{flavor} at {frequency:.4g} Hz'
     if not np.all(kept):
         notes.append(f'{int((~kept).sum())} moving nodes are not drawn')
     title = f'{data_name} on {geometry_name}'
@@ -239,8 +374,13 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows],
                       [v.mode(1, frequency, None, shape, label=label)],
                       triangles=triangles, lines=lines, normalization='unscaled',
-                      node_ids=np.asarray(geometry.node_id)[drawn_rows])
-    curves = _run(project, 'project.plot', data=data_name, records=_runs(records))
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows],
+                      cursor='frequency')
+    curves = _run(project, 'project.plot', data=data_name, records=_runs(records),
+                  component=prefs['component'])
+    for curve in curves:
+        if curve.get('view') == 'spectrum':
+            curve['link'] = 'frequency'
     return [stage, *curves], notes
 
 
@@ -270,8 +410,8 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
                      node_ids=np.concatenate(ids))
 
 
-def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
-          ) -> tuple[list[dict], list[str]] | None:
+def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
+          prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]] | None:
     """What two objects show together, or None when the pair has no joint
     reading."""
     from hertzforge.core.channel_table import ChannelTable
@@ -287,7 +427,6 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
     from hertzforge.core.shapes import ShapeSet
 
     a, b = project[first], project[second]
-    kinds = {first: _kind(a), second: _kind(b)}
 
     def of(cls: Any) -> str | None:
         for name, obj in ((first, a), (second, b)):
@@ -313,7 +452,7 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
             abscissa = getattr(obj, 'abscissa_dim', '')
             if isinstance(obj, Psd) or (abscissa == 'frequency'
                                         and np.iscomplexobj(obj.ordinate)):
-                return _pattern(project, geometry, other, picks)
+                return _pattern(project, geometry, other, picks, prefs)
         return None
     if isinstance(a, ShapeSet) and isinstance(b, ShapeSet):
         return _run(project, 'project.mac', first=first, second=second), []
@@ -335,9 +474,7 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
                         reference=transient), []
     if all(type(o) is Psd for o in (a, b)):
         return _run(project, 'project.psd_overlay', first=first, second=second), []
-    if kinds[first] == kinds[second] and _is_data(a):
-        return None
-    return None
+    return _stacked(project, [first, second], {**PREFS, **(prefs or {})})
 
 
 def _offers(project: Any, objects: list[str]) -> dict[str, bool]:
@@ -371,9 +508,13 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     views: list[dict] = []
     try:
         if len(objects) == 2:
-            paired = _pair(project, objects[0], objects[1], records)
+            paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
+        elif len(objects) > 2:
+            stacked = _stacked(project, objects, prefs)
+            if stacked is not None:
+                views, notes = stacked
         if not views:
             for name in objects:
                 more, said = _alone(project, name, records.get(name, []), prefs)

@@ -163,6 +163,7 @@
         "triangles": {"$ref": "#/$defs/arrayRef"},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "node_ids": {"$ref": "#/$defs/arrayRef"},
+        "cursor": {"const": "frequency"},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
@@ -228,6 +229,7 @@
       "properties": {
         "view": {"const": "waterfall"},
         "title": {"type": "string"},
+        "facing": {"enum": ["perspective", "top", "front"]},
         "x": {"$ref": "#/$defs/axis"},
         "z": {"$ref": "#/$defs/axis"},
         "records": {"type": "array", "items": {"type": "string"}},

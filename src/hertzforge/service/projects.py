@@ -356,6 +356,8 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "prefs" takes ' + ', '.join(showing.PREFS))
     if 'component' in prefs and prefs['component'] not in ('magnitude', 'real', 'imag', 'phase'):
         raise bad_request('project.show "component" is magnitude, real, imag or phase')
+    if prefs.get('line') is not None and not isinstance(prefs['line'], (int, float)):
+        raise bad_request('project.show "line" is a frequency in Hz, or null')
     return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
                         dict(part) if part else None, dict(prefs))
 
