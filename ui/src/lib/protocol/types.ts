@@ -391,6 +391,21 @@ export interface ProjectSummary {
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
+/** One operation a selection can run, with the params the selection fills. */
+export interface Action {
+	id: string;
+	title: string;
+	workspace: string;
+	fill: Record<string, string>;
+}
+
+/** `project.actions`: what a selection can take; `project` is what takes no object, with nothing selected. */
+export interface Actions {
+	readings: Action[];
+	acts: Action[];
+	project: Action[];
+}
+
 /** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
 export interface Shown {
 	title: string;

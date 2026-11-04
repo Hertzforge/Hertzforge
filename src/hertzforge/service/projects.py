@@ -330,6 +330,24 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
                         dict(part) if part else None)
 
 
+def actions(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.actions`: what a selection can take (`service.actions`)."""
+    from . import actions as acting
+
+    state = _open(state, 'project.actions')
+    objects = params.get('objects', [])
+    if not isinstance(objects, list) or not all(isinstance(n, str) for n in objects):
+        raise bad_request('project.actions needs "objects", the selected objects\' names')
+    missing = [n for n in objects if n not in state.project]
+    if missing:
+        raise not_found(f'no object named {missing[0]!r}')
+    records = params.get('records') or {}
+    if not isinstance(records, Mapping):
+        raise bad_request('project.actions "records" maps an object\'s name to its picked records')
+    return acting.actions(state.project, list(objects),
+                          {str(k): [int(i) for i in v] for k, v in records.items()})
+
+
 def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:
     """`project.define_units`: units declared on an object by table and
     row (`service.units.define`); the records converted."""

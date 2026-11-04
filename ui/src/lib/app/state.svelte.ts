@@ -13,7 +13,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ProjectChildren, Shown,
+import type { Action, Actions, ProjectChildren, Shown,
 	Catalog,
 	DatasetInfo,
 	DisplayEvent,
@@ -85,7 +85,12 @@ class AnalyzeState {
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
 	showError = $state<string | null>(null);
+	/** A reading run on the selection, drawn in place of what the selection shows until Back. */
+	reading = $state.raw<{ title: string; views: View[] } | null>(null);
+	/** What the selection can take, as the service last answered; null while nothing is selected. */
+	actions = $state.raw<Actions | null>(null);
 	private showSeq = 0;
+	private actionSeq = 0;
 	private nextResult = 1;
 	private openSeq = 0;
 
@@ -213,6 +218,8 @@ class AnalyzeState {
 	async showSelection(): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
+		this.reading = null;
+		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
 			this.shown = null;
 			this.showError = null;
@@ -232,6 +239,61 @@ class AnalyzeState {
 			this.shown = null;
 			this.showError = message(err);
 		}
+	}
+
+	/** What the selection can take; the current tool stays when it still applies, else the first reading. */
+	async loadActions(): Promise<void> {
+		const seq = ++this.actionSeq;
+		if (!this.app.project.summary || !this.app.analysis.isOpen) {
+			this.actions = null;
+			return;
+		}
+		const selection = this.app.project.selection;
+		try {
+			const res = await this.app.analysis.request<Actions>('project.actions', {
+				objects: selection.objects,
+				records: selection.records
+			});
+			if (seq !== this.actionSeq) return;
+			this.actions = res;
+			if (!this.onProject) return;
+			const offered = [...res.readings, ...res.acts, ...res.project];
+			const current = offered.find((e) => e.id === this.opId);
+			if (current) this.pickAction(current);
+			else if (offered.length) this.pickAction(offered[0]);
+		} catch (err) {
+			if (seq === this.actionSeq) this.actions = null;
+			void err;
+		}
+	}
+
+	/** An action chosen in the frame: its tool, with the selection filled into its params. */
+	pickAction(entry: Action): void {
+		if (this.opId !== entry.id) this.selectOp(entry.id);
+		const op = this.op;
+		if (!op) return;
+		const values = { ...this.currentValues };
+		let changed = false;
+		for (const [key, value] of Object.entries(entry.fill)) {
+			if (values[key] !== value) {
+				values[key] = value;
+				changed = true;
+			}
+		}
+		if (changed) this.values = { ...this.values, [op.id]: values };
+	}
+
+	/** Back from a reading to what the selection shows. */
+	endReading(): void {
+		this.reading = null;
+	}
+
+	/** A reading's own control changed (a waterfall's quantity): run it again with the patch. */
+	async rerunReading(patch: ParamValues): Promise<void> {
+		const op = this.op;
+		if (!op || !this.reading) return;
+		this.values = { ...this.values, [op.id]: { ...this.currentValues, ...patch } };
+		await this.run();
 	}
 
 	/**
@@ -278,8 +340,22 @@ class AnalyzeState {
 		this.running = true;
 		this.runError = null;
 		try {
+			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', target(op, opened.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
+			if (this.onProject) {
+				// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+				// takes the view until Back
+				const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+				if (added.length) {
+					const order = (res.project?.objects ?? []).map((o) => o.name);
+					this.app.project.clickObject(added[0], order);
+				} else if (res.views.length) {
+					this.reading = { title: op.title, views: res.views };
+				}
+				this.triedRun = false;
+				return;
+			}
 			this.results = [
 				{
 					id: this.nextResult++,
