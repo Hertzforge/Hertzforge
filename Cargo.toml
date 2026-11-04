@@ -38,8 +38,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
-# Profiles are the defaults. One setting must not be added without replacing what it
-# would break:
+# Profiles are the defaults but for the `opt-level` overrides at the end of this file. One
+# setting must not be added without replacing what it would break:
 #
 # `panic = "abort"` MUST NOT BE ENABLED while drive safety depends on unwinding.
 # Two module pumps put their whole tick batch under `catch_unwind` and issue
@@ -51,3 +51,32 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # exist. Enabling it requires replacing that mechanism first (a signal or exit path
 # that can reach the device, or moving the drive off a process whose death is
 # survivable), not merely re-testing.
+
+# The overrides: optimized numeric code in a debug build. `opt-level` is the only setting
+# changed, so debug assertions, overflow checks and unwinding stay as the dev profile has
+# them, and the rule above is untouched. What it costs: a debugger shows optimized code in
+# these crates, with locals folded away, and a from-scratch test build of the service's
+# packages takes 2.6 times longer (50 s to 130 s on a ten-core Mac) for the optimized
+# dependencies. Why: a debug test run of the MIMO Random module spent nearly all its time
+# in unoptimized FFT, estimation and simulation code and in the WebAssembly compiler the
+# law files go through. Measured on that Mac, the law check test binary took 331 s
+# unoptimized and 48 s with these overrides, the law parity tests 39 s and 3 s (the time
+# was wasmtime compiling the law files; an explicit list of the linear algebra crates
+# alone left it at 38 s, which is why the dependencies are covered as one), and on the
+# four-core CI runners the control job's tests took 26 minutes and Windows ran past the
+# job's 40. The workspace crates named here are the ones a profile of the law check
+# showed; add one when a profile shows it, not by category.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.hertzforge-dsp]
+opt-level = 3
+
+[profile.dev.package.hertzforge-sdm]
+opt-level = 3
+
+[profile.dev.package.hertzforge-hal-sim]
+opt-level = 3
+
+[profile.dev.package.hertzforge-mimo-random]
+opt-level = 3
