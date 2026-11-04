@@ -56,7 +56,22 @@ ALLOWED_PYTHON = frozenset({
 
 #: packages whose metadata states no license this checker can read, each
 #: with what was checked by hand: {normalized name: reason}
-REVIEWED: dict[str, str] = {}
+REVIEWED: dict[str, str] = {
+    # Intel's oneMKL and TBB, which pypardiso brings on x86-64 Windows and
+    # Linux for the sparse modal solve (pyproject.toml): proprietary, the
+    # Intel Simplified Software License, which allows redistributing the
+    # unmodified binaries with Intel's notice and forbids reverse
+    # engineering them. The one exception to the permissive rule, taken
+    # for the solve (2026-11-03); THIRD_PARTY_NOTICES.md carries the notice
+    'mkl': 'Intel Simplified Software License: redistributable unmodified, with the notice',
+    'tbb': 'Intel Simplified Software License: redistributable unmodified, with the notice',
+    'tcmlib': 'Intel Simplified Software License: redistributable unmodified, with the notice',
+    # pulled in by oneMKL's wheel and not shipped: the packaged builds thread
+    # through TBB and leave the OpenMP runtime out (desktop/packaging/bundle_python.sh)
+    'intel-openmp': 'Intel EULA for developer tools; not in the packaged builds',
+    'intel-cmplr-lib-ur': 'Intel EULA for developer tools; not in the packaged builds',
+    'umf': 'Intel EULA for developer tools; not in the packaged builds',
+}
 
 #: trove classifiers as SPDX identifiers (an unlisted classifier is unknown)
 CLASSIFIERS = {
@@ -319,18 +334,39 @@ def imports(source: str) -> list[tuple[int, str]]:
     return [(line, module.split('.')[0]) for line, module in out]
 
 
+def declared_elsewhere(root: pathlib.Path = ROOT) -> frozenset[str]:
+    """The dependencies `pyproject.toml` declares for other platforms only
+    (an environment marker after `;`), by normalized name: an import of
+    one is accounted for where it does not install, and its license is
+    checked on the platforms where it does. `pypardiso` is one: x86-64
+    Windows and Linux, never the Mac."""
+    import tomllib
+
+    try:
+        project = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return frozenset()
+    out = set()
+    for requirement in project.get('project', {}).get('dependencies', []):
+        name, marker, condition = requirement.partition(';')
+        if marker and condition.strip():
+            out.add(normalized(re.split(r'[\s\[<>=!~]', name.strip(), maxsplit=1)[0]))
+    return frozenset(out)
+
+
 def check_imports(files: Iterable[pathlib.Path], own: Mapping[pathlib.Path, frozenset[str]],
                   provided: Mapping[str, Sequence[str]] | None = None,
                   root: pathlib.Path = ROOT) -> list[str]:
     """Every import that is not the standard library, not one of the file's
-    own names (`first_party`), and not provided by an installed
-    distribution."""
+    own names (`first_party`), not provided by an installed distribution,
+    and not a dependency declared for another platform."""
     provided = metadata.packages_distributions() if provided is None else provided
+    elsewhere = declared_elsewhere(root)
     found = []
     for path in files:
         for line, module in imports(path.read_text(encoding='utf-8')):
             if (module in sys.stdlib_module_names or module in own[path]
-                    or module in provided):
+                    or module in provided or normalized(module) in elsewhere):
                 continue
             found.append(f'{path.relative_to(root)}:{line}: imports {module}, which no '
                          'installed package provides; declare the package that does, '

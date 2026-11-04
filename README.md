@@ -54,7 +54,8 @@ time, so building and testing need no NI software installed.
 - A simulated run is always marked `source: "SIM"` and is never presented as a hardware result.
 - No employer, client, laboratory or partner names anywhere in the tree.
 - Dependencies are permissively licensed (MIT, BSD, Apache-2.0, ISC, Zlib; OFL-1.1 for bundled fonts;
-  MPL-2.0 reviewed case by case). No copyleft packages.
+  MPL-2.0 reviewed case by case). No copyleft packages. The one exception is Intel's oneMKL, which
+  the sparse modal solve factors with on x86-64 Windows and Linux (`THIRD_PARTY_NOTICES.md`).
 - The app makes no network requests beyond its own services: fonts and assets are bundled, because
   test labs run on closed networks.
 

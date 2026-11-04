@@ -67,6 +67,19 @@ Measured on an Apple silicon Mac: the analysis service from the bundled runtime 
 it starts (its heavy imports load first), and the app, opened from a fresh copy, had both services
 listening 3.8 s after it was opened and its window up at 4.0 s.
 
+## The Sparse Solver
+
+The modal solve factors its matrices with the fastest solver the machine has
+(`core/sparse_solve.py`): Apple's Accelerate on a Mac, Intel's PARDISO through oneMKL on x86-64
+Windows and Linux (`pypardiso`, a dependency there), and SuperLU anywhere else, as Visual Dynamics
+does. Intel's libraries are proprietary, the one exception to the permissive rule
+(`THIRD_PARTY_NOTICES.md`). The bundle keeps only the libraries PARDISO loads, threaded through TBB,
+and `bundle_python.sh` runs `hertzforge check-solver` on the bundled runtime before it is packed,
+so a build that fell back to SuperLU fails rather than ships. CI runs the same check on every
+runner. In Visual Dynamics a Windows model of 193,627 bricks that took 70 minutes through SuperLU
+took four through PARDISO. The sizes the trimming leaves in Hertzforge's installers are not
+measured yet.
+
 ## How the Shell Finds the Services
 
 The app starts both services with `--port 0`, so the operating system picks a free loopback port
