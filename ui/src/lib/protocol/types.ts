@@ -193,6 +193,8 @@ export interface Shape3DView {
 	motion?: Motion;
 	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
 	node_ids?: Uint32Array;
+	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
+	cursor?: 'frequency';
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
@@ -231,6 +233,8 @@ export interface Pick3D {
  * Values are in display units and never logged; the shell takes log10 of a `log` axis.
  */
 export interface WaterfallView {
+	/** The view it opens in; a coherence opens on the map, seen from above. */
+	facing?: 'perspective' | 'top' | 'front';
 	view: 'waterfall';
 	title: string;
 	x: Axis;
@@ -427,6 +431,8 @@ export interface ShowPrefs {
 	flat: boolean;
 	log_frequency: boolean;
 	component: 'magnitude' | 'real' | 'imag' | 'phase';
+	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
+	line?: number | null;
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */

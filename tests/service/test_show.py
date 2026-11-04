@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hertzforge.core.data import Frf, Psd, Specification, TimeHistory
+from hertzforge.core.data import Frf, Psd, Specification, TimeHistory, channel_quantities
 from hertzforge.core.shapes import ShapeSet
 from hertzforge.service import frames, projects, show
 from hertzforge.service.protocol import ProtocolError
@@ -259,3 +259,66 @@ def test_a_geometrys_views_carry_the_drawn_nodes_ids(plate, validate):
         ids = stage['node_ids']
         assert ids.dtype == np.uint32 and len(ids) == len(stage['nodes'])
         assert set(ids.tolist()) <= {int(n) for n in project[geometry].node_id}
+
+
+def test_several_data_objects_of_one_type_share_a_stage(plate, validate):
+    project = plate.project
+    history = named(plate, 'time_history')
+    (twin,) = project.duplicate(history)
+    try:
+        out = shown(plate, history, twin, validate=validate)
+        (stage,) = out['views']
+        assert stage['view'] == 'waterfall' and '2 objects on one stage' in out['note']
+        alone = shown(plate, history)['views'][0]
+        assert len(stage['records']) == 2 * len(alone['records'])
+        assert stage['title'] == f'{history} + {twin}'
+        flat = shown(plate, history, twin, prefs={'flat': True}, validate=validate)
+        assert flat['views'][0]['view'] == 'spectrum'
+        assert len(flat['views'][0]['series']) == len(stage['records'])
+    finally:
+        project.remove(twin)
+    others = [n for n, o in project.items() if projects.kind_of(o) == 'time_history' and n != history]
+    apart = shown(plate, history, others[0], validate=validate)
+    assert [v['view'] for v in apart['views']] == ['waterfall', 'waterfall'], 'abscissas differ: each alone'
+    mixed = shown(plate, history, named(plate, 'frf'), validate=validate)
+    assert len(mixed['views']) == 2, 'not one type: each alone'
+
+
+def test_a_coherence_opens_on_the_map(plate, validate):
+    out = shown(plate, named(plate, 'multiple_coherence'), validate=validate)
+    assert out['views'][0]['view'] == 'waterfall' and out['views'][0]['facing'] == 'top'
+    assert 'facing' not in shown(plate, named(plate, 'frf'))['views'][0]
+
+
+def test_a_cpsd_on_a_geometry_is_its_principal_shape_or_one_reference_column(plate, validate):
+    project = plate.project
+    geometry, history = named(plate, 'geometry'), named(plate, 'time_history')
+    cpsd = project.compute_cpsds(history)
+    try:
+        data = project[cpsd]
+        assert data.reference_dof is not None
+        out = shown(plate, geometry, cpsd, validate=validate)
+        stage = out['views'][0]
+        assert stage['modes'][0]['label'].startswith('Principal') and stage['cursor'] == 'frequency'
+        assert out['views'][1]['link'] == 'frequency'
+        # one reference channel's column: the DOF and its quantity, as the grid's columns are
+        reference = data.reference_dof[0]
+        column = [i for i in range(data.num_records) if data.reference_dof[i] == reference
+                  and channel_quantities(data.known_dim(i))[1] == 'force']
+        assert len(column) > 2
+        picked = shown(plate, geometry, cpsd, records={cpsd: column}, validate=validate)
+        assert picked['views'][0]['modes'][0]['label'].startswith('ODS')
+        assert f'relative to reference {reference}' in picked['note']
+    finally:
+        project.remove(cpsd)
+
+
+def test_the_stage_reads_at_the_line_the_cursor_asks_for(plate, validate):
+    geometry, frf = named(plate, 'geometry'), named(plate, 'frf')
+    loudest = shown(plate, geometry, frf, validate=validate)['views'][0]['modes'][0]['frequency_hz']
+    asked = shown(plate, geometry, frf, prefs={'line': 500.3}, validate=validate)
+    at = asked['views'][0]['modes'][0]['frequency_hz']
+    assert at == pytest.approx(500.0, abs=1.0) and at != loudest
+    assert asked['views'][0]['modes'][0]['label'] == f'ODS at {at:.4g} Hz'
+    with pytest.raises(ProtocolError, match='"line"'):
+        projects.show(plate, {'objects': [frf, geometry], 'prefs': {'line': 'peak'}})

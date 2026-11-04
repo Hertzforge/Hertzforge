@@ -86,6 +86,10 @@ class AnalyzeState {
 	shown = $state.raw<Shown | null>(null);
 	/** The bar's choices, remembered across launches as VD remembers 3D. */
 	prefs = $state<ShowPrefs>(readPrefs());
+	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
+	line = $state<number | null>(null);
+	private lineTimer: ReturnType<typeof setTimeout> | null = null;
+	private lineFor = '';
 	showError = $state<string | null>(null);
 	/** A reading run on the selection, drawn in place of what the selection shows until Back. */
 	reading = $state.raw<{ title: string; views: View[] } | null>(null);
@@ -221,6 +225,10 @@ class AnalyzeState {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
 		this.reading = null;
+		if (this.lineFor !== selection.objects.join('\u0000')) {
+			this.lineFor = selection.objects.join('\u0000');
+			this.line = null;
+		}
 		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
 			this.shown = null;
@@ -234,7 +242,7 @@ class AnalyzeState {
 					objects: selection.objects,
 					records: selection.records,
 					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
-					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component }
+					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component, line: this.line }
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
@@ -288,6 +296,18 @@ class AnalyzeState {
 			}
 		}
 		if (changed) this.values = { ...this.values, [op.id]: values };
+	}
+
+	/** The plot's cursor moved on a stage that reads at a line: the line follows, once the cursor rests. */
+	moveLine(frequency: number | null): void {
+		if (frequency === null) return;
+		if (this.lineTimer) clearTimeout(this.lineTimer);
+		this.lineTimer = setTimeout(() => {
+			this.lineTimer = null;
+			if (this.line === frequency) return;
+			this.line = frequency;
+			void this.showSelection();
+		}, 150);
 	}
 
 	/** One of the bar's choices changed: kept, and the selection read again. */

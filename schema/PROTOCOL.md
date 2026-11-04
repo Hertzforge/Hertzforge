@@ -420,8 +420,14 @@ no joint reading shows each object on its own, and `note` says what was left out
 connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
 selections as Visual Dynamics keeps its bar: `flat` (the plot in place of the stage for a whole data
 object), `log_frequency` (decades on every frequency axis) and `component` (`magnitude`, `real`, `imag`
-or `phase` of complex data); `offers` says which of them the selection can take (`flat` for a data
-object, `complex` for complex frequency data, `frequency` for anything on a frequency axis).
+or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
+read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a
+data object, `complex` for complex frequency data, `frequency` for anything on a frequency axis). A
+`shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,
+so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
+the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD
+on a geometry shows its principal shape, or the shape relative to one reference when one column of its
+grid is picked.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:

@@ -547,7 +547,7 @@
 		resizeObs = new ResizeObserver(resize);
 		resizeObs.observe(canvasHost);
 		resize();
-		face(saved?.facing ?? facing);
+		face(saved?.facing ?? view.facing ?? facing);
 		if (saved) {
 			camera.position.fromArray(saved.position);
 			camera.up.fromArray(saved.up);
