@@ -21,6 +21,11 @@ binaries.
 | generativity, num_cpus, hermit-abi, paste, seq-macro, enum-as-inner | MIT OR Apache-2.0 | helpers in faer's dependency tree |
 | bytemuck | Zlib OR Apache-2.0 OR MIT | plain-data casts in faer's dependency tree |
 | walkdir, same-file | Unlicense OR MIT (used under MIT) | sysctl's dependencies under faer's matrix kernels |
+| sha2, digest, block-buffer, crypto-common, generic-array, typenum, cpufeatures | MIT OR Apache-2.0 (generic-array MIT) | the content hash of the native reference file (hertzforge-reference) |
+| zip | MIT | reading NumPy `.npz` specification files (hertzforge-reference) |
+| flate2, miniz_oxide, crc32fast | MIT OR Apache-2.0 (miniz_oxide also Zlib) | inflating deflated `.npz` entries, pure Rust (hertzforge-reference) |
+| adler2, simd-adler32 | 0BSD OR MIT OR Apache-2.0 (simd-adler32 MIT) | checksums under miniz_oxide |
+| indexmap, hashbrown, equivalent, memchr, typed-path, getrandom, nix, bitflags, libc, cfg-if | MIT OR Apache-2.0 (memchr Unlicense OR MIT, used under MIT; nix MIT) | helpers in zip's dependency tree |
 
 ## npm packages shipped in the shell
 
