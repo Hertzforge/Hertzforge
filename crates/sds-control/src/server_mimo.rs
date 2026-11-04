@@ -425,6 +425,48 @@ impl Service {
         json!({"report": run.and_then(|r| r.report()).unwrap_or(Value::Null)})
     }
 
+    /// `mimo_random.identification.save` and `.load`: controller only (they write
+    /// files, or change what the next start does).
+    pub(super) async fn mimo_identification(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+        load: bool,
+    ) -> Result<Value, MethodError> {
+        let path = protocol::named_str(params, "path")?
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| {
+                MethodError::bad_params(
+                    "path",
+                    "Name the folder of the identification set with \"path\".",
+                )
+            })?
+            .to_owned();
+        let (run, table) = {
+            let inner = self.inner.lock().await;
+            inner.session.require_controller(conn.id)?;
+            let run = inner.mimo.clone().ok_or_else(|| {
+                MethodError::named(
+                    ErrorCode::Refused,
+                    "not_configured",
+                    "MIMO Random is not set up; send a setup first.",
+                )
+            })?;
+            (run, inner.table.table.clone())
+        };
+        let info = tokio::task::spawn_blocking(move || {
+            let p = std::path::PathBuf::from(&path);
+            if load {
+                run.with(|d| d.load_identification(&p, &table))
+            } else {
+                run.with(|d| d.save_identification(&p))
+            }
+        })
+        .await
+        .map_err(|e| MethodError::internal(format!("the identification task failed: {e}")))??;
+        Ok(json!({"identification": info.to_json()}))
+    }
+
     pub(super) async fn laws_list(
         &self,
         params: &Map<String, Value>,

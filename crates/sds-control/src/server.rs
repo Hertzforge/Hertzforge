@@ -64,7 +64,8 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     random.clear, random.state, random.config, random.log, random.subscribe, mimo_random.setup, \
     mimo_random.validate, mimo_random.start, mimo_random.proceed, mimo_random.override, \
     mimo_random.iterate_prediction, mimo_random.stop, mimo_random.abort, mimo_random.status, \
-    mimo_random.report, mimo_random.subscribe, laws.list, laws.import, sim.profiles, sim.start, \
+    mimo_random.report, mimo_random.subscribe, mimo_random.identification.save, \
+    mimo_random.identification.load, laws.list, laws.import, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -687,6 +688,10 @@ impl Service {
             "mimo_random.status" => Ok(self.mimo_status_now().await),
             "mimo_random.report" => Ok(self.mimo_report().await),
             "mimo_random.subscribe" => self.mimo_subscribe(conn, params).await,
+            "mimo_random.identification.save" => {
+                self.mimo_identification(conn, params, false).await
+            }
+            "mimo_random.identification.load" => self.mimo_identification(conn, params, true).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             other => Err(MethodError::new(

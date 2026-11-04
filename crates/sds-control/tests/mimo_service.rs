@@ -514,3 +514,90 @@ async fn a_setup_with_a_changed_reference_file_or_a_rank_deficient_transform_is_
         "unconfigured"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_identification_set_is_saved_loaded_into_a_later_run_and_refused_on_another_setup() {
+    let schema = Schema::load();
+    let o = real_options(0.0, Duration::from_secs(600), Duration::from_secs(5));
+    let keep = o.data_root.join("identification").join("four_axis");
+    let svc = Service::with_options(o);
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let s = setup(json!([{"db": -6, "dwell_s": 0}, {"db": 0}]), 600.0, true);
+    c.ok("mimo_random.setup", json!({"setup": s})).await;
+    // Nothing measured yet: nothing to save.
+    let path = keep.display().to_string();
+    let e = c
+        .refused("mimo_random.identification.save", json!({"path": path}))
+        .await;
+    assert_eq!(e["reason"], "wrong_state");
+    c.ok("mimo_random.start", json!({})).await;
+    wait_mimo(&mut c, "the review hold", |d| {
+        d["phase"] == "awaiting_review"
+    })
+    .await;
+    let saved = c
+        .ok("mimo_random.identification.save", json!({"path": path}))
+        .await;
+    schema.assert_valid(&saved, Some("mimoIdentificationResult"));
+    assert!(saved["identification"]["frames"].as_u64().unwrap() >= 64);
+    c.ok("mimo_random.stop", json!({})).await;
+    wait_mimo(&mut c, "the end", |d| d["state"] == "finished").await;
+
+    // The same setup again: the set loads, and the start goes straight to the gates.
+    c.ok("mimo_random.setup", json!({"setup": s})).await;
+    let loaded = c
+        .ok("mimo_random.identification.load", json!({"path": path}))
+        .await;
+    schema.assert_valid(&loaded, Some("mimoIdentificationResult"));
+    assert_eq!(
+        loaded["identification"]["setup_hash"],
+        saved["identification"]["setup_hash"]
+    );
+    let n_before = c.of_topic("mimo_random.status").len();
+    let started = c.ok("mimo_random.start", json!({})).await;
+    assert_eq!(started["phase"], "awaiting_review", "{started}");
+    assert_eq!(started["gates"]["passed"], true);
+    let later: Vec<String> = c.of_topic("mimo_random.status")[n_before..]
+        .iter()
+        .map(|e| e.data()["phase"].as_str().unwrap_or("").to_owned())
+        .collect();
+    assert!(
+        !later.iter().any(|p| p == "sysid" || p == "sysid_noise"),
+        "identification ran again: {later:?}"
+    );
+    c.ok("mimo_random.abort", json!({})).await;
+    wait_mimo(&mut c, "the abort", |d| {
+        d["state"] == "finished" && d["end"]["outcome"] == "operator_abort"
+    })
+    .await;
+
+    // Another setup: control 1's sensitivity changed in the table.
+    let mut rows = four_by_four();
+    rows[0]["sensitivity_mv_per_eu"] = json!(98.5);
+    let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    c.ok("channels.set", json!({"revision": rev, "channels": rows}))
+        .await;
+    c.ok("mimo_random.setup", json!({"setup": s})).await;
+    let e = c
+        .refused("mimo_random.identification.load", json!({"path": path}))
+        .await;
+    assert_eq!(e["reason"], "identification_mismatch", "{e}");
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap()
+            .contains("Run the identification again"),
+        "{e}"
+    );
+    schema.assert_valid(&json!({"type": "response", "id": 1, "error": e}), None);
+    // A folder with no set is a bad path, said so.
+    let e = c
+        .refused(
+            "mimo_random.identification.load",
+            json!({"path": keep.join("missing").display().to_string()}),
+        )
+        .await;
+    assert_eq!(e["reason"], "bad_params");
+}

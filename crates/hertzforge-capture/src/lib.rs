@@ -1227,6 +1227,77 @@ pub fn append_binary_record<S: Serialize>(
     Ok(bin)
 }
 
+/// Append one entry to an indexed record: `chunk` to `<dir>/<name>.bin`, then one
+/// line of JSON to `<dir>/<name>.jsonl` saying where it is. The line is `index`
+/// with two fields added, `offset_bytes` and `len_bytes` (the chunk's place in the
+/// payload). The chunk is written and synced first, so a line never names bytes
+/// that are not there; a crash leaves at most a chunk with no line, which a reader
+/// ignores. Unlike [`append_binary_record`] nothing is rewritten, so a record of
+/// many entries costs one line each. Returns the chunk's offset.
+pub fn append_indexed_record(
+    dir: &Path,
+    name: &str,
+    index: &serde_json::Map<String, serde_json::Value>,
+    chunk: &[u8],
+) -> io::Result<u64> {
+    std::fs::create_dir_all(dir)?;
+    let bin = dir.join(format!("{name}.bin"));
+    let offset = {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&bin)?;
+        let offset = f.metadata()?.len();
+        f.write_all(chunk)?;
+        f.sync_data()?;
+        offset
+    };
+    let mut line = index.clone();
+    line.insert("offset_bytes".into(), serde_json::Value::from(offset));
+    line.insert(
+        "len_bytes".into(),
+        serde_json::Value::from(chunk.len() as u64),
+    );
+    let mut text = serde_json::to_string(&serde_json::Value::Object(line))
+        .map_err(|e| io::Error::other(format!("record index: {e}")))?;
+    text.push('\n');
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(format!("{name}.jsonl")))?;
+    f.write_all(text.as_bytes())?;
+    f.sync_data()?;
+    Ok(offset)
+}
+
+/// One entry of an indexed record: its index line and its chunk.
+pub type IndexedEntry = (serde_json::Map<String, serde_json::Value>, Vec<u8>);
+
+/// Read an indexed record back: each entry's index line with its chunk. A line
+/// that does not parse, or names bytes past the payload (a crash mid-write), ends
+/// the read there.
+pub fn read_indexed_record(dir: &Path, name: &str) -> io::Result<Vec<IndexedEntry>> {
+    let text = std::fs::read_to_string(dir.join(format!("{name}.jsonl")))?;
+    let payload = std::fs::read(dir.join(format!("{name}.bin")))?;
+    let mut out = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let Ok(serde_json::Value::Object(m)) = serde_json::from_str::<serde_json::Value>(line)
+        else {
+            break;
+        };
+        let off = m.get("offset_bytes").and_then(|v| v.as_u64());
+        let len = m.get("len_bytes").and_then(|v| v.as_u64());
+        let (Some(off), Some(len)) = (off, len) else {
+            break;
+        };
+        let Some(chunk) = payload.get(off as usize..(off + len) as usize) else {
+            break;
+        };
+        out.push((m, chunk.to_vec()));
+    }
+    Ok(out)
+}
+
 /// Read a binary record back: its sidecar and its payload.
 pub fn read_binary_record(dir: &Path, name: &str) -> io::Result<(serde_json::Value, Vec<u8>)> {
     let json = std::fs::read(dir.join(format!("{name}.json")))?;

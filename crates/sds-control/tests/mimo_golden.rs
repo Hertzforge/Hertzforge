@@ -565,3 +565,26 @@ fn the_coherence_error_heatmap_subscribes_by_rows() {
     );
     assert!(display::MIMO_QUANTITIES.contains(&"coh_error"));
 }
+
+#[test]
+fn the_identification_goldens_name_a_folder_and_describe_the_set() {
+    let request = golden("request_mimo_random_identification_load.json");
+    let parsed = sds_control::protocol::parse_request(&request).unwrap();
+    assert_eq!(parsed.method, "mimo_random.identification.load");
+    assert!(parsed.params["path"]
+        .as_str()
+        .is_some_and(|p| !p.is_empty()));
+    let info = sds_control::mimo::driver::IdentificationInfo {
+        path: "/home/operator/hertzforge/identification/two_axis".into(),
+        setup_hash: "9f3c2a7e5b1d0c84".into(),
+        frames: 64,
+        level_db: -20.3,
+        drive_vrms: vec![0.0512, 0.0498],
+    };
+    let want = golden("response_mimo_random_identification_load.json");
+    same(
+        &serde_json::json!({ "identification": info.to_json() }),
+        &want["result"],
+        "identification",
+    );
+}

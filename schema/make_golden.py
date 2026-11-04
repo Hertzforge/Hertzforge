@@ -690,6 +690,17 @@ MIMO_TEXT_GOLDENS = {
     'response_laws_import': {
         'type': 'response', 'id': 36, 'result': {'law': LAW_IMPORTED},
     },
+    'request_mimo_random_identification_load': {
+        'type': 'request', 'id': 38, 'method': 'mimo_random.identification.load',
+        'params': {'path': '/home/operator/hertzforge/identification/two_axis'},
+    },
+    'response_mimo_random_identification_load': {
+        'type': 'response', 'id': 38,
+        'result': {'identification': {
+            'path': '/home/operator/hertzforge/identification/two_axis',
+            'setup_hash': '9f3c2a7e5b1d0c84', 'frames': 64, 'level_db': -20.3,
+            'drive_vrms': [0.0512, 0.0498]}},
+    },
     # The error heatmap's two modes: the dB error and the coherence error.
     'request_mimo_random_subscribe_coh_error': {
         'type': 'request', 'id': 37, 'method': 'mimo_random.subscribe',

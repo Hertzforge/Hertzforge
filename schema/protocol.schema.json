@@ -336,7 +336,7 @@
                "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
-               "shaker_record_invalid", "setup_invalid", "gate_failed", "law_import_failed",
+               "shaker_record_invalid", "setup_invalid", "gate_failed", "identification_mismatch", "law_import_failed",
                "catalog_unavailable"]
     },
     "itemReason": {
@@ -1271,6 +1271,24 @@
     "mimoOverrideParams": {
       "type": "object", "required": ["ack"], "additionalProperties": false,
       "properties": {"ack": {"type": "string", "minLength": 1, "pattern": "\\S"}}
+    },
+    "mimoIdentificationParams": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "properties": {"path": {"type": "string", "minLength": 1}}
+    },
+    "mimoIdentificationResult": {
+      "type": "object", "required": ["identification"], "additionalProperties": false,
+      "properties": {"identification": {
+        "type": "object", "required": ["path", "setup_hash", "frames", "level_db", "drive_vrms"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "setup_hash": {"type": "string", "minLength": 1},
+          "frames": {"type": "integer", "minimum": 0},
+          "level_db": {"type": ["number", "null"]},
+          "drive_vrms": {"type": "array", "items": {"type": ["number", "null"]}}
+        }
+      }}
     },
     "mimoIterateParams": {
       "type": "object", "additionalProperties": false,

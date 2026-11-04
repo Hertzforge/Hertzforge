@@ -26,8 +26,8 @@
 
 use super::check::Validation;
 use super::driver::{
-    Curve, Fault, Gates, LawRef, MimoReport, MimoRunDriver, MimoStatus, PackedBlock, Prediction,
-    QuantitySelector, Series, StartContext, StopOutcome,
+    Curve, Fault, Gates, IdentificationInfo, LawRef, MimoReport, MimoRunDriver, MimoStatus,
+    PackedBlock, Prediction, QuantitySelector, Series, StartContext, StopOutcome,
 };
 use super::setup::{ControlSpace, MimoSetup, RealMatrix, Reference};
 use crate::protocol::{ErrorCode, MethodError};
@@ -351,10 +351,10 @@ fn resolve_law(
     params: &Map<String, Value>,
     controls: usize,
     opts: &AdapterOptions,
-) -> Result<(LawChoice, Option<Arc<dyn MimoLawFactory>>), String> {
+) -> Result<ResolvedLaw, String> {
     if let Some(b) = BuiltinMimo::from_id(id) {
         let specs = builtin_mimo_manifest(b).law.params;
-        return Ok((LawChoice::new(id, params_of(&specs, params)), None));
+        return Ok((LawChoice::new(id, params_of(&specs, params)), None, None));
     }
     let Some(cell) = opts.catalog.as_ref() else {
         return Err(format!(
@@ -377,8 +377,13 @@ fn resolve_law(
     let f = cat
         .resolve_mimo(&choice, controls)
         .map_err(|e| e.to_string())?;
-    Ok((choice, Some(f)))
+    let file = cat.laws_dir().join(format!("{id}.wasm"));
+    Ok((choice, Some(f), file.is_file().then_some(file)))
 }
+
+/// A law as a run takes it: the choice, the factory for a law file (none for a
+/// built-in) and the law file's place in the catalog.
+type ResolvedLaw = (LawChoice, Option<Arc<dyn MimoLawFactory>>, Option<PathBuf>);
 
 /// The controller's configuration of `setup` on `table`.
 pub fn config_of(
@@ -618,10 +623,6 @@ enum Cmd {
     Abort {
         by: String,
     },
-    LoadIdentification {
-        dir: PathBuf,
-        reply: Reply<()>,
-    },
 }
 
 /// [`MimoRunDriver`] on the controller's MIMO Random service.
@@ -631,6 +632,8 @@ pub struct ServiceDriver {
     law: LawRef,
     shared: Arc<Shared>,
     tx: Option<Sender<Cmd>>,
+    /// An identification set to load when the run starts.
+    pending_ident: Option<PathBuf>,
 }
 
 fn idle_status(law: LawRef) -> MimoStatus {
@@ -682,6 +685,7 @@ impl ServiceDriver {
             }),
             law,
             tx: None,
+            pending_ident: None,
         }
     }
 
@@ -730,17 +734,6 @@ impl ServiceDriver {
                 level_db: level,
             });
         }
-    }
-
-    /// Load the identification set recorded in `dir` (a run folder holding
-    /// `identification.bin` and `.json`) into this run, right after it arms: the
-    /// noise floor and the identification are skipped. Refused, in words, when the
-    /// set was measured on another setup.
-    pub fn load_identification(&mut self, dir: PathBuf) -> Result<(), MethodError> {
-        self.ask(
-            |reply| Cmd::LoadIdentification { dir, reply },
-            "Loading an identification set",
-        )
     }
 }
 
@@ -799,6 +792,7 @@ impl MimoRunDriver for ServiceDriver {
             min_cap: Vec::new(),
             faults: Vec::new(),
             report: None,
+            pending_ident: self.pending_ident.clone(),
         };
         std::thread::Builder::new()
             .name("mimo-random".into())
@@ -903,6 +897,92 @@ impl MimoRunDriver for ServiceDriver {
 
     fn controller_back(&mut self, name: &str) {
         lock(&self.shared.log).push(format!("controller back: {name}"));
+    }
+
+    fn load_identification(
+        &mut self,
+        path: &Path,
+        table: &ChannelTable,
+    ) -> Result<IdentificationInfo, MethodError> {
+        let Some(setup) = self.setup.clone() else {
+            return Err(refused(
+                "not_configured",
+                "MIMO Random is not set up; send a setup first.",
+            ));
+        };
+        if self.tx.is_some() {
+            let phase = lock(&self.shared.published).status.phase;
+            return Err(wrong_state(
+                "Loading an identification set (it is loaded before the run starts)",
+                phase,
+            ));
+        }
+        let set = hertzforge_mimo_random::records::read_identification(path).map_err(|e| {
+            MethodError::bad_params(
+                "path",
+                format!("{e}; choose a folder that holds an identification set"),
+            )
+        })?;
+        let reference = reference_on_grid(&setup).map_err(|e| {
+            refused(
+                "setup_invalid",
+                format!("The reference could not be used: {e}."),
+            )
+        })?;
+        let (cfg, lc) = config_of(
+            &setup,
+            &reference,
+            LawChoice::new(setup.law.id.clone(), Vec::new()),
+        )
+        .map_err(|e| {
+            refused(
+                "setup_invalid",
+                format!("The setup could not be used: {e}."),
+            )
+        })?;
+        let want = hertzforge_mimo_random::setup_hash_of(&cfg, table, lc.nbins(), lc.df());
+        if set.setup_hash != want {
+            return Err(refused(
+                "identification_mismatch",
+                format!(
+                    "The identification set in {} was measured on another setup (hash {}, this \
+                     setup {want}): the channels, their sensitivities, the transformations or \
+                     the grid differ. Run the identification again, or restore the setup it was \
+                     measured on.",
+                    path.display(),
+                    set.setup_hash
+                ),
+            )
+            .with_detail(json!({"setup_hash": want, "identification_hash": set.setup_hash})));
+        }
+        self.pending_ident = Some(path.to_path_buf());
+        lock(&self.shared.log).push(format!("identification to load from {}", path.display()));
+        Ok(info_of(path, &set))
+    }
+
+    fn save_identification(&mut self, path: &Path) -> Result<IdentificationInfo, MethodError> {
+        let Some(dir) = self.identification_dir() else {
+            let phase = lock(&self.shared.published).status.phase;
+            return Err(wrong_state(
+                "Saving the identification set (none has been measured in this run yet)",
+                phase,
+            ));
+        };
+        hertzforge_mimo_random::records::copy_identification(&dir, path)
+            .map_err(|e| MethodError::bad_params("path", format!("The set was not saved: {e}.")))?;
+        let set = hertzforge_mimo_random::records::read_identification(path)
+            .map_err(|e| MethodError::internal(format!("the saved set does not read back: {e}")))?;
+        Ok(info_of(path, &set))
+    }
+}
+
+fn info_of(path: &Path, set: &hertzforge_mimo_random::IdentificationSet) -> IdentificationInfo {
+    IdentificationInfo {
+        path: path.display().to_string(),
+        setup_hash: set.setup_hash.clone(),
+        frames: set.frames,
+        level_db: set.level_db,
+        drive_vrms: set.drive_vrms.clone(),
     }
 }
 
@@ -1143,6 +1223,8 @@ struct Actor {
     min_cap: Vec<f64>,
     faults: Vec<Fault>,
     report: Option<MimoReport>,
+    /// An identification set to load once armed.
+    pending_ident: Option<PathBuf>,
 }
 
 /// A service call that panicked: the run ends with the drive at zero.
@@ -1340,11 +1422,6 @@ impl Actor {
                 }
                 self.publish();
             }
-            Cmd::LoadIdentification { dir, reply } => {
-                let r = self.load_cmd(&dir);
-                self.publish();
-                let _ = reply.send(r);
-            }
         }
     }
 
@@ -1359,7 +1436,7 @@ impl Actor {
                 format!("The reference could not be used: {e}."),
             )
         })?;
-        let (choice, factory) = resolve_law(
+        let (choice, factory, law_file) = resolve_law(
             &setup.law.id,
             &setup.law.params,
             setup.controlled(),
@@ -1460,13 +1537,44 @@ impl Actor {
         if let Some(f) = self.opts.law_factory.clone().or(factory) {
             svc = svc.with_law_factory(f);
         }
+        if self.opts.law_factory.is_none() {
+            svc.set_law_file(law_file);
+        }
         self.review = setup.identification.review;
         *lock(&self.shared.ramp) = Some(svc.drive_ramp());
         *lock(&self.shared.started) = Some(Instant::now());
         self.svc = Some(svc);
+        let pending = self.pending_ident.clone();
         match self.call(|s| s.start()) {
             Ok(Some(Ok(()))) => {
                 lock(&self.shared.log).push(format!("started: {}", reference.source));
+                if let Some(dir) = pending {
+                    let loaded = self.load_cmd(&dir).and_then(|()| {
+                        // Straight on to the prediction when the loaded set passes
+                        // its gates, so the start answers at the review hold.
+                        let passed = self
+                            .svc
+                            .as_ref()
+                            .and_then(|s| s.gate())
+                            .is_some_and(|g| g.passed);
+                        match self.call(|s| if passed { s.proceed() } else { Ok(()) }) {
+                            Ok(Some(Ok(()))) => Ok(()),
+                            Ok(Some(Err(e))) => Err(refused(
+                                "arm_refused",
+                                format!("The law could not be seeded on the loaded set: {e}."),
+                            )),
+                            _ => Err(MethodError::internal("the run failed while predicting")),
+                        }
+                    });
+                    if let Err(e) = loaded {
+                        let _ = self.call(|s| s.stop());
+                        self.svc = None;
+                        self.lock = None;
+                        *lock(&self.shared.started) = None;
+                        *lock(&self.shared.ramp) = None;
+                        return Err(e);
+                    }
+                }
                 Ok(())
             }
             Ok(Some(Err(e))) => {
@@ -1571,10 +1679,13 @@ impl Actor {
         }
         let r = match law {
             Some((lr, params)) => {
-                let (choice, factory) =
+                let (choice, factory, law_file) =
                     resolve_law(&lr.id, &params, self.setup.controlled(), &self.opts)
                         .map_err(|e| MethodError::bad_params("law", e))?;
-                let r = self.call(move |s| s.change_law(choice, factory));
+                let r = self.call(move |s| {
+                    s.set_law_file(law_file);
+                    s.change_law(choice, factory)
+                });
                 if matches!(r, Ok(Some(Ok(())))) {
                     self.law = lr;
                 }
@@ -1612,7 +1723,7 @@ impl Actor {
                 Ok(())
             }
             Ok(Some(Err(e))) => Err(refused(
-                "setup_invalid",
+                "identification_mismatch",
                 format!("The identification set was not loaded: {e}."),
             )),
             _ => Err(MethodError::internal("the run failed while loading")),
