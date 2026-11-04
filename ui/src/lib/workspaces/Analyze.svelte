@@ -266,6 +266,9 @@
 					<h3>{a.shown?.title ?? 'Selection'}</h3>
 					{#if a.shown?.note}<p class="meta" data-testid="selection-note">{a.shown.note}</p>{/if}
 					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
+					{#if app.project.selection.objects.length === 1 && app.project.summary?.objects.find((o) => o.name === app.project.selection.objects[0])?.kind === 'report'}
+						<button class="btn sm" data-testid="open-report" onclick={() => { const name = app.project.selection.objects[0]; app.go('report'); void app.report.show(name); }}>Open in Report</button>
+					{/if}
 					<button class="btn ghost icon sm" data-testid="selection-clear" onclick={() => app.project.clearSelection()} aria-label="Clear the selection" title="Clear the selection">
 						<Icon name="close" size={14} />
 					</button>

@@ -53,6 +53,27 @@
 		} else if (e.key === 'ArrowRight' && OPENS.has(o.kind) && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
+		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
+			e.preventDefault();
+			p.confirming = true;
+		}
+	}
+
+	/** A DOF label in a grid being typed over: the object and the row, and the text. */
+	let dofEdit = $state<{ name: string; row: number } | null>(null);
+	let dofText = $state('');
+	function startDof(name: string, row: number, dof: string) {
+		dofEdit = { name, row };
+		dofText = dof;
+	}
+	async function commitDof(kids: Extract<ProjectChildren, { kind: 'grid' }>) {
+		const edit = dofEdit;
+		dofEdit = null;
+		if (!edit) return;
+		const was = kids.rows[edit.row];
+		const next = dofText.trim();
+		if (!was || !next || next === was.dof) return;
+		await p.renameDof(edit.name, was.dof, next, was.quantity === 'unknown' ? '' : was.quantity);
 	}
 
 	let newName = $state('');
@@ -257,8 +278,19 @@
 							<tbody>
 								{#each kids.rows as row, r (r)}
 									<tr>
-										<th class="dof" title={row.quantity ? `${row.dof}: ${row.quantity.replace(/_/g, ' ')}` : row.dof}>{row.label}</th>
-										{#if roles}<td class="role" title={row.role}>{roleWord(row.role)}</td>{/if}
+										{#if dofEdit && dofEdit.name === o.name && dofEdit.row === r}
+											<th class="dof editing">
+												<input class="field mono dofedit" aria-label="New DOF for {row.dof}" data-testid="dof-field" bind:value={dofText} use:focusAndSelect
+													onclick={(e) => e.stopPropagation()}
+													onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') void commitDof(kids); if (e.key === 'Escape') dofEdit = null; }}
+													onblur={() => void commitDof(kids)} />
+											</th>
+										{:else}
+											<th class="dof" title={(row.quantity ? `${row.dof}: ${row.quantity.replace(/_/g, ' ')}` : row.dof) + '. Double-click to rename the DOF.'} ondblclick={(e) => { e.stopPropagation(); startDof(o.name, r, row.dof); }}>{row.label}</th>
+										{/if}
+										{#if roles}
+											<td class="role" role="button" tabindex="-1" title="{row.role}: click to change" data-testid="role-{o.name}-{r}" onclick={(e) => { e.stopPropagation(); const index = kids.cells[r].find((i) => i >= 0); if (index !== undefined && row.role) void p.cycleRole(o.name, index, row.role); }} onkeydown={(e) => e.key === 'Enter' && e.stopPropagation()}>{roleWord(row.role)}</td>
+										{/if}
 										{#each kids.cells[r] as index, c (c)}
 											{#if index < 0}
 												<td class="hole" aria-hidden="true"></td>
@@ -536,6 +568,21 @@
 	.grid td.role {
 		padding: 0 4px;
 		color: var(--text-4);
+		cursor: pointer;
+	}
+
+	.grid td.role:hover {
+		color: var(--text-1);
+	}
+
+	.grid th.dof.editing {
+		padding: 0 2px;
+	}
+
+	.dofedit {
+		width: 7ch;
+		padding: 0 2px;
+		font-size: 10px;
 	}
 
 	.grid td.cell {

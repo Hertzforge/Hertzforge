@@ -1028,6 +1028,10 @@ export class ProjectState {
 	children = $state.raw<Record<string, ProjectChildren>>({});
 	/** The object being renamed in the tree, or null. */
 	renaming = $state<string | null>(null);
+	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
+	confirming = $state(false);
+	/** The group being named from the strip: the member it is reached by, or null. */
+	namingGroup = $state<string | null>(null);
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1081,6 +1085,8 @@ export class ProjectState {
 	private selected(next: Selection): void {
 		this.selection = next;
 		this.renaming = null;
+		this.confirming = false;
+		this.namingGroup = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
 		void this.app.analyze.showSelection();
 	}
@@ -1182,6 +1188,35 @@ export class ProjectState {
 
 	setBasis(name: string): Promise<boolean> {
 		return this.act(`Making the group of ${name} the Basis`, 'project.set_basis', { object: name });
+	}
+
+	/** Name the group `name` is in, or clear its name with blank text. */
+	nameGroup(name: string, text: string): Promise<boolean> {
+		return this.act(text.trim() ? `Naming the group of ${name}` : `Unnaming the group of ${name}`, 'project.name_object_group', { object: name, name: text });
+	}
+
+	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives from it, as VD's grid does. */
+	async renameDof(name: string, old: string, next: string, quantity: string): Promise<boolean> {
+		const ok = await this.act(`Renaming ${old} to ${next}`, 'project.rename_dof', { source: name, old, new: next, measured: quantity });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** A Role cell clicked: the channel's role goes to the next one round, reference, response, monitor. */
+	async cycleRole(name: string, index: number, role: string): Promise<boolean> {
+		const order = ['reference', 'response', 'monitor'];
+		const next = order[(order.indexOf(role) + 1) % order.length];
+		const ok = await this.act(`Making ${name}'s channel ${index + 1} a ${next}`, 'project.set_channel_role', { source: name, record: index + 1, role: next });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** Remove what is selected, once confirmed. */
+	async removeSelected(): Promise<boolean> {
+		const names = [...this.selection.objects];
+		this.confirming = false;
+		if (!names.length) return false;
+		return this.remove(names);
 	}
 
 	/** An act on the groups, run as the operation it is; the project it answers with is applied. */

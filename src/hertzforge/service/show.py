@@ -108,6 +108,14 @@ def _alone(project: Any, name: str, picks: list[int]) -> tuple[list[dict], list[
         if picks:
             return _run(project, 'project.plot', data=name, records=_runs(picks)), []
         return _run(project, 'project.waterfall', data=name), []
+    from hertzforge.core.report import Report
+
+    if isinstance(obj, Report):
+        blocks = len(getattr(obj, 'blocks', ()) or ())
+        return [v.reading(name, [
+            v.row('Report', getattr(obj, 'title', '') or name, None, 'info'),
+            v.row('Blocks', float(blocks), '', 'info'),
+            v.row('Edited in', 'the Report workspace', None, 'info')])], []
     return [], [f'{name} ({_kind(obj).replace("_", " ")}) has no view of its own here yet']
 
 
@@ -219,6 +227,29 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
     return [stage, *curves], notes
 
 
+def _overlaid(project: Any, first: str, second: str) -> dict:
+    """Two geometries in one scene, as a test geometry is laid over the
+    model it was built from: one mesh of both, the second's nodes after
+    the first's, each keeping its own units."""
+    views = []
+    for name in (first, second):
+        geometry = project[name]
+        rows, triangles, lines = _mesh(geometry)
+        views.append((np.asarray(geometry.node_xyz, dtype=float)[rows], triangles, lines,
+                      geometry.units_defined))
+    (nodes_a, tri_a, lines_a, defined_a), (nodes_b, tri_b, lines_b, defined_b) = views
+    offset = len(nodes_a)
+    triangles = [t for t in (tri_a, None if tri_b is None or not len(tri_b) else tri_b + offset)
+                 if t is not None and len(t)]
+    lines = [t for t in (lines_a, None if lines_b is None or not len(lines_b) else lines_b + offset)
+             if t is not None and len(t)]
+    return v.shape3d(f'{second} over {first}',
+                     'm' if defined_a and defined_b else 'undefined',
+                     np.vstack([nodes_a, nodes_b]), [],
+                     triangles=np.vstack(triangles) if triangles else None,
+                     lines=np.vstack(lines) if lines else None)
+
+
 def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
           ) -> tuple[list[dict], list[str]] | None:
     """What two objects show together, or None when the pair has no joint
@@ -246,9 +277,7 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
 
     geometry = of(Geometry)
     if isinstance(a, Geometry) and isinstance(b, Geometry):
-        views = (_run(project, 'project.view_geometry', geometry=first)
-                 + _run(project, 'project.view_geometry', geometry=second))
-        return views, ['two geometries, drawn side by side']
+        return [_overlaid(project, first, second)], []
     if geometry is not None:
         other = second if geometry == first else first
         obj = project[other]
