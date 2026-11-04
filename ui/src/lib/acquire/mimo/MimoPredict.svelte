@@ -111,7 +111,7 @@
 </script>
 
 <div class="predict" data-testid="mimo-predict" data-state={s?.state ?? 'none'} data-phase={s?.phase ?? ''}>
-	{#if !review || !p}
+	{#if !p}
 		<section class="aq-panel">
 			<div class="aq-head"><h2>Prediction</h2></div>
 			<p class="aq-muted aq-small">
@@ -306,7 +306,7 @@
 				<section class="aq-panel" aria-labelledby="pl-title" data-testid="predict-law">
 					<div class="aq-head">
 						<h2 id="pl-title">The Law</h2>
-						<span class="aq-sub num">Prediction {p.iteration + 1}, {p.law.name} {p.law.version}</span>
+						<span class="aq-sub num">Prediction {p.iteration}, {p.law.name} {p.law.version}</span>
 					</div>
 					<div class="sel">
 						<label for="pl-law" class="lbl">Law</label>
@@ -328,7 +328,9 @@
 
 				<section class="aq-panel engage" aria-labelledby="pe-title" data-testid="predict-engage">
 					<div class="aq-head"><h2 id="pe-title">Engage</h2></div>
-					{#if gateFailed}
+					{#if !review}
+						<p class="aq-small" data-testid="predict-engaged">{s?.state === 'finished' ? 'The run ended. This is the prediction it engaged on.' : 'The run engaged on this prediction; it is shown as it was. Stop and Abort are in the run bar.'}{#if s?.overrides?.length} Acknowledged: {s.overrides.map((o) => `"${o.text}" (${o.by})`).join('; ')}.{/if}</p>
+					{:else if gateFailed}
 						<p class="aq-small">A gate failed, so going on is an override: your decision, in your own words, kept with the run. If the prediction then asks a drive for more than its ceiling, that needs its own acknowledgement.</p>
 						<div class="aq-actions">
 							<button class="btn primary" disabled={!mimo.isController || mimo.busy !== null} onclick={() => (overrideOpen = true)} data-testid="predict-override">Override the Gate</button>

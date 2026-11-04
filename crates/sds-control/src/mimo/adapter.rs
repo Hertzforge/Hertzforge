@@ -376,7 +376,7 @@ fn resolve_law(
     Ok((choice, Some(f), file.is_file().then_some(file)))
 }
 
-/// The hardware arming gate for control laws (design Q19): the simulator runs any
+/// The hardware arming gate for control laws: the simulator runs any
 /// law; a run on a hardware station arms only with a built-in law or a law file
 /// whose check on the simulator passed for that exact file.
 pub fn hardware_law_gate(
@@ -392,7 +392,7 @@ pub fn hardware_law_gate(
             "law_not_checked",
             format!(
                 "This run is on hardware and the law `{law_id}` is not in the law catalog; import \
-                 it, run its check on the simulator (laws.check), then start again."
+                 it, run its check on the simulator, then start again."
             ),
         ));
     };
@@ -401,7 +401,7 @@ pub fn hardware_law_gate(
             "law_not_checked",
             format!(
                 "This run is on hardware and {why}. Run the law's check on the simulator \
-                 (laws.check) and start again, or choose a built-in law."
+                 and start again, or choose a built-in law."
             ),
         )
     })
@@ -2608,7 +2608,11 @@ mod tests {
         for entry in [Some(&e), None] {
             let r = hardware_law_gate("ni", &id, entry).unwrap_err();
             assert_eq!(r.reason, Some("law_not_checked"), "{r:?}");
-            assert!(r.message.contains("laws.check"), "{}", r.message);
+            assert!(
+                r.message.contains("run its check") || r.message.contains("check on the simulator"),
+                "{}",
+                r.message
+            );
         }
         // A failed or unreadable check is refused too.
         let mut bad = e.clone();

@@ -199,7 +199,7 @@ def test_every_offending_line_is_reported(tmp_path):
     ]
 
 
-# The credit allowance (design 12, Q27): one listed name, as a source credit, in
+# The credit allowance: one listed name, as a source credit, in
 # the two credit places only, on a line that does not speak of hardware. The
 # cases plant names of their own; the real one is held as a hash.
 CREDITED_PLANT = check_tree.phrase_hash('quokka foundry')

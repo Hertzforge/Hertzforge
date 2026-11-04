@@ -85,7 +85,7 @@
 			{/await}
 		{:else}
 			<div class="waiting" data-testid="geometry-empty">
-				Sensor and drive positions are entered with the channels in the setup. The geometry shows them here once they are.
+				Sensor positions and directions are entered in the rigid-body geometry, under Reference in the setup. The geometry shows them here once every control has one.
 			</div>
 		{/if}
 	</div>

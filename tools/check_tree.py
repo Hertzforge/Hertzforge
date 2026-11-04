@@ -63,7 +63,7 @@ CREDIT_FILES = frozenset({'ACKNOWLEDGMENTS.md', 'site/public/credits.html'})
 
 #: Names in NAMES that a credit place may hold, as a source credit only: one
 #: laboratory, credited as the author of the documentation whose concepts are
-#: credited (design 12, Q27). Anywhere else it is blocked as before.
+#: credited. Anywhere else it is blocked as before.
 CREDITED = frozenset({'4a654a97330bd592'})
 
 #: A credit line that also speaks of hardware would read as a hardware or

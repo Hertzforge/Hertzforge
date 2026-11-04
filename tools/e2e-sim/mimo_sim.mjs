@@ -20,9 +20,13 @@
 // 5. Schedule (the single-output editor) and Backend (the station and feasibility).
 // 6. The summary lists nothing missing; Proceed to Run applies; Start runs the noise floor and
 //    identification; the Predict page comes forward with the gates, each drive against its
-//    ceiling and each control's error; Predict Again; Engage; the run reaches the ladder; Stop.
+//    ceiling and each control's error; Predict Again; Engage; the run reaches the ladder.
+// 7. The Run step hosts the run view: each of its four pages during the run (error heatmap,
+//    matrix grid, drive and plant, geometry), a page opened in a window of its own, then the
+//    shell's dark theme over the run pages, the Predict page and every setup section; Stop.
 //
-// Screenshots (1,440 by 900, light theme) of every section and the predict page, `wp7_<name>.png`.
+// Screenshots (1,440 by 900): every section and the predict page, `<prefix>_<name>.png`; the run
+// pages, `<prefix>_run_<page>.png`; the dark theme, `<prefix>_dark_<name>.png` (prefix `wp13`).
 
 import { chromium } from 'playwright-core';
 import { execFileSync, spawn } from 'node:child_process';
@@ -40,6 +44,7 @@ const flag = (name) => {
 };
 const SHOTS = path.resolve(flag('--shots') ?? path.join(os.tmpdir(), 'hertzforge-e2e-mimo'));
 const HEADED = args.includes('--headed');
+const PREFIX = flag('--prefix') ?? 'wp13';
 fs.mkdirSync(SHOTS, { recursive: true });
 
 // ---- processes --------------------------------------------------------------------------------
@@ -106,7 +111,7 @@ const until = (page, what, fn, ms) => waitFor(what, () => fn(page), ms);
 const shots = [];
 
 async function shot(page, name) {
-	const file = path.join(SHOTS, `wp7_${name}.png`);
+	const file = path.join(SHOTS, `${PREFIX}_${name}.png`);
 	await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
 	await page.waitForTimeout(400);
 	await page.screenshot({ path: file });
@@ -298,8 +303,8 @@ try {
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	check('Proceed to Run applies the setup: the run is configured', true);
 	await tid(a, 'act-start').click();
-	await until(a, 'identification', async (p) => ['sysid_noise', 'sysid', 'awaiting_review', 'gate_failed'].includes(await attr(p, 'mimo-run-status', 'data-phase')), 30_000);
-	check('Start runs the noise floor and identification', true, await attr(a, 'mimo-run-status', 'data-phase'));
+	await until(a, 'identification', async (p) => ['sysid_noise', 'sysid', 'awaiting_review', 'gate_failed'].includes(await attr(p, 'mimo-run-view', 'data-phase')), 30_000);
+	check('Start runs the noise floor and identification', true, await attr(a, 'mimo-run-view', 'data-phase'));
 	await until(a, 'the prediction', async (p) => (await attr(p, 'mimo-predict', 'data-state')) === 'review', 240_000);
 	const phase = await attr(a, 'mimo-predict', 'data-phase');
 	check('identification done: the Predict page comes forward by itself', (await attr(a, 'flow-predict', 'aria-current')) === 'step', phase);
@@ -318,10 +323,57 @@ try {
 	} else {
 		await tid(a, 'predict-engage-go').click();
 	}
-	await until(a, 'the ladder', async (p) => ['engaged', 'full_level'].includes(await attr(p, 'mimo-run-status', 'data-phase')), 60_000);
+	await until(a, 'the ladder', async (p) => ['engaged', 'full_level'].includes(await attr(p, 'mimo-run-view', 'data-phase')), 60_000);
 	check(`engaged ${phase === 'gate_failed' ? 'through the override' : 'from the prediction'}: the Run step shows the ladder`, (await attr(a, 'flow-run', 'aria-current')) === 'step');
 	await a.waitForTimeout(3000);
 	await shot(a, 'run');
+
+	// ---- The run view's pages during the run ------------------------------------------------------
+	const PAGES = [
+		['mp-1', 'heatmap', '[data-testid="heatmap-canvas"]'],
+		['mp-2', 'grid', 'canvas'],
+		['mp-3', 'plant', 'canvas, svg'],
+		['mp-4', 'geometry', '[data-testid="mimo-geometry-page"]']
+	];
+	const runPages = async (prefix) => {
+		for (const [id, kind, drawn] of PAGES) {
+			await tid(a, 'mimo-page-select').selectOption(id);
+			await until(a, `the ${kind} page`, async (p) => (await p.locator('[data-testid="mimo-run-view"]').locator(drawn).count()) > 0, 20_000);
+			await a.waitForTimeout(2500);
+			const err = await tid(a, 'mimo-display-error').isVisible().catch(() => false);
+			check(`the run view's ${kind} page draws during the run${prefix ? ' (dark)' : ''}`, !err, err ? await text(a, 'mimo-display-error') : '');
+			await shot(a, `${prefix}run_${kind}`);
+		}
+	};
+	await runPages('');
+	// A page in a window of its own, for another monitor: the same run, observed.
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'mimo-page-popout').click()]);
+	await win.setViewportSize({ width: 1280, height: 820 });
+	await until(win, 'the display window', async (p) => (await tid(p, 'mimo-run-view').isVisible()) && (await attr(p, 'mimo-run-view', 'data-phase')) !== '', 30_000);
+	check('a page opens in a window of its own showing the MIMO run', (await text(win, 'display-window-page')).length > 0, `${await text(win, 'display-window-page')}, ${await attr(win, 'mimo-run-view', 'data-phase')}`);
+	await win.waitForTimeout(2000);
+	await win.screenshot({ path: path.join(SHOTS, `${PREFIX}_run_window.png`) });
+	shots.push({ file: path.join(SHOTS, `${PREFIX}_run_window.png`), kb: Math.round(fs.statSync(path.join(SHOTS, `${PREFIX}_run_window.png`)).size / 1024) });
+	await win.close();
+
+	// ---- The dark theme over the MIMO screens and views -------------------------------------------
+	const setTheme = async (want) => {
+		for (let i = 0; i < 4 && (await a.evaluate(() => document.documentElement.getAttribute('data-theme'))) !== want; i++) await tid(a, 'theme-toggle').click();
+		return a.evaluate(() => document.documentElement.getAttribute('data-theme'));
+	};
+	check('the shell\'s theme switch turns the MIMO screen dark', (await setTheme('dark')) === 'dark');
+	await runPages('dark_');
+	await tid(a, 'flow-predict').click();
+	await until(a, 'the Predict page', async (p) => tid(p, 'mimo-predict').isVisible());
+	await shot(a, 'dark_predict');
+	for (const id of ['channels', 'reference', 'control', 'schedule', 'backend']) {
+		await section(a, id);
+		if (id === 'reference') await referenceSettled(a);
+		await shot(a, `dark_${id}`);
+	}
+	await tid(a, 'flow-run').click();
+	await until(a, 'the run view', async (p) => tid(p, 'mimo-run-view').isVisible());
+	check('the theme switch turns it back', (await setTheme('light')) === 'light');
 	await tid(a, 'act-stop').click();
 	await until(a, 'the run to end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 60_000);
 	check('Stop ends the run with its ramp', (await attr(a, 'run-state', 'data-outcome')) === 'operator_stop', await attr(a, 'run-state', 'data-outcome'));

@@ -5,8 +5,10 @@
 //   node tools/e2e-sim/mimo_views.mjs [--shots <dir>] [--headed]
 //
 // It builds and starts `sds-control` (release, loopback, a free port) and the shell's dev server,
-// sets up and starts the run on a connection of its own (the controller), and mounts the run view
-// in Chrome until the MIMO screen hosts it:
+// sets up and starts the run on the controller's own MIMO service (an inline reference on 72
+// controls, interpolated onto the run's grid) from a connection of its own, acknowledging any
+// hold on the way to full level, and mounts the run view on its own in Chrome (the MIMO screen's
+// Run step hosts the same view; tools/e2e-sim/mimo_sim.mjs drives it there):
 //
 // 1. One monitor: the four pages (error heatmap, matrix grid, drive and plant, geometry), each
 //    shown with data from the run and asking the service for exactly what it draws; a page added
@@ -31,13 +33,16 @@ const flag = (name) => {
 };
 const SHOTS = path.resolve(flag('--shots') ?? path.join(os.tmpdir(), 'hertzforge-e2e-mimo'));
 const HEADED = args.includes('--headed');
+const PREFIX = flag('--prefix') ?? 'wp13_views';
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const CONTROLS = 72;
 const DRIVES = 24;
 const TITLE = 'Full-Scale MIMO on the Simulator';
-// The upper half of the frame holds tighter tolerances than the lower, so every band of the scale shows.
-const BANDS = Array.from({ length: CONTROLS }, (_, i) => (i < CONTROLS / 2 ? { alarm_db: [3, 3], abort_db: [6, 6] } : { alarm_db: [1, 1], abort_db: [1.5, 1.5] }));
+// The upper half of the frame holds tighter alarm bands than the lower, so every band of the scale
+// shows. The abort bands are wide: 72 independent controls on 24 drives cannot all be reached (the
+// prediction's achievable reference), and this check is of the views, not of the envelope abort.
+const BANDS = Array.from({ length: CONTROLS }, (_, i) => (i < CONTROLS / 2 ? { alarm_db: [3, 3], abort_db: [30, 30] } : { alarm_db: [1, 1], abort_db: [25, 25] }));
 
 // ---- processes --------------------------------------------------------------------------------
 const children = [];
@@ -104,7 +109,12 @@ function controller(port) {
 			else if (v.type === 'response') {
 				const p = pending.get(v.id);
 				pending.delete(v.id);
-				if (v.error) p?.reject(new Error(`${p.method}: ${v.error.message}`));
+				if (v.error) {
+					// A refused setup carries its whole validation report: name every finding.
+					const items = [...(v.error.detail?.errors ?? []), ...(v.error.detail?.warnings ?? [])];
+					const why = items.map((i) => `${i.field ?? (i.channel !== undefined && i.channel !== null ? `channel ${i.channel}` : i.reason)}: ${i.message}`).join('; ');
+					p?.reject(new Error(`${p.method}: ${v.error.message}${why ? ` [${why}]` : ''}`));
+				}
 				else p?.resolve(v.result);
 			} else if (v.type === 'event' && v.topic === 'mimo_random.status') status.last = v.data;
 		};
@@ -234,22 +244,56 @@ const geo = layout();
 const rows = [...geo.sensors.map((s, i) => row(i + 1, 'control', s.label)), ...geo.drives.map((d, k) => row(101 + k, 'drive', d.label))];
 const rev = (await ctl.call('channels.get'))['revision'];
 await ctl.call('channels.set', { revision: rev, channels: rows });
+/**
+ * An inline reference the controller interpolates onto its grid (PROTOCOL.md): each
+ * control's PSD flat at `psd` from 40 to 1,600 Hz on 64 points, the controls independent of each
+ * other (72 controls on 24 drives: only part of it is reachable, which the prediction shows).
+ */
+function inlineReference(n, psd) {
+	const freqs = Array.from({ length: 64 }, (_, k) => 40 * (1600 / 40) ** (k / 63));
+	const per = (n * (n + 1)) / 2;
+	const re = new Array(freqs.length * per).fill(0);
+	for (let l = 0; l < freqs.length; l++) {
+		let at = l * per;
+		for (let r = 0; r < n; r++) {
+			re[at] = psd;
+			at += n - r;
+		}
+	}
+	return { kind: 'inline', freqs_hz: freqs, n, re, im: new Array(re.length).fill(0) };
+}
+
 const set = await ctl.call('mimo_random.setup', {
 	setup: {
 		title: TITLE,
 		channels: {
 			controls: rows.filter((r) => r.role === 'control').map((r, i) => ({ channel: r.index, ...BANDS[i] })),
-			drives: rows.filter((r) => r.role === 'drive').map((r) => ({ channel: r.index, ceiling_vrms: 5 }))
+			drives: rows.filter((r) => r.role === 'drive').map((r) => ({ channel: r.index, ceiling_vrms: 5, peak_v: 10 }))
 		},
-		reference: { kind: 'file', path: '/data/references/full_scale.hforge', sha256: 'ab'.repeat(32) },
-		estimation: { fs_hz: 8192, n_pts: 4096 },
-		identification: { review: false },
-		schedule: { mode: 'auto', levels: [{ db: 0 }], full_level_s: 3600 }
+		reference: inlineReference(CONTROLS, 1e-3),
+		estimation: { fs_hz: 4096, n_pts: 2048, frames_per_loop: 8 },
+		identification: { review: false, frames: 48, noise_frames: 8 },
+		schedule: { mode: 'auto', levels: [{ db: 0 }], full_level_s: 3600 },
+		backend: { kind: 'sim' }
 	}
 });
 check('the service took the 72 by 24 setup', set.state.shape.controls === CONTROLS && set.state.shape.drives === DRIVES, `${set.state.shape.controls} by ${set.state.shape.drives}, ${set.state.grid?.lines} lines`);
 await ctl.call('mimo_random.start');
-await waitFor('full level', () => ctl.status.last?.phase === 'full_level', 120_000);
+// The run holds where a person decides: a failed gate, or a prediction over a ceiling. On the
+// simulator each is acknowledged so the views can be checked at full level.
+const acknowledged = new Set();
+for (const t0 = Date.now(); ctl.status.last?.phase !== 'full_level'; ) {
+	const st = ctl.status.last;
+	if (st?.state === 'finished') throw new Error(`the run ended before full level: ${st.end?.outcome}: ${st.end?.message}`);
+	const hold = st?.state === 'review' ? st.phase : null;
+	if ((hold === 'gate_failed' || hold === 'prediction_exceeded') && !acknowledged.has(hold)) {
+		acknowledged.add(hold);
+		await ctl.call('mimo_random.override', { ack: 'Simulator plant for the run views check; reviewed.', reason: hold });
+	}
+	if (Date.now() - t0 > 600_000) throw new Error(`timed out waiting for full level (phase ${st?.phase})`);
+	await new Promise((r) => setTimeout(r, 250));
+}
+if (acknowledged.size) console.log(`acknowledged on the way: ${[...acknowledged].join(', ')}`);
 console.log('the run is at full level');
 
 const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
@@ -270,7 +314,7 @@ try {
 	await tid(a, 'heatmap-canvas').hover({ position: { x: 600, y: 200 } });
 	const readout = (await tid(a, 'heatmap-readout').textContent()).replace(/\s+/g, ' ').trim();
 	check('the heatmap cursor reads control, frequency and dB', /Hz/.test(readout) && /dB/.test(readout), readout);
-	await shot(a, 'wp8_heatmap');
+	await shot(a, `${PREFIX}_` + 'heatmap');
 
 	// The matrix grid: its window block and its 8 spectra.
 	await tid(a, 'mimo-page-select').selectOption('mp-2');
@@ -283,7 +327,7 @@ try {
 	await a.waitForTimeout(300);
 	const gridRead = (await tid(a, 'grid-readout').textContent()).replace(/\s+/g, ' ').trim();
 	check('the grid cursor names the cell and gives its numbers', /Hz/.test(gridRead) && /reference/.test(gridRead), gridRead);
-	await shot(a, 'wp8_grid');
+	await shot(a, `${PREFIX}_` + 'grid');
 
 	// Scroll and pin: the subscription follows the window.
 	await tid(a, 'grid-pin').selectOption('P20 Z');
@@ -299,7 +343,7 @@ try {
 	await waitFor('the open cell data', () => hasData(a, 'mp-2:open'), 10_000);
 	const opened = await accepted(a);
 	check('an opened cell is subscribed as its own quantity', opened.includes('mp-2:open=coh'), opened.filter((s) => s.includes('open')).join());
-	await shot(a, 'wp8_grid_open');
+	await shot(a, `${PREFIX}_` + 'grid_open');
 	await tid(a, 'grid-close').click();
 	await waitFor('the open cell let go', async () => !(await accepted(a)).some((s) => s.startsWith('mp-2:open=')), 10_000);
 
@@ -310,7 +354,7 @@ try {
 	const plantSub = await accepted(a);
 	check('the drive and plant page asks for its drive, pair, response, singular values, condition and caps', plantSub.map((s) => s.split('=')[1]).join() === 'drive_psd,drive_coh,frf,sv,cond,cap', plantSub.join());
 	await a.waitForTimeout(500);
-	await shot(a, 'wp8_plant');
+	await shot(a, `${PREFIX}_` + 'plant');
 
 	// Geometry: physical control, nothing subscribed; colors from the status.
 	await tid(a, 'mimo-page-select').selectOption('mp-4');
@@ -318,7 +362,7 @@ try {
 	await a.waitForTimeout(1200);
 	const geoSub = await accepted(a);
 	check('the geometry page under physical control asks for nothing', geoSub.length === 0, geoSub.join());
-	await shot(a, 'wp8_geometry');
+	await shot(a, `${PREFIX}_` + 'geometry');
 
 	// A page added and removed during the run.
 	await tid(a, 'mimo-page-add').selectOption('heatmap');
@@ -349,9 +393,9 @@ try {
 	console.log(`      frames per second: grid window ${fm.fps.toFixed(1)} (worst frame ${fm.worstFrameMs.toFixed(1)} ms), heatmap window ${fs2.fps.toFixed(1)} (worst frame ${fs2.worstFrameMs.toFixed(1)} ms); last draw: grid ${drawGrid} ms, heatmap ${drawHeat} ms`);
 	check('A10: both windows keep 30 frames per second or more', fm.fps >= 30 && fs2.fps >= 30, `${fm.fps.toFixed(1)} and ${fs2.fps.toFixed(1)}`);
 	await main.bringToFront();
-	await shot(main, 'wp8_two_monitors_main');
+	await shot(main, `${PREFIX}_` + 'two_monitors_main');
 	await second.bringToFront();
-	await shot(second, 'wp8_two_monitors_second');
+	await shot(second, `${PREFIX}_` + 'two_monitors_second');
 	await ctxB.close();
 } catch (err) {
 	failed = err;
