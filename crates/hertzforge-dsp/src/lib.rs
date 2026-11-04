@@ -1074,6 +1074,80 @@ pub mod cola {
             }
             out
         }
+
+        /// Produce the next `hop` output samples from a one-sided complex frame
+        /// spectrum the caller drew, instead of drawing one from a PSD.
+        ///
+        /// This is the multiple-output path: a caller synthesizing several
+        /// correlated outputs draws one random vector per line, couples it through
+        /// a factor of the drive spectral matrix, and hands each output its own
+        /// line spectrum here, so every output uses the same window, the same hop
+        /// and the same frame's random draw, and the cross-spectral coherence and
+        /// phase between outputs are kept.
+        ///
+        /// `spectrum[k]` (length `nfft/2 + 1`) is in PSD units: a draw with
+        /// `E|spectrum[k]|^2 = S(k)` gives an overlap-added stream whose one-sided
+        /// PSD is `S(k)`, by the same normalization as [`Self::next_frame`]. The
+        /// phase is read in the analysis convention `X(f) = sum x(t) e^(-j 2 pi f t)`,
+        /// so a cross spectrum `E[X_a conj(X_b)]` between two outputs has the phase
+        /// of `E[spectrum_a conj(spectrum_b)]`; the method accounts for the sign of
+        /// this crate's own transforms ([`forward_exponent_is_positive`]). The DC
+        /// and Nyquist bins keep only their real part (a real line has no
+        /// imaginary twin); callers must not put control energy there (see
+        /// [`Self::next_frame`]). A non-finite value is played as zero.
+        pub fn next_frame_from_spectrum(&mut self, spectrum: &[(f64, f64)]) -> Vec<f64> {
+            let n = self.nfft;
+            let half = n / 2;
+            assert_eq!(
+                spectrum.len(),
+                half + 1,
+                "ColaSynth::next_frame_from_spectrum: spectrum must have nfft/2+1 bins"
+            );
+            let w2 = self.squared_window_cola();
+            let scale = (n as f64 * self.fs_hz / (2.0 * w2)).sqrt();
+            // A real frame x[n] with analysis-convention spectrum S is
+            // (1/N) sum S[k] e^(+j 2 pi k n / N). `fft::ifft` runs the exponent
+            // opposite to the forward transform's: with a negative-exponent inverse
+            // it must be handed conj(S) to give the same x.
+            let flip = forward_exponent_is_positive();
+            let mut spec = vec![(0.0f64, 0.0f64); n];
+            for k in 0..=half {
+                let (re, im) = spectrum[k];
+                let (re, im) = if re.is_finite() && im.is_finite() {
+                    (re * scale, im * scale)
+                } else {
+                    (0.0, 0.0)
+                };
+                let im = if flip { -im } else { im };
+                if k == 0 || k == half {
+                    spec[k] = (re, 0.0);
+                } else {
+                    spec[k] = (re, im);
+                    spec[n - k] = (re, -im);
+                }
+            }
+            let time = fft::ifft(&spec);
+            for ((t, c), &wn) in self.tail.iter_mut().zip(time.iter()).zip(self.win.iter()) {
+                *t += c.0 * wn;
+            }
+            let out: Vec<f64> = self.tail[..self.hop].to_vec();
+            self.tail.copy_within(self.hop.., 0);
+            for v in self.tail[n - self.hop..].iter_mut() {
+                *v = 0.0;
+            }
+            out
+        }
+    }
+
+    /// Whether this crate's forward FFT uses the positive exponent, measured on a
+    /// four-point unit impulse at sample 1: its forward transform at bin 1 is
+    /// `e^(-j pi/2) = -j` for the negative exponent and `+j` for the positive.
+    /// (It is positive today, although [`fft::fft`] documents the negative one;
+    /// single-output Random reads magnitudes only. Callers that form cross
+    /// spectra measure the sign through this function rather than assume it.)
+    pub fn forward_exponent_is_positive() -> bool {
+        let x = [(0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        fft::fft(&x)[1].1 > 0.0
     }
 }
 
@@ -2846,6 +2920,40 @@ mod tests {
         assert_eq!(s.nfft(), nfft);
         // sqrt-Hann synthesis window -> squared-window COLA constant is 1.0.
         assert!((s.squared_window_cola() - 1.0).abs() < 1e-9);
+    }
+
+    /// A spectrum-driven frame plays the phase it is given in the analysis
+    /// convention: one line at bin `k` with value `e^(j pi/2)` is the frame
+    /// `cos(2 pi k n / N + pi/2) = -sin(2 pi k n / N)` under the window. With the
+    /// sign handling inverted the frame is `+sin`, and this fails.
+    #[test]
+    fn cola_spectrum_frame_plays_the_given_phase() {
+        let nfft = 64;
+        let k = 5;
+        let mut s = cola::ColaSynth::new(nfft, 0.5, 1024.0);
+        let mut spec = vec![(0.0, 0.0); nfft / 2 + 1];
+        spec[k] = (0.0, 1.0);
+        let out = s.next_frame_from_spectrum(&spec);
+        assert_eq!(out.len(), nfft / 2);
+        let win: Vec<f64> = window::hann(nfft).iter().map(|w| w.sqrt()).collect();
+        let mut dot = 0.0;
+        let mut norm = 0.0;
+        for (n, &v) in out.iter().enumerate() {
+            let want = -win[n] * (std::f64::consts::TAU * (k * n) as f64 / nfft as f64).sin();
+            dot += v * want;
+            norm += want * want;
+        }
+        let c = dot / norm;
+        assert!(c > 0.0, "the frame plays the conjugate phase");
+        for (n, &v) in out.iter().enumerate() {
+            let want = -win[n] * (std::f64::consts::TAU * (k * n) as f64 / nfft as f64).sin();
+            assert!(
+                (v - c * want).abs() < 1e-12,
+                "sample {n}: {v} vs {}",
+                c * want
+            );
+        }
+        let _ = cola::forward_exponent_is_positive();
     }
 
     #[test]
