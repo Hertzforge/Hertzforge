@@ -24,6 +24,8 @@ pub struct Event {
     pub decoded: Option<Decoded>,
     /// When it was read.
     pub at: Instant,
+    /// The frame's size on the socket, bytes.
+    pub bytes: usize,
 }
 
 impl Event {
@@ -59,6 +61,7 @@ pub fn options(
         capture_root: Some(dir),
         sim_speed: speed,
         bind: "ws://127.0.0.1:0/".into(),
+        mimo_driver: None,
     }
 }
 
@@ -109,6 +112,7 @@ impl Client {
                         msg: v.clone(),
                         decoded: None,
                         at: Instant::now(),
+                        bytes: t.len(),
                     });
                 }
                 Some(v)
@@ -121,6 +125,7 @@ impl Client {
                     msg: v.clone(),
                     decoded: Some(decoded),
                     at: Instant::now(),
+                    bytes: b.len(),
                 });
                 Some(v)
             }

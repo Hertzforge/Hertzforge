@@ -96,6 +96,11 @@ computed the data decides it. Spectral content is plotted the way it is calculat
   polyline is within a pixel of it. Drawn as a line.
 - `line`: anything that is a sample at a point (an FRF, a coherence, a time history).
 
+`y_min` (optional) makes a series an envelope: the service decimated it to the plot's width,
+and each point stands for an interval of the original lines, `y` the largest value in it and
+`y_min` the smallest. The shell draws the band between them (and with `steps`, each interval
+flat across its `edges`), so no peak or notch is lost to the decimation.
+
 This is Visual Dynamics' drawing rule (`plot.drawing_shape`, `plot.bin_edges`); the analysis
 service takes it from there rather than restating it.
 
@@ -204,6 +209,37 @@ c's shape with row r's, since a real mode is defined only up to its sign and a c
 rotation. Clicking cell (r, c) shows mode r with overlay c drawn over it, rotated by that angle and
 in one flat color, scaled to the same amplitude; the playback and the camera carry on through a
 click. Visual Dynamics draws a MAC pair the same way.
+
+**`heatmap`** (rows of values against frequency, such as MIMO Random's error per control)
+
+```
+{"view":"heatmap","title":"Control Error",
+ "rows":{"label":"Control","ticks":["Control X",...]},         one tick per row
+ "x":{"label":"Frequency","unit":"Hz","scale":"log"},
+ "x_values":{"$array":.. f64 [C]},          the frequency of each column
+ "values":{"$array":.. f32 [R,C]},          row r, column c
+ "value":{"label":"Error","unit":"dB"},
+ "row_bands":[{"alarm_db":[3,3],"abort_db":[6,6]}, ...]}         one per row
+```
+
+The color breaks are each row's own alarm and abort bands. The scale is lightness-ordered so the
+bands read without hue, and hovering a cell reads its row, frequency and value. The service sends
+one column per pixel of the plot, each the line nearest the column's center.
+
+**`sdm`** (a block of a spectral density matrix, such as MIMO Random's matrix grid)
+
+```
+{"view":"sdm","title":"Spectral Matrix","channels":["Control X","Control Y"],
+ "packing":"upper","unit":"g²/Hz",
+ "x":{"label":"Frequency","unit":"Hz","scale":"log"},"x_values":{"$array":.. f64 [L]},
+ "measured":{"re":{"$array":.. f64 [L,P]},"im":{"$array":.. f64 [L,P]}},
+ "reference":{"re":..,"im":..}}
+```
+
+`P = n (n + 1) / 2` for the `n` channels: each line's upper triangle, row by row (see "MIMO
+Random"). The diagonal is each channel's PSD; an element above it gives the coherence
+`|G_ij|² / (G_ii G_jj)` and the phase of `G_ij`, under the `E[X X^H]` convention. `measured` is
+null until the run has measured; `reference` is null when there is none.
 
 ## Operations: Declarative Panels
 
@@ -330,6 +366,10 @@ plain words: it never names a protocol method.
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random configuration has errors | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
+| `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
+| `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` engages anyway | `gates` |
+| `law_import_failed` | `refused` | The file is not a control law this program can run, or cannot be read | `path` |
+| `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -343,6 +383,9 @@ path such as `control.damping`) locates the problem. Item reasons:
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
 | Control and limits | `no_control_channel`, `weight_unknown_channel`, `weights_sum_not_positive`, `limit_unknown_channel`, `limit_rows_not_ascending` | |
 | Any number | `out_of_range` (`field` names it, `message` states the range) | |
+| MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
+| MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
+| MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
 
 A refusal not listed here is a defect in the service.
 
@@ -351,10 +394,12 @@ A refusal not listed here is a defect in the service.
 One connection at a time holds control; any number observe. Every connection starts as an
 observer. Observers receive every event and may call every method that only reads
 (`session.state`, `station.list`, `channels.get`, `random.state`, `random.config`, `random.log`,
-`random.subscribe`, and the `dry_run` checks).
+`random.subscribe`, `mimo_random.status`, `mimo_random.validate`, `mimo_random.report`,
+`mimo_random.subscribe`, `laws.list`, and the `dry_run` checks).
 
-**Stopping is open to everyone.** `random.stop` and `random.abort` are accepted from any
-connection, controller or observer. They only ever end a run, so a second client using them
+**Stopping is open to everyone.** `random.stop` and `random.abort` (and MIMO Random's
+`mimo_random.stop` and `mimo_random.abort`) are accepted from any connection, controller or
+observer. They only ever end a run, so a second client using them
 cannot leave the run in a state nobody asked for, and whoever is watching a test that goes wrong
 can end it from the screen in front of them. `random.stop` is the gentler of the two, so whoever
 may abort may also stop. The control service listens on loopback only, so every client is on
@@ -898,3 +943,288 @@ the configuration as accepted, the actual grid, the log, and `end`. When run fil
 the control service writes the recording under its local data directory while the run goes and
 converts it to `.hforge` when the run finishes, and `end` names the file. That layout is
 specified with the run-file format, not here.
+
+## MIMO Random
+
+Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
+reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
+single-output Random run (or a `sim.start` run) exclude each other exactly as two Random runs
+would: each is refused `run_active` while the other is live. The controller and observer rules
+are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
+`mimo_random.abort`); `mimo_random.setup` (other than a dry run), `start`, `proceed`,
+`override` and `iterate_prediction` need control; everything that only reads is open to every
+connection.
+
+**Conventions.** A spectral matrix is `G = lim (1/T) E[X X^H]` per line, so a response `Y = H X`
+has `G_yy = H G_xx H^H`. This is the complex conjugate of the Bendat and Piersol definition; a
+client converting from that convention conjugates every cross spectrum. A Hermitian matrix travels
+packed: per line its upper triangle row by row (`G00, G01, ..., G0n, G11, ...`), lines in order,
+the element `(r, c)` with `r <= c` at `r (2n - r + 1) / 2 + (c - r)` within its line. Real and
+imaginary parts travel apart. Controls and drives are counted from 0 in the setup's order; that is
+what every index on the wire counts.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `mimo_random.setup` | `{"setup","dry_run"}` (`dry_run` optional) | any but live | `{"state","validation"}` |
+| `mimo_random.validate` | `{"setup"}` (optional) | any | `{"validation"}` |
+| `mimo_random.start` | `{}` | `configured` | status |
+| `mimo_random.proceed` | `{}` | `review`, `awaiting_review` | status |
+| `mimo_random.override` | `{"ack"}` | `review`, `gate_failed` | status |
+| `mimo_random.iterate_prediction` | `{"law"}` (optional) | `review` | `{"prediction"}` |
+| `mimo_random.stop` | `{}` | any | status |
+| `mimo_random.abort` | `{}` | any | status |
+| `mimo_random.status` | `{}` | any | status |
+| `mimo_random.report` | `{}` | any | `{"report"}` |
+| `mimo_random.subscribe` | see "MIMO Random Display" | any | as there |
+
+"status" is the `mimo_random.status` object below.
+
+### MIMO Random Setup
+
+```
+{"title":"Two-Axis Random",
+ "channels":{"controls":[{"channel":1,"alarm_db":[3,3],"abort_db":[6,6]},{"channel":2}],
+             "drives":[{"channel":3,"ceiling_vrms":2},{"channel":4,"ceiling_vrms":2,"abort_vrms":3}]},
+ "space":{"kind":"physical"},
+ "reference":{"kind":"inline","freqs_hz":[100,106.25,...],"n":2,"re":[...],"im":[...]},
+ "law":{"id":"pinv_closed","params":{"convergence":0.5}},
+ "estimation":{"fs_hz":8192,"n_pts":4096,"frames_per_loop":8,"window":"hann","overlap":0.5,"memory_loops":4},
+ "identification":{"level_db":-20,"frames":32,"noise_frames":16,"coherence_floor":0.5,
+                   "condition_limit":1000,"review":true},
+ "control":{"frf":"hold","level_ramp_s":3,"shutdown_ramp_s":3,"max_loops_out":5},
+ "schedule":{"mode":"auto","levels":[{"db":-6,"dwell_s":10},{"db":0}],"full_level_s":60},
+ "backend":{"kind":"sim"}}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `channels.controls` | (required) | The control channels, by their table `index` (each an enabled `control` row), each with its own `alarm_db` and `abort_db` bands (`[below, above]` in positive dB, defaults `[3,3]` and `[6,6]`) |
+| `channels.drives` | (required) | The drives, by table `index` (each an enabled `drive` row), each with its own `ceiling_vrms` (above 0, at most 10) and optional `abort_vrms` (above the ceiling) |
+| `space` | physical | `{"kind":"physical"}`: control the channels themselves. `{"kind":"virtual","dofs":[names],"response_transform","drive_transform"}`: control the named degrees of freedom; `response_transform` is degrees of freedom by control channels, `drive_transform` (optional) drives by virtual drives. A transformation is `{"rows","cols","values"}`, real, row by row |
+| `reference` | (required) | Inline, for a small reference: `{"kind":"inline","freqs_hz","n","re","im"}`, the packed matrices of `n` channels (or degrees of freedom) on the lines `freqs_hz` (at least 8, rising), at most 262,144 values. By file, for a large one: `{"kind":"file","path","sha256"}`, a native reference file on the computer that runs the test, named with the SHA-256 of its bytes; the run reads it when it starts and refuses a file whose hash differs |
+| `law` | `{"id":"pinv_closed"}` | The control law, by its catalog `id` (see "Control Laws"), and values for the parameters its manifest declares |
+| `estimation` | as shown | The frame (`fs_hz` 256 to 204,800, `n_pts` a power of two from 64), frames per loop (1 to 1024), window (`hann` or `rectangular`), overlap (0 to 0.75) and how many loops the estimate remembers (1 to 64) |
+| `identification` | as shown | The identification level (-60 to 0 dB relative to the reference), its frames and the noise-floor frames, the gates (the smallest multiple coherence over the band, `coherence_floor`, and the largest FRF condition number, `condition_limit`), and whether to hold for review afterwards |
+| `control` | as shown | `frf` `hold` (the FRF from identification) or `update` (re-estimated each loop); ramp times; consecutive loops out of tolerance before the divergence abort |
+| `schedule` | (required) | Single-output Random's schedule |
+| `backend` | the selected station | `{"kind":"sim"}` or `{"kind":"ni"}`; must be the station selected (`backend_not_selected` otherwise) |
+
+A setup whose shape is wrong (a missing or mistyped field) is refused `bad_params` naming the
+field. Everything about its content is in the validation report, so the operator sees every
+problem at once: `mimo_random.setup` with errors is refused `setup_invalid` with the report as
+`detail`, and nothing is replaced. `dry_run: true` returns `{"validation"}` only, needs no
+control and replaces nothing; `mimo_random.validate` does the same for the setup it is given, or
+returns the present setup's report (null when there is none). A setup replaces the one before
+and is refused `run_active` while any run is live. An accepted setup's report is also sent to
+every connection as the `mimo_random.validate` text event (`{"run_id","validation"}`).
+
+### MIMO Random Validation
+
+```
+{"ok":true,"errors":[],"warnings":[],
+ "shape":{"controls":2,"drives":2,"space":"physical","dofs":null,"shape":"square"},
+ "transforms":{"response":null,"drive":null},
+ "reference":{"source":"inline","lines":8,"n":2,"band_hz":[100,143.75],"min_eigenvalue_ratio":0,
+              "rank_min":2,"rank_max":2,"repaired_lines":0},
+ "feasibility":[{"channel":3,"ceiling_vrms":2,"verdict":"not_evaluated","predicted_vrms":null,"message":"..."}],
+ "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.0.0","sha256":null,"admitted":true}}
+```
+
+- `ok` is true exactly when `errors` is empty. Items are the table's `{"reason","message"}` with
+  `channel` or `field`.
+- `shape.shape` is `square`, `more_controls_than_drives` or `fewer_controls_than_drives`
+  (controlled quantities against drives).
+- Each transformation reports its `rank` and `condition` (largest over smallest singular value;
+  null when rank-deficient). Rank below `min(rows, cols)` is an error; a condition number above
+  100 is a warning.
+- The reference reports, over its lines, the most negative eigenvalue relative to the line's
+  largest (`min_eigenvalue_ratio`, 0 when none is negative), the smallest and largest rank, and
+  how many lines the run will repair. An eigenvalue below -1e-3 of its line's largest is an
+  error (no signal has those spectra); one between -1e-3 and -1e-6 is repaired at the run
+  (clamped to zero, each PSD kept) and warned. A rank above the number of drives is a warning:
+  the reference can then be met only in the least-squares sense. A reference by file is read
+  when the run starts, so its fields are null until then.
+- `feasibility` lists every drive: `verdict` `pass`, `advisory`, `exceeded` or `not_evaluated`.
+  Before identification the drive a test needs is not known, so a setup's report says
+  `not_evaluated`; the prediction (below) gives the numbers before the loop engages.
+- `law.admitted` is false when the law is unknown, single-output, does not support the test's
+  shape, or a parameter is unknown or out of its declared range.
+
+### MIMO Random Run State
+
+`mimo_random.status` answers with the status object, and the `mimo_random.status` text event
+carries the same object to every connection on every change of state, phase, level, loop,
+alarm, faults or prediction.
+
+```
+{"run_id":"m-0003","state":"running","phase":"engaged","title":"Two-Axis Random","source":"SIM",
+ "station":{"kind":"sim","class":"sim","devices":[]},
+ "grid":{"fs_hz":8192,"n_pts":4096,"df_hz":2,"lines":8,"loop_s":2.25,"actual":false},"clock":null,
+ "shape":{"controls":2,"drives":2,"space":"physical","dofs":null,"shape":"square",
+          "labels":["Control X","Control Y"],"drive_labels":["Shaker X","Shaker Y"]},
+ "mode":"auto","levels_db":[-6,0],"level_db":-6,"elapsed_s":31.5,"at_level_s":4.5,
+ "remaining_at_level_s":5.5,"loop":14,"alarm":false,"control_error_db":[0.42,-0.31],
+ "gates":{"coherence_min":0.962,"coherence_floor":0.5,"condition_max":12.5,"condition_limit":1000,"passed":true},
+ "caps":[1,0.875],"drive_rms_v":[0.412,0.388],
+ "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.0.0","sha256":null},
+ "faults":[],"override":null,"prediction":{...},"end":null}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured` | `idle` | No setup |
+| `configured` | `idle` | Set up; nothing open |
+| `armed` | `armed` | Station open; nothing driven yet |
+| `running` | `sysid_noise`, `sysid`, `engaged`, `full_level` | Driving: the noise floor with the drives off, identification, the ladder, full level |
+| `review` | `awaiting_review`, `gate_failed` | Identification is done; nothing drives until `proceed` (gates passed) or `override` (a gate failed) |
+| `stopping` | `ramping_down` | A controlled stop or a safe stop is ramping the level down |
+| `finished` | `stopped`, `aborted` | Ended; `end` says how (Random's outcomes and trips) |
+
+`labels` and `drive_labels` name what the indexes count: the controlled quantities (control
+channels, or degrees of freedom under virtual control) and the drives. `control_error_db` is
+each controlled quantity's rms over the band against the reference's, in dB (empty before the
+first loop). `gates` is null until identification has measured them. `caps` is each drive's
+cap factor this loop (1 when the core did not hold it down). `prediction`, once identification
+is done: `{"iteration","law","drive_rms_v","ceiling_vrms","error_db","drives_pass"}`, what the
+law would ask of each drive and leave on each control. `override` is `{"by","text"}` once the
+gate was overridden. `faults` lists `{"kind","message"}`.
+
+- **`mimo_random.start`** arms the station and runs identification, then holds for review when
+  `identification.review` is true or a gate failed; otherwise it engages. It answers at once.
+- **`mimo_random.proceed`** engages from `awaiting_review`. After a failed gate it is refused
+  `gate_failed`.
+- **`mimo_random.override`** engages after a failed gate. `ack` is the operator's own words,
+  kept with the run and in its report; an empty one is `bad_params`, and an override when no
+  gate failed is `override_not_needed`.
+- **`mimo_random.iterate_prediction`** recomputes the prediction during the review hold, with
+  another law or other parameters (`{"law":{"id","params"}}`, checked like the setup's) or the
+  run's own. A law chosen here is the one that engages.
+- **`mimo_random.stop`** and **`mimo_random.abort`** behave as Random's; the safe stop when
+  nobody holds control is the same.
+
+### MIMO Random Report
+
+`mimo_random.report` returns `{"report"}`, null until the run has finished; the
+`mimo_random.report` text event carries `{"report"}` to every connection when it finishes.
+
+```
+{"run_id","title","source","grid","shape","law","loops",
+ "controls":[{"label","rms","reference_rms","error_db"}],
+ "drives":[{"channel","label","rms_v","ceiling_vrms","min_cap"}],
+ "gates","override","end"}
+```
+
+### MIMO Random Display
+
+A screen asks for the quantities its plots show, by name and selector, at the rate it wants, and
+the service sends that connection only those, each decimated to its plot's width. Nothing is sent
+that is not on screen: a 72 by 72 spectral matrix is never streamed whole. The mechanics are
+Random's: a subscription replaces the connection's last as a whole, belongs to the connection and
+carries over from run to run, is open to every connection, and is answered with one frame at
+once when the run has streamed.
+
+| Method | Params | Result |
+|---|---|---|
+| `mimo_random.subscribe` | `{"rate_hz","plots":[plot...]}`, or `{"default":true}` | `{"default","rate_hz","plots","quantities"}` |
+
+```
+{"rate_hz":10,"plots":[{"id":"c01","quantity":"coh","pair":[0,1],"points":512},
+                       {"id":"heat","quantity":"error_db","rows":"all","points":512},
+                       {"id":"grid","quantity":"sdm","block":[0,1,2,3,4,5,6,7],"points":256}]}
+```
+
+- With no subscription (the default) a connection receives `mimo_random.status` only.
+- `rate_hz` is 0.5 to 10 (default 5); `plots` holds up to 64 entries, each
+  `{"id","quantity",<selector>,"points"}`. `points` is the plot's width in pixels, 64 to 8192
+  (default 1024): the service sends at most that many points per series.
+- A selector is one of `index` (a control or drive), `pair` (two of them), `rows` (`"all"` or a
+  list of controls: the heatmap's rows), `diagonal: true` (every control or drive), `block`
+  (1 to 8 controls: a block of the spectral matrix, the grid's window) or `key` (a law
+  diagnostic, with an `index` for a per-control or per-drive layout). Positions count the setup's
+  controlled quantities and drives from 0, in order; the status's `shape.labels` and
+  `shape.drive_labels` name them. A position the run does not have is left out (the plot has no
+  views), never refused.
+- Refusals: `bad_params` with `param` naming the field: an unknown quantity, a selector the
+  quantity does not take or two selectors, a pair of one channel where two are needed, a block
+  over 8 or with a repeat, a value out of range, a duplicate `id`.
+
+| `quantity` | Selector | Views |
+|---|---|---|
+| `psd` | `index` or `diagonal` | one `spectrum`, stepped: the control's PSD against the reference and its alarm and abort lines (`index`), or every control's PSD (`diagonal`) |
+| `coh` | `pair` | one `spectrum`: the coherence of two controls against the reference's, 0 to 1 |
+| `phase` | `pair` | one `spectrum`: the phase of `G_ij`, degrees, against the reference's |
+| `csd_mag` | `pair` | one `spectrum`, stepped: the cross-spectrum magnitude against the reference's |
+| `error_db` | `rows` | one `heatmap`: each control's dB error against the reference per line |
+| `drive_psd` | `index` or `diagonal` | one `spectrum`, stepped, V²/Hz |
+| `drive_coh` | `pair` | one `spectrum`: the coherence of two drives |
+| `frf` | `pair` (`[control, drive]`) | two `spectrum`s: the FRF's magnitude and phase |
+| `sv` | none | one `spectrum`: the FRF's singular values per line |
+| `cond` | none | one `spectrum`: the FRF's condition number per line, with the gate as a `limit` |
+| `mcoh` | `index` or `diagonal` | one `spectrum`: a control's multiple coherence with the drives |
+| `cap` | `index` or `diagonal` (default) | one `reading`: each drive's cap factor this loop |
+| `dof_rms` | none | one `reading`: each controlled quantity's rms over the band |
+| `trace` | none | one `spectrum`, stepped: the sum of the control PSDs against the reference's |
+| `pred_drive_rms` | `index` or `diagonal` (default) | one `reading`: each drive's predicted rms against its ceiling |
+| `pred_error_db` | `index` | one `spectrum`: a control's predicted error per line, dB |
+| `law_diag` | `key` (and `index`) | one `spectrum` for a per-line layout, one `reading` for a scalar |
+| `sdm` | `block` | one `sdm`: the block of the response matrix and the reference's |
+| `readings` | none | one `reading`: the run's numbers (loop, level, largest error, gates, elapsed) |
+
+**Decimation.** The service reduces every quantity to the plot's width before it is framed:
+a spectrum to one point per pixel column (columns spaced on the plot's frequency axis), each the
+minimum and maximum of the lines in it (`y_min` and `y`, with the column's `edges` for a stepped
+series), so every original line lies inside its column's envelope; a heatmap row and a matrix
+block to the line nearest each column's center; readings not at all. When the run has no more
+lines than the plot has columns, nothing is decimated and each line is sent as it is.
+
+Event topic `mimo_random.data`, a binary frame to one connection, at most `rate_hz` times a
+second from the start of identification until the run finishes, and once more at the end:
+
+```
+{"run_id","source","state","phase","loop","elapsed_s","level_db",
+ "plots":[{"id","quantity","selector":{"pair":[0,1]},"labels":["Control X","Control Y"],"views":[...]}]}
+```
+
+`selector` echoes the plot's selector; `labels` names what it resolved to (the two channels of a
+pair, the rows of a heatmap, the channels of a block).
+
+## Control Laws
+
+The control laws an operator can choose, for single-output and MIMO Random alike: the laws
+built into the program, and law files imported into the local data folder.
+
+| Method | Params | Result |
+|---|---|---|
+| `laws.list` | `{"world"}` (optional: `single`, `mimo`, or absent for both) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
+| `laws.import` | `{"path"}` | `{"law":entry}` |
+
+```
+{"id":"pinv_closed","world":"mimo","builtin":true,"name":"pseudo-inverse, closed loop",
+ "version":"1.0.0","author":"...","summary":"...","sha256":null,
+ "check":{"status":"built_in","date":null,"tool_version":null,"cases":[],"hardware":true,
+          "message":"Built in: cleared for hardware."},
+ "params":[{"key":"regularization","label":"Regularization","help":"...","kind":"choice",
+            "options":["truncated","tikhonov","none"],"default":"truncated"}, ...],
+ "diagnostics":[{"key":"condition","label":"Condition number","unit":"","help":"...","layout":"per_line"}],
+ "shapes":["square","more_controls_than_drives","fewer_controls_than_drives"],"needs":[]}
+```
+
+- Built-in laws come first, the default of each world first of all, then imported laws by name,
+  version and hash. An imported law's `id` is the SHA-256 of its file.
+- `params` are what a form is built from: `kind` `number`, `integer` or `per_channel` (one value
+  per control channel) with `unit`, `min`, `max`, `step` and `default`; `toggle` with a boolean
+  `default`; `choice` with `options`; `curve` (`[frequency, value]` points) with `unit`, `min`,
+  `max`. Nothing in a screen is specific to a law.
+- `diagnostics` are the numbers a law reports each loop; for a MIMO law `layout` is `scalar`,
+  `per_line`, `per_control_line` or `per_drive_line` (null for a single-output law).
+- `shapes` and `needs` (the optional inputs the law reads) are null for a single-output law.
+- `check.hardware` says whether the law may drive hardware: a built-in law always may; an
+  imported law only with a passing check record for its exact file. Any law runs on the
+  simulator. `check.message` says what stands.
+- `problems` lists files in the laws folder that are not in the catalog, and why.
+- **`laws.import`** reads the law file at `path` (an absolute path on the computer that runs the
+  test; files reach the service by path and are never uploaded), finds which world it
+  implements, checks its manifest, and copies it into the data folder under its SHA-256.
+  Importing a file already in the catalog returns its entry. It needs control. Refusals:
+  `bad_params` (no path, or a relative one), `not_controller`, `law_import_failed`,
+  `catalog_unavailable`.

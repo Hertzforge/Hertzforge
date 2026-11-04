@@ -1,0 +1,1177 @@
+//! The MIMO Random setup on the wire (schema/PROTOCOL.md, "MIMO Random Setup"):
+//! parsed and checked against the channel table and the law catalog.
+//!
+//! Parsing refuses a setup whose shape is wrong (`bad_params`, naming the field).
+//! Everything about its content (unknown channels, a transformation of the wrong
+//! size, a law that does not admit the test's shape) is a validation item, so the
+//! operator sees every problem at once in the validation report.
+
+use crate::protocol::{num, MethodError};
+use crate::table::{unit_name, Item, Report};
+use hertzforge_channel_table::{ChannelRole, ChannelTable};
+use hertzforge_law_host::{MimoManifest, ParamKind};
+use hertzforge_random::RunMode;
+use hertzforge_sdm::law::MimoShape;
+use serde_json::{json, Map, Value};
+
+/// The most complex values an inline reference may carry; a larger reference
+/// travels as a reference file.
+pub const MAX_INLINE_VALUES: usize = 262_144;
+/// The most control channels and drives (design section 3).
+pub const MAX_CONTROLS: usize = 72;
+pub const MAX_DRIVES: usize = 24;
+/// The law used when the setup names none.
+pub const DEFAULT_LAW: &str = "pinv_closed";
+
+/// One control channel: its table row and its tolerance bands, `[below, above]` in
+/// positive dB.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlRow {
+    pub channel: u32,
+    pub label: String,
+    pub unit: String,
+    pub alarm_db: [f64; 2],
+    pub abort_db: [f64; 2],
+}
+
+/// One drive: its table row and its voltage ceiling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveRow {
+    pub channel: u32,
+    pub label: String,
+    pub ceiling_vrms: f64,
+    pub abort_vrms: Option<f64>,
+}
+
+/// A real matrix, row-major.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RealMatrix {
+    pub rows: usize,
+    pub cols: usize,
+    pub values: Vec<f64>,
+}
+
+/// Where control happens: on the control channels, or on virtual degrees of
+/// freedom through the response transformation (and, optionally, virtual drives
+/// through the drive transformation).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlSpace {
+    Physical,
+    Virtual {
+        dofs: Vec<String>,
+        /// Degrees of freedom by control channels.
+        response: RealMatrix,
+        /// Drives by virtual drives, when the drives are transformed too.
+        drive: Option<RealMatrix>,
+    },
+}
+
+/// The reference spectral density matrix.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reference {
+    /// Small references travel in the setup: one packed Hermitian matrix per line
+    /// (upper triangle, row-major, lines in order), real and imaginary parts apart.
+    Inline {
+        freqs_hz: Vec<f64>,
+        n: usize,
+        re: Vec<f64>,
+        im: Vec<f64>,
+    },
+    /// Large references travel by path: a native reference file on the computer
+    /// that runs the test, named with the SHA-256 of its bytes so the run reads
+    /// exactly the file the operator chose.
+    File { path: String, sha256: String },
+}
+
+/// A law and its parameters as the setup names them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LawSetup {
+    pub id: String,
+    pub params: Map<String, Value>,
+}
+
+/// Estimation of the spectral matrices each control loop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Estimation {
+    pub fs_hz: f64,
+    pub n_pts: usize,
+    pub frames_per_loop: usize,
+    pub window: String,
+    pub overlap: f64,
+    pub memory_loops: usize,
+}
+
+/// System identification and its gates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Identification {
+    pub level_db: f64,
+    pub frames: usize,
+    pub noise_frames: usize,
+    pub coherence_floor: f64,
+    pub condition_limit: f64,
+    pub review: bool,
+}
+
+/// The loop's own settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Control {
+    /// `true`: the FRF is re-estimated during the run; `false`: held from
+    /// identification.
+    pub frf_update: bool,
+    pub level_ramp_s: f64,
+    pub shutdown_ramp_s: f64,
+    pub max_loops_out: u32,
+}
+
+/// The level schedule, as single-output Random's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Schedule {
+    pub mode: RunMode,
+    /// `(level_db, dwell_s)`; the last level is full level.
+    pub levels: Vec<(f64, Option<f64>)>,
+    pub full_level_s: f64,
+}
+
+/// A setup as accepted: every default filled in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MimoSetup {
+    pub title: String,
+    pub controls: Vec<ControlRow>,
+    pub drives: Vec<DriveRow>,
+    pub space: ControlSpace,
+    pub reference: Reference,
+    pub law: LawSetup,
+    pub estimation: Estimation,
+    pub identification: Identification,
+    pub control: Control,
+    pub schedule: Schedule,
+    /// `None`: the selected station. Otherwise the station kind the setup was made
+    /// for, which must be the one selected.
+    pub backend: Option<String>,
+    /// The setup as sent, for `mimo_random.status` readers and a reset.
+    pub raw: Value,
+}
+
+impl MimoSetup {
+    /// The controlled quantities: the control channels, or the virtual degrees of
+    /// freedom.
+    pub fn controlled(&self) -> usize {
+        match &self.space {
+            ControlSpace::Physical => self.controls.len(),
+            ControlSpace::Virtual { dofs, .. } => dofs.len(),
+        }
+    }
+
+    /// The labels of the controlled quantities, in order.
+    pub fn controlled_labels(&self) -> Vec<String> {
+        match &self.space {
+            ControlSpace::Physical => self.controls.iter().map(|c| c.label.clone()).collect(),
+            ControlSpace::Virtual { dofs, .. } => dofs.clone(),
+        }
+    }
+
+    /// The test's shape, controls against drives.
+    pub fn shape(&self) -> MimoShape {
+        MimoShape::of(self.controlled(), self.drives.len())
+    }
+
+    /// Line spacing, Hz.
+    pub fn df_hz(&self) -> f64 {
+        self.estimation.fs_hz / self.estimation.n_pts as f64
+    }
+
+    /// One control loop's acquisition time, s (frames without overlap counted
+    /// as the hop between them).
+    pub fn loop_s(&self) -> f64 {
+        let hop = (1.0 - self.estimation.overlap) * self.estimation.n_pts as f64;
+        (self.estimation.n_pts as f64 + hop * (self.estimation.frames_per_loop as f64 - 1.0))
+            / self.estimation.fs_hz
+    }
+
+    /// The reference's lines: an inline reference's own, otherwise every line of
+    /// the grid up to the analysis bandwidth (`fs / 2.56`).
+    pub fn lines_hz(&self) -> Vec<f64> {
+        match &self.reference {
+            Reference::Inline { freqs_hz, .. } => freqs_hz.clone(),
+            Reference::File { .. } => {
+                let df = self.df_hz();
+                let top = self.estimation.fs_hz / 2.56;
+                (1..)
+                    .map(|k| k as f64 * df)
+                    .take_while(|f| *f <= top + 1e-9)
+                    .collect()
+            }
+        }
+    }
+}
+
+/// The name of a shape on the wire.
+pub fn shape_name(s: MimoShape) -> &'static str {
+    match s {
+        MimoShape::Square => "square",
+        MimoShape::MoreControlsThanDrives => "more_controls_than_drives",
+        MimoShape::FewerControlsThanDrives => "fewer_controls_than_drives",
+    }
+}
+
+// ---- parsing helpers ---------------------------------------------------------------
+
+fn bad(path: &str, message: impl Into<String>) -> MethodError {
+    MethodError::bad_params(path, message)
+}
+
+fn obj<'a>(v: &'a Value, path: &str) -> Result<&'a Map<String, Value>, MethodError> {
+    v.as_object()
+        .ok_or_else(|| bad(path, format!("\"{path}\" is an object")))
+}
+
+fn opt<'a>(m: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
+    m.get(key).filter(|v| !v.is_null())
+}
+
+fn number(m: &Map<String, Value>, key: &str, path: &str) -> Result<Option<f64>, MethodError> {
+    match opt(m, key) {
+        None => Ok(None),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite())
+            .map(Some)
+            .ok_or_else(|| bad(&format!("{path}.{key}"), format!("\"{key}\" is a number"))),
+    }
+}
+
+fn whole(m: &Map<String, Value>, key: &str, path: &str) -> Result<Option<u64>, MethodError> {
+    match opt(m, key) {
+        None => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or_else(|| {
+            bad(
+                &format!("{path}.{key}"),
+                format!("\"{key}\" is a whole number from 0"),
+            )
+        }),
+    }
+}
+
+fn text<'a>(
+    m: &'a Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<Option<&'a str>, MethodError> {
+    match opt(m, key) {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(bad(&format!("{path}.{key}"), format!("\"{key}\" is text"))),
+    }
+}
+
+fn boolean(m: &Map<String, Value>, key: &str, path: &str) -> Result<Option<bool>, MethodError> {
+    match opt(m, key) {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(bad(
+            &format!("{path}.{key}"),
+            format!("\"{key}\" is true or false"),
+        )),
+    }
+}
+
+fn numbers(v: &Value, path: &str) -> Result<Vec<f64>, MethodError> {
+    let a = v
+        .as_array()
+        .ok_or_else(|| bad(path, format!("\"{path}\" is a list of numbers")))?;
+    a.iter()
+        .map(|x| {
+            x.as_f64()
+                .filter(|x| x.is_finite())
+                .ok_or_else(|| bad(path, format!("\"{path}\" holds finite numbers only")))
+        })
+        .collect()
+}
+
+fn band(
+    m: &Map<String, Value>,
+    key: &str,
+    path: &str,
+    default: [f64; 2],
+) -> Result<[f64; 2], MethodError> {
+    match opt(m, key) {
+        None => Ok(default),
+        Some(v) => {
+            let p = format!("{path}.{key}");
+            let x = numbers(v, &p)?;
+            if x.len() != 2 || x.iter().any(|d| *d <= 0.0) {
+                return Err(bad(
+                    &p,
+                    format!("\"{key}\" is [below, above] in positive dB, such as [3, 3]"),
+                ));
+            }
+            Ok([x[0], x[1]])
+        }
+    }
+}
+
+fn matrix(v: &Value, path: &str) -> Result<RealMatrix, MethodError> {
+    let m = obj(v, path)?;
+    let rows = whole(m, "rows", path)?.unwrap_or(0) as usize;
+    let cols = whole(m, "cols", path)?.unwrap_or(0) as usize;
+    let values = match opt(m, "values") {
+        Some(v) => numbers(v, &format!("{path}.values"))?,
+        None => Vec::new(),
+    };
+    if rows == 0 || cols == 0 {
+        return Err(bad(
+            path,
+            "a transformation names its \"rows\" and \"cols\", each at least 1",
+        ));
+    }
+    if values.len() != rows * cols {
+        return Err(bad(
+            &format!("{path}.values"),
+            format!(
+                "a {rows} by {cols} transformation holds {} values, row by row; {} were sent",
+                rows * cols,
+                values.len()
+            ),
+        ));
+    }
+    Ok(RealMatrix { rows, cols, values })
+}
+
+fn matrix_json(m: &RealMatrix) -> Value {
+    json!({"rows": m.rows, "cols": m.cols, "values": m.values.iter().map(|x| num(*x)).collect::<Vec<_>>()})
+}
+
+/// What a setup's parse needs from the service: the channel table and the law
+/// catalog's entries for the multiple-output world.
+pub struct SetupContext<'a> {
+    pub table: &'a ChannelTable,
+    pub selected_kind: &'a str,
+    pub law: &'a dyn Fn(&str) -> Option<LawInfo>,
+}
+
+/// A law as the setup's checks see it.
+#[derive(Debug, Clone)]
+pub struct LawInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub sha256: String,
+    /// `None`: a single-output law.
+    pub mimo: Option<MimoManifest>,
+}
+
+/// Parse `setup` and check it against `ctx`. Returns the setup with every default
+/// filled in and the items found, or `bad_params` when its shape is wrong.
+pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report), MethodError> {
+    let s = obj(setup, "setup")?;
+    let mut report = Report::default();
+    let title = text(s, "title", "setup")?
+        .unwrap_or("MIMO Random")
+        .to_owned();
+
+    // Channels.
+    let ch = opt(s, "channels").ok_or_else(|| {
+        bad(
+            "setup.channels",
+            "a setup names its control channels and drives (\"channels\")",
+        )
+    })?;
+    let ch = obj(ch, "setup.channels")?;
+    let row_of = |index: u32| ctx.table.channels.iter().find(|c| c.index == index);
+    let mut controls = Vec::new();
+    let list = opt(ch, "controls")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad("setup.channels.controls", "\"controls\" is a list"))?;
+    for (k, c) in list.iter().enumerate() {
+        let path = format!("setup.channels.controls[{k}]");
+        let c = obj(c, &path)?;
+        let channel = whole(c, "channel", &path)?
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| bad(&format!("{path}.channel"), "each control names its channel"))?;
+        let alarm_db = band(c, "alarm_db", &path, [3.0, 3.0])?;
+        let abort_db = band(c, "abort_db", &path, [6.0, 6.0])?;
+        if alarm_db[0] > abort_db[0] || alarm_db[1] > abort_db[1] {
+            report.warnings.push(Item::field(
+                "alarm_wider_than_abort",
+                format!("{path}.alarm_db"),
+                format!("Channel {channel}'s alarm band is wider than its abort band; narrow the alarm band so it warns before the abort."),
+            ));
+        }
+        let (label, unit) = match row_of(channel) {
+            Some(r) if r.enabled && r.role == ChannelRole::Control => (
+                if r.description.trim().is_empty() {
+                    format!("Channel {channel}")
+                } else {
+                    r.description.trim().to_owned()
+                },
+                unit_name(&r.units),
+            ),
+            _ => {
+                report.errors.push(Item::channel(
+                    "control_unknown_channel",
+                    Some(channel),
+                    format!("Channel {channel} is not an enabled control row of the channel table; set its role to control, or remove it from the setup."),
+                ));
+                (format!("Channel {channel}"), "g".to_owned())
+            }
+        };
+        if controls.iter().any(|x: &ControlRow| x.channel == channel) {
+            report.errors.push(Item::channel(
+                "duplicate_channel",
+                Some(channel),
+                format!("Channel {channel} is listed twice as a control; list each channel once."),
+            ));
+        }
+        controls.push(ControlRow {
+            channel,
+            label,
+            unit,
+            alarm_db,
+            abort_db,
+        });
+    }
+    let mut drives = Vec::new();
+    let list = opt(ch, "drives")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad("setup.channels.drives", "\"drives\" is a list"))?;
+    for (k, d) in list.iter().enumerate() {
+        let path = format!("setup.channels.drives[{k}]");
+        let d = obj(d, &path)?;
+        let channel = whole(d, "channel", &path)?
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| bad(&format!("{path}.channel"), "each drive names its channel"))?;
+        let ceiling_vrms = number(d, "ceiling_vrms", &path)?.ok_or_else(|| {
+            bad(
+                &format!("{path}.ceiling_vrms"),
+                "each drive has its own voltage ceiling (\"ceiling_vrms\")",
+            )
+        })?;
+        let abort_vrms = number(d, "abort_vrms", &path)?;
+        if !(ceiling_vrms > 0.0 && ceiling_vrms <= 10.0) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("{path}.ceiling_vrms"),
+                "A drive ceiling is above 0 and at most 10 V rms.",
+            ));
+        }
+        if abort_vrms.is_some_and(|a| a <= ceiling_vrms) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("{path}.abort_vrms"),
+                "A drive abort level is above the drive's ceiling; raise it or leave it empty.",
+            ));
+        }
+        let label = match row_of(channel) {
+            Some(r) if r.enabled && r.role == ChannelRole::Drive => {
+                if r.description.trim().is_empty() {
+                    format!("Drive {channel}")
+                } else {
+                    r.description.trim().to_owned()
+                }
+            }
+            _ => {
+                report.errors.push(Item::channel(
+                    "drive_unknown_channel",
+                    Some(channel),
+                    format!("Channel {channel} is not an enabled drive row of the channel table; set its role to drive, or remove it from the setup."),
+                ));
+                format!("Drive {channel}")
+            }
+        };
+        if drives.iter().any(|x: &DriveRow| x.channel == channel) {
+            report.errors.push(Item::channel(
+                "duplicate_channel",
+                Some(channel),
+                format!("Channel {channel} is listed twice as a drive; list each channel once."),
+            ));
+        }
+        drives.push(DriveRow {
+            channel,
+            label,
+            ceiling_vrms,
+            abort_vrms,
+        });
+    }
+    if controls.is_empty() {
+        report.errors.push(Item::field(
+            "no_control_channel",
+            "setup.channels.controls",
+            "A MIMO test needs at least one control channel; add the table's control rows.",
+        ));
+    }
+    if drives.is_empty() {
+        report.errors.push(Item::field(
+            "no_drive_channel",
+            "setup.channels.drives",
+            "A MIMO test needs at least one drive; add the table's drive rows.",
+        ));
+    }
+    if controls.len() > MAX_CONTROLS || drives.len() > MAX_DRIVES {
+        report.errors.push(Item::field(
+            "out_of_range",
+            "setup.channels",
+            format!(
+                "A MIMO test has at most {MAX_CONTROLS} control channels and {MAX_DRIVES} drives."
+            ),
+        ));
+    }
+
+    // Control space.
+    let space = match opt(s, "space") {
+        None => ControlSpace::Physical,
+        Some(v) => {
+            let m = obj(v, "setup.space")?;
+            match text(m, "kind", "setup.space")? {
+                None | Some("physical") => ControlSpace::Physical,
+                Some("virtual") => {
+                    let dofs: Vec<String> = match opt(m, "dofs").and_then(Value::as_array) {
+                        Some(a) => a
+                            .iter()
+                            .map(|d| d.as_str().filter(|s| !s.is_empty()).map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or_else(|| {
+                                bad("setup.space.dofs", "each degree of freedom has a name")
+                            })?,
+                        None => {
+                            return Err(bad(
+                                "setup.space.dofs",
+                                "virtual control names its degrees of freedom (\"dofs\")",
+                            ))
+                        }
+                    };
+                    let response = matrix(
+                        opt(m, "response_transform").ok_or_else(|| {
+                            bad(
+                                "setup.space.response_transform",
+                                "virtual control needs the response transformation",
+                            )
+                        })?,
+                        "setup.space.response_transform",
+                    )?;
+                    let drive = opt(m, "drive_transform")
+                        .map(|v| matrix(v, "setup.space.drive_transform"))
+                        .transpose()?;
+                    if response.rows != dofs.len() || response.cols != controls.len() {
+                        report.errors.push(Item::field(
+                            "transform_shape",
+                            "setup.space.response_transform",
+                            format!(
+                                "The response transformation is {} by {}; it must be degrees of freedom by control channels, {} by {}.",
+                                response.rows, response.cols, dofs.len(), controls.len()
+                            ),
+                        ));
+                    }
+                    if let Some(d) = &drive {
+                        if d.rows != drives.len() {
+                            report.errors.push(Item::field(
+                                "transform_shape",
+                                "setup.space.drive_transform",
+                                format!(
+                                    "The drive transformation has {} rows; it must have one per drive, {}.",
+                                    d.rows,
+                                    drives.len()
+                                ),
+                            ));
+                        }
+                    }
+                    ControlSpace::Virtual {
+                        dofs,
+                        response,
+                        drive,
+                    }
+                }
+                Some(other) => {
+                    return Err(bad(
+                        "setup.space.kind",
+                        format!("\"kind\" is \"physical\" or \"virtual\", not \"{other}\""),
+                    ))
+                }
+            }
+        }
+    };
+
+    // Estimation.
+    let e = match opt(s, "estimation") {
+        Some(v) => obj(v, "setup.estimation")?.clone(),
+        None => Map::new(),
+    };
+    let p = "setup.estimation";
+    let estimation = Estimation {
+        fs_hz: number(&e, "fs_hz", p)?.unwrap_or(8192.0),
+        n_pts: whole(&e, "n_pts", p)?.unwrap_or(4096) as usize,
+        frames_per_loop: whole(&e, "frames_per_loop", p)?.unwrap_or(8) as usize,
+        window: text(&e, "window", p)?.unwrap_or("hann").to_owned(),
+        overlap: number(&e, "overlap", p)?.unwrap_or(0.5),
+        memory_loops: whole(&e, "memory_loops", p)?.unwrap_or(4) as usize,
+    };
+    if !estimation.n_pts.is_power_of_two() || estimation.n_pts < 64 {
+        report.errors.push(Item::field(
+            "n_pts_not_power_of_two",
+            "setup.estimation.n_pts",
+            "The frame length is a power of two from 64, such as 4096.",
+        ));
+    }
+    let ranges: [(&str, f64, f64, f64); 4] = [
+        ("fs_hz", estimation.fs_hz, 256.0, 204_800.0),
+        (
+            "frames_per_loop",
+            estimation.frames_per_loop as f64,
+            1.0,
+            1024.0,
+        ),
+        ("overlap", estimation.overlap, 0.0, 0.75),
+        ("memory_loops", estimation.memory_loops as f64, 1.0, 64.0),
+    ];
+    for (key, x, lo, hi) in ranges {
+        if !(lo..=hi).contains(&x) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("setup.estimation.{key}"),
+                format!("\"{key}\" is from {} to {}.", num(lo), num(hi)),
+            ));
+        }
+    }
+    if !matches!(estimation.window.as_str(), "hann" | "rectangular") {
+        report.errors.push(Item::field(
+            "out_of_range",
+            "setup.estimation.window",
+            "The window is \"hann\" or \"rectangular\".",
+        ));
+    }
+
+    // Reference.
+    let r = opt(s, "reference").ok_or_else(|| {
+        bad(
+            "setup.reference",
+            "a setup carries its reference, inline or as a reference file",
+        )
+    })?;
+    let r = obj(r, "setup.reference")?;
+    let reference = match text(r, "kind", "setup.reference")? {
+        Some("inline") => {
+            let p = "setup.reference";
+            let freqs_hz = numbers(
+                opt(r, "freqs_hz").unwrap_or(&Value::Null),
+                "setup.reference.freqs_hz",
+            )?;
+            let n = whole(r, "n", p)?.unwrap_or(0) as usize;
+            let re = numbers(opt(r, "re").unwrap_or(&Value::Null), "setup.reference.re")?;
+            let im = numbers(opt(r, "im").unwrap_or(&Value::Null), "setup.reference.im")?;
+            let packed = n * (n + 1) / 2;
+            if re.len() > MAX_INLINE_VALUES {
+                report.errors.push(Item::field(
+                    "reference_too_large_inline",
+                    "setup.reference",
+                    format!("An inline reference holds at most {MAX_INLINE_VALUES} values; save this one as a reference file and send its path."),
+                ));
+            } else if n == 0 || re.len() != freqs_hz.len() * packed || im.len() != re.len() {
+                report.errors.push(Item::field(
+                    "reference_shape",
+                    "setup.reference",
+                    format!(
+                        "An inline reference of {} lines and {n} channels carries {} real and {} imaginary values (the upper triangle of each line, row by row); {} and {} were sent.",
+                        freqs_hz.len(), freqs_hz.len() * packed, freqs_hz.len() * packed, re.len(), im.len()
+                    ),
+                ));
+            }
+            if freqs_hz.len() < 8 {
+                report.errors.push(Item::field(
+                    "too_few_lines",
+                    "setup.reference.freqs_hz",
+                    "A reference has at least 8 lines.",
+                ));
+            }
+            if freqs_hz.windows(2).any(|w| w[1] <= w[0])
+                || freqs_hz.first().is_some_and(|f| *f <= 0.0)
+            {
+                report.errors.push(Item::field(
+                    "frequency_not_ascending",
+                    "setup.reference.freqs_hz",
+                    "The reference's frequencies are above 0 and rise strictly.",
+                ));
+            }
+            Reference::Inline {
+                freqs_hz,
+                n,
+                re,
+                im,
+            }
+        }
+        Some("file") => {
+            let p = "setup.reference";
+            let path = text(r, "path", p)?
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| {
+                    bad(
+                        "setup.reference.path",
+                        "a reference file is named by its path",
+                    )
+                })?
+                .to_owned();
+            let sha256 = text(r, "sha256", p)?.unwrap_or("").to_owned();
+            if sha256.len() != 64
+                || !sha256
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err(bad(
+                    "setup.reference.sha256",
+                    "a reference file is named with the SHA-256 of its bytes, 64 lower-case hex digits",
+                ));
+            }
+            Reference::File { path, sha256 }
+        }
+        _ => {
+            return Err(bad(
+                "setup.reference.kind",
+                "\"kind\" is \"inline\" or \"file\"",
+            ))
+        }
+    };
+    let n_ref = match &reference {
+        Reference::Inline { n, .. } => Some(*n),
+        Reference::File { .. } => None,
+    };
+    let controlled = match &space {
+        ControlSpace::Physical => controls.len(),
+        ControlSpace::Virtual { dofs, .. } => dofs.len(),
+    };
+    if n_ref.is_some_and(|n| n != controlled && n != 0) {
+        report.errors.push(Item::field(
+            "reference_shape",
+            "setup.reference.n",
+            format!(
+                "The reference is {} by {}; it must be {controlled} by {controlled}, one row per {}.",
+                n_ref.unwrap_or(0),
+                n_ref.unwrap_or(0),
+                if matches!(space, ControlSpace::Physical) { "control channel" } else { "degree of freedom" }
+            ),
+        ));
+    }
+
+    // Law.
+    let law = match opt(s, "law") {
+        None => LawSetup {
+            id: DEFAULT_LAW.into(),
+            params: Map::new(),
+        },
+        Some(v) => {
+            let m = obj(v, "setup.law")?;
+            let id = text(m, "id", "setup.law")?
+                .unwrap_or(DEFAULT_LAW)
+                .to_owned();
+            let params = match opt(m, "params") {
+                None => Map::new(),
+                Some(p) => obj(p, "setup.law.params")?.clone(),
+            };
+            LawSetup { id, params }
+        }
+    };
+    check_law(
+        &law,
+        (ctx.law)(&law.id),
+        MimoShape::of(controlled, drives.len()),
+        controlled,
+        &mut report,
+    );
+
+    // Identification.
+    let i = match opt(s, "identification") {
+        Some(v) => obj(v, "setup.identification")?.clone(),
+        None => Map::new(),
+    };
+    let p = "setup.identification";
+    let identification = Identification {
+        level_db: number(&i, "level_db", p)?.unwrap_or(-20.0),
+        frames: whole(&i, "frames", p)?.unwrap_or(32) as usize,
+        noise_frames: whole(&i, "noise_frames", p)?.unwrap_or(16) as usize,
+        coherence_floor: number(&i, "coherence_floor", p)?.unwrap_or(0.5),
+        condition_limit: number(&i, "condition_limit", p)?.unwrap_or(1000.0),
+        review: boolean(&i, "review", p)?.unwrap_or(true),
+    };
+    let ranges: [(&str, f64, f64, f64); 5] = [
+        ("level_db", identification.level_db, -60.0, 0.0),
+        ("frames", identification.frames as f64, 1.0, 4096.0),
+        (
+            "noise_frames",
+            identification.noise_frames as f64,
+            0.0,
+            4096.0,
+        ),
+        ("coherence_floor", identification.coherence_floor, 0.0, 1.0),
+        (
+            "condition_limit",
+            identification.condition_limit,
+            1.0,
+            1.0e12,
+        ),
+    ];
+    for (key, x, lo, hi) in ranges {
+        if !(lo..=hi).contains(&x) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("setup.identification.{key}"),
+                format!("\"{key}\" is from {} to {}.", num(lo), num(hi)),
+            ));
+        }
+    }
+
+    // Control.
+    let c = match opt(s, "control") {
+        Some(v) => obj(v, "setup.control")?.clone(),
+        None => Map::new(),
+    };
+    let p = "setup.control";
+    let frf_update = match text(&c, "frf", p)? {
+        None | Some("hold") => false,
+        Some("update") => true,
+        Some(_) => {
+            return Err(bad(
+                "setup.control.frf",
+                "\"frf\" is \"hold\" or \"update\"",
+            ))
+        }
+    };
+    let control = Control {
+        frf_update,
+        level_ramp_s: number(&c, "level_ramp_s", p)?.unwrap_or(3.0),
+        shutdown_ramp_s: number(&c, "shutdown_ramp_s", p)?.unwrap_or(3.0),
+        max_loops_out: whole(&c, "max_loops_out", p)?.unwrap_or(5) as u32,
+    };
+    for (key, x) in [
+        ("level_ramp_s", control.level_ramp_s),
+        ("shutdown_ramp_s", control.shutdown_ramp_s),
+    ] {
+        if !(0.0..=60.0).contains(&x) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("setup.control.{key}"),
+                format!("\"{key}\" is from 0 to 60."),
+            ));
+        }
+    }
+
+    // Schedule.
+    let sc = opt(s, "schedule")
+        .ok_or_else(|| bad("setup.schedule", "a setup carries its level schedule"))?;
+    let sc = obj(sc, "setup.schedule")?;
+    let mode = match text(sc, "mode", "setup.schedule")? {
+        None | Some("auto") => RunMode::Auto,
+        Some("manual") => RunMode::Manual,
+        Some(_) => {
+            return Err(bad(
+                "setup.schedule.mode",
+                "\"mode\" is \"auto\" or \"manual\"",
+            ))
+        }
+    };
+    let mut levels = Vec::new();
+    let list = opt(sc, "levels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad("setup.schedule.levels", "\"levels\" is a list"))?;
+    for (k, l) in list.iter().enumerate() {
+        let path = format!("setup.schedule.levels[{k}]");
+        let l = obj(l, &path)?;
+        let db = number(l, "db", &path)?
+            .ok_or_else(|| bad(&format!("{path}.db"), "each level has its \"db\""))?;
+        levels.push((db, number(l, "dwell_s", &path)?));
+    }
+    if levels.is_empty() {
+        report.errors.push(Item::field(
+            "levels_empty",
+            "setup.schedule.levels",
+            "The schedule has at least one level, the last being full level.",
+        ));
+    }
+    if levels.windows(2).any(|w| w[1].0 < w[0].0) {
+        report.errors.push(Item::field(
+            "levels_not_ascending",
+            "setup.schedule.levels",
+            "Levels rise from the first to the last.",
+        ));
+    }
+    for (k, (_, dwell)) in levels
+        .iter()
+        .enumerate()
+        .take(levels.len().saturating_sub(1))
+    {
+        if dwell.is_none() {
+            report.errors.push(Item::field(
+                "dwell_missing",
+                format!("setup.schedule.levels[{k}].dwell_s"),
+                "Every level but the last has a dwell time.",
+            ));
+        }
+    }
+    let schedule = Schedule {
+        mode,
+        levels,
+        full_level_s: number(sc, "full_level_s", "setup.schedule")?.unwrap_or(300.0),
+    };
+
+    // Backend.
+    let backend = match opt(s, "backend") {
+        None => None,
+        Some(v) => {
+            let m = obj(v, "setup.backend")?;
+            let kind = text(m, "kind", "setup.backend")?.unwrap_or("").to_owned();
+            if !matches!(kind.as_str(), "sim" | "ni") {
+                return Err(bad("setup.backend.kind", "\"kind\" is \"sim\" or \"ni\""));
+            }
+            if kind != ctx.selected_kind {
+                report.errors.push(Item::field(
+                    "backend_not_selected",
+                    "setup.backend.kind",
+                    format!("This setup is for the {} station, but the {} station is selected; select the station the setup is for, or change the setup's backend.", station_word(&kind), station_word(ctx.selected_kind)),
+                ));
+            }
+            Some(kind)
+        }
+    };
+
+    Ok((
+        MimoSetup {
+            title,
+            controls,
+            drives,
+            space,
+            reference,
+            law,
+            estimation,
+            identification,
+            control,
+            schedule,
+            backend,
+            raw: setup.clone(),
+        },
+        report,
+    ))
+}
+
+fn station_word(kind: &str) -> &'static str {
+    match kind {
+        "ni" => "NI-DAQmx",
+        _ => "simulator",
+    }
+}
+
+/// Check the law choice: it exists, it is a multiple-output law, it admits the
+/// test's shape, and every parameter is one it declares, of the right kind and in
+/// range.
+pub fn check_law(
+    law: &LawSetup,
+    info: Option<LawInfo>,
+    shape: MimoShape,
+    controls: usize,
+    report: &mut Report,
+) {
+    let Some(info) = info else {
+        report.errors.push(Item::field(
+            "law_unknown",
+            "setup.law.id",
+            format!("No control law \"{}\" is in the catalog; choose one the law list shows, or import its file first.", law.id),
+        ));
+        return;
+    };
+    let Some(m) = info.mimo else {
+        report.errors.push(Item::field(
+            "law_wrong_world",
+            "setup.law.id",
+            format!(
+                "\"{}\" is a single-output law; choose a multiple-output law.",
+                info.name
+            ),
+        ));
+        return;
+    };
+    if !m.supports(shape) {
+        report.errors.push(Item::field(
+            "law_shape_not_supported",
+            "setup.law.id",
+            format!(
+                "\"{}\" does not support a test with {} (it supports {}); choose another law, or change the channels.",
+                info.name,
+                shape_words(shape),
+                m.shapes.iter().map(|s| shape_words(*s)).collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+    for (key, value) in &law.params {
+        let field = format!("setup.law.params.{key}");
+        let Some(spec) = m.law.params.iter().find(|p| &p.key == key) else {
+            report.errors.push(Item::field(
+                "law_param_unknown",
+                field,
+                format!("\"{}\" has no parameter \"{key}\"; remove it.", info.name),
+            ));
+            continue;
+        };
+        if let Err(why) = param_ok(&spec.kind, value, controls) {
+            report.errors.push(Item::field(
+                "law_param_invalid",
+                field,
+                format!("{}: {why}", spec.label),
+            ));
+        }
+    }
+}
+
+fn shape_words(s: MimoShape) -> &'static str {
+    match s {
+        MimoShape::Square => "as many controls as drives",
+        MimoShape::MoreControlsThanDrives => "more controls than drives",
+        MimoShape::FewerControlsThanDrives => "fewer controls than drives",
+    }
+}
+
+/// Whether `value` is a value of a parameter of `kind`; the reason in words when not.
+fn param_ok(kind: &ParamKind, value: &Value, controls: usize) -> Result<(), String> {
+    let in_range = |x: f64, lo: f64, hi: f64| {
+        if (lo..=hi).contains(&x) {
+            Ok(())
+        } else {
+            Err(format!("enter a value from {} to {}", num(lo), num(hi)))
+        }
+    };
+    match kind {
+        ParamKind::Number(s) => match value.as_f64().filter(|x| x.is_finite()) {
+            Some(x) => in_range(x, s.min, s.max),
+            None => Err("enter a number".into()),
+        },
+        ParamKind::Integer(s) => match value.as_i64() {
+            Some(x) => in_range(x as f64, s.min as f64, s.max as f64),
+            None => Err("enter a whole number".into()),
+        },
+        ParamKind::Toggle(_) => value
+            .as_bool()
+            .map(|_| ())
+            .ok_or_else(|| "choose on or off".into()),
+        ParamKind::Choice(s) => match value.as_str() {
+            Some(x) if s.options.iter().any(|o| o == x) => Ok(()),
+            _ => Err(format!("choose one of {}", s.options.join(", "))),
+        },
+        ParamKind::Curve(s) => {
+            let rows = value
+                .as_array()
+                .ok_or("enter a list of [frequency, value] points")?;
+            let mut last = 0.0;
+            for r in rows {
+                let p = r
+                    .as_array()
+                    .filter(|p| p.len() == 2)
+                    .ok_or("each point is [frequency, value]")?;
+                let (f, v) = (
+                    p[0].as_f64().unwrap_or(f64::NAN),
+                    p[1].as_f64().unwrap_or(f64::NAN),
+                );
+                if f.is_nan() || f <= last {
+                    return Err("frequencies rise strictly from above 0".into());
+                }
+                in_range(v, s.min, s.max)?;
+                last = f;
+            }
+            if rows.is_empty() {
+                return Err("enter at least one point".into());
+            }
+            Ok(())
+        }
+        ParamKind::PerChannel(s) => {
+            let a = value
+                .as_array()
+                .ok_or("enter one value per control channel")?;
+            if a.len() != controls {
+                return Err(format!("enter {controls} values, one per control channel"));
+            }
+            for x in a {
+                in_range(x.as_f64().unwrap_or(f64::NAN), s.min, s.max)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// The setup as accepted, every default filled in (`mimo_random.setup`'s echo and
+/// the status readers' copy). An inline reference is summarized, not echoed.
+pub fn setup_json(s: &MimoSetup) -> Value {
+    let reference = match &s.reference {
+        Reference::Inline { freqs_hz, n, .. } => json!({
+            "kind": "inline", "n": n, "lines": freqs_hz.len(),
+            "band_hz": [num(*freqs_hz.first().unwrap_or(&0.0)), num(*freqs_hz.last().unwrap_or(&0.0))],
+        }),
+        Reference::File { path, sha256 } => json!({"kind": "file", "path": path, "sha256": sha256}),
+    };
+    let space = match &s.space {
+        ControlSpace::Physical => json!({"kind": "physical"}),
+        ControlSpace::Virtual {
+            dofs,
+            response,
+            drive,
+        } => json!({
+            "kind": "virtual", "dofs": dofs,
+            "response_transform": matrix_json(response),
+            "drive_transform": drive.as_ref().map(matrix_json),
+        }),
+    };
+    json!({
+        "title": s.title,
+        "channels": {
+            "controls": s.controls.iter().map(|c| json!({
+                "channel": c.channel,
+                "alarm_db": [num(c.alarm_db[0]), num(c.alarm_db[1])],
+                "abort_db": [num(c.abort_db[0]), num(c.abort_db[1])],
+            })).collect::<Vec<_>>(),
+            "drives": s.drives.iter().map(|d| json!({
+                "channel": d.channel, "ceiling_vrms": num(d.ceiling_vrms),
+                "abort_vrms": d.abort_vrms.map(num),
+            })).collect::<Vec<_>>(),
+        },
+        "space": space,
+        "reference": reference,
+        "law": {"id": s.law.id, "params": s.law.params},
+        "estimation": {
+            "fs_hz": num(s.estimation.fs_hz), "n_pts": s.estimation.n_pts,
+            "frames_per_loop": s.estimation.frames_per_loop, "window": s.estimation.window,
+            "overlap": num(s.estimation.overlap), "memory_loops": s.estimation.memory_loops,
+        },
+        "identification": {
+            "level_db": num(s.identification.level_db), "frames": s.identification.frames,
+            "noise_frames": s.identification.noise_frames,
+            "coherence_floor": num(s.identification.coherence_floor),
+            "condition_limit": num(s.identification.condition_limit),
+            "review": s.identification.review,
+        },
+        "control": {
+            "frf": if s.control.frf_update { "update" } else { "hold" },
+            "level_ramp_s": num(s.control.level_ramp_s),
+            "shutdown_ramp_s": num(s.control.shutdown_ramp_s),
+            "max_loops_out": s.control.max_loops_out,
+        },
+        "schedule": {
+            "mode": crate::random::view::mode_name(s.schedule.mode),
+            "levels": s.schedule.levels.iter().map(|(db, dwell)| {
+                let mut m = Map::new();
+                m.insert("db".into(), num(*db));
+                if let Some(d) = dwell {
+                    m.insert("dwell_s".into(), num(*d));
+                }
+                Value::Object(m)
+            }).collect::<Vec<_>>(),
+            "full_level_s": num(s.schedule.full_level_s),
+        },
+        "backend": s.backend.as_ref().map(|k| json!({"kind": k})),
+    })
+}
+
+/// The `setup_invalid` refusal, carrying the validation report.
+pub fn setup_invalid(validation: &Value, errors: usize) -> MethodError {
+    MethodError::named(
+        crate::protocol::ErrorCode::BadRequest,
+        "setup_invalid",
+        format!(
+            "The MIMO setup has {errors} error{}; correct {} and send it again.",
+            if errors == 1 { "" } else { "s" },
+            if errors == 1 { "it" } else { "them" }
+        ),
+    )
+    .with_detail(validation.clone())
+}

@@ -1,0 +1,119 @@
+{
+ "type": "response",
+ "id": 31,
+ "result": {
+  "state": {
+   "run_id": "m-0003",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Two-Axis Random",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 4096,
+    "df_hz": 2,
+    "lines": 8,
+    "loop_s": 2.25,
+    "actual": false
+   },
+   "clock": null,
+   "shape": {
+    "controls": 2,
+    "drives": 2,
+    "space": "physical",
+    "dofs": null,
+    "shape": "square",
+    "labels": [
+     "Control X",
+     "Control Y"
+    ],
+    "drive_labels": [
+     "Shaker X",
+     "Shaker Y"
+    ]
+   },
+   "mode": "auto",
+   "levels_db": [
+    -6,
+    0
+   ],
+   "level_db": null,
+   "elapsed_s": null,
+   "at_level_s": null,
+   "remaining_at_level_s": null,
+   "loop": 0,
+   "alarm": false,
+   "control_error_db": [],
+   "gates": null,
+   "caps": [],
+   "drive_rms_v": [],
+   "law": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null
+   },
+   "faults": [],
+   "override": null,
+   "prediction": null,
+   "end": null
+  },
+  "validation": {
+   "ok": true,
+   "errors": [],
+   "warnings": [],
+   "shape": {
+    "controls": 2,
+    "drives": 2,
+    "space": "physical",
+    "dofs": null,
+    "shape": "square"
+   },
+   "transforms": {
+    "response": null,
+    "drive": null
+   },
+   "reference": {
+    "source": "inline",
+    "lines": 8,
+    "n": 2,
+    "band_hz": [
+     100,
+     143.75
+    ],
+    "min_eigenvalue_ratio": 0,
+    "rank_min": 2,
+    "rank_max": 2,
+    "repaired_lines": 0
+   },
+   "feasibility": [
+    {
+     "channel": 3,
+     "ceiling_vrms": 2,
+     "verdict": "not_evaluated",
+     "predicted_vrms": null,
+     "message": "The drive this test needs is predicted after system identification, before the loop engages."
+    },
+    {
+     "channel": 4,
+     "ceiling_vrms": 2,
+     "verdict": "not_evaluated",
+     "predicted_vrms": null,
+     "message": "The drive this test needs is predicted after system identification, before the loop engages."
+    }
+   ],
+   "law": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null,
+    "admitted": true
+   }
+  }
+ }
+}

@@ -244,7 +244,11 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	stale_revision: 'The Channel Table Changed',
 	table_invalid: 'The Channel Table Has Errors',
 	config_invalid: 'The Setup Has Errors',
-	shaker_record_invalid: 'The Shaker Record Does Not Read'
+	shaker_record_invalid: 'The Shaker Record Does Not Read',
+	setup_invalid: 'The Setup Has Errors',
+	gate_failed: 'Identification Failed a Gate',
+	law_import_failed: 'The Law Was Not Imported',
+	catalog_unavailable: 'The Law Catalog Cannot Be Read'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {
