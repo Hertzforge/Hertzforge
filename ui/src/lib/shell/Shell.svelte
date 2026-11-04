@@ -11,9 +11,6 @@
 	import Simulate from '$lib/workspaces/Simulate.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 	import DisplayWindow from './DisplayWindow.svelte';
-	import Placeholder from './Placeholder.svelte';
-	import Model from '$lib/workspaces/Model.svelte';
-	import Specify from '$lib/workspaces/Specify.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
 	import Rail from './Rail.svelte';
 	import RunLogPanel from '$lib/runlog/RunLogPanel.svelte';
@@ -28,7 +25,7 @@
 		// files dropped anywhere on the window open or import by their paths (the desktop app)
 		return listenForDrops((paths) => {
 			if (paths) return void app.project.openPaths(paths);
-			app.go('analyze');
+			app.go('signals');
 			app.project.error = 'A browser gives the shell a dropped file\'s contents but not its path. Drop files on the desktop app, or give the path under Project.';
 		});
 	});
@@ -73,7 +70,7 @@
 			app.paletteOpen = !app.paletteOpen;
 			return;
 		}
-		if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-7]$/.test(e.code)) {
+		if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) {
 			e.preventDefault();
 			app.go(WORKSPACES[Number(e.code.slice(5)) - 1].id);
 		}
@@ -95,20 +92,14 @@
 		<div class="workspace" hidden={app.runLog.shown && app.runLog.alone}>
 			{#if app.workspace === 'acquire'}
 				<Acquire {app} />
-			{:else if app.workspace === 'analyze'}
-				<Analyze {app} />
-			{:else if app.workspace === 'modal'}
-				<Modal {app} />
 			{:else if app.workspace === 'simulate'}
 				<Simulate {app} />
-			{:else if app.workspace === 'model'}
-				<Model {app} />
-			{:else if app.workspace === 'specify'}
-				<Specify {app} />
+			{:else if app.workspace === 'modal'}
+				<Modal {app} />
 			{:else if app.workspace === 'report'}
 				<Report {app} />
 			{:else}
-				<Placeholder {info} />
+				<Analyze {app} only={app.workspace} />
 			{/if}
 		</div>
 		{#if app.runLog.shown}

@@ -1032,7 +1032,7 @@ def remove_shock(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.sine_extraction', title='Sine Levels', workspace='analyze',
+        id='project.sine_extraction', title='Sine Levels', workspace='sine',
         accepts='project',
         summary='How a sweep\'s levels are read out of a time history, stored on it for '
                 'Extract Sine: the smoothing, chosen from the data or set in cycles, and '
@@ -1040,7 +1040,7 @@ OPERATIONS = (
         params=(HISTORY, SWEEP, SMOOTHING, CYCLES, TARGET, REFINE),
         outputs=('spectrum', 'reading'), run=sine_extraction, edits=True),
     Operation(
-        id='project.level_error', title='Level Error', workspace='analyze',
+        id='project.level_error', title='Level Error', workspace='sine',
         accepts='project',
         summary='Extracted sine levels against the specification they were controlled to: '
                 'one tone\'s levels over its requirement, and each channel\'s RMS deviation '
@@ -1048,7 +1048,7 @@ OPERATIONS = (
         params=(SWEEP, LEVELS, TONE, THRESHOLD), outputs=('spectrum', 'reading'),
         run=level_error),
     Operation(
-        id='project.sine_distortion', title='Distortion', workspace='analyze',
+        id='project.sine_distortion', title='Distortion', workspace='sine',
         accepts='project',
         summary='What a sine record carries besides its tones, from the levels last '
                 'extracted from it: the record less the tones against the tones, at every '
@@ -1056,27 +1056,27 @@ OPERATIONS = (
         params=(HISTORY, SWEEP, TONE, CONTROL, EXCESS), outputs=('spectrum', 'reading'),
         run=distortion),
     Operation(
-        id='project.sine_frequency', title='Frequency', workspace='analyze',
+        id='project.sine_frequency', title='Frequency', workspace='sine',
         accepts='project',
         summary='Whether a sine record\'s tone was at the frequency its profile asks for, '
                 'from the levels last extracted from it, at every line of the sweep.',
         params=(HISTORY, SWEEP, TONE, CONTROL, TOLERANCE, AT_LEAST),
         outputs=('spectrum', 'reading'), run=frequency_check),
     Operation(
-        id='project.dwell', title='Dwell', workspace='analyze', accepts='project',
+        id='project.dwell', title='Dwell', workspace='sine', accepts='project',
         summary='A held tone read against time: the steady level it reached, the cycles '
                 'it took to build to a share of it, and the cycles it rang down after the '
                 'stop.',
         params=(HISTORY, SWEEP, CHOSEN, SHARE), outputs=('spectrum', 'reading'), run=dwell),
     Operation(
-        id='project.mixed_mode', title='Mixed-Mode Data Sheet', workspace='analyze',
+        id='project.mixed_mode', title='Mixed-Mode Data Sheet', workspace='sine',
         accepts='project',
         summary='A sine-on-random record as one test: the tones tracked and taken out, the '
                 'floor, each tone, each narrowband and the total, each by its own rule.',
         params=(HISTORY, FLOOR, SWEEP, CONTROL, EXCLUSION, TRACKING, TONE_TOLERANCE),
         outputs=('spectrum', 'reading'), run=mixed_mode),
     Operation(
-        id='project.pulse_check', title='Pulse Check', workspace='analyze',
+        id='project.pulse_check', title='Pulse Check', workspace='shock',
         accepts='project',
         summary='One acceleration channel against a classical pulse\'s tolerance envelope '
                 'and its velocity change; a peak or duration of zero takes the half-sine the '
@@ -1085,14 +1085,14 @@ OPERATIONS = (
                 EDGE_LIMIT, VELOCITY_TOLERANCE, QUIET),
         outputs=('spectrum', 'reading'), run=pulse_check),
     Operation(
-        id='project.stroke', title='Stroke', workspace='analyze', accepts='project',
+        id='project.stroke', title='Stroke', workspace='shock', accepts='project',
         summary='Whether a shock pulse fits on the shaker: its acceleration integrated raw '
                 'to velocity and travel, each against the shaker\'s shock rating where one '
                 'is given.',
         params=(HISTORY, CHOSEN, *STROKE_RATINGS),
         outputs=('spectrum', 'reading'), run=stroke),
     Operation(
-        id='project.replication_fit', title='Replication Fit', workspace='analyze',
+        id='project.replication_fit', title='Replication Fit', workspace='shock',
         accepts='project',
         summary='Whether a shaker can play a reference record: its travel, velocity and '
                 'force at each candidate high-pass cutoff against the ratings, and what each '
@@ -1101,26 +1101,26 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'),
         run=replication_fit),
     Operation(
-        id='project.wavelet', title='Wavelet', workspace='analyze', accepts='project',
+        id='project.wavelet', title='Wavelet', workspace='shock', accepts='project',
         summary='Where one channel\'s frequencies are, moment by moment: its scalogram as a '
                 'surface and flat, the ridge it follows and how much of the range is cone of '
                 'influence.',
         params=(HISTORY, RECORD, LOW_HZ, HIGH_HZ, PER_OCTAVE, OMEGA0),
         outputs=('waterfall', 'matrix', 'spectrum', 'reading'), run=wavelet),
     Operation(
-        id='project.set_shock', title='Shock Window', workspace='analyze', accepts='project',
+        id='project.set_shock', title='Shock Window', workspace='shock', accepts='project',
         summary='One shock window typed by its start and stop on the record\'s clock, held '
                 'off its neighbors; one past the last adds a window.',
         params=(HISTORY, SHOCK, START, STOP, SHOWN),
         outputs=('spectrum', 'waterfall', 'reading'), run=set_shock, edits=True),
     Operation(
-        id='project.remove_shock', title='Remove Shock', workspace='analyze',
+        id='project.remove_shock', title='Remove Shock', workspace='shock',
         accepts='project',
         summary='One shock window dropped from a time history.',
         params=(HISTORY, REMOVED, SHOWN), outputs=('spectrum', 'waterfall', 'reading'),
         run=remove_shock, edits=True),
     Operation(
-        id='project.shocks', title='Shocks', workspace='analyze', accepts='project',
+        id='project.shocks', title='Shocks', workspace='shock', accepts='project',
         summary='A time history\'s shock windows on one record and on its 3-D stage; drag a '
                 'window to move it, or an edge to change it.',
         params=(HISTORY, SHOWN), outputs=('spectrum', 'waterfall', 'reading'), run=shocks),

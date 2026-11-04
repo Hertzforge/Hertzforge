@@ -341,12 +341,14 @@
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
       }
     },
+    "workspace": {"enum": ["acquire", "simulate", "signals", "random", "shock", "sine", "modal", "geometry", "model", "specify", "report"]},
     "operation": {
       "type": "object", "required": ["id", "title", "workspace", "accepts", "params", "outputs"],
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
-        "workspace": {"enum": ["acquire", "analyze", "modal", "model", "specify", "simulate", "report"]},
+        "workspace": {"$ref": "#/$defs/workspace"},
+        "everywhere": {"type": "boolean"},
         "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
@@ -458,7 +460,8 @@
       "properties": {
         "id": {"type": "string"},
         "title": {"type": "string"},
-        "workspace": {"type": "string"},
+        "workspace": {"$ref": "#/$defs/workspace"},
+        "everywhere": {"type": "boolean"},
         "fill": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },

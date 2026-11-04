@@ -698,7 +698,7 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.tone_readout', title='Tone Readout', workspace='analyze',
+        id='project.tone_readout', title='Tone Readout', workspace='sine',
         accepts='project',
         summary='The tone nearest a frequency read off one record of an autospectrum: its '
                 'amplitude beside the spike it stands at, the floor and the window. '
@@ -706,21 +706,21 @@ OPERATIONS = (
         params=(PSD, RECORD, AT, TONE_WINDOW, WINDOW_NUMBER),
         outputs=('spectrum', 'reading'), run=tone_readout),
     Operation(
-        id='project.transmissibility', title='Transmissibility', workspace='analyze',
+        id='project.transmissibility', title='Transmissibility', workspace='random',
         accepts='project',
         summary='The ratio of the two autospectra behind one record of an FRF computed '
                 'here, beside H1 and the band its random error puts about it, read at a '
                 'line. Blank starts at the resonance.',
         params=(FRF, RECORD, AT), outputs=('spectrum', 'reading'), run=transmissibility),
     Operation(
-        id='project.confidence_band', title='Confidence', workspace='analyze',
+        id='project.confidence_band', title='Confidence', workspace='random',
         accepts='project',
         summary='The chi-square band the true spectrum lies in about one record of an '
                 'averaged PSD, at 90 or 95 %. A count of 0 takes the spectrum\'s own.',
         params=(PSD, RECORD, LEVEL, DOF), outputs=('spectrum', 'reading'),
         run=confidence_band),
     Operation(
-        id='project.partial_coherence', title='Partial Coherence', workspace='analyze',
+        id='project.partial_coherence', title='Partial Coherence', workspace='random',
         accepts='project',
         summary='Which reference explains a response once the others are removed, how '
                 'alike the references are, and how many drives the test had in effect.',
@@ -741,13 +741,13 @@ OPERATIONS = (
                 BREAKPOINTS, RMS, MARGIN),
         outputs=('spectrum', 'reading'), run=field_limit),
     Operation(
-        id='project.octave_bands', title='Octave Bands', workspace='analyze',
+        id='project.octave_bands', title='Octave Bands', workspace='random',
         accepts='project',
         summary='The octave bands a spectrum would be integrated onto, previewed as steps '
                 'over the narrowband record, before Compute Octave Bands makes them.',
         params=(DENSITY, RECORD, BANDS), outputs=('spectrum', 'reading'), run=octave_bands),
     Operation(
-        id='project.sine_profile', title='Sine Profile', workspace='specify',
+        id='project.sine_profile', title='Sine Profile', workspace='sine',
         accepts='project',
         summary='A sine tone read back as segments of constant displacement, velocity and '
                 'acceleration, every crossover checked. Blank tone and channel take the '
@@ -755,12 +755,12 @@ OPERATIONS = (
         params=(SINE, TONE, CONTROL, SLOPE, OWN_LEVEL), outputs=('spectrum', 'reading'),
         run=sine_profile),
     Operation(
-        id='project.cmif', title='CMIF', workspace='analyze', accepts='project',
+        id='project.cmif', title='CMIF', workspace='modal', accepts='project',
         summary='The singular values of an FRF matrix at every line; peaks mark the '
                 'modes. Records "1-8"; blank for every record.',
         params=(FRF, RECORDS), outputs=('spectrum',), run=cmif),
     Operation(
-        id='project.drive_points', title='Drive Points', workspace='analyze',
+        id='project.drive_points', title='Drive Points', workspace='modal',
         accepts='project',
         summary='Only the FRFs whose response and reference are one DOF, or the '
                 'autospectra of a cross-spectral matrix.',

@@ -50,7 +50,7 @@ def block(project, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace == 'model' and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
 
 
 def test_a_new_geometry_is_empty_and_records_its_unit(project, validate):

@@ -154,7 +154,7 @@ def shape_values(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.table', title='View Table', workspace='analyze', accepts='project',
+        id='project.table', title='View Table', workspace='signals', everywhere=True, accepts='project',
         summary='An object\'s table: a shape set\'s modes, a channel table\'s columns, or '
                 'matched modes beside both sets\' parameters.',
         params=(TABLED,), outputs=('table',), run=view_table),

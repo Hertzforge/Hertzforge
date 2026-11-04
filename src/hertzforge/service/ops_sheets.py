@@ -736,17 +736,17 @@ def predict(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.new_channel_table', title='New Channel Table', workspace='model',
+        id='project.new_channel_table', title='New Channel Table', workspace='geometry',
         accepts='project',
         summary='An empty channel table, to fill in by hand: Add Channel adds its rows.',
         params=(TABLE_NAME,), outputs=('table', 'reading'), run=new_channel_table),
     Operation(
-        id='project.add_channels', title='Add Channel', workspace='model', accepts='project',
+        id='project.add_channels', title='Add Channel', workspace='geometry', accepts='project',
         summary='Blank channels added at the end of a channel table, numbered on from its '
                 'highest, to type into.',
         params=(TABLE, COUNT), outputs=('table', 'reading'), run=add_channels, edits=True),
     Operation(
-        id='project.set_channel_cell', title='Set Channel Cell', workspace='model',
+        id='project.set_channel_cell', title='Set Channel Cell', workspace='geometry', everywhere=True,
         accepts='project',
         summary='One cell of a channel table typed over, by row and column; a value the '
                 'column cannot hold is refused and the cell is unchanged. The tables edit '
@@ -754,14 +754,14 @@ OPERATIONS = (
         params=(TABLE, ROW, COLUMN, VALUE), outputs=('table', 'reading'),
         run=set_channel_cell, edits=True),
     Operation(
-        id='project.set_sensor_model', title='Sensor Model', workspace='model',
+        id='project.set_sensor_model', title='Sensor Model', workspace='geometry',
         accepts='project',
         summary='A channel\'s model picked from the sensor catalog: its maker fills a blank '
                 'Make, and a triax fills its other legs at the node.',
         params=(TABLE, ROW, MODEL), outputs=('table', 'reading'), run=set_sensor_model,
         edits=True),
     Operation(
-        id='project.calibration_check', title='Calibration Dates', workspace='model',
+        id='project.calibration_check', title='Calibration Dates', workspace='geometry',
         accepts='project',
         summary='Each sensor\'s calibration expiration against the test\'s first and last '
                 'day: in date, expired, lapsing during the test, or no date given.',

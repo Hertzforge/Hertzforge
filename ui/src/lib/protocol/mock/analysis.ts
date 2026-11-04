@@ -101,7 +101,7 @@ const OPERATIONS: OperationDescriptor[] = [
 	{
 		id: 'random.psd_vs_spec',
 		title: 'PSD Against Specification',
-		workspace: 'analyze',
+		workspace: 'random',
 		accepts: 'random_run',
 		summary: 'Overlay a channel PSD on the test specification with tolerance and abort bands.',
 		params: [
@@ -115,7 +115,7 @@ const OPERATIONS: OperationDescriptor[] = [
 	{
 		id: 'random.transmissibility',
 		title: 'Transmissibility',
-		workspace: 'analyze',
+		workspace: 'random',
 		accepts: 'random_run',
 		summary: 'Ratio of a response channel to a reference channel, with the peaks it finds.',
 		params: [
@@ -128,7 +128,7 @@ const OPERATIONS: OperationDescriptor[] = [
 	{
 		id: 'random.coherence',
 		title: 'Coherence',
-		workspace: 'analyze',
+		workspace: 'random',
 		accepts: 'random_run',
 		summary: 'Ordinary coherence between two channels, against a quality threshold.',
 		params: [
@@ -142,7 +142,7 @@ const OPERATIONS: OperationDescriptor[] = [
 	{
 		id: 'random.waterfall',
 		title: 'Waterfall',
-		workspace: 'analyze',
+		workspace: 'random',
 		accepts: 'random_run',
 		summary: 'Many synthetic PSDs at their own depths, colored by level: a load test of the 3-D data view.',
 		params: [

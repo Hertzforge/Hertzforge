@@ -406,39 +406,39 @@ def resynthesis(run: ModalRun, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='modal_run.waterfall', title='Waterfall', workspace='analyze',
+        id='modal_run.waterfall', title='Waterfall', workspace='modal',
         accepts='modal_run',
         summary='Every FRF, coherence or time capture of the survey at its own '
                 'depth, colored by level; an FRF as magnitude, a part or phase.',
         params=(OF, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
         run=waterfall),
     Operation(
-        id='modal_run.modes', title='Identified Modes', workspace='analyze',
+        id='modal_run.modes', title='Identified Modes', workspace='modal',
         accepts='modal_run',
         summary='Modes fitted to the survey\'s FRFs within a band, on the survey '
                 'geometry, one translation per node.',
         params=(LOW, HIGH, COUNT), outputs=('shape3d',), run=modes),
     Operation(
-        id='modal_run.ods', title='Operating Shape', workspace='analyze',
+        id='modal_run.ods', title='Operating Shape', workspace='modal',
         accepts='modal_run',
         summary='The survey\'s FRFs to one reference at one frequency line, '
                 'a magnitude and phase per node, animated through a cycle.',
         params=(AT, REFERENCE), outputs=('shape3d',), run=ods),
     Operation(
-        id='modal_run.mac', title='MAC', workspace='analyze',
+        id='modal_run.mac', title='MAC', workspace='modal',
         accepts='modal_run',
         summary='The Modal Assurance Criterion of the modes fitted within a '
                 'band, against the FE model or against each other.',
         params=(LOW, HIGH, COUNT, AGAINST), outputs=('matrix',), run=mac),
     Operation(
-        id='modal_run.resynthesis', title='Resynthesis', workspace='analyze',
+        id='modal_run.resynthesis', title='Resynthesis', workspace='modal',
         accepts='modal_run',
         summary='The FRFs the modes fitted within a band synthesize, dashed over '
                 'the measured CMIF and one measured FRF.',
         params=(LOW, HIGH, COUNT, RECORD), outputs=('spectrum',),
         run=resynthesis),
     Operation(
-        id='modal_run.motion', title='Time Animation', workspace='analyze',
+        id='modal_run.motion', title='Time Animation', workspace='modal',
         accepts='modal_run',
         summary='One time capture of the survey played back on the survey '
                 'geometry, one record per DOF, with its time plot.',

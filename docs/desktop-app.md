@@ -190,7 +190,7 @@ HERTZFORGE_E2E_SCRIPT=desktop/packaging/e2e/random_run.js HERTZFORGE_E2E_ANSWER=
 ```
 
 `desktop/packaging/e2e/random_run.js` checks both services connected and nothing loaded from the
-network; opens a dataset and runs a tool in Analyze and solves a model in Modal; runs Random on the
+network; opens a dataset and runs a tool in Random and solves a model in Modal; runs Random on the
 simulator to completion from Acquire & Control; opens a display page in a window of its own; then
 starts a second run and quits while it drives. Each step is written to the app's log, and the control
 service's log says how the run ended. `desktop/packaging/e2e/drop_files.js` checks that the shell

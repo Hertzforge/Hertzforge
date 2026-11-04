@@ -34,7 +34,7 @@ def run(project, op_id, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace == 'model' and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
 
 
 def test_a_geometry_is_drawn_on_its_own(project, validate):

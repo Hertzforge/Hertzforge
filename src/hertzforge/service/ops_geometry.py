@@ -24,7 +24,7 @@ import numpy as np
 from . import group_cells
 from . import views as v
 from .datasets import _mesh
-from .descriptors import Operation, Option, Param
+from .descriptors import Operation, Option, Param, Workspace
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
 from .protocol import refused
@@ -1241,15 +1241,20 @@ def name_object_group(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- descriptors --------------------------------------------------------------------
 
 def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
-           edits: bool = True) -> Operation:
-    return Operation(id=id_, title=title, workspace='model', accepts='project',
+           edits: bool = True, workspace: Workspace = 'geometry') -> Operation:
+    """An act on a geometry: in the Geometry module unless it is the finite
+    element model's (element groups, solving)."""
+    return Operation(id=id_, title=title, workspace=workspace, accepts='project',
                      summary=summary, params=params, outputs=outputs, run=run, edits=edits)
 
 
-def _analyze(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
-             edits: bool = True) -> Operation:
-    return Operation(id=id_, title=title, workspace='analyze', accepts='project',
-                     summary=summary, params=params, outputs=outputs, run=run, edits=edits)
+def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
+            edits: bool = True, workspace: Workspace = 'signals') -> Operation:
+    """An act on the project every module offers: the groups, a channel's
+    role or DOF, the project's type. `workspace` is its home."""
+    return Operation(id=id_, title=title, workspace=workspace, accepts='project',
+                     summary=summary, params=params, outputs=outputs, run=run, edits=edits,
+                     everywhere=True)
 
 
 DRAWN = ('shape3d', 'table')
@@ -1274,7 +1279,7 @@ OPERATIONS = (
            'elements through every node named.',
            (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP), DRAWN, add_element),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group),
+           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='model'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',
@@ -1301,47 +1306,49 @@ OPERATIONS = (
            'The sensors a channel table names, centered on their nodes and turned as the '
            'table says, at a multiple of true size.',
            (TABLE, SIZE), (*DRAWN, 'reading'), sensors, edits=False),
-    _analyze('project.set_project_type', 'Set Project Type',
+    _shared('project.set_project_type', 'Set Project Type',
              'The kind of test the project is, which says what a finished project holds; '
              'the objects that fill its Basis are placed there.',
              (PROJECT_TYPE,), ('reading', 'table'), set_project_type),
-    _analyze('project.work_up', 'Automatic',
+    _shared('project.work_up', 'Automatic',
              'Every object the project\'s type expects computed from what is loaded, the '
              'report last.',
              (), ('reading',), work_up),
-    _analyze('project.set_channel_role', 'Set Channel Role',
+    _shared('project.set_channel_role', 'Set Channel Role',
              'One channel made a reference, a response or a monitor, on a time history or '
              'channel table and on what is linked with it.',
              (ROLE_SOURCE, RECORD, CHANNEL_ROLE), ('table',), set_channel_role),
-    _analyze('project.rename_dof', 'Rename DOF',
+    _shared('project.rename_dof', 'Rename DOF',
              'A channel\'s DOF corrected on an object and on everything derived from it; '
              'with a quantity, only that channel at the DOF.',
              (RENAME_SOURCE, OLD, RENAME_QUANTITY, NEW), ('table', 'reading'), rename_dof),
-    _analyze('project.channel_table_view', 'Channel Table View',
+    _shared('project.channel_table_view', 'Channel Table View',
              'A channel table in one control loop: its channels with that loop\'s Control '
              'column, or the loop\'s response or reference transformation.',
-             (TABLE, ENVIRONMENT, FORM), ('table',), channel_table_view, edits=False),
-    _analyze('project.set_control', 'Set Control',
+             (TABLE, ENVIRONMENT, FORM), ('table',), channel_table_view, edits=False,
+             workspace='geometry'),
+    _shared('project.set_control', 'Set Control',
              'Control checked or cleared on one channel of one control loop.',
-             (TABLE, ENVIRONMENT, RECORD, CONTROL), ('table',), set_control),
-    _analyze('project.link', 'Link', 'Objects linked into one group, merging the groups '
+             (TABLE, ENVIRONMENT, RECORD, CONTROL), ('table',), set_control,
+             workspace='geometry'),
+    _shared('project.link', 'Link', 'Objects linked into one group, merging the groups '
              'they are in.', (FIRST, SECOND, MORE, LINK_NAME), GROUPS, link),
-    _analyze('project.unlink', 'Unlink', 'An object taken out of its group.',
+    _shared('project.unlink', 'Unlink', 'An object taken out of its group.',
              (OBJECT,), GROUPS, unlink),
-    _analyze('project.set_basis', 'Basis of Comparisons',
+    _shared('project.set_basis', 'Basis of Comparisons',
              'An object\'s group made the Basis, the group the others are compared against.',
              (OBJECT,), GROUPS, set_basis),
-    _analyze('project.place', 'Place',
+    _shared('project.place', 'Place',
              'One object put into the Basis or the other group.', (OBJECT, SIDE), GROUPS,
              place),
-    _analyze('project.set_role', 'Set Group Role',
+    _shared('project.set_role', 'Set Group Role',
              'The role of an object\'s group set, or cleared.', (OBJECT, GROUP_ROLE),
              GROUPS, set_role),
-    _analyze('project.name_object_group', 'Name Object Group',
+    _shared('project.name_object_group', 'Name Object Group',
              'The group an object is in named, or its name removed.',
              (OBJECT, NEW_NAME), GROUPS, name_object_group),
     Operation(
-        id='project.set_entity_cell', title='Set Entity Cell', workspace='model',
+        id='project.set_entity_cell', title='Set Entity Cell', workspace='geometry', everywhere=True,
         accepts='project',
         summary='One cell of an entity table typed over in place, by row and column; the '
                 'tables edit through it.',

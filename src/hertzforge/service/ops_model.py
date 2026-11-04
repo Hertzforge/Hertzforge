@@ -256,7 +256,7 @@ def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.view_geometry', title='View Geometry', workspace='model',
+        id='project.view_geometry', title='View Geometry', workspace='geometry', everywhere=True,
         accepts='project', summary='A geometry on its own: its nodes and elements.',
         params=(GEOMETRY,), outputs=('shape3d',), run=view_geometry),
     Operation(
@@ -269,7 +269,7 @@ OPERATIONS = (
         run=group_properties, edits=True),
     Operation(
         id='project.merge_coincident_nodes', title='Merge Coincident Nodes',
-        workspace='model', accepts='project',
+        workspace='geometry', accepts='project',
         summary='Each set of coincident nodes merged into one, so parts meshed '
                 'apart are joined; 0 for the core\'s own tolerance.',
         params=(GEOMETRY, TOLERANCE), outputs=('reading',),
@@ -301,7 +301,7 @@ OPERATIONS = (
         params=(GEOMETRY, ELEMENTS, TIE_TO), outputs=('reading',), run=tie_elements,
         edits=True),
     Operation(
-        id='project.align_meshes', title='Align Meshes', workspace='model', accepts='project',
+        id='project.align_meshes', title='Align Meshes', workspace='geometry', accepts='project',
         summary='Where parts meshed apart meet, the coarser mesh\'s nodes moved onto the '
                 'finer one\'s, so Merge Coincident Nodes can join them; reach 0 for half '
                 'the coarsest spacing.',

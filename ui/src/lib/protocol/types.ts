@@ -340,7 +340,12 @@ export type ViewKind = View['view'];
 // ---------------------------------------------------------------------------------------------
 // Operations and datasets
 
-export type Workspace = 'acquire' | 'analyze' | 'modal' | 'model' | 'specify' | 'simulate' | 'report';
+/**
+ * The modules on the rail. The analysis is split by what is studied (signals, random, shock, sine,
+ * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
+ * project type as Visual Dynamics did.
+ */
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'random' | 'shock' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
 export type DatasetKind = 'random_run' | 'modal_model' | 'modal_run';
 
@@ -411,7 +416,9 @@ export interface ProjectSummary {
 export interface Action {
 	id: string;
 	title: string;
-	workspace: string;
+	workspace: Workspace;
+	/** Offered in every analysis module. */
+	everywhere?: boolean;
 	fill: Record<string, string>;
 }
 
@@ -568,7 +575,10 @@ export interface ProjectProgress {
 export interface OperationDescriptor {
 	id: string;
 	title: string;
+	/** The module that offers it, its home. */
 	workspace: Workspace;
+	/** Offered in every analysis module, not only its home: an act any study needs. */
+	everywhere?: boolean;
 	/** A dataset kind, or `project` for an operation on the connection's own project. */
 	accepts: DatasetKind | 'project';
 	summary?: string;

@@ -1005,7 +1005,7 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.generate_signal', title='Generate Signal', workspace='analyze',
+        id='project.generate_signal', title='Generate Signal', workspace='signals',
         accepts='project',
         summary='A signal made from a spectrum, a sine specification or a channel table\'s '
                 'reference channels, added beside its source: random, burst random, '
@@ -1016,7 +1016,7 @@ OPERATIONS = (
                 WIDTH, SHAPE, PULSE, EDGE, TONE, DOFS),
         outputs=('spectrum', 'reading'), run=generate_signal),
     Operation(
-        id='project.srs_synthesis', title='SRS Synthesis', workspace='analyze',
+        id='project.srs_synthesis', title='SRS Synthesis', workspace='shock',
         accepts='project',
         summary='A shock a shaker can play, synthesized as a sum of wavelets to meet a shock '
                 'specification and read against the shaker\'s ratings, added as a time '
@@ -1031,7 +1031,7 @@ OPERATIONS = (
         params=(FORCES, SHAPES, QUANTITY, MODES, FORCE_RECORDS),
         outputs=('waterfall', 'reading'), run=compute_modal_responses),
     Operation(
-        id='project.sweep_rate', title='Sweep Rate', workspace='specify', accepts='project',
+        id='project.sweep_rate', title='Sweep Rate', workspace='sine', accepts='project',
         summary='One tone of a sine specification against typed modes, each a frequency and '
                 'a Q: every pass through a mode\'s half-power band, and whether it is swept '
                 'too fast for the mode to build.',
@@ -1062,13 +1062,13 @@ OPERATIONS = (
         params=(TRANSMISSIBILITY, TARGET, PROFILES, PAIR),
         outputs=('spectrum', 'table', 'reading'), run=notch_prediction),
     Operation(
-        id='project.conditioning', title='Conditioning', workspace='analyze',
+        id='project.conditioning', title='Conditioning', workspace='modal',
         accepts='project',
         summary='The singular values and condition number of an FRF from several references '
                 'or of a CPSD at every line, read at one frequency.',
         params=(MATRIX, AT), outputs=('spectrum', 'reading'), run=conditioning),
     Operation(
-        id='project.realizability', title='Realizability', workspace='analyze',
+        id='project.realizability', title='Realizability', workspace='random',
         accepts='project',
         summary='Whether any set of signals has a CPSD, line by line, from the eigenvalues of '
                 'its coherence matrix, read at one frequency.',

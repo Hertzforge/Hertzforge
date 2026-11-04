@@ -1161,107 +1161,107 @@ PAIR = (SPECTRUM, SPECIFICATION)
 
 OPERATIONS = (
     Operation(
-        id='project.spec_spectra', title='Spectra', workspace='analyze', accepts='project',
+        id='project.spec_spectra', title='Spectra', workspace='random', accepts='project',
         summary='One channel of a measured PSD over its specification and limits, scaled as '
                 'the comparison scales it, with its RMS error and lines out.',
         params=(*PAIR, RECORD), outputs=('spectrum', 'reading'), run=spec_spectra),
     Operation(
-        id='project.spec_rms_error', title='RMS Error', workspace='analyze', accepts='project',
+        id='project.spec_rms_error', title='RMS Error', workspace='random', accepts='project',
         summary='How far each channel\'s RMS sits from the level its specification asks for, '
                 'in dB, against a floor and a ceiling.',
         params=(*PAIR, ERROR_LOW, ERROR_HIGH), outputs=('reading',), run=spec_rms_error),
     Operation(
-        id='project.spec_lines_out', title='Lines Out', workspace='analyze', accepts='project',
+        id='project.spec_lines_out', title='Lines Out', workspace='random', accepts='project',
         summary='How much of each channel\'s band fell outside its abort limits, against a '
                 'ceiling.',
         params=(*PAIR, LINES_CEILING), outputs=('reading',), run=spec_lines_out),
     Operation(
-        id='project.spec_chance', title='Chance', workspace='analyze', accepts='project',
+        id='project.spec_chance', title='Chance', workspace='random', accepts='project',
         summary='One channel\'s miss from its target in dB, and the lines outside each band '
                 'beside how many chance alone puts there at its degrees of freedom.',
         params=(*PAIR, RECORD, COMBINE, DOF), outputs=('spectrum', 'reading'),
         run=spec_chance),
     Operation(
-        id='project.spec_composite', title='Composite', workspace='analyze', accepts='project',
+        id='project.spec_composite', title='Composite', workspace='random', accepts='project',
         summary='The control channels combined as the controller held them: the composite '
                 'against its band and each channel against its own.',
         params=(*PAIR, STRATEGY, WEIGHTS, COMPOSITE_BAND, COMPOSITE_LOW, COMPOSITE_HIGH,
                 INDIVIDUAL_BAND, INDIVIDUAL_LOW, INDIVIDUAL_HIGH),
         outputs=('spectrum', 'reading'), run=spec_composite),
     Operation(
-        id='project.comparison_scale', title='Comparison Scaling', workspace='analyze',
+        id='project.comparison_scale', title='Comparison Scaling', workspace='random',
         accepts='project',
         summary='Hold the decibels a measured PSD is scaled by when it is compared with a '
                 'specification, or leave it blank to detect them; the data is not changed.',
         params=(*PAIR, SCALE), outputs=('reading',), run=comparison_scale, edits=True),
     Operation(
-        id='project.spec_rms', title='Specification RMS', workspace='analyze',
+        id='project.spec_rms', title='Specification RMS', workspace='random',
         accepts='project',
         summary='The RMS level each channel of a specification asks for.',
         params=(SPECIFICATION,), outputs=('reading',), run=spec_rms),
     Operation(
-        id='project.psd_overlay', title='Overlaid', workspace='analyze', accepts='project',
+        id='project.psd_overlay', title='Overlaid', workspace='random', accepts='project',
         summary='Two densities drawn over each other, channel by channel, the louder solid '
                 'and the quieter dashed.',
         params=(FIRST, SECOND), outputs=('spectrum',), run=psd_overlay),
     Operation(
-        id='project.signal_to_noise', title='Signal to Noise (dB)', workspace='analyze',
+        id='project.signal_to_noise', title='Signal to Noise (dB)', workspace='random',
         accepts='project',
         summary='The louder density over the quieter, line by line in dB: the louder less '
                 'the quieter, over the quieter.',
         params=(FIRST, SECOND), outputs=('spectrum', 'reading'), run=signal_to_noise),
     Operation(
-        id='project.rms_signal_to_noise', title='RMS Signal to Noise', workspace='analyze',
+        id='project.rms_signal_to_noise', title='RMS Signal to Noise', workspace='random',
         accepts='project',
         summary='Each channel\'s signal over its noise across the whole band, from the RMS '
                 'of the two densities, against a floor.',
         params=(FIRST, SECOND, FLOOR), outputs=('reading',), run=rms_signal_to_noise),
     Operation(
-        id='project.signature', title='Signature', workspace='analyze', accepts='project',
+        id='project.signature', title='Signature', workspace='modal', accepts='project',
         summary='Two signatures of one article, before and after a test, compared mode by '
                 'mode: each mode\'s frequency and height shift against its limits.',
         params=(BEFORE, AFTER, SIGNATURE_RECORD, MODES, FIND, FREQUENCY_LIMIT, AMPLITUDE_LIMIT),
         outputs=('spectrum', 'reading'), run=signature),
     Operation(
-        id='project.matrix_comparison', title='Matrix', workspace='analyze', accepts='project',
+        id='project.matrix_comparison', title='Matrix', workspace='random', accepts='project',
         summary='A cross-spectral matrix judged whole against its specification: the levels '
                 'on the diagonal, each cross term\'s coherence above it and phase below it.',
         params=(SPECIFICATION, CPSD, COHERENCE_TOLERANCE, PHASE_TOLERANCE, COHERENCE_FLOOR),
         outputs=('matrix', 'reading'), run=matrix_comparison),
     Operation(
-        id='project.srs_spectra', title='Shock Spectra', workspace='analyze', accepts='project',
+        id='project.srs_spectra', title='Shock Spectra', workspace='shock', accepts='project',
         summary='Every event\'s shock spectrum at one channel against the one it had to meet '
                 'and its limits, with each event\'s RMS deviation in dB.',
         params=(SRS, REQUIREMENT, REQUIREMENT_RECORD), outputs=('spectrum', 'reading'),
         run=srs_spectra),
     Operation(
-        id='project.srs_error', title='SRS Error', workspace='analyze', accepts='project',
+        id='project.srs_error', title='SRS Error', workspace='shock', accepts='project',
         summary='How far each channel\'s shock spectrum sits from the one it had to meet, '
                 'RMS across the band in dB, against a floor and a ceiling.',
         params=(SRS, REQUIREMENT, SRS_LOW, SRS_HIGH), outputs=('reading',), run=srs_error),
     Operation(
-        id='project.srs_points', title='Points Rule', workspace='analyze', accepts='project',
+        id='project.srs_points', title='Points Rule', workspace='shock', accepts='project',
         summary='One shock spectrum against its requirement\'s tolerance band point by point: '
                 'how many points are inside, under the rule the test plan names.',
         params=(SRS, REQUIREMENT, SRS_POINT, RULE, PERCENT, LIMITS, INNER_LOW, INNER_HIGH,
                 OUTER, OUTER_LOW, OUTER_HIGH),
         outputs=('spectrum', 'reading'), run=srs_points),
     Operation(
-        id='project.replication_waveforms', title='Waveforms', workspace='analyze',
+        id='project.replication_waveforms', title='Waveforms', workspace='shock',
         accepts='project',
         summary='One channel of a transient run over one playing of the waveform it was '
                 'controlled to, aligned, with its waveform error.',
         params=(HISTORY, REFERENCE, REFERENCE_RECORD, PLAYING), outputs=('spectrum', 'reading'),
         run=replication_waveforms),
     Operation(
-        id='project.waveform_error', title='Waveform Error', workspace='analyze',
+        id='project.waveform_error', title='Waveform Error', workspace='shock',
         accepts='project',
         summary='Every control channel\'s waveform error at every playing of the reference, '
                 'against a ceiling.',
         params=(HISTORY, REFERENCE, WAVEFORM_CEILING), outputs=('reading',),
         run=waveform_error),
     Operation(
-        id='project.replication_segments', title='Segments', workspace='analyze',
+        id='project.replication_segments', title='Segments', workspace='shock',
         accepts='project',
         summary='One channel of a transient run judged segment by segment, each marked '
                 'segment by the rule for its kind, beside the whole-record error.',

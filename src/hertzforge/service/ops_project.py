@@ -13,7 +13,7 @@ import numpy as np
 
 from . import views as v
 from .datasets import _mesh
-from .descriptors import Operation, Option, Param
+from .descriptors import Operation, Option, Param, Workspace
 from .ops_modal_run import _translations
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
@@ -377,10 +377,10 @@ def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def _derives(verb: str, title: str, summary: str, params: tuple = (),
-             **fixed: Any) -> Operation:
+             workspace: Workspace = 'signals', **fixed: Any) -> Operation:
     """A project operation that runs one core verb on an object it
-    applies to and draws what it added."""
-    return Operation(id=f'project.{verb}', title=title, workspace='analyze',
+    applies to and draws what it added, offered in the module `workspace`."""
+    return Operation(id=f'project.{verb}', title=title, workspace=workspace,
                      accepts='project', summary=summary,
                      params=(_source(verb), *params), outputs=('waterfall',),
                      run=_verb(verb, **fixed))
@@ -390,10 +390,10 @@ MODAL_VERB_OPERATIONS = (
     _derives('transform', 'Transform to Modal Coordinates',
              'A record\'s channels through a shape set to modal coordinates, one '
              'record per mode; with a geometry\'s rigid-body shapes this is the '
-             'virtual point transformation.', (PARTNER,)),
+             'virtual point transformation.', (PARTNER,), workspace='modal'),
     _derives('expand', 'Expand to Physical Responses',
              'Modal responses back through the shape set they were transformed '
-             'through, at every DOF it covers.', (PARTNER,)),
+             'through, at every DOF it covers.', (PARTNER,), workspace='modal'),
     Operation(
         id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
         workspace='modal', accepts='project',
@@ -441,24 +441,24 @@ VERB_OPERATIONS = (
              'Linear spectra from a time history\'s averages.'),
     _derives('compute_cpsds', 'Compute CPSDs',
              'The cross-spectral matrix of a time history\'s channels, from '
-             'its averages.'),
+             'its averages.', workspace='random'),
     _derives('compute_srs', 'Compute SRS',
              'Shock response spectra, one curve per channel per shock marked '
              'on the history (detected first when none is marked).',
-             (SRS_PER_OCTAVE, Q, SRS_KIND)),
+             (SRS_PER_OCTAVE, Q, SRS_KIND), workspace='shock'),
     _derives('compute_multiple_coherence', 'Compute Multiple Coherence',
              'How much of each response the references explain, frequency by '
-             'frequency.'),
+             'frequency.', workspace='random'),
     _derives('compute_octave', 'Compute Octave Bands',
              'A PSD or specification integrated onto proportional octave '
-             'bands, its total power unchanged.', (BANDS,)),
+             'bands, its total power unchanged.', (BANDS,), workspace='random'),
     _derives('make_realizable', 'Make Realizable',
              'A cross-spectral matrix repaired where no set of signals could '
-             'have it.', (KEEP_DIAGONAL,)),
+             'have it.', (KEEP_DIAGONAL,), workspace='random'),
     _derives('convert_to_specification', 'Convert to Specification',
-             'A PSD read as a requirement, which a test is controlled to.'),
+             'A PSD read as a requirement, which a test is controlled to.', workspace='random'),
     Operation(
-        id='project.convert_to_psd', title='Convert to PSD', workspace='analyze',
+        id='project.convert_to_psd', title='Convert to PSD', workspace='random',
         accepts='project',
         summary='A specification read as a PSD, its limits left out; one written at '
                 'breakpoints is read onto lines at a spacing, 0 for the one its sheet '
@@ -466,13 +466,13 @@ VERB_OPERATIONS = (
         params=(_source('convert_to_psd'), SPACING), outputs=('waterfall', 'reading'),
         run=convert_to_psd, edits=True),
     Operation(
-        id='project.detect_shocks', title='Detect Shocks', workspace='analyze',
+        id='project.detect_shocks', title='Detect Shocks', workspace='shock',
         accepts='project',
         summary='Mark the shocks in a time history, which Compute SRS reads.',
         params=(_source('detect_shocks'),), outputs=('reading',),
         run=detect_shocks, edits=True),
     Operation(
-        id='project.extract_sine', title='Extract Sine', workspace='analyze',
+        id='project.extract_sine', title='Extract Sine', workspace='sine',
         accepts='project',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
@@ -483,43 +483,43 @@ VERB_OPERATIONS = (
 
 OPERATIONS = (
     Operation(
-        id='project.waterfall', title='Waterfall', workspace='analyze',
+        id='project.waterfall', title='Waterfall', workspace='signals', everywhere=True,
         accepts='project',
         summary='Any data object with every record at its own depth, colored '
                 'by level; an FRF as magnitude, a part or phase.',
         params=(DATA, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
         run=waterfall),
     Operation(
-        id='project.plot', title='Plot Records', workspace='analyze',
+        id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
         accepts='project',
         summary='Chosen records of any data object as curves on one plot, '
                 'numbered from 1 as "1-3, 7"; the first eight when none are named.',
         params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
     Operation(
-        id='project.compute_psds', title='Compute PSDs', workspace='analyze',
+        id='project.compute_psds', title='Compute PSDs', workspace='random',
         accepts='project',
         summary='PSDs from a time history\'s averages, added to the project.',
         params=(HISTORY,), outputs=('waterfall',), run=compute_psds),
     Operation(
-        id='project.compute_frfs', title='Compute FRFs', workspace='analyze',
+        id='project.compute_frfs', title='Compute FRFs', workspace='modal',
         accepts='project',
         summary='FRFs from a time history, one for each response and drive, '
                 'added to the project.',
         params=(FRF_HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
     Operation(
-        id='project.fit_modes', title='Fit Modes', workspace='analyze',
+        id='project.fit_modes', title='Fit Modes', workspace='modal',
         accepts='project',
         summary='Modes fitted to an FRF set within a band, added to the '
                 'project as a shape set and drawn on its geometry.',
         params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
         run=fit_modes),
     Operation(
-        id='project.mac', title='MAC', workspace='analyze', accepts='project',
+        id='project.mac', title='MAC', workspace='modal', accepts='project',
         summary='One shape set\'s modes against another\'s, or a set against '
                 'itself; with a geometry, a cell shows that pair overlaid.',
         params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
     Operation(
-        id='project.mode_shapes', title='Mode Shapes', workspace='analyze',
+        id='project.mode_shapes', title='Mode Shapes', workspace='modal',
         accepts='project',
         summary='A shape set\'s modes on a geometry, one translation per node.',
         params=(SHAPES, GEOMETRY), outputs=('shape3d',), run=mode_shapes),

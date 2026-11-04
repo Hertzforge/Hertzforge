@@ -135,7 +135,7 @@
 		<section class="block">
 			<h2 class="eyebrow">Report</h2>
 			{#if !app.project.summary}
-				<p class="muted">Open a project or import your files in Analyze; a report is built from the project's objects.</p>
+				<p class="muted">Open a project or import your files in any analysis module; a report is built from the project's objects.</p>
 			{:else}
 				<label class="lbl" for="report-template">Template</label>
 				<select id="report-template" class="field" bind:value={template} data-testid="report-template">

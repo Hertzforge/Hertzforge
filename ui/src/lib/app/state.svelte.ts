@@ -28,7 +28,6 @@ import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	ProjectSummary,
 	ReportEditor,
 	RunState,
-	Shape3DView,
 	SimProfile,
 	Pick3D,
 	Region,
@@ -41,7 +40,7 @@ import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace } from './workspaces';
+import { isWorkspace, offeredIn, STUDIES } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -105,11 +104,21 @@ class AnalyzeState {
 
 	constructor(private readonly app: AppState) {}
 
-	/** Every dataset some Analyze tool accepts: a new kind of data shows up here once a tool takes it. */
-	get datasets(): DatasetInfo[] {
+	/** The datasets a module's tools accept: a kind of data shows up in a module once a tool there takes it. */
+	datasetsFor(workspace: Workspace): DatasetInfo[] {
 		const catalog = this.app.catalog;
-		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.workspace === 'analyze').map((o) => o.accepts));
+		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.accepts !== PROJECT && o.workspace === workspace).map((o) => o.accepts));
 		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
+	}
+
+	/** The module whose tools take a dataset's kind, where it opens. */
+	moduleFor(dataset: DatasetInfo): Workspace | null {
+		return (this.app.catalog?.operations ?? []).find((o) => o.accepts === dataset.kind)?.workspace ?? null;
+	}
+
+	/** The module's own tools and the ones every module offers, of those that take what is open. */
+	toolsFor(workspace: Workspace): OperationDescriptor[] {
+		return this.tools.filter((o) => offeredIn(o, workspace));
 	}
 
 	/**
@@ -596,82 +605,6 @@ function summarize(params: ParamDescriptor[], values: ParamValues, channels: { v
 
 // ---------------------------------------------------------------------------------------------
 
-class ModalState {
-	datasetId = $state<string | null>(null);
-	loading = $state(false);
-	error = $state<string | null>(null);
-	view = $state.raw<Shape3DView | null>(null);
-	mode = $state(0);
-	private seq = 0;
-
-	constructor(private readonly app: AppState) {}
-
-	get datasets(): DatasetInfo[] {
-		return (this.app.catalog?.datasets ?? []).filter((d) => d.kind === 'modal_model');
-	}
-
-	get modesOp(): OperationDescriptor | null {
-		return this.app.catalog?.operations.find((o) => o.id === 'modal.modes') ?? null;
-	}
-
-	/** Open the model and run `modal.modes` with its defaults. */
-	async select(id: string): Promise<void> {
-		if (this.datasetId === id && (this.view || this.loading)) return;
-		const seq = ++this.seq;
-		this.datasetId = id;
-		this.loading = true;
-		this.error = null;
-		try {
-			const opened = await this.app.analysis.request<OpenedDataset>('dataset.open', { id });
-			const op = this.modesOp;
-			if (!op) throw new Error('The analysis service does not offer modal.modes.');
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: op.id, handle: opened.handle, params: defaultValues(op.params, opened.channels) },
-				{ timeoutMs: 30_000 }
-			);
-			if (seq !== this.seq) return;
-			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
-			if (!shape) throw new Error('modal.modes returned no shape3d view.');
-			this.view = shape;
-			this.mode = 0;
-		} catch (err) {
-			if (seq !== this.seq) return;
-			this.view = null;
-			this.error = message(err);
-		} finally {
-			if (seq === this.seq) this.loading = false;
-		}
-	}
-
-	/** The project's shape set `shapes` on its active geometry (`project.mode_shapes`). */
-	async selectShapes(shapes: string): Promise<void> {
-		const geometry = this.app.project.summary?.active_geometry;
-		if (!geometry) return;
-		const seq = ++this.seq;
-		this.datasetId = `project:${shapes}`;
-		this.loading = true;
-		this.error = null;
-		try {
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: 'project.mode_shapes', params: { shapes, geometry } },
-				{ timeoutMs: 30_000 }
-			);
-			if (seq !== this.seq) return;
-			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
-			if (!shape) throw new Error('project.mode_shapes returned no shape3d view.');
-			this.view = shape;
-			this.mode = 0;
-		} catch (err) {
-			if (seq !== this.seq) return;
-			this.view = null;
-			this.error = message(err);
-		} finally {
-			if (seq === this.seq) this.loading = false;
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -1400,8 +1333,8 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// the workspaces with the project panel keep the window; any other goes to Analyze
-				if (this.app.workspace !== 'model' && this.app.workspace !== 'specify') this.app.workspace = 'analyze';
+				// a study keeps the window; any other workspace goes to Signals, the recordings' module
+				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
 				this.app.analyze.selectProject();
 			}
 			return true;
@@ -1422,7 +1355,7 @@ export class AppState {
 	readonly analysis: ServiceClient;
 	readonly control: ServiceClient;
 
-	workspace = $state<Workspace>('analyze');
+	workspace = $state<Workspace>('signals');
 	paletteOpen = $state(false);
 	catalog = $state.raw<Catalog | null>(null);
 	catalogError = $state<string | null>(null);
@@ -1434,7 +1367,6 @@ export class AppState {
 	readonly units: UnitsState;
 	/** The run log the keeper writes while a test runs, beside any workspace. */
 	readonly runLog: RunLogState;
-	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -1456,7 +1388,6 @@ export class AppState {
 		this.report = new ReportState(this);
 		this.units = new UnitsState(this);
 		this.runLog = new RunLogState(this.analysis);
-		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
@@ -1541,10 +1472,15 @@ export class AppState {
 	}
 
 	start(): void {
-		const fromHash = location.hash.replace(/^#\/?/, '');
+		// an address from before the split (#analyze) opens the recordings' module
+		const named = (hash: string) => {
+			const h = hash.replace(/^#\/?/, '');
+			return h === 'analyze' ? 'signals' : h;
+		};
+		const fromHash = named(location.hash);
 		if (isWorkspace(fromHash)) this.go(fromHash);
 		window.addEventListener('hashchange', () => {
-			const h = location.hash.replace(/^#\/?/, '');
+			const h = named(location.hash);
 			if (isWorkspace(h)) this.go(h);
 		});
 

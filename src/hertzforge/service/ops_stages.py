@@ -248,12 +248,12 @@ def spec_stage(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.paired_stage', title='Paired Stage', workspace='analyze', accepts='project',
+        id='project.paired_stage', title='Paired Stage', workspace='random', accepts='project',
         summary='Two densities in 3-D, channel by channel: overlaid, the louder colored by '
                 'level and the quieter in gray, or divided as signal to noise in dB.',
         params=(FIRST, SECOND, PAIRED_MODE, PAGE), outputs=('waterfall',), run=paired_stage),
     Operation(
-        id='project.spec_stage', title='Specification Stage', workspace='analyze',
+        id='project.spec_stage', title='Specification Stage', workspace='random',
         accepts='project',
         summary='A specification\'s every channel in 3-D with its warning and abort bands; '
                 'with a measured PSD, each channel\'s measurement and the lines it went past '
