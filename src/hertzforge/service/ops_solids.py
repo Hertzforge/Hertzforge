@@ -608,7 +608,9 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
             read = hexmesh.likely_to_fold(geometry, shown, entry['size'])
             if not read['likely']:
                 continue
-            bricks = solids.brick_count(geometry, shown, read['suggested'])
+            # the size it is likely to hold at, counted as the limit counts:
+            # bricks by volume and pillow, and the grid
+            bricks = solids.fitted_brick_count(geometry, shown, read['suggested'])
             cells = hexmesh.grid_cells(geometry, shown, read['suggested'], piece=True)
         why = []
         if np.isfinite(read['across']) and read['across'] < hexmesh.ACROSS - 0.5:
