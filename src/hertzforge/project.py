@@ -4837,10 +4837,10 @@ class Project(dict):
         and a thickness or a section (`fem.GroupProperties`, set in the
         Element Groups table or on `geometry.group_properties`); each
         quad becomes a plate element, each triangle a triangular plate
-        element and each two-node line a beam. The model is solved
-        free-free, so the six rigid-body modes come back at 0 Hz,
-        followed by the elastic modes. A geometry with no element group
-        properties raises ValueError.
+        element and each two-node line a beam. Unless a group of points
+        is ground, the model is solved free-free, so the six rigid-body
+        modes come back at 0 Hz, followed by the elastic modes. A geometry
+        with no element group properties raises ValueError.
 
         Parameters
         ----------

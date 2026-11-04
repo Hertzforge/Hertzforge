@@ -318,6 +318,8 @@ export interface TableEdit {
 	op: string;
 	params: Record<string, unknown>;
 	columns: (string | null)[];
+	/** What a column offers, by its key: a shortlist the cell can still be typed past. */
+	choices?: Record<string, string[]>;
 }
 
 export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;

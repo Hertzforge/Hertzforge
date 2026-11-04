@@ -142,7 +142,9 @@ def test_clicked_nodes_make_an_element_of_the_family_in_hand(project, validate):
 
 def test_an_element_group_is_added_empty(project):
     _view, table = run(project, 'project.add_element_group', name='brackets')
-    assert cells(table)[-1] == {'Element group': '2', 'Name': 'brackets', 'Elements': ''}
+    added = cells(table)[-1]
+    assert (added['Element group'], added['Name'], added['Elements']) == ('2', 'brackets', '')
+    assert (added['Elements are'], added['Count'], added['Material']) == ('empty', '0', '')
     with pytest.raises(ProtocolError, match='already exists'):
         run(project, 'project.add_element_group', id=1)
 

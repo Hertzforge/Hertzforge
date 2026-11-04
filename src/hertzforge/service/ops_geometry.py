@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from . import group_cells
 from . import views as v
 from .datasets import _mesh
 from .descriptors import Operation, Option, Param
@@ -181,12 +182,18 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None) 
                     geometry.elem_conn, strict=True)]
     else:
         elem_group = np.asarray(geometry.elem_group)
-        columns = ['Element group', 'Name', 'Elements']
-        rows = [[str(int(group)), geometry.group_name[k],
-                 id_runs_text(np.asarray(geometry.elem_id)[elem_group == int(group)])]
-                for k, group in enumerate(geometry.group_id)]
+        columns = ['Element group', 'Name', 'Elements', 'Elements are', 'Count',
+                   *group_cells.titles(geometry)]
+        rows = []
+        for k, group in enumerate(geometry.group_id):
+            group = int(group)
+            members = np.asarray(geometry.elem_id)[elem_group == group]
+            rows.append([str(group), geometry.group_name[k], id_runs_text(members),
+                         group_cells.family(geometry, group) or 'empty', str(len(members)),
+                         *group_cells.cells(geometry, group)])
     edit = None if name is None else v.editing(
-        'project.set_entity_cell', {'geometry': name, 'kind': kind}, FIELDS[kind])
+        'project.set_entity_cell', {'geometry': name, 'kind': kind}, FIELDS[kind],
+        group_cells.choices() if kind == 'groups' else None)
     return v.table(title, columns, rows, edit)
 
 
@@ -407,7 +414,7 @@ FIELDS = {
     'coordinate_systems': ('id', 'name', 'type', 'origin_x', 'origin_y', 'origin_z',
                            'rotation_x', 'rotation_y', 'rotation_z'),
     'elements': ('id', 'type', 'group', 'nodes'),
-    'groups': ('id', 'name', 'elements'),
+    'groups': ('id', 'name', 'elements', None, None, *group_cells.KEYS),
 }
 FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
     Option(key, label) for key, label in (
@@ -416,7 +423,8 @@ FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
         ('name', 'Name'), ('type', 'Type'), ('origin_x', 'Origin X'),
         ('origin_y', 'Origin Y'), ('origin_z', 'Origin Z'), ('rotation_x', 'Rotation X (°)'),
         ('rotation_y', 'Rotation Y (°)'), ('rotation_z', 'Rotation Z (°)'),
-        ('group', 'Element group'), ('nodes', 'Nodes'), ('elements', 'Elements'))))
+        ('group', 'Element group'), ('nodes', 'Nodes'), ('elements', 'Elements'),
+        *((key, title) for key, title, *_rest in group_cells.COLUMNS))))
 VALUE = Param('value', 'Value', 'string', default='')
 
 
@@ -443,6 +451,9 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
     from hertzforge.rotate import angles_of
 
+    if kind == 'groups' and field in group_cells.KEYS:
+        group_cells.set_cell(geometry, int(geometry.group_id[row]), field, text)
+        return
     if kind == 'nodes':
         if field == 'id':
             geometry.renumber_node(row, _whole(text, 1))
@@ -530,6 +541,7 @@ def _snapshot(geometry: Any) -> dict[str, Any]:
     held = {name: np.array(getattr(geometry, name), copy=True) for name in names}
     held['cs_name'] = list(geometry.cs_name)
     held['group_name'] = list(geometry.group_name)
+    held['group_properties'] = dict(geometry.group_properties)
     held['elem_conn'] = [np.array(c, copy=True) for c in geometry.elem_conn]
     return held
 
@@ -549,7 +561,7 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
     geometry = project[name]
     kind, field = params['kind'], params['field']
     if field not in FIELDS[kind]:
-        raise refused(f'a {LABELS[kind]} has the fields {", ".join(FIELDS[kind])}; '
+        raise refused(f'a {LABELS[kind]} has the fields {", ".join(filter(None, FIELDS[kind]))}; '
                       f'not {field}')
     entity = params['entity']
     row = _row(geometry, kind, entity)

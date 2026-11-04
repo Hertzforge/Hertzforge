@@ -236,8 +236,13 @@
 						{#each row as cell, i (i)}
 							{#if editing && editing.row === r && editing.col === i}
 								<td class="editing">
-									<input bind:this={field} bind:value={draft} class="cell mono" aria-label="{view.columns[i]}, row {r + 1}"
+									<input bind:this={field} bind:value={draft} class="cell mono" list={view.edit?.choices?.[keys[i] ?? ''] ? 'table-cell-choices' : undefined} aria-label="{view.columns[i]}, row {r + 1}"
 										onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
+									{#if view.edit?.choices?.[keys[i] ?? '']}
+										<datalist id="table-cell-choices">
+											{#each view.edit.choices[keys[i] ?? ''] as choice (choice)}<option value={choice}></option>{/each}
+										</datalist>
+									{/if}
 								</td>
 							{:else}
 								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
