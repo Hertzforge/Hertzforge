@@ -12,6 +12,7 @@
 //! - [`estimate`]: Welch spectral-matrix estimates in the `E[X X^H]` convention.
 //! - [`quantities`]: the display quantities, served in process.
 //! - [`records`]: the run's records.
+//! - [`replay`]: a recorded run's law calls replayed through the recorded law.
 //! - [`pool`]: the per-line linear algebra split over threads.
 //!
 //! Conventions (fixed; design 7.0): `G = E[X X^H]` per line, one-sided Welch
@@ -28,6 +29,7 @@ pub mod law;
 pub mod pool;
 pub mod quantities;
 pub mod records;
+pub mod replay;
 pub mod report;
 pub mod service;
 
