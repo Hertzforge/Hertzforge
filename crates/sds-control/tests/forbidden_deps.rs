@@ -61,6 +61,12 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// license and hardware coupling when it was imported. A controller crate not on this
 /// list fails the lockfile check; adding one is a review, then a line here.
 ///
+/// `hertzforge-mimo-random` was written here as well: the multiple-output Random
+/// run service (identification, the loop, the guards, records). Like the
+/// single-output service it reaches hardware only through the station factory
+/// and builds the Sim only as a test fixture. The control service does not
+/// depend on it yet; the wire adapter joins them.
+///
 /// `hertzforge-reference` was written here too: reference SDM builders, validation
 /// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
 /// reaches no hardware. The control service does not depend on it yet.
@@ -87,6 +93,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-host",
     "hertzforge-insight",
     "hertzforge-ipc",
+    "hertzforge-mimo-random",
     "hertzforge-module-abi",
     "hertzforge-protocol",
     "hertzforge-random",
