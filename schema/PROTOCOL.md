@@ -397,9 +397,15 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
 | `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
+| `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**The console.** `project.journal` gives the session as Python: every verb, settings change and
+import since the project was made or opened, as the line a script would make (`Project.journal`),
+the first line making the project. The shell shows it read-only along the bottom of the window, as
+Visual Dynamics' console does, to be copied into a script; nothing is typed into it.
 
 **The tree.** Each object in the summary carries `holds`, a few words on what it contains, and
 `banded` when a PSD or a specification is on proportional bands, which changes its icon.

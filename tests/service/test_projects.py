@@ -379,3 +379,17 @@ def test_parts_of_data_are_deleted_and_every_record_is_refused():
     with pytest.raises(ProtocolError) as error:
         projects.delete_parts(state, {'parts': {}})
     assert error.value.code == 'bad_request'
+
+
+def test_the_journal_is_the_session_as_python(tmp_path):
+    """`project.journal`, VD's console: the lines that replay the session,
+    read-only, the project made first."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    lines = projects.journal(state, {})['lines']
+    assert lines[0].startswith('project = hertzforge.Project(')
+    assert any(line.startswith('project.import_file(') for line in lines)
+    projects.rename(state, {'name': 'Time History', 'to': 'Hammer Run'})
+    assert any('rename' in line and 'Hammer Run' in line for line in projects.journal(state, {})['lines'])
+    with pytest.raises(ProtocolError) as error:
+        projects.journal(None, {})
+    assert error.value.code == 'refused'

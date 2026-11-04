@@ -12,6 +12,7 @@
 	import CommandPalette from './CommandPalette.svelte';
 	import DisplayWindow from './DisplayWindow.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
+	import Console from './Console.svelte';
 	import Rail from './Rail.svelte';
 	import RunLogPanel from '$lib/runlog/RunLogPanel.svelte';
 	import TopBar from './TopBar.svelte';
@@ -90,6 +91,7 @@
 	<div class="body" class:collapsed={app.railCollapsed} class:logged={app.runLog.shown} class:alone={app.runLog.shown && app.runLog.alone} style:--runlog-width="{app.runLog.width}px">
 		{#if !app.railCollapsed}<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
 		<div class="workspace" hidden={app.runLog.shown && app.runLog.alone}>
+			<div class="ws">
 			{#if app.workspace === 'acquire'}
 				<Acquire {app} />
 			{:else if app.workspace === 'simulate'}
@@ -101,6 +103,8 @@
 			{:else}
 				<Analyze {app} only={app.workspace} />
 			{/if}
+			</div>
+			{#if app.project.summary}<Console console={app.console} />{/if}
 		</div>
 		{#if app.runLog.shown}
 			<div class="logside">
@@ -167,8 +171,16 @@
 	}
 
 	.workspace {
+		display: flex;
+		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
 		overflow: hidden;
+	}
+
+	.ws {
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
 	}
 </style>
