@@ -363,6 +363,13 @@
         "units_defined": {"type": "boolean"},
         "banded": {"type": "boolean"},
         "holds": {"type": "string"},
+        "issue": {
+          "type": "object", "required": ["message", "sub_items"], "additionalProperties": false,
+          "properties": {
+            "message": {"type": "string"},
+            "sub_items": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+          }
+        },
         "stale": {"type": "string"},
         "groups": {"type": "array", "items": {"type": "string"}},
         "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
@@ -456,6 +463,14 @@
         "modified": {"type": "boolean"},
         "objects": {"type": "array", "items": {"$ref": "#/$defs/projectObject"}},
         "active_geometry": {"type": ["string", "null"]},
+        "links": {"type": "array", "items": {
+          "type": "object", "required": ["members", "role", "name"], "additionalProperties": false,
+          "properties": {
+            "members": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "role": {"type": ["string", "null"]},
+            "name": {"type": "string"}
+          }
+        }},
         "unresolved": {"type": "array", "items": {
           "type": "object", "required": ["name", "kind", "path", "reason"],
           "properties": {

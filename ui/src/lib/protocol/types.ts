@@ -370,6 +370,8 @@ export interface ProjectObject {
 	banded?: boolean;
 	/** A few words on what the object holds: its size, not its name. */
 	holds?: string;
+	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
+	issue?: { message: string; sub_items: number[] };
 	/** Why a derived object no longer matches its source; absent while it does. */
 	stale?: string;
 	groups: string[];
@@ -387,6 +389,8 @@ export interface ProjectSummary {
 	objects: ProjectObject[];
 	/** The geometry data is drawn on when nothing else names one. */
 	active_geometry?: string | null;
+	/** The object groups, as the tree brackets them: members, `Basis` or null, and a name or blank. */
+	links?: { members: string[]; role: string | null; name: string }[];
 	/** Objects held by reference to a file that was not found or has changed: not loaded, kept. */
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }

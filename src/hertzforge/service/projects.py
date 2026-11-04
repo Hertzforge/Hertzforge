@@ -62,9 +62,12 @@ def summary(state: OpenProject) -> dict[str, Any]:
     labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
               for k, group in enumerate(project.object_groups)]
     stale = project.stale()
+    issues = compatibility_issues(project)
     objects = []
     for name, obj in project.items():
         entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
+        if name in issues:
+            entry['issue'] = issues[name]
         records = getattr(obj, 'num_records', None)
         if records is not None:
             entry['records'] = int(records)
@@ -90,7 +93,11 @@ def summary(state: OpenProject) -> dict[str, Any]:
     out = {'title': project.name, 'file': project.file,
            'modified': state.modified, 'objects': objects,
            'active_geometry': project.active_geometry
-           if project.active_geometry in project else None}
+           if project.active_geometry in project else None,
+           'links': [{'members': [m for m in group['members'] if m in project],
+                      'role': group.get('role'), 'name': group.get('name') or ''}
+                     for group in project.object_groups
+                     if any(m in project for m in group['members'])]}
     if project.unresolved:
         # held by reference to a file that was not found or has changed:
         # not loaded, and kept for the next save (`Project.unresolved`)
@@ -99,6 +106,24 @@ def summary(state: OpenProject) -> dict[str, Any]:
              'reason': reference.reason}
             for name, reference in project.unresolved.items()]
     return out
+
+
+def compatibility_issues(project: Any) -> dict[str, dict[str, Any]]:
+    """What does not fit, by object: Visual Dynamics' red rows
+    (`compatibility.check_compatibility`). An object is judged against the
+    geometry of its group, else the active one; a modal object against the
+    shape sets of its group. `sub_items` are the records, modes or channels
+    at fault, to mark in the grid. Incompatibility warns, it never blocks."""
+    from hertzforge.compatibility import check_compatibility
+
+    try:
+        report = check_compatibility(dict(project.items()), project.active_geometry,
+                                     project.object_groups)
+    except Exception:  # noqa: BLE001 - a check that cannot run marks nothing
+        return {}
+    return {name: {'message': issue.message,
+                   'sub_items': [int(i) for i in issue.sub_items]}
+            for name, issue in report.issues.items()}
 
 
 def _path(params: Mapping[str, Any], method: str) -> str:

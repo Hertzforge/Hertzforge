@@ -133,6 +133,16 @@
 						{#if picked.some((n) => p.summary?.objects.find((o) => o.name === n)?.stale)}
 							<button class="link" data-testid="refresh-{picked[0]}" title="Compute again from the source" onclick={() => p.refresh(picked.filter((n) => p.summary?.objects.find((o) => o.name === n)?.stale))} disabled={p.busy !== null}>Recompute</button>
 						{/if}
+						{#if picked.length >= 2}
+							<button class="link" data-testid="link-objects" title="Link these objects into one group" onclick={() => p.link([...picked])} disabled={p.busy !== null}>Link</button>
+						{/if}
+						{#if one && (p.summary.links ?? []).some((g) => g.members.includes(one.name))}
+							{@const group = (p.summary.links ?? []).find((g) => g.members.includes(one.name))}
+							<button class="link" data-testid="unlink-{one.name}" title="Take it out of its group" onclick={() => p.unlink(one.name)} disabled={p.busy !== null}>Unlink</button>
+							{#if group?.role !== 'Basis'}
+								<button class="link" data-testid="basis-{one.name}" title="Make its group the Basis of comparisons" onclick={() => p.setBasis(one.name)} disabled={p.busy !== null}>Basis</button>
+							{/if}
+						{/if}
 						<button class="link" data-testid="duplicate-{picked[0]}" title="Add a copy" onclick={() => p.duplicate([...picked])} disabled={p.busy !== null}>Copy</button>
 						{#if one}
 							<button class="link" data-testid="rename-{one.name}" onclick={() => (p.renaming = one.name)} disabled={p.busy !== null}>Rename</button>

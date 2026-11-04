@@ -11,6 +11,8 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
+	import { tick } from 'svelte';
+	import { spans, type Span } from './brackets';
 	import Glyph from './Glyph.svelte';
 	import { kindRank, objectIcon, solidIcon } from './icons';
 
@@ -69,6 +71,50 @@
 		node.select();
 	}
 
+	/** The link brackets: each group's members as rows, and where those rows sit, measured after each render. */
+	const painted = $derived(spans(p.summary?.links, order));
+	let treeBox = $state<HTMLDivElement | null>(null);
+	const rowBoxes = new Map<string, HTMLDivElement>();
+	let centers = $state<Record<string, number>>({});
+	let treeHeight = $state(0);
+	function rowBox(node: HTMLDivElement, name: string) {
+		rowBoxes.set(name, node);
+		return {
+			update(next: string) {
+				rowBoxes.delete(name);
+				name = next;
+				rowBoxes.set(name, node);
+			},
+			destroy() {
+				rowBoxes.delete(name);
+			}
+		};
+	}
+	function measure() {
+		if (!treeBox) return;
+		const top = treeBox.getBoundingClientRect().top;
+		const next: Record<string, number> = {};
+		for (const [name, node] of rowBoxes) {
+			const r = node.getBoundingClientRect();
+			next[name] = r.top - top + r.height / 2;
+		}
+		centers = next;
+		treeHeight = treeBox.scrollHeight;
+	}
+	$effect(() => {
+		// rows move when objects, open rows or their children change
+		void [p.summary, p.expanded, p.children, painted];
+		void tick().then(measure);
+	});
+	$effect(() => {
+		if (!treeBox) return;
+		const watch = new ResizeObserver(() => measure());
+		watch.observe(treeBox);
+		return () => watch.disconnect();
+	});
+	const issueOf = (name: string) => p.summary?.objects.find((o) => o.name === name)?.issue;
+	const bad = (name: string, index: number) => (issueOf(name)?.sub_items ?? []).includes(index);
+
 	const picked = (name: string, index: number) => (p.selection.records[name] ?? []).includes(index);
 	const partPicked = (name: string, kind: string, id: string | number) =>
 		p.selection.part?.name === name && p.selection.part.kind === kind && p.selection.part.id === id;
@@ -97,13 +143,32 @@
 	{/each}
 {/snippet}
 
-<div class="tree" role="tree" aria-label="Project objects" data-testid="project-tree">
+<div class="tree" class:bracketed={painted.length > 0} role="tree" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox}>
+	{#if painted.length}
+		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
+			{#each painted as span (span.rows.join('\u0000'))}
+				{@const ys = span.rows.map((r) => centers[r]).filter((y) => y !== undefined)}
+				{#if ys.length >= 2}
+					{@const x = 3 + 3 * span.column}
+					{@const top = Math.min(...ys)}
+					{@const bottom = Math.max(...ys)}
+					<g stroke={span.color} stroke-width={span.bold ? 3 : 1.5} stroke-linecap="round" data-group={span.name || null}>
+						<line x1={x} y1={top} x2={x} y2={bottom} />
+						{#each ys as y, k (k)}<line x1={x} y1={y} x2={x + 4} y2={y} />{/each}
+					</g>
+					{#if span.name && bottom - top > 40}
+						<text x={x - 1} y={bottom - 4} transform="rotate(-90 {x - 1} {bottom - 4})" fill={span.color} font-size="8" textLength={Math.min(bottom - top - 8, span.name.length * 5)} lengthAdjust="spacingAndGlyphs">{span.name}</text>
+					{/if}
+				{/if}
+			{/each}
+		</svg>
+	{/if}
 	{#each objects as o (o.name)}
 		{@const open = p.expanded.has(o.name)}
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		<div class="row" class:on class:issue={!!o.issue} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if OPENS.has(o.kind)}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -201,6 +266,7 @@
 												<td
 													class="cell"
 													class:picked={picked(o.name, index)}
+													class:bad={bad(o.name, index)}
 													role="button"
 													tabindex="-1"
 													aria-pressed={picked(o.name, index)}
@@ -259,9 +325,31 @@
 
 <style>
 	.tree {
+		position: relative;
 		margin-top: var(--sp-2);
 		font-size: var(--text-xs);
 		user-select: none;
+	}
+
+	/* room for the brackets down the left edge, as VD's gutter has */
+	.tree.bracketed {
+		padding-left: 12px;
+	}
+
+	.gutter {
+		position: absolute;
+		top: 0;
+		left: 0;
+		pointer-events: none;
+		overflow: visible;
+	}
+
+	.row.issue .name {
+		color: var(--status-bad, #e5534b);
+	}
+
+	.grid td.cell.bad {
+		box-shadow: inset 0 0 0 1px var(--status-bad, #e5534b);
 	}
 
 	.row {
