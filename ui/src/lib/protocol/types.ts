@@ -391,6 +391,14 @@ export interface ProjectSummary {
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
+/** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
+export interface Shown {
+	title: string;
+	views: View[];
+	/** What was left out or could not be drawn, in a sentence; empty when nothing. */
+	note: string;
+}
+
 /** `project.children`: what an object opens into in the tree, by what it is. */
 export type ProjectChildren =
 	| {

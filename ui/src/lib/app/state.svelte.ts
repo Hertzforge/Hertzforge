@@ -13,7 +13,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ProjectChildren,
+import type { ProjectChildren, Shown,
 	Catalog,
 	DatasetInfo,
 	DisplayEvent,
@@ -82,6 +82,10 @@ class AnalyzeState {
 	running = $state(false);
 	runError = $state<string | null>(null);
 	results = $state.raw<AnalyzeResult[]>([]);
+	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
+	shown = $state.raw<Shown | null>(null);
+	showError = $state<string | null>(null);
+	private showSeq = 0;
 	private nextResult = 1;
 	private openSeq = 0;
 
@@ -202,6 +206,31 @@ class AnalyzeState {
 			this.openError = message(err);
 		} finally {
 			if (seq === this.openSeq) this.opening = false;
+		}
+	}
+
+	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
+	async showSelection(): Promise<void> {
+		const selection = this.app.project.selection;
+		const seq = ++this.showSeq;
+		if (!selection.objects.length || !this.app.project.summary) {
+			this.shown = null;
+			this.showError = null;
+			return;
+		}
+		try {
+			const res = await this.app.analysis.request<Shown>(
+				'project.show',
+				{ objects: selection.objects, records: selection.records, part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (seq !== this.showSeq) return;
+			this.shown = res;
+			this.showError = null;
+		} catch (err) {
+			if (seq !== this.showSeq) return;
+			this.shown = null;
+			this.showError = message(err);
 		}
 	}
 
@@ -948,6 +977,7 @@ export class ProjectState {
 		this.children = children;
 		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
+		void this.app.analyze.showSelection();
 	}
 
 	/** Open or close an object's row; opening asks what it holds. */
@@ -976,6 +1006,7 @@ export class ProjectState {
 		this.selection = next;
 		this.renaming = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
+		void this.app.analyze.showSelection();
 	}
 
 	/** An object's row clicked, with the modifiers held; `order` is the tree's rows. */

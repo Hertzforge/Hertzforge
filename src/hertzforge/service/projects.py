@@ -306,6 +306,30 @@ def children(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, 
     return tree.children(state.project, name)
 
 
+def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.show`: what a selection in the tree shows (`service.show`)."""
+    from . import show as showing
+
+    state = _open(state, 'project.show')
+    objects = params.get('objects')
+    if not isinstance(objects, list) or not objects or not all(isinstance(n, str) for n in objects):
+        raise bad_request('project.show needs "objects", the selected objects\' names')
+    missing = [n for n in objects if n not in state.project]
+    if missing:
+        raise not_found(f'no object named {missing[0]!r}')
+    records = params.get('records') or {}
+    if not isinstance(records, Mapping) or not all(
+            isinstance(v, list) and all(isinstance(i, int) and i >= 0 for i in v)
+            for v in records.values()):
+        raise bad_request('project.show "records" maps an object\'s name to its picked record '
+                          'indices')
+    part = params.get('part')
+    if part is not None and not (isinstance(part, Mapping) and isinstance(part.get('kind'), str)):
+        raise bad_request('project.show "part" is {"kind", "id"} or null')
+    return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
+                        dict(part) if part else None)
+
+
 def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:
     """`project.define_units`: units declared on an object by table and
     row (`service.units.define`); the records converted."""

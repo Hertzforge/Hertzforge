@@ -58,7 +58,8 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.activate',
                    'project.duplicate', 'project.refresh',
-                   'project.units', 'project.define_units', 'project.children')
+                   'project.units', 'project.define_units', 'project.children',
+                   'project.show')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -348,6 +349,11 @@ class Connection:
         if method == 'project.children':
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
+        if method == 'project.show':
+            _only(params, ('objects', 'records', 'part'), method)
+            shown = await call(projects.show, self.project, params)
+            display_units.convert(shown['views'], self.units)
+            return shown
         if method == 'project.define_units':
             _only(params, ('name', 'units'), method)
             converted = await call(projects.define_units, self.project, params)
@@ -553,8 +559,13 @@ class Connection:
                                   'result': result})
             elif method in PROJECT_METHODS:
                 result = await self.project_request(method, params)
-                frame = frames.encode_text({'type': 'response', 'id': ident,
-                                            'result': result})
+                if method == 'project.show':
+                    # its views carry arrays, as an operation's do
+                    frame = await self.service.in_worker(
+                        frames.pack, {'type': 'response', 'id': ident, 'result': result})
+                else:
+                    frame = frames.encode_text({'type': 'response', 'id': ident,
+                                                'result': result})
             elif method in reports.REPORT_METHODS:
                 result = await self.report_request(method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,

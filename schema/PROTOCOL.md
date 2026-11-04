@@ -371,6 +371,7 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
+| `project.show` | `{"objects","records"?,"part"?}` | `{"title","views","note"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
@@ -388,6 +389,20 @@ the object's own icon) and the records whose units are `undefined`; a shape set 
 a channel table its `channels`; photographs their names; matched modes their `matches`; anything
 else is `none`. The answer describes the object as it stands and is asked again when the project
 changes.
+
+**The selection shows.** `project.show` answers what a selection in the tree shows, as Visual
+Dynamics' window shows it: `objects` are the selected objects' names, `records` maps an object's name
+to the record indices picked in its grid (a mode's or a channel's index for a shape set or a channel
+table), and `part` names a part of a geometry picked (`{"kind","id"}`: a family, an element group, a
+solid, a mate) or is null. One object shows by its kind: a geometry draws; a data object is its
+waterfall, or the records picked as curves; a shape set is its modes on the geometry of its group (or
+the active one) with its mode table, or the table and its MAC against itself without one; a channel
+table is its table. Two together show what the pair means: data on a geometry animates it (a shape set,
+a time history played back, an FRF's or a spectrum's operating deflection shape at its loudest line, a
+PSD's envelope), a channel table on a geometry marks its channels, two shape sets give their MAC, a
+measurement beside its requirement gives the comparison's spectra, two PSDs overlay. A selection with
+no joint reading shows each object on its own, and `note` says what was left out. The views come in the
+connection's display units, as an operation's do.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts

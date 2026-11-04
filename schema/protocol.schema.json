@@ -418,6 +418,14 @@
         {"properties": {"kind": {"const": "none"}}, "additionalProperties": false}
       ]
     },
+    "shown": {
+      "type": "object", "required": ["title", "views", "note"], "additionalProperties": false,
+      "properties": {
+        "title": {"type": "string"},
+        "views": {"$ref": "#/$defs/views"},
+        "note": {"type": "string"}
+      }
+    },
     "solidRow": {
       "type": "object", "required": ["id", "label", "kind", "children"],
       "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "kind": {"type": "string"},
