@@ -12,6 +12,8 @@
 		| 'stop'
 		| 'abort'
 		| 'close'
+		| 'maximize'
+		| 'restore'
 		| 'tool'
 		| 'dataset'
 		| 'action'
@@ -79,6 +81,10 @@
 	{:else if name === 'abort'}
 		<path d="M7 2.5h6l4.5 4.5v6L13 17.5H7L2.5 13V7z" fill="currentColor" stroke="none" />
 		<path d="M7.5 10h5" stroke="var(--bg-2)" stroke-width="1.8" />
+	{:else if name === 'maximize'}
+		<path d="M8 3H3v5M12 3h5v5M8 17H3v-5M12 17h5v-5" />
+	{:else if name === 'restore'}
+		<path d="M3 8h5V3M17 8h-5V3M3 12h5v5M17 12h-5v5" />
 	{:else if name === 'close'}
 		<path d="M5 5l10 10M15 5L5 15" />
 	{:else if name === 'tool'}

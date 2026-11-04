@@ -111,9 +111,13 @@ def test_an_object_of_one_quantity_offers_no_choice(modal_run):
 
 
 def test_the_quantity_param_is_set_in_the_view_not_the_panel():
-    waterfalls = [op.to_json() for op in OPERATIONS if op.outputs == ('waterfall',)]
-    assert len(waterfalls) == 2
-    for op in waterfalls:
+    from hertzforge.service.server import OPERATIONS as ALL
+
+    choosing = [op.to_json() for op in ALL
+                if any(param.name == 'quantity' for param in op.params)]
+    assert [op['id'] for op in choosing] == ['random.waterfall', 'modal_run.waterfall',
+                                             'project.waterfall']
+    for op in choosing:
         (param,) = [p for p in op['params'] if p['name'] == 'quantity']
         assert param['in_view'] is True and param['default'] == ''
 
@@ -355,12 +359,90 @@ def test_an_empty_band_is_refused_a_mac(modal_run):
         run('modal_run.mac', modal_run, low_hz=900.0, high_hz=800.0)
 
 
+# ---- modal_run.resynthesis ------------------------------------------------------
+
+def test_resynthesis_draws_the_cmif_and_one_frf_with_their_followers(modal_run, validate):
+    """Two spectra over the fitted band: each measured CMIF singular value
+    and FRF magnitude, then a synthesized curve following each."""
+    views = run('modal_run.resynthesis', modal_run)
+    wire_views(views, validate)
+    cmif, response = views
+    assert [view['view'] for view in views] == ['spectrum', 'spectrum']
+    assert cmif['link'] == response['link'] == 'frequency'
+    assert cmif['y'] == {'label': 'CMIF', 'unit': '(m/s²)/N', 'scale': 'log'}
+    assert [(s['name'], s.get('follows')) for s in cmif['series']] == [
+        ('CMIF 1', None), ('CMIF 2', None),
+        ('CMIF 1, synthesized', 0), ('CMIF 2, synthesized', 1)]
+    assert [(s['name'], s.get('follows')) for s in response['series']] == [
+        ('101Z+/101Z+', None), ('101Z+/101Z+, synthesized', 0)]
+    for line in cmif['series'] + response['series']:
+        assert line['x'][0] >= 300.0 and line['x'][-1] <= 1300.0
+
+
+def test_the_measured_cmif_is_the_frf_matrix_singular_values(modal_run):
+    from hertzforge.core.modal_fit import ModalFitSession
+
+    cmif, _ = run('modal_run.resynthesis', modal_run)
+    frf = modal_run.project['FRF']
+    matrix = ModalFitSession(frf).matrix
+    f = np.asarray(frf.abscissa, dtype=float)
+    band = (f >= 300.0) & (f <= 1300.0)
+    expected = np.linalg.svd(matrix[band], compute_uv=False)
+    for k in range(2):
+        np.testing.assert_allclose(cmif['series'][k]['y'], expected[:, k], rtol=1e-12)
+
+
+def test_the_synthesized_frf_is_the_fitted_modes_prediction(modal_run):
+    """The follower is what the core's resynthesis overlay predicts for the
+    record, from the same fit `modal_run.modes` draws, and the synthesized
+    CMIF is that prediction's singular values."""
+    from hertzforge.core.shapes import synthesize_overlay
+    from hertzforge.service.ops_modal_run import fitted
+
+    shapes = fitted(modal_run, 300.0, 1300.0, 5)
+    frf = modal_run.project['FRF']
+    f = np.asarray(frf.abscissa, dtype=float)
+    band = (f >= 300.0) & (f <= 1300.0)
+    overlay = synthesize_overlay(shapes, frf)
+    for record in (1, 4):
+        _, response = run('modal_run.resynthesis', modal_run, record=record)
+        np.testing.assert_allclose(response['series'][1]['y'],
+                                   np.abs(overlay.ordinate[record - 1])[band], rtol=1e-9)
+    cmif, _ = run('modal_run.resynthesis', modal_run)
+    responses = list(dict.fromkeys(frf.response_dof))
+    references = list(dict.fromkeys(frf.reference_dof))
+    matrix = np.zeros((band.sum(), len(responses), len(references)), dtype=complex)
+    for i in range(frf.num_records):
+        matrix[:, responses.index(frf.response_dof[i]),
+               references.index(frf.reference_dof[i])] = overlay.ordinate[i][band]
+    expected = np.linalg.svd(matrix, compute_uv=False)
+    for k in range(2):
+        np.testing.assert_allclose(cmif['series'][2 + k]['y'], expected[:, k], rtol=1e-9,
+                                   atol=1e-9 * expected.max())
+
+
+def test_the_record_is_chosen_and_named(modal_run):
+    frf = modal_run.project['FRF']
+    _, response = run('modal_run.resynthesis', modal_run, record=4)
+    assert response['title'].endswith(f'FRF {frf.record_label(3)}')
+    assert response['series'][0]['name'] == frf.record_label(3)
+
+
+@pytest.mark.parametrize(('params', 'words'), [
+    ({'low_hz': 900.0, 'high_hz': 800.0}, 'the band 900 to 800 Hz is empty'),
+    ({'record': 23}, 'has 22 FRF records; there is no record 23'),
+])
+def test_resynthesis_refuses(modal_run, params, words):
+    with pytest.raises(ProtocolError, match=words):
+        run('modal_run.resynthesis', modal_run, **params)
+
+
 # ---- modal_run.motion -----------------------------------------------------------
 
 def test_a_capture_plays_back_its_accelerations(modal_run, validate):
     """Capture 3: the eleven accelerometers, one record each, their samples as
     the file has them; the two force gauges are left out and said so."""
-    (view,) = run('modal_run.motion', modal_run, capture=3)
+    view, _ = run('modal_run.motion', modal_run, capture=3)
     wire_views([view], validate)
     assert view['modes'] == [] and view['title'].endswith('Capture 3 of 20, Acceleration')
     assert view['note'] == '2 records of another quantity are not shown'
@@ -379,7 +461,7 @@ def test_a_capture_plays_back_its_accelerations(modal_run, validate):
 def test_each_dof_moves_the_node_at_its_own_position(modal_run):
     """The drawn node a DOF moves is the geometry node its name gives."""
     from hertzforge.deform import dof_directions
-    (view,) = run('modal_run.motion', modal_run)
+    view, _ = run('modal_run.motion', modal_run)
     data = modal_run.project['Time History']
     geometry = modal_run.project['Geometry']
     dofs = [data.response_dof[i] for i in range(data.num_records)
@@ -390,7 +472,7 @@ def test_each_dof_moves_the_node_at_its_own_position(modal_run):
 
 
 def test_the_motion_peak_is_the_furthest_a_node_gets(modal_run):
-    (view,) = run('modal_run.motion', modal_run)
+    view, _ = run('modal_run.motion', modal_run)
     motion = view['motion']
     nodes = len(view['nodes'])
     furthest = 0.0
@@ -399,6 +481,25 @@ def test_the_motion_peak_is_the_furthest_a_node_gets(modal_run):
         np.add.at(offsets, motion['node'], motion['direction'] * motion['values'][:, k:k + 1])
         furthest = max(furthest, np.linalg.norm(offsets, axis=1).max())
     assert motion['peak'] == pytest.approx(furthest, rel=1e-5)
+
+
+def test_the_time_plot_draws_the_records_the_geometry_plays(modal_run, validate):
+    """The plot under the geometry has each played record against time,
+    named as the file names it, and shares the geometry's link."""
+    shape, plot = run('modal_run.motion', modal_run, capture=3)
+    wire_views([shape, plot], validate)
+    assert plot['view'] == 'spectrum' and plot['link'] == shape['link'] == 'time'
+    assert plot['title'] == shape['title']
+    assert (plot['x']['label'], plot['x']['unit'], plot['x']['scale']) == ('Time', 's', 'linear')
+    assert (plot['y']['label'], plot['y']['unit']) == ('Acceleration', 'm/s²')
+    motion = shape['motion']
+    data = modal_run.project['Time History']
+    picked = [i for i in range(data.num_records)
+              if data.block[i] == 'avg 3' and data.known_dim(i) == 'acceleration']
+    assert [line['name'] for line in plot['series']] == [data.record_label(i) for i in picked]
+    for d, line in enumerate(plot['series']):
+        np.testing.assert_allclose(line['y'], motion['values'][d], rtol=1e-6)
+        np.testing.assert_allclose(line['x'], motion['start'] + motion['step'] * np.arange(line['x'].size))
 
 
 def test_a_capture_the_survey_does_not_have_is_refused(modal_run):

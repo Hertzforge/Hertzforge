@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * x-y line view (spectra and anything else on two axes), drawn with uPlot.
 	 *
 	 * Log or linear axes come from the view. Each series' role sets its dash pattern and width;
 	 * color is the second cue, and the legend names the line style in words. Panes with the same
-	 * `link` share a cursor on x through the CursorHub. Live updates keep the axes still: the
+	 * `link` share a cursor on x through the CursorHub, and a shape view of the same result with
+	 * that `link` puts its playback time on the plot as a line that drags to seek. Live updates keep the axes still: the
 	 * plot is rebuilt only when the structure changes, and the y range only moves when the data
 	 * leaves it.
 	 */
@@ -14,10 +16,10 @@
 	import type { Series, SpectrumView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { alignSeries, valueAt } from './align';
-	import { cursors } from './cursor';
+	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
 	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
-	import { ROLE_STYLES, dashArray, roleColorVar } from './roles';
+	import { dashArray, seriesLooks } from './roles';
 	import { stepsPath } from './steps';
 
 	interface Props {
@@ -30,19 +32,38 @@
 		showTitle?: boolean;
 		/** A y range the operator fixed; null lets the pane range itself. */
 		yFixed?: [number, number] | null;
+		/** The result the view belongs to, which a playhead is scoped to. */
+		scope?: string;
+		/** A click on the plot (not a drag), with the x it landed on: a cursor the caller places. */
+		onPick?: (x: number) => void;
+		/** A draggable region released at new edges: its index in `view.regions`, and the edges in x. */
+		onspan?: (region: number, x0: number, x1: number) => void;
+		/** The x range on screen, each time it changes: a zoom the caller reads as a band. */
+		onRange?: (low: number, high: number) => void;
+		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
+		marker?: number | null;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, onspan }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
 	let plotEl: HTMLDivElement;
 	let plot: uPlot | null = null;
 	let structureKey = '';
+	/** The title of the plot last built, whose x range a rebuild of the same plot keeps. */
+	let keptTitle: string | null = null;
 	let yRange: [number, number] | null = null;
 	let resizeObs: ResizeObserver | null = null;
 	let unsubscribeCursor: (() => void) | null = null;
 	let subscribedLink: string | undefined;
+
+	/** The playback line, its time, and the group it is shared in. */
+	let playLine: HTMLDivElement | null = null;
+	let playX: number | null = null;
+	let dragging = false;
+	let unsubscribePlayhead: (() => void) | null = null;
+	let playGroup: string | undefined;
 
 	let cursorX = $state<number | null>(null);
 	let cursorIsLocal = $state(false);
@@ -50,13 +71,10 @@
 	const logX = $derived(view.x.scale === 'log');
 	const logY = $derived(view.y.scale === 'log');
 
-	/** Per-series style, with measured series stepping through the blue family. */
+	/** Per-series style, with measured series stepping through the blue family and followers dashed. */
 	const styled = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		return view.series.map((s, i) => {
-			const nth = (counts[s.role] = (counts[s.role] ?? -1) + 1);
-			return { series: s, index: i, style: ROLE_STYLES[s.role] ?? ROLE_STYLES.other, colorVar: roleColorVar(s.role, nth) };
-		});
+		const looks = seriesLooks(view.series);
+		return view.series.map((s, i) => ({ series: s, index: i, ...looks[i] }));
 	});
 
 	/** Plot order: draw low-z roles first so the measured line stays on top. */
@@ -72,7 +90,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, theme.version]);
+		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version]);
 	}
 
 	function finiteExtent(values: ArrayLike<number | null>[], positive: boolean): [number, number] | null {
@@ -139,7 +157,28 @@
 		return measureCtx.measureText(text).width;
 	}
 
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The plot, axes and curves, as an image on the clipboard. */
+	async function copyImage() {
+		if (!plot) return;
+		copiedImage = await copyCanvas(plot.ctx.canvas, plotBackground(plotEl), undefined, view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
+
+	/** The marker line, placed at `marker`. */
+	let markerLine: HTMLDivElement | null = null;
+	/** The view's regions, shaded behind the curves, one element each. */
+	let regionEls: HTMLDivElement[] = [];
+	/** Where a press on the plot began, to tell a click from a drag. */
+	let pressedAt: number | null = null;
+
 	function build() {
+		// the same plot rebuilt for a new series (a fit's synthesis arriving) keeps the x range the
+		// person zoomed to: the view belongs to them
+		const kept = plot && plot.scales.x.min != null && plot.scales.x.max != null && keptTitle === view.title
+			? { min: plot.scales.x.min, max: plot.scales.x.max }
+			: null;
+		keptTitle = view.title;
 		destroyPlot();
 		const data = alignSeries(view.series, logX, logY);
 		const [xs, ...cols] = data;
@@ -231,9 +270,9 @@
 			],
 			series: [
 				{},
-				...ordered.map(({ series, index, style, colorVar }) => ({
+				...ordered.map(({ series, index, style, colorVar, color }) => ({
 					label: series.name,
-					stroke: cssVar(colorVar),
+					stroke: color ?? cssVar(colorVar),
 					width: style.width,
 					dash: style.dash,
 					spanGaps: true,
@@ -242,6 +281,12 @@
 				}))
 			],
 			hooks: {
+				draw: [placePlayLine, placeMarker, placeRegions],
+				setScale: [
+					(u, key) => {
+						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
+					}
+				],
 				setCursor: [
 					(u) => {
 						const left = u.cursor.left ?? -1;
@@ -262,6 +307,40 @@
 
 		plot = new uPlot(opts, plotData, plotEl);
 		structureKey = keyOf(view);
+		playLine = document.createElement('div');
+		playLine.className = 'playline';
+		playLine.title = 'Drag to move playback';
+		// the line's own drag, not the plot's zoom
+		playLine.addEventListener('mousedown', (e) => e.stopPropagation());
+		playLine.addEventListener('pointerdown', startDrag);
+		plot.over.appendChild(playLine);
+		placePlayLine();
+		markerLine = document.createElement('div');
+		markerLine.className = 'marker';
+		plot.over.appendChild(markerLine);
+		placeMarker();
+		regionEls = (view.regions ?? []).map((r, k) => {
+			const el = document.createElement('div');
+			el.className = `region ${r.kind}`;
+			if (r.label) el.title = r.label;
+			if (r.drag && onspan) {
+				// dragged in the top layer, so the press is the span's and not a zoom
+				el.classList.add('drag');
+				el.addEventListener('mousedown', (e) => e.stopPropagation());
+				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
+				plot!.over.appendChild(el);
+			} else plot!.under.appendChild(el);
+			return el;
+		});
+		placeRegions();
+		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
+		plot.over.addEventListener('click', (e) => {
+			const moved = pressedAt === null ? 0 : Math.abs(e.clientX - pressedAt);
+			pressedAt = null;
+			if (!plot || !onPick || moved > 3) return;
+			onPick(plot.posToVal(e.clientX - plot.over.getBoundingClientRect().left, 'x'));
+		});
+		if (kept) plot.setScale('x', kept);
 		resizeObs = new ResizeObserver(() => {
 			if (!plot) return;
 			const w = Math.max(100, plotEl.clientWidth);
@@ -283,6 +362,120 @@
 		plot.setData(plotData, false);
 		yRange = next;
 		plot.setScale('y', { min: next[0], max: next[1] });
+	}
+
+	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */
+	function placeMarker() {
+		if (!plot || !markerLine) return;
+		const left = marker === null ? -1 : plot.valToPos(marker, 'x');
+		const inside = left >= 0 && left <= plot.over.clientWidth;
+		markerLine.style.display = inside ? '' : 'none';
+		if (inside) markerLine.style.left = `${left}px`;
+	}
+
+	$effect(() => {
+		void marker;
+		placeMarker();
+	});
+
+	/** How near an edge, in pixels, a press takes that edge rather than the whole span. */
+	const EDGE_PX = 6;
+
+	/**
+	 * A draggable region pressed: the middle slides it, an edge (when the span has two) moves that
+	 * edge. It follows the pointer and, on release, its new edges in x go to `onspan`.
+	 */
+	function startSpan(e: PointerEvent, k: number, el: HTMLDivElement) {
+		const region = view.regions?.[k];
+		if (!plot || !region?.drag || e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const a = plot.valToPos(region.x0, 'x');
+		const b = plot.valToPos(region.x1, 'x');
+		const at = e.clientX - plot.over.getBoundingClientRect().left;
+		const two = !!region.drag.high;
+		const part = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
+		const x = e.clientX;
+		let left = a;
+		let right = b;
+		const move = (m: PointerEvent) => {
+			const d = m.clientX - x;
+			if (part === 'move') [left, right] = [a + d, b + d];
+			else if (part === 'low') left = Math.min(a + d, right - 2);
+			else right = Math.max(b + d, left + 2);
+			el.style.left = `${left}px`;
+			el.style.width = `${right - left}px`;
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			if (!plot || (left === a && right === b)) return placeRegions();
+			onspan?.(k, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
+
+	/** Shade each region over the part of it on the plot. */
+	function placeRegions() {
+		if (!plot) return;
+		const width = plot.under.clientWidth;
+		(view.regions ?? []).forEach((r, i) => {
+			const el = regionEls[i];
+			if (!el) return;
+			const a = Math.max(0, Math.min(width, plot!.valToPos(r.x0, 'x')));
+			const b = Math.max(0, Math.min(width, plot!.valToPos(r.x1, 'x')));
+			el.style.display = b > a ? '' : 'none';
+			el.style.left = `${a}px`;
+			el.style.width = `${b - a}px`;
+		});
+	}
+
+	/** Put the playback line at its time, or hide it when there is none or it is off the plot. */
+	function placePlayLine() {
+		if (!plot || !playLine) return;
+		const left = playX === null ? -1 : plot.valToPos(playX, 'x');
+		const inside = left >= 0 && left <= plot.over.clientWidth;
+		playLine.style.display = inside ? '' : 'none';
+		if (inside) playLine.style.left = `${left}px`;
+	}
+
+	function startDrag(e: PointerEvent) {
+		if (!plot || !playGroup) return;
+		const line = e.currentTarget as HTMLDivElement;
+		line.setPointerCapture(e.pointerId);
+		dragging = true;
+		const move = (ev: PointerEvent) => {
+			if (!plot || !playGroup) return;
+			const { min, max } = plot.scales.x;
+			const x = plot.posToVal(ev.clientX - plot.over.getBoundingClientRect().left, 'x');
+			playX = Math.min(Math.max(x, min ?? x), max ?? x);
+			placePlayLine();
+			playheads.set(playGroup, playX, paneId);
+		};
+		const end = () => {
+			dragging = false;
+			line.removeEventListener('pointermove', move);
+			line.removeEventListener('pointerup', end);
+			line.removeEventListener('pointercancel', end);
+		};
+		line.addEventListener('pointermove', move);
+		line.addEventListener('pointerup', end);
+		line.addEventListener('pointercancel', end);
+	}
+
+	function bindPlayhead(group: string | undefined) {
+		if (group === playGroup) return;
+		unsubscribePlayhead?.();
+		unsubscribePlayhead = null;
+		playGroup = group;
+		if (!group) return;
+		unsubscribePlayhead = playheads.subscribe(group, (state) => {
+			// while dragging the line stays under the pointer, not on the sample playback snapped to
+			if (dragging) return;
+			playX = state.x;
+			placePlayLine();
+		});
 	}
 
 	function destroyPlot() {
@@ -324,11 +517,13 @@
 		void yFixed;
 		if (plot) update();
 		bindCursor(view.link);
+		bindPlayhead(view.link ? playheadGroup(view.link, scope) : undefined);
 	});
 
 	onDestroy(() => {
 		if (view.link) cursors.clear(view.link, paneId);
 		unsubscribeCursor?.();
+		unsubscribePlayhead?.();
 		destroyPlot();
 	});
 
@@ -365,9 +560,11 @@
 			<span class="xval">{xReadout ?? '-'}</span>
 			<span class="xunit">{view.x.unit ?? ''}</span>
 		</div>
+		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 	</div>
 	<ul class="legend" aria-label="Legend">
-		{#each styled as { series, style, colorVar }, i (i)}
+		{#each styled as { series, style, colorVar, color, follows }, i (i)}
+			{#if !follows}
 			<li title={legendLabel(series, style.styleName)} onmouseenter={() => focusSeries(i)} onmouseleave={() => focusSeries(null)}>
 				<svg class="swatch" viewBox="0 0 26 8" width="26" height="8" aria-hidden="true">
 					<line
@@ -375,7 +572,7 @@
 						y1="4"
 						x2="25"
 						y2="4"
-						stroke="var({colorVar})"
+						stroke={color ?? `var(${colorVar})`}
 						stroke-width={style.width + 0.4}
 						stroke-dasharray={dashArray(series.role)}
 						stroke-linecap="butt"
@@ -385,12 +582,18 @@
 				<span class="style">{style.styleName}</span>
 				<span class="val num">{readoutText(readouts[i])}</span>
 			</li>
+			{/if}
 		{/each}
 	</ul>
 	<div class="plot" bind:this={plotEl} style:min-height="{minHeight}px"></div>
 </div>
 
 <style>
+	.copyimg {
+		flex: none;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.spectrum {
 		display: flex;
 		flex-direction: column;
@@ -506,6 +709,66 @@
 		font-family: var(--font-mono);
 		position: absolute;
 		inset: 0;
+	}
+
+	.plot :global(.playline) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 9px;
+		transform: translateX(-50%);
+		cursor: ew-resize;
+		z-index: 1;
+	}
+
+	/* the overlay's orange: the time the shape view beside it shows */
+	.plot :global(.playline)::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 3.5px;
+		width: 2px;
+		background: #e69f00;
+	}
+
+	.plot :global(.region) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		pointer-events: none;
+	}
+
+	.plot :global(.region.frame) {
+		background: var(--region-frame);
+		border-left: 1px solid var(--region-frame-edge);
+	}
+
+	.plot :global(.region.cut) {
+		background: var(--region-cut);
+	}
+
+	.plot :global(.region.span) {
+		border-left: 1.5px solid var(--region-frame-edge);
+		border-right: 1.5px solid var(--region-frame-edge);
+	}
+
+	.plot :global(.region.drag) {
+		pointer-events: auto;
+		cursor: grab;
+	}
+
+	.plot :global(.region.drag:hover) {
+		background: var(--region-frame);
+	}
+
+	.plot :global(.marker) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 0;
+		border-left: 1px dashed var(--text-2);
+		pointer-events: none;
 	}
 
 	.plot :global(.u-cursor-x) {

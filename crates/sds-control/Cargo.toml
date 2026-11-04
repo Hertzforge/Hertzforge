@@ -41,7 +41,8 @@ hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
 hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-station.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+# `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).
+tokio = { workspace = true, features = ["signal"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 

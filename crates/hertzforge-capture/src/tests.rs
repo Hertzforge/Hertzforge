@@ -280,10 +280,16 @@ fn free_space_is_a_real_syscall_on_a_real_volume() {
     // u64::MAX (the "assume infinite space" failure) fails here.
     assert!(free < u64::MAX / 2, "implausible free-space figure {free}");
 
-    // The budget helper agrees with the raw figure it is derived from.
-    let cfg = CaptureConfig::at_rate(4, 1000.0); // 16,000 B/s
+    // The budget helper agrees with the raw figure it is derived from. Other
+    // processes write to the temp volume between the two queries (a CI runner
+    // moved it by a block once), so the rate is high enough that a few hundred
+    // megabytes of drift round to the same second.
+    let cfg = CaptureConfig::at_rate(64, 1_000_000.0); // 256,000,000 B/s
     let secs = disk_budget_seconds_on(&here, &cfg, 0).unwrap();
-    assert_eq!(secs, disk_budget_max_seconds(&cfg, free));
+    assert!(
+        secs.abs_diff(disk_budget_max_seconds(&cfg, free)) <= 1,
+        "budget {secs} s against {free} free bytes"
+    );
 
     // A nonexistent path is an ERROR, not a fabricated number.
     let missing = here.join("hertzforge-capture-definitely-not-here-9f2a");

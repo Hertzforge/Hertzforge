@@ -159,3 +159,15 @@ def test_the_search_lands_on_the_pole_of_exact_data(truth, zeta):
     assert abs(found - truth) < 1e-3 * 0.5
     assert damping == pytest.approx(zeta, rel=1e-4)
     assert session.search_damping(truth) == pytest.approx(zeta, rel=1e-4)
+
+
+def test_a_damping_typed_into_a_mode_is_in_the_next_residual():
+    """The residual was cached against the count of modes alone, so a
+    damping typed into a confirmed mode's row, as the fit table allows,
+    left the old residual in place (fixed 2026-11-03)."""
+    session = _fitted([FAR])
+    before = session.residual_matrix().copy()
+    session.modes[0]['damping'] = 0.04
+    after = session.residual_matrix()
+    assert not np.allclose(before, after), 'the residual follows the typed damping'
+    assert np.allclose(after, session.matrix - session.synthesis_matrix())

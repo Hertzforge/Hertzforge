@@ -12,7 +12,7 @@ from typing import Any, Literal
 import numpy as np
 
 Scale = Literal['log', 'linear']
-Role = Literal['measured', 'reference', 'tolerance', 'abort', 'drive', 'other']
+Role = Literal['measured', 'reference', 'tolerance', 'abort', 'limit', 'drive', 'other']
 Status = Literal['pass', 'warn', 'fail', 'info']
 Shape = Literal['line', 'steps', 'law']
 
@@ -23,11 +23,13 @@ def axis(label: str, unit: str | None, scale: Scale) -> dict[str, Any]:
 
 
 def series(name: str, role: Role, x: Any, y: Any, shape: Shape = 'line',
-           edges: Any = None) -> dict[str, Any]:
+           edges: Any = None, follows: int | None = None) -> dict[str, Any]:
     """One curve. f64 is kept for spectra, which are short.
 
     `shape` is how the points mean to be drawn (schema/PROTOCOL.md, Views);
-    'steps' needs `edges`, one more than there are values.
+    'steps' needs `edges`, one more than there are values. `follows` makes
+    the curve a follower of the view's series at that index: a model's
+    prediction of that measurement, drawn dashed in its colour.
     """
     x = np.ascontiguousarray(x, dtype=np.float64)
     y = np.ascontiguousarray(y, dtype=np.float64)
@@ -43,6 +45,8 @@ def series(name: str, role: Role, x: Any, y: Any, shape: Shape = 'line',
         out.update(shape='steps', edges=edges)
     elif shape != 'line':
         out['shape'] = shape
+    if follows is not None:
+        out['follows'] = follows
     return out
 
 
@@ -78,13 +82,60 @@ def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
 
 
 def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
-             link: str | None = None) -> dict[str, Any]:
+             link: str | None = None,
+             regions: Sequence[dict] = ()) -> dict[str, Any]:
     """A `spectrum` view of `lines` on the axes `x` and `y`. Panes with
-    the same `link` share a cursor position on x."""
+    the same `link` share a cursor position on x; `regions` are shaded
+    behind the curves."""
     out = {'view': 'spectrum', 'title': title, 'x': x, 'y': y,
            'series': list(lines)}
     if link is not None:
         out['link'] = link
+    if regions:
+        out['regions'] = list(regions)
+    return out
+
+
+def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span'],
+           label: str | None = None, drag: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A span of x behind a spectrum's curves: a `frame` averaged from, a
+    `cut` left out, or a `span` (its edges drawn, nothing shaded). With
+    `drag` (`dragging`) it is moved on the plot: its middle slides it and
+    an edge moves that edge."""
+    out: dict[str, Any] = {'x0': float(x0), 'x1': float(x1), 'kind': kind}
+    if label:
+        out['label'] = label
+    if drag is not None:
+        out['drag'] = drag
+    return out
+
+
+def dragging(op: str, params: dict[str, Any], low: str, high: str | None = None
+             ) -> dict[str, Any]:
+    """What makes a region draggable: the operation that sets the span,
+    run with `params` and the new x0 as `low` and, when `high` is given,
+    the new x1 as `high`. Without `high` only the whole span slides."""
+    out: dict[str, Any] = {'op': op, 'params': dict(params), 'low': low}
+    if high is not None:
+        out['high'] = high
+    return out
+
+
+def picking(op: str, params: dict[str, Any], target: Literal['point', 'nodes', 'faces'],
+            hint: str, **fields: Any) -> dict[str, Any]:
+    """What a click in a `shape3d` view does: run `op` with `params` and
+    what was clicked. A 'point' click sends the place it lands as `x`, `y`
+    and `z`, on the model's surface or plane. `ids` is the node id of each
+    of the first rows, the model's own nodes. A 'nodes' click picks the
+    node under it of those, and `count` of them (0: as many as wanted,
+    then Enter) go as `param`, a list such as '4, 7, 9'. A 'faces' click
+    toggles the surface its
+    triangle belongs to (`faces`, one owner a triangle, -1 for none): a
+    surface in `kept` is named in the `out` param, any other in `back`.
+    `hint` says what a click does."""
+    out: dict[str, Any] = {'op': op, 'params': dict(params), 'target': target, 'hint': hint}
+    for key, value in fields.items():
+        out[key] = np.asarray(value, np.int32) if key == 'faces' else value
     return out
 
 
@@ -110,9 +161,12 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
             **extra: Any) -> dict[str, Any]:
     """A mesh and its modes. Nodes and shapes are f32 [N, 3]; triangles and
     lines u32 [T, 3] and [L, 2]. `extra` fields ride along (the schema
-    allows them), such as how the shapes are normalized."""
+    allows them), such as how the shapes are normalized, or `node_ids`,
+    the drawn nodes' ids (u32 [N]) for the view's hover captions."""
     out: dict[str, Any] = {'view': 'shape3d', 'title': title, 'unit': unit,
                            'nodes': np.ascontiguousarray(nodes, np.float32)}
+    if extra.get('node_ids') is not None:
+        extra['node_ids'] = np.ascontiguousarray(extra['node_ids'], np.uint32)
     if lines is not None and len(lines):
         out['lines'] = np.ascontiguousarray(lines, np.uint32).reshape(-1, 2)
     if triangles is not None and len(triangles):
@@ -156,6 +210,38 @@ def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
     return out
 
 
+def staged(view: dict[str, Any], stations: Sequence[str], depths: Sequence[int],
+           roles: Sequence[str], zones: Sequence[dict] = (), exceed: Sequence[dict] = (),
+           walls: Sequence[Any] = (), surface: bool = False) -> dict[str, Any]:
+    """A `waterfall` view turned into one of Visual Dynamics' stages: its
+    records stand at named `stations` (`depths`, one station index a
+    record, so two records can share one) and are drawn by `roles` (a
+    'measured' record colored by level, any other in its role's color).
+
+    `zones` are a station's limit bands, each {station, kind 'warning' or
+    'abort', side 'upper' or 'lower', x, inner, outer}, with no `outer`
+    when the band runs to the stage's top or floor. `exceed` are the lines
+    a measurement went past an abort limit, each {station, side, x0, x1,
+    z}: one rectangle a line from its limit to the top or the floor.
+    `walls` are curves of one abscissa a station, drawn as translucent
+    walls from floor to top (a scalogram's cone of influence). `surface`
+    draws the records as one surface, every record on the same abscissa."""
+    view['stations'] = [str(s) for s in stations]
+    view['depths'] = [int(d) for d in depths]
+    view['roles'] = list(roles)
+    if zones:
+        view['zones'] = [{**z, **{k: np.asarray(z[k], np.float32)
+                                  for k in ('x', 'inner', 'outer') if k in z}} for z in zones]
+    if exceed:
+        view['exceed'] = [{**e, **{k: np.asarray(e[k], np.float32) for k in ('x0', 'x1', 'z')}}
+                          for e in exceed]
+    if len(walls):
+        view['walls'] = [np.asarray(w, np.float32) for w in walls]
+    if surface:
+        view['surface'] = True
+    return view
+
+
 def mode(index: int, frequency_hz: float, damping: float | None,
          shape: np.ndarray, label: str | None = None) -> dict[str, Any]:
     """One mode of a `shape3d` view: its 1-based index, frequency,
@@ -189,3 +275,41 @@ def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
             'values': values.reshape(len(rows['ticks']), len(columns['ticks'])),
             'value_label': value_label,
             'value_range': [float(value_range[0]), float(value_range[1])]}
+
+
+def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]],
+          edit: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A `table` view: rows of text under column headings, one cell per
+    column. With `edit` ({'op', 'params', 'columns'}, see `editing`) its
+    cells are typed into in place."""
+    columns = [str(c) for c in columns]
+    rows = [[str(cell) for cell in row] for row in rows]
+    for row in rows:
+        if len(row) != len(columns):
+            raise ValueError(f'table {title!r}: a row of {len(row)} cells under '
+                             f'{len(columns)} columns')
+    out = {'view': 'table', 'title': title, 'columns': columns, 'rows': rows}
+    if edit is not None:
+        if len(edit['columns']) != len(columns):
+            raise ValueError(f'table {title!r}: {len(edit["columns"])} edit keys for '
+                             f'{len(columns)} columns')
+        out['edit'] = edit
+    return out
+
+
+def editing(op: str, params: dict[str, Any], columns: Sequence[str | None],
+            choices: dict[str, list[str]] | None = None,
+            kinds: dict[str, str] | None = None) -> dict[str, Any]:
+    """What makes a `table` view's cells editable: the operation that sets
+    one (taking `row` from 1, `column` and `value` beside `params`), each
+    column's key, or None for a column that is read only, what a column
+    offers by key, a shortlist the cell can still be typed past, and how a
+    column is edited (`kinds`, by key: 'choice' from its list, 'flag' by a
+    check box, 'date' in a date field, 'unit' from a shortlist, 'number'
+    or 'text' typed), as VD's every-table-is-the-same-table widgets."""
+    out = {'op': op, 'params': dict(params), 'columns': list(columns)}
+    if choices:
+        out['choices'] = {key: list(values) for key, values in choices.items()}
+    if kinds:
+        out['kinds'] = dict(kinds)
+    return out

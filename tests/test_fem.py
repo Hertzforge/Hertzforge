@@ -1343,11 +1343,12 @@ def test_the_dense_eigensolution_is_announced_as_busy():
     """The dense solver's eigensolution is one call that reports
     nothing while it runs, and the bar stood still at half for all of
     it. It is announced as BUSY between the factorization's tick and
-    the solve's end; the sparse solver counts its iterations instead."""
+    the solve's end. The sparse solver counts its iterations, and only
+    its factorization is BUSY."""
     from hertzforge.core.progress import BUSY
 
     model = straight_beam(1.0, fem.Section.rod('rod', 0.01), 8)
-    for solver, expected in (('dense', 1), ('sparse', 0)):
+    for solver, expected in (('dense', 1), ('sparse', 1)):
         told = []
         model.eigensolution(num_modes=4, fixed=['100'], solver=solver,
                             progress=lambda d, t, out=told: out.append((d, t)))

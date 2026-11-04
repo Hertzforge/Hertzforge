@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ParamDescriptor } from '$lib/protocol/types';
-import { defaultFor, defaultValues, parseNumber, rangeHint, reconcile, validate, validateAll } from './params';
+import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
+import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
 
 const channels = [
 	{ value: 'ctrl1', label: 'Control 1' },
@@ -25,6 +25,28 @@ const label: ParamDescriptor = { name: 'label', label: 'Label', type: 'string' }
 describe('defaults', () => {
 	it('uses valid defaults as given', () => {
 		expect(defaultValues([tol, avg, ch, flag], channels)).toEqual({ tolerance_db: 3, averages: 64, channel: 'resp1', unity: true });
+	});
+
+	it('starts a second object param of the same objects on another object', () => {
+		const sets: ParamDescriptor[] = [
+			{ name: 'first', label: 'Basis', type: 'enum', options_from: 'objects:shape_set', options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }] },
+			{ name: 'second', label: 'Compared', type: 'enum', options_from: 'objects:shape_set', options: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }] },
+			{ name: 'geometry', label: 'Geometry', type: 'enum', options_from: 'objects:geometry', options: [{ value: 'G', label: 'G' }] }
+		];
+		expect(defaultValues(sets)).toEqual({ first: 'A', second: 'B', geometry: 'G' });
+		const one = sets.map((p) => (p.options_from === 'objects:shape_set' ? { ...p, options: [{ value: 'A', label: 'A' }] } : p));
+		expect(defaultValues(one)).toEqual({ first: 'A', second: 'A', geometry: 'G' });
+	});
+
+	it('offers (none) first for an optional object param, and does not hide the tool for want of one', () => {
+		const levels: ParamDescriptor = { name: 'levels', label: 'Q read off', type: 'enum', default: '', options_from: 'objects:sine_level_set' };
+		const [filled] = withObjects([levels], [{ name: 'Levels', kind: 'sine_level_set', groups: [] }]);
+		expect(filled.options).toEqual([
+			{ value: '', label: '(none)' },
+			{ value: 'Levels', label: 'Levels' }
+		]);
+		expect(defaultValues([filled])).toEqual({ levels: '' });
+		expect(hasObjectsFor(withObjects([levels], []))).toBe(true);
 	});
 
 	it('falls back sensibly when a default is missing or invalid', () => {
@@ -90,5 +112,76 @@ describe('parsing and hints', () => {
 		const prev = { channel: 'resp1', tolerance_db: 4 };
 		expect(reconcile([ch, tol], prev, channels)).toEqual({ channel: 'resp1', tolerance_db: 4 });
 		expect(reconcile([ch, tol], prev, [{ value: 'x', label: 'X' }])).toEqual({ channel: 'x', tolerance_db: 4 });
+	});
+});
+
+describe('object params', () => {
+	const data: ParamDescriptor = { name: 'data', label: 'Data', type: 'enum', options_from: 'objects:psd|frf' };
+	const objects: ProjectObject[] = [
+		{ name: 'Channel Table', kind: 'channel_table', groups: [] },
+		{ name: 'Run FRFs', kind: 'frf', groups: [] },
+		{ name: 'Run PSDs', kind: 'psd', groups: [] }
+	];
+
+	it('lists the project\'s objects of the kinds a param takes, in the project\'s order', () => {
+		expect(objectKinds(data)).toEqual(['psd', 'frf']);
+		const [filled] = withObjects([data], objects);
+		expect(filled.options?.map((o) => o.value)).toEqual(['Run FRFs', 'Run PSDs']);
+		expect(defaultFor(filled)).toBe('Run FRFs');
+		expect(validate(filled, 'Run PSDs')).toBeNull();
+		expect(validate(filled, 'Channel Table')).toBe('Choose one of the options.');
+	});
+
+	it('says which kind is missing when the project has none', () => {
+		const [filled] = withObjects([{ ...data, options_from: 'objects:shape_set' }], objects);
+		expect(validate(filled, '')).toBe('The project has no shape set.');
+	});
+
+	it('leaves other params alone', () => {
+		const number: ParamDescriptor = { name: 'n', label: 'N', type: 'number' };
+		expect(withObjects([number], objects)[0]).toBe(number);
+	});
+
+	it('lists the objects a verb applies to, by the verbs the summary gives each', () => {
+		const source: ParamDescriptor = { name: 'source', label: 'Source', type: 'enum', options_from: 'verb:integrate' };
+		const histories: ProjectObject[] = [
+			{ name: 'Forces', kind: 'time_history', groups: [], verbs: ['filter_data'] },
+			{ name: 'Accels', kind: 'time_history', groups: [], verbs: ['integrate', 'filter_data'] },
+			{ name: 'Older', kind: 'time_history', groups: [] }
+		];
+		expect(objectVerb(source)).toBe('integrate');
+		const [filled] = withObjects([source], histories);
+		expect(filled.options?.map((o) => o.value)).toEqual(['Accels']);
+		const [none] = withObjects([source], histories.slice(0, 1));
+		expect(validate(none, '')).toBe('Nothing in the project takes this.');
+	});
+
+	it('says a tool has nothing to run on when an object param lists nothing', () => {
+		const rate: ParamDescriptor = { name: 'rate', label: 'Rate', type: 'number' };
+		expect(hasObjectsFor(withObjects([data, rate], objects))).toBe(true);
+		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'objects:shape_set' }, rate], objects))).toBe(false);
+		expect(hasObjectsFor(withObjects([{ ...data, options_from: 'verb:integrate' }], objects))).toBe(false);
+		expect(hasObjectsFor([rate])).toBe(true);
+	});
+});
+
+describe('setting params', () => {
+	const params: ParamDescriptor[] = [
+		{ name: 'source', label: 'Source', type: 'enum', options_from: 'objects:time_history' },
+		{ name: 'frame_length', label: 'Frame', type: 'integer', default: 4096, min: 2, setting: 'averaging.frame_length' },
+		{ name: 'window', label: 'Window', type: 'enum', default: 'hann', setting: 'averaging.window', options: [{ value: 'hann', label: 'Hann' }, { value: 'flattop', label: 'Flat top' }] }
+	];
+	const run: ProjectObject = { name: 'Run', kind: 'time_history', groups: [], settings: { averaging: { frame_length: 8192, window: 'flattop' } } };
+
+	it('opens on the settings the source object holds', () => {
+		const out = withSettings(params, { source: 'Run', frame_length: 4096, window: 'hann' }, run);
+		expect(out).toEqual({ source: 'Run', frame_length: 8192, window: 'flattop' });
+	});
+
+	it('keeps the values where the object has no such setting, or one the param would refuse', () => {
+		const bare: ProjectObject = { name: 'Bare', kind: 'time_history', groups: [] };
+		expect(withSettings(params, { source: 'Bare', frame_length: 2048, window: 'hann' }, bare).frame_length).toBe(2048);
+		const odd: ProjectObject = { ...run, settings: { averaging: { frame_length: 1, window: 'bartlett' } } };
+		expect(withSettings(params, { source: 'Run', frame_length: 2048, window: 'hann' }, odd)).toEqual({ source: 'Run', frame_length: 2048, window: 'hann' });
 	});
 });

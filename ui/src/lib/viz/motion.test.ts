@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { decodeFrame } from '$lib/protocol/codec';
 import type { Motion, Shape3DView } from '$lib/protocol/types';
-import { advance, movedNodes, NORMAL_SPEED, sampleCount, SPEEDS, writeFrame } from './motion';
+import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 
 /** The golden frame's motion: three DOFs of four samples, two of them on node 1. */
 function golden(): Motion {
@@ -14,6 +14,14 @@ function golden(): Motion {
 describe('motion playback', () => {
 	it('counts the samples of each DOF', () => {
 		expect(sampleCount(golden())).toBe(4);
+	});
+
+	it('finds the sample nearest a time, held to the record', () => {
+		// samples at 0, 0.25, 0.5 and 0.75 s
+		const motion = golden();
+		expect([0, 0.12, 0.13, 0.5, 0.74].map((t) => sampleAt(motion, t))).toEqual([0, 0, 1, 2, 3]);
+		expect(sampleAt(motion, -1)).toBe(0);
+		expect(sampleAt(motion, 9)).toBe(3);
 	});
 
 	it('lists each moved node once', () => {

@@ -75,14 +75,30 @@ kit. Services never send pixels and the shell never computes the numbers.
  "y":{"label":"PSD","unit":"g²/Hz","scale":"log"|"linear"},
  "series":[{"name":"...","role":"measured"|"reference"|"tolerance"|"abort"|"limit"|"drive"|"other",
             "x":{"$array":..},"y":{"$array":..},
-            "shape":"line"|"steps"|"law", "edges":{"$array":..}}],
- "link":"frequency"}
+            "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
+ "link":"frequency",
+ "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}]}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
 dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot, drive thin solid. `limit` is a
 ceiling the controller holds a channel under; it never aborts. `link` (optional) names the cursor
 group; panes with the same `link` share a cursor position on x.
+
+`regions` (optional) shade spans of x behind the curves, as Visual Dynamics draws a time
+history's settings on it: a `frame` is one frame its spectra are averaged from (frames that
+overlap shade darker where they do), and a `cut` is a span left out, such as the ends a truncation
+discards; a `span` draws its edges alone. `label` is said when the span is hovered. A region with
+`"drag":{"op","params","low","high"?}` is moved on the plot: its middle slides it and, with
+`high`, an edge moves that edge. On release the shell runs `op` with `params`, the new x0 as
+`low` and the new x1 as `high`, and the answer's views take the result's place, as Visual
+Dynamics' averaging and truncation regions are dragged. They are not listed in the legend; the
+result's reading says what they are.
+
+`follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
+a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
+dashed in its measurement's color, above it, and left out of the legend, as Visual Dynamics draws
+it. It names an earlier series that is not itself a follower.
 
 `shape` (optional, default `line`) says how the points mean to be drawn, and the service that
 computed the data decides it. Spectral content is plotted the way it is calculated:
@@ -135,6 +151,28 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 `overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
 `matrix` view that `selects` this one (below).
 
+`pick` (optional) says what a click in the view does, as Visual Dynamics' Add mode and its
+planning pane take clicks. A click is a press and release in one place; a drag still turns the
+view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
+the result's place:
+
+```
+"pick":{"op":"project.add_node","params":{"geometry":"Plate"},
+        "target":"point"|"nodes"|"faces",
+        "hint":"Click in the view to place a node",
+        "ids":[1,2,3,...],             the node id of each of the model's own rows, first rows first
+        "count":3,                     nodes: how many make one; 0 takes any number, then Enter
+        "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
+        "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
+        "kept":[1,3],                  faces: the surfaces in use now
+        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+```
+
+A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
+on the model's plane when the model is flat, or else at the depth of the node nearest it. A
+`faces` click names a surface in `kept` in the `out` param and any other in the `back` param,
+taking it out of the other; the shell draws the surfaces not in `kept` muted.
+
 A `shape3d` may instead play measured data back on the mesh: `modes` is empty and `motion` says
 how each measured DOF moves, sample by sample.
 
@@ -153,6 +191,10 @@ of every node keeps a large mesh with a few sensors as small as the sensors' dat
 DOF stay where they are. Several DOFs may move one node (X, Y and Z, say). The shell plays a
 record through in about 10 s at normal speed, from an eighth to eight times that, as Visual
 Dynamics does, and colors each node by how far it is from rest at that sample.
+
+`link` (optional) ties playback to a `spectrum` of the same result with the same `link`: the
+spectrum marks the time the mesh shows with a line, and dragging that line moves playback there.
+The tie holds within one result; the hover cursor `link` names is shared as for any spectrum.
 
 **`waterfall`** (many records of one quantity, each at its own depth)
 
@@ -185,6 +227,32 @@ param set to that `value`, starting again at page 1. Hovering a curve reads its 
 and level. Records that do not fit one
 scene are on later pages, never drawn coarser. This is Visual Dynamics' 3-D data view
 (`hertzforge.drawing.viz.waterfall`).
+
+A waterfall can also be one of Visual Dynamics' stages, with these optional fields:
+
+```
+ "stations":["101Z+","102Z+",...],          the depth axis's labels, front to back
+ "depths":[0,0,1,1,...],                    each record's station: two records can share one
+ "roles":["reference","measured",...],      each record's pen; "measured" is colored by level,
+                                            any other role is drawn in that role's color
+ "zones":[{"station":0,"kind":"warning"|"abort","side":"upper"|"lower",
+           "x":{"$array"..},"inner":{"$array"..},"outer":{"$array"..}}],
+                                            a limit band; no outer runs it to the top or floor
+ "exceed":[{"station":0,"side":"upper"|"lower","x0":..,"x1":..,"z":..}],
+                                            lines past an abort limit: one rectangle each, from
+                                            its limit's level to the top (upper) or floor (lower)
+ "walls":[{"$array"..}],                    one abscissa a station: a translucent wall
+ "surface":true                             the records are one surface, each on the same
+                                            abscissa, rather than separate lines
+ "regions":[region...]                      spans of the abscissa across the whole stage, as a
+                                            spectrum's regions are, dragged the same way
+ "note":"..."                               optional words under the toolbar
+```
+
+With `stations` the depth axis is the stations, not the records; `records` still names each
+curve for hovering. The paired stage overlays two densities at each channel they share, the
+banded stage draws a specification's bands with or without a measurement, and a scalogram is a
+surface with its cone of influence as two walls.
 
 **`matrix`** (one value per row and column, such as a MAC)
 
@@ -240,6 +308,29 @@ one column per pixel of the plot, each the line nearest the column's center.
 Random"). The diagonal is each channel's PSD; an element above it gives the coherence
 `|G_ij|² / (G_ii G_jj)` and the phase of `G_ij`, under the `E[X X^H]` convention. `measured` is
 null until the run has measured; `reference` is null when there is none.
+**`table`** (rows of text under column headings, such as a mode table)
+
+```
+{"view":"table","title":"...",
+ "columns":["Mode","Frequency [Hz]","Damping [%]","Description"],
+ "rows":[["1","439.2000","1.250",""],...]}          one cell per column, as text
+```
+
+Every cell is text, written the way the value is usually quoted (the service formats it). The
+shell draws the table with its headings held at the top as it scrolls, puts a cell that reads as
+a number at the right of its column, and copies the whole table as tab-separated text, the
+headings first, so it pastes into a spreadsheet.
+
+A `shape3d` built from a geometry carries `node_ids`, the drawn nodes' ids (u32, one per node), so
+the view can caption the node under the pointer, coincident nodes listed together, as Visual
+Dynamics' scene does.
+
+A table may carry `"edit":{"op","params","columns","choices"?}`: its cells are typed into in place. `columns`
+gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
+operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
+and the first `table` view of the answer takes the table's place; a value the operation refuses
+leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
+the block it covers, cell by cell, as Visual Dynamics' tables paste.
 
 ## Operations: Declarative Panels
 
@@ -260,6 +351,30 @@ Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose 
 on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
 `channels` list returned by `dataset.open`.
 
+An `enum` that names one of the project's objects sets `"options_from":"objects:<kind>"`, or
+`"objects:<kind>|<kind>"` for more than one kind; the shell fills it with the names of the open
+project's objects of those kinds, in the project's order. Left out, it takes the first of them.
+An operation run when the project has none of the kinds a required param takes is refused, and
+the refusal names the kind.
+
+An `objects:` or `verb:` enum whose `default` is `""` is optional: `""` names no object, the shell
+offers it first as "(none)", and the tool is shown even when the project has no such object.
+
+An `enum` that names an object a core verb takes sets `"options_from":"verb:<verb>"`, such as
+`verb:integrate`; the shell fills it with the objects whose `verbs` (in the project summary) list
+that verb. Which verb applies to what is the core's own table (`Project.verbs`): Integrate takes a
+time history whose channels are accelerations or velocities, Compute FRFs one whose channels have
+both a response and a reference side, and so on, which no list of kinds can say. One more is
+listed beside the core's: `overload_check`, for a time history a linked channel table describes,
+which the Overload reading reads against that table's ranges. Left out, it
+takes the first of them, and an operation run when no object takes the verb is refused.
+
+A param with `"setting":"<group>.<field>"` opens on that setting of the object the operation's
+`source` param names, from the object's `settings` in the project summary, such as
+`averaging.frame_length`; when the object has no such setting, it opens on its default. The shell
+fills it again each time the source changes, so the form shows what the object holds before it is
+changed.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -267,7 +382,12 @@ the person picks one there.
 
 `workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
 `accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
-the selected dataset is of that kind ("tools follow the data").
+the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
+on the connection's own project: `op.run` names no `handle`, and is refused while no project is
+open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`, and
+the project counts as modified when the operation added an object. These operations are the
+core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes so far). A view drawn
+by a verb that adds an object offers no in-view choice, since choosing would run the verb again.
 
 ## Methods
 
@@ -277,7 +397,314 @@ the selected dataset is of that kind ("tools follow the data").
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
 | `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
-| `op.run` | `{"op","handle","params":{...}}` | `{"views":[view...]}` |
+| `op.run` | `{"op","handle"?,"params":{...}}` | `{"views":[view...],"project"?}` |
+| `project.new` | `{"title"?}` | `{"project"}` |
+| `project.open` | `{"path"}` | `{"project"}` |
+| `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
+| `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `report.*` | see Reports below | |
+| `project.rename` | `{"name","to"}` | `{"project"}` |
+| `project.remove` | `{"names"}` | `{"project"}` |
+| `project.activate` | `{"geometry"}` | `{"project"}` |
+| `project.duplicate` | `{"names"}` | `{"project"}` |
+| `project.refresh` | `{"names"}` | `{"project"}` |
+| `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
+| `project.children` | `{"name"}` | what the object holds (below) |
+| `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
+| `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
+| `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `units.system` | `{"name"?}` | `{"name","systems"}` |
+| `fit.*` | see Fitting modes below | |
+
+**The tree.** Each object in the summary carries `holds`, a few words on what it contains, and
+`banded` when a PSD or a specification is on proportional bands, which changes its icon.
+`project.children` answers what one object opens into, as Visual Dynamics' tree opens it, by
+`kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
+`families` (every family, each with the element `groups` holding elements of it and their counts),
+its `solids` (a boolean's operands as its `children`) and its `mates`; a data object is a `grid`,
+`rows` of a DOF and a quantity (a time history's with a `role`), `columns` of what tells one record
+from another (reference DOFs, capture labels, or one blank), `cells` of record indices (-1 for a
+hole), one icon key per record in `icons` (a quantity, two as `response/reference`, or empty for
+the object's own icon) and the records whose units are `undefined`; a shape set lists its `modes`;
+a channel table its `channels`; photographs their names; matched modes their `matches`; anything
+else is `none`. The answer describes the object as it stands and is asked again when the project
+changes.
+
+**Links and what fits.** The summary's `links` are the project's object groups as Visual Dynamics
+brackets them down the tree: each group's `members`, its `role` (`Basis`, the group comparisons are
+made against, or null) and its `name` (blank when it has none). An object that does not fit the
+geometry it answers to (its group's, else the active one), or a modal object with no shape set to
+answer to, carries `issue`: the `message` to show, and the `sub_items` (record, mode or channel
+indices) at fault, for the grid to mark. Incompatibility warns and never blocks, so a linked object
+with an issue is still linked. `project.link`, `project.unlink`, `project.set_basis`,
+`project.place`, `project.set_role` and `project.name_object_group` are operations (run by `op.run`)
+and answer with the project, as every act does.
+
+**The selection shows.** `project.show` answers what a selection in the tree shows, as Visual
+Dynamics' window shows it: `objects` are the selected objects' names, `records` maps an object's name
+to the record indices picked in its grid (a mode's or a channel's index for a shape set or a channel
+table), and `part` names a part of a geometry picked (`{"kind","id"}`: a family, an element group, a
+solid, a mate) or is null. One object shows by its kind: a geometry draws; a data object is its
+waterfall, or the records picked as curves; a shape set is its modes on the geometry of its group (or
+the active one) with its mode table, or the table and its MAC against itself without one; a channel
+table is its table. Two together show what the pair means: data on a geometry animates it (a shape set,
+a time history played back, an FRF's or a spectrum's operating deflection shape at its loudest line, a
+PSD's envelope), a channel table on a geometry marks its channels, two shape sets give their MAC, a
+measurement beside its requirement gives the comparison's spectra, two PSDs overlay. A selection with
+no joint reading shows each object on its own, and `note` says what was left out. The views come in the
+connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
+selections as Visual Dynamics keeps its bar: `flat` (the plot in place of the stage for a whole data
+object), `log_frequency` (decades on every frequency axis) and `component` (`magnitude`, `real`, `imag`
+or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
+read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a
+data object, `complex` for complex frequency data, `frequency` for anything on a frequency axis). A
+`shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,
+so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
+the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD
+on a geometry shows its principal shape, or the shape relative to one reference when one column of its
+grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC and, on a
+geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
+pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
+`projection` when the two sets are on different geometries) animates the second set projected onto the
+first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's three
+views are `prefs.mode_table`, `prefs.mac` and `prefs.shape_values` (one always up; `offers.shapes`), the
+values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in
+`offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
+set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
+`prefs.sensors` (offered as `arrows` and `sensors`) put DOF arrows and the channel table's sensors over
+every stage as `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the geometry's
+coordinates and `lines` u32 [L, 2] indexing them. A lone channel table shows typed into, its cells
+edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
+date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the
+Control column shows (`offers.environments`) and `prefs.table_view` the table or one of that loop's
+transformations (`offers.table_views`). `project.save_as` takes `units`: `display` for the connection's
+display unit system (the server puts its name in), `si` for the stored values.
+
+**The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
+the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
+every operation on the project whose object params the selected objects fill, each object on a param
+that takes its kind (or whose verb applies to it), every object used and every required object param
+filled. Each entry is `{"id","title","workspace","fill"}`, `fill` the params to set from the selection
+(and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
+how the selection is read; `acts` change the project (the operations named for the project's journaled
+verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
+Geometry, New Channel Table).
+
+**Display units.** Every view the analysis service sends is drawn in its connection's unit
+system, as Visual Dynamics draws its window in the system its selector names. A connection starts
+in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
+edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
+report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
+typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
+not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent. A view already on screen is not converted again; the shell draws it again.
+
+**Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
+has one, and it ends with the connection. A file reaches the service by its path on the service's
+machine; nothing is uploaded. `project.open` replaces the project with the one a `.hforge`, `.vdyn`,
+`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, and refuses any other file with a pointer to
+import it. `project.import` adds a file's objects to the project, making an empty one first when
+none is open. `units` declares what the file does not state, as the core's `import_file` options
+(`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
+project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
+and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
+group, provenance record and report block that names it follows; a name in use is refused.
+`project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
+none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
+nothing else names one. `project.duplicate` adds a copy of each object in `names` beside it, named
+"<name> copy", in no group. `project.refresh` computes each derived object in `names` again from
+its source, in place and under its own name; an empty list refreshes every stale object, sources
+first. Each answers with the project.
+
+Units a file did not state are declared by channel, not by record, as Visual Dynamics' Imported
+Units pane declares them. `project.units` gives an object's tables: a geometry's one row (`side`
+`object`, key `length`), a shape set's (key `mass`), and a data object's channels, one row per
+(DOF, quantity), since a drive point's accelerometer and load cell share a DOF and are two
+channels. An FRF has a `response` and a `reference` table; a cross-spectral matrix and every other
+data object one `channels` table. Each row has `key`, `label` (the DOF), `quantity` (what the
+channel measures, from its dimension or the file's claim, or null), `unit` (null while undeclared)
+and `choices`, the units offered first; any unit Hertzforge reads is accepted. `project.define_units`
+declares units by `side` and `key`. Every unit is read before anything changes. A record converts
+when each of its channels is named, here or before, and one only half named waits; `converted`
+lists the records converted. Project requests on one connection run one
+at a time, in the order they arrive.
+
+The project as the shell lists it:
+
+```
+{"title":"Bracket Survey","file":"/Users/.../survey.hforge"|null,"modified":true,
+ "objects":[{"name":"FRF","kind":"frf","records":22,"source":"SIM",
+             "units_defined":true,"groups":["Group 1"],"verbs":["fit_modes"]},
+            {"name":"Geometry","kind":"geometry","units_defined":false,"groups":[],
+             "verbs":["generate_rigid_body_modes","add_solid_block"]}]}
+```
+
+`kind` is the object's class name in lower case with underscores (`time_history`, `psd`, `frf`,
+`multiple_coherence`, `shape_set`, `geometry`, `channel_table`, `specification` and so on).
+`records` is present for data objects, `source` for measured data, and `units_defined` is false
+for an object imported without its units, which the shell marks as Visual Dynamics does. `groups`
+names the object groups it belongs to, by role (`Basis`), name, or `Group <n>` in the project's
+order. `active_geometry` is the active geometry's name, or null. `unresolved`, present only when
+there are any, lists the objects the project holds by reference to another `.hforge` file that
+was `not found` or has `changed` since: each with its `name`, `kind` and the `path` it was looked
+for at. They are not loaded and no tool lists them; saving keeps their references, and
+`project.remove` drops one. `stale` (present only when it is) says why a derived object no longer
+matches its source: the source's settings changed after it was computed. `verbs` are the core's
+processing verbs that apply to the object, in the core's order, then `overload_check` where a
+linked channel table describes a time history; `verb:` params are filled from them. `settings` is
+a time history's analysis settings, each group
+present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
+`frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+`features` (each report feature's key, true where it is on) and `identity` (each identification
+field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
+removed or changed an object, and false after an open or a save.
+
+A reader that can count reports its progress while an import runs, as event topic
+`project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A
+file the core cannot read is refused in the core's own words (`refused`, or `not_found` for a path
+with no file).
+
+**Fitting modes.** One mode at a time, on the residual, as Visual Dynamics' fitting screen fits
+them; the session is the core's `ModalFitSession`. Each connection has at most one fit, on its
+project, and opening or starting another project ends it.
+
+| Method | Params | Result |
+|---|---|---|
+| `fit.start` | `{"frf","shapes"?,"coherence"?}` | `{"fit"}` |
+| `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
+| `fit.move` | `{"frequency"}` | `{"fit"}` |
+| `fit.damping` | `{"damping"}` | `{"fit"}` |
+| `fit.fit` | `{}` | `{"fit"}` |
+| `fit.confirm` | `{"description"?}` | `{"fit"}` |
+| `fit.refine` | `{}` | `{"fit"}` |
+| `fit.delete` | `{"modes"}` | `{"fit"}` |
+| `fit.edit` | `{"mode","damping"?,"description"?}` | `{"fit"}` |
+| `fit.residual` | `{"show"}` | `{"fit"}` |
+| `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
+| `fit.end` | `{}` | `{}` |
+
+`fit.start` fits the FRF `frf`, or, with `shapes`, edits that shape set's fit (Edit Fit): its
+modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
+frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
+residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left
+out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and searches the
+damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
+`fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
+and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
+`fit.delete` takes back the confirmed modes at `modes` (indices into `modes`, from 0) and drops
+the preview. `fit.edit` types a confirmed mode's `damping` (a fraction of critical, above 0 and up
+to 1) or `description` into its row, as Visual Dynamics' fit table does; a damping changes the
+synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
+`coherence`, the name of a coherence or multiple coherence in the project, `fit.start` weights each
+response at each line by γ²/(1-γ²), as the core does (`ModalFitSession`).
+`fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
+"<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
+published. A step the core refuses is refused in its words; a fit whose FRF has left the project
+ends.
+
+`fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.
+`shapes` is the set the fit edits or last published, or null. `preview` is null or the previewed
+mode's `{"frequency","damping"}`; each of `modes` is `{"frequency","damping","description"}` in
+frequency order, damping a fraction of critical. `view` is a `spectrum` view, frames carrying its
+arrays as `op.run` does: x `Frequency` Hz, y `CMIF` log, `link` `frequency`, the measured CMIF's
+first four singular values (`CMIF 1`...), the synthesis's (`CMIF 1, synthesized`...) each
+`follows` its measured line, and the pending mode's curve (`Pending mode`, role `reference`).
+`mac` is a `matrix` view of the confirmed modes' auto-MAC with the preview's row and column last
+(`New: <f> Hz`), how alike the shapes are; null for fewer than two. `coherence` names the
+coherence the fit is weighted by, or null; `residual` says whether the view draws the residual's
+CMIF (`CMIF 1, residual`..., role `drive`). `half_power` is the half-power reading of the residual
+CMIF peak under the cursor: `{"frequency","low","high","q","damping","notes"}`, each of `low`,
+`high`, `q` and `damping` null where it could not be read, and `notes` saying why.
+
+**Run log.** The log keeper's run log, as Visual Dynamics' Run Log window keeps it while a test
+runs. A connection holds at most one log open; its lock is released when the log is closed or the
+connection ends, and a log another writer holds opens read-only, saying why.
+
+| Method | Params | Result |
+|---|---|---|
+| `runlog.new` | `{"path","title"?,"mirror"?}` | `{"log"}` |
+| `runlog.open` | `{"path","mirror"?}` | `{"log"}` |
+| `runlog.close` | `{}` | `{"log":null}` |
+| `runlog.reload` | `{}` | `{"log"}` |
+| `runlog.state` | `{}` | `{"log"}` (null with none open) |
+| `runlog.form` | `{"form","axis"?,"target"?}` | `{form...,"taken","time","preview"}` |
+| `runlog.preview` | `{"form","values","axis"?,"target"?}` | `{"text"}` |
+| `runlog.write` | `{"form","values","text"?,"time"?,"taken","author","axis"?,"target"?}` | `{"log","said"}` |
+
+`log` is the window's view: its `path`, `title`, `writable` and `read_only` (why it cannot be
+written), the `status` the strip reads (the current test, its axis, run, level and outcome, when
+the run started and stopped), the day's `rows` (each entry's `id`, `kind`, `test`, `date`, `line`,
+the `corrections` that changed it, and when it was entered if `late`), the `tests` with their
+states, the `holds` and `owed` lists, the current test's `header`, the `run` a level row goes into,
+the `level` it offers, and the `readings` forms the test's runs take.
+
+A `form` is one of: `level row`, `abort`, `note`, `clock check`, `person in`, `person out`, `run
+start`, `run stop`, `cause found`, `correct` (with the entry's id as `target`), `open test`,
+`roll`, `close test`, `release`, `header`, `sweep`, `shot`, `result`, `notch`, `deviation`,
+`anomaly`, `disposition`, `setting change`, `opinion` and `new log`. `runlog.form` describes it:
+its `title`, its `fields` (each `field`, `label`, `box` kind, `choices` for a choice and the
+`value` it opens with; a `heading` box titles a group), the `required` fields, the label of its
+line of free `text` ('' for none), a `note`, whether it takes an event time (`with_time`) and
+whether it computes something as it is typed (`live`). It is opened at `taken`, which `time` shows
+as HH:MM:SS. Each box's text goes back as typed in `values`, by field, and the service reads it by
+its box kind; `preview` is what a `live` form computes from it (the projection to full level, a
+sweep's current against its rating, a shot's checks and pulses, a notch's place in the plan, the
+hold a deviation answers), with the predictions drawn for the connection's project beside what is read: the notch Notch Prediction cut beside a notch, and the drives Drive Prediction asked for beside the level row. `runlog.write` writes it as its entries, the event time read from
+`time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
+what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
+
+**Reports.** Visual Dynamics' report on the connection's project, as the core writes it.
+
+| Method | Params | Result |
+|---|---|---|
+| `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
+| `report.render` | `{"name","theme"?}` | `{"name","html"}` |
+| `report.export` | `{"name","path"}` | `{"path"}` |
+| `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
+| `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
+| `report.print` | `{"name"}` | `{"html"}` |
+| `report.issue` | `{"name","step","path"?}` | `{"html","status"}`, `{"entry"}` or `{}`, and `"project"` |
+
+`report.generate` builds a report from a starter template bound by type to the project's objects
+(`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
+`transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
+gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
+nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
+shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
+added when it has another suffix), beside the target first and renamed over it.
+
+`report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
+tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
+and the pane for the selection. A click on a block posts `{"hforgeReport":{"op":"select","at":n}}`
+(`at` null outside every block) to the page's parent, which the shell answers with
+`report.editor` at that block and `"page":false`: the page has framed the block itself, so the
+answer leaves `html` and `references` out and nothing is rendered again. `title`, `marking` and `marking_color` (`ink` or `red`) are the
+report's; `blocks` how many it has; `insert` the Insert menu as `[kind, label]` pairs (Markdown,
+then `core.report.insert_options`); `references` the `[label, caption]` of each numbered figure
+and table, for a text block's `{{figure:<caption>}}` token. `block` is null with nothing selected,
+or the selected block's `index`, `kind` and `mode`, and either its `text` (a text block; `special`
+names a skeleton section, check or requirement block, which has a pane of its own) or its
+`fields` (`{field,label,value,options:[[value,label]...]}`, the objects it may name, symbolic
+bindings such as `@basis:ShapeSet` first) and `caption`.
+
+`report.print` gives the reader's page as it is printed: light, its figures drawn at print
+resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
+PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
+changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
+Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
+on, every required field entered, not already issued), marks it issued (or amended), and gives the
+page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
+issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
+puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+as text beside its `features`.
+
+`report.operate` applies one of VD's editor operations and answers with the editor at the block it
+leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound to the first
+object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
+`value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
+`marking` and `marking_color` (`value`).
 
 **Control service**
 
@@ -378,6 +805,7 @@ plain words: it never names a protocol method.
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
 | `law_not_checked` | `refused` | `mimo_random.start` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode` and `sim.start` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -728,6 +1156,23 @@ Result column is the `random.state` object below.
   `run_id`). It and `random.configure` are the ways out of `finished`.
 - **`random.clear`** drops the configuration and releases the station (`unconfigured`).
 
+### Shutting Down
+
+The control service does not end its process with a run live: a killed process can leave an
+output holding its last sample. Told to stop (Ctrl-C, SIGTERM or SIGHUP on Unix; Ctrl-C,
+Ctrl-Break or a closed console on Windows; and, started with `--watch-stdin`, the end of its
+standard input) it refuses every verb that could start or raise a drive (`shutting_down`; one
+already under way finishes first), ends a live run with the controlled stop, the path of
+`random.stop` (while driving, the level ramps down over `shutdown_ramp_s`; never an abort), and
+exits once the run has ended. The run's outcome is `safe_stop`, and its message says the service
+was shut down. Connections are served until then, so every screen sees the run end and keeps
+Stop and Abort. A stop that has not ended well after its ramp (three control loops, ten seconds
+and twice `shutdown_ramp_s`) is followed by the abort.
+
+`--watch-stdin` is for a parent process that starts the service, such as the desktop app: the
+parent stops it by closing the pipe on its standard input, never by killing it, and if the
+parent dies the operating system closes the pipe, so the run stops the same way.
+
 ### Run State
 
 `random.state` answers with the state object, and the `random.state` text event carries the same
@@ -780,7 +1225,7 @@ or abort was asked for (a controlled stop's ramp-down starts there), or where th
 | `completed` | The schedule finished |
 | `operator_stop` | `random.stop` |
 | `operator_abort` | `random.abort` |
-| `safe_stop` | Nobody held control for `timeout_s`; the service stopped the run (see Controller and Observers) |
+| `safe_stop` | The service stopped the run with the controlled stop: nobody held control for `timeout_s` (see Controller and Observers), or the service was shut down (see Shutting Down); `message` says which |
 | `aborted` | A protection abort tripped; `trip` says which |
 | `held` | The coherence gate held: the band coherence stayed below `coherence_floor`, so the run never drove at test level |
 | `sysid_level_unreachable` | System identification could not bring the control response to `pretest.level_db` within its drive ceiling, or the response did not settle on it; the run never drove at test level |

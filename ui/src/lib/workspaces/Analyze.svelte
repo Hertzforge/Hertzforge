@@ -1,19 +1,57 @@
 <script lang="ts">
 	/**
-	 * Analyze: pick a random-run dataset, pick a tool that accepts it, set its parameters, Run.
-	 * Each run adds a result card; spectrum panes that share a `link` share a cursor.
+	 * Analyze: pick a dataset, or open your own project, pick a tool that accepts it, set its
+	 * parameters, Run. Each run adds a result card; spectrum panes that share a `link` share a cursor.
 	 */
 	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
+	import type { Workspace } from '$lib/protocol/types';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
+	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import { cursors } from '$lib/viz/cursor';
+
+	/** A channel table's views, as VD's drop-down names them. */
+	const TABLE_VIEWS: Record<string, string> = { channels: 'Channels', response: 'Response transformation', reference: 'Reference transformation' };
+
+	/** Where a shape set's values are read, as VD names the choices. */
+	const VALUES_CHOICES: Record<string, string> = {
+		all: 'All DOFs',
+		control: 'Control channels',
+		reference: 'References',
+		response: 'Responses',
+		monitor: 'Monitors'
+	};
 
 	interface Props {
 		app: AppState;
+		/**
+		 * Show only the project's tools of this workspace (the Model workspace's), with no dataset to
+		 * pick: the same runner, the same results.
+		 */
+		only?: Workspace;
 	}
-	let { app }: Props = $props();
+	let { app, only }: Props = $props();
 
 	const a = $derived(app.analyze);
+	const tools = $derived(only ? a.tools.filter((o) => o.workspace === only) : a.tools);
+
+	// a workspace of its own works on the project, and on one of its own tools
+	$effect(() => {
+		if (!only) return;
+		if (app.project.summary && !a.onProject) a.selectProject();
+		if (a.onProject && tools.length && !tools.some((o) => o.id === a.opId)) a.selectOp(tools[0].id);
+	});
+
+	// a settings form opens on what its source object holds, and follows it when the source changes
+	$effect(() => a.followSource());
+
+	// a stage that reads at a line follows the frequency cursor of the plot beside it
+	$effect(() => {
+		const follows = a.shown?.views.some((v) => v.view === 'shape3d' && v.cursor === 'frequency');
+		if (!follows) return;
+		return cursors.subscribe('frequency', (state) => a.moveLine(state.x));
+	});
 
 	/**
 	 * The cell chosen in each result's MAC, by result id. A matrix that `selects` the result's
@@ -22,12 +60,27 @@
 	let pairs = $state<Record<number, { row: number; column: number }>>({});
 	const pairOf = (r: AnalyzeResult) => pairs[r.id] ?? { row: 0, column: 0 };
 	const linked = (r: AnalyzeResult) => r.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d');
+	/**
+	 * The one result filling the results area, by id, the others kept as they were behind it. A
+	 * result removed lets go of it, and a new one does too, so it is not run out of sight.
+	 */
+	let maximized = $state<number | null>(null);
+	const big = $derived(a.results.some((r) => r.id === maximized) ? maximized : null);
+	let newest = 0;
+	$effect(() => {
+		const top = Math.max(0, ...a.results.map((r) => r.id));
+		if (top > newest) maximized = null;
+		newest = top;
+	});
+
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 			e.preventDefault();
 			void a.run();
+		} else if (e.key === 'Escape' && big !== null && !(e.target as HTMLElement | null)?.closest?.('input, textarea, select')) {
+			maximized = null;
 		}
 	}
 
@@ -54,6 +107,8 @@
 
 <div class="analyze">
 	<aside class="side" aria-label="Dataset and tools">
+		<ProjectPanel {app} />
+		{#if !only}
 		<section class="block">
 			<h2 class="eyebrow">Dataset</h2>
 			{#if !app.catalog}
@@ -81,7 +136,7 @@
 			{/if}
 			{#if a.opening}<p class="muted small">Opening.</p>{/if}
 			{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
-			{#if a.opened}
+			{#if a.opened && !a.onProject}
 				<dl class="chips">
 					{#each summaryChips(a.opened.summary) as c (c.label)}
 						<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
@@ -90,12 +145,73 @@
 				</dl>
 			{/if}
 		</section>
+		{/if}
 
-		{#if a.opened}
+		{#if a.opened && a.onProject}
+			{@const picked = app.project.selection.objects}
+			{@const kinds = picked.map((n) => app.project.summary?.objects.find((o) => o.name === n)?.kind)}
+			{@const fitPair = picked.length === 2 && kinds.includes('frf') && kinds.includes('shape_set')}
+			<section class="block" data-testid="actions-frame">
+				<h2 class="eyebrow">
+					{#if picked.length}Actions <span class="for">for {picked.length === 1 ? picked[0] : `${picked.length} objects`}</span>{:else}Actions <span class="for">for the project</span>{/if}
+				</h2>
+				{#if !a.actions}
+					<p class="muted small">Asking what the selection can take.</p>
+				{:else}
+					{@const readings = a.actions.readings.filter((e) => !only || e.workspace === only)}
+					{@const acts = a.actions.acts.filter((e) => !only || e.workspace === only)}
+					{@const whole = a.actions.project.filter((e) => !only || e.workspace === only)}
+					{#if fitPair}
+						<div class="tools" role="group" aria-label="Fit">
+							<button class="tool" data-testid="action-edit-fit" onclick={() => { app.go('modal'); void app.fit.start(picked[kinds.indexOf('frf')], picked[kinds.indexOf('shape_set')]); }}>
+								<Icon name="tool" size={15} />
+								<span class="ttitle">Edit Fit</span>
+								<span class="tout">modal</span>
+							</button>
+						</div>
+					{/if}
+					{#if readings.length}
+						<h3 class="group">Readings</h3>
+						<div class="tools" role="radiogroup" aria-label="Readings" data-testid="action-readings">
+							{#each readings as e (e.id)}
+								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
+									<Icon name="tool" size={15} />
+									<span class="ttitle">{e.title}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#if acts.length}
+						<h3 class="group">Acts</h3>
+						<div class="tools" role="radiogroup" aria-label="Acts" data-testid="action-acts">
+							{#each acts as e (e.id)}
+								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
+									<Icon name="action" size={15} />
+									<span class="ttitle">{e.title}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#if whole.length}
+						<div class="tools" role="radiogroup" aria-label="Project acts" data-testid="action-project">
+							{#each whole as e (e.id)}
+								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
+									<Icon name="action" size={15} />
+									<span class="ttitle">{e.title}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+					{#if !readings.length && !acts.length && !whole.length}
+						<p class="muted small">{picked.length ? 'Nothing takes this selection together. Select less, or something else.' : 'Select an object in the tree to see what it can do.'}</p>
+					{/if}
+				{/if}
+			</section>
+		{:else if a.opened}
 			<section class="block">
 				<h2 class="eyebrow">Tools <span class="for">for {a.opened.kind.replace('_', ' ')} data</span></h2>
 				<div class="tools" role="radiogroup" aria-label="Tool" data-testid="tool-list">
-					{#each a.tools as op (op.id)}
+					{#each tools as op (op.id)}
 						<button class="tool" data-testid="tool-{op.id}" role="radio" aria-checked={a.opId === op.id} class:on={a.opId === op.id} onclick={() => a.selectOp(op.id)}>
 							<Icon name="tool" size={15} />
 							<span class="ttitle">{op.title}</span>
@@ -106,7 +222,7 @@
 			</section>
 		{/if}
 
-		{#if a.op && a.opened}
+		{#if a.op && a.opened && (a.onProject || tools.includes(a.op))}
 			<section class="block panel" aria-labelledby="op-title">
 				<div class="phead">
 					<h2 id="op-title">{a.op.title}</h2>
@@ -114,7 +230,7 @@
 				</div>
 				{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
 				<ParamForm
-					params={a.op.params.filter((p) => !p.in_view)}
+					params={a.params.filter((p) => !p.in_view)}
 					bind:values={a.values[a.op.id]}
 					channels={a.opened.channels}
 					showAllErrors={a.triedRun}
@@ -149,7 +265,133 @@
 			{/if}
 		</div>
 
-		{#if a.results.length === 0}
+		{#if a.reading}
+			<section class="selected" class:alone={a.results.length === 0} data-testid="reading-view" aria-label="The reading">
+				<header>
+					<h3>{a.reading.title}</h3>
+					<p class="meta">{a.shown?.title ?? ''}</p>
+					<button class="btn ghost sm" data-testid="reading-back" onclick={() => a.endReading()}>Back</button>
+				</header>
+				<div class="svviews" class:pair={a.reading.views.length === 2}>
+					{#each a.reading.views as v, i (i)}
+						<div class="view {v.view}">
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} />
+						</div>
+					{/each}
+				</div>
+			</section>
+		{:else if a.shown || a.showError}
+			<section class="selected" class:alone={a.results.length === 0} data-testid="selection-view" aria-label="What the selection shows">
+				<header>
+					<h3>{a.shown?.title ?? 'Selection'}</h3>
+					{#if a.shown?.note}<p class="meta" data-testid="selection-note">{a.shown.note}</p>{/if}
+					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
+					{#if a.shown?.offers}
+						{@const offers = a.shown.offers}
+						<div class="bar" role="toolbar" aria-label="How the data is read">
+							{#if offers.flat}
+								<div class="seg" role="radiogroup" aria-label="Stage or plot">
+									<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="read-3d" title="The 3-D stage, every record at its own depth" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
+									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
+								</div>
+							{/if}
+							{#if offers.frequency}
+								<button class="btn ghost sm" class:on={a.prefs.log_frequency} aria-pressed={a.prefs.log_frequency} data-testid="read-logf" title="Decades on every frequency axis" onclick={() => a.setPref('log_frequency', !a.prefs.log_frequency)}>Log f</button>
+							{/if}
+							{#if offers.complex}
+								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
+									<option value="magnitude">Magnitude</option>
+									<option value="real">Real part</option>
+									<option value="imag">Imaginary part</option>
+									<option value="phase">Phase</option>
+								</select>
+							{/if}
+							{#if a.shown?.views.some((v) => v.view === 'matrix')}
+								<div class="seg" role="radiogroup" aria-label="Bars or grid">
+									<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
+									<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
+								</div>
+							{/if}
+							{#if a.shown?.views.some((v) => v.view === 'shape3d' && v.overlays?.length)}
+								<button class="btn ghost sm" class:on={a.prefs.overlay} aria-pressed={a.prefs.overlay} data-testid="read-overlay" title="Animate the picked pair of modes over each other, the second phase-aligned to the first" onclick={() => a.setPref('overlay', !a.prefs.overlay)}>Overlay</button>
+							{/if}
+							{#if offers.projection}
+								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
+							{/if}
+							{#if offers.shapes}
+								{@const up = [a.prefs.mode_table, a.prefs.mac, a.prefs.shape_values].filter(Boolean).length}
+								<button class="btn ghost sm" class:on={a.prefs.mode_table} aria-pressed={a.prefs.mode_table} disabled={up === 1 && a.prefs.mode_table} data-testid="read-mode-table" title="The mode list: frequency, damping and a description to fill in" onclick={() => a.setPref('mode_table', !a.prefs.mode_table)}>Mode Table</button>
+								<button class="btn ghost sm" class:on={a.prefs.mac} aria-pressed={a.prefs.mac} disabled={up === 1 && a.prefs.mac} data-testid="read-mac" title="The MAC of the set against itself: how distinct its modes are" onclick={() => a.setPref('mac', !a.prefs.mac)}>MAC</button>
+								<button class="btn ghost sm" class:on={a.prefs.shape_values} aria-pressed={a.prefs.shape_values} disabled={up === 1 && a.prefs.shape_values} data-testid="read-shape-values" title="The shape values: a row per DOF and a column per mode" onclick={() => a.setPref('shape_values', !a.prefs.shape_values)}>Shape Values</button>
+								{#if a.prefs.shape_values}
+									{#if offers.values_dofs.length > 1}
+										<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
+											{#each offers.values_dofs as choice (choice)}
+												<option value={choice}>{VALUES_CHOICES[choice] ?? choice}</option>
+											{/each}
+										</select>
+									{/if}
+									<select class="field sm" aria-label="Form" data-testid="read-values-form" value={a.prefs.values_form} onchange={(e) => a.setPref('values_form', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.values_form)} title="The shapes at the DOFs (u = Φq), or a transformation there: the response transformation Φ⁺ (q = Φ⁺u), applied to motions, or the reference transformation Φᵀ, applied to forces and drive signals">
+										<option value="shapes">Shapes Φ</option>
+										<option value="response">Response transformation Φ⁺</option>
+										<option value="reference">Reference transformation Φᵀ</option>
+									</select>
+								{/if}
+							{/if}
+							{#if offers.environments.length > 1}
+								<select class="field sm" aria-label="Environment" data-testid="read-environment" value={a.prefs.environment ?? offers.environments[0]} onchange={(e) => a.setPref('environment', (e.currentTarget as HTMLSelectElement).value)} title="Which environment's control channels the Control column shows, and whose transformation the view drop-down offers">
+									{#each offers.environments as loop (loop)}<option value={loop}>{loop}</option>{/each}
+								</select>
+							{/if}
+							{#if offers.table_views.length > 1}
+								<select class="field sm" aria-label="Table view" data-testid="read-table-view" value={a.prefs.table_view} onchange={(e) => a.setPref('table_view', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.table_view)} title="The channels, or what the controller put over them: the response transformation, a row per controlled response over the control channels, or the reference transformation over the drives">
+									{#each offers.table_views as form (form)}<option value={form}>{TABLE_VIEWS[form] ?? form}</option>{/each}
+								</select>
+							{/if}
+							{#if offers.arrows}
+								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
+							{/if}
+							{#if offers.sensors}
+								<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
+							{/if}
+							{#if a.comparison && a.picks.length}
+								<button class="btn sm" data-testid="add-matches" title="Add the picked MAC squares to the matched modes for this pair of sets; created on first use" onclick={() => void a.addMatches()}>Add Matches</button>
+							{/if}
+						</div>
+					{/if}
+					{#if app.project.selection.objects.length === 1 && app.project.summary?.objects.find((o) => o.name === app.project.selection.objects[0])?.kind === 'report'}
+						<button class="btn sm" data-testid="open-report" onclick={() => { const name = app.project.selection.objects[0]; app.go('report'); void app.report.show(name); }}>Open in Report</button>
+					{/if}
+					<button class="btn ghost icon sm" data-testid="selection-clear" onclick={() => app.project.clearSelection()} aria-label="Clear the selection" title="Clear the selection">
+						<Icon name="close" size={14} />
+					</button>
+				</header>
+				{#if a.shown}
+					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
+					<div class="svviews" class:pair={a.shown.views.length === 2}>
+						{#each a.shown.views as v, i (i)}
+							<div class="view {v.view}">
+								<ViewRenderer
+									view={v}
+									layout="strip"
+									showTitle={v.view === 'spectrum'}
+									minHeight={240}
+									scope="selection"
+									selected={v.view === 'matrix' && v.selects ? a.pair : null}
+									picks={v.view === 'matrix' && v.selects ? a.picks : []}
+									onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
+									bars={v.view === 'matrix' && a.prefs.bars}
+									mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
+									overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
+									onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
+								/>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
+		{#if a.results.length === 0 && !a.shown && !a.showError && !a.reading}
 			<div class="empty">
 				<div class="frame" aria-hidden="true">
 					<svg viewBox="0 0 220 90" width="220" height="90">
@@ -164,9 +406,9 @@
 				</p>
 			</div>
 		{:else}
-			<div class="grid">
+			<div class="grid" class:one={big !== null}>
 				{#each a.results as r (r.id)}
-					<article class="card" data-testid="result-card" data-op={r.opId} aria-label="{r.opTitle} result">
+					<article class="card" class:big={r.id === big} class:tucked={big !== null && r.id !== big} data-testid="result-card" data-op={r.opId} aria-label="{r.opTitle} result">
 						<header>
 							<div class="ctext">
 								<h3>{r.opTitle}</h3>
@@ -174,6 +416,11 @@
 								<p class="meta params">{r.paramSummary}</p>
 							</div>
 							<span class="at num">{time(r.at)}</span>
+							<button class="btn ghost icon sm" data-testid="result-maximize" onclick={() => (maximized = r.id === big ? null : r.id)}
+								aria-pressed={r.id === big} aria-label={r.id === big ? 'Back to all the results' : 'Fill the results area with this result'}
+								title={r.id === big ? 'Back to all the results (Esc)' : 'Fill the results area'}>
+								<Icon name={r.id === big ? 'restore' : 'maximize'} size={14} />
+							</button>
 							<button class="btn ghost icon sm" data-testid="result-remove" onclick={() => a.removeResult(r.id)} aria-label="Remove this result" title="Remove">
 								<Icon name="close" size={14} />
 							</button>
@@ -191,6 +438,10 @@
 										onselect={v.view === 'matrix' && v.selects ? (cell) => (pairs[r.id] = cell) : undefined}
 										mode={v.view === 'shape3d' && linked(r) ? pairOf(r).row : 0}
 										overlay={v.view === 'shape3d' && linked(r) ? pairOf(r).column : null}
+										scope={String(r.id)}
+										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editCell(r.id, i, v.edit!, row, column, value) : undefined}
+										onspan={(v.view === 'spectrum' || v.view === 'waterfall') && v.regions?.some((g) => g.drag) ? (k, x0, x1) => a.dragSpan(r.id, v.regions![k].drag!, x0, x1) : undefined}
+										onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickIn(r.id, v.pick!, patch) : undefined}
 									/>
 								</div>
 							{/each}
@@ -258,6 +509,15 @@
 	}
 
 	.choices,
+	.group {
+		margin: var(--sp-2) 0 2px;
+		font-size: var(--text-2xs);
+		font-weight: var(--weight-medium);
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--text-4);
+	}
+
 	.tools {
 		display: flex;
 		flex-direction: column;
@@ -467,6 +727,144 @@
 		align-items: start;
 	}
 
+	.grid.one {
+		flex: 1;
+		min-height: 0;
+		grid-template-columns: minmax(0, 1fr);
+		grid-auto-rows: minmax(0, 1fr);
+		align-items: stretch;
+	}
+
+	.card.tucked {
+		display: none;
+	}
+
+	.card.big {
+		min-height: 0;
+	}
+
+	.card.big .views {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+	}
+
+	/* what can draw at any size takes the room; a table or a reading keeps its own height */
+	.card.big .view {
+		flex: none;
+	}
+
+	.card.big .view.spectrum,
+	.card.big .view.waterfall,
+	.card.big .view.shape3d,
+	.card.big .view.matrix {
+		flex: 1 1 0;
+		height: auto;
+		min-height: 320px;
+	}
+
+	/* the selection's views: what the tree's selection shows, filling the width; a pair side by side */
+	.selected {
+		display: flex;
+		flex-direction: column;
+		margin-bottom: var(--sp-4);
+		background: var(--bg-1);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-lg);
+	}
+
+	.selected.alone {
+		flex: 1;
+		min-height: 0;
+	}
+
+	.selected header {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		padding: var(--sp-3) var(--sp-3) var(--sp-2) var(--sp-4);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	.selected h3 {
+		font-size: var(--text-md);
+		font-weight: var(--weight-strong);
+		white-space: nowrap;
+	}
+
+	.selected header .meta {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.selected header .error {
+		color: var(--amber-2);
+	}
+
+	.selected header .bar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--sp-2);
+	}
+
+	.seg {
+		display: inline-flex;
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+	}
+
+	.seg button {
+		padding: 2px 8px;
+		font-size: var(--text-xs);
+		color: var(--text-2);
+		background: transparent;
+		border: none;
+		cursor: pointer;
+	}
+
+	.seg button.on {
+		color: var(--text-1);
+		background: var(--bg-3);
+	}
+
+	.selected header .btn.on {
+		color: var(--text-1);
+		background: var(--bg-3);
+	}
+
+	.field.sm {
+		padding: 2px 6px;
+		font-size: var(--text-xs);
+	}
+
+	.svviews {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--sp-3);
+		padding: var(--sp-3);
+		min-height: 0;
+	}
+
+	.svviews.pair {
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+	}
+
+	.selected.alone .svviews {
+		flex: 1;
+		min-height: 0;
+		align-content: start;
+	}
+
+	.selected .view.spectrum {
+		height: 340px;
+	}
+
+	.selected .view.matrix {
+		height: 420px;
+	}
+
 	.card {
 		display: flex;
 		flex-direction: column;
@@ -524,12 +922,13 @@
 		height: 340px;
 	}
 
+	/* the 3-D views grow with the window; a plot keeps its height, which suits a column of them */
 	.view.waterfall {
-		height: 480px;
+		height: clamp(480px, 64vh, 960px);
 	}
 
 	.view.shape3d {
-		height: 440px;
+		height: clamp(440px, 64vh, 960px);
 	}
 
 	.view.matrix {

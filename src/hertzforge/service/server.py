@@ -8,7 +8,8 @@ dataset, running an operation, framing a large result) runs in a worker
 thread so the event loop stays responsive.
 
 Datasets are opened once per process and shared; a handle belongs to the
-connection that opened it and ends with it.
+connection that opened it and ends with it. Each connection also has at
+most one project of its own (`project.*`), which ends with it.
 """
 
 from __future__ import annotations
@@ -17,27 +18,48 @@ import asyncio
 import importlib
 import itertools
 import logging
+import pkgutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import frames
+from . import display_units, fitting, frames, projects, reports, run_logs
 from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
-from .ops_modal import OPERATIONS as MODAL_OPERATIONS
-from .ops_modal_run import OPERATIONS as MODAL_RUN_OPERATIONS
-from .ops_random import OPERATIONS as RANDOM_OPERATIONS
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
 log = logging.getLogger('hertzforge.service')
 
-OPERATIONS: tuple[Operation, ...] = (RANDOM_OPERATIONS + MODAL_OPERATIONS
-                                     + MODAL_RUN_OPERATIONS)
+#: the operation modules served first, in this order; every other `ops_*` module of this package
+#: follows, by name, so a module of operations is served by being added
+FIRST_MODULES = ('ops_random', 'ops_modal', 'ops_modal_run', 'ops_project', 'ops_settings',
+                 'ops_model', 'ops_specify', 'ops_readings')
+
+
+def _operations() -> tuple[Operation, ...]:
+    """Every `ops_*` module's `OPERATIONS`, the `FIRST_MODULES` first."""
+    found = [m.name for m in pkgutil.iter_modules([str(Path(__file__).parent)])
+             if m.name.startswith('ops_')]
+    ordered = [n for n in FIRST_MODULES if n in found] + sorted(
+        n for n in found if n not in FIRST_MODULES)
+    return tuple(op for name in ordered
+                 for op in importlib.import_module(f'{__package__}.{name}').OPERATIONS)
+
+
+OPERATIONS: tuple[Operation, ...] = _operations()
+
+#: the requests on a connection's own project
+PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
+                   'project.rename', 'project.remove', 'project.activate',
+                   'project.duplicate', 'project.refresh',
+                   'project.units', 'project.define_units', 'project.children',
+                   'project.show', 'project.actions')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -189,15 +211,20 @@ class Service:
                 'summary': data.summary(),
                 'channels': [c.to_json() for c in data.channels]}
 
-    async def op_run(self, params: Mapping[str, Any],
-                     handles: dict[str, Handle]) -> dict[str, Any]:
-        """The result of one operation; the caller frames it in a worker,
-        since a dense model's shapes are megabytes."""
+    def operation(self, params: Any) -> Operation:
+        """The operation an `op.run` names."""
         _only(params, ('op', 'handle', 'params'), 'op.run')
         op = self.operations.get(params.get('op'))
         if op is None:
             raise not_found(f'No operation named {params.get("op")!r}; '
                             'catalog.list names the ones that exist.')
+        return op
+
+    async def op_run(self, params: Mapping[str, Any],
+                     handles: dict[str, Handle]) -> dict[str, Any]:
+        """The result of one operation; the caller frames it in a worker,
+        since a dense model's shapes are megabytes."""
+        op = self.operation(params)
         handle = handles.get(params.get('handle'))
         if handle is None:
             raise not_found(f'No open handle {params.get("handle")!r} on this '
@@ -209,6 +236,10 @@ class Service:
                           f'{handle.entry.kind}.')
         values = op.resolve(params.get('params', {}),
                             [c.value for c in handle.data.channels])
+        if values.get('units') == 'display':
+            # a file written in the display units is written in this
+            # connection's (Save As)
+            values['units'] = self.units
         views = await self.in_worker(op.run, handle.data, values)
         return {'views': views}
 
@@ -223,22 +254,254 @@ def _only(params: Any, allowed: Sequence[str], method: str) -> None:
                           f'it has no {", ".join(map(repr, extra))}')
 
 
+#: the shortest gap between two `project.progress` events of one file
+PROGRESS_INTERVAL_S = 0.1
+
+
 class Connection:
-    """One client: its handles, its requests in flight, and the lock that
-    keeps its frames whole."""
+    """One client: its handles, its project, its requests in flight, and
+    the lock that keeps its frames whole."""
 
     def __init__(self, service: Service, socket: ServerConnection) -> None:
         self.service: Service = service
         self.socket: ServerConnection = socket
         self.handles: dict[str, Handle] = {}
+        self.project: projects.OpenProject | None = None
+        #: one project request at a time: two imports must not add to one
+        #: project at once, and a save must not write one half-imported
+        self.project_lock: asyncio.Lock = asyncio.Lock()
+        #: the mode fit under way on the project (`fit.*`), or None
+        self.fit: fitting.Fit | None = None
+        #: the unit system views are drawn in (`units.system`); Visual
+        #: Dynamics' own to start (in-slinch-lbf-s, accelerations in g)
+        self.units: str = display_units.START
+        #: the run log this connection keeps (`runlog.*`), its requests one
+        #: at a time so entries are written in the order they were sent
+        self.run_log: run_logs.Keeper = run_logs.Keeper()
+        self.run_log_lock: asyncio.Lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
         self.sending: asyncio.Lock = asyncio.Lock()
+        self._seq = itertools.count(1)
 
     async def send(self, frame: str | bytes) -> None:
         """Send one frame, under the lock, so concurrent responses never
         interleave on the socket."""
         async with self.sending:
             await self.socket.send(frame)
+
+    async def event(self, topic: str, data: dict[str, Any]) -> None:
+        """Send one event on `topic`, numbered in this connection's order."""
+        try:
+            await self.send(frames.encode_text(
+                {'type': 'event', 'topic': topic, 'seq': next(self._seq),
+                 'data': data}))
+        except ConnectionClosed:
+            pass
+
+    def progress(self, path: str) -> Callable[[int, int], None]:
+        """A (done, total) callable for a reader on a worker thread that
+        sends `project.progress` events, at most one per
+        PROGRESS_INTERVAL_S and always the last."""
+        loop = asyncio.get_running_loop()
+        last = [-PROGRESS_INTERVAL_S]
+
+        def report(done: int, total: int) -> None:
+            now = time.monotonic()
+            if now - last[0] < PROGRESS_INTERVAL_S and done < total:
+                return
+            last[0] = now
+            data = {'done': int(done), 'total': int(total), 'path': path}
+            asyncio.run_coroutine_threadsafe(
+                self.event('project.progress', data), loop)
+        return report
+
+    async def project_request(self, method: str,
+                              params: Any) -> dict[str, Any]:
+        """Answer one `project.*` request on this connection's project, after
+        any still running."""
+        async with self.project_lock:
+            return await self._project_request(method, params)
+
+    async def _project_request(self, method: str,
+                               params: Any) -> dict[str, Any]:
+        call = self.service.in_worker
+        if method == 'project.new':
+            _only(params, ('title',), method)
+            self.project = await call(projects.new, params)
+            self.fit = None
+            return {'project': projects.summary(self.project)}
+        if method == 'project.open':
+            _only(params, ('path',), method)
+            self.project = await call(projects.open_file, params)
+            self.fit = None
+            return {'project': projects.summary(self.project)}
+        if method == 'project.import':
+            _only(params, ('path', 'units'), method)
+            path = params.get('path')
+            report = self.progress(path) if isinstance(path, str) else None
+            self.project, added = await call(projects.import_file, self.project,
+                                             params, report)
+            return {'added': added, 'project': projects.summary(self.project)}
+        edits = {'project.rename': (projects.rename, ('name', 'to')),
+                 'project.remove': (projects.remove, ('names',)),
+                 'project.activate': (projects.activate, ('geometry',)),
+                 'project.duplicate': (projects.duplicate, ('names',)),
+                 'project.refresh': (projects.refresh, ('names',))}
+        if method == 'project.units':
+            _only(params, ('name',), method)
+            return await call(projects.units, self.project, params)
+        if method == 'project.children':
+            _only(params, ('name',), method)
+            return await call(projects.children, self.project, params)
+        if method == 'project.actions':
+            _only(params, ('objects', 'records'), method)
+            return await call(projects.actions, self.project, params)
+        if method == 'project.show':
+            _only(params, ('objects', 'records', 'part', 'prefs'), method)
+            shown = await call(projects.show, self.project, params)
+            display_units.convert(shown['views'], self.units)
+            return shown
+        if method == 'project.define_units':
+            _only(params, ('name', 'units'), method)
+            converted = await call(projects.define_units, self.project, params)
+            assert self.project is not None
+            return {'converted': converted, 'project': projects.summary(self.project)}
+        if method in edits:
+            edit, keys = edits[method]
+            _only(params, keys, method)
+            await call(edit, self.project, params)
+            assert self.project is not None
+            return {'project': projects.summary(self.project)}
+        _only(params, ('path', 'compress'), method)
+        written = await call(projects.save, self.project, params)
+        assert self.project is not None
+        return {'path': written, 'project': projects.summary(self.project)}
+
+    async def project_op(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """An operation on this connection's project: its views and the
+        project's summary, which counts as modified when the operation
+        added or removed an object."""
+        op = self.service.operation(params)
+        if 'handle' in params:
+            raise bad_request(f'{op.id} works on the connection\'s project and '
+                              'takes no "handle"')
+        async with self.project_lock:
+            state = self.project
+            if state is None:
+                raise refused(f'{op.title} works on a project, and none is open; '
+                              'project.open or project.import opens one')
+            project = state.project
+            values = op.resolve(
+                params.get('params', {}),
+                objects={name: projects.kind_of(obj)
+                         for name, obj in project.items()},
+                verbs={name: projects.verbs_of(project, name) for name in project})
+            before = list(project)
+            views = await self.service.in_worker(op.run, project, values)
+            if op.edits or list(project) != before:
+                state.modified = True
+            display_units.convert(views, self.units)
+            return {'views': views, 'project': projects.summary(state)}
+
+    async def report_request(self, method: str, params: Any) -> dict[str, Any]:
+        """Answer one `report.*` request on this connection's project."""
+        keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
+                'report.export': ('name', 'path'),
+                'report.editor': ('name', 'selected', 'theme', 'page'),
+                'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
+                                   'kind', 'field', 'value'),
+                'report.print': ('name',), 'report.issue': ('name', 'step', 'path')}
+        _only(params, keys[method], method)
+        call = self.service.in_worker
+        async with self.project_lock:
+            if self.project is None:
+                raise refused(f'{method} works on a project, and none is open')
+            project = self.project.project
+            if method == 'report.generate':
+                name = await call(reports.generate, project, params)
+                self.project.modified = True
+                return {'name': name, 'project': projects.summary(self.project)}
+            if method == 'report.render':
+                html = await call(reports.render, project, params, 'report.render', self.system)
+                return {'name': params['name'], 'html': html}
+            if method == 'report.print':
+                return {'html': await call(reports.print_page, project, params, self.system)}
+            if method == 'report.issue':
+                done = await call(reports.issue, project, params, self.system)
+                self.project.modified = True
+                return {**done, 'project': projects.summary(self.project)}
+            if method == 'report.editor':
+                return await call(reports.edit_page, project, params, self.system)
+            if method == 'report.operate':
+                edited = await call(reports.operate, project, params, self.system)
+                self.project.modified = True
+                return {**edited, 'project': projects.summary(self.project)}
+            return {'path': await call(reports.export, project, params, self.system)}
+
+    @property
+    def system(self) -> Any:
+        """The `UnitSystem` this connection draws in."""
+        from hertzforge.units import SYSTEMS
+
+        return SYSTEMS[self.units]
+
+    def fit_state(self, fit: fitting.Fit) -> dict[str, Any]:
+        """The fit's state with its CMIF drawn in this connection's units."""
+        state = fitting.state(fit)
+        display_units.convert([state['view']], self.units)
+        return state
+
+    def units_request(self, params: Any) -> dict[str, Any]:
+        """`units.system`: the unit system this connection's views are drawn
+        in, set when `name` is given; the systems there are."""
+        _only(params, ('name',), 'units.system')
+        name = params.get('name')
+        if name is not None:
+            if name not in display_units.systems():
+                raise bad_request(f'units.system "name" is one of '
+                                  f'{", ".join(display_units.systems())}')
+            self.units = name
+        return {'name': self.units, 'systems': display_units.systems()}
+
+    async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
+        """Answer one `fit.*` request: a step of the mode fit on this
+        connection's project, and the fit's state after it."""
+        if not isinstance(params, Mapping):
+            raise bad_request(f'{method} "params" must be an object, not '
+                              f'{json_type(params)}')
+        call = self.service.in_worker
+        async with self.project_lock:
+            if self.project is None:
+                raise refused(f'{method} works on a project, and none is open')
+            project = self.project.project
+            if method == 'fit.start':
+                _only(params, ('frf', 'shapes', 'coherence'), method)
+                self.fit = await call(fitting.start, project, params)
+                return {'fit': await call(self.fit_state, self.fit)}
+            if method == 'fit.end':
+                _only(params, (), method)
+                self.fit = None
+                return {}
+            fit = self.fit
+            if fit is None:
+                raise refused(f'{method} needs a fit under way; fit.start begins one')
+            if fit.frf not in project:
+                self.fit = None
+                raise refused(f'{fit.frf}, the FRF being fitted, is no longer in the '
+                              'project; start the fit again')
+            if method == 'fit.publish':
+                _only(params, ('name',), method)
+                name = await call(fitting.publish, project, fit, params)
+                self.project.modified = True
+                return {'name': name, 'project': projects.summary(self.project),
+                        'fit': await call(self.fit_state, fit)}
+            keys = {'fit.find': ('low', 'high'), 'fit.move': ('frequency',),
+                    'fit.damping': ('damping',), 'fit.confirm': ('description',),
+                    'fit.delete': ('modes',), 'fit.edit': ('mode', 'damping', 'description'),
+                    'fit.residual': ('show',)}
+            _only(params, keys.get(method, ()), method)
+            await call(fitting.act, fit, method, params)
+            return {'fit': await call(self.fit_state, fit)}
 
     async def serve(self) -> None:
         """Send `hello`, then answer each request in its own task until the
@@ -269,6 +532,9 @@ class Connection:
         finally:
             for task in self.tasks:
                 task.cancel()
+            # the log's lock is released with the connection, so another
+            # writer can take it
+            self.run_log.close()
 
     async def answer(self, request: dict[str, Any]) -> None:
         """Run one request and send its response. A ProtocolError becomes an
@@ -287,8 +553,42 @@ class Connection:
                 result = await self.service.dataset_open(params, self.handles)
                 frame = frames.pack({'type': 'response', 'id': ident,
                                      'result': result})
+            elif method == 'op.run' and self.service.operation(params).accepts == 'project':
+                result = await self.project_op(params)
+                frame = await self.service.in_worker(
+                    frames.pack, {'type': 'response', 'id': ident,
+                                  'result': result})
             elif method == 'op.run':
                 result = await self.service.op_run(params, self.handles)
+                display_units.convert(result.get('views', []), self.units)
+                frame = await self.service.in_worker(
+                    frames.pack, {'type': 'response', 'id': ident,
+                                  'result': result})
+            elif method in PROJECT_METHODS:
+                result = await self.project_request(method, params)
+                if method == 'project.show':
+                    # its views carry arrays, as an operation's do
+                    frame = await self.service.in_worker(
+                        frames.pack, {'type': 'response', 'id': ident, 'result': result})
+                else:
+                    frame = frames.encode_text({'type': 'response', 'id': ident,
+                                                'result': result})
+            elif method in reports.REPORT_METHODS:
+                result = await self.report_request(method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
+            elif method == 'units.system':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': self.units_request(params)})
+            elif method in run_logs.RUN_LOG_METHODS:
+                async with self.run_log_lock:
+                    project = self.project.project if self.project is not None else None
+                    result = await self.service.in_worker(run_logs.request, self.run_log,
+                                                          method, params, project, self.system)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
+            elif method in fitting.FIT_METHODS:
+                result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
                     frames.pack, {'type': 'response', 'id': ident,
                                   'result': result})
@@ -296,7 +596,11 @@ class Connection:
                 raise ProtocolError(
                     'unknown_method',
                     f'The analysis service has no method {method!r}; it '
-                    'answers catalog.list, dataset.open and op.run.')
+                    'answers catalog.list, dataset.open, op.run, '
+                    f'{", ".join(PROJECT_METHODS)}, '
+                    f'{", ".join(fitting.FIT_METHODS)}, '
+                    f'{", ".join(run_logs.RUN_LOG_METHODS)} and '
+                    f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)
         except asyncio.CancelledError:

@@ -255,7 +255,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	law_check_unsupported: 'This Law Cannot Be Checked Here',
 	law_check_running: 'A Law Check Is Already Running',
 	law_check_not_recorded: 'The Check Was Not Recorded',
-	law_not_checked: 'The Law Has Not Passed Its Check'
+	law_not_checked: 'The Law Has Not Passed Its Check',
+	shutting_down: 'The Control Service Is Shutting Down'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {

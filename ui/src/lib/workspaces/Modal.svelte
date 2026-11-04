@@ -4,6 +4,7 @@
 	 * shape view; arrow keys in the table step through modes.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
+	import FitPanel from '$lib/modal/FitPanel.svelte';
 	import { formatFixed } from '$lib/viz/format';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
@@ -15,11 +16,31 @@
 	const m = $derived(app.modal);
 	let table = $state<HTMLElement | null>(null);
 
+	// the project's FRFs a fit can start on, and the shape sets an Edit Fit can start from
+	const objects = $derived(app.project.summary?.objects ?? []);
+	const frfs = $derived(objects.filter((o) => o.kind === 'frf').map((o) => o.name));
+	const shapeSets = $derived(objects.filter((o) => o.kind === 'shape_set').map((o) => o.name));
+	const coherences = $derived(objects.filter((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence').map((o) => o.name));
+	let frf = $state('');
+	let from = $state('');
+	let weight = $state('');
+	$effect(() => {
+		if (!frfs.includes(frf)) frf = frfs[0] ?? '';
+		if (from && !shapeSets.includes(from)) from = '';
+		if (weight && !coherences.includes(weight)) weight = '';
+	});
+
 	// The first model opens on arrival, so the view is never empty when there is something to show.
 	$effect(() => {
 		const first = m.datasets[0];
 		if (first && !m.datasetId) void m.select(first.id);
 	});
+
+	/** Show `name`'s modes: the fit ends first, since the stage shows one or the other. */
+	async function showShapes(name: string) {
+		if (app.fit.state) await app.fit.end();
+		await m.selectShapes(name);
+	}
 
 	function onTableKey(e: KeyboardEvent) {
 		const n = m.view?.modes.length ?? 0;
@@ -38,6 +59,33 @@
 
 <div class="modal">
 	<aside class="side" aria-label="Model and modes">
+		{#if frfs.length}
+			<section class="block" data-testid="fit-start">
+				<h2 class="eyebrow">Fit modes</h2>
+				<label class="lbl" for="fit-frf">FRF</label>
+				<select id="fit-frf" class="field" bind:value={frf} data-testid="fit-frf">
+					{#each frfs as name (name)}<option value={name}>{name}</option>{/each}
+				</select>
+				{#if shapeSets.length}
+					<label class="lbl" for="fit-from">Start from</label>
+					<select id="fit-from" class="field" bind:value={from} data-testid="fit-from">
+						<option value="">A new fit</option>
+						{#each shapeSets as name (name)}<option value={name}>Edit Fit of {name}</option>{/each}
+					</select>
+				{/if}
+				{#if coherences.length}
+					<label class="lbl" for="fit-weight">Weight by</label>
+					<select id="fit-weight" class="field" bind:value={weight} data-testid="fit-weight" title="Weight each response at each line by its coherence, γ²/(1-γ²)">
+						<option value="">No weighting</option>
+						{#each coherences as name (name)}<option value={name}>{name}</option>{/each}
+					</select>
+				{/if}
+				<button class="btn primary sm start" data-testid="fit-begin" onclick={() => app.fit.start(frf, from || undefined, weight || undefined)} disabled={!frf || app.fit.busy !== null}>
+					{from ? 'Edit Fit' : 'Fit Modes'}
+				</button>
+				{#if app.fit.error && !app.fit.state}<p class="error" role="alert">{app.fit.error}</p>{/if}
+			</section>
+		{/if}
 		<section class="block">
 			<h2 class="eyebrow">Model</h2>
 			{#if !app.catalog}
@@ -48,6 +96,14 @@
 				<p class="muted">The analysis service lists no modal models.</p>
 			{:else}
 				<div class="choices" role="radiogroup" aria-label="Model" data-testid="model-picker">
+					{#if app.project.summary?.active_geometry}
+						{#each shapeSets as name (name)}
+							<button class="choice" data-testid="shapes-{name}" role="radio" aria-checked={m.datasetId === `project:${name}`} class:on={m.datasetId === `project:${name}`} onclick={() => showShapes(name)}>
+								<span class="ctitle">{name}</span>
+								<span class="cdesc">Your project's modes, on {app.project.summary.active_geometry}.</span>
+							</button>
+						{/each}
+					{/if}
 					{#each m.datasets as ds (ds.id)}
 						<button class="choice" data-testid="dataset-{ds.id}" role="radio" aria-checked={m.datasetId === ds.id} class:on={m.datasetId === ds.id} onclick={() => m.select(ds.id)}>
 							<span class="ctitle">{ds.title}</span>
@@ -103,7 +159,9 @@
 	</aside>
 
 	<main class="stage" aria-label="Mode shape">
-		{#if m.view}
+		{#if app.fit.state}
+			<FitPanel fit={app.fit} />
+		{:else if m.view}
 			<ViewRenderer view={m.view} bind:mode={m.mode} />
 		{:else}
 			<div class="placeholder">
@@ -137,6 +195,21 @@
 
 	.block h2.eyebrow {
 		margin-bottom: var(--sp-2);
+	}
+
+	.lbl {
+		display: block;
+		margin: var(--sp-2) 0 2px;
+		font-size: var(--text-xs);
+		color: var(--text-3);
+	}
+
+	.block select {
+		width: 100%;
+	}
+
+	.start {
+		margin-top: var(--sp-2);
 	}
 
 	.modes {

@@ -26,7 +26,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'model',
 		title: 'Model',
 		rail: 'Model',
-		live: false,
+		live: true,
 		summary: 'Finite element models of the test article and fixtures.',
 		moves: ['Meshing', 'Modal solver', 'Frequency response solver', 'Model to test correlation']
 	},
@@ -34,7 +34,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'specify',
 		title: 'Specify',
 		rail: 'Specify',
-		live: false,
+		live: true,
 		summary: 'Environmental test specification tools.',
 		moves: ['Profile authoring', 'Enveloping and derivation', 'Fatigue damage equivalence', 'Specification library']
 	},
@@ -43,7 +43,7 @@ export const WORKSPACES: WorkspaceInfo[] = [
 		id: 'report',
 		title: 'Report',
 		rail: 'Report',
-		live: false,
+		live: true,
 		summary: 'Reports from every workspace.',
 		moves: ['Test reports', 'Analysis reports', 'Modal survey reports', 'Templates and export']
 	}

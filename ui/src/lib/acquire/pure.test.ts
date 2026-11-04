@@ -169,7 +169,7 @@ describe('words', () => {
 			'manual_mode_required', 'not_a_rung', 'feasibility_exceeded', 'override_not_needed', 'arm_refused',
 			'ni_driver_unavailable', 'no_ni_devices', 'scan_failed', 'devices_absent', 'mixed_simulated_and_real',
 			'mixed_timing_families', 'not_enough_channels', 'hardware_busy', 'stale_revision', 'table_invalid',
-			'config_invalid', 'shaker_record_invalid'
+			'config_invalid', 'shaker_record_invalid', 'shutting_down'
 		];
 		for (const r of reasons) expect(refusalTitle(r)).not.toBe('Not Done');
 		const r = toRefusal('Use Station', new RequestError('refused', 'Selected device not present: cDAQ2.', 'station.select', 'devices_absent', { missing: ['cDAQ2'], found: ['cDAQ1'] }));

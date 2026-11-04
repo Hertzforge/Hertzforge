@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * One colored cell per value (a MAC, say), drawn on a 2-D canvas: a few thousand cells at most,
 	 * redrawn only on resize, theme change or hover. Color is the sequential colormap over the
@@ -11,6 +12,7 @@
 	import type { MatrixView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
+	import { CHECKER, MARK_RED, PICK_BLUE } from './macBars';
 	import { cellAt, cellText, inkOn, matrixLayout, type MatrixLayout } from './matrix';
 
 	interface Props {
@@ -18,10 +20,13 @@
 		showTitle?: boolean;
 		/** The cell whose pair the linked shape view shows. */
 		selected?: { row: number; column: number } | null;
-		onselect?: (cell: { row: number; column: number }) => void;
+		/** Every picked cell, outlined in blue; the selected one is among them. */
+		picks?: { row: number; column: number }[];
+		/** A click chose a cell; `extend` with the modifier held, to add it to the picks. */
+		onselect?: (cell: { row: number; column: number }, extend?: boolean) => void;
 	}
 
-	let { view, showTitle = true, selected = null, onselect }: Props = $props();
+	let { view, showTitle = true, selected = null, picks = [], onselect }: Props = $props();
 
 	const ROWS = $derived(view.rows.ticks.length);
 	const COLUMNS = $derived(view.columns.ticks.length);
@@ -83,6 +88,26 @@
 					ctx.fillText(cellText(v), x + l.cellW / 2, y + l.cellH / 2);
 				}
 			}
+		}
+		// committed matches wear a red checker, as VD's grid marks them
+		for (const [r, c] of view.matched ?? []) {
+			if (r >= ROWS || c >= COLUMNS) continue;
+			const x = l.x0 + c * l.cellW;
+			const y = l.y0 + r * l.cellH;
+			const k = CHECKER;
+			ctx.fillStyle = MARK_RED;
+			for (let i = 0; i < k; i++) {
+				for (let j = 0; j < k; j++) {
+					if ((i + j) % 2) continue;
+					ctx.fillRect(x + (i * l.cellW) / k, y + (j * l.cellH) / k, l.cellW / k + 0.5, l.cellH / k + 0.5);
+				}
+			}
+		}
+		for (const p of picks) {
+			if (p.row >= ROWS || p.column >= COLUMNS) continue;
+			ctx.strokeStyle = PICK_BLUE;
+			ctx.lineWidth = 2;
+			ctx.strokeRect(l.x0 + p.column * l.cellW + 1, l.y0 + p.row * l.cellH + 1, l.cellW - 2, l.cellH - 2);
 		}
 		if (hover) {
 			ctx.strokeStyle = cssVar('--text-1');
@@ -153,7 +178,7 @@
 		if (!layout || !onselect) return;
 		const box = canvas.getBoundingClientRect();
 		const at = cellAt(e.clientX - box.left, e.clientY - box.top, layout);
-		if (at) onselect(at);
+		if (at) onselect(at, e.metaKey || e.ctrlKey || e.shiftKey);
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -174,14 +199,26 @@
 		void size;
 		void hover;
 		void selected;
+		void picks;
 		void theme.version;
 		void view;
 		draw();
 	});
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The cells, as an image on the clipboard. */
+	async function copyImage() {
+		if (!canvas) return;
+		copiedImage = await copyCanvas(canvas, plotBackground(canvas), undefined, view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
 </script>
 
 <section class="matrix" data-testid="view-matrix" aria-label={view.title}>
-	{#if showTitle}<h3 class="title">{view.title}</h3>{/if}
+	<div class="mhead">
+		{#if showTitle}<h3 class="title">{view.title}</h3>{/if}
+		<button class="btn ghost sm copyimg" data-testid="matrix-copy-image" onclick={copyImage} title="Copy the matrix as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
+	</div>
 	<div class="plot" bind:this={host}>
 		<canvas
 			bind:this={canvas}
@@ -217,6 +254,13 @@
 </section>
 
 <style>
+	.mhead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-2);
+	}
+
 	.matrix {
 		display: flex;
 		flex-direction: column;

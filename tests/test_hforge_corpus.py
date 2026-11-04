@@ -114,7 +114,7 @@ def test_a_vdyn_project_moves_across_unchanged(tmp_path, name):
     moved = Project.open(os.path.join(VDYN_CORPUS, name)).save(tmp_path / 'moved')
     again = Project.open(moved).save(tmp_path / 'again.hforge')
     first, second = file_tree(moved), file_tree(again)
-    assert first['@' + native.STAMP] == native.SCHEMA_VERSION
+    assert first['@' + native.STAMP] == native.BASE_SCHEMA
     assert set(first) == set(second), set(first) ^ set(second)
     assert not [key for key in first if not same(first[key], second[key])]
 
@@ -151,7 +151,7 @@ def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     with h5py.File(newer, 'r+') as f:
         f.attrs[native.STAMP] = native.SCHEMA_VERSION + 1
     with pytest.raises(ValueError, match=(
-            r'newer Hertzforge \(schema 2; this build reads up to 1\)')):
+            r'newer Hertzforge \(schema 3; this build reads up to 2\)')):
         native.load(newer)
 
 

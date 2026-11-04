@@ -1,0 +1,427 @@
+<script lang="ts">
+	/**
+	 * The connection's own project: Open, Import and Save, what is under way, and the objects it
+	 * holds. In the desktop app the buttons open the native dialogs; in a browser they ask for a
+	 * path, since a browser never gives the shell a file's path (files.ts).
+	 */
+	import type { AppState } from '$lib/app/state.svelte';
+	import Icon from '$lib/shell/Icon.svelte';
+	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
+	import ProjectTree from './ProjectTree.svelte';
+	import UnitsEditor from './UnitsEditor.svelte';
+
+	interface Props {
+		app: AppState;
+	}
+	let { app }: Props = $props();
+
+	const p = $derived(app.project);
+	/** The path field a browser shows in place of a dialog, and what it is for. */
+	let asking = $state<'open' | 'import' | 'save' | null>(null);
+	let typed = $state('');
+	let field = $state<HTMLInputElement | null>(null);
+
+	const PROMPTS = { open: 'Project file to open', import: 'File to import', save: 'Save the project as' } as const;
+
+	async function act(what: 'open' | 'import' | 'save') {
+		if (what === 'save' && p.summary?.file && !p.summary.file.endsWith('.vdyn')) {
+			await p.save();
+			return;
+		}
+		if (hasNativeFiles()) {
+			if (what === 'save') {
+				const path = await chooseSavePath(p.summary?.title ?? 'Project');
+				if (path) await p.save(path);
+				return;
+			}
+			const paths = await chooseFiles(what);
+			if (paths) await p.openPaths(paths);
+			return;
+		}
+		asking = asking === what ? null : what;
+		typed = '';
+		queueMicrotask(() => field?.focus());
+	}
+
+	async function submit(e: SubmitEvent) {
+		e.preventDefault();
+		const path = typed.trim();
+		if (!path || !asking) return;
+		const ok = asking === 'save' ? await p.save(path) : asking === 'open' ? await p.open(path) : await p.importFile(path);
+		if (ok) asking = null;
+	}
+
+	/** An unresolved reference whose drop waits on a second click. */
+	let confirming = $state<string | null>(null);
+	/** The group name being typed in the strip. */
+	let groupName = $state('');
+	function focusField(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
+
+	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
+</script>
+
+<section class="project" aria-labelledby="project-title" data-testid="project-panel">
+	<div class="head">
+		<h2 id="project-title" class="eyebrow">Project</h2>
+		<div class="actions">
+			<button class="btn ghost sm" data-testid="project-open" onclick={() => act('open')} disabled={!app.analysis.isOpen || p.busy !== null}>Open</button>
+			<button class="btn ghost sm" data-testid="project-import" onclick={() => act('import')} disabled={!app.analysis.isOpen || p.busy !== null}>Import</button>
+			{#if p.summary}
+				{#if p.summary.objects.filter((o) => o.stale).length > 1}
+					<button class="btn ghost sm" data-testid="project-refresh" title="Compute every stale object again, sources first" onclick={() => p.refresh()} disabled={p.busy !== null}>Recompute All</button>
+				{/if}
+				<button class="btn ghost sm" data-testid="project-save" onclick={() => act('save')} disabled={p.busy !== null}>Save</button>
+			{/if}
+		</div>
+	</div>
+
+	{#if asking}
+		<form class="ask" onsubmit={submit} data-testid="project-path-form">
+			<label for="project-path">{PROMPTS[asking]}</label>
+			<div class="row">
+				<input
+					id="project-path"
+					bind:this={field}
+					bind:value={typed}
+					class="field mono"
+					data-testid="project-path"
+					placeholder={asking === 'save' ? '/path/to/project.hforge' : '/path/to/file'}
+					spellcheck="false"
+					autocomplete="off"
+					onkeydown={(e) => e.key === 'Escape' && (asking = null)}
+				/>
+				<button class="btn primary sm" type="submit" disabled={!typed.trim() || p.busy !== null}>{asking === 'save' ? 'Save' : asking === 'open' ? 'Open' : 'Import'}</button>
+			</div>
+			<p class="hint">In the desktop app this is the file dialog, and files can be dropped on the window.</p>
+		</form>
+	{/if}
+
+	{#if p.busy}
+		<div class="busy" role="status" data-testid="project-busy">
+			<span>{p.busy}</span>
+			{#if fraction !== null}
+				<span class="bar" aria-hidden="true"><span style="width: {(fraction * 100).toFixed(1)}%"></span></span>
+				<span class="num">{Math.round(fraction * 100)}%</span>
+			{/if}
+		</div>
+	{/if}
+	{#if p.error}<p class="error" role="alert" data-testid="project-error">{p.error}</p>{/if}
+
+	{#if p.summary}
+		<button class="choice" class:on={app.analyze.onProject} aria-pressed={app.analyze.onProject} data-testid="project-select" onclick={() => app.analyze.selectProject()}>
+			<span class="ctitle">
+				{p.summary.title}
+				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
+			</span>
+			<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
+		</button>
+		{#if p.summary.objects.length || p.summary.unresolved?.length}
+			{#if p.summary.objects.length}
+				{@const picked = p.selection.objects}
+				{@const one = picked.length === 1 ? p.summary.objects.find((o) => o.name === picked[0]) : undefined}
+				<div class="strip" data-testid="selection-strip" aria-label="Acts on the selection">
+					{#if p.confirming && picked.length}
+						<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
+						<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Remove</button>
+						<button class="btn ghost sm" onclick={() => (p.confirming = false)}>Keep</button>
+					{:else if p.namingGroup && one}
+						<form class="row" onsubmit={(e) => { e.preventDefault(); const text = groupName; p.namingGroup = null; void p.nameGroup(one.name, text); }}>
+							<input class="field" aria-label="Name for the group of {one.name}" data-testid="group-name" bind:value={groupName} use:focusField placeholder="Group name; blank removes it" onkeydown={(e) => e.key === 'Escape' && (p.namingGroup = null)} />
+							<button class="btn primary sm" type="submit">Name</button>
+						</form>
+					{:else if picked.length === 0}
+						<span class="hint">Select an object to act on it. Cmd-click adds, Shift-click extends.</span>
+					{:else}
+						{#if one?.kind === 'geometry' && one.name !== p.summary.active_geometry}
+							<button class="link" data-testid="activate-{one.name}" title="Draw data on this geometry" onclick={() => p.activate(one.name)} disabled={p.busy !== null}>Make active</button>
+						{/if}
+						{#if one?.units_defined !== undefined}
+							<button class="link" class:on={p.units?.name === one.name} data-testid="units-{one.name}" onclick={() => p.toggleUnits(one.name)} disabled={p.busy !== null}>Units</button>
+						{/if}
+						{#if picked.some((n) => p.summary?.objects.find((o) => o.name === n)?.stale)}
+							<button class="link" data-testid="refresh-{picked[0]}" title="Compute again from the source" onclick={() => p.refresh(picked.filter((n) => p.summary?.objects.find((o) => o.name === n)?.stale))} disabled={p.busy !== null}>Recompute</button>
+						{/if}
+						{#if picked.length >= 2}
+							<button class="link" data-testid="link-objects" title="Link these objects into one group" onclick={() => p.link([...picked])} disabled={p.busy !== null}>Link</button>
+						{/if}
+						{#if one && (p.summary.links ?? []).some((g) => g.members.includes(one.name))}
+							{@const group = (p.summary.links ?? []).find((g) => g.members.includes(one.name))}
+							<button class="link" data-testid="unlink-{one.name}" title="Take it out of its group" onclick={() => p.unlink(one.name)} disabled={p.busy !== null}>Unlink</button>
+							{#if group?.role !== 'Basis'}
+								<button class="link" data-testid="basis-{one.name}" title="Make its group the Basis of comparisons" onclick={() => p.setBasis(one.name)} disabled={p.busy !== null}>Basis</button>
+							{/if}
+							<button class="link" data-testid="name-group-{one.name}" title={group?.name ? `Rename the group "${group.name}"` : 'Name its group; a named group exports as an activity'} onclick={() => { groupName = group?.name ?? ''; p.namingGroup = one.name; }} disabled={p.busy !== null}>{group?.name ? 'Rename group' : 'Name group'}</button>
+						{/if}
+						<button class="link" data-testid="duplicate-{picked[0]}" title="Add a copy" onclick={() => p.duplicate([...picked])} disabled={p.busy !== null}>Copy</button>
+						{#if one}
+							<button class="link" data-testid="rename-{one.name}" onclick={() => (p.renaming = one.name)} disabled={p.busy !== null}>Rename</button>
+						{/if}
+						<button class="link danger" data-testid="remove-{picked[0]}" onclick={() => (p.confirming = true)} disabled={p.busy !== null}>Remove</button>
+					{/if}
+				</div>
+				<ProjectTree {app} />
+			{/if}
+			{#if p.summary.unresolved?.length}
+				<ul class="objects" aria-label="Unresolved references" data-testid="project-unresolved">
+					{#each p.summary.unresolved as u (u.name)}
+						<li class="unresolved" data-testid="unresolved-{u.name}" title="Held in {u.path}">
+							{#if confirming === u.name}
+								<span class="oname">Drop {u.name}?</span>
+								<span class="row-actions shown">
+									<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => { confirming = null; void p.remove([u.name]); }}>Drop</button>
+									<button class="btn ghost sm" onclick={() => (confirming = null)}>Keep</button>
+								</span>
+							{:else}
+								<span class="oname">{u.name}</span>
+								<span class="badge">{u.reason}</span>
+								<span class="okind">{u.path.split(/[\\/]/).pop()}</span>
+								<span class="row-actions">
+									<button class="icon" data-testid="remove-{u.name}" title="Drop the reference to {u.name}" aria-label="Drop the reference to {u.name}" onclick={() => (confirming = u.name)} disabled={p.busy !== null}>
+										<Icon name="trash" size={12} />
+									</button>
+								</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if p.summary.unresolved?.length}
+				<p class="hint" data-testid="unresolved-hint">
+					Held in files that were not found or have changed. Saving keeps them; put the file back, or beside the project, and open it again.
+				</p>
+			{/if}
+			{#if p.units}<UnitsEditor project={p} tables={p.units} />{/if}
+		{:else}
+			<p class="muted">Empty. Import a file, or drop one on the window in the desktop app.</p>
+		{/if}
+	{:else if !asking && !p.busy}
+		<p class="muted">Open a project or import your own files. In the desktop app, drop them on the window.</p>
+	{/if}
+</section>
+
+<style>
+	.project {
+		padding: var(--sp-4);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	.head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: var(--sp-2);
+	}
+
+	.actions {
+		display: flex;
+		gap: 2px;
+	}
+
+	.ask {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-bottom: var(--sp-2);
+	}
+
+	.ask label {
+		font-size: var(--text-xs);
+		color: var(--text-3);
+	}
+
+	.row {
+		display: flex;
+		gap: 4px;
+	}
+
+	.hint {
+		font-size: var(--text-xs);
+		color: var(--text-4);
+	}
+
+	.busy {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		margin-bottom: var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+	}
+
+	.bar {
+		flex: 1;
+		height: 4px;
+		background: var(--bg-3);
+		border-radius: 2px;
+		overflow: hidden;
+	}
+
+	.bar span {
+		display: block;
+		height: 100%;
+		background: var(--accent);
+	}
+
+	.error {
+		margin-bottom: var(--sp-2);
+		padding: 6px 8px;
+		font-size: var(--text-xs);
+		color: var(--amber-2);
+		background: var(--amber-weak);
+		border-left: 2px solid var(--amber-2);
+		border-radius: var(--radius-sm);
+	}
+
+	.muted {
+		color: var(--text-3);
+		font-size: var(--text-sm);
+	}
+
+	.choice {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: 100%;
+		padding: 8px 10px;
+		text-align: left;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-md);
+	}
+
+	.choice:hover {
+		background: var(--bg-3);
+	}
+
+	.choice.on {
+		background: var(--blue-weak);
+		border-color: var(--blue-line);
+	}
+
+	.ctitle {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: var(--text-sm);
+		font-weight: var(--weight-medium);
+		color: var(--text-1);
+	}
+
+	.cdesc {
+		overflow: hidden;
+		font-size: var(--text-xs);
+		color: var(--text-3);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		direction: rtl;
+		text-align: left;
+	}
+
+	.dot {
+		width: 6px;
+		height: 6px;
+		background: var(--amber-2);
+		border-radius: 50%;
+	}
+
+	.strip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		min-height: 22px;
+		margin-top: var(--sp-2);
+		padding: 2px 4px;
+		font-size: var(--text-xs);
+	}
+
+	.strip .link {
+		padding: 0;
+		font-size: 11px;
+		color: var(--text-2);
+		background: none;
+		border: none;
+		cursor: pointer;
+	}
+
+	.strip .link:hover,
+	.strip .link.on {
+		color: var(--text-1);
+	}
+
+	.strip .link.danger:hover {
+		color: var(--status-bad, var(--amber-2));
+	}
+
+	.strip .link:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.objects {
+		margin-top: var(--sp-2);
+		padding-left: 10px;
+		list-style: none;
+		font-size: var(--text-xs);
+	}
+
+	.objects li {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		padding: 2px 0;
+	}
+
+	.oname {
+		color: var(--text-1);
+	}
+
+	.okind {
+		margin-left: auto;
+		color: var(--text-4);
+		white-space: nowrap;
+	}
+
+	.unresolved .oname {
+		color: var(--text-3);
+	}
+
+	.row-actions {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+		opacity: 0;
+	}
+
+	.objects li:hover .row-actions,
+	.objects li:focus-within .row-actions,
+	.row-actions.shown {
+		opacity: 1;
+	}
+
+	.row-actions .icon {
+		padding: 0;
+		font-size: 10px;
+		color: var(--text-3);
+		background: none;
+		border: none;
+		cursor: pointer;
+	}
+
+	.row-actions .icon:hover {
+		color: var(--text-1);
+	}
+
+	.badge {
+		cursor: pointer;
+		background: none;
+		padding: 0 4px;
+		font-size: 10px;
+		color: var(--amber-2);
+		border: 1px solid var(--amber-line);
+		border-radius: var(--radius-sm);
+	}
+</style>

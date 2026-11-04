@@ -5,6 +5,8 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
+import { pairsText, togglePick } from '$lib/viz/macBars';
+import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
@@ -14,7 +16,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type {
+import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DatasetInfo,
 	DisplayEvent,
@@ -22,14 +24,24 @@ import type {
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
+	FitStateView,
+	ProjectProgress,
+	UnitsTables,
+	ProjectSummary,
+	ReportEditor,
 	RunState,
 	Shape3DView,
 	SimProfile,
+	Pick3D,
+	Region,
 	SimStateResult,
+	TableEdit,
 	View,
-	Workspace
-} from '$lib/protocol/types';
-import { defaultValues, reconcile, validateAll, type ParamValues } from '$lib/forms/params';
+	Workspace, MatrixView } from '$lib/protocol/types';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+import { baseName, isProjectFile } from '$lib/project/files';
+import { RunLogState } from '$lib/runlog/store.svelte';
+import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
 import { isWorkspace } from './workspaces';
 
@@ -57,6 +69,9 @@ export interface AnalyzeResult {
 	busy?: boolean;
 }
 
+/** The dataset id Analyze uses for the connection's own project. */
+export const PROJECT = 'project';
+
 class AnalyzeState {
 	datasetId = $state<string | null>(null);
 	opened = $state.raw<OpenedDataset | null>(null);
@@ -69,6 +84,24 @@ class AnalyzeState {
 	running = $state(false);
 	runError = $state<string | null>(null);
 	results = $state.raw<AnalyzeResult[]>([]);
+	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
+	shown = $state.raw<Shown | null>(null);
+	/** The bar's choices, remembered across launches as VD remembers 3D. */
+	prefs = $state<ShowPrefs>(readPrefs());
+	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
+	line = $state<number | null>(null);
+	private lineTimer: ReturnType<typeof setTimeout> | null = null;
+	private lineFor = '';
+	/** The MAC pair the selection's stage animates, and every picked square; Add Matches keeps the picks. */
+	pair = $state<{ row: number; column: number } | null>(null);
+	picks = $state<{ row: number; column: number }[]>([]);
+	showError = $state<string | null>(null);
+	/** A reading run on the selection, drawn in place of what the selection shows until Back. */
+	reading = $state.raw<{ title: string; views: View[] } | null>(null);
+	/** What the selection can take, as the service last answered; null while nothing is selected. */
+	actions = $state.raw<Actions | null>(null);
+	private showSeq = 0;
+	private actionSeq = 0;
 	private nextResult = 1;
 	private openSeq = 0;
 
@@ -81,15 +114,33 @@ class AnalyzeState {
 		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
 	}
 
-	/** Tools follow the data: only operations that accept the open dataset's kind. */
+	/**
+	 * Tools follow the data: only operations that accept the open dataset's kind, and on the project
+	 * only those with an object to run on.
+	 */
 	get tools(): OperationDescriptor[] {
 		const kind = this.opened?.kind;
 		if (!kind) return [];
-		return (this.app.catalog?.operations ?? []).filter((o) => o.accepts === kind);
+		return (this.app.catalog?.operations ?? []).filter(
+			(o) => o.accepts === kind && (kind !== PROJECT || hasObjectsFor(this.paramsOf(o)))
+		);
 	}
 
 	get op(): OperationDescriptor | null {
 		return this.tools.find((o) => o.id === this.opId) ?? null;
+	}
+
+	get onProject(): boolean {
+		return this.datasetId === PROJECT;
+	}
+
+	/** An operation's params as the form shows them: object params list the project's objects. */
+	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
+		return op.accepts === 'project' ? withObjects(op.params, this.app.project.summary?.objects ?? []) : op.params;
+	}
+
+	get params(): ParamDescriptor[] {
+		return this.op ? this.paramsOf(this.op) : [];
 	}
 
 	get currentValues(): ParamValues {
@@ -99,10 +150,58 @@ class AnalyzeState {
 	get errors(): Record<string, string> {
 		const op = this.op;
 		if (!op) return {};
-		return validateAll(op.params, this.currentValues, this.opened?.channels ?? []);
+		return validateAll(this.paramsOf(op), this.currentValues, this.opened?.channels ?? []);
+	}
+
+	/** Work on the connection's own project, as a dataset whose tools take its objects. */
+	selectProject(): void {
+		const summary = this.app.project.summary;
+		if (!summary) return;
+		++this.openSeq;
+		this.datasetId = PROJECT;
+		this.opening = false;
+		this.openError = null;
+		this.projectChanged();
+		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
+	}
+
+	/** Per operation, the source and its settings its form was last filled from. */
+	private filledFrom: Record<string, string> = {};
+
+	/**
+	 * Open the current form on its source object's settings: each `setting` param takes the value
+	 * the object holds. Done again only when the source, or its settings, change, so a value typed
+	 * after it stays.
+	 */
+	followSource(): void {
+		const op = this.op;
+		if (!op || !this.onProject || !op.params.some((p) => p.setting)) return;
+		const values = this.currentValues;
+		const source = this.app.project.summary?.objects.find((o) => o.name === values.source);
+		const key = `${values.source}\u0000${JSON.stringify(source?.settings ?? {})}`;
+		if (this.filledFrom[op.id] === key) return;
+		this.filledFrom[op.id] = key;
+		this.values = { ...this.values, [op.id]: withSettings(this.paramsOf(op), values, source) };
+	}
+
+	/** The project's objects changed: its title, and every form's object choices, follow. */
+	projectChanged(): void {
+		const summary = this.app.project.summary;
+		if (!this.onProject) return;
+		if (!summary) {
+			this.datasetId = null;
+			this.opened = null;
+			return;
+		}
+		this.opened = { handle: '', kind: 'project', title: summary.title, summary: {}, channels: [] };
+		const next = { ...this.values };
+		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
+		this.values = next;
+		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
 	}
 
 	async selectDataset(id: string): Promise<void> {
+		if (id === PROJECT) return this.selectProject();
 		if (this.datasetId === id && this.opened) return;
 		const seq = ++this.openSeq;
 		this.datasetId = id;
@@ -126,17 +225,193 @@ class AnalyzeState {
 		}
 	}
 
+	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
+	async showSelection(): Promise<void> {
+		const selection = this.app.project.selection;
+		const seq = ++this.showSeq;
+		this.reading = null;
+		if (this.lineFor !== selection.objects.join('\u0000')) {
+			this.lineFor = selection.objects.join('\u0000');
+			this.line = null;
+			this.pair = null;
+			this.picks = [];
+		}
+		void this.loadActions();
+		if (!selection.objects.length || !this.app.project.summary) {
+			this.shown = null;
+			this.showError = null;
+			return;
+		}
+		try {
+			const res = await this.app.analysis.request<Shown>(
+				'project.show',
+				{
+					objects: selection.objects,
+					records: selection.records,
+					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
+					prefs: {
+						flat: this.prefs.flat,
+						log_frequency: this.prefs.log_frequency,
+						component: this.prefs.component,
+						line: this.line,
+						projection: this.prefs.projection,
+						mode_table: this.prefs.mode_table,
+						mac: this.prefs.mac,
+						shape_values: this.prefs.shape_values,
+						values_dofs: this.prefs.values_dofs,
+						values_form: this.prefs.values_form,
+						arrows: this.prefs.arrows,
+						sensors: this.prefs.sensors,
+						environment: this.prefs.environment,
+						table_view: this.prefs.table_view
+					}
+				},
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (seq !== this.showSeq) return;
+			this.shown = res;
+			this.showError = null;
+		} catch (err) {
+			if (seq !== this.showSeq) return;
+			this.shown = null;
+			this.showError = message(err);
+		}
+	}
+
+	/** What the selection can take; the current tool stays when it still applies, else the first reading. */
+	async loadActions(): Promise<void> {
+		const seq = ++this.actionSeq;
+		if (!this.app.project.summary || !this.app.analysis.isOpen) {
+			this.actions = null;
+			return;
+		}
+		const selection = this.app.project.selection;
+		try {
+			const res = await this.app.analysis.request<Actions>('project.actions', {
+				objects: selection.objects,
+				records: selection.records
+			});
+			if (seq !== this.actionSeq) return;
+			this.actions = res;
+			if (!this.onProject) return;
+			const offered = [...res.readings, ...res.acts, ...res.project];
+			const current = offered.find((e) => e.id === this.opId);
+			if (current) this.pickAction(current);
+			else if (offered.length) this.pickAction(offered[0]);
+		} catch (err) {
+			if (seq === this.actionSeq) this.actions = null;
+			void err;
+		}
+	}
+
+	/** An action chosen in the frame: its tool, with the selection filled into its params. */
+	pickAction(entry: Action): void {
+		if (this.opId !== entry.id) this.selectOp(entry.id);
+		const op = this.op;
+		if (!op) return;
+		const values = { ...this.currentValues };
+		let changed = false;
+		for (const [key, value] of Object.entries(entry.fill)) {
+			if (values[key] !== value) {
+				values[key] = value;
+				changed = true;
+			}
+		}
+		if (changed) this.values = { ...this.values, [op.id]: values };
+	}
+
+	/** The plot's cursor moved on a stage that reads at a line: the line follows, once the cursor rests. */
+	moveLine(frequency: number | null): void {
+		if (frequency === null) return;
+		if (this.lineTimer) clearTimeout(this.lineTimer);
+		this.lineTimer = setTimeout(() => {
+			this.lineTimer = null;
+			if (this.line === frequency) return;
+			this.line = frequency;
+			void this.showSelection();
+		}, 150);
+	}
+
+	/** One of the bar's choices changed: kept, and the selection read again. */
+	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
+		this.prefs = { ...this.prefs, [key]: value };
+		try {
+			localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
+		} catch {
+			// kept for this session only
+		}
+		// the shell's own choices redraw what is already here; the rest are the service's to answer
+		if (key !== 'bars' && key !== 'overlay') void this.showSelection();
+	}
+
+	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */
+	pickCell(cell: { row: number; column: number }, extend = false): void {
+		const next = togglePick(this.picks, cell, extend);
+		this.picks = next.picks;
+		this.pair = next.active;
+	}
+
+	/** The matrix the selection shows, when it compares two sets. */
+	get comparison(): MatrixView | null {
+		const m = this.shown?.views.find((v): v is MatrixView => v.view === 'matrix' && v.selects === 'shape3d' && v.rows.label !== v.columns.label);
+		return m ?? null;
+	}
+
+	/** The picked squares kept as matched modes of the two sets (`project.add_matches`); the marks follow. */
+	async addMatches(): Promise<void> {
+		const m = this.comparison;
+		if (!m || !this.picks.length) return;
+		const done = await this.app.project.act('Adding matches', 'project.add_matches', {
+			first: m.rows.label,
+			second: m.columns.label.replace(/, projected$/, ''),
+			pairs: pairsText(this.picks)
+		});
+		if (done) void this.showSelection();
+	}
+
+	/** Back from a reading to what the selection shows. */
+	endReading(): void {
+		this.reading = null;
+	}
+
+	/** A reading's own control changed (a waterfall's quantity): run it again with the patch. */
+	async rerunReading(patch: ParamValues): Promise<void> {
+		const op = this.op;
+		if (!op || !this.reading) return;
+		this.values = { ...this.values, [op.id]: { ...this.currentValues, ...patch } };
+		await this.run();
+	}
+
+	/**
+	 * An object selected in the tree: the current tool's first object param that takes its kind
+	 * (or whose verb it answers to) is set to it, so picking in the tree is picking the source.
+	 */
+	followSelection(name: string): void {
+		const op = this.op;
+		const obj = this.app.project.summary?.objects.find((o) => o.name === name);
+		if (!op || !this.onProject || !obj) return;
+		for (const p of this.paramsOf(op)) {
+			const kinds = objectKinds(p);
+			const verb = objectVerb(p);
+			if ((kinds.length && kinds.includes(obj.kind)) || (verb && obj.verbs?.includes(verb))) {
+				if (this.currentValues[p.name] === name) return;
+				this.values = { ...this.values, [op.id]: { ...this.currentValues, [p.name]: name } };
+				return;
+			}
+		}
+	}
+
 	selectOp(id: string | null): void {
 		this.opId = id;
 		this.runError = null;
 		this.triedRun = false;
 		const op = this.op;
-		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(op.params, this.opened?.channels ?? []);
+		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
 	}
 
 	resetParams(): void {
 		const op = this.op;
-		if (op) this.values[op.id] = defaultValues(op.params, this.opened?.channels ?? []);
+		if (op) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
 		this.triedRun = false;
 	}
 
@@ -147,17 +422,33 @@ class AnalyzeState {
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
+		const shown = this.paramsOf(op);
 		this.running = true;
 		this.runError = null;
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, handle: opened.handle, params }, { timeoutMs: 30_000 });
+			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
+			const res = await this.app.analysis.request<OpResult>('op.run', target(op, opened.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			if (this.onProject) {
+				// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+				// takes the view until Back
+				const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+				if (added.length) {
+					const order = (res.project?.objects ?? []).map((o) => o.name);
+					this.app.project.clickObject(added[0], order);
+				} else if (res.views.length) {
+					this.reading = { title: op.title, views: res.views };
+				}
+				this.triedRun = false;
+				return;
+			}
 			this.results = [
 				{
 					id: this.nextResult++,
 					opId: op.id,
 					opTitle: op.title,
 					datasetTitle: opened.title,
-					paramSummary: summarize(op.params, params, opened.channels),
+					paramSummary: summarize(shown, params, opened.channels),
 					views: res.views,
 					at: new Date(),
 					params,
@@ -186,8 +477,85 @@ class AnalyzeState {
 			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
 		replace({ busy: true });
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, handle: result.handle, params }, { timeoutMs: 30_000 });
-			replace({ views: res.views, params, paramSummary: summarize(op.params, params, this.opened?.channels ?? []), busy: false });
+			const res = await this.app.analysis.request<OpResult>('op.run', target(op, result.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, params, paramSummary: summarize(this.paramsOf(op), params, this.opened?.channels ?? []), busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
+		}
+	}
+
+	/**
+	 * Set one cell of a result's editable table (`TableEdit`): its operation runs, and the first table
+	 * it answers with takes that view's place. The refusal, when there is one, comes back as words.
+	 */
+	async editCell(id: number, viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			const table = res.views.find((v) => v.view === 'table');
+			if (table) {
+				this.results = this.results.map((r) =>
+					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
+				);
+			}
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
+	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			const table = res.views.find((v) => v.view === 'table');
+			if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** A span dragged on a result's plot: its operation runs with the new edges, and its views take the result's place. */
+	async dragSpan(id: number, drag: NonNullable<Region['drag']>, x0: number, x1: number): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		if (!result || result.busy) return;
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, busy: false });
+		} catch (err) {
+			replace({ busy: false });
+			this.runError = message(err);
+		}
+	}
+
+	/** A click in a result's 3-D view: the view's pick operation runs with what was clicked, and its views take the result's place. */
+	async pickIn(id: number, pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
+		const result = this.results.find((r) => r.id === id);
+		if (!result || result.busy) return;
+		const replace = (changes: Partial<AnalyzeResult>) =>
+			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+		replace({ busy: true });
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			replace({ views: res.views, busy: false });
 		} catch (err) {
 			replace({ busy: false });
 			this.runError = message(err);
@@ -201,6 +569,14 @@ class AnalyzeState {
 	clearResults(): void {
 		this.results = [];
 	}
+}
+
+/** How long an operation may take: fitting or computing on a large project is not quick. */
+const RUN_TIMEOUT_MS = 120_000;
+
+/** `op.run`'s params: a project operation names no handle, since it runs on the connection's project. */
+function target(op: OperationDescriptor, handle: string, params: ParamValues): Record<string, unknown> {
+	return op.accepts === 'project' ? { op: op.id, params } : { op: op.id, handle, params };
 }
 
 function summarize(params: ParamDescriptor[], values: ParamValues, channels: { value: string | number; label: string }[]): string {
@@ -259,6 +635,34 @@ class ModalState {
 			if (seq !== this.seq) return;
 			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
 			if (!shape) throw new Error('modal.modes returned no shape3d view.');
+			this.view = shape;
+			this.mode = 0;
+		} catch (err) {
+			if (seq !== this.seq) return;
+			this.view = null;
+			this.error = message(err);
+		} finally {
+			if (seq === this.seq) this.loading = false;
+		}
+	}
+
+	/** The project's shape set `shapes` on its active geometry (`project.mode_shapes`). */
+	async selectShapes(shapes: string): Promise<void> {
+		const geometry = this.app.project.summary?.active_geometry;
+		if (!geometry) return;
+		const seq = ++this.seq;
+		this.datasetId = `project:${shapes}`;
+		this.loading = true;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: 'project.mode_shapes', params: { shapes, geometry } },
+				{ timeoutMs: 30_000 }
+			);
+			if (seq !== this.seq) return;
+			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
+			if (!shape) throw new Error('project.mode_shapes returned no shape3d view.');
 			this.view = shape;
 			this.mode = 0;
 		} catch (err) {
@@ -410,6 +814,611 @@ class SimState {
 
 // ---------------------------------------------------------------------------------------------
 
+/** How long opening or importing a file may take before the shell stops waiting. */
+const FILE_TIMEOUT_MS = 600_000;
+
+/**
+ * The mode fit under way on the project (`fit.*`): Visual Dynamics' fitting loop, one mode at a time
+ * on the residual. The x range on screen is the search band Find Mode reads.
+ */
+export class FitState {
+	state = $state.raw<FitStateView | null>(null);
+	busy = $state<string | null>(null);
+	error = $state<string | null>(null);
+	/** The frequencies on screen, [low, high] Hz, or null for the whole range. */
+	range: [number, number] | null = null;
+
+	constructor(private readonly app: AppState) {}
+
+	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
+		this.range = null;
+		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}) });
+	}
+
+	find(): Promise<boolean> {
+		return this.step('Finding a mode', 'fit.find', this.range ? { low: this.range[0], high: this.range[1] } : {});
+	}
+
+	move(frequency: number): Promise<boolean> {
+		return this.step('Moving the cursor', 'fit.move', { frequency });
+	}
+
+	holdDamping(damping: number): Promise<boolean> {
+		return this.step('Holding the damping', 'fit.damping', { damping });
+	}
+
+	fit(): Promise<boolean> {
+		return this.step('Fitting the mode', 'fit.fit', {});
+	}
+
+	confirm(description?: string): Promise<boolean> {
+		return this.step('Confirming the mode', 'fit.confirm', description ? { description } : {});
+	}
+
+	refine(): Promise<boolean> {
+		return this.step('Refining the residues', 'fit.refine', {});
+	}
+
+	/** Take confirmed modes back, by their index in `modes`. */
+	remove(modes: number[]): Promise<boolean> {
+		return this.step(`Taking back mode ${modes.map((k) => k + 1).join(', ')}`, 'fit.delete', { modes });
+	}
+
+	/** Type a confirmed mode's damping (a fraction of critical) or description into its row. */
+	edit(mode: number, change: { damping?: number; description?: string }): Promise<boolean> {
+		return this.step(`Editing mode ${mode + 1}`, 'fit.edit', { mode, ...change });
+	}
+
+	showResidual(show: boolean): Promise<boolean> {
+		return this.step(show ? 'Drawing the residual' : 'Hiding the residual', 'fit.residual', { show });
+	}
+
+	async publish(name?: string): Promise<boolean> {
+		this.busy = 'Publishing';
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ name: string; project: ProjectSummary; fit: FitStateView }>(
+				'fit.publish',
+				name ? { name } : {},
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.state = res.fit;
+			this.app.project.apply(res.project);
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+
+	async end(): Promise<void> {
+		this.state = null;
+		this.error = null;
+		try {
+			await this.app.analysis.request('fit.end', {});
+		} catch {
+			// the fit is gone either way
+		}
+	}
+
+	private async step(doing: string, method: string, params: Record<string, unknown>): Promise<boolean> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ fit: FitStateView }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
+			this.state = res.fit;
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+}
+
+/**
+ * The project's reports (`report.*`): Visual Dynamics' report, generated from a starter template and
+ * shown as the page the core writes.
+ */
+export class ReportState {
+	/** The report shown, and its page. */
+	name = $state<string | null>(null);
+	html = $state<string | null>(null);
+	busy = $state<string | null>(null);
+	error = $state<string | null>(null);
+	/** Where the last export went. */
+	exported = $state<string | null>(null);
+	/** The editor's pane for the selection, from the last `report.editor`. */
+	editor = $state.raw<ReportEditor | null>(null);
+	/** How far the page was scrolled, kept across the re-render an edit makes. */
+	scroll = 0;
+
+	constructor(private readonly app: AppState) {}
+
+	async generate(template: string): Promise<void> {
+		await this.act('Generating the report', async () => {
+			const res = await this.app.analysis.request<{ name: string; project: ProjectSummary }>(
+				'report.generate',
+				{ template },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.app.project.apply(res.project);
+			await this.load(res.name);
+		});
+	}
+
+	/** Show the report `name`, in the shell's own theme. */
+	async show(name: string): Promise<void> {
+		await this.act(`Opening ${name}`, () => this.load(name));
+	}
+
+	async export(path: string): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		await this.act('Saving the page', async () => {
+			const res = await this.app.analysis.request<{ path: string }>('report.export', { name, path }, { timeoutMs: RUN_TIMEOUT_MS });
+			this.exported = res.path;
+		});
+	}
+
+	/** The page being printed, in a frame of its own that asks for the print dialog. */
+	printing = $state<string | null>(null);
+	/** An issue under way: the report is marked issued and its page printed; the PDF is named next. */
+	issuing = $state<string | null>(null);
+	/** The last issue recorded. */
+	issued = $state<Record<string, string> | null>(null);
+
+	/** Print the reader's page; the print dialog saves it as a PDF. */
+	async print(): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		await this.act('Preparing the page to print', async () => {
+			const res = await this.app.analysis.request<{ html: string }>('report.print', { name }, { timeoutMs: RUN_TIMEOUT_MS });
+			this.printing = res.html;
+		});
+	}
+
+	/** Begin, record or cancel an issue (`report.issue`). */
+	async issue(step: 'begin' | 'record' | 'cancel', path?: string): Promise<void> {
+		const name = this.name;
+		if (!name) return;
+		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
+		await this.act(doing, async () => {
+			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; project: ProjectSummary }>(
+				'report.issue',
+				{ name, step, ...(path ? { path } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			this.app.project.apply(res.project);
+			if (step === 'begin') {
+				this.issuing = res.status ?? 'issued';
+				this.issued = null;
+				this.printing = res.html ?? null;
+			} else {
+				this.issuing = null;
+				if (res.entry) this.issued = res.entry;
+				await this.load(name);
+			}
+		});
+	}
+
+	/** Select a block on the page (null for the report itself); its pane follows. */
+	async select(at: number | null): Promise<void> {
+		const name = this.name;
+		if (!name || at === (this.editor?.selected ?? null)) return;
+		// the page framed the block itself: the pane alone comes back
+		await this.act('Selecting', async () => this.take(await this.request('report.editor', { name, selected: at, page: false })));
+	}
+
+	/** One of the editor's operations (`report.operate`); the page and pane follow. */
+	async operate(op: string, params: Record<string, unknown> = {}): Promise<boolean> {
+		const name = this.name;
+		if (!name) return false;
+		let ok = false;
+		await this.act('Editing the report', async () => {
+			const res = await this.request('report.operate', { name, op, selected: this.editor?.selected ?? null, ...params });
+			if (res.project) this.app.project.apply(res.project);
+			this.take(res);
+			ok = true;
+		});
+		return ok;
+	}
+
+	private request(method: string, params: Record<string, unknown>): Promise<ReportEditor> {
+		return this.app.analysis.request<ReportEditor>(method, { ...params, theme: theme.resolved }, { timeoutMs: RUN_TIMEOUT_MS });
+	}
+
+	private take(res: ReportEditor): void {
+		// a pane alone keeps the page and the labels rendered with it
+		this.editor = res.html === undefined ? { ...res, references: this.editor?.references ?? [] } : res;
+		if (res.html !== undefined) this.html = res.html;
+	}
+
+	private async load(name: string): Promise<void> {
+		const keep = this.name === name ? (this.editor?.selected ?? null) : null;
+		if (this.name !== name) this.scroll = 0;
+		const res = await this.request('report.editor', { name, selected: keep });
+		this.name = name;
+		this.take(res);
+		this.exported = null;
+	}
+
+	private async act(doing: string, work: () => Promise<void>): Promise<void> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			await work();
+		} catch (err) {
+			this.error = message(err);
+		} finally {
+			this.busy = null;
+		}
+	}
+}
+
+/** Where the chosen unit system is kept between launches. */
+const UNITS_KEY = 'hertzforge.units';
+
+/**
+ * The display unit system (`units.system`): every plot and reading the analysis service sends is
+ * in it, as Visual Dynamics' unit selector puts its window in one. Remembered between launches and
+ * told to the service each time it connects; a change draws the results on screen again.
+ */
+export class UnitsState {
+	name = $state<string | null>(null);
+	systems = $state<string[]>([]);
+
+	constructor(private readonly app: AppState) {}
+
+	private stored(): string | null {
+		try {
+			return localStorage.getItem(UNITS_KEY);
+		} catch {
+			return null;
+		}
+	}
+
+	/** The service connected: tell it the system chosen before, or learn its own. */
+	async sync(): Promise<void> {
+		const wanted = this.stored();
+		try {
+			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			this.systems = res.systems;
+			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
+				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				this.name = set.name;
+			} else this.name = res.name;
+		} catch {
+			// an older service without units: its own SI stands
+		}
+	}
+
+	async choose(name: string): Promise<void> {
+		if (name === this.name) return;
+		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		this.name = res.name;
+		try {
+			localStorage.setItem(UNITS_KEY, res.name);
+		} catch {
+			// not kept between launches; this session still uses it
+		}
+		// what is on screen was drawn in the old system: draw it again
+		for (const r of this.app.analyze.results) void this.app.analyze.rerun(r.id, {});
+		if (this.app.report.name) void this.app.report.show(this.app.report.name);
+	}
+}
+
+/**
+ * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
+ * or importing switches Analyze to it.
+ */
+const PREFS_KEY = 'hertzforge.show.prefs';
+
+function readPrefs(): ShowPrefs {
+	const prefs: ShowPrefs = {
+		flat: false,
+		log_frequency: false,
+		component: 'magnitude',
+		projection: false,
+		bars: true,
+		overlay: true,
+		mode_table: true,
+		mac: true,
+		shape_values: false,
+		values_dofs: 'all',
+		values_form: 'shapes',
+		arrows: false,
+		sensors: true,
+		environment: null,
+		table_view: 'channels'
+	};
+	try {
+		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
+		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
+		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
+		for (const key of ['projection', 'bars', 'overlay', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
+		}
+		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
+		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
+	} catch {
+		// nothing kept, or no storage
+	}
+	return prefs;
+}
+
+export class ProjectState {
+	summary = $state.raw<ProjectSummary | null>(null);
+	/** What is being done, in words ("Importing modal.nc4"), or null. */
+	busy = $state<string | null>(null);
+	progress = $state.raw<ProjectProgress | null>(null);
+	error = $state<string | null>(null);
+	/** The object whose units are being declared, and its tables. */
+	units = $state.raw<UnitsTables | null>(null);
+	/** What the tree has selected: objects, records within them, a part of a geometry. */
+	selection = $state.raw<Selection>(EMPTY);
+	/** The objects whose rows are open in the tree. */
+	expanded = $state.raw<Set<string>>(new Set());
+	/** What each open object holds, as the service last answered. */
+	children = $state.raw<Record<string, ProjectChildren>>({});
+	/** The object being renamed in the tree, or null. */
+	renaming = $state<string | null>(null);
+	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
+	confirming = $state(false);
+	/** The group being named from the strip: the member it is reached by, or null. */
+	namingGroup = $state<string | null>(null);
+	/** The last record clicked in each object's grid, where a Shift extension starts. */
+	private anchorRecord: Record<string, number> = {};
+	private childSeq = 0;
+
+	constructor(private readonly app: AppState) {
+		app.analysis.on('project.progress', (data) => {
+			if (this.busy) this.progress = data as unknown as ProjectProgress;
+		});
+	}
+
+	/** A new summary from the service: the tree and Analyze's object choices follow. */
+	apply(summary: ProjectSummary): void {
+		this.summary = summary;
+		if (this.units && !summary.objects.some((o) => o.name === this.units?.name)) this.units = null;
+		const names = summary.objects.map((o) => o.name);
+		this.selection = pruned(this.selection, names);
+		if (this.renaming && !names.includes(this.renaming)) this.renaming = null;
+		// what an open row holds may have changed: ask again, and forget rows that are gone
+		const kept = new Set([...this.expanded].filter((n) => names.includes(n)));
+		this.expanded = kept;
+		const children: Record<string, ProjectChildren> = {};
+		for (const name of kept) if (this.children[name]) children[name] = this.children[name];
+		this.children = children;
+		for (const name of kept) void this.loadChildren(name);
+		this.app.analyze.projectChanged();
+		void this.app.analyze.showSelection();
+	}
+
+	/** Open or close an object's row; opening asks what it holds. */
+	toggleExpanded(name: string): void {
+		const next = new Set(this.expanded);
+		if (next.has(name)) next.delete(name);
+		else {
+			next.add(name);
+			void this.loadChildren(name);
+		}
+		this.expanded = next;
+	}
+
+	async loadChildren(name: string): Promise<void> {
+		const seq = ++this.childSeq;
+		try {
+			const held = await this.app.analysis.request<ProjectChildren>('project.children', { name });
+			if (!this.expanded.has(name) || !this.summary?.objects.some((o) => o.name === name)) return;
+			this.children = { ...this.children, [name]: held };
+		} catch (err) {
+			if (seq === this.childSeq) this.error = message(err);
+		}
+	}
+
+	private selected(next: Selection): void {
+		this.selection = next;
+		this.renaming = null;
+		this.confirming = false;
+		this.namingGroup = null;
+		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
+		void this.app.analyze.showSelection();
+	}
+
+	/** An object's row clicked, with the modifiers held; `order` is the tree's rows. */
+	clickObject(name: string, order: string[], mods: Modifiers = {}): void {
+		this.selected(clickObject(this.selection, name, order, mods));
+	}
+
+	/** A cell of `name`'s grid clicked: its record; Shift takes the block from the last cell clicked. */
+	clickRecord(name: string, index: number, mods: Modifiers = {}, grid?: number[][]): void {
+		const from = this.anchorRecord[name];
+		const block = mods.extend && grid && from !== undefined ? { from, to: index, grid } : undefined;
+		if (!mods.extend) this.anchorRecord[name] = index;
+		this.selected(clickRecord(this.selection, name, index, mods, block));
+	}
+
+	clickPart(name: string, kind: string, id: string | number): void {
+		this.selected(clickPart(this.selection, name, kind, id));
+	}
+
+	clearSelection(): void {
+		this.selected(EMPTY);
+	}
+
+	/** Whether `name`, or one of its records, is selected. */
+	isSelected(name: string): boolean {
+		return this.selection.objects.includes(name);
+	}
+
+	/**
+	 * Open or import each path, as a drop or a dialog gives them: a project file opens (replacing
+	 * the project), anything else is imported into it. Stops at the first refusal and says why.
+	 */
+	async openPaths(paths: string[]): Promise<void> {
+		for (const path of paths) {
+			const ok = isProjectFile(path) ? await this.open(path) : await this.importFile(path);
+			if (!ok) return;
+		}
+	}
+
+	open(path: string): Promise<boolean> {
+		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
+	}
+
+	importFile(path: string, units?: Record<string, string>): Promise<boolean> {
+		return this.call(`Importing ${baseName(path)}`, 'project.import', units ? { path, units } : { path });
+	}
+
+	save(path?: string): Promise<boolean> {
+		return this.call('Saving', 'project.save', path ? { path } : {}, false);
+	}
+
+	newProject(title: string): Promise<boolean> {
+		return this.call('Starting a project', 'project.new', { title });
+	}
+
+	async rename(name: string, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
+		if (ok) {
+			this.selection = renamed(this.selection, name, to);
+			if (this.expanded.has(name)) {
+				const next = new Set(this.expanded);
+				next.delete(name);
+				next.add(to);
+				this.expanded = next;
+				void this.loadChildren(to);
+			}
+		}
+		return ok;
+	}
+
+	remove(names: string[]): Promise<boolean> {
+		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
+	}
+
+	duplicate(names: string[]): Promise<boolean> {
+		return this.call(`Copying ${names.join(', ')}`, 'project.duplicate', { names }, false);
+	}
+
+	/** Compute derived objects again from their sources; with none named, every stale one. */
+	refresh(names: string[] = []): Promise<boolean> {
+		return this.call(names.length ? `Recomputing ${names.join(', ')}` : 'Recomputing what is stale', 'project.refresh', { names });
+	}
+
+	activate(geometry: string): Promise<boolean> {
+		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
+	}
+
+	/** Link the selected objects into one group, as VD's Link does; the group merges any they are in. */
+	link(names: string[]): Promise<boolean> {
+		const [first, second, ...more] = names;
+		return this.act(`Linking ${names.join(', ')}`, 'project.link', { first, second, more: more.join(', '), name: '' });
+	}
+
+	unlink(name: string): Promise<boolean> {
+		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
+	}
+
+	setBasis(name: string): Promise<boolean> {
+		return this.act(`Making the group of ${name} the Basis`, 'project.set_basis', { object: name });
+	}
+
+	/** Name the group `name` is in, or clear its name with blank text. */
+	nameGroup(name: string, text: string): Promise<boolean> {
+		return this.act(text.trim() ? `Naming the group of ${name}` : `Unnaming the group of ${name}`, 'project.name_object_group', { object: name, name: text });
+	}
+
+	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives from it, as VD's grid does. */
+	async renameDof(name: string, old: string, next: string, quantity: string): Promise<boolean> {
+		const ok = await this.act(`Renaming ${old} to ${next}`, 'project.rename_dof', { source: name, old, new: next, measured: quantity });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** A Role cell clicked: the channel's role goes to the next one round, reference, response, monitor. */
+	async cycleRole(name: string, index: number, role: string): Promise<boolean> {
+		const order = ['reference', 'response', 'monitor'];
+		const next = order[(order.indexOf(role) + 1) % order.length];
+		const ok = await this.act(`Making ${name}'s channel ${index + 1} a ${next}`, 'project.set_channel_role', { source: name, record: index + 1, role: next });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** Remove what is selected, once confirmed. */
+	async removeSelected(): Promise<boolean> {
+		const names = [...this.selection.objects];
+		this.confirming = false;
+		if (!names.length) return false;
+		return this.remove(names);
+	}
+
+	/** An act on the groups, run as the operation it is; the project it answers with is applied. */
+	async act(doing: string, op: string, params: Record<string, unknown>): Promise<boolean> {
+		this.busy = doing;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ project?: ProjectSummary }>('op.run', { op, params }, { timeoutMs: FILE_TIMEOUT_MS });
+			if (res.project) this.apply(res.project);
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+		}
+	}
+
+	/** Show the tables `name`'s units are declared in, or close them when they are showing. */
+	async toggleUnits(name: string): Promise<void> {
+		if (this.units?.name === name) {
+			this.units = null;
+			return;
+		}
+		this.error = null;
+		try {
+			this.units = await this.app.analysis.request<UnitsTables>('project.units', { name });
+		} catch (err) {
+			this.error = message(err);
+		}
+	}
+
+	/** Declare units by table and row; the tables are read again to show what converted. */
+	async defineUnits(name: string, units: { side: string; key: string; unit: string }[]): Promise<boolean> {
+		const ok = await this.call(`Declaring units on ${name}`, 'project.define_units', { name, units }, false);
+		if (ok) this.units = await this.app.analysis.request<UnitsTables>('project.units', { name });
+		return ok;
+	}
+
+	private async call(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<boolean> {
+		this.busy = doing;
+		this.progress = null;
+		this.error = null;
+		try {
+			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
+			this.apply(res.project);
+			if (show) {
+				// the workspaces with the project panel keep the window; any other goes to Analyze
+				if (this.app.workspace !== 'model' && this.app.workspace !== 'specify') this.app.workspace = 'analyze';
+				this.app.analyze.selectProject();
+			}
+			return true;
+		} catch (err) {
+			this.error = message(err);
+			return false;
+		} finally {
+			this.busy = null;
+			this.progress = null;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+
 export class AppState {
 	readonly config: ShellConfig;
 	readonly analysis: ServiceClient;
@@ -421,6 +1430,12 @@ export class AppState {
 	catalogError = $state<string | null>(null);
 
 	readonly analyze: AnalyzeState;
+	readonly project: ProjectState;
+	readonly fit: FitState;
+	readonly report: ReportState;
+	readonly units: UnitsState;
+	/** The run log the keeper writes while a test runs, beside any workspace. */
+	readonly runLog: RunLogState;
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
@@ -442,6 +1457,11 @@ export class AppState {
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
 		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
 		this.analyze = new AnalyzeState(this);
+		this.project = new ProjectState(this);
+		this.fit = new FitState(this);
+		this.report = new ReportState(this);
+		this.units = new UnitsState(this);
+		this.runLog = new RunLogState(this.analysis);
 		this.modal = new ModalState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.

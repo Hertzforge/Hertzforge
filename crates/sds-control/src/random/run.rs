@@ -36,6 +36,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
+/// Who stops a run when the service shuts down (`Service::shutdown`). Its safe stop
+/// says so; a safe stop by anyone else is the orphan clock's.
+pub const SHUTDOWN_BY: &str = "the service (shutting down)";
+
 /// A run log entry (schema/PROTOCOL.md, "Run Log").
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogEntry {
@@ -1082,7 +1086,10 @@ impl Actor {
         self.stopped_by = by;
         self.shared.add_log(
             "note",
-            if outcome == "safe_stop" {
+            if outcome == "safe_stop" && self.stopped_by == SHUTDOWN_BY {
+                "the control service is shutting down; stopping the run with its shutdown ramp"
+                    .to_owned()
+            } else if outcome == "safe_stop" {
                 format!(
                     "nobody held control for {} s; stopping the run with its shutdown ramp",
                     num(self.plan.timeout_s)
@@ -1163,6 +1170,10 @@ impl Actor {
         let message = message.unwrap_or_else(|| match outcome {
             "operator_stop" => format!("Stopped by {} at {at}.", self.stopped_by),
             "operator_abort" => format!("Aborted by {} at {at}.", self.stopped_by),
+            "safe_stop" if self.stopped_by == SHUTDOWN_BY => format!(
+                "The control service was shut down, so it stopped the run with its shutdown ramp, \
+                 from {at}."
+            ),
             "safe_stop" => format!(
                 "Nobody held control for {} s, so the service stopped the run with its shutdown \
                  ramp, from {at}.",

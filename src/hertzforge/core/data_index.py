@@ -443,3 +443,44 @@ def _text_of(path: str, sha: str) -> str:
         return data.decode('utf-8')
     except UnicodeDecodeError:
         return ''
+
+
+def file_state(path: str | os.PathLike) -> tuple[int, int]:
+    """(size in bytes, modification time in nanoseconds) of a file: what
+    a reference compares before deciding to hash the file again."""
+    stat = os.stat(path)
+    return stat.st_size, stat.st_mtime_ns
+
+
+@dataclass(frozen=True)
+class Reference:
+    """An object a project holds by reference to another `.hforge` file
+    rather than as a copy (FILE_FORMAT_PLAN.md, section 3).
+
+    `path` is where the file is (absolute), `object` the object's name
+    in it ('' for a file holding a single object) and `kind` the
+    object's kind as the file stores it. `size` and `sha256` are the
+    file's checksum when it was referenced, and `modified_ns` its
+    modification time then: a file with the same size and time is taken
+    as unchanged without reading it, and any other is hashed again.
+
+    `reason` is '' for a reference that resolved, and otherwise why it
+    did not (`NOT_FOUND` or `CHANGED`); such an object is not in the
+    project, and saving the project keeps its reference as it was.
+    """
+
+    path: str
+    object: str
+    kind: str
+    size: int
+    sha256: str
+    modified_ns: int
+    reason: str = ''
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.sha256, str) or not _HEX.fullmatch(self.sha256):
+            raise ValueError(f'{self.path}: {self.sha256!r} is not a SHA-256 '
+                             'checksum (64 lower-case hex digits)')
+        if self.reason not in ('', NOT_FOUND, CHANGED):
+            raise ValueError(f'a reference\'s reason is {NOT_FOUND!r} or '
+                             f'{CHANGED!r}, not {self.reason!r}')

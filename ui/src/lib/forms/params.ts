@@ -3,7 +3,7 @@
  * component stays thin and the rules are testable on their own.
  */
 
-import type { ParamDescriptor, ParamOption } from '$lib/protocol/types';
+import type { ParamDescriptor, ParamOption, ProjectObject } from '$lib/protocol/types';
 
 export type ParamValue = number | string | boolean;
 export type ParamValues = Record<string, ParamValue>;
@@ -13,6 +13,41 @@ export function optionsFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
 	if (p.type !== 'enum') return [];
 	if (p.options_from === 'channels') return channels;
 	return p.options ?? [];
+}
+
+/** The kinds an `objects:` param takes, or none for any other param. */
+export function objectKinds(p: ParamDescriptor): string[] {
+	return p.options_from?.startsWith('objects:') ? p.options_from.slice('objects:'.length).split('|') : [];
+}
+
+/** The core verb a `verb:` param's objects take, or '' for any other param. */
+export function objectVerb(p: ParamDescriptor): string {
+	return p.options_from?.startsWith('verb:') ? p.options_from.slice('verb:'.length) : '';
+}
+
+/**
+ * The params with each `objects:` param's options filled from the project's objects of its kinds,
+ * and each `verb:` param's from the objects its verb applies to, in the project's order, so the
+ * form and its checks treat it as any other enum.
+ */
+export function withObjects(params: ParamDescriptor[], objects: ProjectObject[]): ParamDescriptor[] {
+	return params.map((p) => {
+		const kinds = objectKinds(p);
+		const verb = objectVerb(p);
+		if (!kinds.length && !verb) return p;
+		const taken = objects.filter((o) => (verb ? (o.verbs ?? []).includes(verb) : kinds.includes(o.kind)));
+		const none = p.default === '' ? [{ value: '', label: '(none)' }] : [];
+		return { ...p, options: [...none, ...taken.map((o) => ({ value: o.name, label: o.name }))] };
+	});
+}
+
+/**
+ * Whether a project tool has something to run on: every param filled from the project's objects
+ * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does not is not shown, as Visual Dynamics
+ * offers a verb only where it applies.
+ */
+export function hasObjectsFor(params: ParamDescriptor[]): boolean {
+	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || p.default === '' || (p.options ?? []).length > 0);
 }
 
 function clamp(v: number, p: ParamDescriptor): number {
@@ -46,8 +81,26 @@ export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
 	}
 }
 
+/**
+ * Every param's starting value. A project-object param filled from the same objects as an earlier
+ * one starts on an object the earlier ones have not taken, when there is one: two shape sets to
+ * match or compare start as two sets, not one set twice.
+ */
 export function defaultValues(params: ParamDescriptor[], channels: ParamOption[] = []): ParamValues {
-	return Object.fromEntries(params.map((p) => [p.name, defaultFor(p, channels)]));
+	const taken = new Map<string, Set<ParamValue>>();
+	return Object.fromEntries(
+		params.map((p) => {
+			let value = defaultFor(p, channels);
+			const source = objectKinds(p).length || objectVerb(p) ? p.options_from : undefined;
+			if (source) {
+				const used = taken.get(source) ?? new Set();
+				if (used.has(value)) value = optionsFor(p, channels).find((o) => !used.has(o.value))?.value ?? value;
+				used.add(value);
+				taken.set(source, used);
+			}
+			return [p.name, value];
+		})
+	);
 }
 
 /** Words a user can act on, or null when the value is valid. */
@@ -71,7 +124,12 @@ export function validate(p: ParamDescriptor, value: unknown, channels: ParamOpti
 			return typeof value === 'string' ? null : 'Enter text.';
 		case 'enum': {
 			const opts = optionsFor(p, channels);
-			if (opts.length === 0) return p.options_from === 'channels' ? 'Open a dataset to list its channels.' : 'No options.';
+			if (opts.length === 0) {
+				if (p.options_from === 'channels') return 'Open a dataset to list its channels.';
+				const kinds = objectKinds(p);
+				if (kinds.length) return `The project has no ${kinds.map((k) => k.replace(/_/g, ' ')).join(' or ')}.`;
+				return objectVerb(p) ? 'Nothing in the project takes this.' : 'No options.';
+			}
 			return opts.some((o) => o.value === value) ? null : 'Choose one of the options.';
 		}
 	}
@@ -104,6 +162,21 @@ export function rangeHint(p: ParamDescriptor): string | null {
 }
 
 /** Keep values that are still valid after the descriptor or channels change; reset the rest. */
+/**
+ * The values with each `setting` param taken from the source object's settings, where the object
+ * has that setting and it is a valid value; every other value is left as it was.
+ */
+export function withSettings(params: ParamDescriptor[], values: ParamValues, source: ProjectObject | undefined): ParamValues {
+	const out = { ...values };
+	for (const p of params) {
+		if (!p.setting) continue;
+		const [group, field] = p.setting.split('.');
+		const held = source?.settings?.[group]?.[field];
+		if (held !== undefined && validate(p, held) === null) out[p.name] = held;
+	}
+	return out;
+}
+
 export function reconcile(params: ParamDescriptor[], previous: ParamValues | undefined, channels: ParamOption[] = []): ParamValues {
 	const out = defaultValues(params, channels);
 	if (!previous) return out;

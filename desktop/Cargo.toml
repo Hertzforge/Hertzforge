@@ -1,0 +1,32 @@
+[package]
+name = "hertzforge-desktop"
+description = "The Hertzforge desktop app: the shell in a window of its own, with the control and analysis services started beside it."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+default-run = "hertzforge"
+
+# Its own workspace, apart from the controller's: the window toolkit brings a few
+# hundred crates (and on Linux the GTK and WebKit system libraries) that the control
+# service's build, tests and lint have no reason to compile. It has its own lockfile
+# and its own `cargo deny` check (desktop/deny.toml).
+[workspace]
+
+[[bin]]
+name = "hertzforge"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde_json = "1"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+[features]
+# The local proof of the built app (packaging/e2e/): runs a script in the window
+# that drives the shell the way an operator does. Never in a shipped build.
+e2e = []

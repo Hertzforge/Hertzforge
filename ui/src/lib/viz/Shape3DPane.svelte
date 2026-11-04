@@ -1,4 +1,10 @@
+<script lang="ts" module>
+	/** Where the camera stood in each result's view that takes clicks: a click replaces the view, and the view belongs to the person, so the new one opens where they left it. */
+	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
+</script>
+
 <script lang="ts">
+	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * Mode shape view, drawn with three.js.
 	 *
@@ -12,6 +18,10 @@
 	 * shading), which keeps lighting correct on the deformed surface. Color is the mode shape
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
+	 *
+	 * A view with `pick` takes clicks, as Visual Dynamics' Add mode and planning pane do: a press and
+	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
+	 * a drag still turns the view.
 	 */
 	import { onDestroy, onMount, type Snippet } from 'svelte';
 	import {
@@ -22,13 +32,19 @@
 		DirectionalLight,
 		DoubleSide,
 		LineBasicMaterial,
+		Box3,
+		Box3Helper,
 		LineSegments,
 		Mesh,
 		MeshBasicMaterial,
 		MeshLambertMaterial,
 		PerspectiveCamera,
+		Points,
+		PointsMaterial,
 		Quaternion,
+		Raycaster,
 		Scene,
+		Vector2,
 		Vector3,
 		WebGLRenderer,
 		type Material
@@ -37,8 +53,11 @@
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
-	import { advance, movedNodes, NORMAL_SPEED, sampleCount, SPEEDS, writeFrame } from './motion';
+	import { coincidentGroups, nodeCaption } from './coincident';
+	import { playheadGroup, playheads } from './cursor';
+	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, nodeTravel } from './shape';
+	import { idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -54,9 +73,38 @@
 		colors?: Float32Array | null;
 		/** The legend drawn in place of the travel colormap's, with `colors`. */
 		legend?: Snippet;
+		/** The result the view belongs to, which its playback `link` is scoped to. */
+		scope?: string;
+		/** Run the view's `pick` operation with these params added: what a click chose. */
+		onpick?: (patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, colors = null, legend }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, colors = null, legend, scope, onpick }: Props = $props();
+
+	/** The click the view takes, when it takes one and there is somewhere to send it. */
+	const pick = $derived(onpick ? view.pick : undefined);
+	/** Nodes picked so far toward one element, as rows of `view.nodes`. */
+	let picked = $state<number[]>([]);
+	/** The pickable node under the cursor. */
+	let hoverNode = $state<number | null>(null);
+	/** How far a press may move and still be a click, in CSS pixels. */
+	const CLICK_SLOP = 4;
+
+	const paneId = `s3-${Math.random().toString(36).slice(2, 9)}`;
+	/** The playhead group playback is shared through, when the view links one. */
+	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
+
+	let copiedImage = $state<'copied' | 'saved' | null>(null);
+	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
+	async function copyImage() {
+		const drawer = renderer;
+		if (!drawer) return;
+		copiedImage = await copyCanvas(drawer.domElement, plotBackground(drawer.domElement), () => drawer.render(scene, camera), view.title);
+		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
+	}
+
+	/** The gray a geometry is drawn in when nothing moves, as Visual Dynamics draws one undeformed. */
+	const REST_GRAY = 0.62;
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
@@ -65,6 +113,45 @@
 	const CYCLE_S = 1.6;
 	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
 	const AMP_FULL_SCALE = 0.15;
+	/** The most nodes the hover caption projects on every pointer move. */
+	const HOVER_LIMIT = 60_000;
+
+	/** How long Record records: at least six seconds of whole cycles of a mode, as VD saves an animation, or that long of a motion. */
+	const RECORD_S = Math.ceil(6 / CYCLE_S) * CYCLE_S;
+	let recording = $state(false);
+
+	/**
+	 * The animation recorded from the view as it plays and saved as a video, as Visual Dynamics saves
+	 * an animation: MP4 where the web view can write it (Safari's can), WebM otherwise. The
+	 * background is painted in for the recording, since the view is drawn on a clear one.
+	 */
+	async function record() {
+		const drawer = renderer;
+		if (!drawer || recording || typeof MediaRecorder === 'undefined') return;
+		const type = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+		if (!type) return;
+		recording = true;
+		playing = true;
+		const before = drawer.getClearAlpha();
+		drawer.setClearColor(plotBackground(drawer.domElement), 1);
+		const stream = drawer.domElement.captureStream(30);
+		const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8_000_000 });
+		const pieces: Blob[] = [];
+		recorder.ondataavailable = (e) => e.data.size && pieces.push(e.data);
+		const done = new Promise<void>((resolve) => (recorder.onstop = () => resolve()));
+		recorder.start();
+		await new Promise((r) => setTimeout(r, RECORD_S * 1000));
+		recorder.stop();
+		await done;
+		stream.getTracks().forEach((t) => t.stop());
+		drawer.setClearAlpha(before);
+		recording = false;
+		const link = document.createElement('a');
+		link.href = URL.createObjectURL(new Blob(pieces, { type }));
+		link.download = `${view.title.replace(/[^\w .-]+/g, '_').slice(0, 80) || 'animation'}.${type.startsWith('video/mp4') ? 'mp4' : 'webm'}`;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+	}
 
 	let host: HTMLDivElement;
 	let canvasHost: HTMLDivElement;
@@ -74,6 +161,26 @@
 	let amplitude = $state(0.5);
 	let wireframe = $state(false);
 	let ghost = $state(false);
+	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
+	let colored = $state(true);
+	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, its extents written out. */
+	let bounds = $state(false);
+	/** The node under the pointer, captioned when the view is not picking. */
+	let hovered = $state<number | null>(null);
+	let hoverPending = false;
+	/** Nodes at one place, for the caption; built once per view's nodes and only when first asked. */
+	let groupsFor: { nodes: Float32Array; groups: Map<number, number[]> } | null = null;
+	function caption(n: number): string {
+		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
+		return nodeCaption(n, view.node_ids, groupsFor.groups);
+	}
+	/** The deflection scale as a typed multiplier of the slider's middle, VD's scale box: 0.01 to 1000. */
+	const scaleFactor = $derived(amplitude / 0.5);
+	function setScale(text: string) {
+		const value = Number(text);
+		if (!Number.isFinite(value)) return;
+		amplitude = Math.min(1000, Math.max(0.01, value)) * 0.5;
+	}
 	let fps = $state<number | null>(null);
 	let failure = $state<string | null>(null);
 
@@ -81,6 +188,8 @@
 	const triCount = $derived((view.triangles?.length ?? 0) / 3);
 	const current = $derived(view.modes[Math.min(Math.max(0, mode), view.modes.length - 1)]);
 	const motion = $derived(view.motion);
+	/** Whether anything moves: a geometry on its own has no play, amplitude, ghost or legend to offer. */
+	const moves = $derived(view.modes.length > 0 || !!motion);
 	const shown = $derived(overlay !== null && view.overlays ? view.overlays[overlay] : undefined);
 	const samples = $derived(motion ? sampleCount(motion) : 0);
 	let speedIndex = $state(NORMAL_SPEED);
@@ -103,6 +212,20 @@
 
 	const peak = $derived(amplitude * AMP_FULL_SCALE * diagonal);
 
+	/** The model's extents along each axis, for the bounds box and its labels. */
+	const extents = $derived.by(() => {
+		const n = view.nodes;
+		const lo = [Infinity, Infinity, Infinity];
+		const hi = [-Infinity, -Infinity, -Infinity];
+		for (let i = 0; i < n.length; i += 3) {
+			for (let k = 0; k < 3; k++) {
+				if (n[i + k] < lo[k]) lo[k] = n[i + k];
+				if (n[i + k] > hi[k]) hi[k] = n[i + k];
+			}
+		}
+		return { lo, hi };
+	});
+
 	/** Display scaling of the model unit: meters shown as millimeters below one meter. */
 	const display = $derived.by(() => {
 		if (view.unit === 'm' && peak < 1) return { factor: 1000, unit: 'mm' };
@@ -112,6 +235,7 @@
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
+	let boundsBox: Box3Helper | null = null;
 	let camera: PerspectiveCamera;
 	let controls: OrbitControls;
 	let geometry: BufferGeometry;
@@ -123,12 +247,21 @@
 	let outline: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
+	/** The view's `marks`: DOF arrows and sensors, drawn still. */
+	let markLines: LineSegments | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
 	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
 	let overlayImagAttr: BufferAttribute;
 	let overlaySurface: Mesh | null = null;
 	let overlayOutline: LineSegments | null = null;
+	/** The surfaces not in use, drawn muted over the model, when clicks leave surfaces out. */
+	let mutedSurface: Mesh | null = null;
+	/** The nodes picked and the one under the cursor. */
+	let marks: Points | null = null;
+	/** Every node as a dot, while clicks place points or pick nodes, so a node with no element still shows. */
+	let dots: Points | null = null;
+	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
 	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
 	let maxMag = 1;
@@ -171,6 +304,19 @@
 		return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 	}
 
+	/** The color of a node at `t` of the scale, or the surface's one color when coloring is off. */
+	function paint(colors: Float32Array, n: number, t: number, rgb: [number, number, number]) {
+		if (colored) colormap(t, rgb);
+		else {
+			rgb[0] = 0.62;
+			rgb[1] = 0.66;
+			rgb[2] = 0.72;
+		}
+		colors[3 * n] = srgbToLinear(rgb[0]);
+		colors[3 * n + 1] = srgbToLinear(rgb[1]);
+		colors[3 * n + 2] = srgbToLinear(rgb[2]);
+	}
+
 	/** The caller's own node colors, over whatever the shape or the motion painted. */
 	function paintColors() {
 		if (!renderer || !colors) return;
@@ -193,12 +339,7 @@
 		maxMag = nodeTravel(re, im, travel) || 1;
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
-		for (let n = 0; n < travel.length; n++) {
-			colormap(travel[n] / maxMag, rgb);
-			colors[3 * n] = srgbToLinear(rgb[0]);
-			colors[3 * n + 1] = srgbToLinear(rgb[1]);
-			colors[3 * n + 2] = srgbToLinear(rgb[2]);
-		}
+		for (let n = 0; n < travel.length; n++) paint(colors, n, travel[n] / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
@@ -233,12 +374,8 @@
 		(shapeAttr.array as Float32Array).fill(0);
 		(shapeImagAttr.array as Float32Array).fill(0);
 		const colors = colorAttr.array as Float32Array;
-		const rgb = colormap(0);
-		for (let i = 0; i < colors.length; i += 3) {
-			colors[i] = srgbToLinear(rgb[0]);
-			colors[i + 1] = srgbToLinear(rgb[1]);
-			colors[i + 2] = srgbToLinear(rgb[2]);
-		}
+		const rgb: [number, number, number] = [0, 0, 0];
+		for (let n = 0; n < colors.length / 3; n++) paint(colors, n, 0, rgb);
 		shapeImagAttr.needsUpdate = true;
 		shownSample = -1;
 		showSample(Math.floor(position));
@@ -251,17 +388,13 @@
 		writeFrame(motion, k, moved, offsets);
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
-		for (const n of moved) {
-			colormap(Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
-			colors[3 * n] = srgbToLinear(rgb[0]);
-			colors[3 * n + 1] = srgbToLinear(rgb[1]);
-			colors[3 * n + 2] = srgbToLinear(rgb[2]);
-		}
+		for (const n of moved) paint(colors, n, Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		shownSample = k;
 		sample = k;
 		dirty = true;
+		if (playhead) playheads.set(playhead, motion.start + k * motion.step, paneId);
 	}
 
 	/** Move playback to sample k, as the scrubber does. */
@@ -276,6 +409,10 @@
 		(ghostSurface.material as MeshBasicMaterial).color = ghostColor;
 		if (ghostOutline) (ghostOutline.material as LineBasicMaterial).color = ghostColor;
 		if (outline) (outline.material as LineBasicMaterial).color = lineColor;
+		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
+		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
+		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
 	}
 
@@ -315,7 +452,9 @@
 		const position = new BufferAttribute(view.nodes, 3);
 		shapeAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 		shapeImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
-		colorAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
+		// a neutral gray until a mode or a motion colors the nodes: a geometry on its own is not
+		// at the bottom of the colormap, which reads as black on a dark background
+		colorAttr = new BufferAttribute(new Float32Array(view.nodes.length).fill(srgbToLinear(REST_GRAY)), 3);
 		geometry.setAttribute('position', position);
 		geometry.setAttribute('shape', shapeAttr);
 		geometry.setAttribute('shapeImag', shapeImagAttr);
@@ -329,6 +468,10 @@
 		camera.near = radius / 100;
 		camera.far = radius * 100;
 		camera.updateProjectionMatrix();
+
+		boundsBox = new Box3Helper(new Box3().setFromBufferAttribute(position), 0x8b949e);
+		boundsBox.visible = bounds;
+		scene.add(boundsBox);
 
 		surface = new Mesh(
 			geometry,
@@ -375,6 +518,23 @@
 			}
 		}
 
+		if (view.marks && view.marks.lines.length) {
+			// DOF arrows and sensor bodies: line work that stays put while the model moves
+			const g = new BufferGeometry();
+			const { nodes: mn, lines: ml } = view.marks;
+			const segs = new Float32Array(ml.length * 3);
+			for (let i = 0; i < ml.length; i++) {
+				const n = ml[i] * 3;
+				segs[i * 3] = mn[n];
+				segs[i * 3 + 1] = mn[n + 1];
+				segs[i * 3 + 2] = mn[n + 2];
+			}
+			g.setAttribute('position', new BufferAttribute(segs, 3));
+			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
+			markLines.frustumCulled = false;
+			scene.add(markLines);
+		}
+
 		if (view.lines && view.lines.length) {
 			lineGeometry = new BufferGeometry();
 			lineGeometry.setAttribute('position', position);
@@ -392,6 +552,41 @@
 			scene.add(ghostOutline);
 		}
 
+		if (view.pick?.target === 'faces' && view.pick.faces && view.triangles) {
+			const kept = new Set(view.pick.kept ?? []);
+			const muted: number[] = [];
+			view.pick.faces.forEach((owner, t) => {
+				if (!kept.has(owner)) muted.push(view.triangles![3 * t], view.triangles![3 * t + 1], view.triangles![3 * t + 2]);
+			});
+			if (muted.length) {
+				const g = new BufferGeometry();
+				g.setAttribute('position', position);
+				g.setIndex(muted);
+				mutedSurface = new Mesh(
+					g,
+					plain(new MeshBasicMaterial({ side: DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }))
+				);
+				mutedSurface.frustumCulled = false;
+				scene.add(mutedSurface);
+			}
+		}
+		if (view.pick && view.pick.target !== 'faces') {
+			const g = new BufferGeometry();
+			g.setAttribute('position', position);
+			g.setDrawRange(0, view.pick.ids?.length ?? view.nodes.length / 3);
+			dots = new Points(g, plain(new PointsMaterial({ size: 4, sizeAttenuation: false })));
+			dots.frustumCulled = false;
+			scene.add(dots);
+		}
+		if (view.pick?.target === 'nodes') {
+			markGeometry = new BufferGeometry();
+			markGeometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
+			marks = new Points(markGeometry, plain(new PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false })));
+			marks.renderOrder = 5;
+			marks.frustumCulled = false;
+			scene.add(marks);
+		}
+
 		// A headlight that follows the camera keeps shading even while orbiting.
 		scene.add(new AmbientLight(0xffffff, 1.05));
 		const head = new DirectionalLight(0xffffff, 2.1);
@@ -406,7 +601,13 @@
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
-		resetView();
+		const pose = view.pick && scope ? poses.get(scope) : undefined;
+		if (pose) {
+			camera.position.fromArray(pose.position);
+			camera.up.fromArray(pose.up);
+			controls.target.fromArray(pose.target);
+			controls.update();
+		} else resetView();
 		applyTheme();
 		loadMode();
 		loadOverlay();
@@ -504,6 +705,19 @@
 
 	onMount(init);
 
+	// a linked plot's line, dragged, moves playback to it
+	$effect(() => {
+		const group = playhead;
+		if (!group) return;
+		const unsubscribe = playheads.subscribe(group, (state) => {
+			if (motion && state.source !== paneId && state.x !== null) seek(sampleAt(motion, state.x));
+		});
+		return () => {
+			unsubscribe();
+			playheads.clear(group, paneId);
+		};
+	});
+
 	// Mode or view changes: reload the shape buffer, and the overlay scaled to it.
 	$effect(() => {
 		void current;
@@ -536,12 +750,20 @@
 	});
 
 	onDestroy(() => {
+		if (markLines) {
+			markLines.geometry.dispose();
+			(markLines.material as Material).dispose();
+		}
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
+		if (view.pick && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
+		mutedSurface?.geometry.dispose();
+		dots?.geometry.dispose();
+		markGeometry?.dispose();
 		overlayGeometry?.dispose();
 		overlayLineGeometry?.dispose();
 		for (const m of materials) m.dispose();
@@ -549,6 +771,138 @@
 		renderer.forceContextLoss();
 		renderer.domElement.remove();
 		renderer = null;
+	});
+
+	// The picked nodes and the one under the cursor, as marks on the model.
+	$effect(() => {
+		if (!renderer || !markGeometry) return;
+		const rows = hoverNode !== null && !picked.includes(hoverNode) ? [...picked, hoverNode] : picked;
+		const xyz = new Float32Array(3 * rows.length);
+		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
+		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
+		dirty = true;
+	});
+
+	const raycaster = new Raycaster();
+	const pointer = new Vector2();
+	let pressedAt: [number, number] | null = null;
+
+	/** The cursor's place in the canvas, in CSS pixels. */
+	function at(e: PointerEvent): [number, number] {
+		const box = canvasHost.getBoundingClientRect();
+		return [e.clientX - box.left, e.clientY - box.top];
+	}
+
+	/** The pickable node nearest (x, y) on screen, as a row of `view.nodes`. */
+	function nodeAt(x: number, y: number, over?: number): number | null {
+		const count = over ?? Math.min(pick?.ids?.length ?? 0, nodeCount);
+		const w = canvasHost.clientWidth;
+		const h = canvasHost.clientHeight;
+		const screen = new Float32Array(2 * count);
+		const visible: boolean[] = [];
+		for (let n = 0; n < count; n++) {
+			tmp.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			screen[2 * n] = ((tmp.x + 1) / 2) * w;
+			screen[2 * n + 1] = ((1 - tmp.y) / 2) * h;
+			visible.push(tmp.z < 1);
+		}
+		return nearestNode(screen, visible, count, x, y);
+	}
+
+	/** Aim the raycaster through (x, y) and return what it meets on the model's faces. */
+	function aim(x: number, y: number) {
+		pointer.set((x / canvasHost.clientWidth) * 2 - 1, -(y / canvasHost.clientHeight) * 2 + 1);
+		raycaster.setFromCamera(pointer, camera);
+		return view.triangles ? raycaster.intersectObject(surface, false)[0] : undefined;
+	}
+
+	function commitNodes() {
+		const p = pick;
+		if (!p?.ids || !p.param || picked.length < (p.count === 1 ? 1 : 2)) return;
+		onpick?.({ [p.param]: idList(picked.map((r) => p.ids![r])) });
+		picked = [];
+	}
+
+	function click(x: number, y: number) {
+		const p = pick;
+		if (!p || !renderer) return;
+		if (p.target === 'nodes') {
+			const row = nodeAt(x, y);
+			if (row === null) return;
+			picked = picked.includes(row) ? picked.filter((r) => r !== row) : [...picked, row];
+			if (p.count && picked.length === p.count) commitNodes();
+			return;
+		}
+		const hit = aim(x, y);
+		if (p.target === 'faces') {
+			const owner = hit?.faceIndex != null ? p.faces?.[hit.faceIndex] : undefined;
+			if (owner !== undefined && owner >= 0) onpick?.(toggledSurface(p.params, p.kept ?? [], p.out!, p.back!, owner));
+			return;
+		}
+		let point: [number, number, number];
+		if (hit) point = [hit.point.x, hit.point.y, hit.point.z];
+		else {
+			const count = nodeCount;
+			const w = canvasHost.clientWidth;
+			const h = canvasHost.clientHeight;
+			let anchor: [number, number, number] = [centre.x, centre.y, centre.z];
+			let nearest = Infinity;
+			for (let n = 0; n < count; n++) {
+				tmp.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+				const d = (((tmp.x + 1) / 2) * w - x) ** 2 + (((1 - tmp.y) / 2) * h - y) ** 2;
+				if (d < nearest) {
+					nearest = d;
+					anchor = [view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]];
+				}
+			}
+			const o = raycaster.ray.origin;
+			const d = raycaster.ray.direction;
+			point = placedPoint([o.x, o.y, o.z], [d.x, d.y, d.z], anchor, modelPlane(view.nodes, count));
+		}
+		const [scale, offset] = p.to_si ?? [1, 0];
+		onpick?.({ x: point[0] * scale + offset, y: point[1] * scale + offset, z: point[2] * scale + offset });
+	}
+
+	function onPointerDown(e: PointerEvent) {
+		pressedAt = e.button === 0 ? at(e) : null;
+	}
+
+	function onPointerUp(e: PointerEvent) {
+		const start = pressedAt;
+		pressedAt = null;
+		if (!start || e.button !== 0) return;
+		const [x, y] = at(e);
+		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y);
+	}
+
+	function onPointerMove(e: PointerEvent) {
+		if (e.buttons) return;
+		if (pick?.target === 'nodes') {
+			hoverNode = nodeAt(...at(e));
+			return;
+		}
+		// the caption outside picking: once a frame, and only on a model small enough to project
+		// every node on each move (a large one is looked at, not read node by node)
+		if (!view.node_ids || nodeCount > HOVER_LIMIT || hoverPending) return;
+		hoverPending = true;
+		const [x, y] = at(e);
+		requestAnimationFrame(() => {
+			hoverPending = false;
+			hovered = nodeAt(x, y, nodeCount);
+		});
+	}
+
+	$effect(() => {
+		void colored;
+		if (!renderer) return;
+		if (motion) loadMotion();
+		else loadMode();
+	});
+	$effect(() => {
+		if (boundsBox) {
+			boundsBox.visible = bounds;
+			dirty = true;
+		}
 	});
 
 	/** Move to the next or previous mode, staying within the view's modes. */
@@ -565,6 +919,8 @@
 		else if (k === 'r') resetView();
 		else if (e.key === 'ArrowDown' && view.modes.length > 1) step(1);
 		else if (e.key === 'ArrowUp' && view.modes.length > 1) step(-1);
+		else if (e.key === 'Enter' && pick?.target === 'nodes') commitNodes();
+		else if (e.key === 'Escape' && picked.length) picked = [];
 		else return;
 		e.preventDefault();
 	}
@@ -584,7 +940,28 @@
 	aria-label="{view.title}. Space plays or pauses, W toggles wireframe, G toggles the undeformed ghost, R resets the view, Up and Down step through the modes."
 	onkeydown={onKey}
 >
-	<div class="canvas" data-testid="shape3d-canvas" bind:this={canvasHost}></div>
+	<!-- svelte-ignore a11y_no_static_element_interactions (clicks are also the keyboard's: Enter commits, Escape clears) -->
+	<div
+		class="canvas"
+		class:picking={!!pick}
+		data-testid="shape3d-canvas"
+		bind:this={canvasHost}
+		onpointerdown={onPointerDown}
+		onpointerup={onPointerUp}
+		onpointermove={onPointerMove}
+		onpointerleave={() => (hoverNode = null)}
+	></div>
+
+	{#if pick}
+		<div class="pickbar" data-testid="shape3d-pick" role="status">
+			<span>{pick.hint}</span>
+			{#if picked.length}
+				<span class="num" data-testid="shape3d-picked">Picked {idList(picked.map((r) => pick.ids?.[r] ?? r))}</span>
+				{#if !pick.count}<button class="btn sm" data-testid="shape3d-pick-done" onclick={commitNodes} title="Make the elements (Enter)">Done</button>{/if}
+				<button class="btn ghost sm" onclick={() => (picked = [])} title="Clear the picks (Escape)">Clear</button>
+			{/if}
+		</div>
+	{/if}
 
 	{#if failure}
 		<div class="failure" role="alert">{failure}</div>
@@ -592,6 +969,7 @@
 
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Mode shape display">
+			{#if moves}
 			<button
 				class="btn icon sm"
 				data-testid="shape3d-play"
@@ -608,17 +986,31 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max="1" step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={Math.max(1, amplitude)} step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
+			<label class="scale" title="The deflection scale as a multiplier of the slider's middle, 0.01 to 1000">
+				<span class="lbl">×</span>
+				<input class="field mono num" data-testid="shape3d-scale" type="number" min="0.01" max="1000" step="any" value={Number(scaleFactor.toPrecision(3))} onchange={(e) => setScale(e.currentTarget.value)} aria-label="Deflection scale" />
+			</label>
+			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
 				<button role="radio" data-testid="shape3d-surface" aria-checked={!wireframe} class:on={!wireframe} onclick={() => (wireframe = false)} title="Surface (W)">Surface</button>
 				<button role="radio" data-testid="shape3d-wireframe" aria-checked={wireframe} class:on={wireframe} onclick={() => (wireframe = true)} title="Wireframe (W)">Wireframe</button>
 			</div>
+			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-ghost" class:on={ghost} aria-pressed={ghost} onclick={() => (ghost = !ghost)} title="Undeformed ghost (G)">
 				<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="5" width="12" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6" /></svg>
 				Ghost
 			</button>
+			{/if}
+			{#if moves}
+			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
+			{/if}
+			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, its extents written out">Axes</button>
+{#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
+				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
+			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 			<button class="btn icon sm" data-testid="shape3d-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
 				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
@@ -682,7 +1074,7 @@
 	<div class="bottom">
 		{#if colors && legend}
 			<div class="legend" aria-label="Color legend">{@render legend()}</div>
-		{:else}
+		{:else if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
 				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
@@ -705,6 +1097,16 @@
 			</svg>
 
 			<div class="stats num" aria-live="off">
+				{#if hovered !== null && !pick}
+					<span class="hovercap" data-testid="shape3d-hover">{caption(hovered)}</span>
+				{/if}
+				{#if bounds}
+					<span class="extents" data-testid="shape3d-extents" aria-label="Model extents">
+						{#each ['X', 'Y', 'Z'] as axis, k (axis)}
+							<span>{axis} {formatFixed(extents.lo[k], 4)} to {formatFixed(extents.hi[k], 4)}{view.unit === 'undefined' ? '' : ` ${view.unit}`}</span>
+						{/each}
+					</span>
+				{/if}
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
@@ -714,6 +1116,11 @@
 </div>
 
 <style>
+	.copyimg {
+		flex: none;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.shape3d {
 		position: relative;
 		height: 100%;
@@ -738,6 +1145,28 @@
 	.canvas :global(canvas) {
 		display: block;
 		touch-action: none;
+	}
+
+	.canvas.picking {
+		cursor: crosshair;
+	}
+
+	.pickbar {
+		position: absolute;
+		left: 50%;
+		bottom: 30px;
+		translate: -50% 0;
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		max-width: calc(100% - 2 * var(--sp-3));
+		padding: 4px var(--sp-2);
+		white-space: nowrap;
+		font-size: var(--text-xs);
+		color: var(--text-2);
+		background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-md);
 	}
 
 	.top,
@@ -774,6 +1203,27 @@
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-md);
 		backdrop-filter: blur(6px);
+	}
+
+	.scale {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+	}
+
+	.scale input {
+		width: 6ch;
+		padding: 1px 4px;
+		font-size: var(--text-xs);
+	}
+
+	.hovercap {
+		color: var(--text-1);
+	}
+
+	.extents {
+		display: inline-flex;
+		gap: var(--sp-2);
 	}
 
 	.amp {
