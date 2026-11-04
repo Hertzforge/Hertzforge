@@ -433,6 +433,15 @@ def refresh(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     state.modified = True
 
 
+def journal(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.journal`: the session as Python, every verb and settings
+    change since the project was made or opened as the line that replays
+    it (`Project.journal`), for Visual Dynamics' console: read-only, to be
+    copied into a script."""
+    state = _open(state, 'project.journal')
+    return {'lines': [str(line) for line in state.project.journal]}
+
+
 def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
     """`project.units`: the tables an object's units are declared in
     (`service.units.tables`)."""

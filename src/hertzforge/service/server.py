@@ -58,7 +58,7 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
-                   'project.units', 'project.define_units', 'project.children',
+                   'project.units', 'project.define_units', 'project.children', 'project.journal',
                    'project.show', 'project.actions')
 
 #: the largest frame a client may send; requests are small
@@ -348,6 +348,9 @@ class Connection:
                  'project.activate': (projects.activate, ('geometry',)),
                  'project.duplicate': (projects.duplicate, ('names',)),
                  'project.refresh': (projects.refresh, ('names',))}
+        if method == 'project.journal':
+            _only(params, (), method)
+            return await call(projects.journal, self.project, params)
         if method == 'project.units':
             _only(params, ('name',), method)
             return await call(projects.units, self.project, params)

@@ -1156,6 +1156,7 @@ export class ProjectState {
 		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
 		void this.app.analyze.showSelection();
+		void this.app.console.sync();
 	}
 
 	/** Open or close an object's row; opening asks what it holds. */
@@ -1418,6 +1419,56 @@ export class ProjectState {
 
 // ---------------------------------------------------------------------------------------------
 
+const CONSOLE_KEY = 'hertzforge.console.shown';
+
+/**
+ * The console: the session as Python along the bottom of the window, as Visual Dynamics' is. It
+ * shows the project's journal, every verb and settings change as the line that replays it,
+ * read-only, to be copied into a script; nothing is typed into it (Brandon, 2026-08-30).
+ */
+export class ConsoleState {
+	shown = $state(false);
+	lines = $state.raw<string[]>([]);
+	error = $state<string | null>(null);
+	private seq = 0;
+
+	constructor(private readonly app: AppState) {
+		try {
+			this.shown = localStorage.getItem(CONSOLE_KEY) === '1';
+		} catch {
+			// closed
+		}
+	}
+
+	toggle(): void {
+		this.shown = !this.shown;
+		try {
+			localStorage.setItem(CONSOLE_KEY, this.shown ? '1' : '0');
+		} catch {
+			// kept for this session only
+		}
+		if (this.shown) void this.sync();
+	}
+
+	/** The journal as the service holds it now; asked again whenever the project changes. */
+	async sync(): Promise<void> {
+		if (!this.shown || !this.app.project.summary || !this.app.analysis.isOpen) return;
+		const seq = ++this.seq;
+		try {
+			const res = await this.app.analysis.request<{ lines: string[] }>('project.journal', {});
+			if (seq !== this.seq) return;
+			this.lines = res.lines;
+			this.error = null;
+		} catch (err) {
+			if (seq === this.seq) this.error = message(err);
+		}
+	}
+
+	get text(): string {
+		return this.lines.join('\n');
+	}
+}
+
 export class AppState {
 	readonly config: ShellConfig;
 	readonly analysis: ServiceClient;
@@ -1435,6 +1486,8 @@ export class AppState {
 	readonly units: UnitsState;
 	/** The run log the keeper writes while a test runs, beside any workspace. */
 	readonly runLog: RunLogState;
+	/** The session as Python, along the bottom of every workspace. */
+	readonly console: ConsoleState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -1456,6 +1509,7 @@ export class AppState {
 		this.report = new ReportState(this);
 		this.units = new UnitsState(this);
 		this.runLog = new RunLogState(this.analysis);
+		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
