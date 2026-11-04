@@ -138,6 +138,10 @@ pub enum QuantitySelector {
     /// The dB error against the reference of the listed controls, per line
     /// (`error_db(all)`, the heatmap's rows).
     ErrorDb(Vec<usize>),
+    /// The coherence error of the listed controls, per line: each control's rms
+    /// over its partners of the measured squared coherence minus the reference's
+    /// (`coh_error(all)`, the heatmap's second mode).
+    CohError(Vec<usize>),
     /// A drive's PSD (`drive_psd(k)`).
     DrivePsd(usize),
     /// Coherence between two drives (`drive_coh(k,l)`).
@@ -226,6 +230,11 @@ pub struct StartContext {
     /// `sim`, `ni_simulated` or `ni_real`.
     pub class: &'static str,
     pub kind: &'static str,
+    /// The channel table as it stands (`None` where a driver is only checking a
+    /// setup).
+    pub table: Option<hertzforge_channel_table::ChannelTable>,
+    /// The NI devices the station selection names (empty on the simulator).
+    pub ni_devices: Vec<String>,
 }
 
 /// What the service needs from a MIMO Random run.

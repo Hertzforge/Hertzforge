@@ -24,6 +24,7 @@ PAYLOADS = {
     'response_laws_list': ('result', 'lawsListResult'),
     'request_laws_import': ('params', 'lawsImportParams'),
     'response_laws_import': ('result', 'lawsImportResult'),
+    'request_mimo_random_subscribe_coh_error': ('params', 'mimoSubscribeParams'),
 }
 
 

@@ -690,6 +690,14 @@ MIMO_TEXT_GOLDENS = {
     'response_laws_import': {
         'type': 'response', 'id': 36, 'result': {'law': LAW_IMPORTED},
     },
+    # The error heatmap's two modes: the dB error and the coherence error.
+    'request_mimo_random_subscribe_coh_error': {
+        'type': 'request', 'id': 37, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 5, 'plots': [
+            {'id': 'heat', 'quantity': 'error_db', 'rows': 'all', 'points': 512},
+            {'id': 'coh_heat', 'quantity': 'coh_error', 'rows': 'all', 'points': 512},
+        ]},
+    },
 }
 
 

@@ -1155,6 +1155,7 @@ once when the run has streamed.
 | `phase` | `pair` | one `spectrum`: the phase of `G_ij`, degrees, against the reference's |
 | `csd_mag` | `pair` | one `spectrum`, stepped: the cross-spectrum magnitude against the reference's |
 | `error_db` | `rows` | one `heatmap`: each control's dB error against the reference per line |
+| `coh_error` | `rows` | one `heatmap`: each control's coherence error per line, the rms over its partners of the measured squared coherence minus the reference's (0 to 1; 0 with one control) |
 | `drive_psd` | `index` or `diagonal` | one `spectrum`, stepped, V²/Hz |
 | `drive_coh` | `pair` | one `spectrum`: the coherence of two drives |
 | `frf` | `pair` (`[control, drive]`) | two `spectrum`s: the FRF's magnitude and phase |

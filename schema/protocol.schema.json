@@ -1509,7 +1509,7 @@
       "type": "object", "required": ["law"], "additionalProperties": false,
       "properties": {"law": {"$ref": "#/$defs/lawEntry"}}
     },
-    "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "drive_psd", "drive_coh",
+    "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "coh_error", "drive_psd", "drive_coh",
                               "frf", "sv", "cond", "mcoh", "cap", "dof_rms", "trace", "pred_drive_rms",
                               "pred_error_db", "law_diag", "sdm", "readings"]},
     "mimoPosition": {"type": "integer", "minimum": 0},
@@ -1548,7 +1548,7 @@
          "then": {"properties": {"pair": false, "rows": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "pred_error_db"}}},
          "then": {"required": ["index"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false, "key": false}}},
-        {"if": {"properties": {"quantity": {"const": "error_db"}}},
+        {"if": {"properties": {"quantity": {"enum": ["error_db", "coh_error"]}}},
          "then": {"properties": {"index": false, "pair": false, "diagonal": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "sdm"}}},
          "then": {"required": ["block"], "properties": {"index": false, "pair": false, "rows": false, "diagonal": false, "key": false}}},

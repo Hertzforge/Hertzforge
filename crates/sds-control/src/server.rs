@@ -101,9 +101,21 @@ pub struct ServiceOptions {
     pub sim_speed: f64,
     /// What the hardware lock names as this service's address.
     pub bind: String,
-    /// Makes the driver of a MIMO run (`None`: the simulated driver, paced at
-    /// `sim_speed`).
+    /// Makes the driver of a MIMO run (`None`: the controller's MIMO Random service
+    /// through [`crate::mimo::adapter::ServiceDriver`]). Tests that need no real run
+    /// give [`simulated_mimo_driver`].
     pub mimo_driver: Option<DriverFactory>,
+}
+
+/// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
+/// simulated seconds per wall second: for wire tests that exercise the protocol
+/// without the controller's service. A run never uses it unless given it here.
+pub fn simulated_mimo_driver(speed: f64) -> DriverFactory {
+    Arc::new(move |_ctx| {
+        Box::new(crate::mimo::sim::SimulatedMimoDriver::new(
+            crate::mimo::sim::SimClock::wall(speed),
+        ))
+    })
 }
 
 impl Default for ServiceOptions {

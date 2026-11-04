@@ -35,6 +35,10 @@ pub enum MimoQuantity {
     CsdMag(usize, usize),
     /// Every control's error against the reference per line, dB, full level.
     ErrorDb,
+    /// Every control's coherence error per line: the rms over its partners `j` of
+    /// the measured squared coherence with `j` minus the reference's (the error
+    /// heatmap's second mode, design 9.3). Zero on a test with one control.
+    CohError,
     /// Drive `k`'s PSD (physical).
     DrivePsd(usize),
     /// Coherence between drives `k` and `l`.
@@ -104,6 +108,84 @@ pub(crate) struct View<'a> {
     pub diagnostics: &'a [DiagnosticValue],
 }
 
+/// An owned copy of what the quantities read, taken after a loop so a display can
+/// be answered from another thread while the run computes the next loop.
+#[derive(Debug, Clone)]
+pub struct QuantitySnapshot {
+    pub(crate) lines: usize,
+    pub(crate) df_hz: f64,
+    pub(crate) band: (usize, usize),
+    pub(crate) n_r: usize,
+    pub(crate) n_d: usize,
+    pub(crate) level_db: f64,
+    pub(crate) reference: std::sync::Arc<HermitianStack>,
+    pub(crate) tolerances: std::sync::Arc<Tolerances>,
+    pub(crate) response_full: Option<HermitianStack>,
+    pub(crate) error_lines: Vec<f64>,
+    pub(crate) drive_full: HermitianStack,
+    pub(crate) frf: Option<MatrixStack>,
+    pub(crate) coherence: Vec<f64>,
+    pub(crate) condition: Vec<f64>,
+    pub(crate) caps: Option<DriveFactors>,
+    pub(crate) prediction: Option<Prediction>,
+    pub(crate) diagnostics: Vec<DiagnosticValue>,
+}
+
+impl QuantitySnapshot {
+    fn view(&self) -> View<'_> {
+        View {
+            lines: self.lines,
+            df_hz: self.df_hz,
+            band: self.band,
+            n_r: self.n_r,
+            n_d: self.n_d,
+            level_db: self.level_db,
+            reference: &self.reference,
+            tolerances: &self.tolerances,
+            response_full: self.response_full.as_ref(),
+            error_lines: &self.error_lines,
+            drive_full: &self.drive_full,
+            frf: self.frf.as_ref(),
+            coherence: &self.coherence,
+            condition: &self.condition,
+            caps: self.caps.as_ref(),
+            prediction: self.prediction.as_ref(),
+            diagnostics: &self.diagnostics,
+        }
+    }
+
+    /// The quantity `q`, exactly as [`MimoRandomService::quantity`] answered it
+    /// when the snapshot was taken.
+    pub fn quantity(&self, q: &MimoQuantity) -> Option<Series> {
+        self.view().quantity(q)
+    }
+
+    /// The control-space response at full level, once a loop has been judged.
+    pub fn response_full(&self) -> Option<&HermitianStack> {
+        self.response_full.as_ref()
+    }
+
+    /// The reference at full level, in the control space.
+    pub fn reference(&self) -> &HermitianStack {
+        &self.reference
+    }
+
+    /// The level the run was at, dB (not finite before the loop engages).
+    pub fn level_db(&self) -> f64 {
+        self.level_db
+    }
+
+    /// The controlled band, half-open, in lines.
+    pub fn band(&self) -> (usize, usize) {
+        self.band
+    }
+
+    /// Line spacing, Hz.
+    pub fn df_hz(&self) -> f64 {
+        self.df_hz
+    }
+}
+
 impl View<'_> {
     fn grid(&self, name: &str, unit: &str, traces: Vec<Trace>) -> Series {
         let (lo, hi) = self.band;
@@ -137,6 +219,23 @@ fn db(x: f64) -> f64 {
     }
 }
 
+/// Control `i`'s coherence error on `line`: the rms over every other control `j`
+/// of `gamma^2_measured(i, j) - gamma^2_reference(i, j)`; 0 with no partner.
+fn coherence_error(m: &HermitianStack, r: &HermitianStack, line: usize, i: usize) -> f64 {
+    let n = m.n();
+    if n < 2 {
+        return 0.0;
+    }
+    let s: f64 = (0..n)
+        .filter(|&j| j != i)
+        .map(|j| {
+            let e = coherence(m, line, i, j) - coherence(r, line, i, j);
+            e * e
+        })
+        .sum();
+    (s / (n - 1) as f64).sqrt()
+}
+
 fn coherence(g: &HermitianStack, line: usize, i: usize, j: usize) -> f64 {
     let d = g.get(line, i, i).re * g.get(line, j, j).re;
     if d > 0.0 {
@@ -150,7 +249,38 @@ impl MimoRandomService {
     /// The quantity `q`, or `None` when it does not exist yet or the index is out
     /// of range.
     pub fn quantity(&self, q: &MimoQuantity) -> Option<Series> {
+        self.quantity_state().quantity(q)
+    }
+
+    /// An owned copy of what the quantities read now (see [`QuantitySnapshot`]).
+    pub fn quantity_snapshot(&self) -> QuantitySnapshot {
         let v = self.quantity_state();
+        QuantitySnapshot {
+            lines: v.lines,
+            df_hz: v.df_hz,
+            band: v.band,
+            n_r: v.n_r,
+            n_d: v.n_d,
+            level_db: v.level_db,
+            reference: self.reference_shared(),
+            tolerances: self.tolerances_shared(),
+            response_full: v.response_full.cloned(),
+            error_lines: v.error_lines.to_vec(),
+            drive_full: v.drive_full.clone(),
+            frf: v.frf.cloned(),
+            coherence: v.coherence.to_vec(),
+            condition: v.condition.to_vec(),
+            caps: v.caps.cloned(),
+            prediction: v.prediction.cloned(),
+            diagnostics: v.diagnostics.to_vec(),
+        }
+    }
+}
+
+impl View<'_> {
+    /// The quantity `q` of this view.
+    fn quantity(&self, q: &MimoQuantity) -> Option<Series> {
+        let v = self;
         let (n_r, n_d) = (v.n_r, v.n_d);
         let p = v.level();
         let t = |label: &str, y: Vec<f64>| Trace {
@@ -242,6 +372,18 @@ impl MimoRandomService {
                             .collect(),
                     ),
                 )
+            }
+            MimoQuantity::CohError => {
+                let r = v.response_full?;
+                let rows = (0..n_r)
+                    .map(|i| {
+                        t(
+                            &format!("{i}"),
+                            v.band_of(|l| coherence_error(r, v.reference, l, i)),
+                        )
+                    })
+                    .collect();
+                Some(v.grid("coh_error", "", rows))
             }
             MimoQuantity::DrivePsd(k) if *k < n_d => Some(v.grid(
                 "drive_psd",
@@ -407,7 +549,9 @@ impl MimoRandomService {
             _ => None,
         }
     }
+}
 
+impl MimoRandomService {
     /// Every quantity name the service answers, for a screen's subscription list.
     pub fn quantity_names() -> &'static [&'static str] {
         &[
@@ -417,6 +561,7 @@ impl MimoRandomService {
             "phase",
             "csd_mag",
             "error_db",
+            "coh_error",
             "drive_psd",
             "drive_coh",
             "frf",

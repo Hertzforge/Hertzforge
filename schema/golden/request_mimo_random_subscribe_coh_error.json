@@ -1,0 +1,22 @@
+{
+ "type": "request",
+ "id": 37,
+ "method": "mimo_random.subscribe",
+ "params": {
+  "rate_hz": 5,
+  "plots": [
+   {
+    "id": "heat",
+    "quantity": "error_db",
+    "rows": "all",
+    "points": 512
+   },
+   {
+    "id": "coh_heat",
+    "quantity": "coh_error",
+    "rows": "all",
+    "points": 512
+   }
+  ]
+ }
+}

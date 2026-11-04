@@ -7,11 +7,14 @@
 //! - [`check`]: the validation report (ranks, positive semi-definiteness,
 //!   feasibility per drive, law shape admission).
 //! - [`driver`]: [`driver::MimoRunDriver`], what the service needs from a run.
-//! - [`sim`]: [`sim::SimulatedMimoDriver`], a deterministic stand-in that lets every
-//!   wire test run without the controller's MIMO service.
+//! - [`adapter`]: [`adapter::ServiceDriver`], the controller's MIMO Random service
+//!   behind the trait, on its own run thread: what a run uses.
+//! - [`sim`]: [`sim::SimulatedMimoDriver`], a deterministic stand-in for wire tests
+//!   that do not need the controller's service.
 //! - [`view`]: the status, prediction and report objects.
 //! - [`display`]: the display quantities, their selectors and decimation.
 
+pub mod adapter;
 pub mod check;
 pub mod display;
 pub mod driver;

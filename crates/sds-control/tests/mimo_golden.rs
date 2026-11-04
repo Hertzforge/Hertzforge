@@ -544,3 +544,24 @@ fn the_mimo_data_frame_is_built_byte_for_byte() {
     assert_eq!(heat.shape, vec![2, 4]);
     assert!(matches!(heat.data, sds_control::codec::ArrayData::F32(_)));
 }
+
+#[test]
+fn the_coherence_error_heatmap_subscribes_by_rows() {
+    use sds_control::mimo::display;
+    use sds_control::mimo::driver::QuantitySelector;
+    let request = golden("request_mimo_random_subscribe_coh_error.json");
+    let parsed = sds_control::protocol::parse_request(&request).unwrap();
+    assert_eq!(parsed.method, "mimo_random.subscribe");
+    let sub = display::parse(&parsed.params).unwrap().expect("plots");
+    assert_eq!(sub.plots.len(), 2);
+    assert_eq!(sub.plots[1].quantity, "coh_error");
+    assert_eq!(
+        display::resolve(&sub.plots[1], 3, 2),
+        vec![QuantitySelector::CohError(vec![0, 1, 2])]
+    );
+    assert_eq!(
+        display::resolve(&sub.plots[0], 3, 2),
+        vec![QuantitySelector::ErrorDb(vec![0, 1, 2])]
+    );
+    assert!(display::MIMO_QUANTITIES.contains(&"coh_error"));
+}

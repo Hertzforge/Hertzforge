@@ -184,6 +184,9 @@ pub struct MimoRandomService {
     response_slots: Vec<usize>,
     /// The reference in the control space, full level.
     reference: HermitianStack,
+    /// The same reference and its tolerances, shared with display snapshots.
+    reference_shared: Arc<HermitianStack>,
+    tolerances_shared: Arc<hertzforge_sdm::law::Tolerances>,
     /// The reference's diagonal per line (line-major, `lines * n_r`).
     ref_diag: Vec<f64>,
     /// What the plant can reach of the reference (`P G_ref P^H`), for the core's
@@ -379,6 +382,7 @@ impl MimoRandomService {
             diagnostics: Vec::new(),
             drive_rms: vec![0.0; n_d],
         };
+        let tolerances_shared = Arc::new(cfg.reference.tolerances.clone());
         Ok(MimoRandomService {
             achievable_diag: ref_diag.clone(),
             cfg,
@@ -398,6 +402,8 @@ impl MimoRandomService {
             n_r,
             n_u,
             response_slots,
+            reference_shared: Arc::new(reference.clone()),
+            tolerances_shared,
             reference,
             ref_diag,
             t_resp,
@@ -549,6 +555,98 @@ impl MimoRandomService {
     /// The drive's peak clip and rms ceiling hold the drive; this is what played.
     pub fn data_root(&self) -> &std::path::Path {
         &self.data_root
+    }
+
+    pub(crate) fn reference_shared(&self) -> Arc<HermitianStack> {
+        self.reference_shared.clone()
+    }
+
+    pub(crate) fn tolerances_shared(&self) -> Arc<hertzforge_sdm::law::Tolerances> {
+        self.tolerances_shared.clone()
+    }
+
+    /// Per drive, the smallest power factor the change cap and the ceiling applied
+    /// on any band line in the last accepted loop (1 when nothing held it down);
+    /// empty before the first.
+    pub fn drive_caps(&self) -> Vec<f64> {
+        let Some(c) = self.ls.caps.as_ref() else {
+            return Vec::new();
+        };
+        (0..c.drives)
+            .map(|k| {
+                (self.band.0..self.band.1)
+                    .filter_map(|l| c.factors.get(l * c.drives + k).copied())
+                    .filter(|f| f.is_finite())
+                    .fold(1.0f64, f64::min)
+                    .clamp(0.0, 1.0)
+            })
+            .collect()
+    }
+
+    /// Seconds at the present level (the loop's acquisition time summed).
+    pub fn elapsed_at_level_s(&self) -> f64 {
+        self.elapsed_at_level_s
+    }
+
+    /// Seconds left at full level before the run stops by itself, at full level
+    /// with a duration set.
+    pub fn remaining_at_full_level_s(&self) -> Option<f64> {
+        if self.state != MimoState::FullLevel {
+            return None;
+        }
+        self.cfg
+            .full_level_duration_s
+            .map(|d| (d - self.elapsed_at_level_s).max(0.0))
+    }
+
+    /// A stop has been asked for and the drive is ramping down to it.
+    pub fn stopping(&self) -> bool {
+        self.ramp.stop_requested().is_some()
+            && matches!(self.state, MimoState::Engaged | MimoState::FullLevel)
+    }
+
+    /// The law the run uses, by the catalog's id, with its parameter values.
+    pub fn law_choice(&self) -> &hertzforge_random_laws::LawChoice {
+        &self.cfg.law
+    }
+
+    /// Choose another law (or other parameters) during the prediction step: the law
+    /// is built and seeded again against the identification set and the prediction
+    /// starts over. `factory` builds an imported law file (resolved through the law
+    /// catalog); `None` builds the built-in law `choice` names.
+    pub fn change_law(
+        &mut self,
+        choice: hertzforge_random_laws::LawChoice,
+        factory: Option<Arc<dyn MimoLawFactory>>,
+    ) -> Result<(), MimoError> {
+        if self.state != MimoState::Predict {
+            return Err(MimoError::BadState(format!(
+                "the law is changed in the prediction step; the run is {:?}",
+                self.state
+            )));
+        }
+        let factory = match factory {
+            Some(f) => f,
+            None => crate::law::builtin_factory(&choice, self.n_r)
+                .map_err(|e| MimoError::Law(e.to_string()))?,
+        };
+        let before = (self.law_factory.clone(), self.cfg.law.clone());
+        self.law_factory = Some(factory);
+        self.cfg.law = choice;
+        self.law_misses = 0;
+        self.law_stop_due = None;
+        if let Err(e) = self.predict() {
+            // Keep the law that was there; the prediction it made stands.
+            self.law_factory = before.0;
+            self.cfg.law = before.1;
+            let _ = self.predict();
+            return Err(e);
+        }
+        self.note(format!(
+            "Law changed to `{}` in the prediction step.",
+            self.cfg.law.id
+        ));
+        Ok(())
     }
 
     fn transition(&mut self, to: MimoState) {

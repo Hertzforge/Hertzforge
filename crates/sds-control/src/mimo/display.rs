@@ -19,12 +19,13 @@ use serde_json::{json, Map, Value};
 use std::ops::Range;
 
 /// The quantities MIMO Random offers, in the order the result lists them.
-pub const MIMO_QUANTITIES: [&str; 19] = [
+pub const MIMO_QUANTITIES: [&str; 20] = [
     "psd",
     "coh",
     "phase",
     "csd_mag",
     "error_db",
+    "coh_error",
     "drive_psd",
     "drive_coh",
     "frf",
@@ -92,7 +93,7 @@ fn selectors(q: &str) -> &'static [&'static str] {
         "psd" | "drive_psd" | "mcoh" => &["index", "diagonal"],
         "cap" | "pred_drive_rms" => &["diagonal", "index"],
         "coh" | "phase" | "csd_mag" | "drive_coh" | "frf" => &["pair"],
-        "error_db" => &["rows"],
+        "error_db" | "coh_error" => &["rows"],
         "pred_error_db" => &["index"],
         "sdm" => &["block"],
         "law_diag" => &["key"],
@@ -537,6 +538,17 @@ pub fn resolve(p: &MimoPlot, controls: usize, drives: usize) -> Vec<QuantitySele
                 q(QuantitySelector::ErrorDb(r))
             }
         }
+        ("coh_error", Selector::Rows(None)) => {
+            q(QuantitySelector::CohError((0..controls).collect()))
+        }
+        ("coh_error", Selector::Rows(Some(r))) => {
+            let r: Vec<usize> = r.iter().copied().filter(|i| c(*i)).collect();
+            if r.is_empty() {
+                Vec::new()
+            } else {
+                q(QuantitySelector::CohError(r))
+            }
+        }
         ("drive_psd", Selector::Index(k)) if d(*k) => q(QuantitySelector::DrivePsd(*k)),
         ("drive_psd", Selector::Diagonal) => (0..drives).map(QuantitySelector::DrivePsd).collect(),
         ("drive_coh", Selector::Pair(k, l)) if d(*k) && d(*l) => {
@@ -610,10 +622,13 @@ fn spectrum_view(
     views::spectrum(arrays, title, &freq_axis(), &y, series, Some("frequency"))
 }
 
-/// A heatmap of rows against frequency, the nearest line to each pixel column.
+/// A heatmap of rows against frequency, the nearest line to each pixel column;
+/// `value` is the cells' label and unit.
+#[allow(clippy::too_many_arguments)]
 pub fn heatmap_view(
     arrays: &mut Arrays,
     title: &str,
+    value: (&str, &str),
     row_labels: Vec<String>,
     bands: Vec<([f64; 2], [f64; 2])>,
     freqs: &[f64],
@@ -641,7 +656,7 @@ pub fn heatmap_view(
         "x": json!({"label": "Frequency", "unit": "Hz", "scale": "log"}),
         "x_values": x_ref,
         "values": v_ref,
-        "value": {"label": "Error", "unit": "dB"},
+        "value": {"label": value.0, "unit": value.1},
         "row_bands": bands.iter().map(|(a, b)| json!({
             "alarm_db": [num(a[0]), num(a[1])], "abort_db": [num(b[0]), num(b[1])],
         })).collect::<Vec<_>>(),
@@ -839,7 +854,7 @@ pub fn plot_views(
             }
             vec![views::reading("Degree-of-Freedom RMS", rows)]
         }
-        "error_db" => match data.first() {
+        "error_db" | "coh_error" => match data.first() {
             Some(Some(Series::Rows { freqs, rows })) => {
                 let idx: Vec<usize> = match &p.selector {
                     Selector::Rows(Some(r)) => r
@@ -858,14 +873,13 @@ pub fn plot_views(
                             .unwrap_or(([3.0, 3.0], [6.0, 6.0]))
                     })
                     .collect();
+                let (title, value) = if p.quantity == "coh_error" {
+                    ("Coherence Error", ("Coherence error", ""))
+                } else {
+                    ("Control Error", ("Error", "dB"))
+                };
                 vec![heatmap_view(
-                    arrays,
-                    "Control Error",
-                    lab,
-                    bands,
-                    freqs,
-                    rows,
-                    p.points,
+                    arrays, title, value, lab, bands, freqs, rows, p.points,
                 )]
             }
             _ => Vec::new(),
