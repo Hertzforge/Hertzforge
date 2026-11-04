@@ -97,12 +97,15 @@ pub struct CaseResult {
     pub verdict: CheckCase,
 }
 
-/// The line grid a case runs on.
-#[derive(Debug, Clone, Copy)]
-struct Grid {
-    fs_hz: f64,
-    nfft: usize,
-    band_hz: (f64, f64),
+/// The line grid a run is made on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grid {
+    /// Sample rate, Hz.
+    pub fs_hz: f64,
+    /// Points per Welch frame.
+    pub nfft: usize,
+    /// The controlled band, Hz.
+    pub band_hz: (f64, f64),
 }
 
 impl Grid {
@@ -274,11 +277,34 @@ fn plant_of(case: MimoCheckCase) -> NamedPlant {
         .build()
 }
 
+/// A run of a law on one plant, as the check makes it: the plant, the grid, the
+/// level schedule (dB, the last entry full level) and the measurement noise (dB
+/// under the smallest control's response; `None` for the simulator's floor).
+#[derive(Debug, Clone)]
+pub struct PlantRun {
+    pub plant: NamedPlant,
+    pub grid: Grid,
+    pub levels_db: Vec<f64>,
+    pub noise_below_db: Option<f64>,
+}
+
+impl PlantRun {
+    /// The run a check case makes.
+    pub fn of(case: MimoCheckCase) -> PlantRun {
+        PlantRun {
+            plant: plant_of(case),
+            grid: Grid::of(case),
+            levels_db: case.levels_db().to_vec(),
+            noise_below_db: case.noise_below_db(),
+        }
+    }
+}
+
 /// The simulator's noise for `case`: the floor, or `noise_below_db` under the
 /// smallest control's in-band rms (white noise of standard deviation `s` has
 /// in-band rms `s sqrt(2 B / fs)`).
-fn noise_of(case: MimoCheckCase, reference: &HermitianStack, grid: &Grid) -> f64 {
-    let Some(below) = case.noise_below_db() else {
+fn noise_of(below: Option<f64>, reference: &HermitianStack, grid: &Grid) -> f64 {
+    let Some(below) = below else {
         return FLOOR_NOISE;
     };
     let (lo, hi) = grid.band();
@@ -306,22 +332,22 @@ fn scratch_root() -> PathBuf {
     d
 }
 
-/// The service for `case` with the law from `factory`, and the call budget in ms.
+/// The service for `run` with the law from `factory`.
 fn build(
-    case: MimoCheckCase,
+    run: &PlantRun,
     factory: Arc<dyn MimoLawFactory>,
     opts: &CheckOptions,
     root: &std::path::Path,
 ) -> Result<MimoRandomService, String> {
-    let grid = Grid::of(case);
-    let plant = plant_of(case);
+    let grid = run.grid;
+    let plant = &run.plant;
     let (n_in, n_d) = plant.model.dims().ok_or("the plant has no size")?;
     let h = plant
         .model
         .analytic_frf(grid.lines(), grid.df(), grid.fs_hz);
     let x = well_driven(&h, reference_drive(n_d, &grid, REFERENCE_DRIVE_VRMS), &grid)?;
     let r = linalg::response_from_drive(&h, &x).map_err(|e| e.to_string())?;
-    let noise = noise_of(case, &r, &grid);
+    let noise = noise_of(run.noise_below_db, &r, &grid);
     let band = grid.band();
     let reference = ReferenceSpec {
         tolerances: tolerances(&r, band),
@@ -337,11 +363,11 @@ fn build(
         })
         .collect();
     let mut cfg = MimoConfig::new((1..=n_in as u32).collect(), drives, reference);
-    let levels = case.levels_db();
+    let levels = &run.levels_db;
     cfg.schedule = LevelSchedule {
         mode: RunMode::Auto,
-        start_db: levels[0],
-        table_db: levels.to_vec(),
+        start_db: levels.first().copied().unwrap_or(0.0),
+        table_db: levels.clone(),
         dwell_s: vec![0.0],
     };
     cfg.records.enabled = false;
@@ -405,6 +431,16 @@ pub fn run_case(
     factory: Arc<dyn MimoLawFactory>,
     opts: &CheckOptions,
 ) -> MimoCaseMeasure {
+    run_plant(&PlantRun::of(case), factory, opts)
+}
+
+/// Make `run` with the law `factory` builds and measure it, exactly as a check case
+/// is made: any plant, such as a bench network's computed FRF, before it is wired.
+pub fn run_plant(
+    run: &PlantRun,
+    factory: Arc<dyn MimoLawFactory>,
+    opts: &CheckOptions,
+) -> MimoCaseMeasure {
     let root = scratch_root();
     let mut m = MimoCaseMeasure {
         final_error_db: f64::NAN,
@@ -412,7 +448,7 @@ pub fn run_case(
         settle_db: f64::NAN,
         ..MimoCaseMeasure::default()
     };
-    let mut svc = match build(case, factory, opts, &root) {
+    let mut svc = match build(run, factory, opts, &root) {
         Ok(s) => s,
         Err(e) => {
             m.setup_error = Some(e);
@@ -424,7 +460,7 @@ pub fn run_case(
     // Each control's in-band error, every loop at full level.
     let mut history: Vec<Vec<f64>> = Vec::new();
     let outcome = engage(&mut svc, &mut m).and_then(|()| {
-        let ladder = case.levels_db().len() as u64;
+        let ladder = run.levels_db.len() as u64;
         let mut at_full: Option<u64> = None;
         while svc.state().is_running() {
             svc.loop_tick()?;
@@ -731,7 +767,7 @@ mod tests {
         let h = p.model.analytic_frf(grid.lines(), grid.df(), grid.fs_hz);
         let x = well_driven(&h, reference_drive(4, &grid, REFERENCE_DRIVE_VRMS), &grid).unwrap();
         let r = linalg::response_from_drive(&h, &x).unwrap();
-        let s = noise_of(case, &r, &grid);
+        let s = noise_of(case.noise_below_db(), &r, &grid);
         let (lo, hi) = grid.band();
         let bw = (hi - lo) as f64 * grid.df();
         let in_band = s * (2.0 * bw / grid.fs_hz).sqrt();
@@ -744,6 +780,6 @@ mod tests {
             })
             .fold(f64::INFINITY, f64::min);
         assert!((20.0 * (smallest / in_band).log10() - 30.0).abs() < 1e-9);
-        assert_eq!(noise_of(MimoCheckCase::Modal4x4, &r, &grid), FLOOR_NOISE);
+        assert_eq!(noise_of(None, &r, &grid), FLOOR_NOISE);
     }
 }

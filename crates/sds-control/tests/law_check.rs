@@ -405,3 +405,36 @@ fn the_check_report_and_its_events_on_the_wire_are_the_golden_ones() {
     let r = sds_control::protocol::parse_request(&req).unwrap();
     assert!(r.params["path"].as_str().unwrap().ends_with(".wasm"));
 }
+
+/// The bench's passive network, run on the simulator before it is wired: its
+/// computed FRF played as the plant on the bench's grid (12.8 kHz, 3.125 Hz lines,
+/// 20 Hz to 5 kHz), the default law to full level on a ladder from -20 dB.
+#[test]
+fn the_bench_network_runs_on_the_simulator_before_it_is_wired() {
+    use hertzforge_hal_sim::bench_network::{BenchNetwork, BAND_HZ};
+    use hertzforge_random_laws::CONVERGE_DB;
+    use sds_control::mimo::law_check::{run_plant, Grid, PlantRun};
+    let grid = Grid {
+        fs_hz: 12_800.0,
+        nfft: 4096,
+        band_hz: BAND_HZ,
+    };
+    let run = PlantRun {
+        plant: BenchNetwork::nominal().plant(grid.nfft / 2 + 1, grid.fs_hz / grid.nfft as f64),
+        grid,
+        levels_db: vec![-20.0, -14.0, -8.0, -4.0, 0.0],
+        noise_below_db: Some(40.0),
+    };
+    for law in ["pinv_closed", "pinv_open"] {
+        let f = builtin_factory(&LawChoice::new(law, Vec::new()), 4).unwrap();
+        let m = run_plant(&run, f, &opts());
+        eprintln!("bench network, {law}: {m:?}");
+        assert!(
+            m.setup_error.is_none() && m.trip.is_none() && m.misses.is_empty(),
+            "{m:?}"
+        );
+        assert!(m.gate_passed, "{m:?}");
+        assert!(m.loops_to_converge.is_some(), "{m:?}");
+        assert!(m.final_error_db <= CONVERGE_DB);
+    }
+}
