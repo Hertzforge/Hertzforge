@@ -56,7 +56,7 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
-                   'project.rename', 'project.remove', 'project.activate',
+                   'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children',
                    'project.show', 'project.actions')
@@ -342,8 +342,9 @@ class Connection:
             self.project, added = await call(projects.import_file, self.project,
                                              params, report)
             return {'added': added, 'project': projects.summary(self.project)}
-        edits = {'project.rename': (projects.rename, ('name', 'to')),
+        edits = {'project.rename': (projects.rename, ('name', 'to', 'index')),
                  'project.remove': (projects.remove, ('names',)),
+                 'project.delete_parts': (projects.delete_parts, ('parts',)),
                  'project.activate': (projects.activate, ('geometry',)),
                  'project.duplicate': (projects.duplicate, ('names',)),
                  'project.refresh': (projects.refresh, ('names',))}

@@ -177,6 +177,15 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
     return out
 
 
+def image(title: str, fmt: str, data: bytes) -> dict[str, Any]:
+    """An `image` view: a photo as its encoded bytes (png or jpeg), never
+    re-encoded, titled by its name. The shell draws it at its own aspect."""
+    if fmt not in ('png', 'jpeg'):
+        raise ValueError(f'an image view is png or jpeg, not {fmt!r}')
+    return {'view': 'image', 'title': title, 'format': fmt,
+            'bytes': np.frombuffer(bytes(data), dtype=np.uint8)}
+
+
 def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
               curves: Sequence[tuple[Any, Any]], x_range: tuple[float, float],
               z_range: tuple[float, float] | None = None,

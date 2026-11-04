@@ -286,6 +286,17 @@ shell draws the table with its headings held at the top as it scrolls, puts a ce
 a number at the right of its column, and copies the whole table as tab-separated text, the
 headings first, so it pastes into a spreadsheet.
 
+**`image`** (a photo of the test)
+
+```
+{"view":"image","title":"setup","format":"png"|"jpeg","bytes":{"$array":.. u8 [N]}}
+```
+
+The file's bytes as they were read, never re-encoded, so the report and the view show the same
+picture; the shell draws it at its own aspect under its name. A Photos object selected in the tree
+shows one `image` a photo, the picked ones when some are picked, stacked as Visual Dynamics stacks
+them.
+
 A `shape3d` built from a geometry carries `node_ids`, the drawn nodes' ids (u32, one per node), so
 the view can caption the node under the pointer, coincident nodes listed together, as Visual
 Dynamics' scene does.
@@ -376,8 +387,9 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
 | `report.*` | see Reports below | |
-| `project.rename` | `{"name","to"}` | `{"project"}` |
+| `project.rename` | `{"name","to","index"?}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
+| `project.delete_parts` | `{"parts":{name:[index,...]}}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |
 | `project.duplicate` | `{"names"}` | `{"project"}` |
 | `project.refresh` | `{"names"}` | `{"project"}` |
@@ -483,12 +495,18 @@ none is open. `units` declares what the file does not state, as the core's `impo
 project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
 and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
-`project.remove` takes `names`, a list, and removes them all or, when one is not in the project,
-none. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
+With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that
+index, from 0), and the report blocks that show it follow. `project.remove` takes `names`, a list,
+and removes them all or, when one is not in the project, none. `project.delete_parts` deletes
+sub-items picked in the tree, `parts` mapping an object's name to the indices picked: records of a
+data object, modes of a shape set, channels of a channel table, photos of a Photos object, as
+Visual Dynamics' Delete does on grid picks. Taking every item is refused ("delete the object
+instead"), and the journal records the call a script would make. `project.activate` makes `geometry` the active geometry, the one data is drawn on when
 nothing else names one. `project.duplicate` adds a copy of each object in `names` beside it, named
 "<name> copy", in no group. `project.refresh` computes each derived object in `names` again from
 its source, in place and under its own name; an empty list refreshes every stale object, sources
-first. Each answers with the project.
+first. Each answers with the project. A `.png`, `.jpg` or `.jpeg` path is a photo: it is added to the project's Photos object,
+made on first use, and `added` names that object.
 
 Units a file did not state are declared by channel, not by record, as Visual Dynamics' Imported
 Units pane declares them. `project.units` gives an object's tables: a geometry's one row (`side`

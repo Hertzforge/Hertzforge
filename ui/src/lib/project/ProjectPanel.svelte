@@ -124,8 +124,14 @@
 				{@const one = picked.length === 1 ? p.summary.objects.find((o) => o.name === picked[0]) : undefined}
 				<div class="strip" data-testid="selection-strip" aria-label="Acts on the selection">
 					{#if p.confirming && picked.length}
-						<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
-						<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Remove</button>
+						{@const parts = Object.entries(p.pickedParts)}
+						{#if parts.length}
+							<span class="oname">Delete {parts.map(([name, picks]) => `${picks.length} of ${name}`).join(', ')}?</span>
+							<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
+						{:else}
+							<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
+							<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Remove</button>
+						{/if}
 						<button class="btn ghost sm" onclick={() => (p.confirming = false)}>Keep</button>
 					{:else if p.namingGroup && one}
 						<form class="row" onsubmit={(e) => { e.preventDefault(); const text = groupName; p.namingGroup = null; void p.nameGroup(one.name, text); }}>

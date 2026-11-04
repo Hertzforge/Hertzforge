@@ -373,6 +373,17 @@
 									{#each offers.table_views as form (form)}<option value={form}>{TABLE_VIEWS[form] ?? form}</option>{/each}
 								</select>
 							{/if}
+							{#if offers.tones.length > 1}
+								<select class="field sm" aria-label="Tone" data-testid="read-tone" value={offers.tones.includes(a.prefs.tone ?? '') ? a.prefs.tone : offers.tones[0]} onchange={(e) => a.setPref('tone', (e.currentTarget as HTMLSelectElement).value)} title="Which tone of the sweep is read">
+									{#each offers.tones as tone (tone)}<option value={tone}>{tone}</option>{/each}
+								</select>
+							{/if}
+							{#if offers.sine_readings}
+								<div class="seg" role="radiogroup" aria-label="Levels or error">
+									<button role="radio" aria-checked={a.prefs.sine_reading === 'curves'} class:on={a.prefs.sine_reading === 'curves'} data-testid="read-sine-curves" title="The extracted levels over the tone's requirement and limits" onclick={() => a.prefs.sine_reading !== 'curves' && a.setPref('sine_reading', 'curves')}>Levels</button>
+									<button role="radio" aria-checked={a.prefs.sine_reading === 'bars'} class:on={a.prefs.sine_reading === 'bars'} data-testid="read-sine-bars" title="Each channel's signed RMS deviation from its tone across the sweep, in dB" onclick={() => a.prefs.sine_reading !== 'bars' && a.setPref('sine_reading', 'bars')}>Level Error</button>
+								</div>
+							{/if}
 							{#if offers.arrows}
 								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
 							{/if}
