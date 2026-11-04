@@ -476,7 +476,13 @@ export type ItemReason =
 	| 'law_shape_not_supported'
 	| 'law_param_unknown'
 	| 'law_param_invalid'
-	| 'backend_not_selected';
+	| 'backend_not_selected'
+	| 'reference_invalid'
+	| 'reference_file'
+	| 'geometry'
+	| 'transform_rank'
+	| 'transform_condition'
+	| 'tolerance';
 
 /** One validation finding, located by whichever of `channel`, `row` and `field` applies. */
 export interface ReportItem {

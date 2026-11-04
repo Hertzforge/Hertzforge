@@ -4,10 +4,10 @@
 	 * it; and short notes about what just happened (control resumed, a table applied).
 	 */
 	import Icon from '$lib/shell/Icon.svelte';
-	import type { AcquireState } from './store.svelte';
+	import type { NoticesHost } from './actions';
 
 	interface Props {
-		acq: AcquireState;
+		acq: NoticesHost;
 	}
 	let { acq }: Props = $props();
 

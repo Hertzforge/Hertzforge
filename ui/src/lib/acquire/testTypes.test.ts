@@ -33,20 +33,21 @@ describe('the test types', () => {
 		expect(typesIn('acquisition').map((t) => t.title)).toEqual(['Recorder']);
 		// Every test type is in exactly one section, and the keyboard order is the sections' order.
 		expect(TEST_GROUPS.flatMap((g) => typesIn(g.id))).toEqual([...TEST_TYPES]);
-		expect(typesIn('mimo').every((t) => !t.ready)).toBe(true);
+		// MIMO Random is offered; the other MIMO test types are coming.
+		expect(typesIn('mimo').filter((t) => t.ready).map((t) => t.id)).toEqual(['mimo_random']);
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the twelve test types one plain line, and only Random can be chosen', () => {
+	it('gives each of the twelve test types one plain line, and only Random and MIMO Random can be chosen', () => {
 		expect(TEST_TYPES).toHaveLength(12);
-		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random']);
+		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'mimo_random']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);
 			// What the test is, never a note to developers.
 			expect(t.summary).not.toMatch(/\b[QM]\d+\b|#\d+|todo|tbd|port|issue|milestone/i);
 		}
 		const { view } = viewOf(null);
-		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random']);
+		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'mimo_random']);
 		expect(TEST_TYPES.filter((t) => !t.ready).every((t) => view.whyNot(t.id) === 'Coming')).toBe(true);
 	});
 });
@@ -232,5 +233,25 @@ describe('the chooser against the control service', () => {
 			s.unwatch();
 			s.client.close();
 		}
+	});
+});
+
+describe('a live MIMO Random run', () => {
+	const open = 'open' as const;
+	it('is the live test while its status is live, and nothing is live once both runs have answered', () => {
+		const idle = { run: { state: 'configured' } as never, syncError: null };
+		expect(liveTestOf(idle, open, { status: { state: 'running' }, syncError: null })).toBe('mimo_random');
+		expect(liveTestOf(idle, open, { status: { state: 'review' }, syncError: null })).toBe('mimo_random');
+		expect(liveTestOf(idle, open, { status: { state: 'finished' }, syncError: null })).toBeNull();
+		// MIMO Random's status not read yet: not known.
+		expect(liveTestOf(idle, open, { status: null, syncError: null })).toBeUndefined();
+		// A service without MIMO Random: nothing of it is live.
+		expect(liveTestOf(idle, open, { status: null, syncError: 'no such method' })).toBeNull();
+	});
+
+	it('closes the chooser to every other test type while it runs', () => {
+		const { view } = viewOf('mimo_random');
+		expect(view.whyNot('random')).toBe('Opens when the MIMO Random run ends.');
+		expect(view.canLeave).toBe(false);
 	});
 });

@@ -7,10 +7,10 @@
 	import Findings from './Findings.svelte';
 	import NumberField from './NumberField.svelte';
 	import { under } from './setup';
-	import type { AcquireState } from './store.svelte';
+	import type { ScheduleHost } from './setup';
 
 	interface Props {
-		acq: AcquireState;
+		acq: ScheduleHost;
 	}
 	let { acq }: Props = $props();
 

@@ -3,11 +3,11 @@
 	 * The run's state as a shape, a word and a color together. Running pulses; a finished run shows
 	 * its outcome, and every outcome but a completed schedule or the operator's stop reads as an abort.
 	 */
-	import type { RandomState } from '$lib/protocol/types';
+	import type { RunHead } from './actions';
 	import { OUTCOME_WORDS, outcomeTone, STATE_WORDS } from './words';
 
 	interface Props {
-		run: RandomState | null;
+		run: RunHead | null;
 	}
 	let { run }: Props = $props();
 

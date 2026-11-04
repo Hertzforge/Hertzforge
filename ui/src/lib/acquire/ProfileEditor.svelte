@@ -7,13 +7,23 @@
 	import type { BandDb } from '$lib/protocol/types';
 	import Findings from './Findings.svelte';
 	import NumberField from './NumberField.svelte';
-	import { newBreakpoint, under, type BreakpointDraft } from './setup';
-	import type { AcquireState } from './store.svelte';
+	import { newBreakpoint, under, type BreakpointDraft, type ProfileHost } from './setup';
 
 	interface Props {
-		acq: AcquireState;
+		acq: ProfileHost;
+		/** The panel's heading and the line under it (Random: "Profile"). */
+		heading?: string;
+		sub?: string;
+		/** The test's title field (Random's profile carries it). */
+		showTitle?: boolean;
+		/** Each row's own bands (Random's envelope); off where the bands are the channel's. */
+		rowBands?: boolean;
+		/** The bands group under the table. */
+		showBands?: boolean;
+		/** The PSD's unit. */
+		unit?: string;
 	}
-	let { acq }: Props = $props();
+	let { acq, heading = 'Profile', sub = 'The reference PSD the run controls to, at full level.', showTitle = true, rowBands = true, showBands = true, unit = 'g²/Hz' }: Props = $props();
 
 	const d = $derived(acq.setup);
 	const locked = $derived(acq.locked);
@@ -76,15 +86,17 @@
 
 <section class="aq-panel profile" aria-labelledby="profile-title" data-testid="profile-panel">
 	<div class="aq-head">
-		<h2 id="profile-title">Profile</h2>
-		<span class="aq-sub">The reference PSD the run controls to, at full level.</span>
+		<h2 id="profile-title">{heading}</h2>
+		<span class="aq-sub">{sub}</span>
 	</div>
 
-	<div class="title-row">
-		<label for="setup-title" class="lbl">Test title</label>
-		<input id="setup-title" class="field" bind:value={d.title} disabled={locked} aria-invalid={at(E, 'title').length > 0} data-testid="setup-title" />
-		<Findings items={at(E, 'title').map((message) => ({ level: 'error' as const, message }))} />
-	</div>
+	{#if showTitle}
+		<div class="title-row">
+			<label for="setup-title" class="lbl">Test title</label>
+			<input id="setup-title" class="field" bind:value={d.title} disabled={locked} aria-invalid={at(E, 'title').length > 0} data-testid="setup-title" />
+			<Findings items={at(E, 'title').map((message) => ({ level: 'error' as const, message }))} />
+		</div>
+	{/if}
 
 	<Findings items={at(E, 'profile.breakpoints').map((message) => ({ level: 'error' as const, message }))} />
 
@@ -96,7 +108,7 @@
 					<th class="num">Frequency</th>
 					<th>Defined By</th>
 					<th class="num">Value</th>
-					<th>Bands</th>
+					{#if rowBands}<th>Bands</th>{/if}
 					<th><span class="visually-hidden">Row actions</span></th>
 				</tr>
 			</thead>
@@ -116,18 +128,18 @@
 						</td>
 						<td class="num">
 							{#if b.kind === 'psd'}
-								<NumberField id="bp-{i}-v" label="Row {i + 1} PSD" compact unit="g²/Hz" bind:value={b.psd_g2_hz} errors={at(E, key(i, 'value'))} disabled={locked} testid="bp-{i}-value" />
+								<NumberField id="bp-{i}-v" label="Row {i + 1} PSD" compact {unit} bind:value={b.psd_g2_hz} errors={at(E, key(i, 'value'))} disabled={locked} testid="bp-{i}-value" />
 							{:else}
 								<NumberField id="bp-{i}-v" label="Row {i + 1} slope" compact unit="dB/oct" bind:value={b.slope_db_oct} errors={at(E, key(i, 'value'))} disabled={locked} testid="bp-{i}-value" />
 							{/if}
 						</td>
-						<td>
+						{#if rowBands}<td>
 							{#if bandsSummary(b)}
 								<button class="bands own" aria-expanded={!!open[i]} onclick={() => (open[i] = !open[i])} disabled={locked}>{bandsSummary(b)}</button>
 							{:else}
 								<button class="bands" onclick={() => ownBands(i)} disabled={locked} title="Give this row its own alarm and abort bands">Profile bands</button>
 							{/if}
-						</td>
+						</td>{/if}
 						<td class="acts">
 							<button class="aq-icon-btn" aria-label="Insert a row after row {i + 1}" disabled={locked} onclick={() => insertAfter(i)}>
 								<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
@@ -140,7 +152,7 @@
 					{#if rf.length}
 						<tr class="aq-findrow"><td colspan="6"><Findings items={rf} /></td></tr>
 					{/if}
-					{#if open[i] && b.alarm_db && b.abort_db}
+					{#if rowBands && open[i] && b.alarm_db && b.abort_db}
 						<tr class="aq-detail">
 							<td colspan="6">
 								<div class="own-bands">
@@ -162,6 +174,7 @@
 		<button class="btn sm" data-testid="bp-add" disabled={locked} onclick={() => insertAfter(d.breakpoints.length - 1)}>Add Row</button>
 	</div>
 
+	{#if showBands}
 	<div class="aq-group bands-group">
 		<h3>Bands Around the Reference</h3>
 		<p class="aq-lead">Positive dB below and above the reference. An alarm warns; the abort band trips the envelope abort. A row's own bands hold from that row to the next.</p>
@@ -172,6 +185,7 @@
 			<NumberField id="pb-bh" label="Abort above" unit="dB" bind:value={d.abort_db[1]} disabled={locked} />
 		</div>
 	</div>
+	{/if}
 </section>
 
 <style>
