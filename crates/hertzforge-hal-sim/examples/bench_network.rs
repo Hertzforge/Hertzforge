@@ -62,6 +62,20 @@ fn main() {
         worst = worst.max(hertzforge_sdm::linalg::condition_numbers(&s).unwrap()[0]);
     }
     println!("Worst condition number in band: {worst:.1}\n");
+    println!("Ohmmeter, network alone (outputs open, inputs unattached), to COM:");
+    for j in 0..4 {
+        match n.c_series[j] {
+            Some(_) => println!("  AO{j} terminal: open (series capacitor)"),
+            None => println!(
+                "  AO{j} terminal: {:.0} Ohm",
+                n.r_feed[j] + n.dc_resistance(j)
+            ),
+        }
+    }
+    for i in 0..4 {
+        println!("  IN{i} terminal: {:.0} Ohm", n.dc_resistance(4 + i));
+    }
+    println!();
     for f in [20.0, 100.0, 300.0, 1000.0, 2000.0, f0, 5000.0] {
         println!("{f:.1} Hz (rows: inputs 0-3; columns: outputs 0-3; dB / degrees)");
         for row in n.frf_at(f) {

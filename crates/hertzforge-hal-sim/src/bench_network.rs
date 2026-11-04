@@ -307,6 +307,36 @@ impl BenchNetwork {
         (fp, fp / (hi - lo))
     }
 
+    /// What an ohmmeter reads from node `k` (`0..4` the output nodes `P_k`, `4..8`
+    /// the input nodes `IN_(k-4)`) to ground on the network alone, before it is
+    /// wired: the outputs open, no input attached, capacitors open, the inductor
+    /// its winding resistance. From an output terminal `j` the meter reads the feed
+    /// resistor plus `dc_resistance(j)`, or nothing (open) through a series
+    /// capacitor.
+    pub fn dc_resistance(&self, node: usize) -> f64 {
+        let zero = C64::new(0.0, 0.0);
+        let mut y = [[zero; 8]; 8];
+        for k in 0..4 {
+            if self.tank.drive == k {
+                // At DC the inductor shorts the tank: the base resistor and the DCR.
+                y[k][k] += C64::new(1.0 / (self.tank.r_base + self.tank.dcr), 0.0);
+            }
+            for i in 0..4 {
+                let g = C64::new(1.0 / self.r_sum[i][k], 0.0);
+                y[k][k] += g;
+                y[4 + i][4 + i] += g;
+                y[k][4 + i] -= g;
+                y[4 + i][k] -= g;
+            }
+        }
+        for i in 0..4 {
+            y[4 + i][4 + i] += C64::new(1.0 / self.r_ground[i], 0.0);
+        }
+        let mut rhs = [zero; 8];
+        rhs[node] = C64::new(1.0, 0.0);
+        solve8(y, rhs)[node].re
+    }
+
     /// Each plain path's corner, Hz: the frequency where output `j`'s node is
     /// 3 dB below its value at the corner's flat side (low for a low-pass, high
     /// for a high-pass). `None` on a path with neither capacitor.
@@ -413,6 +443,24 @@ mod tests {
                 (s.re - v_in).abs() < 1e-9 && s.im.abs() < 1e-9,
                 "{s} vs {v_in}"
             );
+        }
+    }
+
+    #[test]
+    fn the_ohmmeter_readings_follow_the_resistor_paths() {
+        // One summing resistor left, no tank: the output node reaches ground only
+        // through it and the input's 47k; the input node only through its 47k.
+        let mut n = BenchNetwork::nominal();
+        n.r_sum = [[1e15; 4]; 4];
+        n.r_sum[0][0] = 100e3;
+        n.tank.r_base = 1e15;
+        assert!((n.dc_resistance(4) - 47e3).abs() < 1e-3, "{}", n.dc_resistance(4));
+        assert!((n.dc_resistance(0) - 147e3).abs() < 1e-3, "{}", n.dc_resistance(0));
+        // The nominal network: every input node under its own 47k.
+        let n = BenchNetwork::nominal();
+        for i in 0..4 {
+            let r = n.dc_resistance(4 + i);
+            assert!(r > 20e3 && r < 47e3, "{r}");
         }
     }
 
