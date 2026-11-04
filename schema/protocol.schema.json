@@ -304,7 +304,8 @@
           "properties": {
             "op": {"type": "string"},
             "params": {"type": "object"},
-            "columns": {"type": "array", "items": {"type": ["string", "null"]}}
+            "columns": {"type": "array", "items": {"type": ["string", "null"]}},
+            "choices": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}
           }
         }
       }

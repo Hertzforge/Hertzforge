@@ -11,9 +11,11 @@ from typing import Any
 
 import numpy as np
 
+from . import group_cells
 from . import views as v
 from .datasets import _mesh
 from .descriptors import Operation, Option, Param
+from .ops_geometry import entity_table
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -47,18 +49,7 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
                       triangles=triangles, lines=lines)]
 
 
-def _family(geometry: Any, group: int) -> str:
-    """'face', 'volume', 'line' or 'point': what an element group's
-    elements are; 'mixed' when they differ, '' when it has none."""
-    from hertzforge.core.geometry import ELEMENT_TYPES
-
-    ids = set(geometry.elements_in(group))
-    families = {ELEMENT_TYPES.get(int(kind), ('', 0, ''))[2]
-                for elem, kind in zip(geometry.elem_id, geometry.elem_type, strict=True)
-                if int(elem) in ids}
-    if not families:
-        return ''
-    return families.pop() if len(families) == 1 else 'mixed'
+_family = group_cells.family
 
 
 def _groups(geometry: Any, text: str) -> list[int]:
@@ -88,9 +79,9 @@ def _properties_reading(name: str, geometry: Any) -> dict:
         elif held.thickness is not None:
             said = f'{held.material.name}, {held.thickness * 1000:g} mm'
         elif held.section is not None:
-            said = f'{held.material.name}, a section'
+            said = f'{held.material.name}, {held.section.shape or "custom"} section'
         else:
-            said = held.material.name if held.material else 'set'
+            said = held.material.name if held.material else held.kind
         rows.append(v.row(f'Group {group} ({family or "empty"})', said, None,
                           'info' if held is not None else 'warn'))
     return v.reading(f'Element groups of {name}', rows)
@@ -98,9 +89,10 @@ def _properties_reading(name: str, geometry: Any) -> dict:
 
 def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.group_properties`: what the chosen element groups are made
-    of (`fem.GroupProperties`), as the Element Groups table sets it: a
-    library material, and for plates a thickness. A group of beams takes a
-    section, which a script sets; one is refused here by name."""
+    of (`fem.GroupProperties`), many at once: a library material, and for
+    plates a thickness. Beams and points take more than that, a section, a
+    mass, a stiffness or a ground, in the Element Groups table; with no group
+    named they are left alone, and one named is refused with where to go."""
     from hertzforge.core.fem import GroupProperties, material
 
     name = params['geometry']
@@ -108,6 +100,10 @@ def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
     chosen = _groups(geometry, params['groups'])
     if not chosen:
         raise refused(f'{name} has no element groups')
+    if not params['groups'].strip():
+        taking = [g for g in chosen if _family(geometry, g) in ('face', 'volume')]
+        if taking:
+            chosen = taking
     made = material(params['material'])
     thickness = params['thickness'] / 1000.0
     set_now = {}
@@ -120,8 +116,11 @@ def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
         elif family == 'volume':
             set_now[group] = GroupProperties(made)
         elif family == 'line':
-            raise refused(f'group {group} is beams, which take a section; set it from a '
-                          'script (geometry.group_properties) for now')
+            raise refused(f'group {group} is beams, which take a section: set it in the '
+                          'Element Groups table')
+        elif family == 'point':
+            raise refused(f'group {group} is points, which take a mass, a stiffness or a '
+                          'ground: set it in the Element Groups table')
         else:
             raise refused(f'group {group} holds {family or "no"} elements; give it one '
                           'kind of element first')
@@ -164,22 +163,11 @@ def _ids(text: str, what: str) -> list[int]:
 
 def element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.element_groups`: a geometry's element groups as Visual
-    Dynamics' Element Groups table lists them: each group's id, name,
-    what its elements are, how many, and what it is made of."""
+    Dynamics' Element Groups table lists them, and takes them typed in place
+    (`group_cells`): each group's id, name and elements, and what it is
+    made of."""
     name = params['geometry']
-    geometry = project[name]
-    rows = []
-    for group, label in zip(geometry.groups.ids, geometry.groups.names, strict=True):
-        group = int(group)
-        held = geometry.group_properties.get(group)
-        material = held.material.name if held is not None and held.material else ''
-        thickness = (f'{held.thickness * 1000:g}' if held is not None
-                     and held.thickness is not None else '')
-        rows.append([str(group), label, _family(geometry, group) or 'empty',
-                     str(len(geometry.elements_in(group))), material, thickness])
-    return [v.table(f'Element groups of {name}',
-                    ['Group', 'Name', 'Elements are', 'Count', 'Material', 'Thickness [mm]'],
-                    rows)]
+    return [entity_table(project[name], 'groups', f'Element groups of {name}', name)]
 
 
 def merge_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:

@@ -294,8 +294,13 @@ def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]],
     return out
 
 
-def editing(op: str, params: dict[str, Any], columns: Sequence[str | None]) -> dict[str, Any]:
+def editing(op: str, params: dict[str, Any], columns: Sequence[str | None],
+            choices: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """What makes a `table` view's cells editable: the operation that sets
-    one (taking `row` from 1, `column` and `value` beside `params`), and each
-    column's key, or None for a column that is read only."""
-    return {'op': op, 'params': dict(params), 'columns': list(columns)}
+    one (taking `row` from 1, `column` and `value` beside `params`), each
+    column's key, or None for a column that is read only, and what a column
+    offers by key, a shortlist the cell can still be typed past."""
+    out = {'op': op, 'params': dict(params), 'columns': list(columns)}
+    if choices:
+        out['choices'] = {key: list(values) for key, values in choices.items()}
+    return out

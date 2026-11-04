@@ -283,6 +283,11 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 PARTNER = Param('shapes', 'Shape set', 'enum', options_from='objects:shape_set')
 MODES = Param('num_modes', 'Modes', 'integer', default=20, min=1, max=200, step=1)
+SOLVED_MODES = Param('num_modes', 'Modes', 'integer', default=30, min=1, max=100000, step=1)
+TOP_FREQUENCY = Param('maximum_frequency', 'Highest frequency (0: by the number of modes)',
+                      'number', default=0.0, unit='Hz', min=0.0, step=10.0)
+MODAL_DAMPING = Param('damping', 'Damping', 'number', default=2.0, unit='%', min=0.0,
+                      max=100.0, step=0.5)
 ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
 MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
               min=0.01, max=100.0, step=0.5)
@@ -314,9 +319,12 @@ def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.solve_modes`: the normal modes of a geometry whose element
-    groups have properties, free-free (`Project.solve_modes`)."""
+    groups have properties (`Project.solve_modes`), a number of them or all
+    up to a highest frequency, as Visual Dynamics' Modes pane asks."""
+    top = params['maximum_frequency']
+    limit = {'maximum_frequency': top} if top > 0 else {'num_modes': params['num_modes']}
     return _added_shapes(project, lambda: project.solve_modes(
-        params['source'], num_modes=params['num_modes']))
+        params['source'], damping=params['damping'] / 100.0, **limit))
 
 
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -395,9 +403,10 @@ MODAL_VERB_OPERATIONS = (
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='model',
         accepts='project',
-        summary='The normal modes of a geometry whose element groups have '
-                'properties, solved free-free.',
-        params=(_source('solve_modes', 'Geometry'), MODES),
+        summary='The normal modes of a geometry whose element groups have properties: a '
+                'number of them, or all up to a highest frequency. Free-free unless a '
+                'group of points is ground; the damping is given to every mode.',
+        params=(_source('solve_modes', 'Geometry'), SOLVED_MODES, TOP_FREQUENCY, MODAL_DAMPING),
         outputs=('shape3d', 'reading'), run=solve_modes),
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',

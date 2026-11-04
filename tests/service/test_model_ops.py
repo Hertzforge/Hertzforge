@@ -96,10 +96,11 @@ def test_the_element_groups_table_lists_each_group(validate):
     project = _parts()
     (view,) = run(project, 'project.element_groups', geometry='Plate')
     wire_views([view], validate)
-    assert [row[:4] for row in view['rows']] == [['1', 'floor', 'face', '16'],
-                                                 ['2', 'foot', 'face', '4']]
-    assert view['rows'][0][4:] == ['6061-T6', '10']
-    assert view['rows'][1][4:] == ['', '']
+    named = [dict(zip(view['columns'], row, strict=True)) for row in view['rows']]
+    assert [(g['Element group'], g['Name'], g['Elements are'], g['Count']) for g in named] == [
+        ('1', 'floor', 'face', '16'), ('2', 'foot', 'face', '4')]
+    assert named[0]['Material'] == '6061-T6' and float(named[0]['Thickness [m]']) == 0.01
+    assert named[1]['Material'] == '' and named[1]['Thickness [m]'] == ''
 
 
 def test_merging_element_groups_keeps_the_first(validate):
@@ -109,7 +110,7 @@ def test_merging_element_groups_keeps_the_first(validate):
     run(project, 'project.group_properties', geometry='Plate', groups='2',
         material='6061-T6', thickness=10.0)
     (view,) = run(project, 'project.merge_element_groups', geometry='Plate', groups='1, 2')
-    assert [row[:4] for row in view['rows']] == [['1', 'floor', 'face', '20']]
+    assert [[row[0], row[1], row[3], row[4]] for row in view['rows']] == [['1', 'floor', 'face', '20']]
     with pytest.raises(ProtocolError, match='two or more'):
         run(project, 'project.merge_element_groups', geometry='Plate', groups='1')
 
