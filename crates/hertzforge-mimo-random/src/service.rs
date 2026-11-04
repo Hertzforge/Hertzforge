@@ -152,6 +152,9 @@ struct LoopState {
     /// error seen.
     div_streak: Vec<u32>,
     div_best: Vec<f64>,
+    /// Per drive and line (line-major): which of the last loops the change cap
+    /// held it back in, one bit per loop, newest lowest.
+    cap_hist: Vec<u32>,
     settle: u32,
     caps: Option<DriveFactors>,
     diagnostics: Vec<DiagnosticValue>,
@@ -370,6 +373,7 @@ impl MimoRandomService {
             worst_db: Vec::new(),
             div_streak: vec![0; n_r],
             div_best: vec![f64::INFINITY; n_r],
+            cap_hist: vec![0; lines * n_d],
             settle: 0,
             caps: None,
             diagnostics: Vec::new(),
@@ -1919,6 +1923,10 @@ impl MimoRandomService {
             limited_lines: limited,
             peak_change_db: caps.peak_change_db,
         };
+        let window = cap_window(self.cfg.protections.divergence_loops);
+        for (h, f) in self.ls.cap_hist.iter_mut().zip(&caps.factors) {
+            *h = ((*h << 1) | u32::from(*f != 1.0)) & window;
+        }
         self.ls.caps = Some(caps);
         self.ls.law_drive = drive_u;
         self.ls.drive_full = g;
@@ -2045,6 +2053,31 @@ impl MimoRandomService {
         true
     }
 
+    /// The core's other divergence count (the single-output rule, per drive): a
+    /// drive line the change cap has held back in `divergence_loops` of the last
+    /// `2 * divergence_loops` loops is divergent whatever the law says;
+    /// `envelope_abort_lines` of them on one drive abort the run. A law that swings
+    /// the drive faster than the caps allow is caught here even when the averaged
+    /// estimate looks right. Returns `false` when it aborted.
+    fn check_cap_divergence(&mut self) -> bool {
+        let p = self.cfg.protections;
+        let n = self.n_d;
+        for k in 0..n {
+            let lines = (self.band.0..self.band.1)
+                .filter(|&l| self.ls.cap_hist[l * n + k].count_ones() >= p.divergence_loops)
+                .count();
+            if lines >= p.envelope_abort_lines {
+                self.abort(MimoTripKind::CapDivergence {
+                    drive: k,
+                    lines,
+                    consecutive_loops: p.divergence_loops,
+                });
+                return false;
+            }
+        }
+        true
+    }
+
     // --- the loop -----------------------------------------------------------------------
 
     /// One closed-loop step. Returns `true` while the run goes on.
@@ -2145,7 +2178,13 @@ impl MimoRandomService {
         if !self.check_envelope(&resp, dof) {
             return Ok(false);
         }
-        let (err_ach, _, _) = self.errors_of(&resp, self.n_r > self.n_u);
+        // The core's divergence judges this loop's own estimate, not the averaged
+        // one: an average across loops hides a drive that swings loop to loop.
+        let mut raw_resp = self
+            .to_control(&raw.g_cc)
+            .map_err(|e| MimoError::Law(e.to_string()))?;
+        let _ = raw_resp.scale_lines(&vec![to_full; self.lines]);
+        let (err_ach, _, _) = self.errors_of(&raw_resp, self.n_r > self.n_u);
         if !self.check_divergence(&err_ach) {
             return Ok(false);
         }
@@ -2184,11 +2223,14 @@ impl MimoRandomService {
             };
             let idx = self.loop_count;
             match self.call_law(idx, &resp, dof, csd.as_ref()) {
-                Ok(out) => {
-                    if let Err(m) = self.accept(out) {
-                        self.law_missed(m);
+                Ok(out) => match self.accept(out) {
+                    Ok(()) => {
+                        if !self.check_cap_divergence() {
+                            return Ok(false);
+                        }
                     }
-                }
+                    Err(m) => self.law_missed(m),
+                },
                 Err(m) => self.law_missed(m),
             }
         }
@@ -2409,3 +2451,14 @@ fn merge(acc: Option<Estimate>, e: Estimate) -> Estimate {
 
 #[allow(dead_code)]
 fn _c64_used(_: C64) {}
+
+/// The bits of the change-cap history the divergence count looks at: the last
+/// `2 * loops` loops (at most 32).
+fn cap_window(loops: u32) -> u32 {
+    let bits = (2 * loops).min(32);
+    if bits >= 32 {
+        u32::MAX
+    } else {
+        (1u32 << bits) - 1
+    }
+}

@@ -101,6 +101,14 @@ pub enum MimoTripKind {
         consecutive_loops: u32,
         error_db: f64,
     },
+    /// The change cap held a drive back on `lines` lines for
+    /// `consecutive_loops` loops running: the law asks for more change than the
+    /// core allows, loop after loop.
+    CapDivergence {
+        drive: usize,
+        lines: usize,
+        consecutive_loops: u32,
+    },
     /// A tri-field kinematic abort on an input channel.
     Kinematic {
         channel_index: u32,
@@ -151,6 +159,15 @@ impl MimoTripKind {
             } => format!(
                 "Control {control}'s error grew for {consecutive_loops} loops in a row, to \
                  {error_db:.1} dB."
+            ),
+            MimoTripKind::CapDivergence {
+                drive,
+                lines,
+                consecutive_loops,
+            } => format!(
+                "The change cap held drive {drive} back on {lines} lines for \
+                 {consecutive_loops} loops in a row: the control law asked for more change \
+                 than the core allows."
             ),
             MimoTripKind::Kinematic {
                 channel_index,
