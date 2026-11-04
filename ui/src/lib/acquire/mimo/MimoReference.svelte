@@ -389,6 +389,10 @@
 		min-width: 180px;
 	}
 
+	.qpick span {
+		white-space: nowrap;
+	}
+
 	.geo td.num :global(.nf) {
 		min-width: 92px;
 	}

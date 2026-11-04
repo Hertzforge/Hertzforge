@@ -177,7 +177,7 @@
 	{#if showBands}
 	<div class="aq-group bands-group">
 		<h3>Bands Around the Reference</h3>
-		<p class="aq-lead">Positive dB below and above the reference. An alarm warns; the abort band trips the envelope abort. A row's own bands hold from that row to the next.</p>
+		<p class="aq-lead">Positive dB below and above the reference. An alarm warns; the abort band trips the envelope abort.{rowBands ? " A row's own bands hold from that row to the next." : ""}</p>
 		<div class="aq-fields">
 			<NumberField id="pb-al" label="Alarm below" unit="dB" bind:value={d.alarm_db[0]} errors={at(E, 'profile.alarm_db')} disabled={locked} />
 			<NumberField id="pb-ah" label="Alarm above" unit="dB" bind:value={d.alarm_db[1]} disabled={locked} />

@@ -79,7 +79,7 @@
 		{/each}
 	</ol>
 
-	{#if check}
+	{#if check && check.shape.controls > 0}
 		<dl class="facts" data-testid="summary-shape">
 			<div><dt>Shape</dt><dd>{SHAPE[check.shape.shape]}</dd></div>
 			<div><dt>Controlled</dt><dd class="num">{check.shape.dofs ?? check.shape.controls} by <span>{check.shape.drives}</span></dd></div>

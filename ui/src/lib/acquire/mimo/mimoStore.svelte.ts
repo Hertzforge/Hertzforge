@@ -474,6 +474,8 @@ export class MimoState {
 				// Every drive and control row has its settings; matrices follow the channels.
 				const rows = this.acq.rows;
 				void rows.map((r) => [r.role, r.enabled, r.index]);
+				// The grids also follow the degrees of freedom named and the virtual drives.
+				void [this.setup.space.dofs.length, this.setup.space.kind, this.setup.space.driveOn];
 				untrack(() => {
 					if (this.locked) return;
 					ensureSettings(rows, this.setup);
@@ -754,14 +756,14 @@ export class MimoState {
 	/** Engage after the review. */
 	async proceed(): Promise<boolean> {
 		const res = await this.act<MimoStatus>('Proceed', 'mimo_random.proceed');
-		if (res) this.status = res;
+		if (res) this.onStatus(res);
 		return res !== null;
 	}
 
 	/** Engage after a failed gate, with the operator's own words. */
 	async override(ack: string): Promise<boolean> {
 		const res = await this.act<MimoStatus>('Override', 'mimo_random.override', { ack });
-		if (res) this.status = res;
+		if (res) this.onStatus(res);
 		return res !== null;
 	}
 
