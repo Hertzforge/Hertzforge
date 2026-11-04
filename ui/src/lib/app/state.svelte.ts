@@ -6,6 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { AcquireState } from '$lib/acquire/store.svelte';
+import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -422,6 +423,8 @@ export class AppState {
 	readonly modal: ModalState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
+	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
+	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
 	readonly tests: TestTypeView;
 	/** The Random run's display: its pages and plots, and the data this window asks for. */
@@ -440,6 +443,7 @@ export class AppState {
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
+		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			testType: 'random',
@@ -496,7 +500,7 @@ export class AppState {
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status);
+		return liveTestOf(this.acquire, this.control.status, this.mimo);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -517,6 +521,8 @@ export class AppState {
 		// The test-type chooser shows no control data of its own.
 		const onRandom = this.workspace === 'acquire' && this.tests.screen === 'random';
 		if (onRandom || this.acquire.isLive) return this.acquire.source;
+		const onMimo = this.workspace === 'acquire' && this.tests.screen === 'mimo_random';
+		if (onMimo || this.mimo.isLive) return this.mimo.source;
 		return null;
 	}
 
@@ -540,12 +546,16 @@ export class AppState {
 				if (this.control.status === 'open') void this.acquire.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimo.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
 		});
 
 		this.acquire.watch();
+		this.mimo.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.analysis.connect();

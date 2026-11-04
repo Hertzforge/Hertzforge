@@ -263,6 +263,13 @@ impl BreakpointReference {
         &self,
         repair: Option<RepairPolicy>,
     ) -> Result<(Reference, Option<PsdRepairReport>), ReferenceError> {
+        Reference::from_parts(self.assemble()?, repair)
+    }
+
+    /// The reference's parts before validation: the spectral matrix exactly as the
+    /// tables and pairs give it, so a caller can show what was entered (for
+    /// example each line's smallest eigenvalue) before any repair.
+    pub fn assemble(&self) -> Result<ReferenceParts, ReferenceError> {
         let n = self.labels.len();
         let Grid { df_hz, lines } = Grid::new(self.grid.df_hz, self.grid.lines)?;
         if n == 0 || self.psd.len() != n {
@@ -355,20 +362,17 @@ impl BreakpointReference {
                 "pairs not given are fully coherent with zero phase".to_string()
             }
         });
-        Reference::from_parts(
-            ReferenceParts {
-                sdm,
-                df_hz,
-                band,
-                labels: self.labels.clone(),
-                unit: self.unit.clone(),
-                tolerances,
-                response_transformation: None,
-                drive_transformation: None,
-                provenance,
-            },
-            repair,
-        )
+        Ok(ReferenceParts {
+            sdm,
+            df_hz,
+            band,
+            labels: self.labels.clone(),
+            unit: self.unit.clone(),
+            tolerances,
+            response_transformation: None,
+            drive_transformation: None,
+            provenance,
+        })
     }
 }
 

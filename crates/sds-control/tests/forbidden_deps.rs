@@ -77,7 +77,8 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 ///
 /// `hertzforge-reference` was written here too: reference SDM builders, validation
 /// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
-/// reaches no hardware. The control service reads a setup's reference file with it.
+/// reaches no hardware. The control service reads a setup's reference file with it, and
+/// reaches it for `mimo_random.reference.*`.
 ///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It

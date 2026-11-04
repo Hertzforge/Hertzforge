@@ -13,11 +13,14 @@
 //!   that do not need the controller's service.
 //! - [`view`]: the status, prediction and report objects.
 //! - [`display`]: the display quantities, their selectors and decimation.
+//! - [`reference`]: the reference builders, readers and checks on the wire
+//!   (`mimo_random.reference.*`).
 
 pub mod adapter;
 pub mod check;
 pub mod display;
 pub mod driver;
+pub mod reference;
 pub mod setup;
 pub mod sim;
 pub mod view;

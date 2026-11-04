@@ -34,14 +34,47 @@ pub struct ControlRow {
     pub abort_db: [f64; 2],
 }
 
-/// One drive: its table row and its voltage ceiling.
+/// One drive: its table row, its voltage ceiling and peak, and the shaker behind it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DriveRow {
     pub channel: u32,
     pub label: String,
     pub ceiling_vrms: f64,
     pub abort_vrms: Option<f64>,
+    /// The output's peak voltage: the synthesized stream is clipped here. Defaults
+    /// to [`DEFAULT_CREST`] times the ceiling, at most 10 V.
+    pub peak_v: f64,
+    /// The shaker record (the shaker database's form) for feasibility; `None`: not
+    /// evaluated.
+    pub shaker: Option<Value>,
+    /// This shaker's own moving mass (armature, adapter, fixturing), lb.
+    pub moving_mass_lb: f64,
 }
+
+/// One limit channel: a monitored response the core holds under a ceiling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitRow {
+    pub channel: u32,
+    pub label: String,
+    /// The ceiling on the channel's PSD at full level, units squared per hertz.
+    pub ceiling: f64,
+    /// A measured PSD this many dB above the ceiling on any in-band line aborts.
+    pub abort_margin_db: f64,
+}
+
+/// The crest factor a drive's default peak assumes.
+pub const DEFAULT_CREST: f64 = 3.0;
+/// The service's per-loop change caps on each drive's PSD, dB.
+pub const DEFAULT_CAP_UP_DB: f64 = 3.5;
+pub const DEFAULT_CAP_DOWN_DB: f64 = 6.0;
+/// The largest rise cap an operator may set, dB.
+pub const MAX_CAP_UP_DB: f64 = 6.0;
+/// The law call's time budget as a fraction of the loop, and the unusable calls in
+/// a row that stop the run.
+pub const DEFAULT_LAW_BUDGET: f64 = 0.25;
+pub const DEFAULT_LAW_MISSES: u32 = 3;
+/// The FRF update's blend weight when the FRF is updated during the run.
+pub const DEFAULT_FRF_BLEND: f64 = 0.5;
 
 /// A real matrix, row-major.
 #[derive(Debug, Clone, PartialEq)]
@@ -118,9 +151,18 @@ pub struct Control {
     /// `true`: the FRF is re-estimated during the run; `false`: held from
     /// identification.
     pub frf_update: bool,
+    /// Under update, the weight of each loop's estimate against identification's.
+    pub frf_blend: f64,
     pub level_ramp_s: f64,
     pub shutdown_ramp_s: f64,
     pub max_loops_out: u32,
+    /// The core's per-loop rise and fall caps on each drive's PSD, dB.
+    pub cap_up_db: f64,
+    pub cap_down_db: f64,
+    /// The law call's time budget, a fraction of the loop, and the unusable calls
+    /// in a row that stop the run.
+    pub law_budget: f64,
+    pub law_misses: u32,
 }
 
 /// The level schedule, as single-output Random's.
@@ -138,6 +180,10 @@ pub struct MimoSetup {
     pub title: String,
     pub controls: Vec<ControlRow>,
     pub drives: Vec<DriveRow>,
+    /// Monitored responses held under a ceiling.
+    pub limits: Vec<LimitRow>,
+    /// The test article's mass, split across the shakers for feasibility, lb.
+    pub article_mass_lb: f64,
     pub space: ControlSpace,
     pub reference: Reference,
     pub law: LawSetup,
@@ -485,12 +531,114 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
                 format!("Channel {channel} is listed twice as a drive; list each channel once."),
             ));
         }
+        let peak_v =
+            number(d, "peak_v", &path)?.unwrap_or_else(|| (DEFAULT_CREST * ceiling_vrms).min(10.0));
+        if !(peak_v >= ceiling_vrms && peak_v <= 10.0) {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("{path}.peak_v"),
+                "A drive's peak is at least its rms ceiling and at most 10 V.",
+            ));
+        }
+        let shaker = match opt(d, "shaker") {
+            None => None,
+            Some(v @ Value::Object(_)) => Some(v.clone()),
+            Some(_) => {
+                return Err(bad(
+                    &format!("{path}.shaker"),
+                    "a drive's \"shaker\" is a shaker record (an object)",
+                ))
+            }
+        };
+        let moving_mass_lb = number(d, "moving_mass_lb", &path)?.unwrap_or(0.0);
+        if moving_mass_lb < 0.0 {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("{path}.moving_mass_lb"),
+                "A moving mass is 0 or more.",
+            ));
+        }
         drives.push(DriveRow {
             channel,
             label,
             ceiling_vrms,
             abort_vrms,
+            peak_v,
+            shaker,
+            moving_mass_lb,
         });
+    }
+    let mut limits = Vec::new();
+    if let Some(list) = opt(ch, "limits") {
+        let list = list
+            .as_array()
+            .ok_or_else(|| bad("setup.channels.limits", "\"limits\" is a list"))?;
+        for (k, l) in list.iter().enumerate() {
+            let path = format!("setup.channels.limits[{k}]");
+            let l = obj(l, &path)?;
+            let channel = whole(l, "channel", &path)?
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| bad(&format!("{path}.channel"), "each limit names its channel"))?;
+            let ceiling = number(l, "ceiling", &path)?.ok_or_else(|| {
+                bad(
+                    &format!("{path}.ceiling"),
+                    "each limit has its PSD ceiling (\"ceiling\")",
+                )
+            })?;
+            let abort_margin_db = number(l, "abort_margin_db", &path)?.unwrap_or(3.0);
+            if ceiling <= 0.0 {
+                report.errors.push(Item::field(
+                    "out_of_range",
+                    format!("{path}.ceiling"),
+                    "A limit's ceiling is above 0.",
+                ));
+            }
+            if abort_margin_db <= 0.0 {
+                report.errors.push(Item::field(
+                    "out_of_range",
+                    format!("{path}.abort_margin_db"),
+                    "A limit's abort margin is above 0 dB.",
+                ));
+            }
+            let label = match row_of(channel) {
+                Some(r) if r.enabled && r.role == ChannelRole::Monitor => {
+                    if r.description.trim().is_empty() {
+                        format!("Channel {channel}")
+                    } else {
+                        r.description.trim().to_owned()
+                    }
+                }
+                _ => {
+                    report.errors.push(Item::channel(
+                        "limit_unknown_channel",
+                        Some(channel),
+                        format!("Channel {channel} is not an enabled monitor row of the channel table; a limit is a monitored response. Set its role to monitor, or remove the limit."),
+                    ));
+                    format!("Channel {channel}")
+                }
+            };
+            if limits.iter().any(|x: &LimitRow| x.channel == channel) {
+                report.errors.push(Item::channel(
+                    "duplicate_channel",
+                    Some(channel),
+                    format!("Channel {channel} has two limits; keep one."),
+                ));
+            }
+            limits.push(LimitRow {
+                channel,
+                label,
+                ceiling,
+                abort_margin_db,
+            });
+        }
+    }
+    let article_mass_lb = number(ch, "article_mass_lb", "setup.channels")?.unwrap_or(0.0);
+    if article_mass_lb < 0.0 {
+        report.errors.push(Item::field(
+            "out_of_range",
+            "setup.channels.article_mass_lb",
+            "The test article's mass is 0 or more.",
+        ));
     }
     if controls.is_empty() {
         report.errors.push(Item::field(
@@ -837,6 +985,11 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
         level_ramp_s: number(&c, "level_ramp_s", p)?.unwrap_or(3.0),
         shutdown_ramp_s: number(&c, "shutdown_ramp_s", p)?.unwrap_or(3.0),
         max_loops_out: whole(&c, "max_loops_out", p)?.unwrap_or(5) as u32,
+        frf_blend: number(&c, "frf_blend", p)?.unwrap_or(DEFAULT_FRF_BLEND),
+        cap_up_db: number(&c, "cap_up_db", p)?.unwrap_or(DEFAULT_CAP_UP_DB),
+        cap_down_db: number(&c, "cap_down_db", p)?.unwrap_or(DEFAULT_CAP_DOWN_DB),
+        law_budget: number(&c, "law_budget", p)?.unwrap_or(DEFAULT_LAW_BUDGET),
+        law_misses: whole(&c, "law_misses", p)?.unwrap_or(DEFAULT_LAW_MISSES as u64) as u32,
     };
     for (key, x) in [
         ("level_ramp_s", control.level_ramp_s),
@@ -847,6 +1000,42 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
                 "out_of_range",
                 format!("setup.control.{key}"),
                 format!("\"{key}\" is from 0 to 60."),
+            ));
+        }
+    }
+    let checks: [(&str, bool, &str); 5] = [
+        (
+            "frf_blend",
+            control.frf_blend > 0.0 && control.frf_blend <= 1.0,
+            "The FRF update's blend is above 0 and at most 1.",
+        ),
+        (
+            "cap_up_db",
+            control.cap_up_db > 0.0 && control.cap_up_db <= MAX_CAP_UP_DB,
+            "The rise cap is above 0 and at most 6 dB per loop.",
+        ),
+        (
+            "cap_down_db",
+            control.cap_down_db > 0.0 && control.cap_down_db <= 60.0,
+            "The fall cap is above 0 and at most 60 dB per loop.",
+        ),
+        (
+            "law_budget",
+            control.law_budget > 0.0 && control.law_budget <= 1.0,
+            "The law's time budget is a fraction of the loop, above 0 and at most 1.",
+        ),
+        (
+            "law_misses",
+            control.law_misses >= 1 && control.law_misses <= 100,
+            "The misses before a stop are from 1 to 100.",
+        ),
+    ];
+    for (key, ok, message) in checks {
+        if !ok {
+            report.errors.push(Item::field(
+                "out_of_range",
+                format!("setup.control.{key}"),
+                message,
             ));
         }
     }
@@ -934,6 +1123,8 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
             title,
             controls,
             drives,
+            limits,
+            article_mass_lb,
             space,
             reference,
             law,

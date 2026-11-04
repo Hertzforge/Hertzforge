@@ -34,8 +34,10 @@ hertzforge-shaker-db.workspace = true
 # Reviewed 2026-11-03: it reaches hardware only through the station backend it is
 # handed, and holds the Sim only as a dev-dependency.
 hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
-# The native reference file a MIMO setup names by path and hash. Reviewed
-# 2026-11-03: file reading and validation only; it names no backend.
+# The native reference file a MIMO setup names by path and hash, and the builders
+# and readers behind `mimo_random.reference.*` (breakpoints, rigid body, import,
+# validation), so the shell never repeats their math. Reviewed 2026-11-03: file
+# reading, validation and pure computation; it names no backend.
 hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-station.workspace = true
 serde_json.workspace = true

@@ -43,6 +43,21 @@ export interface MimoDriveRow {
 	channel: number;
 	ceiling_vrms: number;
 	abort_vrms?: number | null;
+	/** The output's peak, V; the stream is clipped here. Default 3 times the ceiling, at most 10 V. */
+	peak_v?: number;
+	/** The shaker record (the shaker database's form) for feasibility; null: not evaluated. */
+	shaker?: Record<string, unknown> | null;
+	/** This shaker's own moving mass (armature, adapter, fixturing), lb. */
+	moving_mass_lb?: number;
+}
+
+/** A monitored response the core holds under a ceiling (an enabled monitor row). */
+export interface MimoLimitRow {
+	channel: number;
+	/** The PSD ceiling at full level, units squared per hertz. */
+	ceiling: number;
+	/** Abort this many dB above the ceiling (default 3). */
+	abort_margin_db?: number;
 }
 
 export type MimoSpace =
@@ -79,6 +94,14 @@ export interface MimoIdentification {
 
 export interface MimoControl {
 	frf?: 'hold' | 'update';
+	/** Under update, the weight of each loop's estimate (above 0, at most 1; default 0.5). */
+	frf_blend?: number;
+	/** Per-loop rise and fall caps on each drive's PSD, dB (defaults 3.5 and 6). */
+	cap_up_db?: number;
+	cap_down_db?: number;
+	/** The law call's time budget, a fraction of the loop (default 0.25), and the misses in a row that stop the run (default 3). */
+	law_budget?: number;
+	law_misses?: number;
 	level_ramp_s?: number;
 	shutdown_ramp_s?: number;
 	max_loops_out?: number;
@@ -86,7 +109,7 @@ export interface MimoControl {
 
 export interface MimoSetup {
 	title?: string;
-	channels: { controls: MimoControlRow[]; drives: MimoDriveRow[] };
+	channels: { controls: MimoControlRow[]; drives: MimoDriveRow[]; limits?: MimoLimitRow[]; article_mass_lb?: number };
 	space?: MimoSpace;
 	reference: MimoReference;
 	law?: MimoLawChoice;
@@ -405,4 +428,139 @@ export function packedCoherence(re: ArrayLike<number>, im: ArrayLike<number>, n:
 	const grr = packedElement(re, im, n, line, r, r)[0];
 	const gcc = packedElement(re, im, n, line, c, c)[0];
 	return grr > 0 && gcc > 0 ? (a * a + b * b) / (grr * gcc) : 0;
+}
+
+// --- the reference sub-family (PROTOCOL.md, "MIMO Random Reference") ------------------------
+
+/** The test's frame, which sets the reference's line spacing and lines. */
+export interface MimoGridParams {
+	fs_hz: number;
+	n_pts: number;
+}
+
+/** A breakpoint row as single-output Random's profile carries it. */
+export interface MimoBreakpoint {
+	freq_hz: number;
+	psd_g2_hz?: number;
+	slope_db_oct?: number;
+	alarm_db?: BandDb;
+	abort_db?: BandDb;
+}
+
+/** A pair value: a constant, or `[frequency, value]` points joined by straight lines. */
+export type MimoPairValue = number | [number, number][];
+
+export interface MimoPairSpec {
+	row: number;
+	col: number;
+	/** Squared coherence, 0 to 1. */
+	coherence: MimoPairValue;
+	/** Phase of `G_row,col`, degrees. */
+	phase_deg: MimoPairValue;
+}
+
+export interface MimoBuildBreakpointsParams {
+	grid: MimoGridParams;
+	unit?: string;
+	tables: { label: string; rows: MimoBreakpoint[] }[];
+	pairs?: MimoPairSpec[];
+	unspecified?: 'independent' | 'fully_coherent';
+	alarm_db?: BandDb;
+	abort_db?: BandDb;
+	/** Accept the repair the result describes. */
+	repair?: boolean;
+	preview_pair?: [number, number];
+}
+
+export interface MimoImportParams {
+	/** A reference folder, an `.npz` specification or a CSV table, by full path. */
+	path: string;
+	/** A CSV import's pair table, by full path. */
+	pair_path?: string | null;
+	grid?: MimoGridParams;
+	labels?: string[];
+	unit?: string;
+	repair?: boolean;
+	preview_pair?: [number, number];
+}
+
+export interface MimoValidateReferenceParams {
+	reference: MimoReference;
+	labels?: string[];
+	unit?: string;
+	preview_pair?: [number, number];
+}
+
+export interface MimoTransformOut {
+	rows: number;
+	cols: number;
+	values: number[];
+	row_labels: string[];
+	col_labels: string[];
+	condition: number | null;
+}
+
+/** What a reference request made: the reference (for the setup), its checks and its preview. */
+export interface MimoReferenceResult {
+	ok: boolean;
+	/** Null when the reference was not accepted. */
+	reference: MimoReference | null;
+	labels: string[];
+	unit: string;
+	df_hz: number;
+	band_hz: [number, number] | null;
+	lines: number;
+	errors: ReportItem[];
+	warnings: ReportItem[];
+	psd: {
+		violations: number;
+		/** The most negative eigenvalue relative to its line's largest, as entered (0 when none is). */
+		min_eigenvalue_ratio: number | null;
+		worst_hz: number | null;
+		lines_hz: number[];
+		repair: {
+			lines: number;
+			clamped: number;
+			max_change: number;
+			pairs: { row: number; col: number; labels: [string, string]; before: number; after: number; freq_hz: number }[];
+		} | null;
+		repair_accepted: boolean;
+	};
+	transforms: { response: MimoTransformOut | null; drive: MimoTransformOut | null };
+	provenance: {
+		method: string;
+		source: string;
+		tool: string;
+		created_unix_secs: number;
+		conjugated_on_import: boolean | null;
+		assumptions: string[];
+	} | null;
+	/** Every PSD, the smallest eigenvalue per line, a pair's coherence and its phase. */
+	views: View[];
+}
+
+export interface MimoRigidSensor {
+	label: string;
+	position: [number, number, number];
+	direction: [number, number, number];
+}
+
+export interface MimoRigidParams {
+	sensors: MimoRigidSensor[];
+	reference_point?: [number, number, number];
+	unit?: string;
+	length_unit?: string;
+}
+
+export interface MimoRigidResult {
+	ok: boolean;
+	errors: ReportItem[];
+	warnings?: ReportItem[];
+	dofs: string[];
+	dof_units: string[] | null;
+	transform: MimoTransformOut | null;
+	condition: number | null;
+	singular_values: number[];
+	/** How much of each sensor's reading the others can check, 0 to 1. */
+	sensors: { label: string; check_share: number }[];
 }
