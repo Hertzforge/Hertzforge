@@ -1362,7 +1362,7 @@ def brick_count(geometry: Any, ids: Sequence[int], size: float) -> int:
     return round(held / float(size) ** 3)
 
 
-def fitted_brick_count(geometry: Any, ids, size: float) -> int:
+def fitted_brick_count(geometry: Any, ids: Sequence[int], size: float) -> int:
     """About how many bricks `hexmesh.overlay_mesh` makes of these parts
     at `size`: the grid's cubes the parts hold (`brick_count`) and the
     pillow, a brick on each face where the grid steps from inside to
@@ -2334,7 +2334,8 @@ def grid_cells(geometry: Any, ids: Sequence[int], size: float, piece: bool = Fal
     return (nu - 1) * (nv - 1) * (nw - 1)
 
 
-def extrusion_bricks(geometry: Any, ids, size: float, piece: bool = False) -> int:
+def extrusion_bricks(geometry: Any, ids: Sequence[int], size: float,
+                     piece: bool = False) -> int:
     """How many bricks `extrusion_mesh` makes of these parts at `size`,
     rings and all, without making them: the section holds between two
     of the grid's cuts along the extrusion, so the plane is laid once

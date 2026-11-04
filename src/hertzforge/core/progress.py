@@ -122,19 +122,26 @@ class Share:
         parent.add(self.units)
 
     def add(self, count: int) -> None:
+        """`count` more units to this stage's total."""
         self.total += int(count)
         self._pass()
 
     def tick(self, count: int = 1) -> None:
+        """`count` units of this stage done; the parent moves when the
+        share's fraction has earned another of its units."""
         self.done += int(count)
         self._pass()
 
     def extend_to(self, count: int) -> None:
+        """At least `count` more units to come: the total grows to hold
+        them, never shrinks."""
         if self.done + int(count) > self.total:
             self.total = self.done + int(count)
             self._pass()
 
     def busy(self) -> None:
+        """A step that cannot count itself is under way: the parent's bar
+        moves on its own until the next count."""
         self.parent.busy()
 
     def _pass(self) -> None:
