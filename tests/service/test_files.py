@@ -224,3 +224,20 @@ def test_a_text_import_adds_one_history_read_with_the_corrections(project, text,
     assert data.ordinate[0, 1] == pytest.approx(0.5 * 9.80665)
     with pytest.raises(ProtocolError, match='does not read as delimited text'):
         run(project, 'project.import_text', path=RUN)
+
+
+def test_a_foreign_file_is_written_in_the_units_asked_for(tmp_path, validate):
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'geometry.unv'),
+                                           'units': {'length_unit': 'mm'}})
+    project = state.project
+    (si,) = run(project, 'project.save_as', object='Geometry', format='unv',
+                path=str(tmp_path / 'si'), units='si')
+    (inches,) = run(project, 'project.save_as', object='Geometry', format='unv',
+                    path=str(tmp_path / 'inches'), units='in-slinch-lbf-s')
+    wire_views([si, inches], validate)
+    assert rows(si)['Units']['value'] == 'm-kg-N-s'
+    assert rows(inches)['Units']['value'] == 'in-slinch-lbf-s'
+    assert (tmp_path / 'si.unv').read_bytes() != (tmp_path / 'inches.unv').read_bytes()
+    with pytest.raises(ProtocolError, match="no unit system named 'cubits'"):
+        run(project, 'project.save_as', object='Geometry', format='unv',
+            path=str(tmp_path / 'odd'), units='cubits')

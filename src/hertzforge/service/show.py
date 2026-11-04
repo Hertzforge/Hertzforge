@@ -85,7 +85,30 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'mode_table': True, 'mac': True, 'shape_values': False,
-         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True}
+         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
+         'environment': None, 'table_view': 'channels'}
+
+TABLE_VIEWS = ('channels', 'response', 'reference')
+
+
+def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | None, list[str], str]:
+    """(environments, the one picked, the views it holds, the one picked)
+    for a channel table, as VD's two drop-downs read it: the picked
+    environment while it still applies, else the first; the transformation
+    views only when the loop holds them."""
+    loops = list(table.environments)
+    environment = prefs.get('environment')
+    if environment not in loops:
+        environment = loops[0] if loops else None
+    forms = ['channels']
+    if environment is not None:
+        held = table.environments[environment]
+        if held.response_transformation is not None:
+            forms.append('response')
+        if held.reference_transformation is not None:
+            forms.append('reference')
+    form = prefs.get('table_view') if prefs.get('table_view') in forms else 'channels'
+    return loops, environment, forms, form
 
 #: past this many shape values the table is not offered (VD's limit)
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
@@ -277,7 +300,21 @@ def _alone(project: Any, name: str, picks: list[int],
         if prefs['shape_values'] and not fits:
             notes.append(f'{count:,} shape values, too many for a table')
         return views, notes
-    if isinstance(obj, (ChannelTable, MatchedModes)):
+    if isinstance(obj, ChannelTable):
+        # the table itself, typed into, with the Control column of the
+        # picked loop, or one of that loop's transformations in its place
+        from hertzforge.core.tables import transformation_table
+
+        from .ops_sheets import channel_table
+
+        prefs = {**PREFS, **(prefs or {})}
+        _loops, environment, _forms, form = _table_views(obj, prefs)
+        notes = [f'{len(picks)} channels picked'] if picks else []
+        if form == 'channels':
+            return [channel_table(project, name, environment=environment)], notes
+        headers, rows = transformation_table(obj, environment, form)
+        return [v.table(f'{name}: {environment}, {form} transformation', headers, rows)], notes
+    if isinstance(obj, MatchedModes):
         return _run(project, 'project.table', object=name), []
     if _is_data(obj):
         prefs = {**PREFS, **(prefs or {})}
@@ -772,7 +809,7 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
     return [view], [note]
 
 
-def _offers(project: Any, objects: list[str]) -> dict[str, Any]:
+def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str, Any]:
     """Which of the bar's choices the selection can take: the stage or the
     flat plot for a data object, a component for complex frequency data,
     decades for anything on a frequency axis."""
@@ -787,6 +824,12 @@ def _offers(project: Any, objects: list[str]) -> dict[str, Any]:
         found = project.channel_table_for(sets[0])
         if found is not None:
             choices += [c for c in found[1].choices() if c in VALUES_CHOICES and c != 'all']
+    from hertzforge.core.channel_table import ChannelTable
+
+    loops: list[str] = []
+    forms: list[str] = []
+    if len(objects) == 1 and isinstance(project[objects[0]], ChannelTable):
+        loops, _environment, forms, _form = _table_views(project[objects[0]], prefs)
     stage = _stage_geometry(project, objects)
     table = _table_on(project, stage) if stage is not None else None
     placed: list = []
@@ -798,6 +841,8 @@ def _offers(project: Any, objects: list[str]) -> dict[str, Any]:
     return {
         'shapes': alone,
         'values_dofs': choices,
+        'environments': loops,
+        'table_views': forms,
         'arrows': stage is not None and bool(_arrow_dofs(project, objects, table)[0]),
         'sensors': bool(placed),
         'projection': (len(sets) == 2 and all(home is not None for home in homes)
@@ -854,4 +899,4 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
         notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
     title = ' and '.join(objects) if len(objects) <= 3 else f'{objects[0]} and {len(objects) - 1} more'
     return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n),
-            'offers': _offers(project, objects)}
+            'offers': _offers(project, objects, prefs)}

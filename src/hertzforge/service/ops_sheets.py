@@ -48,22 +48,50 @@ START = Param('start', 'First test day (YYYY-MM-DD)', 'string', default='')
 END = Param('end', 'Last test day (blank: the first)', 'string', default='')
 
 
-def channel_table(project: Any, name: str, title: str | None = None) -> dict:
+#: how each column's cells are edited, from the schema's own kinds
+_CELL_KINDS = {'int': 'number', 'index': 'number', 'float': 'number'}
+
+
+def cell_widgets() -> tuple[dict[str, str], dict[str, list[str]]]:
+    """(kinds, choices) of a channel table's columns for the table view's
+    `edit`: each column's kind from `ChannelTable.COLUMNS`, a choice
+    column's list, the unit shortlist, and the sensor catalog's models."""
+    from hertzforge.core.unit_choices import units_for
+
+    kinds: dict[str, str] = {}
+    choices: dict[str, list[str]] = {}
+    for key, spec in ChannelTable.COLUMNS.items():
+        kinds[key] = _CELL_KINDS.get(spec.kind, spec.kind)
+        if spec.kind == 'choice':
+            choices[key] = list(spec.choices)
+        elif spec.kind == 'unit':
+            choices[key] = list(units_for(None))
+    choices['model'] = [entry.model for entry in CATALOG]
+    return kinds, choices
+
+
+def channel_table(project: Any, name: str, title: str | None = None,
+                  environment: str | None = None) -> dict:
     """A channel table as Visual Dynamics shows it (`core.tables.table_of`):
     its columns, then the direction columns derived from the geometry
     linked with it, each of its own columns edited through
-    `project.set_channel_cell`. The derived columns are read only, and so
-    is Control on a table whose control channels are per environment."""
+    `project.set_channel_cell`, with VD's widgets (`cell_widgets`). The
+    derived columns are read only, and so is Control on a table whose
+    control channels are per environment; `environment` names the loop
+    whose control channels that column shows."""
     from hertzforge.core.tables import table_of
 
     table = project[name]
     home = project.geometry_for(name)
-    headers, rows = table_of(table, geometry=None if home is None else home[1])
+    headers, rows = table_of(table, geometry=None if home is None else home[1],
+                             environment=environment)
     keys: list[str | None] = [None if key == 'control' and table.environments else key
                               for key in table.column_names]
     keys += [None] * (len(headers) - len(keys))
+    kinds, choices = cell_widgets()
     return v.table(title or name, headers, rows,
-                   edit=v.editing('project.set_channel_cell', {'table': name}, keys))
+                   edit=v.editing('project.set_channel_cell', {'table': name}, keys,
+                                  choices=choices, kinds=kinds))
 
 
 def _cell(table: Any, row: int, key: str) -> str:

@@ -15,17 +15,7 @@
 	 */
 	import { tick } from 'svelte';
 	import type { TableView } from '$lib/protocol/types';
-	import {
-		blockText,
-		fillTargets,
-		inside,
-		numeric,
-		parseTsv,
-		pasteTargets,
-		spanned,
-		tableText,
-		type Block
-	} from './table';
+	import { blockText, fillTargets, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -48,6 +38,16 @@
 	let fillTo = $state<{ row: number; col: number } | null>(null);
 
 	const keys = $derived(onedit && view.edit ? view.edit.columns : []);
+	/** How a column is edited: a flag by its check box, a choice from its list, a date in a date field. */
+	const kindOf = (col: number) => view.edit?.kinds?.[keys[col] ?? ''] ?? 'text';
+	const choicesOf = (col: number) => view.edit?.choices?.[keys[col] ?? ''];
+
+	/** A flag cell clicked: set the other way, with no field to type into. */
+	async function toggleFlag(row: number, col: number) {
+		if (!onedit || saving || !editable(col)) return;
+		select(row, col);
+		await apply([{ row, key: keys[col] as string, value: flagOn(view.rows[row]?.[col] ?? '') ? 'False' : 'True' }]);
+	}
 	const editable = (col: number) => !!keys[col];
 	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
 	const fillBlock = $derived(block && fillTo && dragging === 'fill' ? spanned({ row: Math.min(block.r0, fillTo.row), col: Math.min(block.c0, fillTo.col) }, { row: Math.max(block.r1, fillTo.row), col: Math.max(block.c1, fillTo.col) }) : null);
@@ -205,8 +205,19 @@
 		void apply(fillTargets(view.rows, block, view.rows.length - 1, block.c1, keys));
 	}
 
+	/** The whole table on the clipboard as text and as HTML at once, so a spreadsheet pastes cells and a document a table. */
 	async function copy() {
-		await navigator.clipboard.writeText(tableText(view));
+		const text = tableText(view);
+		try {
+			await navigator.clipboard.write([
+				new ClipboardItem({
+					'text/plain': new Blob([text], { type: 'text/plain' }),
+					'text/html': new Blob([tableHtml(view)], { type: 'text/html' })
+				})
+			]);
+		} catch {
+			await navigator.clipboard.writeText(text);
+		}
 		copied = true;
 		setTimeout(() => (copied = false), 1500);
 	}
@@ -236,19 +247,32 @@
 						{#each row as cell, i (i)}
 							{#if editing && editing.row === r && editing.col === i}
 								<td class="editing">
-									<input bind:this={field} bind:value={draft} class="cell mono" list={view.edit?.choices?.[keys[i] ?? ''] ? 'table-cell-choices' : undefined} aria-label="{view.columns[i]}, row {r + 1}"
-										onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
-									{#if view.edit?.choices?.[keys[i] ?? '']}
-										<datalist id="table-cell-choices">
-											{#each view.edit.choices[keys[i] ?? ''] as choice (choice)}<option value={choice}></option>{/each}
-										</datalist>
+									{#if kindOf(i) === 'choice' && choicesOf(i)}
+										<select bind:value={draft} class="cell" aria-label="{view.columns[i]}, row {r + 1}" onchange={() => commit()} onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-select">
+											{#if !choicesOf(i)?.includes(draft)}<option value={draft}>{draft || '(blank)'}</option>{/if}
+											{#each choicesOf(i) ?? [] as choice (choice)}<option value={choice}>{choice}</option>{/each}
+										</select>
+									{:else if kindOf(i) === 'date'}
+										<input bind:this={field} bind:value={draft} type="date" class="cell mono" aria-label="{view.columns[i]}, row {r + 1}" onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
+									{:else}
+										<input bind:this={field} bind:value={draft} class="cell mono" list={choicesOf(i) ? 'table-cell-choices' : undefined} aria-label="{view.columns[i]}, row {r + 1}"
+											onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
+										{#if choicesOf(i)}
+											<datalist id="table-cell-choices">
+												{#each choicesOf(i) ?? [] as choice (choice)}<option value={choice}></option>{/each}
+											</datalist>
+										{/if}
 									{/if}
 								</td>
 							{:else}
 								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
 									class:picked={onedit && view.edit && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
-									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => open(r, i)}>
-									{cell}
+									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
+									{#if editable(i) && kindOf(i) === 'flag'}
+										<input type="checkbox" class="flag" checked={flagOn(cell)} aria-label="{view.columns[i]}, row {r + 1}" disabled={saving} onclick={(e) => { e.preventDefault(); void toggleFlag(r, i); }} data-testid="table-cell-flag" />
+									{:else}
+										{cell}
+									{/if}
 									{#if onedit && view.edit && block && r === block.r1 && i === block.c1 && !saving}
 										<span class="handle" role="presentation" title="Drag to fill; double-click to fill down" onpointerdown={grabHandle} ondblclick={fillDown} data-testid="table-fill-handle"></span>
 									{/if}
@@ -387,5 +411,9 @@
 
 	.refusal {
 		color: var(--status-warn);
+	}
+	.flag {
+		margin: 0;
+		accent-color: var(--accent, #0a84ff);
 	}
 </style>

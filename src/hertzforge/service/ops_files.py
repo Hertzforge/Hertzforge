@@ -58,6 +58,11 @@ FORMAT = Param('format', 'Format', 'enum', default='hforge', options=_formats())
 PATH = Param('path', 'File', 'string', default='')
 CREATOR = Param('creator', 'Creator, for ESCDF (blank: the login name)', 'string',
                 default='')
+#: the units a foreign format is written in: the window's display unit
+#: system, as VD exports (the server puts the connection's system in for
+#: 'display'), or SI as stored
+UNITS = Param('units', 'Units', 'enum', default='display', options=(
+    Option('display', 'The display unit system'), Option('si', 'SI, as stored')))
 
 RUN = Param('path', 'Rattlesnake run (.nc4)', 'string', default='')
 START = Param('start', 'Start (0: the run\'s start)', 'number', default=0.0, min=0.0,
@@ -162,15 +167,29 @@ def _exodus_geometry(project: Any, name: str, obj: Any) -> tuple[str, Any]:
     return geometry_name, geometry
 
 
+def _export_system(units: Any) -> Any:
+    """The unit system a foreign file is written in: SI for 'si' (and for
+    'display' when no connection put its system in), else the display
+    system named (`units.SYSTEMS`)."""
+    import hertzforge as hz
+    from hertzforge.units import SYSTEMS
+
+    if units in (None, '', 'si', 'display'):
+        return hz.SI
+    try:
+        return SYSTEMS[units]
+    except KeyError:
+        raise refused(f'no unit system named {units!r}') from None
+
+
 def save_as(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.save_as`: one object written to a file in the format
     chosen, as Visual Dynamics' Save As writes it: a `.hforge` object
-    (`io.save`), or a foreign format by `Project.export`, in SI (the
-    service has no display units yet). The format's suffix is added when
+    (`io.save`), or a foreign format by `Project.export`, in the display
+    unit system (the `units` param, 'display' or 'si'). The format's suffix is added when
     the path lacks it. A format that cannot write the object is refused,
     naming those that can. Shapes and data written to Exodus ride on a
     geometry, and an ESCDF file records `creator` as its creator."""
-    import hertzforge as hz
     from hertzforge.io import exporters
     from hertzforge.io import save as save_object
     from hertzforge.io.escdf_objects import SUFFIXES
@@ -210,12 +229,13 @@ def save_as(project: Any, params: dict[str, Any]) -> list[dict]:
             extras['created_by'] = params['creator'].strip() or None
             rows.append(v.row('Creator', params['creator'].strip() or 'the login name',
                               None, 'info'))
+        system = _export_system(params.get('units'))
         try:
-            project.export(name, path, unit_system=hz.SI, format=chosen, **extras)
+            project.export(name, path, unit_system=system, format=chosen, **extras)
         except (ValueError, OSError) as error:
             raise refused(str(error)) from None
         written = path
-        units = units_written(chosen, hz.SI)
+        units = units_written(chosen, system)
     declared = getattr(obj, 'units_defined', True)
     rows += [v.row('Written', written, None, 'pass'),
              v.row('Size', _size(written), 'bytes', 'info'),
@@ -598,7 +618,7 @@ OPERATIONS = (
         summary='Write one object to a file on the service\'s machine, as a Hertzforge object '
                 'or in a format another tool reads; a format that cannot hold the object is '
                 'refused, naming those that can.',
-        params=(OBJECT, FORMAT, PATH, CREATOR), outputs=('reading',), run=save_as),
+        params=(OBJECT, FORMAT, PATH, UNITS, CREATOR), outputs=('reading',), run=save_as),
     Operation(
         id='project.rattlesnake_preview', title='Preview a Rattlesnake Run',
         workspace='analyze', accepts='project',

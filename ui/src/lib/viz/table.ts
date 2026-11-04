@@ -11,6 +11,20 @@ export function tableText(view: Pick<TableView, 'columns' | 'rows'>): string {
 	return [view.columns, ...view.rows].map((row) => row.map(clean).join('\t')).join('\n');
 }
 
+/** The table as HTML, headings in a `thead`: what a document or an email pastes as a table. */
+export function tableHtml(view: Pick<TableView, 'columns' | 'rows'>): string {
+	const escape = (cell: string) => cell.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const cells = (tag: string, row: string[]) => row.map((c) => `<${tag}>${escape(c)}</${tag}>`).join('');
+	const head = `<thead><tr>${cells('th', view.columns)}</tr></thead>`;
+	const body = `<tbody>${view.rows.map((r) => `<tr>${cells('td', r)}</tr>`).join('')}</tbody>`;
+	return `<table>${head}${body}</table>`;
+}
+
+/** Whether a flag cell reads as set: the table writes True and False, a file may say yes or 1. */
+export function flagOn(cell: string): boolean {
+	return ['true', 'yes', '1', 'on', 'x'].includes(cell.trim().toLowerCase());
+}
+
 /** Tab-separated text as rows of cells, a trailing line break dropped: what a spreadsheet copies. */
 export function parseTsv(text: string): string[][] {
 	const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');

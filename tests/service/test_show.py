@@ -451,3 +451,45 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
     finally:
         table.set_cell('model', 0, was)
+
+
+def test_a_channel_table_shows_typed_into_with_its_widgets(plate, validate):
+    import numpy as np
+
+    from hertzforge.core.channel_table import Environment
+
+    project = plate.project
+    name = next(n for n, o in project.items() if projects.kind_of(o) == 'channel_table')
+    out = shown(plate, name, validate=validate)
+    (table,) = out['views']
+    edit = table['edit']
+    assert edit['op'] == 'project.set_channel_cell' and edit['kinds']['control'] == 'flag'
+    assert edit['kinds']['channel_type'] == 'choice' and 'acceleration' in edit['choices']['channel_type']
+    assert edit['kinds']['expiration'] == 'date' and edit['kinds']['sensitivity'] == 'number'
+    assert edit['kinds']['unit'] == 'unit' and 'g' in edit['choices']['unit']
+    assert edit['choices']['model'], 'the catalog\'s models'
+    assert out['offers']['environments'] == [] and out['offers']['table_views'] == ['channels']
+    # a table with two loops: the Control column follows the picked one, and a
+    # loop's transformation stands in the table's place
+    held = project[name]
+    numbers = [int(c) for c in held['channel'][:3]]
+    held.environments['Random'] = Environment(controls=numbers[:2], drives=[],
+                                              response_transformation=np.eye(2))
+    held.environments['Sine'] = Environment(controls=numbers[2:], drives=[])
+    try:
+        two = shown(plate, name, validate=validate)
+        assert two['offers']['environments'] == ['Random', 'Sine']
+        assert two['offers']['table_views'] == ['channels', 'response']
+        sine = shown(plate, name, prefs={'environment': 'Sine'}, validate=validate)
+        assert sine['offers']['table_views'] == ['channels'], 'Sine holds no transformation'
+        matrix = shown(plate, name, prefs={'environment': 'Random', 'table_view': 'response'},
+                       validate=validate)
+        (view,) = matrix['views']
+        assert view['title'].endswith('Random, response transformation')
+        assert view['columns'][0] == 'Row' and len(view['rows']) == 2 and 'edit' not in view
+        with pytest.raises(ProtocolError, match='"table_view"'):
+            projects.show(plate, {'objects': [name], 'prefs': {'table_view': 'inverse'}})
+        with pytest.raises(ProtocolError, match='"environment"'):
+            projects.show(plate, {'objects': [name], 'prefs': {'environment': 3}})
+    finally:
+        held.environments.clear()

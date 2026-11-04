@@ -361,13 +361,17 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
     for key in ('projection', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'):
         if key in prefs and not isinstance(prefs[key], bool):
             raise bad_request(f'project.show "{key}" is true or false')
-    from .show import VALUES_CHOICES, VALUES_FORMS
+    from .show import TABLE_VIEWS, VALUES_CHOICES, VALUES_FORMS
 
     if 'values_dofs' in prefs and prefs['values_dofs'] not in VALUES_CHOICES:
         raise bad_request('project.show "values_dofs" is all, control, reference, response or '
                           'monitor')
     if 'values_form' in prefs and prefs['values_form'] not in VALUES_FORMS:
         raise bad_request('project.show "values_form" is shapes, response or reference')
+    if prefs.get('environment') is not None and not isinstance(prefs['environment'], str):
+        raise bad_request('project.show "environment" is a name, or null')
+    if 'table_view' in prefs and prefs['table_view'] not in TABLE_VIEWS:
+        raise bad_request('project.show "table_view" is channels, response or reference')
     return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
                         dict(part) if part else None, dict(prefs))
 

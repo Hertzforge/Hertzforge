@@ -330,6 +330,8 @@ export interface TableEdit {
 	columns: (string | null)[];
 	/** What a column offers, by its key: a shortlist the cell can still be typed past. */
 	choices?: Record<string, string[]>;
+	/** How a column's cells are edited, by key: a flag is a check box, a choice a drop-down, a date a date field. */
+	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
 }
 
 export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView;
@@ -438,6 +440,9 @@ export interface Shown {
 		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
 		arrows: boolean;
 		sensors: boolean;
+		/** A lone channel table: its control loops, and the views the picked one holds. */
+		environments: string[];
+		table_views: string[];
 	};
 }
 
@@ -459,6 +464,9 @@ export interface ShowPrefs {
 	/** DOF arrows and the channel table's sensors over every stage. */
 	arrows: boolean;
 	sensors: boolean;
+	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
+	environment: string | null;
+	table_view: 'channels' | 'response' | 'reference';
 	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */

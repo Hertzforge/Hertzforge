@@ -298,12 +298,18 @@ def table(title: str, columns: Sequence[str], rows: Sequence[Sequence[str]],
 
 
 def editing(op: str, params: dict[str, Any], columns: Sequence[str | None],
-            choices: dict[str, list[str]] | None = None) -> dict[str, Any]:
+            choices: dict[str, list[str]] | None = None,
+            kinds: dict[str, str] | None = None) -> dict[str, Any]:
     """What makes a `table` view's cells editable: the operation that sets
     one (taking `row` from 1, `column` and `value` beside `params`), each
-    column's key, or None for a column that is read only, and what a column
-    offers by key, a shortlist the cell can still be typed past."""
+    column's key, or None for a column that is read only, what a column
+    offers by key, a shortlist the cell can still be typed past, and how a
+    column is edited (`kinds`, by key: 'choice' from its list, 'flag' by a
+    check box, 'date' in a date field, 'unit' from a shortlist, 'number'
+    or 'text' typed), as VD's every-table-is-the-same-table widgets."""
     out = {'op': op, 'params': dict(params), 'columns': list(columns)}
     if choices:
         out['choices'] = {key: list(values) for key, values in choices.items()}
+    if kinds:
+        out['kinds'] = dict(kinds)
     return out

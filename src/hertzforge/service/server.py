@@ -236,6 +236,10 @@ class Service:
                           f'{handle.entry.kind}.')
         values = op.resolve(params.get('params', {}),
                             [c.value for c in handle.data.channels])
+        if values.get('units') == 'display':
+            # a file written in the display units is written in this
+            # connection's (Save As)
+            values['units'] = self.units
         views = await self.in_worker(op.run, handle.data, values)
         return {'views': views}
 
