@@ -113,7 +113,7 @@
 				id: 'act:clear',
 				group: 'Actions',
 				title: 'Clear Analysis Results',
-				subtitle: `${app.analyze.results.length} in Analyze`,
+				subtitle: `${app.analyze.results.length} across the modules`,
 				keywords: 'remove panes reset',
 				icon: 'trash',
 				disabledReason: app.analyze.results.length ? null : 'No results to clear',
@@ -149,7 +149,7 @@
 				id: `ws:${w.id}`,
 				group: 'Workspaces',
 				title: `Go to ${w.title}`,
-				subtitle: w.live ? `Alt+${i + 1}` : 'Planned',
+				subtitle: i < 9 ? `Alt+${i + 1}` : w.summary,
 				keywords: w.summary,
 				icon: w.id,
 				run: () => app.go(w.id)
@@ -173,17 +173,12 @@
 				id: `ds:${ds.id}`,
 				group: 'Datasets',
 				title: ds.title,
-				subtitle: ds.kind === 'random_run' ? 'Random run, opens in Analyze' : 'Modal model, opens in Modal',
+				subtitle: `${ds.kind.replace('_', ' ')}, opens in ${workspaceInfo(app.analyze.moduleFor(ds) ?? 'signals').title}`,
 				keywords: `${ds.id} ${ds.description ?? ''}`,
 				icon: 'dataset',
 				run: () => {
-					if (ds.kind === 'random_run') {
-						app.go('analyze');
-						void app.analyze.selectDataset(ds.id);
-					} else {
-						app.go('modal');
-						void app.modal.select(ds.id);
-					}
+					app.go(app.analyze.moduleFor(ds) ?? 'signals');
+					void app.analyze.selectDataset(ds.id);
 				}
 			});
 		}
@@ -193,13 +188,7 @@
 	async function openTool(opId: string) {
 		const op = app.catalog?.operations.find((o) => o.id === opId);
 		if (!op) return;
-		if (op.workspace === 'modal' || op.accepts === 'modal_model') {
-			app.go('modal');
-			const first = app.modal.datasets[0];
-			if (!app.modal.datasetId && first) await app.modal.select(first.id);
-			return;
-		}
-		app.go(op.workspace === 'analyze' ? 'analyze' : op.workspace);
+		app.go(op.workspace);
 		if (app.analyze.opened?.kind !== op.accepts) {
 			const ds = app.catalog?.datasets.find((d) => d.kind === op.accepts);
 			if (ds) await app.analyze.selectDataset(ds.id);

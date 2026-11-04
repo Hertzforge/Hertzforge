@@ -332,19 +332,19 @@ def waterfall(run: RandomRun, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='random.psd_vs_spec', title='PSD Against Specification',
-        workspace='analyze', accepts='random_run',
+        workspace='random', accepts='random_run',
         summary='A channel\'s PSD against its specification and limits, with '
                 'its rms, its rms error and the share of lines in tolerance.',
         params=(CHANNEL, TOLERANCE), outputs=('spectrum', 'reading'),
         run=psd_vs_spec),
     Operation(
         id='random.error_db', title='Error Against Specification',
-        workspace='analyze', accepts='random_run',
+        workspace='random', accepts='random_run',
         summary='A channel\'s departure from its specification in dB, line '
                 'by line, with its limits about zero.',
         params=(CHANNEL, TOLERANCE), outputs=('spectrum',), run=error_db),
     Operation(
-        id='random.waterfall', title='Waterfall', workspace='analyze',
+        id='random.waterfall', title='Waterfall', workspace='random',
         accepts='random_run',
         summary='Every record of the run\'s PSDs, time histories or '
                 'coherence at its own depth, colored by level.',

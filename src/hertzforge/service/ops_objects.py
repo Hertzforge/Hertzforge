@@ -52,7 +52,7 @@ def merge(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.merge', title='Merge into One', workspace='analyze', accepts='project',
+        id='project.merge', title='Merge into One', workspace='signals', everywhere=True, accepts='project',
         summary='Two or more objects of one type made into one, in place of its parts: '
                 'geometries, shape sets, channel tables, or data on one abscissa. Name more '
                 'after the second, separated by semicolons.',

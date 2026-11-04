@@ -285,27 +285,27 @@ def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.set_averaging', title='Averaging', workspace='analyze',
+        id='project.set_averaging', title='Averaging', workspace='signals', everywhere=True,
         accepts='project',
         summary='The frames a time history\'s spectra are averaged from: their '
                 'length, overlap, window, number and start.',
         params=(HISTORY, FRAME, OVERLAP, WINDOW, FRAMES, START, DETREND, SHOWN),
         outputs=('spectrum', 'reading'), run=set_averaging, edits=True),
     Operation(
-        id='project.detect_averaging', title='Detect Averaging', workspace='analyze',
+        id='project.detect_averaging', title='Detect Averaging', workspace='signals', everywhere=True,
         accepts='project',
         summary='The steady stretch of a time history found, and as many frames '
                 'as fit in it, keeping its frame length, window and overlap.',
         params=(HISTORY, SHOWN), outputs=('spectrum', 'reading'), run=detect_averaging, edits=True),
     Operation(
-        id='project.set_filter', title='Filter', workspace='analyze',
+        id='project.set_filter', title='Filter', workspace='signals', everywhere=True,
         accepts='project',
         summary='The pass band Apply Filter filters a time history to, at zero '
                 'phase.',
         params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN), outputs=('spectrum', 'reading'),
         run=set_filter, edits=True),
     Operation(
-        id='project.set_truncation', title='Truncation', workspace='analyze',
+        id='project.set_truncation', title='Truncation', workspace='signals', everywhere=True,
         accepts='project',
         summary='The span of a time history Apply Truncation keeps.',
         params=(HISTORY, CUT_START, CUT_STOP, SHOWN), outputs=('spectrum', 'reading'),

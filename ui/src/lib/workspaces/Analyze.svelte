@@ -1,10 +1,14 @@
 <script lang="ts">
 	/**
-	 * Analyze: pick a dataset, or open your own project, pick a tool that accepts it, set its
-	 * parameters, Run. Each run adds a result card; spectrum panes that share a `link` share a cursor.
+	 * The study host every analysis module shares: the project tree, what the selection shows, the
+	 * Actions frame, the tool panel and the result cards. A module (`only`) differs in which
+	 * operations its Actions frame and tool list offer, its own and those offered everywhere, and in
+	 * which demonstration datasets it opens. Each run adds a result card; spectrum panes that share
+	 * a `link` share a cursor.
 	 */
 	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
 	import type { Workspace } from '$lib/protocol/types';
+	import { offeredIn } from '$lib/app/workspaces';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
@@ -25,22 +29,28 @@
 
 	interface Props {
 		app: AppState;
-		/**
-		 * Show only the project's tools of this workspace (the Model workspace's), with no dataset to
-		 * pick: the same runner, the same results.
-		 */
-		only?: Workspace;
+		/** The module shown: its operations, and those every module offers. */
+		only: Workspace;
 	}
 	let { app, only }: Props = $props();
 
 	const a = $derived(app.analyze);
-	const tools = $derived(only ? a.tools.filter((o) => o.workspace === only) : a.tools);
+	const tools = $derived(a.toolsFor(only));
+	const datasets = $derived(a.datasetsFor(only));
+	const inModule = (e: { workspace: Workspace; everywhere?: boolean }) => offeredIn(e, only);
 
-	// a workspace of its own works on the project, and on one of its own tools
+	// a module works on the project when one is open and nothing else is, and on one of its own tools
 	$effect(() => {
-		if (!only) return;
-		if (app.project.summary && !a.onProject) a.selectProject();
+		if (app.project.summary && !a.opened && !a.opening) a.selectProject();
 		if (a.onProject && tools.length && !tools.some((o) => o.id === a.opId)) a.selectOp(tools[0].id);
+	});
+
+	// the project's FRFs a fit can start on, and the coherences that can weight it
+	const objects = $derived(app.project.summary?.objects ?? []);
+	const coherences = $derived(objects.filter((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence').map((o) => o.name));
+	let weight = $state('');
+	$effect(() => {
+		if (weight && !coherences.includes(weight)) weight = '';
 	});
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
@@ -108,18 +118,18 @@
 <div class="analyze">
 	<aside class="side" aria-label="Dataset and tools">
 		<ProjectPanel {app} />
-		{#if !only}
-		<section class="block">
-			<h2 class="eyebrow">Dataset</h2>
-			{#if !app.catalog}
+		{#if !app.catalog}
+			<section class="block">
+				<h2 class="eyebrow">Dataset</h2>
 				<p class="muted">
 					{#if app.catalogError}{app.catalogError}{:else if app.analysis.isOpen}Loading the catalog.{:else}Waiting for the analysis service at <span class="mono">{app.analysis.url}</span>.{/if}
 				</p>
-			{:else if a.datasets.length === 0}
-				<p class="muted">The analysis service lists no random-run datasets.</p>
-			{:else}
+			</section>
+		{:else if datasets.length}
+			<section class="block">
+				<h2 class="eyebrow">Dataset</h2>
 				<div class="choices" role="radiogroup" aria-label="Dataset" data-testid="dataset-picker">
-					{#each a.datasets as ds (ds.id)}
+					{#each datasets as ds (ds.id)}
 						<button
 							class="choice"
 							data-testid="dataset-{ds.id}"
@@ -133,24 +143,24 @@
 						</button>
 					{/each}
 				</div>
-			{/if}
-			{#if a.opening}<p class="muted small">Opening.</p>{/if}
-			{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
-			{#if a.opened && !a.onProject}
-				<dl class="chips">
-					{#each summaryChips(a.opened.summary) as c (c.label)}
-						<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
-					{/each}
-					<div><dt>Channels</dt><dd class="num">{a.opened.channels.length}</dd></div>
-				</dl>
-			{/if}
-		</section>
+				{#if a.opening}<p class="muted small">Opening.</p>{/if}
+				{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
+				{#if a.opened && !a.onProject}
+					<dl class="chips">
+						{#each summaryChips(a.opened.summary) as c (c.label)}
+							<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
+						{/each}
+						<div><dt>Channels</dt><dd class="num">{a.opened.channels.length}</dd></div>
+					</dl>
+				{/if}
+			</section>
 		{/if}
 
 		{#if a.opened && a.onProject}
 			{@const picked = app.project.selection.objects}
 			{@const kinds = picked.map((n) => app.project.summary?.objects.find((o) => o.name === n)?.kind)}
 			{@const fitPair = picked.length === 2 && kinds.includes('frf') && kinds.includes('shape_set')}
+			{@const fitAlone = only === 'modal' && picked.length === 1 && kinds[0] === 'frf'}
 			<section class="block" data-testid="actions-frame">
 				<h2 class="eyebrow">
 					{#if picked.length}Actions <span class="for">for {picked.length === 1 ? picked[0] : `${picked.length} objects`}</span>{:else}Actions <span class="for">for the project</span>{/if}
@@ -158,16 +168,31 @@
 				{#if !a.actions}
 					<p class="muted small">Asking what the selection can take.</p>
 				{:else}
-					{@const readings = a.actions.readings.filter((e) => !only || e.workspace === only)}
-					{@const acts = a.actions.acts.filter((e) => !only || e.workspace === only)}
-					{@const whole = a.actions.project.filter((e) => !only || e.workspace === only)}
-					{#if fitPair}
-						<div class="tools" role="group" aria-label="Fit">
-							<button class="tool" data-testid="action-edit-fit" onclick={() => { app.go('modal'); void app.fit.start(picked[kinds.indexOf('frf')], picked[kinds.indexOf('shape_set')]); }}>
-								<Icon name="tool" size={15} />
-								<span class="ttitle">Edit Fit</span>
-								<span class="tout">modal</span>
-							</button>
+					{@const readings = a.actions.readings.filter(inModule)}
+					{@const acts = a.actions.acts.filter(inModule)}
+					{@const whole = a.actions.project.filter(inModule)}
+					{#if fitPair || fitAlone}
+						<div class="tools" role="group" aria-label="Fit" data-testid="fit-start">
+							{#if fitPair}
+								<button class="tool" data-testid="action-edit-fit" onclick={() => { app.go('modal'); void app.fit.start(picked[kinds.indexOf('frf')], picked[kinds.indexOf('shape_set')], weight || undefined); }}>
+									<Icon name="tool" size={15} />
+									<span class="ttitle">Edit Fit</span>
+									<span class="tout">modal</span>
+								</button>
+							{:else}
+								<button class="tool" data-testid="fit-begin" onclick={() => { void app.fit.start(picked[0], undefined, weight || undefined); }} disabled={app.fit.busy !== null}>
+									<Icon name="tool" size={15} />
+									<span class="ttitle">Fit Modes</span>
+									<span class="tout">by hand</span>
+								</button>
+							{/if}
+							{#if coherences.length}
+								<select class="field sm" aria-label="Weight the fit by" data-testid="fit-weight" bind:value={weight} title="Weight each response at each line by its coherence, γ²/(1-γ²)">
+									<option value="">No weighting</option>
+									{#each coherences as name (name)}<option value={name}>Weight by {name}</option>{/each}
+								</select>
+							{/if}
+							{#if app.fit.error && !app.fit.state}<p class="error" role="alert">{app.fit.error}</p>{/if}
 						</div>
 					{/if}
 					{#if readings.length}

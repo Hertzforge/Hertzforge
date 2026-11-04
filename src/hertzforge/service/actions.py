@@ -85,6 +85,15 @@ def _runs(indices: list[int]) -> str:
     return _runs(indices)
 
 
+def _entry(op: Any, fill: dict[str, str]) -> dict[str, Any]:
+    """One action as the shell lists it: the operation, its module, and
+    whether every module offers it."""
+    entry = {'id': op.id, 'title': op.title, 'workspace': op.workspace, 'fill': fill}
+    if op.everywhere:
+        entry['everywhere'] = True
+    return entry
+
+
 def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> dict[str, Any]:
     """What `objects` can take: `{'readings': [...], 'acts': [...]}`, each
     entry `{'id', 'title', 'fill'}`; with nothing selected, the acts that
@@ -102,8 +111,7 @@ def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> 
             continue
         if not chosen:
             if not _object_params(op):
-                whole.append({'id': op.id, 'title': op.title, 'workspace': op.workspace,
-                              'fill': {}})
+                whole.append(_entry(op, {}))
             continue
         fill = _fill(op, chosen)
         if fill is None:
@@ -112,6 +120,5 @@ def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> 
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             picked = next(r for r in picks if r)
             fill['records'] = _runs(picked)
-        entry = {'id': op.id, 'title': op.title, 'workspace': op.workspace, 'fill': fill}
-        (acts if _is_act(op) else readings).append(entry)
+        (acts if _is_act(op) else readings).append(_entry(op, fill))
     return {'readings': readings, 'acts': acts, 'project': whole}

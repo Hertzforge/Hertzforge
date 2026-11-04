@@ -303,7 +303,7 @@ The analysis service describes each operation; the shell builds the panel from t
 A feature that fits this pattern needs no TypeScript.
 
 ```
-{"id":"random.psd_vs_spec","title":"PSD Against Specification","workspace":"analyze",
+{"id":"random.psd_vs_spec","title":"PSD Against Specification","workspace":"random",
  "accepts":"random_run","summary":"one sentence",
  "params":[{"name":"tolerance_db","label":"Tolerance","type":"number","unit":"dB",
             "default":3,"min":0,"max":12,"step":0.5},
@@ -345,7 +345,15 @@ the operation again with the panel's values and the view's choice, and shows the
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
 the person picks one there.
 
-`workspace` is one of `acquire`, `analyze`, `modal`, `model`, `specify`, `simulate`, `report`.
+`workspace` is the module the operation belongs to, the rail entry that offers it: `acquire`,
+`simulate`, `signals` (recordings and what is read straight off them), `random`, `shock`, `sine`,
+`modal`, `geometry`, `model`, `specify` or `report`. Visual Dynamics put every analysis under one
+window and typed the project instead; Hertzforge splits the analysis by what is studied, so a sine
+test is not offered shock tools. The modules share one project, one tree and one way of showing a
+selection; they differ in which operations their Actions frame offers. An operation every study
+needs (Plot Records, View Table, Save As, the averaging, filter and truncation settings, a table's
+cell edit) says `"everywhere": true` and is offered in every analysis module, its `workspace`
+naming its home.
 `accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
 the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
 on the connection's own project: `op.run` names no `handle`, and is refused while no project is
@@ -449,7 +457,7 @@ display unit system (the server puts its name in), `si` for the stored values.
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
 every operation on the project whose object params the selected objects fill, each object on a param
 that takes its kind (or whose verb applies to it), every object used and every required object param
-filled. Each entry is `{"id","title","workspace","fill"}`, `fill` the params to set from the selection
+filled. Each entry is `{"id","title","workspace","everywhere"?,"fill"}`, `fill` the params to set from the selection
 (and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
 how the selection is read; `acts` change the project (the operations named for the project's journaled
 verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
