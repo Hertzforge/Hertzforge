@@ -1,9 +1,10 @@
-//! The multiple-output worked example of `docs/control-laws.md`, compiled and
-//! run natively through the SDK's trait, so the example in the guide is code
-//! that builds and works. (A law file adds one line, `export_mimo_law!(OpenLoop);`,
-//! at its crate root.)
+//! The smallest multiple-output law, a truncated pseudo-inverse with one
+//! parameter, compiled and run natively through the SDK's trait. (A law file adds
+//! one line, `export_mimo_law!(OpenLoop);`, at its crate root. The worked example a
+//! law author copies is the template, `template/mimo-open-loop`, tested in
+//! `template.rs`.)
 
-// The example as the guide shows it, from here to the end of `impl`.
+// The law, from here to the end of `impl`.
 use hertzforge_law_sdk::mimo::*;
 use hertzforge_law_sdk::{NumberSpec, ParamKind, ParamSpec, Params, RandomMimoLaw};
 

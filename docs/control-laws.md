@@ -176,90 +176,97 @@ unpacks what the interface carries into these types and packs the drive back, so
 run natively and as a law file. `MimoManifestBuilder` builds the manifest; parameters are declared
 exactly as a single-output law declares them.
 
-The worked example is the open-loop pseudo-inverse law: each loop it returns
-`G = H^+ G_ref H^+^H`, with the plant's weak directions dropped below a ratio the operator sets.
-With more controls than drives this is the least-squares drive; with fewer, the minimum-norm one.
+The worked example is a complete law crate to copy: `crates/hertzforge-law-sdk/template/mimo-open-loop`.
+It is the open-loop pseudo-inverse, the same method as the built-in `pinv_open`: each loop it
+returns `G = H^+ G_ref H^+^H` per line, with the operator's choice of truncated or Tikhonov
+regularization. With more controls than drives this is the least-squares drive; with fewer, the
+minimum-norm one. Copy the folder, rename the package in its `Cargo.toml`, and change
+`src/law.rs`. Its heart is one function:
 
 ```rust
-use hertzforge_law_sdk::mimo::*;
-use hertzforge_law_sdk::{
-    export_mimo_law, NumberSpec, ParamKind, ParamSpec, Params, RandomMimoLaw,
-};
-
-/// The truncated pseudo-inverse drive `H+ G_ref H+^H`, every loop.
-pub struct OpenLoop {
-    band: (usize, usize),
-    rcond: f64,
+fn drive(&self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, String> {
+    // H+ per line, and a report of the singular values it kept.
+    let (hp, report) = linalg::pinv(inputs.frf, self.regularization).map_err(|e| e.to_string())?;
+    // H+ G_ref H+^H per line: a congruence, so the drive is positive
+    // semi-definite whenever the reference is.
+    let mut drive = linalg::congruence(&hp, inputs.reference).map_err(|e| e.to_string())?;
+    // The controller refuses a drive that is not zero outside the band.
+    linalg::zero_out_of_band(&mut drive, self.band).map_err(|e| e.to_string())?;
+    let kept = report.kept.iter().map(|&k| k as f64).collect();
+    // ... the condition number per line, likewise ...
+    Ok(MimoLoopOutputs {
+        drive,
+        diagnostics: vec![DiagnosticValue {
+            key: "kept".into(),
+            data: DiagnosticData::PerLine(kept),
+        }],
+    })
 }
-
-impl RandomMimoLaw for OpenLoop {
-    fn describe() -> MimoManifest {
-        MimoManifestBuilder::new("open-loop example", "0.1.0")
-            .summary("The truncated pseudo-inverse drive, every loop.")
-            .param(ParamSpec {
-                key: "rcond".into(),
-                label: "Singular values kept above".into(),
-                help: "Keep singular values above this fraction of the largest.".into(),
-                kind: ParamKind::Number(NumberSpec {
-                    unit: String::new(),
-                    min: 0.0,
-                    max: 1.0,
-                    step: 1e-4,
-                    default: 1e-3,
-                }),
-            })
-            .shapes(&[
-                MimoShape::Square,
-                MimoShape::MoreControlsThanDrives,
-                MimoShape::FewerControlsThanDrives,
-            ])
-            .diagnostic(
-                "kept",
-                "Singular values kept",
-                "",
-                "Per line.",
-                DiagnosticKind::PerLine,
-            )
-            .build()
-    }
-
-    fn new(setup: MimoSetup, params: Params) -> Result<Self, String> {
-        Ok(OpenLoop {
-            band: setup.band,
-            rcond: params.number("rcond")?,
-        })
-    }
-
-    fn seed(&mut self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, String> {
-        self.iterate(inputs)
-    }
-
-    fn iterate(&mut self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, String> {
-        let reg = linalg::Regularization::Truncated { rcond: self.rcond };
-        let (hp, report) = linalg::pinv(inputs.frf, reg).map_err(|e| e.to_string())?;
-        let mut drive = linalg::congruence(&hp, inputs.reference).map_err(|e| e.to_string())?;
-        linalg::zero_out_of_band(&mut drive, self.band).map_err(|e| e.to_string())?;
-        let kept = report.kept.iter().map(|&k| k as f64).collect();
-        Ok(MimoLoopOutputs {
-            drive,
-            diagnostics: vec![DiagnosticValue {
-                key: "kept".into(),
-                data: DiagnosticData::PerLine(kept),
-            }],
-        })
-    }
-}
-
-export_mimo_law!(OpenLoop);
 ```
 
-It builds like any law, with `cargo build --target wasm32-wasip2 --release`. The same code, without
-the last line, is a test of the SDK (`crates/hertzforge-law-sdk/tests/mimo_example.rs`), which
-runs it natively and checks its drive.
+and `describe()` declares the rest: two parameters (the regularization and its amount), all three
+shapes, no optional inputs, and two per-line diagnostics. `seed()` and `iterate()` both return
+`drive()`: an open-loop law gives the same drive every loop for the same plant estimate. The crate
+root is two lines, `pub mod law;` and `hertzforge_law_sdk::export_mimo_law!(law::OpenLoop);`.
+
+In the template's folder, one command builds the law file:
+
+```
+cargo build --target wasm32-wasip2 --release
+```
+
+and it lands at `target/wasm32-wasip2/release/my_mimo_law.wasm`. The template's law is also
+compiled natively and tested as part of the SDK (`crates/hertzforge-law-sdk/tests/template.rs`),
+so the code a law author copies builds and returns the drive its documentation states.
 
 A drive built as a congruence of a positive semidefinite matrix, as here, or as the Gram matrix
 `B B^H` of some `B`, is positive semidefinite by construction; that is the easiest way for a law to
 meet the controller's rule.
+
+### Checking a MIMO law before hardware
+
+Any law runs on the simulator. Before an imported MIMO law may drive hardware it has to pass the
+check, and the pass is recorded against the exact file. The check runs the law on six simulated
+test articles, each a whole run (identification, the level schedule, then up to 20 loops at full
+level) inside the controller, under its own guards, against a reference the plant can reach:
+
+| Case | Plant | Asks for |
+|---|---|---|
+| modal 4 x 4 | Well-conditioned 4 x 4 modal plant | Converge: every control within +/- 1 dB |
+| modal 12 x 6 | Well-conditioned 12 x 6 modal plant (more controls than drives) | Converge, or settle |
+| ill-conditioned 12 x 6 | Two drives acting through nearly the same shape; fails the identification gate, which the check overrides | Survive |
+| rigid plate 12 x 6 | A plate on a soft suspension, in its rigid-body band | Converge, or settle |
+| measurement noise 4 x 4 | The 4 x 4 plant with noise 30 dB under the response | Converge |
+| level ladder 12 x 6 | The 12 x 6 plant on a ladder from -20 dB to full level | Converge, or settle |
+
+Every case first asks that every call is answered, in time (a quarter of the loop's acquisition),
+with a drive the checks accept, and that no protection trips. Then:
+
+- **Converge:** every control's in-band error within +/- 1 dB within 20 loops at full level.
+- **Settle:** converge, or hold a steady drive: no control's error moving more than 0.5 dB from
+  loop to loop over the last three loops, with every control within 6 dB. With more controls than
+  drives a reference is not exactly reachable in general, and the documented methods aim at
+  different compromises (least squares, the plant's leading directions, the structure's own
+  coherence), so the check asks for a steady drive near the reference rather than one compromise.
+- **Survive:** as settle, or the run ended by the controller's own judgement that the loop was
+  diverging or asking for more change than it allows, which the case reports. What the
+  ill-conditioned plant tests is that a nearly singular plant estimate never makes the law miss a
+  call: a NaN, an exception, or an answer too late.
+
+Each case reports the loops it took to converge, the trip if one ended the run, the calls not used
+and the drives refused, the drive-lines the controller repaired or held back, and the slowest call
+against its budget. The four built-in laws pass; the zero-drive law fails every case (the envelope
+ends each run), and a law whose drive is refused fails with that reason.
+
+In the application, import the file and choose "Check before hardware" (`laws.check` on the
+protocol). From a checkout of the repository the same check runs from the command line:
+
+```
+cargo run --release -p sds-control --example law_check -- path/to/law.wasm
+```
+
+It imports the file into the local data folder, prints each case, records the result, and says
+whether the file is cleared for hardware.
 
 ### The built-in MIMO laws
 
@@ -271,7 +278,7 @@ that hold every law file to its native law within `1e-12`, relative:
 | Id | Law | What it does |
 |---|---|---|
 | `pinv_closed` | Pseudo-inverse, closed loop (the default) | Starts from the pseudo-inverse drive, then each loop corrects a lower-triangular factor of the reference from the measured error, autospectra first, each drive held to a per-loop change (by default +3.5 dB and -6.0 dB). Parameters: regularization and its amount, convergence factor, the per-loop rise and fall, rank tolerance, error weighting |
-| `pinv_open` | Pseudo-inverse, open loop | The pseudo-inverse drive every loop, the example above with a choice of truncated or Tikhonov regularization and optional error weighting |
+| `pinv_open` | Pseudo-inverse, open loop | The pseudo-inverse drive every loop, the method of the template above, with optional error weighting as well |
 | `shape_svd` | Shape-constrained (SVD) | Holds the drive on each line to the `m` directions the plant responds to most, for much lower drive; `m` fixed, or set by a singular-value ratio; closed loop inside the constraint |
 | `buzz_match` | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent; then the default law's closed loop |
 
