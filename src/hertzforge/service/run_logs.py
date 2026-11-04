@@ -29,6 +29,7 @@ it would be shown says so.
 from __future__ import annotations
 
 import contextlib
+import os
 import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -67,7 +68,8 @@ from hertzforge.core.run_log_model import (
 from .protocol import bad_request, refused
 
 RUN_LOG_METHODS = ('runlog.new', 'runlog.open', 'runlog.close', 'runlog.reload',
-                   'runlog.state', 'runlog.form', 'runlog.preview', 'runlog.write')
+                   'runlog.state', 'runlog.form', 'runlog.preview', 'runlog.write',
+                   'runlog.export')
 
 #: what a prediction field reads when none is drawn
 NO_PREDICTION = 'no prediction in a project'
@@ -1176,6 +1178,33 @@ class Keeper:
                 raise refused(str(error)) from None
         return self.state()
 
+    def export(self, path: str, view: str, test: Any) -> dict[str, Any]:
+        """One view of the log written to `path` (`core.run_log_export`):
+        'text' (the log as it reads), 'csv' (every entry as stored,
+        corrections included) or 'machine' (the trips and machine events for
+        the lab's own log), the whole log ('all') or one test by number, as
+        VD's run-log dock exports; `{'path'}` written."""
+        from hertzforge.core.run_log import RunLogError
+        from hertzforge.core.run_log_export import VIEWS, export
+
+        if self.log is None:
+            raise refused('no run log is open to export')
+        if view not in VIEWS:
+            raise bad_request('runlog.export "view" is one of ' + ', '.join(VIEWS))
+        if not path.strip():
+            raise bad_request('runlog.export needs "path", where to write')
+        if test is None or test == 'all':
+            which: Any = 'all'
+        elif isinstance(test, int) and not isinstance(test, bool) and test > 0:
+            which = test
+        else:
+            raise bad_request('runlog.export "test" is a test number, or "all" for the whole log')
+        try:
+            written = export(self.log, os.path.expanduser(path.strip()), view, test=which)
+        except (RunLogError, OSError) as error:
+            raise refused(str(error)) from None
+        return {'path': written}
+
     def form(self, name: str, axis: str | None, target: Any) -> dict[str, Any]:
         """Form `name` as it opens now: `form_spec`, when it was taken, and
         what it computes from what it opens with."""
@@ -1269,6 +1298,9 @@ def request(keeper: Keeper, method: str, params: Any, project: Any = None,
         return keeper.state()
     if method == 'runlog.reload':
         return keeper.reload()
+    if method == 'runlog.export':
+        return keeper.export(_text(params, 'path', method), _text(params, 'view', method),
+                             params.get('test', 'all'))
     name = _text(params, 'form', method)
     if name not in FORMS:
         raise bad_request(f'{method} "form" is one of ' + ', '.join(FORMS))

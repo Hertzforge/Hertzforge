@@ -407,11 +407,11 @@ class Connection:
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
         keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
-                'report.export': ('name', 'path'),
+                'report.export': ('name', 'path', 'anyway'),
                 'report.editor': ('name', 'selected', 'theme', 'page'),
                 'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
                                    'kind', 'field', 'value'),
-                'report.print': ('name',), 'report.issue': ('name', 'step', 'path')}
+                'report.print': ('name',), 'report.issue': ('name', 'step', 'path', 'anyway')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -437,7 +437,7 @@ class Connection:
                 edited = await call(reports.operate, project, params, self.system)
                 self.project.modified = True
                 return {**edited, 'project': projects.summary(self.project)}
-            return {'path': await call(reports.export, project, params, self.system)}
+            return await call(reports.export, project, params, self.system)
 
     @property
     def system(self) -> Any:

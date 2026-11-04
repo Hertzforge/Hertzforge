@@ -73,6 +73,13 @@ export async function chooseSavePath(title: string): Promise<string | null> {
 	return dialog.save({ title: 'Save Project', defaultPath: `${title}.hforge`, filters: [{ name: 'Hertzforge project', extensions: ['hforge'] }] });
 }
 
+/** A path for a run log's export chosen in the native save dialog, or null when cancelled. */
+export async function chooseExportPath(title: string, defaultPath: string, filter: DialogFilter): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	return dialog.save({ title, defaultPath, filters: [filter] });
+}
+
 /** A path for a report's page chosen in the native save dialog, or null when cancelled. */
 export async function chooseReportPath(title: string): Promise<string | null> {
 	const dialog = tauri()?.dialog;

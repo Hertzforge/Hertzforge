@@ -78,7 +78,9 @@ export class RunLogState {
 	private following: number | null = null;
 	holdsShown = $state(false);
 	/** Asking for a log's path, to open or to start one, in a browser that has no file dialog. */
-	asking = $state<'open' | null>(null);
+	asking = $state<'open' | 'export' | null>(null);
+	/** Where the last export went. */
+	exported = $state<string | null>(null);
 	private timer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly analysis: ServiceClient) {}
@@ -147,6 +149,21 @@ export class RunLogState {
 
 	closeLog(): Promise<void> {
 		return this.swap('runlog.close', {});
+	}
+
+	/**
+	 * One view of the log written to `path`: the text, the CSV of every entry with its corrections,
+	 * or the machine log's CSV; the whole log, or the test the day list shows (`runlog.export`).
+	 */
+	async exportLog(path: string, view: 'text' | 'csv' | 'machine', whole: boolean): Promise<void> {
+		try {
+			const res = await this.call<{ path: string }>('runlog.export', { path, view, test: whole || this.test === null ? 'all' : this.test });
+			this.exported = res.path;
+			this.message = `Exported to ${res.path}`;
+			this.asking = null;
+		} catch (err) {
+			this.message = words(err);
+		}
 	}
 
 	reload(): Promise<void> {
