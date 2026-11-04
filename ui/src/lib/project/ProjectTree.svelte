@@ -105,6 +105,8 @@
 
 	/** The link brackets: each group's members as rows, and where those rows sit, measured after each render. */
 	const painted = $derived(spans(p.summary?.links, order));
+	/** How many gutter columns the brackets take; two at least, so the tree does not shift. */
+	const lanes = $derived(Math.max(2, ...painted.map((s) => s.column + 1)));
 	let treeBox = $state<HTMLDivElement | null>(null);
 	const rowBoxes = new Map<string, HTMLDivElement>();
 	let centers = $state<Record<string, number>>({});
@@ -175,13 +177,13 @@
 	{/each}
 {/snippet}
 
-<div class="tree" class:bracketed={painted.length > 0} role="tree" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox}>
+<div class="tree" class:bracketed={painted.length > 0} style:--lanes={lanes} role="tree" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox}>
 	{#if painted.length}
-		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
+		<svg class="gutter" width={6 + 5 * lanes} height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
 				{@const ys = span.rows.map((r) => centers[r]).filter((y) => y !== undefined)}
 				{#if ys.length >= 2}
-					{@const x = 3 + 3 * span.column}
+					{@const x = 3 + 5 * span.column}
 					{@const top = Math.min(...ys)}
 					{@const bottom = Math.max(...ys)}
 					<g stroke={span.color} stroke-width={span.bold ? 3 : 1.5} stroke-linecap="round" data-group={span.name || null}>
@@ -395,7 +397,7 @@
 
 	/* room for the brackets down the left edge, as VD's gutter has */
 	.tree.bracketed {
-		padding-left: 12px;
+		padding-left: calc(2px + 5px * var(--lanes, 2));
 	}
 
 	.gutter {
