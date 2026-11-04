@@ -191,6 +191,8 @@ export interface Shape3DView {
 	modes: Mode[];
 	/** Measured data to play back, with `modes` empty. */
 	motion?: Motion;
+	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
+	node_ids?: Uint32Array;
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
@@ -416,6 +418,15 @@ export interface Shown {
 	views: View[];
 	/** What was left out or could not be drawn, in a sentence; empty when nothing. */
 	note: string;
+	/** Which of the bar's choices this selection takes. */
+	offers?: { flat: boolean; complex: boolean; frequency: boolean };
+}
+
+/** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
+export interface ShowPrefs {
+	flat: boolean;
+	log_frequency: boolean;
+	component: 'magnitude' | 'real' | 'imag' | 'phase';
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */

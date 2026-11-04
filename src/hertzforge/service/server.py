@@ -353,7 +353,7 @@ class Connection:
             _only(params, ('objects', 'records'), method)
             return await call(projects.actions, self.project, params)
         if method == 'project.show':
-            _only(params, ('objects', 'records', 'part'), method)
+            _only(params, ('objects', 'records', 'part', 'prefs'), method)
             shown = await call(projects.show, self.project, params)
             display_units.convert(shown['views'], self.units)
             return shown

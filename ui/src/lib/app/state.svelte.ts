@@ -13,7 +13,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { Action, Actions, ProjectChildren, Shown,
+import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DatasetInfo,
 	DisplayEvent,
@@ -84,6 +84,8 @@ class AnalyzeState {
 	results = $state.raw<AnalyzeResult[]>([]);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
+	/** The bar's choices, remembered across launches as VD remembers 3D. */
+	prefs = $state<ShowPrefs>(readPrefs());
 	showError = $state<string | null>(null);
 	/** A reading run on the selection, drawn in place of what the selection shows until Back. */
 	reading = $state.raw<{ title: string; views: View[] } | null>(null);
@@ -228,7 +230,12 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<Shown>(
 				'project.show',
-				{ objects: selection.objects, records: selection.records, part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null },
+				{
+					objects: selection.objects,
+					records: selection.records,
+					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
+					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component }
+				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (seq !== this.showSeq) return;
@@ -281,6 +288,17 @@ class AnalyzeState {
 			}
 		}
 		if (changed) this.values = { ...this.values, [op.id]: values };
+	}
+
+	/** One of the bar's choices changed: kept, and the selection read again. */
+	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
+		this.prefs = { ...this.prefs, [key]: value };
+		try {
+			localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
+		} catch {
+			// kept for this session only
+		}
+		void this.showSelection();
 	}
 
 	/** Back from a reading to what the selection shows. */
@@ -1012,6 +1030,21 @@ export class UnitsState {
  * The connection's own project (`project.*`): what it holds, and the file work under way. Opening
  * or importing switches Analyze to it.
  */
+const PREFS_KEY = 'hertzforge.show.prefs';
+
+function readPrefs(): ShowPrefs {
+	const prefs: ShowPrefs = { flat: false, log_frequency: false, component: 'magnitude' };
+	try {
+		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
+		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
+		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
+		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
+	} catch {
+		// nothing kept, or no storage
+	}
+	return prefs;
+}
+
 export class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
 	/** What is being done, in words ("Importing modal.nc4"), or null. */

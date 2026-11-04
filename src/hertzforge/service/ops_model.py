@@ -46,7 +46,8 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     rows, triangles, lines = _mesh(geometry)
     return [v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[rows], [],
-                      triangles=triangles, lines=lines)]
+                      triangles=triangles, lines=lines,
+                      node_ids=np.asarray(geometry.node_id)[rows])]
 
 
 _family = group_cells.family

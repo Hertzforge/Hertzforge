@@ -162,6 +162,7 @@
         "lines": {"$ref": "#/$defs/arrayRef"},
         "triangles": {"$ref": "#/$defs/arrayRef"},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
+        "node_ids": {"$ref": "#/$defs/arrayRef"},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
@@ -430,7 +431,11 @@
       "properties": {
         "title": {"type": "string"},
         "views": {"$ref": "#/$defs/views"},
-        "note": {"type": "string"}
+        "note": {"type": "string"},
+        "offers": {
+          "type": "object", "required": ["flat", "complex", "frequency"], "additionalProperties": false,
+          "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"}}
+        }
       }
     },
     "action": {

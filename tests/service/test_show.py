@@ -33,8 +33,9 @@ def named(state, kind):
     return next(name for name, obj in state.project.items() if projects.kind_of(obj) == kind)
 
 
-def shown(state, *objects, records=None, part=None, validate=None):
-    out = projects.show(state, {'objects': list(objects), 'records': records or {}, 'part': part})
+def shown(state, *objects, records=None, part=None, validate=None, prefs=None):
+    out = projects.show(state, {'objects': list(objects), 'records': records or {}, 'part': part,
+                                **({'prefs': prefs} if prefs else {})})
     if validate:
         # the views carry arrays until they go on the wire; check them as the shell gets them
         wire_views(out['views'], validate)
@@ -225,3 +226,36 @@ def test_two_geometries_are_one_scene_and_a_report_says_where_it_opens(plate, va
         assert any(r['value'] == 'the Report workspace' for r in out['views'][0]['rows'])
     finally:
         project.remove('Report')
+
+
+def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
+    frf, history = named(plate, 'frf'), named(plate, 'time_history')
+    stage = shown(plate, frf, validate=validate)
+    assert stage['views'][0]['view'] == 'waterfall'
+    assert stage['offers'] == {'flat': True, 'complex': True, 'frequency': True}
+    flat = shown(plate, frf, prefs={'flat': True}, validate=validate)
+    (plot,) = flat['views']
+    assert plot['view'] == 'spectrum' and len(plot['series']) == plate.project[frf].num_records
+    assert plot['x']['scale'] != 'log'
+    decades = shown(plate, frf, prefs={'flat': True, 'log_frequency': True})
+    assert decades['views'][0]['x']['scale'] == 'log'
+    phase = shown(plate, frf, prefs={'flat': True, 'component': 'phase'})
+    assert 'phase' in phase['views'][0]['y']['label'].lower() or phase['views'][0]['y']['unit'] in ('°', 'deg', 'rad')
+    time = shown(plate, history, validate=validate)
+    assert time['offers'] == {'flat': True, 'complex': False, 'frequency': False}
+    assert shown(plate, named(plate, 'geometry'))['offers'] == {'flat': False, 'complex': False,
+                                                                  'frequency': False}
+    with pytest.raises(ProtocolError, match='"prefs"'):
+        projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
+    with pytest.raises(ProtocolError, match='component'):
+        projects.show(plate, {'objects': [frf], 'prefs': {'component': 'abs'}})
+
+
+def test_a_geometrys_views_carry_the_drawn_nodes_ids(plate, validate):
+    geometry, frf, history = named(plate, 'geometry'), named(plate, 'frf'), named(plate, 'time_history')
+    project = plate.project
+    for objects in ((geometry,), (geometry, frf), (geometry, history)):
+        (stage, *_rest) = shown(plate, *objects, validate=validate)['views']
+        ids = stage['node_ids']
+        assert ids.dtype == np.uint32 and len(ids) == len(stage['nodes'])
+        assert set(ids.tolist()) <= {int(n) for n in project[geometry].node_id}

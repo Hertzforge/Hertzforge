@@ -80,7 +80,14 @@ def _geometry_for(project: Any, name: str) -> str | None:
     return found[0] if found else None
 
 
-def _alone(project: Any, name: str, picks: list[int]) -> tuple[list[dict], list[str]]:
+#: how the window reads data, kept across selections as Visual Dynamics keeps
+#: its bar: the stage or the flat plot, decades on the frequency axis, and the
+#: component of complex data
+PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude'}
+
+
+def _alone(project: Any, name: str, picks: list[int],
+           prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]]:
     """One object as the window shows it; (views, notes)."""
     from hertzforge.core.channel_table import ChannelTable
     from hertzforge.core.geometry import Geometry
@@ -105,9 +112,17 @@ def _alone(project: Any, name: str, picks: list[int]) -> tuple[list[dict], list[
     if isinstance(obj, (ChannelTable, MatchedModes)):
         return _run(project, 'project.table', object=name), []
     if _is_data(obj):
+        prefs = {**PREFS, **(prefs or {})}
+        component = prefs['component']
         if picks:
-            return _run(project, 'project.plot', data=name, records=_runs(picks)), []
-        return _run(project, 'project.waterfall', data=name), []
+            return _run(project, 'project.plot', data=name, records=_runs(picks),
+                        component=component), []
+        if prefs['flat']:
+            # the flat plot draws every record, as VD's does when 3D is off
+            return _run(project, 'project.plot', data=name,
+                        records=_runs(list(range(int(obj.num_records)))),
+                        component=component), []
+        return _run(project, 'project.waterfall', data=name, component=component), []
     from hertzforge.core.report import Report
 
     if isinstance(obj, Report):
@@ -182,7 +197,8 @@ def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
                        for d, i in enumerate(played)], link='time')
     stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [],
-                      triangles=triangles, lines=lines, **extra)
+                      triangles=triangles, lines=lines,
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows], **extra)
     return [stage, plot], notes
 
 
@@ -222,7 +238,8 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
     stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows],
                       [v.mode(1, frequency, None, shape, label=label)],
-                      triangles=triangles, lines=lines, normalization='unscaled')
+                      triangles=triangles, lines=lines, normalization='unscaled',
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows])
     curves = _run(project, 'project.plot', data=data_name, records=_runs(records))
     return [stage, *curves], notes
 
@@ -232,11 +249,13 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
     model it was built from: one mesh of both, the second's nodes after
     the first's, each keeping its own units."""
     views = []
+    ids = []
     for name in (first, second):
         geometry = project[name]
         rows, triangles, lines = _mesh(geometry)
         views.append((np.asarray(geometry.node_xyz, dtype=float)[rows], triangles, lines,
                       geometry.units_defined))
+        ids.append(np.asarray(geometry.node_id)[rows])
     (nodes_a, tri_a, lines_a, defined_a), (nodes_b, tri_b, lines_b, defined_b) = views
     offset = len(nodes_a)
     triangles = [t for t in (tri_a, None if tri_b is None or not len(tri_b) else tri_b + offset)
@@ -247,7 +266,8 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
                      'm' if defined_a and defined_b else 'undefined',
                      np.vstack([nodes_a, nodes_b]), [],
                      triangles=np.vstack(triangles) if triangles else None,
-                     lines=np.vstack(lines) if lines else None)
+                     lines=np.vstack(lines) if lines else None,
+                     node_ids=np.concatenate(ids))
 
 
 def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
@@ -320,9 +340,33 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]
     return None
 
 
+def _offers(project: Any, objects: list[str]) -> dict[str, bool]:
+    """Which of the bar's choices the selection can take: the stage or the
+    flat plot for a data object, a component for complex frequency data,
+    decades for anything on a frequency axis."""
+    data = [project[name] for name in objects if _is_data(project[name])]
+    return {
+        'flat': bool(data),
+        'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
+                       and np.iscomplexobj(obj.ordinate) for obj in data),
+        'frequency': any(getattr(obj, 'abscissa_dim', '') == 'frequency' for obj in data),
+    }
+
+
+def _decades(views: list[dict]) -> None:
+    """Every frequency axis in log, as VD's Log f draws them for the session."""
+    for view in views:
+        for key in ('x', 'z'):
+            axis = view.get(key)
+            if isinstance(axis, dict) and axis.get('unit') == 'Hz':
+                axis['scale'] = 'log'
+
+
 def show(project: Any, objects: list[str], records: dict[str, list[int]],
-         part: dict[str, Any] | None) -> dict[str, Any]:
-    """What `objects` show together: `{'title', 'views', 'note'}`."""
+         part: dict[str, Any] | None, prefs: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What `objects` show together: `{'title', 'views', 'note', 'offers'}`,
+    read as `prefs` ask (`PREFS`)."""
+    prefs = {**PREFS, **(prefs or {})}
     notes: list[str] = []
     views: list[dict] = []
     try:
@@ -332,14 +376,17 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
                 views, notes = paired
         if not views:
             for name in objects:
-                more, said = _alone(project, name, records.get(name, []))
+                more, said = _alone(project, name, records.get(name, []), prefs)
                 views += more
                 notes += said
             if len(objects) > 1 and views:
                 notes.append('each object on its own')
     except ProtocolError as error:
         raise refused(str(error)) from None
+    if prefs['log_frequency']:
+        _decades(views)
     if part and part.get('kind') and len(objects) == 1:
         notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
     title = ' and '.join(objects) if len(objects) <= 3 else f'{objects[0]} and {len(objects) - 1} more'
-    return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n)}
+    return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n),
+            'offers': _offers(project, objects)}
