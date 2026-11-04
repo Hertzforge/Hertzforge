@@ -394,6 +394,29 @@ def _sine(project: Any, spec_name: str | None, levels_name: str | None,
     if level_set is not None and spec is not None and not levels:
         notes.append(f'{levels_name} holds no tone of {spec_name} ({", ".join(tones)})')
     where = f' at {", ".join(dofs)}' if dofs else ''
+    if not prefs.get('flat'):
+        # VD's default reading of a sweep: the stage, frequency across, time
+        # receding, amplitude up; the bar's Flat is the per-channel plot
+        from .sine_stage import sine_stage
+
+        if spec is not None and levels:
+            shown = [level for level in levels if level.tone == tone]
+            what = (f'{tone}{where}: {len(shown)} level{"s" * (len(shown) != 1)} against the '
+                    f'requirement of {spec_name}')
+        elif spec is not None:
+            what = f'{tone}{where}: the requirement of {spec_name}'
+        else:
+            what = f'{tone}{where}: the extracted level'
+        stage = sine_stage(spec, levels, tone, dofs, title=what)
+        if stage is None:
+            return [], notes + [f'nothing to draw for {tone}{where}']
+        if prefs.get('sine_reading') == 'bars' and spec is not None and levels:
+            try:
+                rows = sine_error_rows(spec, levels, SINE_ERROR_DB, dofs)
+            except ProtocolError as error:
+                return [stage], notes + [str(error)]
+            return [stage, v.reading(f'Level Error of {levels_name} against {spec_name}', rows)], notes
+        return [stage], notes
     if spec is not None and levels and prefs.get('sine_reading') == 'bars':
         try:
             rows = sine_error_rows(spec, levels, SINE_ERROR_DB, dofs)
@@ -934,6 +957,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
     level_sets = [project[name] for name in objects if isinstance(project[name], SineLevelSet)]
     sine = (len(objects) == len(specs) + len(level_sets) and len(specs) <= 1
             and len(level_sets) <= 1 and objects)
+    if sine:
+        data = [*specs, *level_sets]
     tones: list[str] = []
     if sine:
         tones = ([tone.name for tone in specs[0].tones] if specs

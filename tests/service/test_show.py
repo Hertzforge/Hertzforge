@@ -523,27 +523,41 @@ def swept():
 
 
 def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
-    """VD's sine readings: a specification alone draws the tone's requirement
-    with its limits, the levels alone the extracted level, and both
-    together the levels over the requirement, or the Level Error bars."""
+    """VD's sine readings: the stage by default (frequency across, time
+    receding, amplitude up, every point at its own time), the flat plot on
+    the bar's Flat: a specification alone draws the tone's requirement with
+    its limits, the levels alone the extracted level, and both together the
+    levels over the requirement, or the Level Error bars."""
     levels = named(swept, 'sine_level_set')
-    spec = shown(swept, 'Profile', validate=validate)
-    (plot,) = spec['views']
-    assert plot['view'] == 'spectrum' and [s['role'] for s in plot['series']] == ['reference']
-    assert spec['offers']['tones'] == ['Up'] and not spec['offers']['sine_readings']
-    assert spec['offers']['flat'] is False
-    alone = shown(swept, levels, validate=validate)
-    assert [s['role'] for s in alone['views'][0]['series']] == ['measured']
-    assert alone['views'][0]['title'].startswith('Up')
+    stage = shown(swept, 'Profile', validate=validate)
+    (path,) = stage['views']
+    assert path['view'] == 'waterfall' and path['y']['unit'] == 's'
+    assert len(path['y_values']) == len(path['x_values']) and path['roles'] == ['reference']
+    assert path['y_range'][0] >= 0.5, 'the tone starts at its start time'
+    assert stage['offers']['tones'] == ['Up'] and not stage['offers']['sine_readings']
+    assert stage['offers']['flat'] is True
     both = shown(swept, 'Profile', levels, validate=validate)
-    assert [s['role'] for s in both['views'][0]['series']] == ['measured', 'reference']
+    (path,) = both['views']
+    assert path['roles'] == ['reference', 'measured'], 'the level is a path of its own'
     assert both['offers']['sine_readings'] is True
     bars = shown(swept, levels, 'Profile', prefs={'sine_reading': 'bars'}, validate=validate)
+    assert [view['view'] for view in bars['views']] == ['waterfall', 'reading']
+
+    flat = {'flat': True}
+    spec = shown(swept, 'Profile', prefs=flat, validate=validate)
+    (plot,) = spec['views']
+    assert plot['view'] == 'spectrum' and [s['role'] for s in plot['series']] == ['reference']
+    alone = shown(swept, levels, prefs=flat, validate=validate)
+    assert [s['role'] for s in alone['views'][0]['series']] == ['measured']
+    assert alone['views'][0]['title'].startswith('Up')
+    both = shown(swept, 'Profile', levels, prefs=flat, validate=validate)
+    assert [s['role'] for s in both['views'][0]['series']] == ['measured', 'reference']
+    bars = shown(swept, levels, 'Profile', prefs={**flat, 'sine_reading': 'bars'}, validate=validate)
     (reading,) = bars['views']
     assert reading['view'] == 'reading'
     rows = {row['label']: row for row in reading['rows']}
     assert rows['101Z+']['unit'] == 'dB' and rows['101Z+']['status'] in ('pass', 'fail')
-    picked = shown(swept, 'Profile', records={'Profile': [0]}, validate=validate)
+    picked = shown(swept, 'Profile', records={'Profile': [0]}, prefs=flat, validate=validate)
     assert 'at 101Z+' in picked['views'][0]['title']
-    unknown = shown(swept, 'Profile', prefs={'tone': 'Down'}, validate=validate)
+    unknown = shown(swept, 'Profile', prefs={**flat, 'tone': 'Down'}, validate=validate)
     assert unknown['views'][0]['title'].startswith('Up'), 'a tone the set lacks falls to the first'

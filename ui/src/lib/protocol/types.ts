@@ -241,6 +241,11 @@ export interface WaterfallView {
 	title: string;
 	x: Axis;
 	z: Axis;
+	/** A stage of paths: every point at a depth of its own on this axis (the sine stage's time). */
+	y?: Axis;
+	/** f32 [P]: each point's depth on `y`. */
+	y_values?: Float32Array;
+	y_range?: [number, number];
 	/** One label per record, front to back. */
 	records: string[];
 	/** u32 [R + 1]: record r is points offsets[r] .. offsets[r + 1]. */
@@ -283,6 +288,8 @@ export interface StageZone {
 	kind: 'warning' | 'abort';
 	side: 'upper' | 'lower';
 	x: Float32Array;
+	/** On a stage of paths: the depth of each point, so the band follows the path. */
+	y?: Float32Array;
 	inner: Float32Array;
 	outer?: Float32Array;
 }
@@ -292,6 +299,9 @@ export interface StageExceed {
 	side: 'upper' | 'lower';
 	x0: Float32Array;
 	x1: Float32Array;
+	/** On a stage of paths: each rectangle's depths at its two edges. */
+	y0?: Float32Array;
+	y1?: Float32Array;
 	z: Float32Array;
 }
 

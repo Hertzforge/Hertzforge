@@ -245,7 +245,15 @@ A waterfall can also be one of Visual Dynamics' stages, with these optional fiel
 ```
 
 With `stations` the depth axis is the stations, not the records; `records` still names each
-curve for hovering. The paired stage overlays two densities at each channel they share, the
+curve for hovering.
+
+A waterfall may instead be a stage of paths: with `y` (an axis) and `y_values` (f32 [P], one a
+point) every point stands at a depth of its own on that axis, `y_range` its span, rather than at
+its record's station. This is Visual Dynamics' sine stage: frequency across, time receding,
+amplitude up, each tone's requirement and limits a path through time and each extracted level its
+own path placed by its clock. A `zones` entry then carries `y` beside `x` and an `exceed` entry
+`y0` and `y1` beside `x0` and `x1`, so the bands and the rectangles follow the path; the depth axis
+is ticked in `y`'s unit and each record is named at the start of its path. The paired stage overlays two densities at each channel they share, the
 banded stage draws a specification's bands with or without a measurement, and a scalogram is a
 surface with its cone of influence as two walls.
 

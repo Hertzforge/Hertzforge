@@ -27,7 +27,7 @@
 <div class="console" class:open={c.shown} data-testid="console">
 	<div class="tabbar">
 		<button class="tab" data-testid="console-tab" aria-expanded={c.shown} onclick={() => c.toggle()} title="The session as Python: every act as the line that replays it, to copy into a script">
-			Console{#if c.shown && c.lines.length}<span class="num"> {c.lines.length}</span>{/if}
+			Console{#if c.shown && c.lines.length}<span class="count num">{c.lines.length}</span>{/if}
 		</button>
 		{#if c.shown}
 			<button class="btn ghost sm" data-testid="console-copy" onclick={copy} disabled={!c.lines.length}>{copied ? 'Copied' : 'Copy'}</button>
@@ -62,6 +62,11 @@
 		border: 0;
 		border-bottom: 2px solid transparent;
 		cursor: pointer;
+	}
+
+	.count {
+		margin-left: 6px;
+		color: var(--text-3);
 	}
 
 	.tab:hover,
