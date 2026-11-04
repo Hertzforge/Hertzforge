@@ -66,6 +66,8 @@ REVIEWED: dict[str, str] = {
     'mkl': 'Intel Simplified Software License: redistributable unmodified, with the notice',
     'tbb': 'Intel Simplified Software License: redistributable unmodified, with the notice',
     'tcmlib': 'Intel Simplified Software License: redistributable unmodified, with the notice',
+    # the license text itself, as a package the Windows wheel of oneMKL depends on
+    'onemkl-license': 'Intel Simplified Software License: the license text, as a package',
     # pulled in by oneMKL's wheel and not shipped: the packaged builds thread
     # through TBB and leave the OpenMP runtime out (desktop/packaging/bundle_python.sh)
     'intel-openmp': 'Intel EULA for developer tools; not in the packaged builds',
