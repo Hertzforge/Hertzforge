@@ -5,6 +5,7 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
+import { pairsText, togglePick } from '$lib/viz/macBars';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -34,8 +35,7 @@ import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	SimStateResult,
 	TableEdit,
 	View,
-	Workspace
-} from '$lib/protocol/types';
+	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
@@ -90,6 +90,9 @@ class AnalyzeState {
 	line = $state<number | null>(null);
 	private lineTimer: ReturnType<typeof setTimeout> | null = null;
 	private lineFor = '';
+	/** The MAC pair the selection's stage animates, and every picked square; Add Matches keeps the picks. */
+	pair = $state<{ row: number; column: number } | null>(null);
+	picks = $state<{ row: number; column: number }[]>([]);
 	showError = $state<string | null>(null);
 	/** A reading run on the selection, drawn in place of what the selection shows until Back. */
 	reading = $state.raw<{ title: string; views: View[] } | null>(null);
@@ -228,6 +231,8 @@ class AnalyzeState {
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
+			this.pair = null;
+			this.picks = [];
 		}
 		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
@@ -242,7 +247,7 @@ class AnalyzeState {
 					objects: selection.objects,
 					records: selection.records,
 					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
-					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component, line: this.line }
+					prefs: { flat: this.prefs.flat, log_frequency: this.prefs.log_frequency, component: this.prefs.component, line: this.line, projection: this.prefs.projection }
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
@@ -318,7 +323,33 @@ class AnalyzeState {
 		} catch {
 			// kept for this session only
 		}
-		void this.showSelection();
+		// the shell's own choices redraw what is already here; the rest are the service's to answer
+		if (key !== 'bars' && key !== 'overlay') void this.showSelection();
+	}
+
+	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */
+	pickCell(cell: { row: number; column: number }, extend = false): void {
+		const next = togglePick(this.picks, cell, extend);
+		this.picks = next.picks;
+		this.pair = next.active;
+	}
+
+	/** The matrix the selection shows, when it compares two sets. */
+	get comparison(): MatrixView | null {
+		const m = this.shown?.views.find((v): v is MatrixView => v.view === 'matrix' && v.selects === 'shape3d' && v.rows.label !== v.columns.label);
+		return m ?? null;
+	}
+
+	/** The picked squares kept as matched modes of the two sets (`project.add_matches`); the marks follow. */
+	async addMatches(): Promise<void> {
+		const m = this.comparison;
+		if (!m || !this.picks.length) return;
+		const done = await this.app.project.act('Adding matches', 'project.add_matches', {
+			first: m.rows.label,
+			second: m.columns.label.replace(/, projected$/, ''),
+			pairs: pairsText(this.picks)
+		});
+		if (done) void this.showSelection();
 	}
 
 	/** Back from a reading to what the selection shows. */
@@ -1053,11 +1084,12 @@ export class UnitsState {
 const PREFS_KEY = 'hertzforge.show.prefs';
 
 function readPrefs(): ShowPrefs {
-	const prefs: ShowPrefs = { flat: false, log_frequency: false, component: 'magnitude' };
+	const prefs: ShowPrefs = { flat: false, log_frequency: false, component: 'magnitude', projection: false, bars: true, overlay: true };
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
+		for (const key of ['projection', 'bars', 'overlay'] as const) if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
 	} catch {
 		// nothing kept, or no storage
@@ -1273,7 +1305,7 @@ export class ProjectState {
 	}
 
 	/** An act on the groups, run as the operation it is; the project it answers with is applied. */
-	private async act(doing: string, op: string, params: Record<string, unknown>): Promise<boolean> {
+	async act(doing: string, op: string, params: Record<string, unknown>): Promise<boolean> {
 		this.busy = doing;
 		this.error = null;
 		try {

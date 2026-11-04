@@ -83,7 +83,8 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: how the window reads data, kept across selections as Visual Dynamics keeps
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
-PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None}
+PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
+         'projection': False}
 
 
 def _alone(project: Any, name: str, picks: list[int],
@@ -236,6 +237,63 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
     kinds = [response for response, _reference in quantities]
     wanted = max(set(kinds), key=kinds.count)
     return [i for i, kind in zip(picks, kinds, strict=True) if kind == wanted]
+
+
+def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
+    """The Matched Modes object between these two sets, (name, object), or
+    None (VD's `_matched_for`)."""
+    from hertzforge.core.matches import MatchedModes
+
+    return next(((name, obj) for name, obj in project.items()
+                 if isinstance(obj, MatchedModes) and obj.first == first
+                 and obj.second == second), None)
+
+
+def _mac(project: Any, first: str, second: str, geometry: str | None,
+         prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
+    """Two shape sets: their MAC, each axis ticked by its own frequencies,
+    and on a geometry the stage the matrix selects a pair on, the column
+    mode overlaid on the row mode (`ops_modal_run.paired`). Sets on two
+    geometries compare after projection onto the first's DOFs
+    (`Project.comparison_mac`), and `prefs['projection']` animates the
+    projection on the basis geometry instead of both sets by DOF name.
+    Pairs already committed to a Matched Modes object ride on the matrix
+    as `matched`, as VD's red checker."""
+    from .ops_modal_run import paired
+
+    rows, columns = project[first], project[second]
+    if not rows.num_shapes or not columns.num_shapes:
+        raise refused(f'{first if not rows.num_shapes else second} has no modes')
+    homes = project.geometry_for(first), project.geometry_for(second)
+    apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
+    notes: list[str] = []
+    if apart and prefs.get('projection'):
+        views = _run(project, 'project.projection_overlay', first=first, second=second,
+                     tolerance=2.0)
+    else:
+        try:
+            values = (rows.auto_mac() if first == second
+                      else project.comparison_mac(first, second))
+        except ValueError as error:
+            raise refused(str(error)) from None
+
+        def axis(name: str, shapes: Any) -> dict:
+            return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
+
+        title = (f'Auto-MAC of {first}' if first == second
+                 else f'MAC of {first} Against {second}')
+        matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
+                          (0.0, 1.0))
+        views = paired(None if geometry is None else project[geometry], matrix, rows,
+                       range(rows.num_shapes), columns, range(columns.num_shapes))
+        if apart:
+            notes.append(f'the MAC after projecting {second} onto {first}; both drawn on '
+                         f'{geometry} by DOF name, Projection animates the projection')
+    found = _matched(project, first, second)
+    if found is not None:
+        views[0]['matched'] = [[int(a), int(b)] for a, b in found[1].pairs]
+        notes.append(f'{len(found[1].pairs)} pairs matched in {found[0]}')
+    return views, notes
 
 
 def _drawn_rows(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -455,7 +513,8 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
                 return _pattern(project, geometry, other, picks, prefs)
         return None
     if isinstance(a, ShapeSet) and isinstance(b, ShapeSet):
-        return _run(project, 'project.mac', first=first, second=second), []
+        return _mac(project, first, second, _geometry_for(project, first),
+                    {**PREFS, **(prefs or {})})
     spec = of(Specification)
     if spec is not None and all(isinstance(o, Psd) for o in (a, b)):
         measured = second if spec == first else first
@@ -477,12 +536,32 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
     return _stacked(project, [first, second], {**PREFS, **(prefs or {})})
 
 
+def _compared(project: Any, objects: list[str], prefs: dict[str, Any]
+              ) -> tuple[list[dict], list[str]] | None:
+    """A geometry and two shape sets: their MAC and the pair it selects on
+    that geometry; None for any other three."""
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    geometries = [name for name in objects if isinstance(project[name], Geometry)]
+    sets = [name for name in objects if isinstance(project[name], ShapeSet)]
+    if len(geometries) != 1 or len(sets) != 2:
+        return None
+    return _mac(project, sets[0], sets[1], geometries[0], prefs)
+
+
 def _offers(project: Any, objects: list[str]) -> dict[str, bool]:
     """Which of the bar's choices the selection can take: the stage or the
     flat plot for a data object, a component for complex frequency data,
     decades for anything on a frequency axis."""
+    from hertzforge.core.shapes import ShapeSet
+
     data = [project[name] for name in objects if _is_data(project[name])]
+    sets = [name for name in objects if isinstance(project[name], ShapeSet)]
+    homes = [project.geometry_for(name) for name in sets]
     return {
+        'projection': (len(sets) == 2 and all(home is not None for home in homes)
+                       and homes[0][1] is not homes[1][1]),
         'flat': bool(data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
                        and np.iscomplexobj(obj.ordinate) for obj in data),
@@ -511,7 +590,11 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
-        elif len(objects) > 2:
+        elif len(objects) == 3:
+            compared = _compared(project, objects, prefs)
+            if compared is not None:
+                views, notes = compared
+        if len(objects) > 2 and not views:
             stacked = _stacked(project, objects, prefs)
             if stacked is not None:
                 views, notes = stacked

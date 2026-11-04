@@ -26,7 +26,7 @@ from .descriptors import Operation, Param
 #: operations that add to or change the project without being named for a
 #: journaled verb
 ADDS = frozenset((
-    'project.compute_psds', 'project.compute_frfs', 'project.fit_modes',
+    'project.add_matches', 'project.compute_psds', 'project.compute_frfs', 'project.fit_modes',
     'project.create_specification', 'project.edit_specification', 'project.set_breakpoint',
     'project.new_channel_table', 'project.new_geometry', 'project.add_channels',
     'project.add_node', 'project.add_coordinate_system', 'project.add_element',

@@ -24,7 +24,11 @@
 		onparams?: (patch: ParamValues) => void;
 		/** A matrix that selects a shape view: the cell chosen, and how to choose another. */
 		selected?: { row: number; column: number } | null;
-		onselect?: (cell: { row: number; column: number }) => void;
+		/** Every picked cell of such a matrix. */
+		picks?: { row: number; column: number }[];
+		onselect?: (cell: { row: number; column: number }, extend?: boolean) => void;
+		/** A matrix drawn as 3-D bars, VD's default for a MAC, instead of the flat grid. */
+		bars?: boolean;
 		/** Index into a shape3d view's overlays, drawn over its mode. */
 		overlay?: number | null;
 		/** The result the view belongs to: a playback `link` ties views within it only. */
@@ -37,11 +41,12 @@
 		onpick?: (patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, onselect, overlay = null, scope, onedit, onspan, onpick }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onspan, onpick }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
 	const waterfall = () => import('./WaterfallPane.svelte');
+	const macBars = () => import('./MacBarsPane.svelte');
 </script>
 
 {#if view.view === 'spectrum'}
@@ -68,8 +73,16 @@
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>
 	{/await}
+{:else if view.view === 'matrix' && bars}
+	{#await macBars()}
+		<div class="loading">Loading the 3-D view.</div>
+	{:then { default: MacBarsPane }}
+		<MacBarsPane {view} {showTitle} {selected} {picks} {onselect} />
+	{:catch err}
+		<p class="unknown">The 3-D view failed to load: {err.message}</p>
+	{/await}
 {:else if view.view === 'matrix'}
-	<MatrixPane {view} {showTitle} {selected} {onselect} />
+	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
 	<TablePane {view} {onedit} />
 {:else}

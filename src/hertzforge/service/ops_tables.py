@@ -25,6 +25,9 @@ SECOND = Param('second', 'Compared', 'enum', options_from='objects:shape_set')
 THRESHOLD = Param('threshold', 'Lowest MAC', 'number', default=0.7, min=0.0, max=1.0,
                   step=0.05)
 NAME = Param('name', 'Name', 'string', default='Matched Modes')
+#: the MAC squares to keep, row and column numbered from 1 as the grid
+#: shows them: '1,1; 2,3'
+PAIRS = Param('pairs', 'Pairs', 'string', default='')
 MATCHED = Param('matched', 'Matched modes', 'enum', options_from='objects:matched_modes')
 ROWS = Param('rows', 'Rows', 'string', default='')
 FORM = Param('form', 'Form', 'enum', default='shapes', options=(
@@ -74,6 +77,46 @@ def match_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     return [_table(project, name)]
 
 
+def add_matches(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_matches`: the picked MAC squares kept as matched
+    modes of this pair of sets, with the MAC as the comparison shows it
+    (`Project.comparison_mac`, after projection across geometries): the
+    Matched Modes object is created on first use and added to after
+    (`MatchedModes.add`, journaled), as VD's Add Matches does."""
+    from .projects import kind_of as projects_kind
+
+    first, second = params['first'], params['second']
+    if first == second:
+        raise refused('a set is matched against another set, not itself')
+    pairs = []
+    for piece in params['pairs'].replace(';', ' ').split():
+        row, _comma, column = piece.partition(',')
+        if not (row.strip().isdigit() and column.strip().isdigit()):
+            raise refused(f'"{piece}" is not a pair: row,column numbered from 1, such as 2,3')
+        pairs.append((int(row) - 1, int(column) - 1))
+    if not pairs:
+        raise refused('pick the MAC squares to keep: row,column pairs such as 1,1; 2,3')
+    try:
+        values = project.comparison_mac(first, second)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    for row, column in pairs:
+        if not (0 <= row < values.shape[0] and 0 <= column < values.shape[1]):
+            raise refused(f'the MAC is {values.shape[0]} by {values.shape[1]}: no square '
+                          f'{row + 1},{column + 1}')
+    macs = [float(values[row, column]) for row, column in pairs]
+    found = next(((name, obj) for name, obj in project.items()
+                  if projects_kind(obj) == 'matched_modes' and obj.first == first
+                  and obj.second == second), None)
+    if found is None:
+        name = project.match_modes(first, second, pairs=pairs, macs=macs)
+    else:
+        name, matched = found
+        matched.add([list(pair) for pair in pairs], macs)
+        project.record_call(matched, 'add', [[int(a), int(b)] for a, b in pairs], macs)
+    return [_table(project, name)]
+
+
 def delete_matches(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.delete_matches`: take rows out of a Matched Modes object
     (`MatchedModes.delete_matches`), numbered from 1 as its table shows
@@ -120,6 +163,12 @@ OPERATIONS = (
         summary='Pair each mode of the basis set with the compared set\'s mode of highest '
                 'MAC, at or above the lowest MAC given, and keep the pairs as an object.',
         params=(FIRST, SECOND, THRESHOLD, NAME), outputs=('table',), run=match_modes),
+    Operation(
+        id='project.add_matches', title='Add Matches', workspace='modal', accepts='project',
+        summary='Keep the picked MAC squares as matched modes of this pair of sets, with the '
+                'MAC as the comparison shows it; the Matched Modes object is created on first '
+                'use and added to after.',
+        params=(FIRST, SECOND, PAIRS), outputs=('table',), run=add_matches),
     Operation(
         id='project.delete_matches', title='Delete Matches', workspace='modal',
         accepts='project',

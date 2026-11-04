@@ -232,7 +232,7 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     frf, history = named(plate, 'frf'), named(plate, 'time_history')
     stage = shown(plate, frf, validate=validate)
     assert stage['views'][0]['view'] == 'waterfall'
-    assert stage['offers'] == {'flat': True, 'complex': True, 'frequency': True}
+    assert stage['offers'] == {'flat': True, 'complex': True, 'frequency': True, 'projection': False}
     flat = shown(plate, frf, prefs={'flat': True}, validate=validate)
     (plot,) = flat['views']
     assert plot['view'] == 'spectrum' and len(plot['series']) == plate.project[frf].num_records
@@ -242,9 +242,10 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     phase = shown(plate, frf, prefs={'flat': True, 'component': 'phase'})
     assert 'phase' in phase['views'][0]['y']['label'].lower() or phase['views'][0]['y']['unit'] in ('°', 'deg', 'rad')
     time = shown(plate, history, validate=validate)
-    assert time['offers'] == {'flat': True, 'complex': False, 'frequency': False}
+    assert time['offers'] == {'flat': True, 'complex': False, 'frequency': False,
+                              'projection': False}
     assert shown(plate, named(plate, 'geometry'))['offers'] == {'flat': False, 'complex': False,
-                                                                  'frequency': False}
+                                                                  'frequency': False, 'projection': False}
     with pytest.raises(ProtocolError, match='"prefs"'):
         projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
     with pytest.raises(ProtocolError, match='component'):
@@ -322,3 +323,50 @@ def test_the_stage_reads_at_the_line_the_cursor_asks_for(plate, validate):
     assert asked['views'][0]['modes'][0]['label'] == f'ODS at {at:.4g} Hz'
     with pytest.raises(ProtocolError, match='"line"'):
         projects.show(plate, {'objects': [frf, geometry], 'prefs': {'line': 'peak'}})
+
+
+def _two_sets(project):
+    geometry = project[next(n for n, o in project.items() if projects.kind_of(o) == 'geometry')]
+    dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    rng = np.random.default_rng(3)
+    project.add('Set A', ShapeSet(frequency=[10.0, 20.0, 30.0], damping=[0.01] * 3,
+                                  shape_matrix=rng.normal(size=(3, 6)), coordinate=dofs))
+    project.add('Set B', ShapeSet(frequency=[11.0, 21.0], damping=[0.01] * 2,
+                                  shape_matrix=rng.normal(size=(2, 6)), coordinate=dofs))
+
+
+def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
+    project = plate.project
+    geometry = named(plate, 'geometry')
+    _two_sets(project)
+    try:
+        out = shown(plate, 'Set A', 'Set B', validate=validate)
+        matrix, stage = out['views']
+        assert matrix['view'] == 'matrix' and matrix['selects'] == 'shape3d'
+        assert matrix['values'].shape == (3, 2) and 'matched' not in matrix
+        assert stage['view'] == 'shape3d' and len(stage['overlays']) == 2
+        assert out['offers']['projection'] is False, 'one geometry: nothing to project'
+        three = shown(plate, geometry, 'Set A', 'Set B', validate=validate)
+        assert [v['view'] for v in three['views']] == ['matrix', 'shape3d']
+        assert three['views'][0]['rows']['label'] == 'Set A'
+        # the matches kept so far ride on the matrix
+        from hertzforge.service.ops_tables import OPERATIONS
+        add = next(op for op in OPERATIONS if op.id == 'project.add_matches')
+        (table,) = add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': '1,1; 3,2'})
+        assert len(table['rows']) == 2
+        (table,) = add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': '2,2'})
+        assert len(table['rows']) == 3, 'added to the same object'
+        marked = shown(plate, 'Set A', 'Set B', validate=validate)
+        assert marked['views'][0]['matched'] == [[0, 0], [1, 1], [2, 1]], 'by row, as the object keeps them'
+        assert '3 pairs matched in' in marked['note']
+        with pytest.raises(ProtocolError, match='no square 4,1'):
+            add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': '4,1'})
+        with pytest.raises(ProtocolError, match='not a pair'):
+            add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': 'x'})
+        with pytest.raises(ProtocolError, match='"projection"'):
+            projects.show(plate, {'objects': ['Set A', 'Set B'], 'prefs': {'projection': 'yes'}})
+    finally:
+        for name in [n for n, o in project.items() if projects.kind_of(o) == 'matched_modes']:
+            project.remove(name)
+        project.remove('Set B')
+        project.remove('Set A')

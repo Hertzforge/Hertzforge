@@ -306,6 +306,8 @@ export interface MatrixView {
 	value_range: [number, number];
 	/** Clicking cell (r, c) shows the result's shape3d view's mode r with overlay c. */
 	selects?: 'shape3d';
+	/** [row, column] pairs already kept as matched modes, marked in red. */
+	matched?: [number, number][];
 }
 
 /** Rows of text under column headings, such as a mode table. */
@@ -423,7 +425,7 @@ export interface Shown {
 	/** What was left out or could not be drawn, in a sentence; empty when nothing. */
 	note: string;
 	/** Which of the bar's choices this selection takes. */
-	offers?: { flat: boolean; complex: boolean; frequency: boolean };
+	offers?: { flat: boolean; complex: boolean; frequency: boolean; projection: boolean };
 }
 
 /** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
@@ -433,6 +435,12 @@ export interface ShowPrefs {
 	component: 'magnitude' | 'real' | 'imag' | 'phase';
 	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
 	line?: number | null;
+	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
+	projection: boolean;
+	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
+	bars: boolean;
+	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
+	overlay: boolean;
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */
