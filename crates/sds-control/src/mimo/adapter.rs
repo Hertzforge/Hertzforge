@@ -53,7 +53,8 @@ use hertzforge_random::service::config::LevelSchedule;
 use hertzforge_random::service::ramp::DriveRamp;
 use hertzforge_random::LoopConfig;
 use hertzforge_random_laws::{
-    builtin_mimo_manifest, BuiltinMimo, LawCatalog, LawChoice, MimoLawFactory,
+    builtin_mimo_manifest, may_arm_on_hardware, BuiltinMimo, CatalogEntry, LawCatalog, LawChoice,
+    MimoLawFactory,
 };
 use hertzforge_sdm::law::Tolerances;
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
@@ -373,6 +374,50 @@ fn resolve_law(
         .map_err(|e| e.to_string())?;
     let file = cat.laws_dir().join(format!("{id}.wasm"));
     Ok((choice, Some(f), file.is_file().then_some(file)))
+}
+
+/// The hardware arming gate for control laws (design Q19): the simulator runs any
+/// law; a run on a hardware station arms only with a built-in law or a law file
+/// whose check on the simulator passed for that exact file.
+pub fn hardware_law_gate(
+    kind: &str,
+    law_id: &str,
+    entry: Option<&CatalogEntry>,
+) -> Result<(), MethodError> {
+    if kind == "sim" || BuiltinMimo::from_id(law_id).is_some() {
+        return Ok(());
+    }
+    let Some(entry) = entry else {
+        return Err(refused(
+            "law_not_checked",
+            format!(
+                "This run is on hardware and the law `{law_id}` is not in the law catalog; import \
+                 it, run its check on the simulator (laws.check), then start again."
+            ),
+        ));
+    };
+    may_arm_on_hardware(entry).map_err(|why| {
+        refused(
+            "law_not_checked",
+            format!(
+                "This run is on hardware and {why}. Run the law's check on the simulator \
+                 (laws.check) and start again, or choose a built-in law."
+            ),
+        )
+    })
+}
+
+/// The catalog's entry for `id`, opening the catalog if it is not open yet.
+fn catalog_entry(id: &str, opts: &AdapterOptions) -> Option<CatalogEntry> {
+    let cell = opts.catalog.as_ref()?;
+    let mut guard = match cell.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if guard.is_none() {
+        *guard = LawCatalog::open(&opts.data_root).ok();
+    }
+    guard.as_ref()?.entry(id)
 }
 
 /// A law as a run takes it: the choice, the factory for a law file (none for a
@@ -1636,6 +1681,13 @@ impl Actor {
             &self.opts,
         )
         .map_err(|e| refused("arm_refused", format!("The law could not be used: {e}.")))?;
+        // Nothing opens on hardware with a law that has not passed its check.
+        let entry = if ctx.kind == "sim" {
+            None
+        } else {
+            catalog_entry(&setup.law.id, &self.opts)
+        };
+        hardware_law_gate(ctx.kind, &setup.law.id, entry.as_ref())?;
         let (cfg, loop_cfg) = config_of(&setup, &reference, choice)
             .map_err(|e| refused("arm_refused", format!("The setup could not be used: {e}.")))?;
         let table = ctx.table.clone().ok_or_else(|| {
@@ -2531,6 +2583,40 @@ fn trip_json(t: &MimoTripRecord, setup: &MimoSetup) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A law file in the catalog's form, unchecked.
+    fn imported_entry() -> CatalogEntry {
+        let dir = std::env::temp_dir().join(format!("sds-gate-{}", std::process::id()));
+        let cat = LawCatalog::open(&dir).unwrap();
+        let mut e = cat.entry("pinv_closed").unwrap();
+        e.id = "f".repeat(64);
+        e.builtin = false;
+        e.identity.sha256 = "f".repeat(64);
+        e.check = hertzforge_random_laws::CheckStatus::Unchecked;
+        e
+    }
+
+    #[test]
+    fn hardware_arms_only_with_a_checked_law_and_the_simulator_with_any() {
+        let e = imported_entry();
+        let id = e.id.clone();
+        // The simulator runs any law.
+        assert!(hardware_law_gate("sim", &id, Some(&e)).is_ok());
+        assert!(hardware_law_gate("sim", &id, None).is_ok());
+        // Hardware refuses an unchecked law file, and one the catalog does not hold,
+        // saying what to do.
+        for entry in [Some(&e), None] {
+            let r = hardware_law_gate("ni", &id, entry).unwrap_err();
+            assert_eq!(r.reason, Some("law_not_checked"), "{r:?}");
+            assert!(r.message.contains("laws.check"), "{}", r.message);
+        }
+        // A failed or unreadable check is refused too.
+        let mut bad = e.clone();
+        bad.check = hertzforge_random_laws::CheckStatus::Unreadable("torn".into());
+        assert!(hardware_law_gate("ni", &id, Some(&bad)).is_err());
+        // A built-in law is cleared for hardware.
+        assert!(hardware_law_gate("ni", "pinv_closed", None).is_ok());
+    }
 
     #[test]
     fn a_sized_table_finds_its_standard_plant() {

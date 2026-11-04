@@ -249,7 +249,13 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	gate_failed: 'Identification Failed a Gate',
 	prediction_exceeded: 'A Drive Is Predicted Over Its Ceiling',
 	law_import_failed: 'The Law Was Not Imported',
-	catalog_unavailable: 'The Law Catalog Cannot Be Read'
+	catalog_unavailable: 'The Law Catalog Cannot Be Read',
+	law_unknown: 'The Law Is Not in the Catalog',
+	law_params_invalid: 'The Law Parameters Are Not Valid',
+	law_check_unsupported: 'This Law Cannot Be Checked Here',
+	law_check_running: 'A Law Check Is Already Running',
+	law_check_not_recorded: 'The Check Was Not Recorded',
+	law_not_checked: 'The Law Has Not Passed Its Check'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {

@@ -414,7 +414,13 @@ export type RefusalReason =
 	| 'gate_failed'
 	| 'prediction_exceeded'
 	| 'law_import_failed'
-	| 'catalog_unavailable';
+	| 'catalog_unavailable'
+	| 'law_unknown'
+	| 'law_params_invalid'
+	| 'law_check_unsupported'
+	| 'law_check_running'
+	| 'law_check_not_recorded'
+	| 'law_not_checked';
 
 export type ItemReason =
 	// channel table

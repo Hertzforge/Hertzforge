@@ -61,7 +61,7 @@ reports divergent lines), but never suppress one.
 | R10 | **State.** A law keeps its state in the resource the core constructs for each run. Nothing carries over between runs. |
 | R11 | **Parameters.** Only the declared kinds in section 5. The core validates every value against the declaration before the law is constructed. There are no free-form strings for a law to parse. |
 | R12 | **Identity and records.** A law file is identified by the SHA-256 of its bytes. Every run records the law's name, version, hash and parameter values, the law file itself, and each loop's law inputs and outputs. |
-| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. |
+| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). |
 | R14 | **Licensing.** A law file is a separate work loaded at run time; its author chooses its license. Laws shipped with Hertzforge are MIT. |
 | R15 | **Versioning.** While the interface is 0.x it may change. From 1.0, minor versions only add, and the controller loads the current and the previous major version. |
 
@@ -139,14 +139,15 @@ conventions in its comments too.
 - **One-sided.** The integral of a PSD over frequency is the signal's variance.
 - **Whole grid.** One call covers every line, in line order, so a law may work across lines (for
   example, smoothing its correction in frequency). Lines outside the band carry no drive.
-- **Complex values** are pairs of 64-bit floats (real, imaginary).
+- **Complex values** are a record of two f64, `re` and `im`.
 - **Rectangular stacks** (the FRF, the response-to-drive cross spectrum) are passed in full,
   row-major within a line, lines in order: element `(r, c)` of line `l` is
   `data[(l * rows + r) * cols + c]`. The FRF is response over drive, `n_c` by `n_d`.
 - **Hermitian stacks** (every SDM) are passed packed: the upper triangle of each line, row-major,
   lines in order. For `r <= c`, element `(r, c)` of line `l` is
-  `data[l * n (n + 1) / 2 + r (2 n - r + 1) / 2 + (c - r)]`; an element below the diagonal is the
-  conjugate of its mirror, and a diagonal value is real. This halves the largest copies.
+  `data[l * n * (n + 1) / 2 + r * (2 * n - r + 1) / 2 + (c - r)]`; an element below the diagonal
+  is the conjugate of its mirror, and a diagonal value is real (its imaginary part is zero). This
+  halves the largest copies.
 - **Units.** A control SDM in EU²/Hz, a drive SDM in V²/Hz, the FRF in EU/V.
 - **Full level.** Everything a law sees and returns is at full level (0 dB). The reference is the
   full-level specification, the measured response has been referred to its full-level equivalent
@@ -163,14 +164,16 @@ parameters, diagnostics) and three things more:
 
 | Field | Meaning |
 |---|---|
-| Shapes | Which shapes the law supports: square (`n_c` = `n_d`), more controls than drives, fewer controls than drives. At least one. The host refuses a run of another shape. |
-| Needs | The optional inputs the law reads (below). The core passes only these. |
-| Diagnostic layouts | For each declared diagnostic, exactly one: a scalar, one value per line, per control per line, or per drive per line. |
+| Shapes | Which shapes the law supports: square (`n_c` = `n_d`), more controls than drives (least squares), fewer controls than drives (minimum norm). At least one, each at most once. The controller refuses a test of another shape. |
+| Needs | The optional inputs the law reads (below), each at most once. The core passes only these; the others arrive as `none`. |
+| Diagnostic layouts | For each declared diagnostic, exactly one: a scalar (one number for the loop), one value per line (`N` values), one per control per line (`N * n_c` values, line after line), or one per drive per line (`N * n_d` values, line after line). |
 
 A per-channel parameter holds one value per control channel.
 
 **Calls.** The constructor takes the setup (`n_c`, `n_d`, `N`, line spacing, band, the reference
-SDM and the tolerance lines) and the parameter values. `seed(inputs)` is called once after system
+SDM and the tolerance lines) and the parameter values: every declared parameter, already checked
+against the manifest, in manifest order, with defaults for the values the operator left out. An
+error refuses the run with the reason given. `seed(inputs)` is called once after system
 identification with the identification response as the measured response, and returns the first
 drive. `iterate(inputs)` is called once per control loop.
 
@@ -179,12 +182,12 @@ drive. `iterate(inputs)` is called once per control loop.
 | Input | Shape per line | Meaning |
 |---|---|---|
 | Reference SDM | `n_c` x `n_c`, packed | The specification at full level |
-| Alarm and abort lines | `n_c`, four of them (alarm upper and lower, abort upper and lower) | Each control's tolerance lines as PSDs at full level, so a law can weight its effort by where the tolerance is tight; NaN where a control has none |
+| Alarm and abort lines | `n_c`, four of them (alarm upper and lower, abort upper and lower) | Each control's tolerance lines as PSDs at full level, so a law can weight its effort by where the tolerance is tight; NaN where a control has none (`N * n_c` values each, line after line) |
 | Measured response SDM | `n_c` x `n_c`, packed | The latest control estimate, referred to full level |
 | Degrees of freedom | scalar | Of the measured estimate |
 | FRF | `n_c` x `n_d` | The plant estimate the core is using, held or updated (question 2) |
-| Multiple coherence | `n_c` | Of each control channel on all drives |
-| Line spacing, band, loop index | scalars | As in section 6; the loop index is 0 at the seed |
+| Multiple coherence | `n_c` | Of each control channel on all drives, 0 to 1 (`N * n_c` values, line after line) |
+| Line spacing, band, loop index | scalars | As in section 6; the loop index is 0 at the seed, then 1, 2, ... for each iteration |
 
 **Optional inputs**, passed only when the manifest declares them (at full scale each is tens of
 megabytes a loop, so a law that does not read one never pays for it):
@@ -197,8 +200,10 @@ megabytes a loop, so a law that does not read one never pays for it):
 | Identification drive | `n_d` x `n_d`, packed | The drive SDM of system identification |
 | Identification noise | `n_c` x `n_c`, packed | The control SDM measured with the drives off |
 
-**Output.** The next full-level drive SDM, `n_d` x `n_d` per line, packed (V²/Hz), plus the
-declared diagnostics in their declared layouts.
+**Output.** The next full-level drive SDM, `n_d` x `n_d` per line, packed (V²/Hz): finite, Hermitian
+(real diagonal), positive semidefinite on every line, and zero on every line outside the band. Plus
+the declared diagnostics, each at most once, finite, in its declared layout; they are shown and
+recorded, never relied on for protection.
 
 **What the host checks.** Every output, before the core sees it; a failure is a failed call that
 names the rule:

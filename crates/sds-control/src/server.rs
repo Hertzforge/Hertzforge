@@ -67,7 +67,7 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_random.report, mimo_random.subscribe, mimo_random.identification.save, \
     mimo_random.identification.load, mimo_random.reference.build_breakpoints, \
     mimo_random.reference.build_rigid_body, mimo_random.reference.validate, \
-    mimo_random.reference.import, laws.list, laws.import, sim.profiles, sim.start, \
+    mimo_random.reference.import, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -703,6 +703,7 @@ impl Service {
             "mimo_random.identification.load" => self.mimo_identification(conn, params, true).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
+            "laws.check" => self.laws_check(conn, params).await,
             other => Err(MethodError::new(
                 ErrorCode::UnknownMethod,
                 format!("the control service has no method \"{other}\"; it serves {METHODS}"),

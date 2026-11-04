@@ -29,6 +29,10 @@
 //! ([`ChoiceError::WrongTestType`]). Check records and [`may_arm_on_hardware`]
 //! apply to both alike.
 //!
+//! The check of a multiple-output law ([`MimoCheckCase`], [`judge`],
+//! [`mimo_check_record`]) is the plant set and the rules; the controller runs
+//! the plants and records the result here.
+//!
 //! [`Manifest`]: hertzforge_law_host::Manifest
 //! [`LawFactory`]: hertzforge_random::LawFactory
 
@@ -41,6 +45,7 @@ mod catalog;
 mod check;
 mod choice;
 mod mimo;
+mod mimo_check;
 mod ratio;
 
 pub use adapter::{law_fault, WasmControlLaw, WasmLawFactory};
@@ -55,5 +60,9 @@ pub use hertzforge_mimo_laws::BuiltinMimo;
 pub use mimo::{
     builtin_mimo_manifest, default_mimo_choice, BuiltinMimoFactory, MimoLawFactory,
     WasmMimoLawFactory, DEFAULT_MIMO_LAW_ID,
+};
+pub use mimo_check::{
+    judge, mimo_check_record, MimoCaseMeasure, MimoCheckCase, Requirement, TripClass, CONVERGE_DB,
+    MAX_LOOPS_AT_FULL, MIMO_CHECK_VERSION, SETTLE_DB, SETTLE_LOOPS, SETTLE_MAX_DB,
 };
 pub use ratio::{NativeRatioFactory, NativeRatioLaw};

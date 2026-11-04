@@ -631,6 +631,62 @@ LAW_IMPORTED = {
     'needs': ['last_drive'],
 }
 
+_TRIP_CAP = ('The change cap held drive 4 back on 721 lines for 5 loops in a row: the control '
+             'law asked for more change than the core allows.')
+
+
+def _check_case(name, plant, requirement, outcome, conv, at_full, final, line, settle, *,
+                trip=None, capped=0, calls=3, ms=7.4, gate=True):
+    """One case of a `laws.check` report, its `detail` in the controller's words."""
+    gate_words = '' if gate else '; identification gate overridden for the check'
+    detail = (f'{outcome}; {calls} calls, slowest {ms} ms of 2125 ms; 0 drive-lines repaired, '
+              f'{capped} capped{gate_words}')
+    return {
+        'name': name, 'plant': plant, 'passed': True, 'detail': detail,
+        'loops_to_converge': conv, 'loops_at_full': at_full, 'final_error_db': final,
+        'worst_line_db': line, 'settle_db': settle, 'requirement': requirement, 'trip': trip,
+        'misses': 0, 'rejected': 0, 'repaired_lines': 0, 'capped_lines': capped, 'calls': calls,
+        'worst_call_ms': ms, 'budget_ms': 2125, 'gate_passed': gate,
+    }
+
+
+def _within(final, line):
+    return (f'within +/- 1 dB 1 loop after full level (worst control {final} dB, worst line '
+            f'{line} dB)')
+
+
+#: `laws.check` on the imported law: the report (the open-loop law file's check, its
+#: figures rounded; on the ill-conditioned plant the core's own judgement ended the run,
+#: which that case allows) and one progress event. The Rust golden test rebuilds both
+#: from the same figures through the controller's own serializers.
+LAW_CHECK_REPORT = {'passed': True, 'recorded': True, 'tool_version': 'mimo-check 1', 'cases': [
+    _check_case('modal 4 x 4', 'modal-4x4', 'converge', _within('0.46', '4.26'), 1, 1, 0.46,
+                4.26, None),
+    _check_case('modal 12 x 6', 'modal-12x6', 'settle',
+                'settled after 20 loops at full level (worst control 1.98 dB, last changes under '
+                '0.01 dB)', None, 20, 1.98, 11.06, 0.01, calls=22, ms=32.9),
+    _check_case('ill-conditioned 12 x 6', 'modal-12x6-ill', 'survive',
+                f'every call answered; the core ended the run by its own judgement ({_TRIP_CAP})',
+                None, 2, 6.32, 10.55, None, trip=_TRIP_CAP, capped=7210, calls=5, ms=32.3,
+                gate=False),
+    _check_case('rigid plate 12 x 6', 'rigid-plate-12x6', 'settle', _within('0.62', '2.79'), 1, 1,
+                0.62, 2.79, None, ms=5.7),
+    _check_case('measurement noise 4 x 4', 'modal-4x4', 'converge', _within('0.77', '5.29'), 1, 1,
+                0.77, 5.29, None),
+    _check_case('level ladder 12 x 6', 'modal-12x6', 'settle', _within('0.36', '4.02'), 1, 1,
+                0.36, 4.02, None, calls=6, ms=31.7),
+]}
+LAW_CHECK_EVENT = {'law_id': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+                   'index': 2, 'of': 6, 'case': 'ill-conditioned 12 x 6', 'state': 'done',
+                   'result': LAW_CHECK_REPORT['cases'][2]}
+LAW_CHECKED = {**LAW_IMPORTED, 'check': {
+    'status': 'passed', 'date': '2026-11-03T15:42:07Z', 'tool_version': 'mimo-check 1',
+    'cases': [{'name': c['name'], 'passed': c['passed'], 'detail': c['detail']}
+              for c in LAW_CHECK_REPORT['cases']],
+    'hardware': True,
+    'message': 'Checked against the simulated test articles and passed: cleared for hardware.',
+}}
+
 MIMO_TEXT_GOLDENS = {
     'request_mimo_random_setup': {
         'type': 'request', 'id': 31, 'method': 'mimo_random.setup',
@@ -740,6 +796,17 @@ MIMO_TEXT_GOLDENS = {
     },
     'response_laws_import': {
         'type': 'response', 'id': 36, 'result': {'law': LAW_IMPORTED},
+    },
+    'request_laws_check': {
+        'type': 'request', 'id': 39, 'method': 'laws.check',
+        'params': {'path': '/home/operator/laws/notch_pinv.wasm', 'params': {'gain': 0.5}},
+    },
+    'response_laws_check': {
+        'type': 'response', 'id': 39,
+        'result': {'law': LAW_CHECKED, 'report': LAW_CHECK_REPORT},
+    },
+    'event_laws_check': {
+        'type': 'event', 'topic': 'laws.check', 'seq': 412, 'data': LAW_CHECK_EVENT,
     },
     'request_mimo_random_identification_load': {
         'type': 'request', 'id': 38, 'method': 'mimo_random.identification.load',

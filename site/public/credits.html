@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hertzforge Credits</title>
+<meta name="description" content="Hertzforge credits: the authors, and the work Hertzforge stands on. Thanks and provenance, not authorship.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b1626'/%3E%3Cpath d='M4 16h4l3-8 4 16 4-12 3 6 2-2h4' fill='none' stroke='%23168fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  /* The same page as index.html: dark only, the logo's black as the background. */
+  :root { --bg: #000000; --fg: #e6ebf1; --muted: #8b97a7; --accent: #168fff; --accent-hi: #8ce4ff; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 56px; }
+  header { text-align: center; }
+  .logo {
+    display: block; width: 100%; max-width: 360px; height: auto; margin: 0 auto;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 2%, #000 98%, transparent),
+                        linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(to right, transparent, #000 2%, #000 98%, transparent),
+                linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+    mask-composite: intersect;
+  }
+  h1 {
+    margin: 0.4em 0 0; color: var(--fg); font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; font-size: 0.95rem;
+  }
+  h2 {
+    margin: 2.2em 0 0.6em; padding-bottom: 0.35em; font-size: 1.05rem; font-weight: 600;
+    letter-spacing: 0.02em; border-bottom: 1px solid rgba(22, 143, 255, 0.4);
+  }
+  p, li { color: var(--muted); font-size: 1rem; line-height: 1.55; }
+  p { margin: 0.6em 0; }
+  .lead { color: var(--fg); font-size: 1.1rem; text-align: center; margin-top: 1.2em; }
+  strong { color: var(--fg); font-weight: 600; }
+  ul.standing { list-style: none; padding: 0; margin: 0; }
+  ul.standing li {
+    margin: 0 0 0.7em; padding: 0.7em 0.95em;
+    border: 1px solid rgba(22, 143, 255, 0.25); border-radius: 10px;
+    background: rgba(22, 143, 255, 0.05);
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 0.45em 0.6em; border-bottom: 1px solid rgba(139, 151, 167, 0.25); }
+  th { color: var(--fg); font-weight: 600; }
+  td { color: var(--muted); }
+  .empty { font-style: italic; }
+  .back { text-align: center; margin-top: 2.6em; }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-hi); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a href="/"><img class="logo" src="hertzforge-logo.webp" width="1536" height="968" alt="Hertzforge"></a>
+    <h1>Credits</h1>
+  </header>
+
+  <p class="lead">Thanks, not authorship.</p>
+  <p>Nothing on this page confers a copyright interest, an authorship claim, or any right in
+    Hertzforge. It is a record of help gratefully received and of the work Hertzforge is built on:
+    advice, review, test data, papers, and the projects that showed what these tools should do.</p>
+  <p>Where the rights actually live is written down elsewhere, and the records are kept apart on
+    purpose:</p>
+  <table>
+    <thead><tr><th>Record</th><th>What it means</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>This page</td><td>Thanks and provenance, freely given, at the authors' discretion</td><td>Here, and in the repository's <code>ACKNOWLEDGMENTS.md</code></td></tr>
+      <tr><td>The terms of the work itself, and of every contribution to it</td><td>MIT</td><td><a href="https://github.com/Hertzforge/Hertzforge/blob/main/LICENSE">LICENSE</a></td></tr>
+      <tr><td>Third-party licenses</td><td>Attribution the dependencies require</td><td><a href="https://github.com/Hertzforge/Hertzforge/blob/main/THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a></td></tr>
+    </tbody>
+  </table>
+  <p>Being named here is not a claim on anything, authorship, ownership or otherwise, and it is
+    not an affiliation: no one named here endorses Hertzforge or is responsible for it.</p>
+
+  <h2>Authors</h2>
+  <p>Hertzforge is written by Brandon Zwink and Kevin Cross, who hold the copyright in it.</p>
+
+  <h2>With Thanks To</h2>
+  <p class="empty">Nobody yet. This page was written before there was anyone on it, so that the
+    policy would be settled before the first case rather than decided about a particular person.</p>
+
+  <h2>Organizations</h2>
+  <p class="empty">Nothing yet.</p>
+
+  <h2>Standing On</h2>
+  <p>Not people, but worth naming: Hertzforge is written against a body of work it does not
+    include and could not replace. Papers are cited by author, title and venue. The control laws
+    and the reference tools of MIMO Random were written from these papers, and their code comments
+    cite them the same way.</p>
+  <ul class="standing">
+    <li><strong>Bendat and Piersol</strong>, <em>Random Data: Analysis and Measurement Procedures</em>. The spectral conventions follow it. Where the controller holds the complex conjugate of its cross-spectral definition, as the multiple-shaker control literature does, the documentation says so at every boundary.</li>
+    <li><strong>Visual Dynamics</strong>, Brandon Zwink's structural dynamics toolset, from which Hertzforge's analysis core comes. Its own acknowledgments carry over with it.</li>
+    <li>The <strong>UFF dataset 58</strong> convention, for a fifty-year-old format that still says what a channel is and what it measures.</li>
+    <li><strong>P. D. Welch</strong>, "The Use of Fast Fourier Transform for the Estimation of Power Spectra", IEEE Transactions on Audio and Electroacoustics, 1967: the averaged spectral estimates every loop is built on.</li>
+    <li><strong>D. O. Smallwood</strong>, the multiple-shaker random control papers: "Multiple Shaker Random Vibration Control: An Update", Proceedings of the IEST, 1999, the source of the default law's closed-loop correction of a factor of the reference and its per-loop limits; and "Random Vibration Testing of a Single Test Item with a Multiple Input Control System", Proceedings of the IES, 1982, where the lineage starts.</li>
+    <li><strong>D. O. Smallwood and T. L. Paez</strong>, "A Frequency Domain Method for the Generation of Partially Coherent Normal Stationary Time Domain Signals", Shock and Vibration, 1993: drive synthesis from a drive spectral density matrix.</li>
+    <li><strong>R. Schultz and P. Avitabile</strong>, "Shape-Constrained Input Estimation for Multi-Shaker Vibration Testing", IMAC proceedings, and "Shape-Constrained Input Estimation for Efficient Multi-shaker Vibration Testing", Experimental Techniques, 2020: the shape-constrained law.</li>
+    <li><strong>R. Schultz</strong>, "A Demonstration of Force Estimation and Regularization Methods for Multi-Shaker Testing", IMAC proceedings: the regularization choices and the condition-number limit of the identification gate.</li>
+    <li><strong>P. M. Daborn, C. Roberts, D. J. Ewins and P. R. Ind</strong>, "Next-Generation Random Vibration Tests", IMAC XXXII, 2014: the buzz-test method, matching the structure's own coherence and phase, as described by Schultz.</li>
+    <li><strong>N. Hunter, K. Cross and G. Nelson</strong>, "The Cross Spectrum in Multiple Input Multiple Response Vibration Testing", IMAC proceedings: which references a signal can have, entering one as autospectra, coherence and phase, and the eigenvalue clamp that repairs one that cannot be had.</li>
+    <li><strong>L. Jacobs, M. Ross, G. Tipton, G. Nelson, K. Cross, N. Hunter and J. Harvie</strong>, "6-DOF Shaker Test Input Derivation from Field Test" and "Experimental Execution of 6DOF Tests Derived from Field Tests", IMAC XXXV, 2017: six degree-of-freedom references from field data.</li>
+    <li><strong>J. Paripovic and R. L. Mayes</strong>, "Reproducing a Component Field Environment on a Six Degree-of-Freedom Shaker", IMAC proceedings: six degree-of-freedom control in practice, identification with uncorrelated inputs, and the conditioning a working test can tolerate.</li>
+    <li><strong>N. J. Higham</strong>, "Computing a Nearest Symmetric Positive Semidefinite Matrix", Linear Algebra and its Applications, 1988: the nearest realizable matrix, the mathematics under the reference repair.</li>
+    <li><strong>Rattlesnake</strong>, the open-source MIMO vibration controller by Sandia National Laboratories (its packaging names Daniel P. Rohe as author), for showing what an open MIMO controller should do. Credited as a source, not an affiliation. Nothing of its code is in Hertzforge: Rattlesnake is GPL-3.0 and Hertzforge is an MIT project, so its code could not have been taken. Its features, workflow and file layouts were read from its public documentation only, and the methods were written here from the published literature listed above.</li>
+    <li><strong>sdynpy</strong>, for showing what a structural dynamics toolset in Python should do. Hertzforge reads its data files; nothing of its code is in Hertzforge, since it is GPL-3.0 and its code could not have been taken into an MIT project.</li>
+  </ul>
+
+  <p class="back"><a href="/">Hertzforge</a></p>
+</main>
+</body>
+</html>

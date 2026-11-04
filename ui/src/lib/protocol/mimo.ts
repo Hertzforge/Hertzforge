@@ -380,6 +380,57 @@ export interface LawsImportResult {
 	law: LawEntry;
 }
 
+/** What a law check asks of a case (PROTOCOL.md, "Control Laws", `laws.check`). */
+export type LawCheckRequirement = 'converge' | 'settle' | 'survive';
+
+export interface LawsCheckParams {
+	/** A catalog id; give this or `path`, not both. */
+	id?: string;
+	/** A law file's full path on the computer that runs the test; it is imported first. */
+	path?: string;
+	/** Parameter values by key; the law's defaults fill the rest. */
+	params?: Record<string, unknown> | null;
+}
+
+/** One simulated test article's result. */
+export interface LawCheckCase {
+	name: string;
+	plant: string;
+	requirement: LawCheckRequirement;
+	passed: boolean;
+	detail: string;
+	loops_to_converge: number | null;
+	loops_at_full: number;
+	final_error_db: number | null;
+	worst_line_db: number | null;
+	settle_db: number | null;
+	trip: string | null;
+	misses: number;
+	rejected: number;
+	repaired_lines: number;
+	capped_lines: number;
+	calls: number;
+	worst_call_ms: number | null;
+	budget_ms: number | null;
+	gate_passed: boolean;
+}
+
+export interface LawsCheckResult {
+	/** The law's entry after the check: a law file's `check` now holds the record. */
+	law: LawEntry;
+	report: { passed: boolean; recorded: boolean; tool_version: string; cases: LawCheckCase[] };
+}
+
+/** A `laws.check` event: one as each case starts (`result` null) and one as it ends. */
+export interface LawsCheckEvent {
+	law_id: string;
+	index: number;
+	of: number;
+	case: string;
+	state: 'running' | 'done';
+	result: LawCheckCase | null;
+}
+
 // --- the display (PROTOCOL.md, "MIMO Random Display") ---------------------------------------
 
 /** What a MIMO plot can show. */

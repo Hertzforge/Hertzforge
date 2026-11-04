@@ -337,7 +337,8 @@
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
-               "catalog_unavailable"]
+               "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
+               "law_check_running", "law_check_not_recorded", "law_not_checked"]
     },
     "itemReason": {
       "enum": ["duplicate_index", "no_channel_enabled", "zero_sensitivity", "non_positive_range",
@@ -1579,6 +1580,73 @@
     "lawsImportResult": {
       "type": "object", "required": ["law"], "additionalProperties": false,
       "properties": {"law": {"$ref": "#/$defs/lawEntry"}}
+    },
+    "lawsCheckParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "params": {"type": ["object", "null"]}
+      }
+    },
+    "lawCheckCase": {
+      "type": "object",
+      "required": ["name", "plant", "requirement", "passed", "detail", "loops_to_converge", "loops_at_full",
+                   "final_error_db", "worst_line_db", "settle_db", "trip", "misses", "rejected",
+                   "repaired_lines", "capped_lines", "calls", "worst_call_ms", "budget_ms", "gate_passed"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "plant": {"type": "string", "minLength": 1},
+        "requirement": {"enum": ["converge", "settle", "survive"]},
+        "passed": {"type": "boolean"},
+        "detail": {"type": "string", "minLength": 1},
+        "loops_to_converge": {"type": ["integer", "null"], "minimum": 0},
+        "loops_at_full": {"type": "integer", "minimum": 0},
+        "final_error_db": {"type": ["number", "null"]},
+        "worst_line_db": {"type": ["number", "null"]},
+        "settle_db": {"type": ["number", "null"]},
+        "trip": {"type": ["string", "null"]},
+        "misses": {"type": "integer", "minimum": 0},
+        "rejected": {"type": "integer", "minimum": 0},
+        "repaired_lines": {"type": "integer", "minimum": 0},
+        "capped_lines": {"type": "integer", "minimum": 0},
+        "calls": {"type": "integer", "minimum": 0},
+        "worst_call_ms": {"type": ["number", "null"]},
+        "budget_ms": {"type": ["number", "null"]},
+        "gate_passed": {"type": "boolean"}
+      }
+    },
+    "lawsCheckResult": {
+      "type": "object", "required": ["law", "report"], "additionalProperties": false,
+      "properties": {
+        "law": {"$ref": "#/$defs/lawEntry"},
+        "report": {
+          "type": "object", "required": ["passed", "recorded", "tool_version", "cases"],
+          "additionalProperties": false,
+          "properties": {
+            "passed": {"type": "boolean"},
+            "recorded": {"type": "boolean"},
+            "tool_version": {"type": "string", "minLength": 1},
+            "cases": {"type": "array", "items": {"$ref": "#/$defs/lawCheckCase"}}
+          }
+        }
+      }
+    },
+    "lawsCheckEvent": {
+      "type": "object", "required": ["law_id", "index", "of", "case", "state", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "law_id": {"type": "string", "minLength": 1},
+        "index": {"type": "integer", "minimum": 0},
+        "of": {"type": "integer", "minimum": 1},
+        "case": {"type": "string", "minLength": 1},
+        "state": {"enum": ["running", "done"]},
+        "result": {"oneOf": [{"$ref": "#/$defs/lawCheckCase"}, {"type": "null"}]}
+      },
+      "if": {"properties": {"state": {"const": "done"}}},
+      "then": {"properties": {"result": {"type": "object"}}},
+      "else": {"properties": {"result": {"type": "null"}}}
     },
     "mimoGrid": {
       "type": "object", "required": ["fs_hz", "n_pts"], "additionalProperties": false,
