@@ -180,6 +180,16 @@ def test_refusals_name_the_problem(tmp_path):
         reference_convert.from_mat(_v5(tmp_path, dict(variables, cpsd=bad)),
                                    tmp_path / 'd', df_hz=GEN.DF_HZ, lines=GEN.LINES)
 
+    # the same file converts when the repair is asked for, keeping the PSDs
+    reference_convert.from_mat(_v5(tmp_path, dict(variables, cpsd=bad)), tmp_path / 'r',
+                               df_hz=GEN.DF_HZ, lines=GEN.LINES, repair=True)
+    ref = reference_convert.read(tmp_path / 'r')
+    np.testing.assert_allclose(np.real(np.diagonal(ref.sdm[10])), psd, rtol=1e-12)
+    values = np.linalg.eigvalsh(ref.sdm[10])
+    assert values[0] >= -1e-12 * values[-1]
+    assert ref.provenance['repair']['lines_repaired'] == 17
+    assert ref.provenance['repair']['max_coherence_change'] > 0.1
+
     # 5 Hz lines on a 2.5 Hz grid leave zero lines inside the band
     with pytest.raises(ValueError, match='no level at 22.5 Hz'):
         reference_convert.from_mat(_v5(tmp_path), tmp_path / 'e', df_hz=2.5, lines=81)

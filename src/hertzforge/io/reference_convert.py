@@ -31,7 +31,9 @@ arrives at `+phi`.
 
 The controller validates the reference again when it reads it; this module
 refuses early what it can (shape, finiteness, Hermitian symmetry, positive
-semi-definiteness, the band) so the message comes with the conversion.
+semi-definiteness, the band) so the message comes with the conversion. A
+line that is not positive semi-definite can instead be repaired with
+`repair=True`, as the controller repairs one, and the repair is recorded.
 """
 
 from __future__ import annotations
@@ -63,6 +65,9 @@ HERMITIAN_REL_TOL = 1e-9
 #: a line whose smallest eigenvalue is below this fraction of its largest
 #: is not positive semi-definite
 PSD_CLAMP_REL = 1e-6
+#: the reject threshold recorded for a repair accepted at any depth (the
+#: largest double, as the controller records it)
+ANY_DEPTH = float(np.finfo(np.float64).max)
 
 #: the limit arrays of a specification file, and the tolerance each becomes
 LIMITS = {'warning_upper': 'alarm_upper', 'warning_lower': 'alarm_lower',
@@ -331,10 +336,34 @@ def _match_lines(freqs: np.ndarray, df_hz: float, lines: int, name: str) -> np.n
     return np.asarray(out, dtype=int)
 
 
+def _coherence(g: np.ndarray) -> np.ndarray:
+    d = np.real(np.diag(g))
+    scale = np.outer(d, d)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return np.where(scale > 0, np.abs(g) ** 2 / scale, 0.0)
+
+
+def _repair_line(sdm: np.ndarray, k: int, values: np.ndarray,
+                 vectors: np.ndarray) -> tuple[int, float, float]:
+    """Clamp line `k`'s negative eigenvalues to zero and rescale its diagonal
+    back to what it was. Returns the eigenvalues clamped, the smallest
+    relative eigenvalue before, and the largest change in squared
+    coherence."""
+    before = sdm[k].copy()
+    want = np.real(np.diag(before))
+    clamped = int(np.sum(values < -PSD_CLAMP_REL * values[-1]))
+    rebuilt = (vectors * np.maximum(values, 0.0)) @ vectors.conj().T
+    have = np.real(np.diag(rebuilt))
+    s = np.where(have > 0, want / np.where(have > 0, have, 1.0), 0.0)
+    sdm[k] = np.sqrt(np.outer(s, s)) * rebuilt
+    change = float(np.max(np.abs(_coherence(sdm[k]) - _coherence(before))))
+    return clamped, float(values[0] / values[-1]), change
+
+
 def build(cpsd: np.ndarray, frequencies: np.ndarray, *, df_hz: float, lines: int,
           labels: list[str], unit: str, limits: dict[str, np.ndarray] | None = None,
           conjugate_on_import: bool = True, method: str, source: str,
-          source_sha256: str | None = None,
+          source_sha256: str | None = None, repair: bool = False,
           created_unix_secs: int | None = None) -> NativeReference:
     """A reference on the controller's grid from a specification's arrays.
 
@@ -356,6 +385,12 @@ def build(cpsd: np.ndarray, frequencies: np.ndarray, *, df_hz: float, lines: int
         Conjugate every cross term (see the module notes).
     method, source, source_sha256 : str
         For the provenance.
+    repair : bool
+        Repair a line that is not positive semi-definite instead of refusing
+        it: its negative eigenvalues are set to zero and its diagonal is
+        rescaled to the specified PSDs (the controller's repair, at any
+        depth), and the change is recorded in the provenance. Off by default,
+        so a user sees the refusal before accepting a changed reference.
     created_unix_secs : int, optional
         The time to record; now when not given.
 
@@ -393,6 +428,7 @@ def build(cpsd: np.ndarray, frequencies: np.ndarray, *, df_hz: float, lines: int
     if not len(nonzero):
         raise ValueError(f'{source}: no line has a level')
     band = (int(nonzero[0]), int(nonzero[-1]) + 1)
+    repaired: list[tuple[int, float, float]] = []
     for k in range(*band):
         for i in range(n):
             if diag[k, i] <= 0:
@@ -400,13 +436,15 @@ def build(cpsd: np.ndarray, frequencies: np.ndarray, *, df_hz: float, lines: int
                     f'{source}: channel {labels[i]} has no level at {k * df_hz:g} Hz, inside '
                     'the band; every channel needs a positive PSD across the band (a file '
                     'coarser than the grid leaves the lines between its own at zero)')
-        values = np.linalg.eigvalsh(sdm[k])
+        values, vectors = np.linalg.eigh(sdm[k])
         if values[0] < -PSD_CLAMP_REL * values[-1]:
-            raise ValueError(
-                f'{source}: the matrix at {k * df_hz:g} Hz is not positive semi-definite '
-                f'(smallest eigenvalue {values[0]:.4g} against largest {values[-1]:.4g}); '
-                'correct the coherences and phases, or import it in the controller and '
-                'accept its repair')
+            if not repair:
+                raise ValueError(
+                    f'{source}: the matrix at {k * df_hz:g} Hz is not positive '
+                    f'semi-definite (smallest eigenvalue {values[0]:.4g} against largest '
+                    f'{values[-1]:.4g}); correct the coherences and phases, or convert with '
+                    'repair=True and review the coherence changes it records')
+            repaired.append(_repair_line(sdm, k, values, vectors))
     tolerances = {name: np.full((lines, n), np.nan) for name in TOLERANCES}
     for key, values in (limits or {}).items():
         values = np.asarray(values, dtype=np.float64)
@@ -434,7 +472,14 @@ def build(cpsd: np.ndarray, frequencies: np.ndarray, *, df_hz: float, lines: int
              f'{df_hz:g} Hz spacing; grid lines absent from the file are zero'),
             'rows and columns taken in the control channels\' order',
         ],
-        'repair': None,
+        'repair': None if not repaired else {
+            'lines_repaired': len(repaired),
+            'eigenvalues_clamped': int(sum(r[0] for r in repaired)),
+            'worst_relative_eigenvalue': float(min(r[1] for r in repaired)),
+            'max_coherence_change': float(max(r[2] for r in repaired)),
+            'clamp_rel': PSD_CLAMP_REL,
+            'reject_rel': ANY_DEPTH,
+        },
     }
     return NativeReference(sdm, float(df_hz), band, [str(x) for x in labels], unit,
                            tolerances, provenance)
@@ -485,7 +530,7 @@ def _names(values: Any) -> list[str]:
 
 def from_mat(path: str | os.PathLike, folder: str | os.PathLike, *, df_hz: float,
              lines: int, labels: list[str] | None = None, unit: str = 'g',
-             conjugate_on_import: bool = True,
+             conjugate_on_import: bool = True, repair: bool = False,
              created_unix_secs: int | None = None) -> str:
     """Convert a specification `.mat` file into a native reference folder.
 
@@ -528,14 +573,14 @@ def from_mat(path: str | os.PathLike, folder: str | os.PathLike, *, df_hz: float
     ref = build(cpsd, np.asarray(variables['f']).ravel(), df_hz=df_hz, lines=lines,
                 labels=labels, unit=unit, limits=limits,
                 conjugate_on_import=conjugate_on_import, method='specification_mat',
-                source=name, source_sha256=_file_hash(path),
+                source=name, source_sha256=_file_hash(path), repair=repair,
                 created_unix_secs=created_unix_secs)
     return write(ref, folder)
 
 
 def from_hforge(path: str | os.PathLike, folder: str | os.PathLike, *, df_hz: float,
                 lines: int, unit: str | None = None, conjugate_on_import: bool = True,
-                created_unix_secs: int | None = None) -> str:
+                repair: bool = False, created_unix_secs: int | None = None) -> str:
     """Convert a `.hforge` file holding a random `Specification` into a
     native reference folder. Its matrix is formed as the controller's
     specification writer forms it (pairs not held are zero), its values are
@@ -566,5 +611,6 @@ def from_hforge(path: str | os.PathLike, folder: str | os.PathLike, *, df_hz: fl
                 labels=[str(x) for x in arrays['dof']], unit=unit,
                 limits={k: arrays[k] for k in LIMITS if k in arrays},
                 conjugate_on_import=conjugate_on_import, method='hforge', source=name,
-                source_sha256=_file_hash(path), created_unix_secs=created_unix_secs)
+                source_sha256=_file_hash(path), repair=repair,
+                created_unix_secs=created_unix_secs)
     return write(ref, folder)
