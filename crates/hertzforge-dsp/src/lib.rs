@@ -45,8 +45,13 @@ pub mod eu {
 /// `spectrum` (and later `frf`/`cola`) build on.
 ///
 /// Complex numbers are `(re, im)` tuples. The forward transform uses the
-/// engineering sign convention `X[k] = sum_n x[n] * exp(-j*2*pi*k*n/N)`; the
-/// inverse divides by `N`. Input length MUST be a power of two; use
+/// POSITIVE exponent, `X[k] = sum_n x[n] * exp(+j*2*pi*k*n/N)`, which for real
+/// input is the conjugate of the textbook (negative-exponent) spectrum; the
+/// inverse uses the negative exponent and divides by `N`. Measured: a delta at
+/// `n = 1` gives bin 1 a positive imaginary part. The FRF phase is still
+/// correct because the cross-spectrum accumulator flips the sign back (see
+/// `frf::h_estimate_hv`'s phase-convention note). Do not change this sign on
+/// its own. Input length MUST be a power of two; use
 /// [`fft::next_pow2`] / [`fft::zero_pad_pow2`] to condition arbitrary-length
 /// signals first.
 pub mod fft {
@@ -95,7 +100,7 @@ pub mod fft {
     }
 
     /// In-place iterative Cooley-Tukey. `inverse == false` applies the forward
-    /// (negative-exponent) transform; `inverse == true` applies the positive
+    /// (positive-exponent) transform; `inverse == true` applies the negative
     /// exponent WITHOUT the 1/N scale (the scale is applied by [`ifft`]).
     fn transform_in_place(buf: &mut [Cplx], inverse: bool) {
         let n = buf.len();
@@ -104,13 +109,16 @@ pub mod fft {
             return;
         }
         bit_reverse(buf);
-        // sign of the exponent: forward = -1, inverse = +1.
+        // `sign` is -1 forward and +1 inverse, but `theta` below carries its own
+        // minus, so the forward exponent is POSITIVE (theta = +2*pi/len) and the
+        // inverse is its conjugate, as it must be. Changing either minus alone
+        // would negate every FRF phase; see `frf::h_estimate_hv`.
         let sign = if inverse { 1.0 } else { -1.0 };
         let mut len = 2usize;
         while len <= n {
             let half = len / 2;
-            // principal twiddle for this stage: exp(sign * -j * 2*pi/len)
-            // == cos(theta) + j*sin(theta) with theta = sign * -2*pi/len.
+            // principal twiddle for this stage: exp(j*theta) == cos(theta) +
+            // j*sin(theta) with theta = sign * -2*pi/len, i.e. +2*pi/len forward.
             let theta = sign * -std::f64::consts::TAU / len as f64;
             let (wlen_re, wlen_im) = (theta.cos(), theta.sin());
             let mut start = 0usize;
@@ -1122,18 +1130,35 @@ pub mod frf {
     ///
     /// # Phase convention (load-bearing - do not "fix" to match intuition)
     ///
-    /// This crate's forward FFT uses the negative exponent
-    /// `X[k] = sum_n x[n] e^{-j2pi kn/N}`. Under that sign, the cross-spectrum that
-    /// yields the correct z-domain / continuous FRF phase `angle(H(e^{jw}))` is
-    /// `Gxy = <X*conj(Y)>`, so `angle(Hv) = angle(Gxy)`. This is the CONJUGATE of
-    /// the `<conj(X)*Y>` form; the two differ only in the SIGN of the phase, and the
-    /// sign that makes a lagging response come out with negative (lagging) phase is
-    /// the `<X*conj(Y)>` one implemented below. Verified against the analytic biquad
-    /// plant AND a pure integer-sample-delay plant in the test suite
-    /// (`h_estimate_hv_phase_sign_pinned`). A future FFT-sign change or a "fix" to
-    /// `<conj(X)*Y>` would negate every FRF phase and drive the closed loop the wrong
-    /// way around resonances; the sign-pinning test exists to trip on exactly that.
-    /// The magnitude `sqrt(Gyy/Gxx)` is convention-independent.
+    /// This crate's forward FFT uses the POSITIVE exponent
+    /// `X[k] = sum_n x[n] e^{+j2pi kn/N}` (see [`fft`]; measured, a delta at `n = 1`
+    /// gives bin 1 a positive imaginary part). For real input that is the conjugate
+    /// of the textbook spectrum `X_std[k] = sum_n x[n] e^{-j2pi kn/N}`. The code
+    /// below accumulates `Gxy = <X*conj(Y)>` on this crate's spectra, which in
+    /// textbook terms is
+    ///
+    /// ```text
+    ///   <X*conj(Y)> = <conj(X_std)*Y_std>
+    /// ```
+    ///
+    /// and `<conj(X_std)*Y_std> / <|X_std|^2>` is exactly `H1 = Y/X`, so
+    /// `angle(Hv) = angle(Gxy)` is the z-domain / continuous FRF phase
+    /// `angle(H(e^{jw}))`: the two sign flips (positive-exponent FFT, `X*conj(Y)`)
+    /// cancel. Measured: with y leading x by 90 degrees, `angle(Gxy) = +90` degrees,
+    /// and a pure delay plant gives a negative (lagging) phase. Verified against the
+    /// analytic biquad plant AND a pure integer-sample-delay plant in the test suite
+    /// (`h_estimate_hv_phase_sign_pinned`). Changing the FFT sign alone, or "fixing"
+    /// the accumulator to `<conj(X)*Y>` alone, would negate every FRF phase and drive
+    /// the closed loop the wrong way around resonances; the sign-pinning test exists
+    /// to trip on exactly that. The magnitude `sqrt(Gyy/Gxx)` is
+    /// convention-independent.
+    ///
+    /// For anyone exchanging cross spectra with other tools: because of the FFT
+    /// sign, this crate's `Gxy` is the `conj(X)*Y` form in standard terms, the same
+    /// form the Python analysis side stores in its files. Rattlesnake and SDynPy
+    /// hold `X*conj(Y)` in standard terms, the conjugate of this. The control-law
+    /// spec (docs/control-law-spec.md, section 7) says which form the law boundary
+    /// should carry; that choice is open for maintainer review.
     ///
     /// # Magnitude bias at low SNR
     ///
@@ -1166,7 +1191,7 @@ pub mod frf {
 
         let mut gxx = vec![0.0f64; nout]; // <|X|^2>
         let mut gyy = vec![0.0f64; nout]; // <|Y|^2>
-        let mut gxy = vec![(0.0f64, 0.0f64); nout]; // <conj(X)*Y>
+        let mut gxy = vec![(0.0f64, 0.0f64); nout]; // <X*conj(Y)> on this crate's spectra
         let mut nseg = 0usize;
 
         let mut xbuf = vec![(0.0f64, 0.0f64); nfft];
@@ -1185,12 +1210,12 @@ pub mod frf {
                 let (yr, yi) = ybuf[k];
                 gxx[k] += xr * xr + xi * xi;
                 gyy[k] += yr * yr + yi * yi;
-                // Cross spectrum Gxy = <X * conj(Y)> so that angle(Gxy) equals the
-                // z-domain FRF phase angle(H(e^{jw})) under this crate's
-                // negative-exponent forward FFT (X[k] = sum x[n] e^{-j2pi kn/N}).
-                // With that FFT sign, a positive-frequency component of y that
-                // lags x shows up with the sign that <X*conj(Y)> (not <conj(X)*Y>)
-                // maps onto the continuous/z-domain H phase; verified against the
+                // Cross spectrum Gxy = <X * conj(Y)> on this crate's spectra, so
+                // that angle(Gxy) equals the z-domain FRF phase angle(H(e^{jw})).
+                // The forward FFT here has a POSITIVE exponent, so X and Y are the
+                // conjugates of the textbook spectra and <X*conj(Y)> here is the
+                // textbook <conj(X)*Y>, the H1 numerator; a component of y that
+                // lags x comes out with negative phase. Verified against the
                 // analytic biquad transfer function in tests. The magnitude is
                 // sqrt(Gyy/Gxx) regardless of this phase convention.
                 // X * conj(Y) = (xr + j xi)(yr - j yi):

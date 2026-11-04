@@ -4,9 +4,12 @@
 //!
 //! # Convention note (the divide the `frf` module told us to write here)
 //!
-//! This crate's forward FFT uses the negative exponent, and the cross-spectrum
-//! that yields the correct FRF phase under that sign is `Gxy = <X * conj(Y)>`
-//! with `angle(H) = angle(Gxy)` (see `frf::h_estimate_hv`'s pinned convention).
+//! This crate's forward FFT uses the POSITIVE exponent, so its spectra are the
+//! conjugates of the textbook ones, and the cross-spectrum that yields the
+//! correct FRF phase under that sign is `Gxy = <X * conj(Y)>` on those spectra,
+//! which is the textbook `<conj(X) * Y>`, with `angle(H) = angle(Gxy)` (see
+//! `frf::h_estimate_hv`'s pinned convention). Measured: y leading x by 90
+//! degrees gives `angle(Gxy) = +90` degrees, and H1 the same.
 //! The estimator divisions implemented here keep that convention:
 //!
 //! ```text
