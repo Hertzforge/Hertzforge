@@ -219,7 +219,7 @@
 										<td>{driveLabels[k] ?? `Drive ${k + 1}`}</td>
 										<td>{controlNames[p.accel_control?.[k] ?? -1] ?? '-'}</td>
 										<td class="num">{formatNumber(a, 3)} {unit.split('²')[0]} rms</td>
-										<td class="verdict {v.tone}" title={p.feasibility?.[k]?.message || undefined}>{v.word}{#if p.feasibility?.[k]?.message && v.tone !== 'pass'}<span class="aq-muted">: {p.feasibility[k].message}</span>{/if}</td>
+										<td class="verdict {v.tone}" title={p.feasibility?.[k]?.message || undefined}>{v.word}{#if p.feasibility?.[k]?.message && v.tone !== 'pass' && v.tone !== 'info'}<span class="aq-muted">: {p.feasibility[k].message}</span>{/if}</td>
 									</tr>
 								{/each}
 							</tbody>
