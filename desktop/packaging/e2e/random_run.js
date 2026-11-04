@@ -3,7 +3,7 @@
 // drives it, and every step reported to the app's log.
 //
 //   1. Both services connected, as the window opened.
-//   2. Analyze opens the plate random run and runs a tool on it; Modal opens the
+//   2. Random opens the plate random run and runs a tool on it; Modal opens the
 //      quadcopter model and lists its modes (the bundled Python, its test data and
 //      its cache folder).
 //   3. Acquire & Control: take control, the simulator, a channel table, a short
@@ -81,19 +81,21 @@
 		const remote = performance.getEntriesByType('resource').map((e) => e.name).filter((u) => !/^(tauri|http:\/\/(tauri|ipc)\.localhost|ipc|ws:\/\/127\.0\.0\.1|data|blob):/.test(u));
 		check('nothing loaded from the network', remote.length === 0, remote.join(', '));
 
-		// 2. Analyze and Modal, on the bundled Python and its test data.
-		await click('rail-analyze');
+		// 2. Random and Modal, on the bundled Python and its test data.
+		await click('rail-random');
 		await click('dataset-plate-random', 60000);
 		await until('the tools of the plate run', () => q('[data-testid^="tool-"]:not([data-testid="tool-list"])'), 120000);
 		const tool = q('[data-testid^="tool-"]:not([data-testid="tool-list"])');
 		tool.click();
 		await verb('run-op').catch(async () => click('run-op'));
 		await until('a result', () => document.querySelectorAll('[data-testid="result-card"]').length > 0, 120000);
-		check('Analyze: the plate random run opens and a tool runs on it', true, `${tool.textContent.trim()} -> ${q('[data-testid="result-card"]').getAttribute('data-op')}`);
+		check('Random: the plate random run opens and a tool runs on it', true, `${tool.textContent.trim()} -> ${q('[data-testid="result-card"]').getAttribute('data-op')}`);
 		await click('rail-modal');
 		await click('dataset-drone-fem', 60000);
-		await until('the modes of the quadcopter', () => q('[data-testid^="mode-row-"]'), 120000);
-		check('Modal: the quadcopter model solves and lists its modes', true, `${document.querySelectorAll('[data-testid^="mode-row-"]').length} modes`);
+		await click('tool-modal.modes', 120000);
+		await verb('run-op').catch(async () => click('run-op'));
+		await until('the modes of the quadcopter', () => document.querySelectorAll('[data-testid="result-card"][data-op="modal.modes"]').length > 0, 120000);
+		check('Modal: the quadcopter model solves and shows its modes', true, 'modal.modes result');
 
 		// 3. Acquire & Control: one Random run on the simulator, to completion.
 		await click('rail-acquire');

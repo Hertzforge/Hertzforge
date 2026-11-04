@@ -2,7 +2,8 @@
  * The brackets down the tree's left edge that join the objects of one object group, as Visual
  * Dynamics paints them (`gui/project_tree.py`): the Basis blue and bold, each other group a color
  * of its own from the curve palette (never the Basis blue), neighboring groups interleaved on two
- * columns so two brackets never run on top of each other, and a named group's name along its line.
+ * columns so they read apart, and a named group's name along its line. Brackets never nest: the
+ * tree lists a group's members together (`order.ts`), as VD's does.
  */
 
 import type { ProjectSummary } from '$lib/protocol/types';
@@ -17,7 +18,7 @@ export interface Span {
 	color: string;
 	bold: boolean;
 	name: string;
-	/** 0 or 1: which of the two gutter columns the bracket runs in. */
+	/** 0 or 1: which of the two gutter columns the bracket runs in; neighbors alternate. */
 	column: number;
 }
 

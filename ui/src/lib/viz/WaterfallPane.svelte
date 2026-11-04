@@ -130,6 +130,19 @@
 	});
 
 	const recordCount = $derived(view.records.length);
+	/** A stage of paths: every point at a depth of its own on the `y` axis (the sine stage's time). */
+	const pathed = $derived(!!view.y_values && !!view.y_range);
+	const yRange = $derived.by((): [number, number] => {
+		const [a, b] = view.y_range ?? [0, 1];
+		return a < b ? [a, b] : [a, a + 1];
+	});
+	const yTicks = $derived(pathed ? axisTicks(yRange, false).filter((t) => t >= yRange[0] && t <= yRange[1]) : []);
+	/** A point's depth on the stage: along its path, or at its record's station. */
+	function depthAt(point: number, record: number): number {
+		if (pathed && view.y_values) return Math.min(1, Math.max(0, (view.y_values[point] - yRange[0]) / (yRange[1] - yRange[0]))) * STAGE.y;
+		const station = view.depths ? view.depths[record] : record;
+		return stationCount > 1 ? (station / (stationCount - 1)) * STAGE.y : 0;
+	}
 	/** The depth axis: the stations when the view names them, else one a record. */
 	const stationCount = $derived(view.stations?.length ?? view.records.length);
 	const depthLabels = $derived(view.stations ?? view.records);
@@ -181,6 +194,7 @@
 		uXLog: { value: 0 },
 		uZLog: { value: 0 },
 		uDepth: { value: 0 },
+		uPath: { value: 0 },
 		uMap: { value: null as DataTexture | null },
 		uTones: { value: TONES.map(() => new Color()) }
 	};
@@ -202,6 +216,7 @@
 		#endif
 		in float ax;
 		in float az;
+		in float ay;
 		in float arec;
 		in float atone;
 		flat out float vTone;
@@ -212,6 +227,7 @@
 		uniform float uXLog;
 		uniform float uZLog;
 		uniform float uDepth;
+		uniform float uPath;
 		out float vLevel;
 		const vec3 S = vec3(${STAGE.x}, ${STAGE.y}, ${STAGE.z});
 		void main() {
@@ -219,7 +235,7 @@
 			float z = uZLog > 0.5 ? log2(az) * 0.30102999566 : az;
 			float tx = (x - uX.x) / (uX.y - uX.x);
 			float tz = clamp((z - uZ.x) / (uZ.y - uZ.x), 0.0, 1.0);
-			float depth = uDepth > 0.0 ? arec / uDepth : 0.0;
+			float depth = uPath > 0.5 ? ay : (uDepth > 0.0 ? arec / uDepth : 0.0);
 			vLevel = tz;
 			vTone = atone;
 			#ifdef PICKING
@@ -419,7 +435,7 @@
 
 	/** The bands, the exceedances and the walls, one translucent mesh for each kind, rebuilt on a scale change. */
 	function buildMarks() {
-		const map = stageMap(xRange, logX, zRange, logZ, stationCount);
+		const map = stageMap(xRange, logX, zRange, logZ, stationCount, pathed ? yRange : undefined);
 		const found = new Map<MarkKind, number[]>();
 		const into = (kind: MarkKind) => found.get(kind) ?? (found.set(kind, []), found.get(kind)!);
 		for (const z of view.zones ?? []) zoneTriangles(z, map, into(z.kind === 'warning' ? 'warning' : z.side === 'upper' ? 'over' : 'under'));
@@ -508,6 +524,14 @@
 		geometry.setAttribute('az', new BufferAttribute(view.z_values, 1));
 		records = recordOf(view.offsets, view.x_values.length);
 		geometry.setAttribute('arec', new BufferAttribute(stationOf(view.offsets, view.x_values.length, view.depths), 1));
+		// on a stage of paths each point carries its own depth, as a fraction of the y span
+		const along = new Float32Array(view.x_values.length);
+		if (pathed && view.y_values) {
+			const span = yRange[1] - yRange[0];
+			for (let i = 0; i < along.length; i++) along[i] = Math.min(1, Math.max(0, (view.y_values[i] - yRange[0]) / span));
+		}
+		geometry.setAttribute('ay', new BufferAttribute(along, 1));
+		uniforms.uPath.value = pathed ? 1 : 0;
 		const tones = new Float32Array(view.x_values.length);
 		if (view.roles) for (let i = 0; i < tones.length; i++) tones[i] = TONES.indexOf(view.roles[records[i]]) + 1;
 		geometry.setAttribute('atone', new BufferAttribute(tones, 1));
@@ -625,11 +649,10 @@
 			return;
 		}
 		const record = records[point];
-		const station = view.depths ? view.depths[record] : record;
 		probe
 			.set(
 				fraction(view.x_values[point], xRange, logX) * STAGE.x,
-				stationCount > 1 ? (station / (stationCount - 1)) * STAGE.y : 0,
+				depthAt(point, record),
 				Math.min(1, Math.max(0, fraction(view.z_values[point], zRange, logZ))) * STAGE.z
 			)
 			.project(camera);
@@ -736,6 +759,14 @@
 	// the curves rarely pass in front of its labels
 	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
 	const recordAt = (r: number) => `${STAGE.x + 0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
+	const yAt = (t: number) => `${STAGE.x + 0.03},${((t - yRange[0]) / (yRange[1] - yRange[0])) * STAGE.y},0`;
+	/** A path is named where it starts, a little above its first point, as VD labels the sine stage. */
+	const pathStart = (r: number) => {
+		const p = view.offsets[r];
+		if (p >= view.offsets[r + 1]) return null;
+		const z = Math.min(1, Math.max(0, fraction(view.z_values[p], zRange, logZ))) * STAGE.z;
+		return `${fraction(view.x_values[p], xRange, logX) * STAGE.x},${depthAt(p, r) - 0.03 * STAGE.y},${z + 0.04 * STAGE.z}`;
+	};
 
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
@@ -772,6 +803,7 @@
 			<span class="rname">{view.records[hover.record]}</span>
 			<span>{formatNumber(view.x_values[hover.point], 5)}{view.x.unit ? ` ${view.x.unit}` : ''}</span>
 			<span>{formatNumber(view.z_values[hover.point], 4)}{view.z.unit ? ` ${view.z.unit}` : ''}</span>
+			{#if pathed && view.y && view.y_values}<span>{formatNumber(view.y_values[hover.point], 4)}{view.y.unit ? ` ${view.y.unit}` : ''}</span>{/if}
 		</div>
 	{/if}
 
@@ -785,9 +817,20 @@
 				<span class="tick z num" data-at={zAt(t)}>{tickText(t)}</span>
 			{/each}
 		{/if}
-		{#each named as r (r)}
-			<span class="tick rec" data-at={recordAt(r)}>{depthLabels[r]}</span>
-		{/each}
+		{#if pathed}
+			{#each yTicks as t (t)}
+				<span class="tick rec num" data-at={yAt(t)}>{tickText(t)}</span>
+			{/each}
+			{#each view.records as label, r (r)}
+				{@const at = pathStart(r)}
+				{#if at}<span class="tick rec" data-at={at}>{label}</span>{/if}
+			{/each}
+			{#if view.y}<span class="tick rec" data-at="{STAGE.x + 0.03},{STAGE.y * 1.08},0">{withUnit(view.y.label, view.y.unit)}</span>{/if}
+		{:else}
+			{#each named as r (r)}
+				<span class="tick rec" data-at={recordAt(r)}>{depthLabels[r]}</span>
+			{/each}
+		{/if}
 		{#each view.regions ?? [] as r, i (i)}
 			{#if r.label}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
 		{/each}

@@ -1,12 +1,15 @@
 <script lang="ts">
 	/**
-	 * Analyze: pick a dataset, or open your own project, pick a tool that accepts it, set its
-	 * parameters, Run. Each run adds a result card; spectrum panes that share a `link` share a cursor.
+	 * The study host every analysis module shares: the project tree, what the selection shows, the
+	 * Actions frame, the tool panel and the result cards. A module (`only`) differs in which
+	 * operations its Actions frame and tool list offer, its own and those offered everywhere, and in
+	 * which demonstration datasets it opens. Each run adds a result card; spectrum panes that share
+	 * a `link` share a cursor.
 	 */
 	import type { AnalyzeResult, AppState } from '$lib/app/state.svelte';
 	import type { Workspace } from '$lib/protocol/types';
-	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
+	import ActionsFrame from './ActionsFrame.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
@@ -25,23 +28,21 @@
 
 	interface Props {
 		app: AppState;
-		/**
-		 * Show only the project's tools of this workspace (the Model workspace's), with no dataset to
-		 * pick: the same runner, the same results.
-		 */
-		only?: Workspace;
+		/** The module shown: its operations, and those every module offers. */
+		only: Workspace;
 	}
 	let { app, only }: Props = $props();
 
 	const a = $derived(app.analyze);
-	const tools = $derived(only ? a.tools.filter((o) => o.workspace === only) : a.tools);
+	const tools = $derived(a.toolsFor(only));
+	const datasets = $derived(a.datasetsFor(only));
 
-	// a workspace of its own works on the project, and on one of its own tools
+	// a module works on the project when one is open and nothing else is, and on one of its own tools
 	$effect(() => {
-		if (!only) return;
-		if (app.project.summary && !a.onProject) a.selectProject();
+		if (app.project.summary && !a.opened && !a.opening) a.selectProject();
 		if (a.onProject && tools.length && !tools.some((o) => o.id === a.opId)) a.selectOp(tools[0].id);
 	});
+
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
@@ -108,18 +109,18 @@
 <div class="analyze">
 	<aside class="side" aria-label="Dataset and tools">
 		<ProjectPanel {app} />
-		{#if !only}
-		<section class="block">
-			<h2 class="eyebrow">Dataset</h2>
-			{#if !app.catalog}
+		{#if !app.catalog}
+			<section class="block">
+				<h2 class="eyebrow">Dataset</h2>
 				<p class="muted">
 					{#if app.catalogError}{app.catalogError}{:else if app.analysis.isOpen}Loading the catalog.{:else}Waiting for the analysis service at <span class="mono">{app.analysis.url}</span>.{/if}
 				</p>
-			{:else if a.datasets.length === 0}
-				<p class="muted">The analysis service lists no random-run datasets.</p>
-			{:else}
+			</section>
+		{:else if datasets.length}
+			<section class="block">
+				<h2 class="eyebrow">Dataset</h2>
 				<div class="choices" role="radiogroup" aria-label="Dataset" data-testid="dataset-picker">
-					{#each a.datasets as ds (ds.id)}
+					{#each datasets as ds (ds.id)}
 						<button
 							class="choice"
 							data-testid="dataset-{ds.id}"
@@ -133,81 +134,20 @@
 						</button>
 					{/each}
 				</div>
-			{/if}
-			{#if a.opening}<p class="muted small">Opening.</p>{/if}
-			{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
-			{#if a.opened && !a.onProject}
-				<dl class="chips">
-					{#each summaryChips(a.opened.summary) as c (c.label)}
-						<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
-					{/each}
-					<div><dt>Channels</dt><dd class="num">{a.opened.channels.length}</dd></div>
-				</dl>
-			{/if}
-		</section>
-		{/if}
-
-		{#if a.opened && a.onProject}
-			{@const picked = app.project.selection.objects}
-			{@const kinds = picked.map((n) => app.project.summary?.objects.find((o) => o.name === n)?.kind)}
-			{@const fitPair = picked.length === 2 && kinds.includes('frf') && kinds.includes('shape_set')}
-			<section class="block" data-testid="actions-frame">
-				<h2 class="eyebrow">
-					{#if picked.length}Actions <span class="for">for {picked.length === 1 ? picked[0] : `${picked.length} objects`}</span>{:else}Actions <span class="for">for the project</span>{/if}
-				</h2>
-				{#if !a.actions}
-					<p class="muted small">Asking what the selection can take.</p>
-				{:else}
-					{@const readings = a.actions.readings.filter((e) => !only || e.workspace === only)}
-					{@const acts = a.actions.acts.filter((e) => !only || e.workspace === only)}
-					{@const whole = a.actions.project.filter((e) => !only || e.workspace === only)}
-					{#if fitPair}
-						<div class="tools" role="group" aria-label="Fit">
-							<button class="tool" data-testid="action-edit-fit" onclick={() => { app.go('modal'); void app.fit.start(picked[kinds.indexOf('frf')], picked[kinds.indexOf('shape_set')]); }}>
-								<Icon name="tool" size={15} />
-								<span class="ttitle">Edit Fit</span>
-								<span class="tout">modal</span>
-							</button>
-						</div>
-					{/if}
-					{#if readings.length}
-						<h3 class="group">Readings</h3>
-						<div class="tools" role="radiogroup" aria-label="Readings" data-testid="action-readings">
-							{#each readings as e (e.id)}
-								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
-									<Icon name="tool" size={15} />
-									<span class="ttitle">{e.title}</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-					{#if acts.length}
-						<h3 class="group">Acts</h3>
-						<div class="tools" role="radiogroup" aria-label="Acts" data-testid="action-acts">
-							{#each acts as e (e.id)}
-								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
-									<Icon name="action" size={15} />
-									<span class="ttitle">{e.title}</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-					{#if whole.length}
-						<div class="tools" role="radiogroup" aria-label="Project acts" data-testid="action-project">
-							{#each whole as e (e.id)}
-								<button class="tool" data-testid="action-{e.id}" role="radio" aria-checked={a.opId === e.id} class:on={a.opId === e.id} onclick={() => a.pickAction(e)}>
-									<Icon name="action" size={15} />
-									<span class="ttitle">{e.title}</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-					{#if !readings.length && !acts.length && !whole.length}
-						<p class="muted small">{picked.length ? 'Nothing takes this selection together. Select less, or something else.' : 'Select an object in the tree to see what it can do.'}</p>
-					{/if}
+				{#if a.opening}<p class="muted small">Opening.</p>{/if}
+				{#if a.openError}<p class="error" role="alert">{a.openError}</p>{/if}
+				{#if a.opened && !a.onProject}
+					<dl class="chips">
+						{#each summaryChips(a.opened.summary) as c (c.label)}
+							<div><dt>{c.label}</dt><dd class="num">{c.value}</dd></div>
+						{/each}
+						<div><dt>Channels</dt><dd class="num">{a.opened.channels.length}</dd></div>
+					</dl>
 				{/if}
 			</section>
-		{:else if a.opened}
+		{/if}
+
+		{#if a.opened && !a.onProject}
 			<section class="block">
 				<h2 class="eyebrow">Tools <span class="for">for {a.opened.kind.replace('_', ' ')} data</span></h2>
 				<div class="tools" role="radiogroup" aria-label="Tool" data-testid="tool-list">
@@ -222,34 +162,7 @@
 			</section>
 		{/if}
 
-		{#if a.op && a.opened && (a.onProject || tools.includes(a.op))}
-			<section class="block panel" aria-labelledby="op-title">
-				<div class="phead">
-					<h2 id="op-title">{a.op.title}</h2>
-					<button class="btn ghost sm" onclick={() => a.resetParams()} title="Reset every field to its default">Defaults</button>
-				</div>
-				{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
-				<ParamForm
-					params={a.params.filter((p) => !p.in_view)}
-					bind:values={a.values[a.op.id]}
-					channels={a.opened.channels}
-					showAllErrors={a.triedRun}
-					idPrefix={a.op.id.replace('.', '-')}
-				/>
-				<div class="runrow">
-					<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>
-						{#if a.running}
-							<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-							Running
-						{:else}
-							<Icon name="play" size={13} /> Run
-						{/if}
-					</button>
-					<span class="keys"><kbd>{isMac ? 'Cmd' : 'Ctrl'}</kbd><kbd>Enter</kbd></span>
-				</div>
-				{#if a.runError}<p class="error" role="alert">{a.runError}</p>{/if}
-			</section>
-		{/if}
+		<ActionsFrame {app} {only} />
 	</aside>
 
 	<main class="results" aria-label="Results">
@@ -347,6 +260,17 @@
 								<select class="field sm" aria-label="Table view" data-testid="read-table-view" value={a.prefs.table_view} onchange={(e) => a.setPref('table_view', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.table_view)} title="The channels, or what the controller put over them: the response transformation, a row per controlled response over the control channels, or the reference transformation over the drives">
 									{#each offers.table_views as form (form)}<option value={form}>{TABLE_VIEWS[form] ?? form}</option>{/each}
 								</select>
+							{/if}
+							{#if offers.tones.length > 1}
+								<select class="field sm" aria-label="Tone" data-testid="read-tone" value={offers.tones.includes(a.prefs.tone ?? '') ? a.prefs.tone : offers.tones[0]} onchange={(e) => a.setPref('tone', (e.currentTarget as HTMLSelectElement).value)} title="Which tone of the sweep is read">
+									{#each offers.tones as tone (tone)}<option value={tone}>{tone}</option>{/each}
+								</select>
+							{/if}
+							{#if offers.sine_readings}
+								<div class="seg" role="radiogroup" aria-label="Levels or error">
+									<button role="radio" aria-checked={a.prefs.sine_reading === 'curves'} class:on={a.prefs.sine_reading === 'curves'} data-testid="read-sine-curves" title="The extracted levels over the tone's requirement and limits" onclick={() => a.prefs.sine_reading !== 'curves' && a.setPref('sine_reading', 'curves')}>Levels</button>
+									<button role="radio" aria-checked={a.prefs.sine_reading === 'bars'} class:on={a.prefs.sine_reading === 'bars'} data-testid="read-sine-bars" title="Each channel's signed RMS deviation from its tone across the sweep, in dB" onclick={() => a.prefs.sine_reading !== 'bars' && a.setPref('sine_reading', 'bars')}>Level Error</button>
+								</div>
 							{/if}
 							{#if offers.arrows}
 								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
@@ -509,20 +433,7 @@
 	}
 
 	.choices,
-	.group {
-		margin: var(--sp-2) 0 2px;
-		font-size: var(--text-2xs);
-		font-weight: var(--weight-medium);
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: var(--text-4);
-	}
 
-	.tools {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
 
 	.choice {
 		display: flex;
@@ -583,75 +494,17 @@
 		white-space: nowrap;
 	}
 
-	.tool {
-		display: grid;
-		grid-template-columns: auto 1fr auto;
-		align-items: center;
-		gap: var(--sp-2);
-		padding: 7px 10px;
-		text-align: left;
-		color: var(--text-3);
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: var(--radius-md);
-	}
 
-	.tool:hover {
-		background: var(--bg-3);
-	}
 
-	.tool.on {
-		color: var(--blue-2);
-		background: var(--blue-weak);
-		border-color: var(--blue-line);
-	}
 
-	.ttitle {
-		font-size: var(--text-sm);
-		color: var(--text-1);
-	}
 
-	.tout {
-		font-size: var(--text-2xs);
-		color: var(--text-4);
-	}
 
-	.panel {
-		border-bottom: 0;
-	}
 
-	.phead {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
 
-	.phead h2 {
-		font-size: var(--text-lg);
-		font-weight: var(--weight-strong);
-	}
 
-	.psum {
-		margin: 4px 0 var(--sp-3);
-		font-size: var(--text-xs);
-		color: var(--text-3);
-	}
 
-	.runrow {
-		display: flex;
-		align-items: center;
-		gap: var(--sp-3);
-		margin-top: var(--sp-2);
-	}
 
-	.run {
-		min-width: 104px;
-	}
 
-	.keys {
-		display: inline-flex;
-		gap: 3px;
-	}
 
 	.results {
 		display: flex;
@@ -935,15 +788,7 @@
 		height: 420px;
 	}
 
-	.spin {
-		animation: spin 0.9s linear infinite;
-	}
 
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
 
 	@keyframes enter {
 		from {

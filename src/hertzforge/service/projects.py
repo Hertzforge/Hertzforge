@@ -170,6 +170,10 @@ def open_file(params: Mapping[str, Any]) -> OpenProject:
     return OpenProject(project)
 
 
+#: the pictures `project.import` takes, by suffix (`core.photos.FORMATS`)
+PHOTO_FORMATS = ('.png', '.jpg', '.jpeg')
+
+
 def import_file(state: OpenProject | None, params: Mapping[str, Any],
                 progress: Callable[[int, int], None] | None = None
                 ) -> tuple[OpenProject, list[str]]:
@@ -180,6 +184,8 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
     import hertzforge as hz
 
     path = _path(params, 'project.import')
+    if os.path.splitext(path)[1].lower() in PHOTO_FORMATS:
+        return _import_photo(state, path)
     units = params.get('units', {})
     if not isinstance(units, Mapping) or not all(
             isinstance(key, str) and isinstance(value, str)
@@ -200,6 +206,31 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
         raise _refusal(error) from None
     state.modified = True
     return state, added
+
+
+def _import_photo(state: OpenProject | None, path: str) -> tuple[OpenProject, list[str]]:
+    """A png or jpeg added to the project's Photos object, created on
+    first use (`Photos()` is the replayable line; a photo is its bytes, so
+    the file is added by its path), as Visual Dynamics takes a dropped
+    picture. The Photos object is what was added."""
+    import hertzforge as hz
+    from hertzforge.core.photos import Photos
+
+    if state is None:
+        state = OpenProject(hz.Project())
+    project = state.project
+    name = next((n for n, obj in project.items() if isinstance(obj, Photos)), None)
+    if name is None:
+        with project.journal_as(None):
+            name = project.add('Photos', Photos())
+        project.journal.append(f'project.add({name!r}, Photos())')
+    try:
+        project[name].add_file(path)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    project.journal.append(f'project[{name!r}].add_file({path!r})')
+    state.modified = True
+    return state, [name]
 
 
 def save(state: OpenProject | None, params: Mapping[str, Any]) -> str:
@@ -241,18 +272,108 @@ def _name(params: Mapping[str, Any], key: str, method: str) -> str:
 def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.rename`: the object `name` called `to`, and every group,
     provenance record and report block that names it following
-    (`Project.rename`)."""
+    (`Project.rename`); with `index`, one photo of a Photos object
+    renamed instead, the report blocks that show it following."""
     state = _open(state, 'project.rename')
     old = _name(params, 'name', 'project.rename')
     new = _name(params, 'to', 'project.rename').strip()
     if old not in state.project:
         raise not_found(f'the project has no object named {old!r}')
+    if params.get('index') is not None:
+        return _rename_photo(state, old, params['index'], new)
     if new == old:
         return
     try:
         state.project.rename(old, new)
     except ValueError as error:
         raise refused(str(error)) from None
+    state.modified = True
+
+
+def _rename_photo(state: OpenProject, name: str, index: Any, new: str) -> None:
+    """One photo renamed (`Photos.rename`), journaled as the call, and the
+    report blocks bound to it pointed at the new name, as VD's
+    `_apply_photo_name` does."""
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.report import Report
+
+    photos = state.project[name]
+    if not isinstance(photos, Photos):
+        raise refused(f'{name} is not a Photos object; only a photo is renamed by index')
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise bad_request('project.rename "index" is a photo\'s index, from 0')
+    if index >= photos.num_photos:
+        raise not_found(f'{name} has {photos.num_photos} photos; there is no photo {index}')
+    was = photos.names[index]
+    if new == was:
+        return
+    try:
+        photos.rename(index, new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.project.record_call(photos, 'rename', index, new)
+    for obj in state.project.values():
+        if isinstance(obj, Report):
+            for block in obj.blocks:
+                if (block.get('kind') == 'photo' and block.get('source') == name
+                        and block.get('photo') == was):
+                    block['photo'] = new
+    state.modified = True
+
+
+#: how each kind of object deletes its sub-items, by the tree's word for them
+_DELETERS = (('photos', 'delete_photos', 'photo'), ('shapes', 'delete_modes', 'mode'),
+             ('channel_table', 'delete_channels', 'channel'), ('data', 'delete_records', 'record'))
+
+
+def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.delete_parts`: the sub-items picked in the tree deleted
+    from their objects, `parts` mapping each object's name to the indices
+    picked: a data object's records, a shape set's modes, a channel table's
+    channels, a Photos object's photos, as Visual Dynamics' Delete takes
+    grid picks. Every item of an object is refused (delete the object
+    instead), nothing is deleted when any part is refused, and each
+    deletion is journaled as the call a script would make."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import DataArray
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.shapes import ShapeSet
+
+    state = _open(state, 'project.delete_parts')
+    parts = params.get('parts')
+    if (not isinstance(parts, Mapping) or not parts or not all(
+            isinstance(name, str) and isinstance(picks, list) and picks
+            and all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in picks)
+            for name, picks in parts.items())):
+        raise bad_request('project.delete_parts needs "parts", an object\'s name to the '
+                          'indices picked in it')
+    kinds = {'photos': Photos, 'shapes': ShapeSet, 'channel_table': ChannelTable,
+             'data': DataArray}
+    counts = {'photos': 'num_photos', 'shapes': 'num_shapes', 'channel_table': 'num_channels',
+              'data': 'num_records'}
+    planned = []
+    for name, picks in parts.items():
+        if name not in state.project:
+            raise not_found(f'the project has no object named {name!r}')
+        obj = state.project[name]
+        found = next(((kind, deleter, word) for kind, deleter, word in _DELETERS
+                      if isinstance(obj, kinds[kind])), None)
+        if found is None:
+            raise refused(f'{name} has no parts to delete; remove the object instead')
+        kind, deleter, word = found
+        count = int(getattr(obj, counts[kind]))
+        chosen = sorted(set(picks))
+        if chosen[-1] >= count:
+            raise not_found(f'{name} has {count} {word}s; there is no {word} {chosen[-1] + 1}')
+        if len(chosen) >= count:
+            raise refused(f'that is every {word} of {name}; delete the object instead')
+        planned.append((name, obj, deleter, chosen))
+    for name, obj, deleter, chosen in planned:
+        try:
+            getattr(obj, deleter)(chosen)
+        except ValueError as error:
+            raise refused(f'{name}: {error}') from None
+        state.project.record_call(obj, deleter, chosen)
     state.modified = True
 
 
@@ -310,6 +431,15 @@ def refresh(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     except (KeyError, ValueError) as error:
         raise refused(str(error).strip("'")) from None
     state.modified = True
+
+
+def journal(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.journal`: the session as Python, every verb and settings
+    change since the project was made or opened as the line that replays
+    it (`Project.journal`), for Visual Dynamics' console: read-only, to be
+    copied into a script."""
+    state = _open(state, 'project.journal')
+    return {'lines': [str(line) for line in state.project.journal]}
 
 
 def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
@@ -372,6 +502,10 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "environment" is a name, or null')
     if 'table_view' in prefs and prefs['table_view'] not in TABLE_VIEWS:
         raise bad_request('project.show "table_view" is channels, response or reference')
+    if prefs.get('tone') is not None and not isinstance(prefs['tone'], str):
+        raise bad_request('project.show "tone" is a tone\'s name, or null')
+    if 'sine_reading' in prefs and prefs['sine_reading'] not in ('curves', 'bars'):
+        raise bad_request('project.show "sine_reading" is curves or bars')
     return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
                         dict(part) if part else None, dict(prefs))
 

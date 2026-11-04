@@ -493,3 +493,71 @@ def test_a_channel_table_shows_typed_into_with_its_widgets(plate, validate):
             projects.show(plate, {'objects': [name], 'prefs': {'environment': 3}})
     finally:
         held.environments.clear()
+
+
+# ---- photos and sine objects -----------------------------------------------------
+
+
+def test_photos_show_as_images_and_picks_restrict_them(tmp_path, validate):
+    from .test_projects import tiny_png
+
+    for name, color in (('setup', (255, 0, 0)), ('closeup', (0, 255, 0))):
+        (tmp_path / f'{name}.png').write_bytes(tiny_png(color))
+        state, _ = projects.import_file(locals().get('state'), {'path': str(tmp_path / f'{name}.png')})
+    out = shown(state, 'Photos', validate=validate)
+    assert [(v['view'], v['title'], v['format']) for v in out['views']] == [
+        ('image', 'setup', 'png'), ('image', 'closeup', 'png')]
+    assert bytes(out['views'][0]['bytes']) == tiny_png((255, 0, 0)), 'the file\'s bytes, as read'
+    picked = shown(state, 'Photos', records={'Photos': [1]}, validate=validate)
+    assert [v['title'] for v in picked['views']] == ['closeup'] and picked['note'] == '1 photo'
+    assert picked['offers']['tones'] == [] and not picked['offers']['sine_readings']
+
+
+@pytest.fixture(scope='module')
+def swept():
+    from .test_sine_shock import _sweep
+
+    project = _sweep()
+    project.extract_sine('Sweep')
+    return projects.OpenProject(project)
+
+
+def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
+    """VD's sine readings: the stage by default (frequency across, time
+    receding, amplitude up, every point at its own time), the flat plot on
+    the bar's Flat: a specification alone draws the tone's requirement with
+    its limits, the levels alone the extracted level, and both together the
+    levels over the requirement, or the Level Error bars."""
+    levels = named(swept, 'sine_level_set')
+    stage = shown(swept, 'Profile', validate=validate)
+    (path,) = stage['views']
+    assert path['view'] == 'waterfall' and path['y']['unit'] == 's'
+    assert len(path['y_values']) == len(path['x_values']) and path['roles'] == ['reference']
+    assert path['y_range'][0] >= 0.5, 'the tone starts at its start time'
+    assert stage['offers']['tones'] == ['Up'] and not stage['offers']['sine_readings']
+    assert stage['offers']['flat'] is True
+    both = shown(swept, 'Profile', levels, validate=validate)
+    (path,) = both['views']
+    assert path['roles'] == ['reference', 'measured'], 'the level is a path of its own'
+    assert both['offers']['sine_readings'] is True
+    bars = shown(swept, levels, 'Profile', prefs={'sine_reading': 'bars'}, validate=validate)
+    assert [view['view'] for view in bars['views']] == ['waterfall', 'reading']
+
+    flat = {'flat': True}
+    spec = shown(swept, 'Profile', prefs=flat, validate=validate)
+    (plot,) = spec['views']
+    assert plot['view'] == 'spectrum' and [s['role'] for s in plot['series']] == ['reference']
+    alone = shown(swept, levels, prefs=flat, validate=validate)
+    assert [s['role'] for s in alone['views'][0]['series']] == ['measured']
+    assert alone['views'][0]['title'].startswith('Up')
+    both = shown(swept, 'Profile', levels, prefs=flat, validate=validate)
+    assert [s['role'] for s in both['views'][0]['series']] == ['measured', 'reference']
+    bars = shown(swept, levels, 'Profile', prefs={**flat, 'sine_reading': 'bars'}, validate=validate)
+    (reading,) = bars['views']
+    assert reading['view'] == 'reading'
+    rows = {row['label']: row for row in reading['rows']}
+    assert rows['101Z+']['unit'] == 'dB' and rows['101Z+']['status'] in ('pass', 'fail')
+    picked = shown(swept, 'Profile', records={'Profile': [0]}, prefs=flat, validate=validate)
+    assert 'at 101Z+' in picked['views'][0]['title']
+    unknown = shown(swept, 'Profile', prefs={**flat, 'tone': 'Down'}, validate=validate)
+    assert unknown['views'][0]['title'].startswith('Up'), 'a tone the set lacks falls to the first'

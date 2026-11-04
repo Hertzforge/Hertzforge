@@ -38,4 +38,5 @@ describe('the link brackets', () => {
 		expect(a[1].color).toBe(CURVE_COLORS[2]);
 		expect(a[1].column).toBe(1);
 	});
+
 });

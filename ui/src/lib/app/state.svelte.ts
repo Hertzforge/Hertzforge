@@ -30,7 +30,6 @@ import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	ProjectSummary,
 	ReportEditor,
 	RunState,
-	Shape3DView,
 	SimProfile,
 	Pick3D,
 	Region,
@@ -43,7 +42,7 @@ import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace } from './workspaces';
+import { isWorkspace, offeredIn, STUDIES } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -107,11 +106,21 @@ class AnalyzeState {
 
 	constructor(private readonly app: AppState) {}
 
-	/** Every dataset some Analyze tool accepts: a new kind of data shows up here once a tool takes it. */
-	get datasets(): DatasetInfo[] {
+	/** The datasets a module's tools accept: a kind of data shows up in a module once a tool there takes it. */
+	datasetsFor(workspace: Workspace): DatasetInfo[] {
 		const catalog = this.app.catalog;
-		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.workspace === 'analyze').map((o) => o.accepts));
+		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.accepts !== PROJECT && o.workspace === workspace).map((o) => o.accepts));
 		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
+	}
+
+	/** The module whose tools take a dataset's kind, where it opens. */
+	moduleFor(dataset: DatasetInfo): Workspace | null {
+		return (this.app.catalog?.operations ?? []).find((o) => o.accepts === dataset.kind)?.workspace ?? null;
+	}
+
+	/** The module's own tools and the ones every module offers, of those that take what is open. */
+	toolsFor(workspace: Workspace): OperationDescriptor[] {
+		return this.tools.filter((o) => offeredIn(o, workspace));
 	}
 
 	/**
@@ -263,7 +272,9 @@ class AnalyzeState {
 						arrows: this.prefs.arrows,
 						sensors: this.prefs.sensors,
 						environment: this.prefs.environment,
-						table_view: this.prefs.table_view
+						table_view: this.prefs.table_view,
+						tone: this.prefs.tone,
+						sine_reading: this.prefs.sine_reading
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
@@ -598,82 +609,6 @@ function summarize(params: ParamDescriptor[], values: ParamValues, channels: { v
 
 // ---------------------------------------------------------------------------------------------
 
-class ModalState {
-	datasetId = $state<string | null>(null);
-	loading = $state(false);
-	error = $state<string | null>(null);
-	view = $state.raw<Shape3DView | null>(null);
-	mode = $state(0);
-	private seq = 0;
-
-	constructor(private readonly app: AppState) {}
-
-	get datasets(): DatasetInfo[] {
-		return (this.app.catalog?.datasets ?? []).filter((d) => d.kind === 'modal_model');
-	}
-
-	get modesOp(): OperationDescriptor | null {
-		return this.app.catalog?.operations.find((o) => o.id === 'modal.modes') ?? null;
-	}
-
-	/** Open the model and run `modal.modes` with its defaults. */
-	async select(id: string): Promise<void> {
-		if (this.datasetId === id && (this.view || this.loading)) return;
-		const seq = ++this.seq;
-		this.datasetId = id;
-		this.loading = true;
-		this.error = null;
-		try {
-			const opened = await this.app.analysis.request<OpenedDataset>('dataset.open', { id });
-			const op = this.modesOp;
-			if (!op) throw new Error('The analysis service does not offer modal.modes.');
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: op.id, handle: opened.handle, params: defaultValues(op.params, opened.channels) },
-				{ timeoutMs: 30_000 }
-			);
-			if (seq !== this.seq) return;
-			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
-			if (!shape) throw new Error('modal.modes returned no shape3d view.');
-			this.view = shape;
-			this.mode = 0;
-		} catch (err) {
-			if (seq !== this.seq) return;
-			this.view = null;
-			this.error = message(err);
-		} finally {
-			if (seq === this.seq) this.loading = false;
-		}
-	}
-
-	/** The project's shape set `shapes` on its active geometry (`project.mode_shapes`). */
-	async selectShapes(shapes: string): Promise<void> {
-		const geometry = this.app.project.summary?.active_geometry;
-		if (!geometry) return;
-		const seq = ++this.seq;
-		this.datasetId = `project:${shapes}`;
-		this.loading = true;
-		this.error = null;
-		try {
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: 'project.mode_shapes', params: { shapes, geometry } },
-				{ timeoutMs: 30_000 }
-			);
-			if (seq !== this.seq) return;
-			const shape = res.views.find((v): v is Shape3DView => v.view === 'shape3d') ?? null;
-			if (!shape) throw new Error('project.mode_shapes returned no shape3d view.');
-			this.view = shape;
-			this.mode = 0;
-		} catch (err) {
-			if (seq !== this.seq) return;
-			this.view = null;
-			this.error = message(err);
-		} finally {
-			if (seq === this.seq) this.loading = false;
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -931,6 +866,12 @@ export class ReportState {
 	error = $state<string | null>(null);
 	/** Where the last export went. */
 	exported = $state<string | null>(null);
+	/**
+	 * What an export or an issue is held on, as Visual Dynamics asks before a report leaves the
+	 * project: the sections still owed and the indexed files that do not match; the person says
+	 * anyway or lets it be.
+	 */
+	held = $state<{ act: 'export' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
 	/** The editor's pane for the selection, from the last `report.editor`. */
 	editor = $state.raw<ReportEditor | null>(null);
 	/** How far the page was scrolled, kept across the re-render an edit makes. */
@@ -955,13 +896,27 @@ export class ReportState {
 		await this.act(`Opening ${name}`, () => this.load(name));
 	}
 
-	async export(path: string): Promise<void> {
+	async export(path: string, anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		await this.act('Saving the page', async () => {
-			const res = await this.app.analysis.request<{ path: string }>('report.export', { name, path }, { timeoutMs: RUN_TIMEOUT_MS });
-			this.exported = res.path;
+			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+				'report.export',
+				{ name, path, ...(anyway ? { anyway } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.path === null) this.held = { act: 'export', path, owed: res.owed, index: res.index };
+			else this.exported = res.path;
 		});
+	}
+
+	/** The held export or issue, done anyway. */
+	async anyway(): Promise<void> {
+		const held = this.held;
+		if (!held) return;
+		if (held.act === 'export' && held.path) await this.export(held.path, true);
+		else await this.issue('begin', undefined, true);
 	}
 
 	/** The page being printed, in a frame of its own that asks for the print dialog. */
@@ -982,18 +937,21 @@ export class ReportState {
 	}
 
 	/** Begin, record or cancel an issue (`report.issue`). */
-	async issue(step: 'begin' | 'record' | 'cancel', path?: string): Promise<void> {
+	async issue(step: 'begin' | 'record' | 'cancel', path?: string, anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
 		await this.act(doing, async () => {
-			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; project: ProjectSummary }>(
+			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
-				{ name, step, ...(path ? { path } : {}) },
+				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			this.app.project.apply(res.project);
-			if (step === 'begin') {
+			if (step === 'begin' && res.index) {
+				this.held = { act: 'issue', owed: [], index: res.index };
+			} else if (step === 'begin') {
 				this.issuing = res.status ?? 'issued';
 				this.issued = null;
 				this.printing = res.html ?? null;
@@ -1133,7 +1091,9 @@ function readPrefs(): ShowPrefs {
 		arrows: false,
 		sensors: true,
 		environment: null,
-		table_view: 'channels'
+		table_view: 'channels',
+		tone: null,
+		sine_reading: 'curves'
 	};
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
@@ -1166,6 +1126,8 @@ export class ProjectState {
 	children = $state.raw<Record<string, ProjectChildren>>({});
 	/** The object being renamed in the tree, or null. */
 	renaming = $state<string | null>(null);
+	/** The photo being renamed in place: its object and index, or null. */
+	renamingPart = $state<{ name: string; index: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the strip: the member it is reached by, or null. */
@@ -1196,6 +1158,7 @@ export class ProjectState {
 		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
 		void this.app.analyze.showSelection();
+		void this.app.console.sync();
 	}
 
 	/** Open or close an object's row; opening asks what it holds. */
@@ -1223,6 +1186,7 @@ export class ProjectState {
 	private selected(next: Selection): void {
 		this.selection = next;
 		this.renaming = null;
+		this.renamingPart = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
@@ -1349,12 +1313,50 @@ export class ProjectState {
 		return ok;
 	}
 
-	/** Remove what is selected, once confirmed. */
+	/** The sub-items picked in the tree, by object: what Delete takes when any are picked. */
+	get pickedParts(): Record<string, number[]> {
+		const parts: Record<string, number[]> = {};
+		for (const [name, picks] of Object.entries(this.selection.records)) if (picks.length) parts[name] = picks;
+		return parts;
+	}
+
+	/**
+	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
+	 * co-selected object is context, not a target, as in Visual Dynamics), else the objects.
+	 */
 	async removeSelected(): Promise<boolean> {
 		const names = [...this.selection.objects];
+		const parts = this.pickedParts;
 		this.confirming = false;
+		if (Object.keys(parts).length) return this.deleteParts(parts);
 		if (!names.length) return false;
 		return this.remove(names);
+	}
+
+	/** Delete sub-items by index: records, modes, channels or photos (`project.delete_parts`). */
+	async deleteParts(parts: Record<string, number[]>): Promise<boolean> {
+		const what = Object.entries(parts).map(([name, picks]) => `${picks.length} of ${name}`).join(', ');
+		const ok = await this.call(`Deleting ${what}`, 'project.delete_parts', { parts }, false);
+		if (ok) {
+			const records = { ...this.selection.records };
+			for (const name of Object.keys(parts)) {
+				delete records[name];
+				if (this.expanded.has(name)) void this.loadChildren(name);
+			}
+			this.selection = { ...this.selection, records };
+			void this.app.analyze.showSelection();
+		}
+		return ok;
+	}
+
+	/** Rename one photo in place (`project.rename` with `index`). */
+	async renamePart(name: string, index: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming photo ${index + 1} of ${name}`, 'project.rename', { name, to, index }, false);
+		if (ok) {
+			if (this.expanded.has(name)) void this.loadChildren(name);
+			void this.app.analyze.showSelection();
+		}
+		return ok;
 	}
 
 	/** An act on the groups, run as the operation it is; the project it answers with is applied. */
@@ -1402,8 +1404,8 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// the workspaces with the project panel keep the window; any other goes to Analyze
-				if (this.app.workspace !== 'model' && this.app.workspace !== 'specify') this.app.workspace = 'analyze';
+				// a study keeps the window; any other workspace goes to Signals, the recordings' module
+				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
 				this.app.analyze.selectProject();
 			}
 			return true;
@@ -1419,12 +1421,62 @@ export class ProjectState {
 
 // ---------------------------------------------------------------------------------------------
 
+const CONSOLE_KEY = 'hertzforge.console.shown';
+
+/**
+ * The console: the session as Python along the bottom of the window, as Visual Dynamics' is. It
+ * shows the project's journal, every verb and settings change as the line that replays it,
+ * read-only, to be copied into a script; nothing is typed into it (Brandon, 2026-08-30).
+ */
+export class ConsoleState {
+	shown = $state(false);
+	lines = $state.raw<string[]>([]);
+	error = $state<string | null>(null);
+	private seq = 0;
+
+	constructor(private readonly app: AppState) {
+		try {
+			this.shown = localStorage.getItem(CONSOLE_KEY) === '1';
+		} catch {
+			// closed
+		}
+	}
+
+	toggle(): void {
+		this.shown = !this.shown;
+		try {
+			localStorage.setItem(CONSOLE_KEY, this.shown ? '1' : '0');
+		} catch {
+			// kept for this session only
+		}
+		if (this.shown) void this.sync();
+	}
+
+	/** The journal as the service holds it now; asked again whenever the project changes. */
+	async sync(): Promise<void> {
+		if (!this.shown || !this.app.project.summary || !this.app.analysis.isOpen) return;
+		const seq = ++this.seq;
+		try {
+			const res = await this.app.analysis.request<{ lines: string[] }>('project.journal', {});
+			if (seq !== this.seq) return;
+			this.lines = res.lines;
+			this.error = null;
+		} catch (err) {
+			if (seq === this.seq) this.error = message(err);
+		}
+	}
+
+	get text(): string {
+		return this.lines.join('\n');
+	}
+}
+
 export class AppState {
 	readonly config: ShellConfig;
 	readonly analysis: ServiceClient;
 	readonly control: ServiceClient;
 
-	workspace = $state<Workspace>('analyze');
+	workspace = $state<Workspace>('signals');
 	paletteOpen = $state(false);
 	catalog = $state.raw<Catalog | null>(null);
 	catalogError = $state<string | null>(null);
@@ -1436,7 +1488,8 @@ export class AppState {
 	readonly units: UnitsState;
 	/** The run log the keeper writes while a test runs, beside any workspace. */
 	readonly runLog: RunLogState;
-	readonly modal: ModalState;
+	/** The session as Python, along the bottom of every workspace. */
+	readonly console: ConsoleState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
@@ -1462,7 +1515,7 @@ export class AppState {
 		this.report = new ReportState(this);
 		this.units = new UnitsState(this);
 		this.runLog = new RunLogState(this.analysis);
-		this.modal = new ModalState(this);
+		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
@@ -1566,10 +1619,15 @@ export class AppState {
 	}
 
 	start(): void {
-		const fromHash = location.hash.replace(/^#\/?/, '');
+		// an address from before the split (#analyze) opens the recordings' module
+		const named = (hash: string) => {
+			const h = hash.replace(/^#\/?/, '');
+			return h === 'analyze' ? 'signals' : h;
+		};
+		const fromHash = named(location.hash);
 		if (isWorkspace(fromHash)) this.go(fromHash);
 		window.addEventListener('hashchange', () => {
-			const h = location.hash.replace(/^#\/?/, '');
+			const h = named(location.hash);
 			if (isWorkspace(h)) this.go(h);
 		});
 

@@ -150,48 +150,73 @@ def sine_extraction(project: Any, params: dict[str, Any]) -> list[dict]:
 THRESHOLD = Param('threshold', 'Threshold', 'number', default=3.0, min=0.1, step=0.5, unit='dB')
 
 
-def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.level_error`: extracted sine levels against the
-    specification they were controlled to, Visual Dynamics' Sine view.
-    The Levels reading draws one tone's levels at each control channel
-    over its requirement (`SineSweepSpecification.tone_curve`); the Level
-    Error reading is each channel's signed RMS deviation in dB across the
-    sweep, per tone (`core.compliance.sine_errors`), judged against the
-    threshold either way."""
-    from hertzforge.core.compliance import comparison_note, sine_errors
+def sine_dofs(grouped: Any) -> list[str]:
+    """The control DOFs a sine specification or a level set covers, in
+    order: the specification's own, or the union of its levels', since a
+    tone the instructions windowed may have been read at fewer DOFs (VD's
+    `record_grid.sine_dofs`)."""
+    if hasattr(grouped, 'tones'):
+        return [str(dof) for dof in grouped.response_dof]
+    out: list[str] = []
+    for level in grouped.levels:
+        for dof in level.response_dof:
+            if str(dof) not in out:
+                out.append(str(dof))
+    return out
 
-    spec_name, levels_name = params['specification'], params['levels']
-    spec, levels = project[spec_name], project[levels_name]
-    tones = [tone.name for tone in spec.tones]
-    matched = [level for level in levels.levels if level.tone in tones]
-    if not matched:
-        raise refused(f'{levels_name} holds no tone of {spec_name} '
-                      f'({", ".join(tones)})')
-    tone = _nth(tones, params['tone'], 'tone', spec_name)
-    unit = unit_text(spec.ordinate_dim) if spec.ordinate_unit is not None else None
-    lines = []
-    for level in matched:
+
+def sine_lines(spec: Any, tone: str, levels: list[Any], dofs: list[str] | None = None
+               ) -> tuple[list[dict], str | None]:
+    """The flat reading of one tone: each level of it at each control
+    channel (measured), over the tone's requirement and its warning and
+    abort limits from `spec` when there is one; (lines, amplitude unit).
+    `dofs` restricts the channels drawn, as picks in the tree do."""
+    lines: list[dict] = []
+    unit: str | None = None
+    wanted = None if dofs is None else set(dofs)
+    for level in levels:
         if level.tone != tone:
             continue
         for i, dof in enumerate(level.response_dof):
-            if str(dof) in spec.response_dof:
-                lines.append(_positive(f'{tone} level, {dof}', 'measured', level.abscissa,
-                                       np.abs(level.ordinate[i])))
-    target = spec.tone_curve(tone)
-    looks = (('ordinate', 'requirement', 'reference'), ('warning_lower', 'warning', 'tolerance'),
-             ('warning_upper', 'warning', 'tolerance'), ('abort_lower', 'abort', 'abort'),
-             ('abort_upper', 'abort', 'abort'))
-    for k, dof in enumerate(spec.response_dof):
-        for attribute, words, role in looks:
-            values = getattr(target, attribute, None)
-            if values is not None and np.isfinite(np.asarray(values)[k]).any():
-                lines.append(_positive(f'{tone} {words}, {dof}', role, target.abscissa,
-                                       np.abs(np.asarray(values)[k])))
-    levels_view = v.spectrum(f'{tone}: the extracted levels against the requirement of '
-                             f'{spec_name}', v.axis('Frequency', 'Hz', 'log'),
-                             v.axis('Amplitude', unit, 'log'), lines, link='frequency')
-    threshold = params['threshold']
-    errors = sine_errors(spec, matched)
+            dof = str(dof)
+            if wanted is not None and dof not in wanted:
+                continue
+            if spec is not None and dof not in spec.response_dof:
+                continue
+            lines.append(_positive(f'{tone} level, {dof}', 'measured', level.abscissa,
+                                   np.abs(level.ordinate[i])))
+            if unit is None and level.ordinate_unit is not None and level.ordinate_unit[i]:
+                unit = unit_text(level.ordinate_dim[i])
+    if spec is not None:
+        unit = unit_text(spec.ordinate_dim) if spec.ordinate_unit is not None else None
+        target = spec.tone_curve(tone)
+        looks = (('ordinate', 'requirement', 'reference'),
+                 ('warning_lower', 'warning', 'tolerance'),
+                 ('warning_upper', 'warning', 'tolerance'),
+                 ('abort_lower', 'abort', 'abort'), ('abort_upper', 'abort', 'abort'))
+        for k, dof in enumerate(spec.response_dof):
+            if wanted is not None and str(dof) not in wanted:
+                continue
+            for attribute, words, role in looks:
+                values = getattr(target, attribute, None)
+                if values is not None and np.isfinite(np.asarray(values)[k]).any():
+                    lines.append(_positive(f'{tone} {words}, {dof}', role, target.abscissa,
+                                           np.abs(np.asarray(values)[k])))
+    return lines, unit
+
+
+def sine_error_rows(spec: Any, levels: list[Any], threshold: float,
+                    dofs: list[str] | None = None) -> list[dict]:
+    """The Level Error reading's rows: each channel's signed RMS deviation
+    in dB across the sweep, per tone (`core.compliance.sine_errors`),
+    judged against `threshold`; a pair that cannot be scored keeps its row
+    with the reason. `dofs` restricts the channels, as picks do."""
+    from hertzforge.core.compliance import comparison_note, sine_errors
+
+    tones = [tone.name for tone in spec.tones]
+    errors = sine_errors(spec, levels)
+    if dofs is not None:
+        errors = [error for error in errors if error.dof in dofs]
     rows = []
     for error in errors:
         label = f'{error.dof} {error.tone}' if len(tones) > 1 else error.dof
@@ -206,6 +231,30 @@ def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
     note = comparison_note(errors)
     if note:
         rows.append(v.row('Note', note, None, 'warn'))
+    return rows
+
+
+def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.level_error`: extracted sine levels against the
+    specification they were controlled to, Visual Dynamics' Sine view.
+    The Levels reading draws one tone's levels at each control channel
+    over its requirement (`SineSweepSpecification.tone_curve`); the Level
+    Error reading is each channel's signed RMS deviation in dB across the
+    sweep, per tone (`core.compliance.sine_errors`), judged against the
+    threshold either way."""
+    spec_name, levels_name = params['specification'], params['levels']
+    spec, levels = project[spec_name], project[levels_name]
+    tones = [tone.name for tone in spec.tones]
+    matched = [level for level in levels.levels if level.tone in tones]
+    if not matched:
+        raise refused(f'{levels_name} holds no tone of {spec_name} '
+                      f'({", ".join(tones)})')
+    tone = _nth(tones, params['tone'], 'tone', spec_name)
+    lines, unit = sine_lines(spec, tone, matched)
+    levels_view = v.spectrum(f'{tone}: the extracted levels against the requirement of '
+                             f'{spec_name}', v.axis('Frequency', 'Hz', 'log'),
+                             v.axis('Amplitude', unit, 'log'), lines, link='frequency')
+    rows = sine_error_rows(spec, matched, params['threshold'])
     return [levels_view, v.reading(f'Level Error of {levels_name} against {spec_name}', rows)]
 
 
@@ -1032,7 +1081,7 @@ def remove_shock(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.sine_extraction', title='Sine Levels', workspace='analyze',
+        id='project.sine_extraction', title='Sine Levels', workspace='sine',
         accepts='project',
         summary='How a sweep\'s levels are read out of a time history, stored on it for '
                 'Extract Sine: the smoothing, chosen from the data or set in cycles, and '
@@ -1040,7 +1089,7 @@ OPERATIONS = (
         params=(HISTORY, SWEEP, SMOOTHING, CYCLES, TARGET, REFINE),
         outputs=('spectrum', 'reading'), run=sine_extraction, edits=True),
     Operation(
-        id='project.level_error', title='Level Error', workspace='analyze',
+        id='project.level_error', title='Level Error', workspace='sine',
         accepts='project',
         summary='Extracted sine levels against the specification they were controlled to: '
                 'one tone\'s levels over its requirement, and each channel\'s RMS deviation '
@@ -1048,7 +1097,7 @@ OPERATIONS = (
         params=(SWEEP, LEVELS, TONE, THRESHOLD), outputs=('spectrum', 'reading'),
         run=level_error),
     Operation(
-        id='project.sine_distortion', title='Distortion', workspace='analyze',
+        id='project.sine_distortion', title='Distortion', workspace='sine',
         accepts='project',
         summary='What a sine record carries besides its tones, from the levels last '
                 'extracted from it: the record less the tones against the tones, at every '
@@ -1056,27 +1105,27 @@ OPERATIONS = (
         params=(HISTORY, SWEEP, TONE, CONTROL, EXCESS), outputs=('spectrum', 'reading'),
         run=distortion),
     Operation(
-        id='project.sine_frequency', title='Frequency', workspace='analyze',
+        id='project.sine_frequency', title='Frequency', workspace='sine',
         accepts='project',
         summary='Whether a sine record\'s tone was at the frequency its profile asks for, '
                 'from the levels last extracted from it, at every line of the sweep.',
         params=(HISTORY, SWEEP, TONE, CONTROL, TOLERANCE, AT_LEAST),
         outputs=('spectrum', 'reading'), run=frequency_check),
     Operation(
-        id='project.dwell', title='Dwell', workspace='analyze', accepts='project',
+        id='project.dwell', title='Dwell', workspace='sine', accepts='project',
         summary='A held tone read against time: the steady level it reached, the cycles '
                 'it took to build to a share of it, and the cycles it rang down after the '
                 'stop.',
         params=(HISTORY, SWEEP, CHOSEN, SHARE), outputs=('spectrum', 'reading'), run=dwell),
     Operation(
-        id='project.mixed_mode', title='Mixed-Mode Data Sheet', workspace='analyze',
+        id='project.mixed_mode', title='Mixed-Mode Data Sheet', workspace='sine',
         accepts='project',
         summary='A sine-on-random record as one test: the tones tracked and taken out, the '
                 'floor, each tone, each narrowband and the total, each by its own rule.',
         params=(HISTORY, FLOOR, SWEEP, CONTROL, EXCLUSION, TRACKING, TONE_TOLERANCE),
         outputs=('spectrum', 'reading'), run=mixed_mode),
     Operation(
-        id='project.pulse_check', title='Pulse Check', workspace='analyze',
+        id='project.pulse_check', title='Pulse Check', workspace='shock',
         accepts='project',
         summary='One acceleration channel against a classical pulse\'s tolerance envelope '
                 'and its velocity change; a peak or duration of zero takes the half-sine the '
@@ -1085,14 +1134,14 @@ OPERATIONS = (
                 EDGE_LIMIT, VELOCITY_TOLERANCE, QUIET),
         outputs=('spectrum', 'reading'), run=pulse_check),
     Operation(
-        id='project.stroke', title='Stroke', workspace='analyze', accepts='project',
+        id='project.stroke', title='Stroke', workspace='shock', accepts='project',
         summary='Whether a shock pulse fits on the shaker: its acceleration integrated raw '
                 'to velocity and travel, each against the shaker\'s shock rating where one '
                 'is given.',
         params=(HISTORY, CHOSEN, *STROKE_RATINGS),
         outputs=('spectrum', 'reading'), run=stroke),
     Operation(
-        id='project.replication_fit', title='Replication Fit', workspace='analyze',
+        id='project.replication_fit', title='Replication Fit', workspace='shock',
         accepts='project',
         summary='Whether a shaker can play a reference record: its travel, velocity and '
                 'force at each candidate high-pass cutoff against the ratings, and what each '
@@ -1101,26 +1150,26 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'),
         run=replication_fit),
     Operation(
-        id='project.wavelet', title='Wavelet', workspace='analyze', accepts='project',
+        id='project.wavelet', title='Wavelet', workspace='shock', accepts='project',
         summary='Where one channel\'s frequencies are, moment by moment: its scalogram as a '
                 'surface and flat, the ridge it follows and how much of the range is cone of '
                 'influence.',
         params=(HISTORY, RECORD, LOW_HZ, HIGH_HZ, PER_OCTAVE, OMEGA0),
         outputs=('waterfall', 'matrix', 'spectrum', 'reading'), run=wavelet),
     Operation(
-        id='project.set_shock', title='Shock Window', workspace='analyze', accepts='project',
+        id='project.set_shock', title='Shock Window', workspace='shock', accepts='project',
         summary='One shock window typed by its start and stop on the record\'s clock, held '
                 'off its neighbors; one past the last adds a window.',
         params=(HISTORY, SHOCK, START, STOP, SHOWN),
         outputs=('spectrum', 'waterfall', 'reading'), run=set_shock, edits=True),
     Operation(
-        id='project.remove_shock', title='Remove Shock', workspace='analyze',
+        id='project.remove_shock', title='Remove Shock', workspace='shock',
         accepts='project',
         summary='One shock window dropped from a time history.',
         params=(HISTORY, REMOVED, SHOWN), outputs=('spectrum', 'waterfall', 'reading'),
         run=remove_shock, edits=True),
     Operation(
-        id='project.shocks', title='Shocks', workspace='analyze', accepts='project',
+        id='project.shocks', title='Shocks', workspace='shock', accepts='project',
         summary='A time history\'s shock windows on one record and on its 3-D stage; drag a '
                 'window to move it, or an edge to change it.',
         params=(HISTORY, SHOWN), outputs=('spectrum', 'waterfall', 'reading'), run=shocks),

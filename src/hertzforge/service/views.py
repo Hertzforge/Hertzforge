@@ -177,6 +177,15 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
     return out
 
 
+def image(title: str, fmt: str, data: bytes) -> dict[str, Any]:
+    """An `image` view: a photo as its encoded bytes (png or jpeg), never
+    re-encoded, titled by its name. The shell draws it at its own aspect."""
+    if fmt not in ('png', 'jpeg'):
+        raise ValueError(f'an image view is png or jpeg, not {fmt!r}')
+    return {'view': 'image', 'title': title, 'format': fmt,
+            'bytes': np.frombuffer(bytes(data), dtype=np.uint8)}
+
+
 def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
               curves: Sequence[tuple[Any, Any]], x_range: tuple[float, float],
               z_range: tuple[float, float] | None = None,
@@ -239,6 +248,29 @@ def staged(view: dict[str, Any], stations: Sequence[str], depths: Sequence[int],
         view['walls'] = [np.asarray(w, np.float32) for w in walls]
     if surface:
         view['surface'] = True
+    return view
+
+
+def pathed(view: dict[str, Any], y: dict, y_values: Any, y_range: tuple[float, float],
+           roles: Sequence[str], zones: Sequence[dict] = (),
+           exceed: Sequence[dict] = ()) -> dict[str, Any]:
+    """A `waterfall` view whose records are paths: each point at a depth of
+    its own on the axis `y` (`y_values`, one a point, `y_range` the span),
+    rather than at its record's station, as the sine stage places a tone
+    through time. `zones` carry `y` beside `x` and `exceed` carries `y0`
+    and `y1`, so the bands and the rectangles follow the path."""
+    view['y'] = dict(y)
+    view['y_values'] = np.ascontiguousarray(y_values, dtype=np.float32)
+    if view['y_values'].shape != view['x_values'].shape:
+        raise ValueError('a path needs one depth a point')
+    view['y_range'] = [float(y_range[0]), float(y_range[1])]
+    view['roles'] = list(roles)
+    if zones:
+        view['zones'] = [{**z, **{k: np.asarray(z[k], np.float32)
+                                  for k in ('x', 'y', 'inner', 'outer') if k in z}} for z in zones]
+    if exceed:
+        view['exceed'] = [{**e, **{k: np.asarray(e[k], np.float32)
+                                   for k in ('x0', 'x1', 'y0', 'y1', 'z')}} for e in exceed]
     return view
 
 

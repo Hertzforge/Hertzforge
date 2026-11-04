@@ -81,17 +81,60 @@ def render(project: Any, params: Mapping[str, Any], method: str = 'report.render
                        theme=theme)
 
 
-def export(project: Any, params: Mapping[str, Any], units: Any = None) -> str:
+def _anyway(params: Mapping[str, Any], method: str) -> bool:
+    anyway = params.get('anyway', False)
+    if not isinstance(anyway, bool):
+        raise bad_request(f'{method} "anyway" is true or false')
+    return anyway
+
+
+def export_checks(project: Any, name: str, index: bool = True) -> dict[str, Any]:
+    """What Visual Dynamics asks about before a report leaves the project
+    (`_export_owed`, `_export_index`): with skeleton sections on, the
+    sections (a flash report's parts) the report still owes; with the data
+    index on, every indexed file hashed again and those that do not match
+    the checksum indexed, each with what the check found. `{'owed': [...],
+    'index': [{'name', 'status'}]}`, both empty when nothing is asked.
+    `index` False leaves the files unread (an issue's record step)."""
+    from hertzforge.core.data_index import MATCHES
+    from hertzforge.report.data_index import CHECK_WORDS
+    from hertzforge.report.data_index import FEATURE as INDEX
+    from hertzforge.report.features import enabled
+    from hertzforge.report.skeleton import FEATURE as SKELETON
+
+    report = project[name]
+    features = enabled(report)
+    owed = list(project.report_check(name)) if SKELETON in features else []
+    astray: list[dict[str, str]] = []
+    if index and INDEX in features:
+        try:
+            project.verify_data_index()
+        except OSError as error:
+            raise refused(f'the data index could not be checked: {error}') from None
+        astray = [{'name': entry.name, 'status': CHECK_WORDS[entry.status]}
+                  for entry in project.data_index if entry.status != MATCHES]
+    return {'owed': owed, 'index': astray}
+
+
+def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.export`: the page written to `path` (`.html` added when it
-    has another suffix); the path written. Written beside the target and
-    renamed over it, so a failed write leaves an earlier file whole."""
+    has another suffix); `{'path'}`, the path written. Written beside the
+    target and renamed over it, so a failed write leaves an earlier file
+    whole. First the checks VD makes (`export_checks`): a report that still
+    owes sections or whose indexed files do not all match is not written
+    unless `anyway`; the answer then carries `owed` and `index` and no
+    `path`, for the shell to ask "Export anyway?"."""
+    name = _report(project, params, 'report.export')
     path = params.get('path')
     if not isinstance(path, str) or not path.strip():
         raise bad_request('report.export needs "path", where to write the page')
     path = os.path.expanduser(path.strip())
     if not path.lower().endswith(('.html', '.htm')):
         path += '.html'
-    html = render(project, {'name': params.get('name'), 'theme': 'light'}, 'report.export', units)
+    checks = export_checks(project, name)
+    if (checks['owed'] or checks['index']) and not _anyway(params, 'report.export'):
+        return {'path': None, **checks}
+    html = render(project, {'name': name, 'theme': 'light'}, 'report.export', units)
     partial = f'{path}.partial'
     try:
         with open(partial, 'w', encoding='utf-8') as handle:
@@ -101,7 +144,7 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> str:
         if os.path.exists(partial):
             os.remove(partial)
         raise refused(f'could not write {path}: {error.strerror or error}') from None
-    return path
+    return {'path': path, 'owed': [], 'index': []}
 
 
 def _selected(params: Mapping[str, Any], method: str) -> int | None:
@@ -184,7 +227,11 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
             status = issue_ready(report, project, project.object_groups)
         except ValueError as error:
             raise refused(str(error)) from None
-        project._verify_index_for(name)
+        # VD's `_export_index` with the act 'Issue': the files hashed again,
+        # and an issue of a report whose files do not all match is asked about
+        checks = export_checks(project, name)
+        if checks['index'] and not _anyway(params, 'report.issue'):
+            return {'index': checks['index']}
         before = mark_issued(report, status)
         page = render_html(report, project, units, object_groups=project.object_groups)
         _PENDING[id(report)] = (before, page)

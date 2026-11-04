@@ -13,8 +13,9 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
 	import { spans, type Span } from './brackets';
+	import { treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
-	import { kindRank, objectIcon, solidIcon } from './icons';
+	import { objectIcon, solidIcon } from './icons';
 
 	interface Props {
 		app: AppState;
@@ -22,11 +23,8 @@
 	let { app }: Props = $props();
 
 	const p = $derived(app.project);
-	/** The objects in the tree's order: by kind, then as they arrived. */
-	const objects = $derived.by(() => {
-		const listed = p.summary?.objects ?? [];
-		return listed.map((o, i) => ({ o, i })).sort((a, b) => kindRank(a.o.kind) - kindRank(b.o.kind) || a.i - b.i).map((x) => x.o);
-	});
+	/** The objects in the tree's order: each group together, the Basis first, then the rest by kind. */
+	const objects = $derived(treeOrder(p.summary?.objects ?? [], p.summary?.links));
 	const order = $derived(objects.map((o) => o.name));
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
@@ -86,6 +84,17 @@
 		const to = newName.trim();
 		p.renaming = null;
 		if (name && to && to !== name) await p.rename(name, to);
+	}
+	/** A photo's name typed over in its row (double-click, or F2 on the picked photo). */
+	function startPartRename(name: string, index: number, current: string) {
+		p.renamingPart = { name, index };
+		newName = current;
+	}
+	async function commitPartRename(current: string) {
+		const part = p.renamingPart;
+		const to = newName.trim();
+		p.renamingPart = null;
+		if (part && to && to !== current) await p.renamePart(part.name, part.index, to);
 	}
 	function focusAndSelect(node: HTMLInputElement) {
 		node.focus();
@@ -222,7 +231,8 @@
 		</div>
 		{#if open}
 			{@const kids = held(o.name)}
-			<div class="kids" role="group" data-testid="children-{o.name}">
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<div class="kids" role="group" data-testid="children-{o.name}" onkeydown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length && !(e.target as HTMLElement).closest('input')) { e.preventDefault(); p.confirming = true; } }}>
 				{#if !kids}
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
@@ -334,9 +344,27 @@
 					{/each}
 				{:else if kids.kind === 'photos'}
 					{#each kids.photos as photo, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} ondblclick={() => startPartRename(o.name, i, photo)} onkeydown={(e) => { if (e.key === 'Enter') p.clickRecord(o.name, i); else if (e.key === 'F2') { e.stopPropagation(); startPartRename(o.name, i, photo); } }}>
 							<Glyph name="photos" size={14} />
-							<span class="label">{photo}</span>
+							{#if p.renamingPart?.name === o.name && p.renamingPart.index === i}
+								<input
+									class="field rename"
+									aria-label="New name for the photo {photo}"
+									data-testid="rename-photo-field"
+									bind:value={newName}
+									use:focusAndSelect
+									onclick={(e) => e.stopPropagation()}
+									ondblclick={(e) => e.stopPropagation()}
+									onkeydown={(e) => {
+										e.stopPropagation();
+										if (e.key === 'Enter') void commitPartRename(photo);
+										if (e.key === 'Escape') p.renamingPart = null;
+									}}
+									onblur={() => (p.renamingPart = null)}
+								/>
+							{:else}
+								<span class="label">{photo}</span>
+							{/if}
 						</div>
 					{/each}
 				{:else if kids.kind === 'matches'}

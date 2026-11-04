@@ -161,3 +161,18 @@ def test_the_server_answers_children_and_refuses_an_unknown_name():
 def test_children_needs_an_open_project():
     with pytest.raises(ProtocolError, match='none is open'):
         projects.children(None, {'name': 'x'})
+
+
+def test_sine_objects_open_into_their_control_dofs(validate):
+    """The rows under a sine specification or a level set are its control
+    DOFs, as VD lays them (the tones are the bar's drop-down)."""
+    from hertzforge.core.sine import SineSweepSpecification, SineTone
+
+    project = Project()
+    tone = SineTone('Up', 0.5, [100.0, 500.0], [[2.0, 1.0]] * 2, [0], [100.0])
+    project.add('Profile', SineSweepSpecification([tone], ['101Z+', '102Z+'],
+                                                  ordinate_unit='m/s**2'))
+    held = tree.children(project, 'Profile')
+    validate(held, 'children')
+    assert held == {'kind': 'channels', 'channels': [
+        {'dof': '101Z+', 'quantity': 'acceleration'}, {'dof': '102Z+', 'quantity': 'acceleration'}]}

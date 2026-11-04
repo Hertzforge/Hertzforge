@@ -13,7 +13,7 @@
 	 * is a reminder, never an interlock.
 	 */
 	import { onDestroy, onMount } from 'svelte';
-	import { chooseRunLog, hasNativeFiles } from '$lib/project/files';
+	import { chooseExportPath, chooseRunLog, hasNativeFiles } from '$lib/project/files';
 	import type { RunLogState, Typing } from './store.svelte';
 	import { actFor, byDate, keyName, notices, sinceWords, statusWords } from './words';
 
@@ -37,6 +37,23 @@
 	let ticker: ReturnType<typeof setInterval> | undefined;
 	let dayList: HTMLOListElement | undefined = $state();
 	let pathTyped = $state('');
+	/** The export's view and scope, as VD's dock offers them. */
+	let exportView = $state<'text' | 'csv' | 'machine'>('text');
+	let exportWhole = $state(true);
+	const EXPORT_VIEWS: [typeof exportView, string, string][] = [
+		['text', 'Text', 'The log as it reads: every entry in the order written, corrections struck and restated'],
+		['csv', 'CSV with corrections', 'Every entry as stored, one row each, corrections included'],
+		['machine', 'Machine log CSV', 'The trips and machine events, for the lab\'s own machine log']
+	];
+	async function exportLog() {
+		if (!log) return;
+		if (native) {
+			const ext = exportView === 'text' ? 'txt' : 'csv';
+			const name = (log.title || 'Run log') + (exportWhole || rl.test === null ? '' : ` test ${rl.test}`);
+			const path = await chooseExportPath('Export Run Log', `${name}.${ext}`, { name: exportView === 'text' ? 'Text' : 'CSV', extensions: [ext] });
+			if (path) void rl.exportLog(path, exportView, exportWhole);
+		} else rl.asking = rl.asking === 'export' ? null : 'export';
+	}
 
 	onMount(() => {
 		void rl.sync();
@@ -155,6 +172,13 @@
 			<button class="btn ghost sm" data-testid="runlog-open" onclick={openLog} title="Open a run log; read-only when another program is writing it">Open Log</button>
 			<button class="btn ghost sm" disabled={!log} onclick={() => rl.closeLog()} title="Close the log and release it for another writer">Close Log</button>
 			<button class="btn ghost sm" disabled={!log} onclick={() => rl.reload()} title="Read the log again from its file">Reload</button>
+			<select class="field sm" aria-label="Export view" data-testid="runlog-export-view" bind:value={exportView} disabled={!log} title="Which view of the log an export writes">
+				{#each EXPORT_VIEWS as [value, label, words] (value)}<option {value} title={words}>{label}</option>{/each}
+			</select>
+			{#if rl.test !== null}
+				<label class="scope" title="The whole log, or the test the day list shows"><input type="checkbox" bind:checked={exportWhole} /> Whole log</label>
+			{/if}
+			<button class="btn ghost sm" data-testid="runlog-export" disabled={!log} onclick={exportLog} title="Write the chosen view of the log to a file">Export</button>
 			<button class="btn ghost sm" data-testid="runlog-alone" onclick={() => (rl.alone = !rl.alone)} title="Show the workspace beside the log, or the log alone">{rl.alone ? 'Whole Window' : 'Log Only'}</button>
 			<button class="btn ghost sm" onclick={() => rl.toggle()} title="Put the run log away; the log stays open">Hide</button>
 		</div>
@@ -168,6 +192,14 @@
 		{/if}
 	</header>
 
+	{#if rl.asking === 'export'}
+		<form class="ask" onsubmit={(e) => (e.preventDefault(), void rl.exportLog(pathTyped, exportView, exportWhole))}>
+			<label for="rl-export-path">Write the {EXPORT_VIEWS.find(([v]) => v === exportView)?.[1].toLowerCase()} to</label>
+			<input id="rl-export-path" class="field" bind:value={pathTyped} placeholder={exportView === 'text' ? '/path/to/the log.txt' : '/path/to/the log.csv'} />
+			<button class="btn sm primary" type="submit">Export</button>
+			<button class="btn ghost sm" type="button" onclick={() => (rl.asking = null)}>Cancel</button>
+		</form>
+	{/if}
 	{#if rl.asking === 'open'}
 		<form class="ask" onsubmit={(e) => (e.preventDefault(), void rl.openLog(pathTyped))}>
 			<label for="rl-open-path">Run log to open</label>
@@ -350,6 +382,19 @@
 
 	.acts .gap {
 		flex: 1;
+	}
+
+	.acts .field.sm {
+		width: auto;
+		flex: 0 0 auto;
+	}
+
+	.acts .scope {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: var(--text-xs);
+		color: var(--text-3);
 	}
 
 	.abort {

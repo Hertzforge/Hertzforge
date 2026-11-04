@@ -247,6 +247,11 @@ export interface WaterfallView {
 	title: string;
 	x: Axis;
 	z: Axis;
+	/** A stage of paths: every point at a depth of its own on this axis (the sine stage's time). */
+	y?: Axis;
+	/** f32 [P]: each point's depth on `y`. */
+	y_values?: Float32Array;
+	y_range?: [number, number];
 	/** One label per record, front to back. */
 	records: string[];
 	/** u32 [R + 1]: record r is points offsets[r] .. offsets[r + 1]. */
@@ -289,6 +294,8 @@ export interface StageZone {
 	kind: 'warning' | 'abort';
 	side: 'upper' | 'lower';
 	x: Float32Array;
+	/** On a stage of paths: the depth of each point, so the band follows the path. */
+	y?: Float32Array;
 	inner: Float32Array;
 	outer?: Float32Array;
 }
@@ -298,6 +305,9 @@ export interface StageExceed {
 	side: 'upper' | 'lower';
 	x0: Float32Array;
 	x1: Float32Array;
+	/** On a stage of paths: each rectangle's depths at its two edges. */
+	y0?: Float32Array;
+	y1?: Float32Array;
 	z: Float32Array;
 }
 
@@ -375,13 +385,27 @@ export interface TableEdit {
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView;
+/** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
+export interface ImageView {
+	view: 'image';
+	title: string;
+	format: 'png' | 'jpeg';
+	/** u8 [N]: the encoded file. */
+	bytes: Uint8Array;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView | ImageView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------
 // Operations and datasets
 
-export type Workspace = 'acquire' | 'analyze' | 'modal' | 'model' | 'specify' | 'simulate' | 'report';
+/**
+ * The modules on the rail. The analysis is split by what is studied (signals, random, shock, sine,
+ * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
+ * project type as Visual Dynamics did.
+ */
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'random' | 'shock' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
 export type DatasetKind = 'random_run' | 'modal_model' | 'modal_run';
 
@@ -452,7 +476,9 @@ export interface ProjectSummary {
 export interface Action {
 	id: string;
 	title: string;
-	workspace: string;
+	workspace: Workspace;
+	/** Offered in every analysis module. */
+	everywhere?: boolean;
 	fill: Record<string, string>;
 }
 
@@ -484,6 +510,9 @@ export interface Shown {
 		/** A lone channel table: its control loops, and the views the picked one holds. */
 		environments: string[];
 		table_views: string[];
+		/** A sine specification or level set: its tones, and with both the Level Error reading. */
+		tones: string[];
+		sine_readings: boolean;
 	};
 }
 
@@ -508,6 +537,9 @@ export interface ShowPrefs {
 	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
 	environment: string | null;
 	table_view: 'channels' | 'response' | 'reference';
+	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
+	tone: string | null;
+	sine_reading: 'curves' | 'bars';
 	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
@@ -609,7 +641,10 @@ export interface ProjectProgress {
 export interface OperationDescriptor {
 	id: string;
 	title: string;
+	/** The module that offers it, its home. */
 	workspace: Workspace;
+	/** Offered in every analysis module, not only its home: an act any study needs. */
+	everywhere?: boolean;
 	/** A dataset kind, or `project` for an operation on the connection's own project. */
 	accepts: DatasetKind | 'project';
 	summary?: string;

@@ -52,10 +52,30 @@ def test_channel_param_comes_from_the_dataset(catalog):
         assert 'options' not in channel
 
 
+def test_every_module_has_its_tools_and_the_shared_ones_say_so(catalog):
+    """The analysis is split into modules by what is studied, one rail entry
+    each, and an act every study needs is offered in every module."""
+    from hertzforge.service.descriptors import Workspace
+
+    modules = set(Workspace.__args__)
+    homes = {op['id']: op['workspace'] for op in catalog['operations']}
+    assert set(homes.values()) <= modules
+    for module in ('signals', 'random', 'shock', 'sine', 'modal', 'geometry', 'model',
+                   'specify', 'report'):
+        assert module in homes.values(), module
+    assert homes['project.shocks'] == 'shock' and homes['project.dwell'] == 'sine'
+    assert homes['project.add_solid_block'] == 'geometry' and homes['project.mesh_solids'] == 'model'
+    shared = {op['id'] for op in catalog['operations'] if op.get('everywhere')}
+    assert {'project.plot', 'project.table', 'project.save_as', 'project.set_averaging',
+            'project.set_channel_cell'} <= shared
+    assert 'project.shocks' not in shared
+
+
 def test_workspaces_and_outputs(catalog):
     by_id = {op['id']: op for op in catalog['operations']}
-    assert by_id['random.psd_vs_spec']['workspace'] == 'analyze'
+    assert by_id['random.psd_vs_spec']['workspace'] == 'random'
     assert by_id['random.psd_vs_spec']['outputs'] == ['spectrum', 'reading']
+    assert 'everywhere' not in by_id['random.psd_vs_spec']
     assert by_id['random.error_db']['outputs'] == ['spectrum']
     assert by_id['modal.modes']['workspace'] == 'modal'
     assert by_id['modal.modes']['outputs'] == ['shape3d']

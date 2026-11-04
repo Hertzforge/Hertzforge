@@ -9,6 +9,8 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import { choosePdf, chooseReportPath, hasNativeFiles } from '$lib/project/files';
 	import { theme } from '$lib/theme/theme.svelte';
+	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import ActionsFrame from './ActionsFrame.svelte';
 
 	interface Props {
 		app: AppState;
@@ -17,6 +19,20 @@
 
 	const r = $derived(app.report);
 	const reports = $derived((app.project.summary?.objects ?? []).filter((o) => o.kind === 'report').map((o) => o.name));
+
+	// the report shown is the selection the Actions frame works on: Report Features, Identity,
+	// the findings and chronology, every report operation, offered as the module's acts
+	$effect(() => {
+		const name = r.name;
+		if (!name || !app.project.summary || app.project.selection.objects.includes(name)) return;
+		app.project.clickObject(name, app.project.summary.objects.map((o) => o.name));
+	});
+	// a report operation run on the project gives a reading (as Visual Dynamics' acts do, until
+	// Back); it shows here, and the page follows what the act changed
+	const a = $derived(app.analyze);
+	$effect(() => {
+		if (a.reading && r.name) void r.show(r.name);
+	});
 
 	const TEMPLATES = [
 		['modal', 'Modal test'],
@@ -135,7 +151,7 @@
 		<section class="block">
 			<h2 class="eyebrow">Report</h2>
 			{#if !app.project.summary}
-				<p class="muted">Open a project or import your files in Analyze; a report is built from the project's objects.</p>
+				<p class="muted">Open a project or import your files in any analysis module; a report is built from the project's objects.</p>
 			{:else}
 				<label class="lbl" for="report-template">Template</label>
 				<select id="report-template" class="field" bind:value={template} data-testid="report-template">
@@ -169,6 +185,22 @@
 					</form>
 				{/if}
 				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>.</p>{/if}
+				{#if r.held}
+					<div class="ask held" data-testid="report-held" role="alertdialog" aria-label="The report is not ready">
+						{#if r.held.owed.length}
+							<p class="muted">{r.name} still owes {r.held.owed.length} {r.held.owed.length === 1 ? 'section' : 'sections'}:</p>
+							<ul class="owed">{#each r.held.owed as line (line)}<li>{line}</li>{/each}</ul>
+						{/if}
+						{#if r.held.index.length}
+							<p class="muted">{r.held.index.length} {r.held.index.length === 1 ? 'file' : 'files'} in the data index of {r.name} {r.held.index.length === 1 ? 'does' : 'do'} not match the checksum indexed:</p>
+							<ul class="owed">{#each r.held.index as entry (entry.name)}<li>{entry.name}: {entry.status}</li>{/each}</ul>
+						{/if}
+						<div class="row">
+							<button class="btn sm danger" data-testid="report-anyway" onclick={() => r.anyway()} disabled={r.busy !== null}>{r.held.act === 'export' ? 'Export anyway' : 'Issue anyway'}</button>
+							<button class="btn ghost sm" onclick={() => (r.held = null)}>Not yet</button>
+						</div>
+					</div>
+				{/if}
 				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
 					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
 				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
@@ -184,6 +216,20 @@
 				{/if}
 				{#if r.issued}<p class="muted" data-testid="report-issued">Issued {r.issued.number} revision {r.issued.revision}, PDF {r.issued.sha256?.slice(0, 12)}.</p>{/if}
 			</section>
+		{/if}
+		{#if r.name && app.project.summary}
+			<ActionsFrame {app} only="report" />
+			{#if a.reading}
+				<section class="block" data-testid="report-result" aria-label="The reading">
+					<div class="phead">
+						<h2 class="eyebrow">{a.reading.title}</h2>
+						<button class="btn ghost sm" data-testid="report-reading-back" onclick={() => a.endReading()}>Back</button>
+					</div>
+					{#each a.reading.views as v, i (i)}
+						<ViewRenderer view={v} layout="strip" showTitle={v.view !== 'reading'} minHeight={160} />
+					{/each}
+				</section>
+			{/if}
 		{/if}
 		{#if ed}
 			<section class="block pane" data-testid="report-pane" aria-label="Selection">
@@ -263,6 +309,33 @@
 </div>
 
 <style>
+	.phead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-2);
+		margin-bottom: var(--sp-2);
+	}
+
+	.held {
+		margin-top: var(--sp-2);
+		padding: var(--sp-3);
+		border: 1px solid var(--amber-2);
+		border-radius: var(--radius-md);
+	}
+
+	.owed {
+		margin: var(--sp-1) 0 var(--sp-2);
+		padding-left: var(--sp-4);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+	}
+
+	.held .row {
+		display: flex;
+		gap: var(--sp-2);
+	}
+
 	.report {
 		display: grid;
 		grid-template-columns: 316px minmax(0, 1fr);

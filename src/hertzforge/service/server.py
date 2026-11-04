@@ -56,9 +56,9 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
-                   'project.rename', 'project.remove', 'project.activate',
+                   'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
-                   'project.units', 'project.define_units', 'project.children',
+                   'project.units', 'project.define_units', 'project.children', 'project.journal',
                    'project.show', 'project.actions')
 
 #: the largest frame a client may send; requests are small
@@ -342,11 +342,15 @@ class Connection:
             self.project, added = await call(projects.import_file, self.project,
                                              params, report)
             return {'added': added, 'project': projects.summary(self.project)}
-        edits = {'project.rename': (projects.rename, ('name', 'to')),
+        edits = {'project.rename': (projects.rename, ('name', 'to', 'index')),
                  'project.remove': (projects.remove, ('names',)),
+                 'project.delete_parts': (projects.delete_parts, ('parts',)),
                  'project.activate': (projects.activate, ('geometry',)),
                  'project.duplicate': (projects.duplicate, ('names',)),
                  'project.refresh': (projects.refresh, ('names',))}
+        if method == 'project.journal':
+            _only(params, (), method)
+            return await call(projects.journal, self.project, params)
         if method == 'project.units':
             _only(params, ('name',), method)
             return await call(projects.units, self.project, params)
@@ -406,11 +410,11 @@ class Connection:
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
         keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
-                'report.export': ('name', 'path'),
+                'report.export': ('name', 'path', 'anyway'),
                 'report.editor': ('name', 'selected', 'theme', 'page'),
                 'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
                                    'kind', 'field', 'value'),
-                'report.print': ('name',), 'report.issue': ('name', 'step', 'path')}
+                'report.print': ('name',), 'report.issue': ('name', 'step', 'path', 'anyway')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -436,7 +440,7 @@ class Connection:
                 edited = await call(reports.operate, project, params, self.system)
                 self.project.modified = True
                 return {**edited, 'project': projects.summary(self.project)}
-            return {'path': await call(reports.export, project, params, self.system)}
+            return await call(reports.export, project, params, self.system)
 
     @property
     def system(self) -> Any:

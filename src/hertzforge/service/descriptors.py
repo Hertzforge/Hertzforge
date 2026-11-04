@@ -16,8 +16,13 @@ from typing import Any, Literal
 from .protocol import bad_request, refused
 
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
-Workspace = Literal['acquire', 'analyze', 'modal', 'model', 'specify',
-                    'simulate', 'report']
+#: the module an operation belongs to: the shell's rail entry that offers it.
+#: The analysis modules split what Visual Dynamics put under one window by
+#: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
+#: is not offered shock tools; an operation every module needs (Plot
+#: Records, Save As, the averaging settings) says `everywhere`.
+Workspace = Literal['acquire', 'simulate', 'signals', 'random', 'shock', 'sine',
+                    'modal', 'geometry', 'model', 'specify', 'report']
 DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
 #: what an operation runs on: a catalog dataset of one kind, or the
 #: connection's own project
@@ -211,15 +216,21 @@ class Operation:
     #: on a history), so the project has unsaved changes even when no
     #: object was added or removed
     edits: bool = False
+    #: offered in every analysis module, not only its own: an act any
+    #: study needs (Plot Records, Save As, a table's cell edit)
+    everywhere: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`
         stays behind."""
-        return {'id': self.id, 'title': self.title,
-                'workspace': self.workspace, 'accepts': self.accepts,
-                'summary': self.summary,
-                'params': [param.to_json() for param in self.params],
-                'outputs': list(self.outputs)}
+        out = {'id': self.id, 'title': self.title,
+               'workspace': self.workspace, 'accepts': self.accepts,
+               'summary': self.summary,
+               'params': [param.to_json() for param in self.params],
+               'outputs': list(self.outputs)}
+        if self.everywhere:
+            out['everywhere'] = True
+        return out
 
     def resolve(self, given: Any, channels: Sequence[str] = (),
                 objects: Mapping[str, str] | None = None,

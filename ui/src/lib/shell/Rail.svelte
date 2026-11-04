@@ -1,5 +1,5 @@
 <script lang="ts">
-	/** The workspace rail. Alt plus 1 to 7 jumps; arrow keys move between items. */
+	/** The workspace rail. Alt plus 1 to 9 jumps to the first nine; arrow keys move between items. */
 	import { WORKSPACES } from '$lib/app/workspaces';
 	import type { Workspace } from '$lib/protocol/types';
 	import Icon from './Icon.svelte';
@@ -29,9 +29,8 @@
 			class="item"
 			data-testid="rail-{w.id}"
 			class:active={w.id === current}
-			class:planned={!w.live}
 			aria-current={w.id === current ? 'page' : undefined}
-			title="{w.title} (Alt+{i + 1}){w.live ? '' : ', planned'}"
+			title="{w.title}{i < 9 ? ` (Alt+${i + 1})` : ''}: {w.summary}"
 			onclick={() => onselect(w.id)}
 		>
 			<span class="ico"><Icon name={w.id} size={20} /></span>
@@ -103,14 +102,5 @@
 		font-weight: var(--weight-medium);
 		line-height: 1.2;
 		text-align: center;
-	}
-
-	.planned .lbl {
-		color: var(--text-4);
-	}
-
-	.planned:hover .lbl,
-	.planned.active .lbl {
-		color: var(--text-2);
 	}
 </style>

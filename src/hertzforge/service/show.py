@@ -86,7 +86,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'mode_table': True, 'mac': True, 'shape_values': False,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
-         'environment': None, 'table_view': 'channels'}
+         'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
 TABLE_VIEWS = ('channels', 'response', 'reference')
 
@@ -316,6 +316,19 @@ def _alone(project: Any, name: str, picks: list[int],
         return [v.table(f'{name}: {environment}, {form} transformation', headers, rows)], notes
     if isinstance(obj, MatchedModes):
         return _run(project, 'project.table', object=name), []
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
+
+    if isinstance(obj, Photos):
+        # every photo, or the picked ones, stacked as VD's `_render_photos`
+        shown = [i for i in sorted(set(picks)) if i < obj.num_photos] or range(obj.num_photos)
+        views = [v.image(obj.names[i], obj.formats[i], obj.images[i]) for i in shown]
+        count = len(views)
+        return views, [f'{count} photo{"s" * (count != 1)}'] if picks else []
+    if isinstance(obj, SineSweepSpecification):
+        return _sine(project, name, None, {name: picks}, {**PREFS, **(prefs or {})})
+    if isinstance(obj, SineLevelSet):
+        return _sine(project, None, name, {name: picks}, {**PREFS, **(prefs or {})})
     if _is_data(obj):
         prefs = {**PREFS, **(prefs or {})}
         component = prefs['component']
@@ -339,6 +352,103 @@ def _alone(project: Any, name: str, picks: list[int],
             v.row('Blocks', float(blocks), '', 'info'),
             v.row('Edited in', 'the Report workspace', None, 'info')])], []
     return [], [f'{name} ({_kind(obj).replace("_", " ")}) has no view of its own here yet']
+
+
+#: the sine readings a specification with its levels offers: the curves, or
+#: one signed number per tone per channel
+SINE_READINGS = ('curves', 'bars')
+
+
+def _sine(project: Any, spec_name: str | None, levels_name: str | None,
+          records: dict[str, list[int]], prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
+    """A sine specification, extracted levels, or both together, as VD's
+    `_render_sine` reads them: one tone at a time (the bar's drop-down,
+    `prefs['tone']`), the levels at each control channel over the tone's
+    requirement and limits, and with both objects the Level Error reading
+    (`prefs['sine_reading']` 'bars'): each channel's signed RMS deviation
+    in dB. The rows under either object are its control DOFs, and picks on
+    them restrict the reading. The stage (frequency across, time receding,
+    amplitude up) is not drawn yet."""
+    from hertzforge.core.compliance import SINE_ERROR_DB
+
+    from .ops_sine_shock import sine_dofs, sine_error_rows, sine_lines
+
+    spec = project[spec_name] if spec_name else None
+    level_set = project[levels_name] if levels_name else None
+    tones = [tone.name for tone in spec.tones] if spec is not None else list(level_set.tone_names)
+    if not tones:
+        return [], [f'{spec_name or levels_name} holds no tone']
+    tone = prefs.get('tone') if prefs.get('tone') in tones else tones[0]
+    picked: list[str] = []
+    for name, obj in ((spec_name, spec), (levels_name, level_set)):
+        if obj is None:
+            continue
+        dofs = sine_dofs(obj)
+        picked += [dofs[i] for i in sorted(set(records.get(name, []))) if i < len(dofs)
+                   and dofs[i] not in picked]
+    dofs = picked or None
+    levels = list(level_set.levels) if level_set is not None else []
+    if spec is not None:
+        levels = [level for level in levels if level.tone in tones]
+    notes: list[str] = []
+    if level_set is not None and spec is not None and not levels:
+        notes.append(f'{levels_name} holds no tone of {spec_name} ({", ".join(tones)})')
+    where = f' at {", ".join(dofs)}' if dofs else ''
+    if not prefs.get('flat'):
+        # VD's default reading of a sweep: the stage, frequency across, time
+        # receding, amplitude up; the bar's Flat is the per-channel plot
+        from .sine_stage import sine_stage
+
+        if spec is not None and levels:
+            shown = [level for level in levels if level.tone == tone]
+            what = (f'{tone}{where}: {len(shown)} level{"s" * (len(shown) != 1)} against the '
+                    f'requirement of {spec_name}')
+        elif spec is not None:
+            what = f'{tone}{where}: the requirement of {spec_name}'
+        else:
+            what = f'{tone}{where}: the extracted level'
+        stage = sine_stage(spec, levels, tone, dofs, title=what)
+        if stage is None:
+            return [], notes + [f'nothing to draw for {tone}{where}']
+        if prefs.get('sine_reading') == 'bars' and spec is not None and levels:
+            try:
+                rows = sine_error_rows(spec, levels, SINE_ERROR_DB, dofs)
+            except ProtocolError as error:
+                return [stage], notes + [str(error)]
+            return [stage, v.reading(f'Level Error of {levels_name} against {spec_name}', rows)], notes
+        return [stage], notes
+    if spec is not None and levels and prefs.get('sine_reading') == 'bars':
+        try:
+            rows = sine_error_rows(spec, levels, SINE_ERROR_DB, dofs)
+        except ProtocolError as error:
+            return [], [str(error)]
+        return [v.reading(f'Level Error of {levels_name} against {spec_name}', rows)], notes
+    lines, unit = sine_lines(spec, tone, levels, dofs)
+    if not lines:
+        return [], notes + [f'nothing to draw for {tone}{where}']
+    if spec is None:
+        what = f'{tone}{where}: the extracted level'
+    elif levels:
+        shown = [level for level in levels if level.tone == tone]
+        what = (f'{tone}{where}: {len(shown)} level{"s" * (len(shown) != 1)} against the '
+                f'requirement of {spec_name}')
+    else:
+        what = f'{tone}{where}: the requirement of {spec_name}'
+    view = v.spectrum(what, v.axis('Frequency', 'Hz', 'log'), v.axis('Amplitude', unit, 'log'),
+                      lines, link='frequency')
+    return [view], notes
+
+
+def _sine_pair(project: Any, first: str, second: str) -> tuple[str, str] | None:
+    """(specification, level set) when the two are one of each, else None."""
+    from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
+
+    a, b = project[first], project[second]
+    if isinstance(a, SineSweepSpecification) and isinstance(b, SineLevelSet):
+        return first, second
+    if isinstance(b, SineSweepSpecification) and isinstance(a, SineLevelSet):
+        return second, first
+    return None
 
 
 def _faced(views: list[dict], obj: Any) -> None:
@@ -676,6 +786,9 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
           prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]] | None:
     """What two objects show together, or None when the pair has no joint
     reading."""
+    sine = _sine_pair(project, first, second)
+    if sine is not None:
+        return _sine(project, sine[0], sine[1], records, {**PREFS, **(prefs or {})})
     from hertzforge.core.channel_table import ChannelTable
     from hertzforge.core.data import (
         Frf,
@@ -838,7 +951,22 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
             placed = project.sensors(table[0])[0]
         except (TypeError, ValueError):
             placed = []
+    from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
+
+    specs = [project[name] for name in objects if isinstance(project[name], SineSweepSpecification)]
+    level_sets = [project[name] for name in objects if isinstance(project[name], SineLevelSet)]
+    sine = (len(objects) == len(specs) + len(level_sets) and len(specs) <= 1
+            and len(level_sets) <= 1 and objects)
+    if sine:
+        data = [*specs, *level_sets]
+    tones: list[str] = []
+    if sine:
+        tones = ([tone.name for tone in specs[0].tones] if specs
+                 else list(level_sets[0].tone_names))
     return {
+        'tones': tones,
+        'sine_readings': bool(sine and specs and level_sets and any(
+            level.tone in tones for level in level_sets[0].levels)),
         'shapes': alone,
         'values_dofs': choices,
         'environments': loops,

@@ -1,11 +1,15 @@
 <script lang="ts" module>
 	export type IconName =
 		| 'acquire'
-		| 'analyze'
+		| 'simulate'
+		| 'signals'
+		| 'random'
+		| 'shock'
+		| 'sine'
 		| 'modal'
+		| 'geometry'
 		| 'model'
 		| 'specify'
-		| 'simulate'
 		| 'report'
 		| 'search'
 		| 'play'
@@ -51,9 +55,19 @@
 	{#if name === 'acquire'}
 		<rect x="2.5" y="4" width="15" height="12" rx="2" />
 		<path d="M4.5 10.5c1.2 0 1.2-3.5 2.4-3.5s1.2 6 2.4 6 1.2-4.5 2.4-4.5 1.2 2.5 2.4 2.5h1.4" />
-	{:else if name === 'analyze'}
+	{:else if name === 'signals'}
+		<path d="M2.5 10h2l1.5-4 2 8 2-6 1.5 3 1.5-1.5 1.5 1.5h3" />
+	{:else if name === 'random'}
 		<path d="M3 3v14h14" />
 		<path d="M5.5 13.5l2.5-5 2.5 3.5 2.2-6 2.3 4" />
+	{:else if name === 'shock'}
+		<path d="M2.5 13h4l2-9 2 13 2-7 1.5 3h3.5" />
+	{:else if name === 'sine'}
+		<path d="M2.5 10c1.9-6 3.7-6 5.6 0s3.7 6 5.6 0 2.7-4.5 3.8-3" />
+	{:else if name === 'geometry'}
+		<path d="M4 15.5h12l-3-5.5H7z" />
+		<path d="M10 3.5v6.5M7 10l-3 5.5M13 10l3 5.5" />
+		<circle cx="10" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
 	{:else if name === 'modal'}
 		<path d="M2.5 10c2.5-5 5-5 7.5 0s5 5 7.5 0" />
 		<path d="M2.5 10c2.5 5 5 5 7.5 0s5-5 7.5 0" opacity="0.45" />
