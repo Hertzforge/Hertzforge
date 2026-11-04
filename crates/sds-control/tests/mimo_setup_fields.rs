@@ -159,7 +159,7 @@ fn reference(plant: StandardPlant, n: usize, vrms: f64, unreachable: f64) -> Val
 
 /// A 4 by 4 setup on table rows 1 to 4 (controls) and 5 to 8 (drives).
 fn setup(review: bool) -> Value {
-    json!({
+    let mut s = json!({
         "title": "Four-Axis Random",
         "channels": {
             "controls": (1..=4).map(|c| json!({"channel": c, "alarm_db": [3, 3], "abort_db": [6, 6]})).collect::<Vec<_>>(),
@@ -176,7 +176,16 @@ fn setup(review: bool) -> Value {
         "schedule": {"mode": "auto", "levels": [{"db": -6, "dwell_s": 600}, {"db": 0}],
                      "full_level_s": 600},
         "backend": {"kind": "sim"},
-    })
+    });
+    // A debug build of the linear algebra is many times slower than release; the
+    // law's time budget is the design's in release and the whole loop in a debug
+    // test run, as the service's own convergence tests have it (a 12 by 6 seed on
+    // a loaded CI runner overran a quarter of the loop). A test of the budget sets
+    // its own after this.
+    if cfg!(debug_assertions) {
+        s["control"]["law_budget"] = json!(1.0);
+    }
+    s
 }
 
 /// A shaker record in the shaker database's form, rated `force_lbf` random.

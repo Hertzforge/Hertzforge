@@ -985,7 +985,10 @@ pub fn import(params: &Map<String, Value>, root: &Path) -> Result<(Value, Arrays
             )
         })?;
     let path = PathBuf::from(path.trim());
-    if !path.is_absolute() {
+    let kind = file_kind(&path);
+    // A .mat or .hforge is never read here, so its refusal does not depend on
+    // the path's shape (a Unix-absolute path is relative on Windows).
+    if !path.is_absolute() && !matches!(kind, FileKind::Convert) {
         return Err(bad(
             "path",
             "Give the full path of the file or folder, on the computer that runs the test.",
@@ -1003,7 +1006,7 @@ pub fn import(params: &Map<String, Value>, root: &Path) -> Result<(Value, Arrays
             .push(Item::field("reference_file", "path", message));
         out
     };
-    let out = match file_kind(&path) {
+    let out = match kind {
         FileKind::Folder => {
             let dir = if path.is_dir() { path.clone() } else { path.parent().map(Path::to_path_buf).unwrap_or_default() };
             read_folder(&dir)

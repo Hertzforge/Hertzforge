@@ -99,6 +99,25 @@ fn the_rigid_body_answer_is_the_golden_one() {
 }
 
 #[test]
+fn a_specification_is_refused_on_its_name_alone_wherever_it_is() {
+    // The golden import names a Unix path, which is relative on Windows. A .mat
+    // or .hforge is never read here, so its refusal must not depend on the
+    // path's shape: a bare file name gets the same answer as the golden.
+    let mut req = golden("request_mimo_random_reference_import.json");
+    req["params"]["path"] = json!("qualification.mat");
+    let dir = std::env::temp_dir().join(format!("sds-ref-relative-{}", std::process::id()));
+    let (result, arrays) = reference::import(&params(&req), &dir).unwrap();
+    assert!(arrays.is_empty());
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["errors"][0]["reason"], "reference_file", "{result}");
+    let message = result["errors"][0]["message"].as_str().unwrap();
+    assert!(
+        message.contains("converted to a reference folder"),
+        "{message}"
+    );
+}
+
+#[test]
 fn an_import_of_a_file_it_does_not_read_is_the_golden_answer() {
     let req = golden("request_mimo_random_reference_import.json");
     let dir = std::env::temp_dir().join(format!("sds-ref-golden-{}", std::process::id()));

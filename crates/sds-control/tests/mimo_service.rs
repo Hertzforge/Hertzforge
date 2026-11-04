@@ -125,7 +125,7 @@ fn reachable_reference(vrms: f64) -> Value {
 }
 
 fn setup(levels: Value, full_level_s: f64, review: bool) -> Value {
-    json!({
+    let mut s = json!({
         "title": "Four-Axis Random",
         "channels": {
             "controls": (1..=4).map(|c| json!({"channel": c, "alarm_db": [3, 3], "abort_db": [6, 6]})).collect::<Vec<_>>(),
@@ -141,7 +141,16 @@ fn setup(levels: Value, full_level_s: f64, review: bool) -> Value {
         "control": {"frf": "hold", "level_ramp_s": 0, "shutdown_ramp_s": 2, "max_loops_out": 5},
         "schedule": {"mode": "auto", "levels": levels, "full_level_s": full_level_s},
         "backend": {"kind": "sim"},
-    })
+    });
+    // A debug build of the linear algebra is many times slower than release; the
+    // law's time budget is the design's in release and the whole loop in a debug
+    // test run, as the service's own convergence tests have it (a 12 by 6 seed on
+    // a loaded CI runner overran a quarter of the loop). A test of the budget sets
+    // its own after this.
+    if cfg!(debug_assertions) {
+        s["control"]["law_budget"] = json!(1.0);
+    }
+    s
 }
 
 async fn controller(c: &mut Client) {

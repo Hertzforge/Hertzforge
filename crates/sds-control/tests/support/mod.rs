@@ -180,11 +180,31 @@ impl Client {
         if let Some(i) = self.events.iter().position(&pred) {
             return i;
         }
-        let deadline = Instant::now() + wait;
+        let start = Instant::now();
+        let deadline = start + wait;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                panic!("no event for {what} within {wait:?}");
+                // Say what was seen, so a run that ended some other way (a fault, a
+                // refusal, a stop) is told apart from one that never answered.
+                let seen = self.events.len();
+                let last = self
+                    .events
+                    .iter()
+                    .rev()
+                    .find(|e| e.topic().ends_with(".status") || e.topic().ends_with(".state"))
+                    .or(self.events.last())
+                    .map(|e| {
+                        let mut data = e.data().to_string();
+                        data.truncate(6000);
+                        format!(
+                            "the last {} at +{:.1}s: {data}",
+                            e.topic(),
+                            e.at.duration_since(start).as_secs_f64()
+                        )
+                    })
+                    .unwrap_or_else(|| "no events at all".into());
+                panic!("no event for {what} within {wait:?}; {seen} events seen, {last}");
             }
             if self.read(left).await.is_some() {
                 if let Some(i) = self.events.iter().position(&pred) {
