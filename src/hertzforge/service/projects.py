@@ -351,8 +351,13 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
     part = params.get('part')
     if part is not None and not (isinstance(part, Mapping) and isinstance(part.get('kind'), str)):
         raise bad_request('project.show "part" is {"kind", "id"} or null')
+    prefs = params.get('prefs') or {}
+    if not isinstance(prefs, Mapping) or set(prefs) - set(showing.PREFS):
+        raise bad_request('project.show "prefs" takes ' + ', '.join(showing.PREFS))
+    if 'component' in prefs and prefs['component'] not in ('magnitude', 'real', 'imag', 'phase'):
+        raise bad_request('project.show "component" is magnitude, real, imag or phase')
     return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
-                        dict(part) if part else None)
+                        dict(part) if part else None, dict(prefs))
 
 
 def actions(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:

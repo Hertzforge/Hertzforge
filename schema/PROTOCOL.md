@@ -371,7 +371,7 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
-| `project.show` | `{"objects","records"?,"part"?}` | `{"title","views","note"}` |
+| `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
 | `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
@@ -413,7 +413,11 @@ a time history played back, an FRF's or a spectrum's operating deflection shape 
 PSD's envelope), a channel table on a geometry marks its channels, two shape sets give their MAC, a
 measurement beside its requirement gives the comparison's spectra, two PSDs overlay. A selection with
 no joint reading shows each object on its own, and `note` says what was left out. The views come in the
-connection's display units, as an operation's do.
+connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
+selections as Visual Dynamics keeps its bar: `flat` (the plot in place of the stage for a whole data
+object), `log_frequency` (decades on every frequency axis) and `component` (`magnitude`, `real`, `imag`
+or `phase` of complex data); `offers` says which of them the selection can take (`flat` for a data
+object, `complex` for complex frequency data, `frequency` for anything on a frequency axis).
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:

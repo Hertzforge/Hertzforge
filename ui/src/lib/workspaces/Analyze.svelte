@@ -266,6 +266,28 @@
 					<h3>{a.shown?.title ?? 'Selection'}</h3>
 					{#if a.shown?.note}<p class="meta" data-testid="selection-note">{a.shown.note}</p>{/if}
 					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
+					{#if a.shown?.offers}
+						{@const offers = a.shown.offers}
+						<div class="bar" role="toolbar" aria-label="How the data is read">
+							{#if offers.flat}
+								<div class="seg" role="radiogroup" aria-label="Stage or plot">
+									<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="read-3d" title="The 3-D stage, every record at its own depth" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
+									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
+								</div>
+							{/if}
+							{#if offers.frequency}
+								<button class="btn ghost sm" class:on={a.prefs.log_frequency} aria-pressed={a.prefs.log_frequency} data-testid="read-logf" title="Decades on every frequency axis" onclick={() => a.setPref('log_frequency', !a.prefs.log_frequency)}>Log f</button>
+							{/if}
+							{#if offers.complex}
+								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
+									<option value="magnitude">Magnitude</option>
+									<option value="real">Real part</option>
+									<option value="imag">Imaginary part</option>
+									<option value="phase">Phase</option>
+								</select>
+							{/if}
+						</div>
+					{/if}
 					{#if app.project.selection.objects.length === 1 && app.project.summary?.objects.find((o) => o.name === app.project.selection.objects[0])?.kind === 'report'}
 						<button class="btn sm" data-testid="open-report" onclick={() => { const name = app.project.selection.objects[0]; app.go('report'); void app.report.show(name); }}>Open in Report</button>
 					{/if}
@@ -654,6 +676,107 @@
 		flex: 1 1 0;
 		height: auto;
 		min-height: 320px;
+	}
+
+	/* the selection's views: what the tree's selection shows, filling the width; a pair side by side */
+	.selected {
+		display: flex;
+		flex-direction: column;
+		margin-bottom: var(--sp-4);
+		background: var(--bg-1);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-lg);
+	}
+
+	.selected.alone {
+		flex: 1;
+		min-height: 0;
+	}
+
+	.selected header {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-3);
+		padding: var(--sp-3) var(--sp-3) var(--sp-2) var(--sp-4);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	.selected h3 {
+		font-size: var(--text-md);
+		font-weight: var(--weight-strong);
+		white-space: nowrap;
+	}
+
+	.selected header .meta {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.selected header .error {
+		color: var(--amber-2);
+	}
+
+	.selected header .bar {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+	}
+
+	.seg {
+		display: inline-flex;
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+	}
+
+	.seg button {
+		padding: 2px 8px;
+		font-size: var(--text-xs);
+		color: var(--text-2);
+		background: transparent;
+		border: none;
+		cursor: pointer;
+	}
+
+	.seg button.on {
+		color: var(--text-1);
+		background: var(--bg-3);
+	}
+
+	.selected header .btn.on {
+		color: var(--text-1);
+		background: var(--bg-3);
+	}
+
+	.field.sm {
+		padding: 2px 6px;
+		font-size: var(--text-xs);
+	}
+
+	.svviews {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--sp-3);
+		padding: var(--sp-3);
+		min-height: 0;
+	}
+
+	.svviews.pair {
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+	}
+
+	.selected.alone .svviews {
+		flex: 1;
+		min-height: 0;
+		align-content: start;
+	}
+
+	.selected .view.spectrum {
+		height: 340px;
+	}
+
+	.selected .view.matrix {
+		height: 420px;
 	}
 
 	.card {

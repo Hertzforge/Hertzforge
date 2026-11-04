@@ -430,7 +430,11 @@
       "properties": {
         "title": {"type": "string"},
         "views": {"$ref": "#/$defs/views"},
-        "note": {"type": "string"}
+        "note": {"type": "string"},
+        "offers": {
+          "type": "object", "required": ["flat", "complex", "frequency"], "additionalProperties": false,
+          "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"}}
+        }
       }
     },
     "action": {
