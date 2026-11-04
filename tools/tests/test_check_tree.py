@@ -197,3 +197,55 @@ def test_every_offending_line_is_reported(tmp_path):
         'notes.md: line 1 names a listed organization',
         'notes.md: line 3 names a listed organization',
     ]
+
+
+# The credit allowance (design 12, Q27): one listed name, as a source credit, in
+# the two credit places only, on a line that does not speak of hardware. The
+# cases plant names of their own; the real one is held as a hash.
+CREDITED_PLANT = check_tree.phrase_hash('quokka foundry')
+OTHER_PLANT = check_tree.phrase_hash('wombat works')
+BOTH = frozenset({CREDITED_PLANT, OTHER_PLANT})
+CREDIT_LINE = 'Concepts from the Quokka Foundry documentation, credited with thanks.\n'
+
+
+def _credit_check(tmp_path, rel, text):
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'Credits\n{text}', encoding='utf-8')
+    return check_tree.check_names([path], tmp_path, names=BOTH,
+                                  credited=frozenset({CREDITED_PLANT}))
+
+
+@pytest.mark.parametrize('rel', sorted(check_tree.CREDIT_FILES))
+def test_the_credited_name_passes_in_a_credit_file(tmp_path, rel):
+    assert _credit_check(tmp_path, rel, CREDIT_LINE) == []
+
+
+@pytest.mark.parametrize('rel', ['docs/mimo-random.md', 'crates/sds-control/src/lib.rs',
+                                 'site/public/index.html', 'acknowledgments.md'])
+def test_the_same_line_elsewhere_is_blocked(tmp_path, rel):
+    assert _credit_check(tmp_path, rel, CREDIT_LINE) == [
+        f'{rel}: line 2 names a listed organization']
+
+
+@pytest.mark.parametrize('line', [
+    'Runs on Quokka Foundry hardware.\n',
+    'The Quokka Foundry DAQ backend is supported.\n',
+    'Quokka Foundry drives the shakers.\n',
+])
+def test_a_hardware_claim_in_a_credit_file_is_blocked(tmp_path, line):
+    assert _credit_check(tmp_path, 'ACKNOWLEDGMENTS.md', line) == [
+        'ACKNOWLEDGMENTS.md: line 2 names a listed organization']
+
+
+def test_every_other_listed_name_is_still_blocked_in_a_credit_file(tmp_path):
+    found = _credit_check(tmp_path, 'site/public/credits.html',
+                          CREDIT_LINE + 'With thanks to Wombat Works.\n')
+    assert found == ['site/public/credits.html: line 3 names a listed organization']
+
+
+def test_the_allowance_is_one_listed_name():
+    # The credited hash is a listed name (so it stays blocked everywhere else),
+    # and the allowance holds no other.
+    assert len(check_tree.CREDITED) == 1
+    assert check_tree.CREDITED <= check_tree.NAMES
