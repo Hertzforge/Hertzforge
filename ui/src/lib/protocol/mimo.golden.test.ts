@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame, shapeOf, withShape, dtypeOf } from './codec';
 import type { Dtype, Event, HeatmapView, Request, ResponseErr, ResponseOk, SdmView, SpectrumView } from './types';
 import type {
+	LawsCheckEvent,
+	LawsCheckParams,
+	LawsCheckResult,
 	LawsImportResult,
 	LawsListResult,
 	MimoReportResult,
@@ -34,7 +37,10 @@ const TEXT = [
 	'request_laws_list',
 	'response_laws_list',
 	'request_laws_import',
-	'response_laws_import'
+	'response_laws_import',
+	'request_laws_check',
+	'response_laws_check',
+	'event_laws_check'
 ];
 
 describe('MIMO text goldens', () => {
@@ -116,6 +122,17 @@ describe('MIMO messages match their types', () => {
 		const imported = (readJson('response_laws_import.json') as ResponseOk<LawsImportResult>).result.law;
 		expect(imported.sha256).toBe(imported.id);
 		expect([imported.check.status, imported.check.hardware]).toEqual(['unchecked', false]);
+	});
+
+	it('a law check reports every case and clears the law it checked', () => {
+		const req = readJson('request_laws_check.json') as Request<LawsCheckParams>;
+		expect(req.params.path?.endsWith('.wasm')).toBe(true);
+		const { law, report } = (readJson('response_laws_check.json') as ResponseOk<LawsCheckResult>).result;
+		expect([report.passed, report.recorded, report.cases.length]).toEqual([true, true, 6]);
+		expect([law.check.status, law.check.hardware]).toEqual(['passed', true]);
+		expect(report.cases.map((c) => c.requirement)).toContain('survive');
+		const ev = (readJson('event_laws_check.json') as Event<LawsCheckEvent>).data;
+		expect(ev.result).toEqual(report.cases[ev.index]);
 	});
 });
 

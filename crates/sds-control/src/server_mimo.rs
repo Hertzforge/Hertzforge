@@ -521,6 +521,109 @@ impl Service {
         self.with_catalog(move |cat| laws::import(cat, &path)).await
     }
 
+    /// `laws.check`: run a multiple-output law on every simulated test article
+    /// (`mimo::law_check`), one `laws.check` event per case as it starts and as it
+    /// ends, and, for a law file, record the result against its hash.
+    pub(super) async fn laws_check(
+        self: &Arc<Self>,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        use crate::mimo::law_check;
+        let id = protocol::named_str(params, "id")?.map(str::to_owned);
+        let path = protocol::named_str(params, "path")?.map(str::to_owned);
+        let given = match params.get("params") {
+            None | Some(Value::Null) => Map::new(),
+            Some(Value::Object(m)) => m.clone(),
+            Some(_) => {
+                return Err(MethodError::bad_params(
+                    "params",
+                    "\"params\" is an object of parameter values by key.",
+                ))
+            }
+        };
+        if id.is_some() == path.is_some() {
+            return Err(MethodError::bad_params(
+                "id",
+                "Checking a law needs either its catalog \"id\" or the \"path\" of its file.",
+            ));
+        }
+        {
+            let inner = self.inner.lock().await;
+            inner.session.require_controller(conn.id)?;
+            inner.run_active()?;
+        }
+        // The law, its parameters and a factory for each plant size, resolved under
+        // the catalog's lock; the runs themselves hold no lock.
+        let sizes = law_check::control_counts();
+        let (entry, factories) = self
+            .with_catalog(move |cat| {
+                let id = match (id, path) {
+                    (Some(id), _) => id,
+                    (None, Some(p)) => laws::import(cat, &p)?["law"]["id"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    (None, None) => String::new(),
+                };
+                let entry = cat.entry(&id).ok_or_else(|| law_check::unknown_law(&id))?;
+                if entry.world != hertzforge_random_laws::LawWorld::Mimo {
+                    return Err(law_check::single_output_refusal(&id));
+                }
+                let choice = hertzforge_random_laws::LawChoice::new(
+                    id.clone(),
+                    crate::mimo::adapter::params_of(&entry.manifest.params, &given),
+                );
+                let mut factories = Vec::new();
+                for n in sizes {
+                    let f = cat
+                        .resolve_mimo(&choice, n)
+                        .map_err(|e| law_check::bad_choice(&id, &e.to_string()))?;
+                    factories.push((n, f));
+                }
+                Ok((entry, factories))
+            })
+            .await?;
+        let _slot = law_check::CheckSlot::take()?;
+        let svc = self.clone();
+        let law_id = entry.id.clone();
+        let cases = tokio::task::spawn_blocking(move || {
+            let law = |n: usize| {
+                factories
+                    .iter()
+                    .find(|(k, _)| *k == n)
+                    .map(|(_, f)| f.clone())
+                    .ok_or_else(|| format!("no law was resolved for {n} controls"))
+            };
+            law_check::run_check(&law, &law_check::CheckOptions::default(), &mut |i, c, r| {
+                svc.emit("laws.check", law_check::progress_json(&law_id, i, c, r));
+            })
+        })
+        .await
+        .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))?;
+        let law = if entry.builtin {
+            laws::entry_json(&entry)
+        } else {
+            let sha = entry.identity.sha256.clone();
+            let verdicts: Vec<_> = cases.iter().map(|c| c.verdict.clone()).collect();
+            self.with_catalog(move |cat| {
+                let record = hertzforge_random_laws::mimo_check_record(
+                    sha,
+                    law_check::now_rfc3339(),
+                    verdicts,
+                );
+                cat.record_check(&record)
+                    .map_err(|e| law_check::not_recorded(&e.to_string()))?;
+                let e = cat
+                    .entry(&record.law_sha256)
+                    .ok_or_else(|| MethodError::internal("the checked law left the catalog"))?;
+                Ok(laws::entry_json(&e))
+            })
+            .await?
+        };
+        Ok(json!({"law": law, "report": law_check::report_json(&cases, !entry.builtin)}))
+    }
+
     /// Follow `run` until it has finished: `mimo_random.status` on every change, and
     /// the report once at the end.
     fn spawn_mimo_watch(self: &Arc<Self>, run: Arc<MimoRun>) {
