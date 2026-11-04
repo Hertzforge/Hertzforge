@@ -30,7 +30,7 @@
 	const unit = $derived(sdm?.unit ?? 'g²/Hz');
 	const openView = $derived(s.open ? ((views.plotData(plotId(page, 'open'))?.views[0] as SpectrumView | undefined) ?? null) : null);
 	const openTitle = $derived(
-		s.open ? `${CELL_WORDS[cellKind(s.open.row, s.open.col, s.off)]}: ${s.open.row === s.open.col ? labels[s.open.row] : `${labels[s.open.row]} with ${labels[s.open.col]}`}` : ''
+		s.open ? `${CELL_WORDS[s.open.kind]}: ${s.open.row === s.open.col ? labels[s.open.row] : `${labels[s.open.row]} with ${labels[s.open.col]}`}` : ''
 	);
 	let selected = $state<{ r: number; c: number } | null>(null);
 	let pinChoice = $state('');
@@ -51,7 +51,7 @@
 	}
 
 	function open(r: number, c: number) {
-		views.patch(page.id, { open: { row: win[r], col: win[c] } });
+		views.patch(page.id, { open: { row: win[r], col: win[c], kind: cellKind(r, c, s.off) } });
 	}
 
 	function close() {
@@ -122,8 +122,8 @@
 		{/if}
 
 		<div class="seg" role="radiogroup" aria-label="Off the diagonal">
-			<button role="radio" aria-checked={s.off === 'coh_phase'} class:on={s.off === 'coh_phase'} data-testid="grid-coh" onclick={() => views.patch(page.id, { off: 'coh_phase' })}>Coherence and Phase</button>
-			<button role="radio" aria-checked={s.off === 'csd'} class:on={s.off === 'csd'} data-testid="grid-csd" onclick={() => views.patch(page.id, { off: 'csd' })}>Cross Spectrum</button>
+			<button role="radio" aria-checked={s.off === 'coh_phase'} class:on={s.off === 'coh_phase'} data-testid="grid-coh" onclick={() => views.patch(page.id, { off: 'coh_phase', open: null })}>Coherence and Phase</button>
+			<button role="radio" aria-checked={s.off === 'csd'} class:on={s.off === 'csd'} data-testid="grid-csd" onclick={() => views.patch(page.id, { off: 'csd', open: null })}>Cross Spectrum</button>
 		</div>
 	</div>
 
@@ -142,7 +142,7 @@
 				</div>
 				<div class="fullplot">
 					{#if openView}
-						<SpectrumPane view={openView} live minHeight={260} showTitle={false} />
+						<SpectrumPane view={openView} live minHeight={260} showTitle={false} yFixed={s.open.kind === 'coh' ? [0, 1.05] : s.open.kind === 'phase' ? [-180, 180] : null} />
 					{:else}
 						<div class="waiting">Waiting for the run.</div>
 					{/if}

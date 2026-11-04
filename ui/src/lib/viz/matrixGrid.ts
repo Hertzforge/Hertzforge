@@ -263,8 +263,9 @@ export interface GridGeometry {
 	/** The top-left of cell (0, 0), CSS pixels. */
 	x0: number;
 	y0: number;
-	/** A cell's side and the gap between cells. */
+	/** A cell's width and height, and the gap between cells. */
 	cell: number;
+	cellH: number;
 	gap: number;
 }
 
@@ -276,31 +277,36 @@ export interface Rect {
 }
 
 /**
- * Square cells filling `width` by `height` after the gutters for the row names (left), the
+ * Cells filling `width` by `height` after the gutters for the row names (left), the
  * column names (top) and the frequency axis (bottom).
  */
 export function gridGeometry(width: number, height: number, n: number, gutter: { left: number; top: number; bottom: number }): GridGeometry {
 	const gap = n > 6 ? 4 : 6;
 	const availW = Math.max(0, width - gutter.left - 4);
 	const availH = Math.max(0, height - gutter.top - gutter.bottom);
-	const side = n > 0 ? Math.floor(Math.min((availW + gap) / n, (availH + gap) / n)) - gap : 0;
-	return { n, x0: gutter.left, y0: gutter.top, cell: Math.max(0, side), gap };
+	let w = n > 0 ? Math.floor((availW + gap) / n) - gap : 0;
+	let h = n > 0 ? Math.floor((availH + gap) / n) - gap : 0;
+	// Cells fill the space, but never so stretched that a curve's shape is lost.
+	w = Math.min(w, Math.floor(h * 1.8));
+	h = Math.min(h, Math.floor(w * 1.2));
+	return { n, x0: gutter.left, y0: gutter.top, cell: Math.max(0, w), cellH: Math.max(0, h), gap };
 }
 
 export function cellRect(g: GridGeometry, r: number, c: number): Rect {
-	return { x: g.x0 + c * (g.cell + g.gap), y: g.y0 + r * (g.cell + g.gap), w: g.cell, h: g.cell };
+	return { x: g.x0 + c * (g.cell + g.gap), y: g.y0 + r * (g.cellH + g.gap), w: g.cell, h: g.cellH };
 }
 
 /** The cell under a point and how far across it the point is (0 to 1), or null in a gap or outside. */
 export function cellAtPoint(g: GridGeometry, px: number, py: number): { r: number; c: number; fx: number } | null {
 	const step = g.cell + g.gap;
-	if (step <= 0) return null;
+	const stepH = g.cellH + g.gap;
+	if (step <= 0 || stepH <= 0) return null;
 	const c = Math.floor((px - g.x0) / step);
-	const r = Math.floor((py - g.y0) / step);
+	const r = Math.floor((py - g.y0) / stepH);
 	if (r < 0 || c < 0 || r >= g.n || c >= g.n) return null;
 	const inX = px - g.x0 - c * step;
-	const inY = py - g.y0 - r * step;
-	if (inX > g.cell || inY > g.cell) return null;
+	const inY = py - g.y0 - r * stepH;
+	if (inX > g.cell || inY > g.cellH) return null;
 	return { r, c, fx: inX / g.cell };
 }
 

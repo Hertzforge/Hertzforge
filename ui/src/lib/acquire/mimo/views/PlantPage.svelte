@@ -10,6 +10,7 @@
 	import type { LawEntry } from '$lib/protocol/mimo';
 	import type { View } from '$lib/protocol/types';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
 	import StatusMark from '$lib/viz/StatusMark.svelte';
 	import { formatFixed } from '$lib/viz/format';
 	import type { MimoViewsState } from './mimoViews.svelte';
@@ -49,11 +50,17 @@
 	const set = (patch: Record<string, unknown>) => views.patch(page.id, patch);
 </script>
 
-{#snippet plot(part: string, empty: string, minHeight = 190)}
+{#snippet plot(part: string, empty: string, minHeight = 190, yFixed: [number, number] | null = null)}
 	{@const vs = v(part)}
 	{#if vs.length}
 		{#each vs as view, i (i)}
-			<div class="pane"><ViewRenderer {view} live showTitle={false} {minHeight} /></div>
+			<div class="pane">
+				{#if view.view === 'spectrum'}
+					<SpectrumPane {view} live showTitle={false} {minHeight} {yFixed} />
+				{:else}
+					<ViewRenderer {view} live showTitle={false} {minHeight} />
+				{/if}
+			</div>
 		{/each}
 	{:else}
 		<div class="waiting" style:min-height="{minHeight}px">{empty}</div>
@@ -77,6 +84,7 @@
 		</header>
 		{@render plot('drive', 'Waiting for the run.')}
 		{#if drives.length}
+			<div class="rmswrap">
 			<table class="rmsbars" aria-label="Drive rms against its ceiling" data-testid="plant-drive-rms">
 				<thead><tr><th>Drive</th><th class="bar">rms against ceiling</th><th class="r">V rms</th><th class="r">Ceiling</th><th></th></tr></thead>
 				<tbody>
@@ -99,6 +107,7 @@
 					{/each}
 				</tbody>
 			</table>
+			</div>
 		{/if}
 	</section>
 
@@ -125,7 +134,7 @@
 				{@render pick('Drive', s.drivePair[0], drives, (i) => set({ drivePair: [i, i === s.drivePair[1] ? s.drivePair[0] : s.drivePair[1]] }), 'plant-dcoh-a')}
 				{@render pick('with', s.drivePair[1], drives, (i) => set({ drivePair: [i === s.drivePair[0] ? s.drivePair[1] : s.drivePair[0], i] }), 'plant-dcoh-b')}
 			</header>
-			{@render plot('dcoh', 'Waiting for the run.', 150)}
+			{@render plot('dcoh', 'Waiting for the run.', 150, [0, 1.05])}
 		{/if}
 		<header><h3>Drive Caps This Loop</h3></header>
 		{@render plot('cap', 'Waiting for the run.', 80)}
@@ -215,6 +224,11 @@
 	.help {
 		font-size: var(--text-xs);
 		color: var(--text-2);
+	}
+
+	.rmswrap {
+		max-height: 230px;
+		overflow-y: auto;
 	}
 
 	.rmsbars {

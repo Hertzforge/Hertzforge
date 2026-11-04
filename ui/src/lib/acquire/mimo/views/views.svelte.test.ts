@@ -36,6 +36,9 @@ describe('what each page subscribes to', () => {
 		const sub = wire(p, ctx({ widths: { cell: 100, full: 900 } }));
 		expect((sub[0] as { block: number[] }).block).toEqual([49, 20, 21, 22, 23, 24, 25, 26]);
 		expect(sub.at(-1)).toEqual({ id: 'mp-9:open', quantity: 'phase', pair: [49, 21], points: 900 });
+		// A pinned control drawn first opens above the diagonal as coherence, whatever its position.
+		const pinnedAbove = wire(page('grid', { window: w, open: { row: 49, col: 21, kind: 'coh' } }));
+		expect(pinnedAbove.at(-1)).toMatchObject({ quantity: 'coh', pair: [49, 21] });
 		const csd = wire(page('grid', { open: { row: 2, col: 5 }, off: 'csd' }));
 		expect(csd.at(-1)).toMatchObject({ quantity: 'csd_mag', pair: [2, 5] });
 		const diag = wire(page('grid', { open: { row: 3, col: 3 } }));

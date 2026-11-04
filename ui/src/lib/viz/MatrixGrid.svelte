@@ -127,6 +127,7 @@
 		const fontUi = cssVar('--font-ui');
 		const fontMono = cssVar('--font-mono');
 		const cell = geom.cell;
+		const cellH = geom.cellH;
 		const ticks = logTicks(xr.lo, xr.hi, [1]);
 
 		for (const p of prepared) {
@@ -204,7 +205,7 @@
 			for (let c = 0; c < n; c++) {
 				const x = Math.round(geom.x0 + c * (cell + geom.gap) + frac(cursorF, xr) * cell) + 0.5;
 				ctx.moveTo(x, geom.y0);
-				ctx.lineTo(x, geom.y0 + n * (cell + geom.gap) - geom.gap);
+				ctx.lineTo(x, geom.y0 + n * (cellH + geom.gap) - geom.gap);
 			}
 			ctx.stroke();
 		}
@@ -212,11 +213,11 @@
 		// the selected and hovered cells
 		const outline = (r: number, c: number, w: number, dash: number[]) => {
 			const x = geom.x0 + c * (cell + geom.gap);
-			const y = geom.y0 + r * (cell + geom.gap);
+			const y = geom.y0 + r * (cellH + geom.gap);
 			ctx.strokeStyle = text1;
 			ctx.lineWidth = w;
 			ctx.setLineDash(dash);
-			ctx.strokeRect(x - 1.5, y - 1.5, cell + 3, cell + 3);
+			ctx.strokeRect(x - 1.5, y - 1.5, cell + 3, cellH + 3);
 			ctx.setLineDash([]);
 		};
 		if (selected) outline(selected.r, selected.c, 2, []);
@@ -226,7 +227,7 @@
 		ctx.textBaseline = 'middle';
 		const size = cell < 70 ? 11 : 12;
 		for (let k = 0; k < n; k++) {
-			const y = geom.y0 + k * (cell + geom.gap) + cell / 2;
+			const y = geom.y0 + k * (cellH + geom.gap) + cellH / 2;
 			const x = geom.x0 + k * (cell + geom.gap) + cell / 2;
 			const strong = focus && (focus.r === k || focus.c === k);
 			ctx.font = `${strong ? 640 : 400} ${size}px ${fontUi}`;
@@ -240,7 +241,7 @@
 		}
 
 		// the shared frequency axis under the last row
-		const yAxis = geom.y0 + n * (cell + geom.gap) - geom.gap;
+		const yAxis = geom.y0 + n * (cellH + geom.gap) - geom.gap;
 		ctx.fillStyle = axisColor;
 		ctx.strokeStyle = axisColor;
 		ctx.font = `10.5px ${fontMono}`;

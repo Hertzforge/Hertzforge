@@ -13,7 +13,7 @@
 import type { MimoQuantity } from '$lib/protocol/mimo';
 import { newMimoPlot, pointsForWidth, type MimoPageSpec, type MimoPlotSpec } from '$lib/acquire/display/mimoLayout';
 import type { HeatMode } from '$lib/viz/heatmap';
-import { cellKind, defaultWindow, GRID_MAX, windowControls, type GridWindowSpec, type OffDiagonal } from '$lib/viz/matrixGrid';
+import { cellKind, defaultWindow, GRID_MAX, windowControls, type CellKind, type GridWindowSpec, type OffDiagonal } from '$lib/viz/matrixGrid';
 
 /**
  * The coherence error per control, when the service offers it: the heatmap's second mode. Not a
@@ -21,11 +21,16 @@ import { cellKind, defaultWindow, GRID_MAX, windowControls, type GridWindowSpec,
  */
 export const COH_ERROR = 'coh_error';
 
+const CELL_KINDS: CellKind[] = ['psd', 'coh', 'phase', 'csd'];
+
 export interface GridSettings {
 	window: GridWindowSpec;
 	off: OffDiagonal;
-	/** The cell open full size, by the controls' positions (row, column), or none. */
-	open: { row: number; col: number } | null;
+	/**
+	 * The cell open full size, by the controls' positions (row, column) and what the cell showed
+	 * (above or below the diagonal of the window as drawn, which pinning can reorder), or none.
+	 */
+	open: { row: number; col: number; kind: CellKind } | null;
 }
 
 export interface HeatmapSettings {
@@ -67,7 +72,7 @@ export function gridSettings(page: MimoPageSpec): GridSettings {
 	return {
 		window: { ...defaultWindow(), ...window },
 		off: s.off === 'csd' ? 'csd' : 'coh_phase',
-		open: isPos(o.row) && isPos(o.col) ? { row: o.row, col: o.col } : null
+		open: isPos(o.row) && isPos(o.col) ? { row: o.row, col: o.col, kind: CELL_KINDS.includes(o.kind as CellKind) ? (o.kind as CellKind) : cellKind(o.row, o.col, s.off === 'csd' ? 'csd' : 'coh_phase') } : null
 	};
 }
 
@@ -115,10 +120,9 @@ const pts = (ctx: PageContext, part: string, fallback: number) => pointsForWidth
 export const plotId = (page: MimoPageSpec, part: string) => `${page.id}:${part}`;
 
 /** The quantity a grid cell opens full size as, with its selector. */
-export function openCellPlot(page: MimoPageSpec, open: { row: number; col: number }, off: OffDiagonal, points: number): MimoPlotSpec {
-	const { row, col } = open;
+export function openCellPlot(page: MimoPageSpec, open: { row: number; col: number; kind: CellKind }, points: number): MimoPlotSpec {
+	const { row, col, kind } = open;
 	const id = plotId(page, 'open');
-	const kind = cellKind(row, col, off);
 	const p = (q: MimoQuantity, s: MimoPlotSpec['selector']) => ({ ...newMimoPlot(id, q, s), points });
 	if (kind === 'psd') return p('psd', { kind: 'index', index: row });
 	if (kind === 'coh') return p('coh', { kind: 'pair', pair: [row, col] });
@@ -148,7 +152,7 @@ export function pagePlots(page: MimoPageSpec, ctx: PageContext): MimoPlotSpec[] 
 			const cell = pts(ctx, 'cell', 120);
 			const out: MimoPlotSpec[] = [{ ...newMimoPlot(plotId(page, 'sdm'), 'sdm', { kind: 'block', block: window }), points: cell }];
 			for (const i of window) out.push({ ...newMimoPlot(plotId(page, `psd:${i}`), 'psd', { kind: 'index', index: i }), points: cell });
-			if (s.open && s.open.row < ctx.labels.length && s.open.col < ctx.labels.length) out.push(openCellPlot(page, s.open, s.off, pts(ctx, 'full', 1024)));
+			if (s.open && s.open.row < ctx.labels.length && s.open.col < ctx.labels.length) out.push(openCellPlot(page, s.open, pts(ctx, 'full', 1024)));
 			return out;
 		}
 		case 'heatmap': {

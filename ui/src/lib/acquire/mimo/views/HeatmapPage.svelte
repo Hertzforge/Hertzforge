@@ -61,7 +61,7 @@
 		</div>
 		{#if worstCount && mode === 'error'}
 			<span class="counts num" data-testid="heat-counts">
-				<span><b>{worstCount.alarm}</b> of {view?.rows.ticks.length} controls beyond alarm</span>
+				<span><b>{worstCount.alarm}</b> of {view?.rows.ticks.length} controls with lines beyond alarm</span>
 				<span><b>{worstCount.abort}</b> beyond abort</span>
 			</span>
 		{/if}

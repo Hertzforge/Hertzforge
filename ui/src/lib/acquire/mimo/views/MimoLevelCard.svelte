@@ -77,15 +77,15 @@
 
 	<dl class="rms">
 		<div class:warn={counts.alarm > 0}>
-			<dt>Beyond alarm</dt>
+			<dt>RMS beyond alarm</dt>
 			<dd class="num" data-testid="mimo-level-alarm">{errors.length ? `${counts.alarm} of ${errors.length}` : '-'}</dd>
 		</div>
 		<div class:fail={counts.abort > 0}>
-			<dt>Beyond abort</dt>
+			<dt>RMS beyond abort</dt>
 			<dd class="num" data-testid="mimo-level-abort">{errors.length ? counts.abort : '-'}</dd>
 		</div>
 		<div>
-			<dt>Largest error</dt>
+			<dt>Largest rms error</dt>
 			<dd class="num" data-testid="mimo-level-worst" title={counts.worst ? names[counts.worst.i] : undefined}>{counts.worst ? formatDb(counts.worst.e, 2) : '-'}</dd>
 		</div>
 	</dl>

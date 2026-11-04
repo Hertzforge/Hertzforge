@@ -85,14 +85,14 @@ export function lightness(rgb: ArrayLike<number>): number {
 /** OKLCH lightness at the start and end of each band class: [inside alarm, alarm to abort, beyond abort]. */
 const ERROR_L: Record<ThemeKind, [number, number][]> = {
 	light: [
-		[0.975, 0.86],
-		[0.74, 0.62],
-		[0.47, 0.35]
+		[0.975, 0.8],
+		[0.7, 0.58],
+		[0.45, 0.33]
 	],
 	dark: [
-		[0.215, 0.32],
-		[0.47, 0.59],
-		[0.76, 0.9]
+		[0.215, 0.36],
+		[0.48, 0.6],
+		[0.75, 0.9]
 	]
 };
 const ERROR_C: [number, number][] = [

@@ -51,7 +51,8 @@
 	const cellW = $derived(Math.max(0, width - LEFT - RIGHT));
 	const bodyH = $derived(rows * rowPx);
 	const tk = $derived<'light' | 'dark'>(theme.resolved);
-	const firstBand = $derived((view?.row_bands[0] as RowBand | undefined) ?? DEFAULT_BAND);
+	/** The legend shows the band of the row under the cursor (rows may differ), else the first row's. */
+	const firstBand = $derived((view?.row_bands[cursor ? ord[cursor.row] : 0] as RowBand | undefined) ?? DEFAULT_BAND);
 	const gradient = $derived(mode === 'error' ? errorGradient(firstBand, tk) : sequentialGradient(tk));
 
 	/** What the cursor reads, in words and numbers. */

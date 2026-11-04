@@ -82,8 +82,15 @@ export function buildGeometry(g: MimoGeometry, driveRms: (number | null)[] = [],
 		return nodes.length / 3 - 1;
 	};
 
-	// the reference point
-	const o = push(g.reference_point);
+	// the frame: the box around the sensors, the structure's outline
+	const ps = g.sensors.map((s) => s.position);
+	if (ps.length) {
+		const lo = [0, 1, 2].map((k) => Math.min(...ps.map((p) => p[k])));
+		const hi = [0, 1, 2].map((k) => Math.max(...ps.map((p) => p[k])));
+		const corner = (i: number) => push([i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]]);
+		const cs = [0, 1, 2, 3, 4, 5, 6, 7].map(corner);
+		for (const [a, b] of [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]) lines.push(cs[a], cs[b]);
+	}
 
 	for (const s of g.sensors) {
 		const d = unit(s.direction);
@@ -99,7 +106,8 @@ export function buildGeometry(g: MimoGeometry, driveRms: (number | null)[] = [],
 			tris.push(tip, a, b, tail, b, a);
 		}
 		sensorNodes.push([first, 6]);
-		lines.push(o, tail);
+		// the marker's edges, so a sensor reads at any color
+		for (let k = 0; k < 4; k++) lines.push(tip, ring[k], tail, ring[k], ring[k], ring[(k + 1) % 4]);
 	}
 
 	const biggest = Math.max(1e-12, ...driveRms.map((v) => (v !== null && Number.isFinite(v) ? v : 0)));
@@ -108,9 +116,9 @@ export function buildGeometry(g: MimoGeometry, driveRms: (number | null)[] = [],
 		const d = unit(dr.direction);
 		const [u, v] = basis(d);
 		const rel = driveRms[k] !== null && driveRms[k] !== undefined && Number.isFinite(driveRms[k]) ? (driveRms[k] as number) / biggest : 0;
-		const length = size * (0.08 + 0.17 * Math.max(0, Math.min(1, rel)));
-		const r = marker * 0.35;
-		const head = marker * 0.9;
+		const length = size * (0.06 + 0.12 * Math.max(0, Math.min(1, rel)));
+		const r = marker * 0.22;
+		const head = marker * 0.7;
 		const first = nodes.length / 3;
 		const base = dr.position;
 		const neck = add(base, scale(d, Math.max(length - head * 1.6, length * 0.4)));
@@ -125,7 +133,6 @@ export function buildGeometry(g: MimoGeometry, driveRms: (number | null)[] = [],
 			tris.push(cone[j], cone[i], shaft1[i]);
 		}
 		driveNodes.push([first, 13]);
-		lines.push(o, shaft0[0]);
 	}
 
 	const modes: Shape3DView['modes'] = [];

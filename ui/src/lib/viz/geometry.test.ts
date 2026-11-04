@@ -17,17 +17,17 @@ const cube: MimoGeometry = {
 };
 
 describe('the geometry view', () => {
-	it('places a marker per sensor and an arrow per drive, tied to the reference point', () => {
+	it('places a marker per sensor, outlined, an arrow per drive, and the box around the sensors', () => {
 		const m = buildGeometry(cube, [1, 0.5]);
 		expect(m.sensorNodes).toEqual([
-			[1, 6],
-			[7, 6],
-			[13, 6]
+			[8, 6],
+			[14, 6],
+			[20, 6]
 		]);
 		expect(m.driveNodes.length).toBe(2);
-		expect(m.view.nodes.length / 3).toBe(1 + 3 * 6 + 2 * 13);
+		expect(m.view.nodes.length / 3).toBe(8 + 3 * 6 + 2 * 13);
 		expect(m.view.triangles!.length / 3).toBe(3 * 8 + 2 * 16);
-		expect(m.view.lines!.length / 2).toBe(5);
+		expect(m.view.lines!.length / 2).toBe(12 + 3 * 12);
 		const n = m.view.nodes.length / 3;
 		for (const i of m.view.triangles!) expect(i).toBeLessThan(n);
 		// no motion without the six degrees of freedom
