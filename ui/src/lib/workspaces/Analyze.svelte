@@ -185,7 +185,28 @@
 			{/if}
 		</div>
 
-		{#if a.results.length === 0}
+		{#if a.shown || a.showError}
+			<section class="selected" class:alone={a.results.length === 0} data-testid="selection-view" aria-label="What the selection shows">
+				<header>
+					<h3>{a.shown?.title ?? 'Selection'}</h3>
+					{#if a.shown?.note}<p class="meta" data-testid="selection-note">{a.shown.note}</p>{/if}
+					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
+					<button class="btn ghost icon sm" data-testid="selection-clear" onclick={() => app.project.clearSelection()} aria-label="Clear the selection" title="Clear the selection">
+						<Icon name="close" size={14} />
+					</button>
+				</header>
+				{#if a.shown}
+					<div class="svviews" class:pair={a.shown.views.length === 2}>
+						{#each a.shown.views as v, i (i)}
+							<div class="view {v.view}">
+								<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} scope="selection" />
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{/if}
+		{#if a.results.length === 0 && !a.shown && !a.showError}
 			<div class="empty">
 				<div class="frame" aria-hidden="true">
 					<svg viewBox="0 0 220 90" width="220" height="90">
