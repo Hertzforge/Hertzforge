@@ -454,8 +454,16 @@ mod tests {
         n.r_sum = [[1e15; 4]; 4];
         n.r_sum[0][0] = 100e3;
         n.tank.r_base = 1e15;
-        assert!((n.dc_resistance(4) - 47e3).abs() < 1e-3, "{}", n.dc_resistance(4));
-        assert!((n.dc_resistance(0) - 147e3).abs() < 1e-3, "{}", n.dc_resistance(0));
+        assert!(
+            (n.dc_resistance(4) - 47e3).abs() < 1e-3,
+            "{}",
+            n.dc_resistance(4)
+        );
+        assert!(
+            (n.dc_resistance(0) - 147e3).abs() < 1e-3,
+            "{}",
+            n.dc_resistance(0)
+        );
         // The nominal network: every input node under its own 47k.
         let n = BenchNetwork::nominal();
         for i in 0..4 {
