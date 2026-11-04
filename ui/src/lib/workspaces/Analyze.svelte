@@ -11,6 +11,15 @@
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
 
+	/** Where a shape set's values are read, as VD names the choices. */
+	const VALUES_CHOICES: Record<string, string> = {
+		all: 'All DOFs',
+		control: 'Control channels',
+		reference: 'References',
+		response: 'Responses',
+		monitor: 'Monitors'
+	};
+
 	interface Props {
 		app: AppState;
 		/**
@@ -305,6 +314,32 @@
 							{/if}
 							{#if offers.projection}
 								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
+							{/if}
+							{#if offers.shapes}
+								{@const up = [a.prefs.mode_table, a.prefs.mac, a.prefs.shape_values].filter(Boolean).length}
+								<button class="btn ghost sm" class:on={a.prefs.mode_table} aria-pressed={a.prefs.mode_table} disabled={up === 1 && a.prefs.mode_table} data-testid="read-mode-table" title="The mode list: frequency, damping and a description to fill in" onclick={() => a.setPref('mode_table', !a.prefs.mode_table)}>Mode Table</button>
+								<button class="btn ghost sm" class:on={a.prefs.mac} aria-pressed={a.prefs.mac} disabled={up === 1 && a.prefs.mac} data-testid="read-mac" title="The MAC of the set against itself: how distinct its modes are" onclick={() => a.setPref('mac', !a.prefs.mac)}>MAC</button>
+								<button class="btn ghost sm" class:on={a.prefs.shape_values} aria-pressed={a.prefs.shape_values} disabled={up === 1 && a.prefs.shape_values} data-testid="read-shape-values" title="The shape values: a row per DOF and a column per mode" onclick={() => a.setPref('shape_values', !a.prefs.shape_values)}>Shape Values</button>
+								{#if a.prefs.shape_values}
+									{#if offers.values_dofs.length > 1}
+										<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
+											{#each offers.values_dofs as choice (choice)}
+												<option value={choice}>{VALUES_CHOICES[choice] ?? choice}</option>
+											{/each}
+										</select>
+									{/if}
+									<select class="field sm" aria-label="Form" data-testid="read-values-form" value={a.prefs.values_form} onchange={(e) => a.setPref('values_form', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.values_form)} title="The shapes at the DOFs (u = Φq), or a transformation there: the response transformation Φ⁺ (q = Φ⁺u), applied to motions, or the reference transformation Φᵀ, applied to forces and drive signals">
+										<option value="shapes">Shapes Φ</option>
+										<option value="response">Response transformation Φ⁺</option>
+										<option value="reference">Reference transformation Φᵀ</option>
+									</select>
+								{/if}
+							{/if}
+							{#if offers.arrows}
+								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
+							{/if}
+							{#if offers.sensors}
+								<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
 							{/if}
 							{#if a.comparison && a.picks.length}
 								<button class="btn sm" data-testid="add-matches" title="Add the picked MAC squares to the matched modes for this pair of sets; created on first use" onclick={() => void a.addMatches()}>Add Matches</button>
@@ -754,6 +789,7 @@
 
 	.selected header .bar {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--sp-2);
 	}

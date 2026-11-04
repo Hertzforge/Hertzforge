@@ -164,6 +164,10 @@
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "node_ids": {"$ref": "#/$defs/arrayRef"},
         "cursor": {"const": "frequency"},
+        "marks": {
+          "type": "object", "required": ["nodes", "lines"],
+          "properties": {"nodes": {"$ref": "#/$defs/arrayRef"}, "lines": {"$ref": "#/$defs/arrayRef"}}
+        },
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
@@ -436,9 +440,13 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "complex", "frequency", "projection"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "complex", "frequency", "projection", "shapes", "values_dofs", "arrows", "sensors"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"}, "frequency": {"type": "boolean"},
-          "projection": {"type": "boolean"}}
+          "projection": {"type": "boolean"},
+          "shapes": {"type": "boolean"},
+          "values_dofs": {"type": "array", "items": {"type": "string"}},
+          "arrows": {"type": "boolean"},
+          "sensors": {"type": "boolean"}}
         }
       }
     },
