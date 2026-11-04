@@ -864,6 +864,12 @@ export class ReportState {
 	error = $state<string | null>(null);
 	/** Where the last export went. */
 	exported = $state<string | null>(null);
+	/**
+	 * What an export or an issue is held on, as Visual Dynamics asks before a report leaves the
+	 * project: the sections still owed and the indexed files that do not match; the person says
+	 * anyway or lets it be.
+	 */
+	held = $state<{ act: 'export' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
 	/** The editor's pane for the selection, from the last `report.editor`. */
 	editor = $state.raw<ReportEditor | null>(null);
 	/** How far the page was scrolled, kept across the re-render an edit makes. */
@@ -888,13 +894,27 @@ export class ReportState {
 		await this.act(`Opening ${name}`, () => this.load(name));
 	}
 
-	async export(path: string): Promise<void> {
+	async export(path: string, anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		await this.act('Saving the page', async () => {
-			const res = await this.app.analysis.request<{ path: string }>('report.export', { name, path }, { timeoutMs: RUN_TIMEOUT_MS });
-			this.exported = res.path;
+			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+				'report.export',
+				{ name, path, ...(anyway ? { anyway } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.path === null) this.held = { act: 'export', path, owed: res.owed, index: res.index };
+			else this.exported = res.path;
 		});
+	}
+
+	/** The held export or issue, done anyway. */
+	async anyway(): Promise<void> {
+		const held = this.held;
+		if (!held) return;
+		if (held.act === 'export' && held.path) await this.export(held.path, true);
+		else await this.issue('begin', undefined, true);
 	}
 
 	/** The page being printed, in a frame of its own that asks for the print dialog. */
@@ -915,18 +935,21 @@ export class ReportState {
 	}
 
 	/** Begin, record or cancel an issue (`report.issue`). */
-	async issue(step: 'begin' | 'record' | 'cancel', path?: string): Promise<void> {
+	async issue(step: 'begin' | 'record' | 'cancel', path?: string, anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
 		await this.act(doing, async () => {
-			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; project: ProjectSummary }>(
+			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
-				{ name, step, ...(path ? { path } : {}) },
+				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			this.app.project.apply(res.project);
-			if (step === 'begin') {
+			if (step === 'begin' && res.index) {
+				this.held = { act: 'issue', owed: [], index: res.index };
+			} else if (step === 'begin') {
 				this.issuing = res.status ?? 'issued';
 				this.issued = null;
 				this.printing = res.html ?? null;

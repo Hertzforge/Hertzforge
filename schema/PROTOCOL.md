@@ -623,6 +623,7 @@ connection ends, and a log another writer holds opens read-only, saying why.
 | `runlog.form` | `{"form","axis"?,"target"?}` | `{form...,"taken","time","preview"}` |
 | `runlog.preview` | `{"form","values","axis"?,"target"?}` | `{"text"}` |
 | `runlog.write` | `{"form","values","text"?,"time"?,"taken","author","axis"?,"target"?}` | `{"log","said"}` |
+| `runlog.export` | `{"path","view","test"?}` | `{"path"}` |
 
 `log` is the window's view: its `path`, `title`, `writable` and `read_only` (why it cannot be
 written), the `status` the strip reads (the current test, its axis, run, level and outcome, when
@@ -646,17 +647,19 @@ hold a deviation answers), with the predictions drawn for the connection's proje
 `time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
 what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
 
+`runlog.export` writes one view of the open log to `path`, as Visual Dynamics' run-log dock exports it: `view` `text` (the log as it reads, every entry in the order written, corrections struck through and restated), `csv` (every entry as stored, corrections included, one row each) or `machine` (the trips and machine events for the lab's own machine log); `test` is a test number for that test alone, or `all` (the default) for the whole log. The view's extension is added when the path has none. The answer is the `path` written.
+
 **Reports.** Visual Dynamics' report on the connection's project, as the core writes it.
 
 | Method | Params | Result |
 |---|---|---|
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
-| `report.export` | `{"name","path"}` | `{"path"}` |
+| `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index"}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
 | `report.print` | `{"name"}` | `{"html"}` |
-| `report.issue` | `{"name","step","path"?}` | `{"html","status"}`, `{"entry"}` or `{}`, and `"project"` |
+| `report.issue` | `{"name","step","path"?,"anyway"?}` | `{"html","status"}`, `{"index"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -664,7 +667,14 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
-added when it has another suffix), beside the target first and renamed over it.
+added when it has another suffix), beside the target first and renamed over it. First it makes
+the checks Visual Dynamics makes before a report leaves the project: with skeleton sections on,
+the sections (a flash report's parts) the report still owes; with the data index on, every
+indexed file hashed again and those that do not match the checksum indexed. A report that owes
+or whose files have `CHANGED` or are `NOT FOUND` is not written unless `anyway` is true; the
+answer then carries `owed` (the sections' lines) and `index` (`{name, status}` a file) with
+`path` null, and the shell asks "Export anyway?". Written, the answer is the `path` with both
+lists empty.
 
 `report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
 tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
@@ -685,8 +695,9 @@ resolution (`#print`), and asking for the print dialog once they are drawn, wher
 PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
 changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
 Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
-on, every required field entered, not already issued), marks it issued (or amended), and gives the
-page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
+on, every required field entered, not already issued), makes the data index check `report.export`
+makes (answering `{"index":[...]}` alone, nothing marked, when files are astray and `anyway` is not
+true), marks it issued (or amended), and gives the page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
 issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
 puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
 as text beside its `features`.

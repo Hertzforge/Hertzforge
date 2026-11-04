@@ -28,10 +28,43 @@ def test_a_report_is_generated_rendered_and_exported(project, tmp_path):
     html = reports.render(project, {'name': name, 'theme': 'dark'})
     assert html.startswith('<!DOCTYPE html>') and 'data-theme="dark"' in html
     assert 'http://' not in html.split('<script id="data"')[0].lower(), 'nothing from a network'
-    written = reports.export(project, {'name': name, 'path': str(tmp_path / 'plate')})
-    assert written == str(tmp_path / 'plate.html')
+    answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'plate')})
+    written = answer['path']
+    assert written == str(tmp_path / 'plate.html') and answer == {'path': written, 'owed': [], 'index': []}
     assert Path(written).read_text(encoding='utf-8').startswith('<!DOCTYPE html>')
     assert not list(tmp_path.glob('*.partial'))
+
+
+def test_an_export_asks_about_owed_sections_and_astray_files_first(project, tmp_path):
+    """VD's `_export_owed` and `_export_index`: with skeleton sections on, a
+    report that still owes sections is not written until told to anyway;
+    with the data index on, the files are hashed again and one changed or
+    not found holds the export the same way. An issue makes the index
+    check too."""
+    name = reports.generate(project, {'template': 'modal'})
+    project.report_features(name, enable=('skeleton_sections',))
+    asked = reports.export(project, {'name': name, 'path': str(tmp_path / 'owed')})
+    assert asked['path'] is None and asked['owed'] and asked['index'] == []
+    assert asked['owed'] == list(project.report_check(name))
+    assert not (tmp_path / 'owed.html').exists(), 'nothing written while asking'
+    forced = reports.export(project, {'name': name, 'path': str(tmp_path / 'owed'), 'anyway': True})
+    assert forced['path'] == str(tmp_path / 'owed.html') and (tmp_path / 'owed.html').exists()
+
+    attached = tmp_path / 'settings.txt'
+    attached.write_text('gain 2', encoding='utf-8')
+    project.index_file(attached, 'the settings')
+    project.report_features(name, enable=('data_index',), disable=('skeleton_sections',))
+    clean = reports.export(project, {'name': name, 'path': str(tmp_path / 'clean')})
+    assert clean['path'] and clean['index'] == []
+    attached.unlink()
+    asked = reports.export(project, {'name': name, 'path': str(tmp_path / 'astray')})
+    assert asked['path'] is None and asked['owed'] == []
+    assert asked['index'] == [{'name': 'settings.txt', 'status': 'NOT FOUND'}]
+    with pytest.raises(ProtocolError) as error:
+        reports.export(project, {'name': name, 'path': str(tmp_path / 'x'), 'anyway': 'yes'})
+    assert error.value.code == 'bad_request'
+    forced = reports.export(project, {'name': name, 'path': str(tmp_path / 'astray'), 'anyway': True})
+    assert forced['path'] and forced['index'] == []
 
 
 @pytest.mark.parametrize(('params', 'code'), [

@@ -228,3 +228,30 @@ def test_the_server_keeps_one_log_a_connection_and_releases_it(tmp_path):
             'the connection closed released its log'
     finally:
         other.close()
+
+
+def test_the_log_exports_as_text_csv_and_the_machine_log(keeper, tmp_path):
+    """`runlog.export`, VD's run-log dock exports: one view of the open log
+    written to a path, the whole log or one test, the view's extension
+    added; a view that is not one, no log, or a bad test is refused."""
+    opened(keeper)
+    write(keeper, 'note', text='shaker warmed up')
+    written = call(keeper, 'runlog.export', path=str(tmp_path / 'log'), view='text')['path']
+    assert written == str(tmp_path / 'log.txt')
+    text = (tmp_path / 'log.txt').read_text(encoding='utf-8')
+    assert 'shaker warmed up' in text and 'Z axis random' in text
+    csv = call(keeper, 'runlog.export', path=str(tmp_path / 'log.csv'), view='csv', test=1)['path']
+    assert (tmp_path / 'log.csv').read_text(encoding='utf-8').startswith('id,kind,')
+    machine = call(keeper, 'runlog.export', path=str(tmp_path / 'machine'), view='machine')['path']
+    assert csv.endswith('.csv') and machine.endswith('.csv')
+    for params, code in (({'path': str(tmp_path / 'x'), 'view': 'pdf'}, 'bad_request'),
+                         ({'path': '', 'view': 'text'}, 'bad_request'),
+                         ({'path': str(tmp_path / 'x'), 'view': 'text', 'test': 'two'}, 'bad_request'),
+                         ({'path': str(tmp_path / 'shaker.hflog'), 'view': 'text'}, 'refused')):
+        with pytest.raises(ProtocolError) as error:
+            call(keeper, 'runlog.export', **params)
+        assert error.value.code == code, params
+    keeper.close()
+    with pytest.raises(ProtocolError) as error:
+        call(keeper, 'runlog.export', path=str(tmp_path / 'x'), view='text')
+    assert error.value.code == 'refused'
