@@ -32,6 +32,8 @@
 		DirectionalLight,
 		DoubleSide,
 		LineBasicMaterial,
+		Box3,
+		Box3Helper,
 		LineSegments,
 		Mesh,
 		MeshBasicMaterial,
@@ -51,6 +53,7 @@
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
+	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, nodeTravel } from './shape';
@@ -103,9 +106,11 @@
 	const CYCLE_S = 1.6;
 	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
 	const AMP_FULL_SCALE = 0.15;
+	/** The most nodes the hover caption projects on every pointer move. */
+	const HOVER_LIMIT = 60_000;
 
-	/** How long Record records: three cycles of a mode, or that long of a motion. */
-	const RECORD_S = 3 * CYCLE_S;
+	/** How long Record records: at least six seconds of whole cycles of a mode, as VD saves an animation, or that long of a motion. */
+	const RECORD_S = Math.ceil(6 / CYCLE_S) * CYCLE_S;
 	let recording = $state(false);
 
 	/**
@@ -149,6 +154,26 @@
 	let amplitude = $state(0.5);
 	let wireframe = $state(false);
 	let ghost = $state(false);
+	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
+	let colored = $state(true);
+	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, its extents written out. */
+	let bounds = $state(false);
+	/** The node under the pointer, captioned when the view is not picking. */
+	let hovered = $state<number | null>(null);
+	let hoverPending = false;
+	/** Nodes at one place, for the caption; built once per view's nodes and only when first asked. */
+	let groupsFor: { nodes: Float32Array; groups: Map<number, number[]> } | null = null;
+	function caption(n: number): string {
+		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
+		return nodeCaption(n, view.node_ids, groupsFor.groups);
+	}
+	/** The deflection scale as a typed multiplier of the slider's middle, VD's scale box: 0.01 to 1000. */
+	const scaleFactor = $derived(amplitude / 0.5);
+	function setScale(text: string) {
+		const value = Number(text);
+		if (!Number.isFinite(value)) return;
+		amplitude = Math.min(1000, Math.max(0.01, value)) * 0.5;
+	}
 	let fps = $state<number | null>(null);
 	let failure = $state<string | null>(null);
 
@@ -180,6 +205,20 @@
 
 	const peak = $derived(amplitude * AMP_FULL_SCALE * diagonal);
 
+	/** The model's extents along each axis, for the bounds box and its labels. */
+	const extents = $derived.by(() => {
+		const n = view.nodes;
+		const lo = [Infinity, Infinity, Infinity];
+		const hi = [-Infinity, -Infinity, -Infinity];
+		for (let i = 0; i < n.length; i += 3) {
+			for (let k = 0; k < 3; k++) {
+				if (n[i + k] < lo[k]) lo[k] = n[i + k];
+				if (n[i + k] > hi[k]) hi[k] = n[i + k];
+			}
+		}
+		return { lo, hi };
+	});
+
 	/** Display scaling of the model unit: meters shown as millimeters below one meter. */
 	const display = $derived.by(() => {
 		if (view.unit === 'm' && peak < 1) return { factor: 1000, unit: 'mm' };
@@ -189,6 +228,7 @@
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
+	let boundsBox: Box3Helper | null = null;
 	let camera: PerspectiveCamera;
 	let controls: OrbitControls;
 	let geometry: BufferGeometry;
@@ -255,6 +295,19 @@
 		return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 	}
 
+	/** The color of a node at `t` of the scale, or the surface's one color when coloring is off. */
+	function paint(colors: Float32Array, n: number, t: number, rgb: [number, number, number]) {
+		if (colored) colormap(t, rgb);
+		else {
+			rgb[0] = 0.62;
+			rgb[1] = 0.66;
+			rgb[2] = 0.72;
+		}
+		colors[3 * n] = srgbToLinear(rgb[0]);
+		colors[3 * n + 1] = srgbToLinear(rgb[1]);
+		colors[3 * n + 2] = srgbToLinear(rgb[2]);
+	}
+
 	function loadMode() {
 		if (!renderer || !current) return;
 		const re = current.shape;
@@ -266,12 +319,7 @@
 		maxMag = nodeTravel(re, im, travel) || 1;
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
-		for (let n = 0; n < travel.length; n++) {
-			colormap(travel[n] / maxMag, rgb);
-			colors[3 * n] = srgbToLinear(rgb[0]);
-			colors[3 * n + 1] = srgbToLinear(rgb[1]);
-			colors[3 * n + 2] = srgbToLinear(rgb[2]);
-		}
+		for (let n = 0; n < travel.length; n++) paint(colors, n, travel[n] / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
@@ -305,12 +353,8 @@
 		(shapeAttr.array as Float32Array).fill(0);
 		(shapeImagAttr.array as Float32Array).fill(0);
 		const colors = colorAttr.array as Float32Array;
-		const rgb = colormap(0);
-		for (let i = 0; i < colors.length; i += 3) {
-			colors[i] = srgbToLinear(rgb[0]);
-			colors[i + 1] = srgbToLinear(rgb[1]);
-			colors[i + 2] = srgbToLinear(rgb[2]);
-		}
+		const rgb: [number, number, number] = [0, 0, 0];
+		for (let n = 0; n < colors.length / 3; n++) paint(colors, n, 0, rgb);
 		shapeImagAttr.needsUpdate = true;
 		shownSample = -1;
 		showSample(Math.floor(position));
@@ -323,12 +367,7 @@
 		writeFrame(motion, k, moved, offsets);
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
-		for (const n of moved) {
-			colormap(Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
-			colors[3 * n] = srgbToLinear(rgb[0]);
-			colors[3 * n + 1] = srgbToLinear(rgb[1]);
-			colors[3 * n + 2] = srgbToLinear(rgb[2]);
-		}
+		for (const n of moved) paint(colors, n, Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		shownSample = k;
@@ -407,6 +446,10 @@
 		camera.near = radius / 100;
 		camera.far = radius * 100;
 		camera.updateProjectionMatrix();
+
+		boundsBox = new Box3Helper(new Box3().setFromBufferAttribute(position), 0x8b949e);
+		boundsBox.visible = bounds;
+		scene.add(boundsBox);
 
 		surface = new Mesh(
 			geometry,
@@ -703,8 +746,8 @@
 	}
 
 	/** The pickable node nearest (x, y) on screen, as a row of `view.nodes`. */
-	function nodeAt(x: number, y: number): number | null {
-		const count = Math.min(pick?.ids?.length ?? 0, nodeCount);
+	function nodeAt(x: number, y: number, over?: number): number | null {
+		const count = over ?? Math.min(pick?.ids?.length ?? 0, nodeCount);
 		const w = canvasHost.clientWidth;
 		const h = canvasHost.clientHeight;
 		const screen = new Float32Array(2 * count);
@@ -785,9 +828,34 @@
 	}
 
 	function onPointerMove(e: PointerEvent) {
-		if (pick?.target !== 'nodes' || e.buttons) return;
-		hoverNode = nodeAt(...at(e));
+		if (e.buttons) return;
+		if (pick?.target === 'nodes') {
+			hoverNode = nodeAt(...at(e));
+			return;
+		}
+		// the caption outside picking: once a frame, and only on a model small enough to project
+		// every node on each move (a large one is looked at, not read node by node)
+		if (!view.node_ids || nodeCount > HOVER_LIMIT || hoverPending) return;
+		hoverPending = true;
+		const [x, y] = at(e);
+		requestAnimationFrame(() => {
+			hoverPending = false;
+			hovered = nodeAt(x, y, nodeCount);
+		});
 	}
+
+	$effect(() => {
+		void colored;
+		if (!renderer) return;
+		if (motion) loadMotion();
+		else loadMode();
+	});
+	$effect(() => {
+		if (boundsBox) {
+			boundsBox.visible = bounds;
+			dirty = true;
+		}
+	});
 
 	/** Move to the next or previous mode, staying within the view's modes. */
 	function step(by: number) {
@@ -870,8 +938,12 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max="1" step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={Math.max(1, amplitude)} step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
+			</label>
+			<label class="scale" title="The deflection scale as a multiplier of the slider's middle, 0.01 to 1000">
+				<span class="lbl">×</span>
+				<input class="field mono num" data-testid="shape3d-scale" type="number" min="0.01" max="1000" step="any" value={Number(scaleFactor.toPrecision(3))} onchange={(e) => setScale(e.currentTarget.value)} aria-label="Deflection scale" />
 			</label>
 			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
@@ -884,6 +956,10 @@
 				Ghost
 			</button>
 			{/if}
+			{#if moves}
+			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
+			{/if}
+			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, its extents written out">Axes</button>
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -948,7 +1024,7 @@
 	</div>
 
 	<div class="bottom">
-		{#if moves}
+		{#if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
 				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
@@ -971,6 +1047,16 @@
 			</svg>
 
 			<div class="stats num" aria-live="off">
+				{#if hovered !== null && !pick}
+					<span class="hovercap" data-testid="shape3d-hover">{caption(hovered)}</span>
+				{/if}
+				{#if bounds}
+					<span class="extents" data-testid="shape3d-extents" aria-label="Model extents">
+						{#each ['X', 'Y', 'Z'] as axis, k (axis)}
+							<span>{axis} {formatFixed(extents.lo[k], 4)} to {formatFixed(extents.hi[k], 4)}{view.unit === 'undefined' ? '' : ` ${view.unit}`}</span>
+						{/each}
+					</span>
+				{/if}
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
@@ -1067,6 +1153,27 @@
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-md);
 		backdrop-filter: blur(6px);
+	}
+
+	.scale {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+	}
+
+	.scale input {
+		width: 6ch;
+		padding: 1px 4px;
+		font-size: var(--text-xs);
+	}
+
+	.hovercap {
+		color: var(--text-1);
+	}
+
+	.extents {
+		display: inline-flex;
+		gap: var(--sp-2);
 	}
 
 	.amp {

@@ -162,6 +162,7 @@
         "lines": {"$ref": "#/$defs/arrayRef"},
         "triangles": {"$ref": "#/$defs/arrayRef"},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
+        "node_ids": {"$ref": "#/$defs/arrayRef"},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},

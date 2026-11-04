@@ -161,9 +161,12 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
             **extra: Any) -> dict[str, Any]:
     """A mesh and its modes. Nodes and shapes are f32 [N, 3]; triangles and
     lines u32 [T, 3] and [L, 2]. `extra` fields ride along (the schema
-    allows them), such as how the shapes are normalized."""
+    allows them), such as how the shapes are normalized, or `node_ids`,
+    the drawn nodes' ids (u32 [N]) for the view's hover captions."""
     out: dict[str, Any] = {'view': 'shape3d', 'title': title, 'unit': unit,
                            'nodes': np.ascontiguousarray(nodes, np.float32)}
+    if extra.get('node_ids') is not None:
+        extra['node_ids'] = np.ascontiguousarray(extra['node_ids'], np.uint32)
     if lines is not None and len(lines):
         out['lines'] = np.ascontiguousarray(lines, np.uint32).reshape(-1, 2)
     if triangles is not None and len(triangles):

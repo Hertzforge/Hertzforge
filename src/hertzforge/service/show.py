@@ -197,7 +197,8 @@ def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
                        for d, i in enumerate(played)], link='time')
     stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [],
-                      triangles=triangles, lines=lines, **extra)
+                      triangles=triangles, lines=lines,
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows], **extra)
     return [stage, plot], notes
 
 
@@ -237,7 +238,8 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int]
     stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn_rows],
                       [v.mode(1, frequency, None, shape, label=label)],
-                      triangles=triangles, lines=lines, normalization='unscaled')
+                      triangles=triangles, lines=lines, normalization='unscaled',
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows])
     curves = _run(project, 'project.plot', data=data_name, records=_runs(records))
     return [stage, *curves], notes
 
@@ -247,11 +249,13 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
     model it was built from: one mesh of both, the second's nodes after
     the first's, each keeping its own units."""
     views = []
+    ids = []
     for name in (first, second):
         geometry = project[name]
         rows, triangles, lines = _mesh(geometry)
         views.append((np.asarray(geometry.node_xyz, dtype=float)[rows], triangles, lines,
                       geometry.units_defined))
+        ids.append(np.asarray(geometry.node_id)[rows])
     (nodes_a, tri_a, lines_a, defined_a), (nodes_b, tri_b, lines_b, defined_b) = views
     offset = len(nodes_a)
     triangles = [t for t in (tri_a, None if tri_b is None or not len(tri_b) else tri_b + offset)
@@ -262,7 +266,8 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
                      'm' if defined_a and defined_b else 'undefined',
                      np.vstack([nodes_a, nodes_b]), [],
                      triangles=np.vstack(triangles) if triangles else None,
-                     lines=np.vstack(lines) if lines else None)
+                     lines=np.vstack(lines) if lines else None,
+                     node_ids=np.concatenate(ids))
 
 
 def _pair(project: Any, first: str, second: str, records: dict[str, list[int]]

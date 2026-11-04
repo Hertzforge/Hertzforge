@@ -286,6 +286,10 @@ shell draws the table with its headings held at the top as it scrolls, puts a ce
 a number at the right of its column, and copies the whole table as tab-separated text, the
 headings first, so it pastes into a spreadsheet.
 
+A `shape3d` built from a geometry carries `node_ids`, the drawn nodes' ids (u32, one per node), so
+the view can caption the node under the pointer, coincident nodes listed together, as Visual
+Dynamics' scene does.
+
 A table may carry `"edit":{"op","params","columns","choices"?}`: its cells are typed into in place. `columns`
 gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
 operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),

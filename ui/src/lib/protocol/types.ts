@@ -191,6 +191,8 @@ export interface Shape3DView {
 	modes: Mode[];
 	/** Measured data to play back, with `modes` empty. */
 	motion?: Motion;
+	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
+	node_ids?: Uint32Array;
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */

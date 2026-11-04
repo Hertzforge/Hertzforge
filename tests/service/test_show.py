@@ -249,3 +249,13 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
         projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
     with pytest.raises(ProtocolError, match='component'):
         projects.show(plate, {'objects': [frf], 'prefs': {'component': 'abs'}})
+
+
+def test_a_geometrys_views_carry_the_drawn_nodes_ids(plate, validate):
+    geometry, frf, history = named(plate, 'geometry'), named(plate, 'frf'), named(plate, 'time_history')
+    project = plate.project
+    for objects in ((geometry,), (geometry, frf), (geometry, history)):
+        (stage, *_rest) = shown(plate, *objects, validate=validate)['views']
+        ids = stage['node_ids']
+        assert ids.dtype == np.uint32 and len(ids) == len(stage['nodes'])
+        assert set(ids.tolist()) <= {int(n) for n in project[geometry].node_id}

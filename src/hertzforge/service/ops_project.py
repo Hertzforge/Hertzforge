@@ -254,6 +254,7 @@ def _shape_view(project: Any, shapes_name: str, geometry_name: str) -> dict:
                      'm' if geometry.units_defined else 'undefined',
                      np.asarray(geometry.node_xyz, dtype=float)[rows], modes,
                      triangles=triangles, lines=lines,
+                     node_ids=np.asarray(geometry.node_id)[rows],
                      normalization='unscaled' if getattr(shapes, 'unscaled', False)
                      else 'mass')
 
