@@ -24,6 +24,9 @@ PAYLOADS = {
     'response_laws_list': ('result', 'lawsListResult'),
     'request_laws_import': ('params', 'lawsImportParams'),
     'response_laws_import': ('result', 'lawsImportResult'),
+    'request_mimo_random_subscribe_coh_error': ('params', 'mimoSubscribeParams'),
+    'request_mimo_random_identification_load': ('params', 'mimoIdentificationParams'),
+    'response_mimo_random_identification_load': ('result', 'mimoIdentificationResult'),
     'request_mimo_random_reference_build_breakpoints': ('params', 'mimoReferenceBuildParams'),
     'request_mimo_random_reference_build_rigid_body': ('params', 'mimoRigidParams'),
     'response_mimo_random_reference_build_rigid_body': ('result', 'mimoRigidResult'),
@@ -122,7 +125,8 @@ def test_law_entries_say_which_world_they_are_for(validate):
 def test_every_new_refusal_is_a_listed_reason(validate):
     error = _text('response_error_setup_invalid')
     validate(error)
-    for reason in ('gate_failed', 'law_import_failed', 'catalog_unavailable'):
+    for reason in ('gate_failed', 'law_import_failed', 'catalog_unavailable',
+                   'identification_mismatch'):
         e = copy.deepcopy(error)
         e['error']['reason'] = reason
         validate(e)

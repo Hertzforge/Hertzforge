@@ -268,6 +268,15 @@ pub struct Records {
     /// Full spectral-matrix snapshot cadence, seconds, plus the first and last loop
     /// at full level.
     pub snapshot_every_s: f64,
+    /// Record every law call's inputs and outputs, so the run replays (A11). The
+    /// response spectral matrix is in every entry, so at the largest scale this is
+    /// the size of a full snapshot per loop.
+    #[serde(default = "yes")]
+    pub law_inputs: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Records {
@@ -275,6 +284,7 @@ impl Default for Records {
         Records {
             enabled: true,
             snapshot_every_s: DEFAULT_SNAPSHOT_EVERY_S,
+            law_inputs: true,
         }
     }
 }

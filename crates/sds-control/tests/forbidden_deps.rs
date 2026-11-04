@@ -40,9 +40,6 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-hal-sim",
     "hertzforge-module-abi",
     "hertzforge-random",
-    // The reference builders and readers behind `mimo_random.reference.*`, reviewed
-    // 2026-11-03: pure computation and file reading (zip, sha2, both MIT), no backend.
-    "hertzforge-reference",
     "hertzforge-sdm",
     "hertzforge-shaker-db",
     "hertzforge-station",
@@ -58,6 +55,14 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-law-sdk",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
+    // The MIMO Random run service and the reference reader behind the wire's MIMO
+    // driver (src/mimo/adapter.rs), reviewed 2026-11-03: `hertzforge-mimo-random`
+    // reaches hardware only through the station backend the control service hands it
+    // (built by `hertzforge-station`, wrapped for the operator's stop and abort) and
+    // holds the Sim only as a dev-dependency; `hertzforge-reference` reads and checks
+    // reference files (sha2 and zip, both MIT) and names no backend.
+    "hertzforge-mimo-random",
+    "hertzforge-reference",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -67,12 +72,13 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// `hertzforge-mimo-random` was written here as well: the multiple-output Random
 /// run service (identification, the loop, the guards, records). Like the
 /// single-output service it reaches hardware only through the station factory
-/// and builds the Sim only as a test fixture. The control service does not
-/// depend on it yet; the wire adapter joins them.
+/// and builds the Sim only as a test fixture. The control service reaches it
+/// through the wire adapter (`src/mimo/adapter.rs`).
 ///
 /// `hertzforge-reference` was written here too: reference SDM builders, validation
 /// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
-/// reaches no hardware. The control service reaches it for `mimo_random.reference.*`.
+/// reaches no hardware. The control service reads a setup's reference file with it, and
+/// reaches it for `mimo_random.reference.*`.
 ///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It

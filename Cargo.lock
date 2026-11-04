@@ -2225,6 +2225,7 @@ dependencies = [
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-law-host",
+ "hertzforge-mimo-random",
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",

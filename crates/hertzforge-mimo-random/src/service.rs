@@ -184,6 +184,9 @@ pub struct MimoRandomService {
     response_slots: Vec<usize>,
     /// The reference in the control space, full level.
     reference: HermitianStack,
+    /// The same reference and its tolerances, shared with display snapshots.
+    reference_shared: Arc<HermitianStack>,
+    tolerances_shared: Arc<hertzforge_sdm::law::Tolerances>,
     /// The reference's diagonal per line (line-major, `lines * n_r`).
     ref_diag: Vec<f64>,
     /// What the plant can reach of the reference (`P G_ref P^H`), for the core's
@@ -194,6 +197,8 @@ pub struct MimoRandomService {
     t_drive_pinv: Option<MatrixStack>,
 
     law_factory: Option<Arc<dyn MimoLawFactory>>,
+    /// The law file behind `law_factory`, when the law is one (for the law record).
+    law_file: Option<PathBuf>,
     law_clock: Arc<dyn LawClock>,
     law: Option<Box<dyn MimoControlLaw + Send>>,
     law_needs: Vec<MimoInput>,
@@ -379,6 +384,7 @@ impl MimoRandomService {
             diagnostics: Vec::new(),
             drive_rms: vec![0.0; n_d],
         };
+        let tolerances_shared = Arc::new(cfg.reference.tolerances.clone());
         Ok(MimoRandomService {
             achievable_diag: ref_diag.clone(),
             cfg,
@@ -398,12 +404,15 @@ impl MimoRandomService {
             n_r,
             n_u,
             response_slots,
+            reference_shared: Arc::new(reference.clone()),
+            tolerances_shared,
             reference,
             ref_diag,
             t_resp,
             t_drive,
             t_drive_pinv,
             law_factory,
+            law_file: None,
             law_clock: Arc::new(MonotonicClock::new()),
             law: None,
             law_needs: Vec::new(),
@@ -455,6 +464,12 @@ impl MimoRandomService {
     pub fn with_law_factory(mut self, factory: Arc<dyn MimoLawFactory>) -> Self {
         self.law_factory = Some(factory);
         self
+    }
+
+    /// Name the law file the law factory builds from (an imported law's place in the
+    /// catalog), so the run's law record carries a copy of it.
+    pub fn set_law_file(&mut self, path: Option<PathBuf>) {
+        self.law_file = path;
     }
 
     /// Time law calls on `clock` (tests make a law slow deterministically).
@@ -549,6 +564,98 @@ impl MimoRandomService {
     /// The drive's peak clip and rms ceiling hold the drive; this is what played.
     pub fn data_root(&self) -> &std::path::Path {
         &self.data_root
+    }
+
+    pub(crate) fn reference_shared(&self) -> Arc<HermitianStack> {
+        self.reference_shared.clone()
+    }
+
+    pub(crate) fn tolerances_shared(&self) -> Arc<hertzforge_sdm::law::Tolerances> {
+        self.tolerances_shared.clone()
+    }
+
+    /// Per drive, the smallest power factor the change cap and the ceiling applied
+    /// on any band line in the last accepted loop (1 when nothing held it down);
+    /// empty before the first.
+    pub fn drive_caps(&self) -> Vec<f64> {
+        let Some(c) = self.ls.caps.as_ref() else {
+            return Vec::new();
+        };
+        (0..c.drives)
+            .map(|k| {
+                (self.band.0..self.band.1)
+                    .filter_map(|l| c.factors.get(l * c.drives + k).copied())
+                    .filter(|f| f.is_finite())
+                    .fold(1.0f64, f64::min)
+                    .clamp(0.0, 1.0)
+            })
+            .collect()
+    }
+
+    /// Seconds at the present level (the loop's acquisition time summed).
+    pub fn elapsed_at_level_s(&self) -> f64 {
+        self.elapsed_at_level_s
+    }
+
+    /// Seconds left at full level before the run stops by itself, at full level
+    /// with a duration set.
+    pub fn remaining_at_full_level_s(&self) -> Option<f64> {
+        if self.state != MimoState::FullLevel {
+            return None;
+        }
+        self.cfg
+            .full_level_duration_s
+            .map(|d| (d - self.elapsed_at_level_s).max(0.0))
+    }
+
+    /// A stop has been asked for and the drive is ramping down to it.
+    pub fn stopping(&self) -> bool {
+        self.ramp.stop_requested().is_some()
+            && matches!(self.state, MimoState::Engaged | MimoState::FullLevel)
+    }
+
+    /// The law the run uses, by the catalog's id, with its parameter values.
+    pub fn law_choice(&self) -> &hertzforge_random_laws::LawChoice {
+        &self.cfg.law
+    }
+
+    /// Choose another law (or other parameters) during the prediction step: the law
+    /// is built and seeded again against the identification set and the prediction
+    /// starts over. `factory` builds an imported law file (resolved through the law
+    /// catalog); `None` builds the built-in law `choice` names.
+    pub fn change_law(
+        &mut self,
+        choice: hertzforge_random_laws::LawChoice,
+        factory: Option<Arc<dyn MimoLawFactory>>,
+    ) -> Result<(), MimoError> {
+        if self.state != MimoState::Predict {
+            return Err(MimoError::BadState(format!(
+                "the law is changed in the prediction step; the run is {:?}",
+                self.state
+            )));
+        }
+        let factory = match factory {
+            Some(f) => f,
+            None => crate::law::builtin_factory(&choice, self.n_r)
+                .map_err(|e| MimoError::Law(e.to_string()))?,
+        };
+        let before = (self.law_factory.clone(), self.cfg.law.clone());
+        self.law_factory = Some(factory);
+        self.cfg.law = choice;
+        self.law_misses = 0;
+        self.law_stop_due = None;
+        if let Err(e) = self.predict() {
+            // Keep the law that was there; the prediction it made stands.
+            self.law_factory = before.0;
+            self.cfg.law = before.1;
+            let _ = self.predict();
+            return Err(e);
+        }
+        self.note(format!(
+            "Law changed to `{}` in the prediction step.",
+            self.cfg.law.id
+        ));
+        Ok(())
     }
 
     fn transition(&mut self, to: MimoState) {
@@ -1346,37 +1453,7 @@ impl MimoRandomService {
     /// transformations, the drives and the grid. A loaded identification set must
     /// carry the same.
     pub fn setup_hash(&self) -> String {
-        let mut s = String::new();
-        s.push_str(&format!(
-            "lines={};df={:.12e};band={:?};",
-            self.lines, self.df_hz, self.band
-        ));
-        let find = |idx: u32| self.table.channels.iter().find(|c| c.index == idx);
-        for (role, idx) in self
-            .cfg
-            .controls
-            .iter()
-            .map(|&c| ("c", c))
-            .chain(self.cfg.limits.iter().map(|l| ("l", l.channel_index)))
-            .chain(self.cfg.drives.iter().map(|d| ("d", d.channel_index)))
-        {
-            let sens = find(idx)
-                .map(|c| c.sensitivity_mv_per_eu)
-                .unwrap_or(f64::NAN);
-            s.push_str(&format!("{role}{idx}:{sens:.12e};"));
-        }
-        for t in [&self.t_resp, &self.t_drive].into_iter().flatten() {
-            s.push_str(&format!("t{:?}:", t.dims()));
-            for v in t.data() {
-                s.push_str(&format!("{:.12e},{:.12e};", v.re, v.im));
-            }
-        }
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in s.bytes() {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        format!("{h:016x}")
+        setup_hash_of(&self.cfg, &self.table, self.lines, self.df_hz)
     }
 
     fn gate_report(&self) -> GateReport {
@@ -1507,6 +1584,26 @@ impl MimoRandomService {
                 .collect(),
         });
         self.law = Some(law);
+        if let (Some(r), Some(line)) = (self.records.as_mut(), self.law_line.as_ref()) {
+            let record = crate::records::LawRecord {
+                id: line.id.clone(),
+                name: line.name.clone(),
+                version: line.version.clone(),
+                sha256: line.sha256.clone(),
+                builtin: line.sha256.is_empty(),
+                params: factory
+                    .params()
+                    .iter()
+                    .map(crate::records::param_json)
+                    .collect(),
+                file: None,
+                catalog_path: None,
+                parameters: line.parameters.clone(),
+            };
+            if let Err(e) = r.write_law_record(record, self.law_file.as_deref()) {
+                self.faults.push(format!("law record: {e}"));
+            }
+        }
         // The seed: the identification response referred to the reference's level.
         let set = self.ident.clone().ok_or_else(|| {
             MimoError::BadState("there is no identification set to seed the law with".into())
@@ -1857,6 +1954,25 @@ impl MimoRandomService {
             }
         });
         self.timing.law_ms = t0.elapsed().as_secs_f64() * 1e3;
+        if self.cfg.records.law_inputs {
+            let seed = loop_index == 0;
+            let params: Vec<serde_json::Value> = match (&self.law_factory, seed) {
+                (Some(f), true) => f.params().iter().map(crate::records::param_json).collect(),
+                _ => Vec::new(),
+            };
+            let id = self.cfg.law.id.clone();
+            if let Some(rec) = self.records.as_mut() {
+                let words = r.as_ref().err().map(|m| m.words());
+                let outcome = match &r {
+                    Ok(o) => Ok(o),
+                    Err(_) => Err(words.as_deref().unwrap_or("")),
+                };
+                let law = seed.then_some((id.as_str(), params.as_slice()));
+                if let Err(e) = rec.write_law_call(seed, &inputs, outcome, law) {
+                    self.faults.push(format!("law-input record: {e}"));
+                }
+            }
+        }
         r
     }
 
@@ -2397,6 +2513,20 @@ impl MimoRandomService {
         .map_err(MimoError::Io)?;
         let mut rec = rec;
         rec.set_snapshot_every_s(self.cfg.records.snapshot_every_s);
+        let space = match self.cfg.control_space {
+            ControlSpace::Physical => "physical",
+            ControlSpace::Virtual { .. } => "virtual",
+        };
+        if let Err(e) = rec.write_reference(
+            &self.reference,
+            &self.cfg.reference.tolerances,
+            self.band,
+            self.df_hz,
+            &self.cfg.controls,
+            space,
+        ) {
+            self.faults.push(format!("reference record: {e}"));
+        }
         self.log.push(MimoEventKind::Record {
             path: rec.run_dir().display().to_string(),
         });
@@ -2418,6 +2548,8 @@ impl MimoRandomService {
             "law": self.cfg.law.id,
             "seed": self.cfg.seed,
             "setup_hash": self.setup_hash(),
+            "station": self.station.to_string(),
+            "source": if self.station.is_hardware() { "HARDWARE" } else { "SIM" },
         })
         .to_string()
     }
@@ -2436,6 +2568,48 @@ impl MimoRandomService {
     pub fn records_dir(&self) -> Option<PathBuf> {
         self.records.as_ref().map(|r| r.run_dir().to_path_buf())
     }
+}
+
+/// The setup hash of a run of `cfg` on `table` with `lines` lines of `df_hz`
+/// (what [`MimoRandomService::setup_hash`] returns once the run is built): FNV-1a
+/// over the channel roles and sensitivities, the transformations, the drives and
+/// the grid. Lets a caller check an identification set against a setup before the
+/// run exists.
+pub fn setup_hash_of(cfg: &MimoConfig, table: &ChannelTable, lines: usize, df_hz: f64) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "lines={};df={:.12e};band={:?};",
+        lines, df_hz, cfg.reference.band
+    ));
+    let find = |idx: u32| table.channels.iter().find(|c| c.index == idx);
+    for (role, idx) in cfg
+        .controls
+        .iter()
+        .map(|&c| ("c", c))
+        .chain(cfg.limits.iter().map(|l| ("l", l.channel_index)))
+        .chain(cfg.drives.iter().map(|d| ("d", d.channel_index)))
+    {
+        let sens = find(idx)
+            .map(|c| c.sensitivity_mv_per_eu)
+            .unwrap_or(f64::NAN);
+        s.push_str(&format!("{role}{idx}:{sens:.12e};"));
+    }
+    let t_resp = match &cfg.control_space {
+        ControlSpace::Physical => None,
+        ControlSpace::Virtual { response } => Some(response),
+    };
+    for t in [t_resp, cfg.drive_transform.as_ref()].into_iter().flatten() {
+        s.push_str(&format!("t{:?}:", t.dims()));
+        for v in t.data() {
+            s.push_str(&format!("{:.12e},{:.12e};", v.re, v.im));
+        }
+    }
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// Fold `e` into an average weighted by frames.

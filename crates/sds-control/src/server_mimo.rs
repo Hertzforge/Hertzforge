@@ -8,7 +8,6 @@ use crate::laws;
 use crate::mimo::display;
 use crate::mimo::driver::{LawRef, StartContext, StopOutcome};
 use crate::mimo::setup::{self, SetupContext};
-use crate::mimo::sim::{SimClock, SimulatedMimoDriver};
 use crate::mimo::{view as mview, MimoRun};
 use crate::protocol::{self, ErrorCode, MethodError};
 use crate::random::config::Grid;
@@ -62,9 +61,17 @@ impl Service {
     fn new_driver(&self, ctx: &StartContext) -> Box<dyn crate::mimo::driver::MimoRunDriver> {
         match &self.opts.mimo_driver {
             Some(f) => f(ctx),
-            None => Box::new(SimulatedMimoDriver::new(SimClock::wall(
-                self.opts.sim_speed,
-            ))),
+            None => Box::new(crate::mimo::adapter::ServiceDriver::new(
+                crate::mimo::adapter::AdapterOptions {
+                    data_root: self.opts.data_root.clone(),
+                    capture_root: self.opts.capture_root.clone(),
+                    sim_speed: self.opts.sim_speed,
+                    scanner: self.opts.scanner.clone(),
+                    bind: self.opts.bind.clone(),
+                    catalog: Some(self.catalog.clone()),
+                    law_factory: None,
+                },
+            )),
         }
     }
 
@@ -82,7 +89,7 @@ impl Service {
         ),
         MethodError,
     > {
-        let (table, kind, class, table_report) = {
+        let (table, kind, class, table_report, ni_devices) = {
             let inner = self.inner.lock().await;
             let kind = match inner.stations.selected() {
                 Selection::Sim => "sim",
@@ -93,9 +100,11 @@ impl Service {
                 kind,
                 station::class_name(inner.stations.class()),
                 table::validate(&inner.table.table, &inner.ctx()),
+                ni_devices(inner.stations.selected()),
             )
         };
         let raw = setup.clone();
+        let table_now = table.clone();
         let (parsed, items, law) = self
             .with_catalog(move |cat| {
                 let lookup = |id: &str| cat.entry(id).map(|e| laws::law_info(&e));
@@ -114,7 +123,12 @@ impl Service {
         let mut all = Report::default();
         all.extend(table_report);
         all.extend(items);
-        let ctx = StartContext { class, kind };
+        let ctx = StartContext {
+            class,
+            kind,
+            table: Some(table_now),
+            ni_devices,
+        };
         let parsed = Arc::new(parsed);
         let mut driver = self.new_driver(&ctx);
         let v = driver.configure(parsed.clone(), law, all);
@@ -277,6 +291,8 @@ impl Service {
                     Selection::Sim => "sim",
                     Selection::Ni { .. } => "ni",
                 },
+                table: Some(inner.table.table.clone()),
+                ni_devices: ni_devices(inner.stations.selected()),
             };
             (run, ctx)
         };
@@ -431,6 +447,48 @@ impl Service {
         })
         .await
         .map_err(|e| MethodError::internal(format!("the reference task failed: {e}")))?
+    }
+
+    /// `mimo_random.identification.save` and `.load`: controller only (they write
+    /// files, or change what the next start does).
+    pub(super) async fn mimo_identification(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+        load: bool,
+    ) -> Result<Value, MethodError> {
+        let path = protocol::named_str(params, "path")?
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| {
+                MethodError::bad_params(
+                    "path",
+                    "Name the folder of the identification set with \"path\".",
+                )
+            })?
+            .to_owned();
+        let (run, table) = {
+            let inner = self.inner.lock().await;
+            inner.session.require_controller(conn.id)?;
+            let run = inner.mimo.clone().ok_or_else(|| {
+                MethodError::named(
+                    ErrorCode::Refused,
+                    "not_configured",
+                    "MIMO Random is not set up; send a setup first.",
+                )
+            })?;
+            (run, inner.table.table.clone())
+        };
+        let info = tokio::task::spawn_blocking(move || {
+            let p = std::path::PathBuf::from(&path);
+            if load {
+                run.with(|d| d.load_identification(&p, &table))
+            } else {
+                run.with(|d| d.save_identification(&p))
+            }
+        })
+        .await
+        .map_err(|e| MethodError::internal(format!("the identification task failed: {e}")))??;
+        Ok(json!({"identification": info.to_json()}))
     }
 
     pub(super) async fn laws_list(
@@ -599,6 +657,14 @@ impl Service {
             }
             Err(e) => eprintln!("sds-control: mimo_random.data frame not encoded: {e}"),
         }
+    }
+}
+
+/// The NI devices a station selection names.
+fn ni_devices(sel: &Selection) -> Vec<String> {
+    match sel {
+        Selection::Sim => Vec::new(),
+        Selection::Ni { devices } => devices.clone(),
     }
 }
 

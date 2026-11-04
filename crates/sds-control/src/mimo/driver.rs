@@ -138,6 +138,10 @@ pub enum QuantitySelector {
     /// The dB error against the reference of the listed controls, per line
     /// (`error_db(all)`, the heatmap's rows).
     ErrorDb(Vec<usize>),
+    /// The coherence error of the listed controls, per line: each control's rms
+    /// over its partners of the measured squared coherence minus the reference's
+    /// (`coh_error(all)`, the heatmap's second mode).
+    CohError(Vec<usize>),
     /// A drive's PSD (`drive_psd(k)`).
     DrivePsd(usize),
     /// Coherence between two drives (`drive_coh(k,l)`).
@@ -226,6 +230,45 @@ pub struct StartContext {
     /// `sim`, `ni_simulated` or `ni_real`.
     pub class: &'static str,
     pub kind: &'static str,
+    /// The channel table as it stands (`None` where a driver is only checking a
+    /// setup).
+    pub table: Option<hertzforge_channel_table::ChannelTable>,
+    /// The NI devices the station selection names (empty on the simulator).
+    pub ni_devices: Vec<String>,
+}
+
+/// An identification set on disk, as the protocol describes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdentificationInfo {
+    /// The folder holding the set.
+    pub path: String,
+    /// The setup hash it was measured on.
+    pub setup_hash: String,
+    pub frames: usize,
+    /// The controls' level against the reference during identification, dB.
+    pub level_db: f64,
+    /// The rms each drive played, V.
+    pub drive_vrms: Vec<f64>,
+}
+
+impl IdentificationInfo {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "path": self.path,
+            "setup_hash": self.setup_hash,
+            "frames": self.frames,
+            "level_db": crate::protocol::num(self.level_db),
+            "drive_vrms": self.drive_vrms.iter().map(|x| crate::protocol::num(*x)).collect::<Vec<_>>(),
+        })
+    }
+}
+
+fn not_offered(what: &str) -> MethodError {
+    MethodError::named(
+        crate::protocol::ErrorCode::Refused,
+        "wrong_state",
+        format!("{what} is not offered by this run."),
+    )
 }
 
 /// What the service needs from a MIMO Random run.
@@ -278,6 +321,24 @@ pub trait MimoRunDriver: Send {
     fn controller_lost(&mut self, _name: &str) {}
     /// The controlling client came back within the timeout.
     fn controller_back(&mut self, _name: &str) {}
+    /// Use the identification set in the folder `path` for this run, before it
+    /// starts: the run then skips the noise floor and identification. Refused
+    /// (`identification_mismatch`) when it was measured on another setup, checked
+    /// against `table` as it stands.
+    fn load_identification(
+        &mut self,
+        _path: &std::path::Path,
+        _table: &hertzforge_channel_table::ChannelTable,
+    ) -> Result<IdentificationInfo, MethodError> {
+        Err(not_offered("Loading an identification set"))
+    }
+    /// Copy this run's identification set into the folder `path`.
+    fn save_identification(
+        &mut self,
+        _path: &std::path::Path,
+    ) -> Result<IdentificationInfo, MethodError> {
+        Err(not_offered("Saving the identification set"))
+    }
 }
 
 /// Makes a driver for a setup on the selected station.
