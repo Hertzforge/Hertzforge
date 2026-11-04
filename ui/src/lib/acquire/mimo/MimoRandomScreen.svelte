@@ -19,7 +19,9 @@
 	import MimoControl from './MimoControl.svelte';
 	import MimoPredict from './MimoPredict.svelte';
 	import MimoReference from './MimoReference.svelte';
-	import MimoRunStatus from './MimoRunStatus.svelte';
+	import StationPanel from '../StationPanel.svelte';
+	import { runBandsOf, runGeometryOf } from './runFrame';
+	import MimoRunView from './views/MimoRunView.svelte';
 	import MimoSpace from './MimoSpace.svelte';
 	import MimoSummary from './MimoSummary.svelte';
 	import type { MimoSection } from './mimoSetup';
@@ -50,6 +52,9 @@
 	const section = $derived((mimo.section === 'predict' ? 'channels' : mimo.section) as SetupSection);
 	const step = $derived(mimo.step);
 	const review = $derived(mimo.status?.state === 'review');
+	/** What the run views draw against: each controlled quantity's bands, and where the sensors are. */
+	const runBands = $derived(runBandsOf(mimo.status));
+	const geometry = $derived(runGeometryOf(mimo.setup, mimo.status));
 	const liveDot = $derived(mimo.status?.state === 'running' || mimo.status?.state === 'stopping');
 
 	/** Why Proceed to Run waits, or null. An observer only looks, so it never waits. */
@@ -227,14 +232,16 @@
 			<MimoPredict {mimo} />
 		</div>
 	{:else}
-		<div class="body" bind:this={body} data-testid="run-view">
-			<MimoRunStatus {mimo} />
-			<div class="aq-actions back">
-				<button class="btn sm" data-testid="back-to-setup" onclick={() => (mimo.step = 'setup')} title={mimo.isLive ? 'Look at the setup. It stays locked while the run is live.' : 'Back to the setup.'}>
-					<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-					Back to Setup
-				</button>
-			</div>
+		<div class="body fit" bind:this={body} data-testid="run-view">
+			<MimoRunView views={app.mimoViews} onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} {geometry} bands={runBands} diagnostics={mimo.law?.diagnostics ?? []}>
+				{#snippet station()}<StationPanel acq={mimo.acq} />{/snippet}
+				{#snippet end()}
+					<button class="btn sm" data-testid="back-to-setup" onclick={() => (mimo.step = 'setup')} title={mimo.isLive ? 'Look at the setup. It stays locked while the run is live.' : 'Back to the setup.'}>
+						<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						Back to Setup
+					</button>
+				{/snippet}
+			</MimoRunView>
 		</div>
 	{/if}
 </div>
@@ -430,6 +437,17 @@
 
 	.body:focus {
 		outline: none;
+	}
+
+	/* The run fills the window when there is room, so the pages and the numbers are all in view
+	   during a run; on a small window it scrolls like the rest. */
+	@media (min-height: 700px) and (min-width: 1101px) {
+		.body.fit {
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+			padding-bottom: var(--sp-3);
+		}
 	}
 
 	.withsum {

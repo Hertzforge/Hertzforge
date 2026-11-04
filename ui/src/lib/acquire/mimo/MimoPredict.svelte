@@ -9,7 +9,10 @@
 	 */
 	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import type { ParamValues } from '$lib/forms/params';
+	import type { SdmView } from '$lib/protocol/types';
 	import { formatFixed, formatNumber } from '$lib/viz/format';
+	import MatrixGrid from '$lib/viz/MatrixGrid.svelte';
+	import { pointsForWidth } from '../display/mimoLayout';
 	import Findings from '../Findings.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
 	import { db } from '../words';
@@ -26,6 +29,7 @@
 	const gates = $derived(s?.gates ?? null);
 	const review = $derived(s?.state === 'review');
 	const gateFailed = $derived(s?.phase === 'gate_failed');
+	const predictionExceeded = $derived(s?.phase === 'prediction_exceeded');
 	const labels = $derived(s?.shape?.labels ?? mimo.labels);
 	const driveLabels = $derived(s?.shape?.drive_labels ?? mimo.channels.drives.map((r) => r.description));
 	const physical = $derived((s?.shape?.space ?? mimo.space.kind) === 'physical');
@@ -34,15 +38,62 @@
 	const descriptors = $derived((law?.params ?? []).map(lawParamDescriptor).filter((x) => x !== null));
 	const canEdit = $derived(review && mimo.isController);
 	let overrideOpen = $state(false);
+	/** Controls marked to exclude at a failed gate, and the operator's reason. */
+	let excludeSet = $state<number[]>([]);
+	let excludeWhy = $state('');
+	const excluded = $derived(s?.excluded ?? []);
+	function toggleExclude(i: number) {
+		excludeSet = excludeSet.includes(i) ? excludeSet.filter((x) => x !== i) : [...excludeSet, i];
+	}
+	async function exclude() {
+		if (!excludeSet.length || !excludeWhy.trim()) return;
+		if (await mimo.exclude([...excludeSet].sort((a, b) => a - b), excludeWhy.trim())) {
+			excludeSet = [];
+			excludeWhy = '';
+		}
+	}
 
-	/** The tolerances a control is judged by: its own bands when the controls are physical. */
+	/**
+	 * The tolerances a controlled quantity is judged by: the run's own (a control row's, or a
+	 * degree of freedom's under virtual control), or the draft's while there is no run.
+	 */
 	function bands(i: number): { alarm: [number, number]; abort: [number, number] } | null {
+		const own = s?.shape?.bands?.[i];
+		if (own) return { alarm: own.alarm_db, abort: own.abort_db };
 		if (!physical) return null;
 		const r = mimo.channels.controls[i];
 		if (!r) return null;
 		const c = controlOf(mimo.setup, r.index);
 		return { alarm: c.alarm_db, abort: c.abort_db };
 	}
+
+	// The achievable reference, when controls outnumber drives: a window of up to eight
+	// controls drawn as the run's matrix grid draws the measured matrix.
+	$effect(() => {
+		mimo.predictShown = true;
+		const stop = mimo.predictFeed.watch();
+		return () => {
+			stop();
+			mimo.predictShown = false;
+		};
+	});
+	let gridWidth = $state(0);
+	$effect(() => {
+		if (gridWidth > 0) mimo.predictPoints = pointsForWidth(gridWidth / 3, Math.min(2, globalThis.devicePixelRatio || 1));
+	});
+	const achView = $derived((mimo.predictFeed.plotData('predict:achievable')?.views[0] as SdmView | undefined) ?? null);
+	const achFirst = $derived(Math.min(mimo.predictFirst, Math.max(0, labels.length - 8)));
+	const achNames = $derived(labels.slice(achFirst, achFirst + 8));
+	const achSpectra = $derived(achNames.map(() => null));
+	const unit = $derived(achView?.unit ?? 'g²/Hz');
+	const controlNames = $derived(mimo.channels.controls.map((r) => r.description || `Channel ${r.index}`));
+
+	const VERDICT_WORDS: Record<string, { word: string; tone: 'pass' | 'warn' | 'fail' | 'info' }> = {
+		pass: { word: 'Within rating', tone: 'pass' },
+		advisory: { word: 'Advisory', tone: 'warn' },
+		exceeded: { word: 'Exceeded', tone: 'fail' },
+		not_evaluated: { word: 'No shaker record', tone: 'info' }
+	};
 
 	function errorVerdict(e: number, b: ReturnType<typeof bands>): { word: string; tone: 'pass' | 'warn' | 'fail' | 'info' } {
 		if (!Number.isFinite(e)) return { word: '-', tone: 'info' };
@@ -95,7 +146,33 @@
 						</dl>
 					{/if}
 					{#if gateFailed}
-						<p class="aq-small warnline">A gate failed: some controls are not explained by the drives, or the plant is nearly singular on some lines. Change the setup (controls, drives, frame) and run again, or override in your own words.</p>
+						<p class="aq-small warnline">A gate failed: some controls are not explained by the drives, or the plant is nearly singular on some lines. Exclude a control (it stays measured, as a monitor), override in your own words, or change the setup and run again.</p>
+					{/if}
+					{#if gates?.coherence?.length}
+						<table class="aq-table compact" data-testid="predict-gate-controls">
+							<thead><tr><th>{physical ? 'Control' : 'Degree of freedom'}</th><th class="num">Multiple coherence</th><th>Against the floor</th>{#if gateFailed && physical}<th>Exclude</th>{/if}</tr></thead>
+							<tbody>
+								{#each gates.coherence as c, i (i)}
+									{@const low = c !== null && c < gates.coherence_floor}
+									<tr data-testid="gate-control-{i}" data-low={low}>
+										<td>{labels[i] ?? `Control ${i + 1}`}</td>
+										<td class="num">{c === null ? '-' : formatFixed(c, 4)}</td>
+										<td class="verdict {excluded.includes(i) ? 'info' : low ? 'fail' : 'pass'}">{excluded.includes(i) ? 'Excluded, kept as a monitor' : low ? 'Below the floor' : 'Above the floor'}</td>
+										{#if gateFailed && physical}
+											<td><input type="checkbox" aria-label="Exclude {labels[i] ?? `control ${i + 1}`}" checked={excludeSet.includes(i)} disabled={!mimo.isController || excluded.includes(i)} onchange={() => toggleExclude(i)} data-testid="gate-exclude-{i}" /></td>
+										{/if}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+						{#if gateFailed && physical && excludeSet.length}
+							<div class="excl">
+								<label class="lbl" for="pg-why">Why these controls are excluded</label>
+								<input id="pg-why" class="field" bind:value={excludeWhy} placeholder="For example: sits on a fixture mode the shakers cannot reach." data-testid="gate-exclude-why" />
+								<button class="btn" disabled={!excludeWhy.trim() || mimo.busy !== null} onclick={exclude} data-testid="gate-exclude-go">Exclude {excludeSet.length === 1 ? 'This Control' : `${excludeSet.length} Controls`}</button>
+							</div>
+							<p class="aq-muted aq-small">The reference is reduced to the controls kept and the gate is judged again on them; the reason is kept with the run.</p>
+						{/if}
 					{/if}
 				</section>
 
@@ -127,6 +204,30 @@
 					<p class="aq-muted aq-small">The bar's tick is the ceiling. The core caps a drive at its ceiling during the run, so a drive over it would leave its controls short of the reference.</p>
 				</section>
 
+				{#if p.drive_accel?.length}
+					<section class="aq-panel" aria-labelledby="pa-title" data-testid="predict-accel">
+						<div class="aq-head">
+							<h2 id="pa-title">Shaker Acceleration</h2>
+							<span class="aq-sub">Predicted at full level from the identified plant and the predicted drive</span>
+						</div>
+						<table class="aq-table">
+							<thead><tr><th>Drive</th><th>Read at</th><th class="num">Predicted</th><th>Shaker</th></tr></thead>
+							<tbody>
+								{#each p.drive_accel as a, k (k)}
+									{@const v = VERDICT_WORDS[p.feasibility?.[k]?.verdict ?? 'not_evaluated']}
+									<tr data-testid="predict-accel-{k}" data-verdict={p.feasibility?.[k]?.verdict ?? 'not_evaluated'}>
+										<td>{driveLabels[k] ?? `Drive ${k + 1}`}</td>
+										<td>{controlNames[p.accel_control?.[k] ?? -1] ?? '-'}</td>
+										<td class="num">{formatNumber(a, 3)} {unit.split('²')[0]} rms</td>
+										<td class="verdict {v.tone}" title={p.feasibility?.[k]?.message || undefined}>{v.word}{#if p.feasibility?.[k]?.message && v.tone !== 'pass'}<span class="aq-muted">: {p.feasibility[k].message}</span>{/if}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+						<p class="aq-muted aq-small">Each drive is read at the control it moves most. Where a drive has a shaker record, its ratings are checked against this acceleration rather than the estimate the run armed on.</p>
+					</section>
+				{/if}
+
 				<section class="aq-panel" aria-labelledby="pc-title" data-testid="predict-controls">
 					<div class="aq-head">
 						<h2 id="pc-title">Error per Control</h2>
@@ -157,14 +258,48 @@
 						</tbody>
 					</table>
 					<p class="aq-muted aq-small">
-						{#if physical}The darker band is the alarm band, the lighter the abort band; the bar spans plus and minus {ERR_SPAN} dB.{:else}Under virtual control the bands are the control channels'; the errors here are each degree of freedom's.{/if}
+						The darker band is the alarm band, the lighter the abort band; the bar spans plus and minus {ERR_SPAN} dB.{#if !physical} Under virtual control each degree of freedom is judged by its own bands.{/if}
 					</p>
-					{#if moreControls}
+					{#if moreControls && !p.has_achievable}
 						<p class="aq-small note" data-testid="predict-achievable">
 							There are more controls than drives, so the shakers can reach only part of the reference: what the drives can produce at the controls, through the identified plant. The error above is measured against the whole reference, so a control the drives cannot reach shows the part left over. Coherence and phase between controls follow from the drives, and may not match the reference's.
 						</p>
 					{/if}
 				</section>
+
+				{#if p.has_achievable}
+					<section class="aq-panel" aria-labelledby="ar-title" data-testid="predict-achievable">
+						<div class="aq-head">
+							<h2 id="ar-title">Achievable Reference</h2>
+							<span class="aq-sub">What the drives can reach of the reference, through the identified plant</span>
+							<span class="aq-spacer"></span>
+							{#if labels.length > 8}
+								<button class="btn ghost" disabled={achFirst === 0} onclick={() => (mimo.predictFirst = Math.max(0, achFirst - 8))}>Previous Eight</button>
+								<span class="aq-small num">{achFirst + 1} to {achFirst + achNames.length} of {labels.length}</span>
+								<button class="btn ghost" disabled={achFirst + 8 >= labels.length} onclick={() => (mimo.predictFirst = Math.min(labels.length - 1, achFirst + 8))}>Next Eight</button>
+							{/if}
+						</div>
+						<p class="aq-small aq-muted">
+							There are more controls than drives, so only part of the reference can be reached. Solid lines are the achievable reference, dashed the reference: the diagonal is each control's spectrum, above it the coherence and below it the phase between two controls. A cross term the drives cannot make shows here before the test, not as an error during it.
+						</p>
+						<div class="achgrid" bind:clientWidth={gridWidth}>
+							{#if achView}
+								<MatrixGrid labels={achNames} sdm={achView} spectra={achSpectra} {unit} />
+							{:else}
+								<p class="aq-muted aq-small">The achievable reference is on its way from the service.</p>
+							{/if}
+						</div>
+						<table class="aq-table compact">
+							<thead><tr><th>{physical ? 'Control' : 'Degree of freedom'}</th><th class="num">Reachable</th></tr></thead>
+							<tbody>
+								{#each p.unreachable_db ?? [] as u, i (i)}
+									<tr><td>{labels[i] ?? `Control ${i + 1}`}</td><td class="num">{db(u, 2)}</td></tr>
+								{/each}
+							</tbody>
+						</table>
+						<p class="aq-muted aq-small">Reachable is the achievable reference's rms against the reference's over the band; 0 dB is all of it.</p>
+					</section>
+				{/if}
 			</div>
 
 			<div class="stack">
@@ -194,7 +329,12 @@
 				<section class="aq-panel engage" aria-labelledby="pe-title" data-testid="predict-engage">
 					<div class="aq-head"><h2 id="pe-title">Engage</h2></div>
 					{#if gateFailed}
-						<p class="aq-small">A gate failed, so engaging is an override: your decision, in your own words, kept with the run.</p>
+						<p class="aq-small">A gate failed, so going on is an override: your decision, in your own words, kept with the run. If the prediction then asks a drive for more than its ceiling, that needs its own acknowledgement.</p>
+						<div class="aq-actions">
+							<button class="btn primary" disabled={!mimo.isController || mimo.busy !== null} onclick={() => (overrideOpen = true)} data-testid="predict-override">Override the Gate</button>
+						</div>
+					{:else if predictionExceeded}
+						<p class="aq-small">The prediction asks a drive for more than its ceiling. Change the law or its parameters and predict again, or engage through an override: the ceilings still hold every drive during the run, and the controls that drive serves will fall short of the reference.</p>
 						<div class="aq-actions">
 							<button class="btn primary" disabled={!mimo.isController || mimo.busy !== null} onclick={() => (overrideOpen = true)} data-testid="predict-override">Override and Engage</button>
 						</div>
@@ -214,18 +354,50 @@
 <OverrideDialog
 	acq={mimo.acq}
 	bind:open={overrideOpen}
-	variant={{
-		title: 'Engage Past a Failed Gate',
+	variant={predictionExceeded
+		? {
+				title: 'Engage Past the Drive Ceilings',
+				lead: `The prediction asks ${p ? p.drive_rms_v.filter((v, k) => v > p.ceiling_vrms[k]).length : 0} of ${p?.drive_rms_v.length ?? 0} drives for more than their ceilings. The ceilings hold each drive during the run, so the controls those drives serve will fall short of the reference.`,
+				verb: 'Engaging',
+				confirm: 'Engage With This Acknowledgement',
+				send: (text) => mimo.override(text, 'prediction_exceeded'),
+				refusal: mimo.refusal && mimo.refusal.verb === 'Override' ? `${mimo.refusal.title}: ${mimo.refusal.message}` : null,
+				busy: mimo.busy !== null
+			}
+		: {
+		title: 'Go On Past a Failed Gate',
 		lead: `Identification did not pass its gates (smallest multiple coherence ${gates ? formatFixed(gates.coherence_min, 3) : '-'} against ${gates ? formatFixed(gates.coherence_floor, 2) : '-'}, largest condition number ${gates ? formatNumber(gates.condition_max, 4) : '-'} against ${gates ? formatNumber(gates.condition_limit, 4) : '-'}).`,
-		verb: 'Engaging',
-		confirm: 'Engage With This Acknowledgement',
-		send: (text) => mimo.override(text),
+		verb: 'Going on',
+		confirm: 'Go On With This Acknowledgement',
+		send: (text) => mimo.override(text, 'gate_failed'),
 		refusal: mimo.refusal && mimo.refusal.verb === 'Override' ? `${mimo.refusal.title}: ${mimo.refusal.message}` : null,
 		busy: mimo.busy !== null
 	}}
 />
 
 <style>
+	.excl {
+		display: flex;
+		gap: var(--sp-2);
+		align-items: end;
+		margin-top: var(--sp-2);
+	}
+
+	.excl .field {
+		flex: 1;
+	}
+
+	.achgrid {
+		height: 420px;
+		margin: var(--sp-2) 0;
+	}
+
+	.aq-table.compact td,
+	.aq-table.compact th {
+		padding-top: 2px;
+		padding-bottom: 2px;
+	}
+
 	.cols {
 		display: grid;
 		grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);

@@ -60,9 +60,22 @@ export interface MimoLimitRow {
 	abort_margin_db?: number;
 }
 
+/** A controlled quantity's alarm and abort bands, `[below, above]` in positive dB. */
+export interface MimoBands {
+	alarm_db?: BandDb;
+	abort_db?: BandDb;
+}
+
 export type MimoSpace =
 	| { kind: 'physical' }
-	| { kind: 'virtual'; dofs: string[]; response_transform: MimoTransform; drive_transform?: MimoTransform | null };
+	| {
+			kind: 'virtual';
+			dofs: string[];
+			response_transform: MimoTransform;
+			drive_transform?: MimoTransform | null;
+			/** One per degree of freedom, in their order: the tolerances live in the control space. */
+			dof_bands?: MimoBands[];
+	  };
 
 /** Inline for small references; a native reference file, by path and SHA-256, for large ones. */
 export type MimoReference =
@@ -177,6 +190,8 @@ export interface MimoValidateResult {
 export interface MimoOverrideParams {
 	/** The operator's own words; kept with the run. */
 	ack: string;
+	/** What the words acknowledge; absent: whatever holds the run now. */
+	reason?: MimoOverrideReason | null;
 }
 
 export interface MimoIterateParams {
@@ -197,6 +212,25 @@ export interface MimoPrediction {
 	ceiling_vrms: number[];
 	error_db: number[];
 	drives_pass: boolean;
+	/** More controls than drives: only part of the reference is reachable (`pred_sdm`). */
+	has_achievable?: boolean;
+	/** Per controlled quantity: the achievable reference's rms against the reference's, dB. */
+	unreachable_db?: number[];
+	/** Per drive: predicted rms acceleration at its shaker at full level, in the controls' unit. */
+	drive_accel?: number[];
+	/** Per drive: the control position that acceleration is read at. */
+	accel_control?: number[];
+	/** Per drive: the shaker against that acceleration. */
+	feasibility?: { verdict: 'pass' | 'advisory' | 'exceeded' | 'not_evaluated'; message: string }[];
+}
+
+/** What an override acknowledges. */
+export type MimoOverrideReason = 'gate_failed' | 'prediction_exceeded';
+
+export interface MimoOverride {
+	by: string;
+	text: string;
+	reason?: MimoOverrideReason;
 }
 
 export type MimoPhase =
@@ -206,6 +240,7 @@ export type MimoPhase =
 	| 'sysid'
 	| 'awaiting_review'
 	| 'gate_failed'
+	| 'prediction_exceeded'
 	| 'engaged'
 	| 'full_level'
 	| 'ramping_down'
@@ -218,6 +253,8 @@ export interface MimoGates {
 	condition_max: number;
 	condition_limit: number;
 	passed: boolean;
+	/** Each controlled quantity's multiple coherence over the band; null for one excluded. */
+	coherence?: (number | null)[];
 }
 
 export interface MimoShapeInfo {
@@ -229,6 +266,8 @@ export interface MimoShapeInfo {
 	/** The controlled quantities' names, in order: what a selector's index counts. */
 	labels: string[];
 	drive_labels: string[];
+	/** Each controlled quantity's bands: its control row's, or its degree of freedom's. */
+	bands?: { alarm_db: BandDb; abort_db: BandDb }[];
 }
 
 /** The `mimo_random.status` result and event. */
@@ -256,8 +295,12 @@ export interface MimoStatus {
 	drive_rms_v: number[];
 	law: MimoLawRef | null;
 	faults: { kind: string; message: string }[];
-	override: { by: string; text: string } | null;
+	override: MimoOverride | null;
+	/** Every acknowledgement, in order. */
+	overrides?: MimoOverride[];
 	prediction: MimoPrediction | null;
+	/** Control positions taken out of control at the gate (kept as monitors). */
+	excluded?: number[];
 	end: RunEnd | null;
 }
 
@@ -272,7 +315,8 @@ export interface MimoReport {
 	controls: { label: string; rms: number | null; reference_rms: number | null; error_db: number | null }[];
 	drives: { channel: number; label: string; rms_v: number | null; ceiling_vrms: number; min_cap: number | null }[];
 	gates: MimoGates | null;
-	override: { by: string; text: string } | null;
+	override: MimoOverride | null;
+	overrides?: MimoOverride[];
 	end: RunEnd | null;
 }
 
@@ -345,6 +389,7 @@ export type MimoQuantity =
 	| 'phase'
 	| 'csd_mag'
 	| 'error_db'
+	| 'coh_error'
 	| 'drive_psd'
 	| 'drive_coh'
 	| 'frf'
@@ -358,7 +403,9 @@ export type MimoQuantity =
 	| 'pred_error_db'
 	| 'law_diag'
 	| 'sdm'
-	| 'readings';
+	| 'readings'
+	| 'pred_sdm'
+	| 'pred_drive_accel';
 
 /**
  * Which part of a quantity a plot shows. Positions count the setup's controlled quantities (or

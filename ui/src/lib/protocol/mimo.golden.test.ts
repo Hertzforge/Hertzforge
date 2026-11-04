@@ -3,7 +3,7 @@
  * Typed literals are the goldens' content written against the TypeScript types, so the type
  * check proves the types accept what the contract says.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame, shapeOf, withShape, dtypeOf } from './codec';
@@ -24,18 +24,16 @@ import { MIMO_TOPICS, packedCoherence, packedElement, packedIndex } from './mimo
 const golden = (name: string) => fileURLToPath(new URL(`../../../../schema/golden/${name}`, import.meta.url));
 const readJson = (name: string) => JSON.parse(readFileSync(golden(name), 'utf-8'));
 
-const TEXT = [
-	'request_mimo_random_setup',
-	'response_mimo_random_setup',
-	'response_error_setup_invalid',
-	'event_mimo_random_status',
-	'request_mimo_random_override',
-	'response_mimo_random_report',
-	'request_laws_list',
-	'response_laws_list',
-	'request_laws_import',
-	'response_laws_import'
-];
+/**
+ * Every MIMO Random and control-law text golden in schema/golden/, read from the folder itself so
+ * this suite, the Rust suite and the Python suite all read the same files: a golden added there
+ * is checked here without a list to update.
+ */
+const TEXT = readdirSync(fileURLToPath(new URL('../../../../schema/golden/', import.meta.url)))
+	.filter((f) => /^(request|response|event)_.*(mimo_random|laws)_.*\.json$/.test(f) && !f.endsWith('.expected.json'))
+	.map((f) => f.replace(/\.json$/, ''))
+	.concat(['response_error_setup_invalid'])
+	.sort();
 
 describe('MIMO text goldens', () => {
 	for (const name of TEXT) {
@@ -46,6 +44,45 @@ describe('MIMO text goldens', () => {
 			expect(encodeFrame(message)).toBe(JSON.stringify(JSON.parse(text)));
 		});
 	}
+});
+
+describe('the goldens this suite reads', () => {
+	it('include every new MIMO golden by name', () => {
+		for (const name of [
+			'request_mimo_random_subscribe_coh_error',
+			'request_mimo_random_identification_load',
+			'request_mimo_random_override_prediction',
+			'request_mimo_random_setup_virtual',
+			'request_mimo_random_subscribe_pred_sdm'
+		])
+			expect(TEXT).toContain(name);
+	});
+});
+
+describe('the wave D additions match their types', () => {
+	it('a prediction override names what it acknowledges', () => {
+		const req = readJson('request_mimo_random_override_prediction.json') as Request<MimoOverrideParams>;
+		expect(req.params.reason).toBe('prediction_exceeded');
+	});
+
+	it('virtual control carries one band pair per degree of freedom', () => {
+		const req = readJson('request_mimo_random_setup_virtual.json') as Request<MimoSetupParams>;
+		const space = req.params.setup.space;
+		if (space?.kind !== 'virtual') throw new Error('virtual expected');
+		expect(space.dof_bands?.map((b) => b.abort_db)).toEqual([
+			[4, 4],
+			[6, 6]
+		]);
+		expect(req.params.setup.control?.law_misses).toBe(2);
+	});
+
+	it('the status carries each quantity\'s bands, every override and the prediction\'s additions', () => {
+		const ev = readJson('event_mimo_random_status.json') as Event<MimoStatus>;
+		expect(ev.data.shape?.bands?.length).toBe(2);
+		expect(ev.data.overrides).toEqual([]);
+		expect(ev.data.prediction?.drive_accel).toEqual([1.25, 1.1]);
+		expect(ev.data.prediction?.feasibility?.[1].verdict).toBe('not_evaluated');
+	});
 });
 
 describe('MIMO messages match their types', () => {

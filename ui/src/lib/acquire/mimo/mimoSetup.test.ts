@@ -27,6 +27,7 @@ import {
 	spaceErrors,
 	testChannels,
 	toWireSetup,
+	ensureDofBands,
 	type EffectiveSpace,
 	type MimoDraft
 } from './mimoSetup';
@@ -274,6 +275,19 @@ describe('the setup on the wire', () => {
 		expect(s.schedule.levels.at(-1)).toEqual({ db: 0 });
 		expect(s.control?.cap_up_db).toBe(3.5);
 		expect(toWireSetup(d, { rows, space: PHYSICAL, reference: null, law: LAW, backend: null })).toBeNull();
+	});
+
+	it('under virtual control sends each degree of freedom its own bands, in their order', () => {
+		const { rows, d } = bench();
+		const virt: EffectiveSpace = { kind: 'virtual', dofs: ['X', 'Y'], response: { rows: 2, cols: 2, values: [1, 0, 0, 1], source: null }, drive: null, from: 'operator' };
+		ensureDofBands(d, virt.dofs);
+		d.space.dofBands['Y'] = { alarm_db: [1, 2], abort_db: [3, 4] };
+		const s = toWireSetup(d, { rows, space: virt, reference: { kind: 'file', path: '/r', sha256: 'c'.repeat(64) }, law: LAW, backend: 'sim' })!;
+		if (s.space?.kind !== 'virtual') throw new Error('virtual expected');
+		expect(s.space.dof_bands).toEqual([
+			{ alarm_db: [3, 3], abort_db: [6, 6] },
+			{ alarm_db: [1, 2], abort_db: [3, 4] }
+		]);
 	});
 });
 

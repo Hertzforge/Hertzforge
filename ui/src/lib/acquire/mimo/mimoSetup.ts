@@ -104,6 +104,8 @@ export interface MimoDraft {
 		/** The drives are transformed too (ganged or differential shakers). */
 		driveOn: boolean;
 		drive: MatrixDraft;
+		/** Under virtual control, each degree of freedom's bands, by its name. */
+		dofBands: Record<string, ControlSettings>;
 	};
 	reference: {
 		method: ReferenceMethod;
@@ -154,7 +156,7 @@ export function defaultMimoSetup(): MimoDraft {
 		controls: {},
 		limits: {},
 		article_mass_lb: 0,
-		space: { kind: 'physical', dofs: [], response: emptyMatrix(0, 0), driveOn: false, drive: emptyMatrix(0, 0) },
+		space: { kind: 'physical', dofs: [], response: emptyMatrix(0, 0), driveOn: false, drive: emptyMatrix(0, 0), dofBands: {} },
 		reference: {
 			method: 'breakpoints',
 			importPath: '',
@@ -267,6 +269,14 @@ export function assignRole(r: ChannelRow, role: MimoRole, d: MimoDraft): void {
 export const driveOf = (d: MimoDraft, ch: number): DriveSettings => d.drives[String(ch)] ?? defaultDrive();
 export const controlOf = (d: MimoDraft, ch: number): ControlSettings => d.controls[String(ch)] ?? defaultControl(d);
 export const limitOf = (d: MimoDraft, ch: number): LimitSettings => d.limits[String(ch)] ?? defaultLimit();
+/** A degree of freedom's bands under virtual control: its own, or the reference's defaults. */
+export const dofBandsOf = (d: MimoDraft, name: string): ControlSettings => d.space.dofBands?.[name] ?? defaultControl(d);
+
+/** Give a degree of freedom its own bands to edit, starting from the defaults. */
+export function ensureDofBands(d: MimoDraft, names: string[]): void {
+	if (!d.space.dofBands) d.space.dofBands = {};
+	for (const n of names) if (!d.space.dofBands[n]) d.space.dofBands[n] = defaultControl(d);
+}
 
 /** Make sure every drive, control and limit row has its settings in the draft. */
 export function ensureSettings(rows: ChannelRow[], d: MimoDraft): void {
@@ -582,7 +592,16 @@ export function toWireSetup(d: MimoDraft, x: WireInputs): MimoSetup | null {
 		},
 		space:
 			x.space.kind === 'virtual' && x.space.response
-				? { kind: 'virtual', dofs: [...x.space.dofs], response_transform: toTransform(x.space.response), drive_transform: x.space.drive ? toTransform(x.space.drive) : null }
+				? {
+						kind: 'virtual',
+						dofs: [...x.space.dofs],
+						response_transform: toTransform(x.space.response),
+						drive_transform: x.space.drive ? toTransform(x.space.drive) : null,
+						dof_bands: x.space.dofs.map((n) => {
+							const b = dofBandsOf(d, n);
+							return { alarm_db: [b.alarm_db[0], b.alarm_db[1]] as BandDb, abort_db: [b.abort_db[0], b.abort_db[1]] as BandDb };
+						})
+					}
 				: { kind: 'physical' },
 		reference: x.reference,
 		law: { id: d.law.id, params },

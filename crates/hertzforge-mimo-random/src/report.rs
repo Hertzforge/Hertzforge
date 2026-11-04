@@ -252,6 +252,12 @@ pub enum MimoEventKind {
     Note {
         text: String,
     },
+    /// A control taken out of control at the gate (low coherence, say): measured
+    /// and recorded as a monitor from then on, the reference reduced to the rest.
+    ControlExcluded {
+        channel_index: u32,
+        ack: String,
+    },
 }
 
 /// A timestamped event.
@@ -332,6 +338,20 @@ pub struct Prediction {
     /// In-band rms difference between the reference and its achievable part, dB,
     /// per control (0 for a square plant).
     pub unreachable_db: Vec<f64>,
+    /// Predicted rms acceleration at each drive's shaker at full level, in the
+    /// controls' unit: the response of the physical control that drive moves most
+    /// (the largest in-band identification FRF), from the identification FRF and
+    /// the predicted drive as played.
+    #[serde(default)]
+    pub drive_accel_rms: Vec<f64>,
+    /// The physical control (position in the setup's control order) each drive's
+    /// acceleration is read at.
+    #[serde(default)]
+    pub accel_control: Vec<usize>,
+    /// Each drive's shaker against that predicted acceleration (rather than the
+    /// rigid-body estimate the run armed on).
+    #[serde(default)]
+    pub feasibility: Vec<DriveFeasibilityRow>,
 }
 
 /// The law's identity line.

@@ -7,7 +7,9 @@ use hertzforge_random::RunMode;
 use hertzforge_random_laws::LawCatalog;
 use sds_control::laws;
 use sds_control::mimo::check;
-use sds_control::mimo::driver::{Gates, LawRef, MimoReport, MimoStatus, Prediction};
+use sds_control::mimo::driver::{
+    DriveVerdict, Gates, LawRef, MimoReport, MimoStatus, OverrideReason, Prediction,
+};
 use sds_control::mimo::setup::{self, LawInfo, SetupContext};
 use sds_control::mimo::view::{self, RunFacts};
 use sds_control::random::config::Grid;
@@ -134,8 +136,9 @@ fn configured() -> MimoStatus {
         drive_rms_v: Vec::new(),
         law: law_ref(),
         faults: Vec::new(),
-        override_ack: None,
+        override_ack: Vec::new(),
         prediction: None,
+        excluded: Vec::new(),
         end: None,
         streaming: false,
     }
@@ -147,6 +150,7 @@ fn gates() -> Gates {
         coherence_floor: 0.5,
         condition_max: 12.5,
         condition_limit: 1000.0,
+        coherence: vec![0.962, 0.981],
     }
 }
 
@@ -237,6 +241,20 @@ fn a_running_status_is_the_golden_event() {
             drive_rms_v: vec![0.82, 0.77],
             ceiling_vrms: vec![2.0, 2.0],
             error_db: vec![0.5, -0.5],
+            has_achievable: false,
+            unreachable_db: vec![0.0, 0.0],
+            drive_accel: vec![1.25, 1.1],
+            accel_control: vec![0, 1],
+            feasibility: vec![
+                DriveVerdict {
+                    verdict: "pass",
+                    message: String::new(),
+                },
+                DriveVerdict {
+                    verdict: "not_evaluated",
+                    message: "no shaker record".into(),
+                },
+            ],
         }),
         streaming: true,
         ..configured()
@@ -289,7 +307,7 @@ fn the_report_is_the_golden_report() {
         drive_rms_v: vec![0.8231, 0.7764],
         min_cap: vec![0.875, 1.0],
         gates: Some(gates()),
-        override_ack: None,
+        override_ack: Vec::new(),
     };
     let facts = RunFacts {
         run_id: "m-0003",
@@ -587,4 +605,70 @@ fn the_identification_goldens_name_a_folder_and_describe_the_set() {
         &want["result"],
         "identification",
     );
+}
+
+#[test]
+fn a_prediction_override_names_its_reason() {
+    let r = sds_control::protocol::parse_request(&golden(
+        "request_mimo_random_override_prediction.json",
+    ))
+    .unwrap();
+    assert_eq!(r.method, "mimo_random.override");
+    assert_eq!(
+        OverrideReason::from_name(r.params["reason"].as_str().unwrap()),
+        Some(OverrideReason::Prediction)
+    );
+    assert!(!r.params["ack"].as_str().unwrap().trim().is_empty());
+}
+
+#[test]
+fn the_virtual_setup_golden_carries_every_field_to_the_setup() {
+    let request = golden("request_mimo_random_setup_virtual.json");
+    let parsed = sds_control::protocol::parse_request(&request).unwrap();
+    let cat = catalog();
+    let lookup = |id: &str| cat.entry(id).map(|e| laws::law_info(&e));
+    let mut table = two_by_two();
+    let mut m = table::new_row(5);
+    m.description = "Fixture Top".into();
+    m.role = ChannelRole::Monitor;
+    table.channels.push(m);
+    let ctx = SetupContext {
+        table: &table,
+        selected_kind: "sim",
+        law: &lookup,
+    };
+    let (s, report) = setup::parse(&parsed.params["setup"], &ctx).unwrap();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert_eq!(
+        s.dof_bands,
+        vec![([2.0, 2.0], [4.0, 4.0]), ([3.0, 3.0], [6.0, 6.0])]
+    );
+    assert_eq!(s.band_of(0), ([2.0, 2.0], [4.0, 4.0]));
+    assert_eq!(s.drives[0].peak_v, 6.0);
+    assert_eq!(s.drives[1].moving_mass_lb, 12.5);
+    assert_eq!(s.limits.len(), 1);
+    assert_eq!(s.limits[0].channel, 5);
+    assert_eq!(s.article_mass_lb, 40.0);
+    assert_eq!(s.control.frf_blend, 0.25);
+    assert_eq!(s.control.law_misses, 2);
+    // The setup as the service echoes it carries the bands and the new fields.
+    let echo = setup::setup_json(&s);
+    assert_eq!(echo["space"]["dof_bands"][0]["abort_db"][0], 4.0);
+    assert_eq!(echo["channels"]["limits"][0]["ceiling"], 0.04);
+    assert_eq!(echo["control"]["cap_down_db"], 4.0);
+}
+
+#[test]
+fn the_achievable_reference_subscribes_as_a_block() {
+    use sds_control::mimo::display;
+    use sds_control::mimo::driver::QuantitySelector;
+    let request = golden("request_mimo_random_subscribe_pred_sdm.json");
+    let parsed = sds_control::protocol::parse_request(&request).unwrap();
+    let sub = display::parse(&parsed.params).unwrap().expect("plots");
+    assert_eq!(sub.plots[0].quantity, "pred_sdm");
+    assert_eq!(
+        display::resolve(&sub.plots[0], 3, 2),
+        vec![QuantitySelector::PredSdmBlock(vec![0, 1])]
+    );
+    assert_eq!(sub.plots[1].quantity, "pred_drive_accel");
 }

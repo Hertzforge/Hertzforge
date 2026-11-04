@@ -7,7 +7,8 @@
 	 * rigid-body or imported reference brings its own transformation, shown read-only.
 	 */
 	import Findings from '../Findings.svelte';
-	import { rowName, type MatrixDraft } from './mimoSetup';
+	import NumberField from '../NumberField.svelte';
+	import { dofBandsOf, ensureDofBands, rowName, type MatrixDraft } from './mimoSetup';
 	import MatrixGrid from './MatrixGrid.svelte';
 	import type { MimoState } from './mimoStore.svelte';
 
@@ -57,6 +58,12 @@
 	}
 
 	const at = (k: string) => E[k] ?? [];
+
+	// Under virtual control the reference and its tolerances are in the control space, so each
+	// degree of freedom carries its own alarm and abort bands.
+	$effect(() => {
+		if (s.kind === 'virtual' && !locked) ensureDofBands(d, s.dofs);
+	});
 	const virtualDrives = $derived(Array.from({ length: d.space.drive.cols }, (_, i) => `U${i + 1}`));
 </script>
 
@@ -110,6 +117,29 @@
 			<p class="aq-muted aq-small">The transformation appears once the sensor geometry fits, under Reference.</p>
 		{/if}
 
+		{#if s.dofs.length}
+			<div class="bands" data-testid="space-dof-bands">
+				<h3>Tolerance per Degree of Freedom</h3>
+				<p class="aq-muted aq-small">The reference is written on the degrees of freedom, so its alarm and abort bands are too: below and above the reference, in dB.</p>
+				<table class="aq-table">
+					<thead><tr><th>Degree of freedom</th><th class="num">Alarm below</th><th class="num">Alarm above</th><th class="num">Abort below</th><th class="num">Abort above</th></tr></thead>
+					<tbody>
+						{#each s.dofs as name, i (name + i)}
+							{@const b = d.space.dofBands?.[name] ?? dofBandsOf(d, name)}
+							<tr data-testid="space-dof-band-{i}">
+								<td>{name}</td>
+								<td class="num"><NumberField id="ms-b{i}-al" label="{name} alarm below" compact unit="dB" bind:value={b.alarm_db[0]} disabled={locked} /></td>
+								<td class="num"><NumberField id="ms-b{i}-ah" label="{name} alarm above" compact unit="dB" bind:value={b.alarm_db[1]} disabled={locked} /></td>
+								<td class="num"><NumberField id="ms-b{i}-bl" label="{name} abort below" compact unit="dB" bind:value={b.abort_db[0]} disabled={locked} /></td>
+								<td class="num"><NumberField id="ms-b{i}-bh" label="{name} abort above" compact unit="dB" bind:value={b.abort_db[1]} disabled={locked} /></td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				<Findings items={at('space.dof_bands').map((message) => ({ level: 'error' as const, message }))} />
+			</div>
+		{/if}
+
 		<div class="drive-head">
 			<label class="aq-switch" for="ms-drive-on">
 				<input id="ms-drive-on" type="checkbox" role="switch" checked={d.space.driveOn} disabled={locked} onchange={(e) => (d.space.driveOn = e.currentTarget.checked)} data-testid="space-drive-on" />
@@ -144,6 +174,16 @@
 </section>
 
 <style>
+	.bands {
+		margin: var(--sp-3) 0;
+	}
+
+	.bands h3 {
+		margin-bottom: 4px;
+		font-size: var(--text-sm);
+		font-weight: var(--weight-strong);
+	}
+
 	.lead {
 		margin: -6px 0 var(--sp-3);
 		max-width: 90ch;

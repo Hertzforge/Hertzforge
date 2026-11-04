@@ -27,6 +27,28 @@
     "drive_labels": [
      "Shaker X",
      "Shaker Y"
+    ],
+    "bands": [
+     {
+      "alarm_db": [
+       3,
+       3
+      ],
+      "abort_db": [
+       6,
+       6
+      ]
+     },
+     {
+      "alarm_db": [
+       3,
+       3
+      ],
+      "abort_db": [
+       6,
+       6
+      ]
+     }
     ]
    },
    "law": {
@@ -71,9 +93,14 @@
     "coherence_floor": 0.5,
     "condition_max": 12.5,
     "condition_limit": 1000,
-    "passed": true
+    "passed": true,
+    "coherence": [
+     0.962,
+     0.981
+    ]
    },
    "override": null,
+   "overrides": [],
    "end": {
     "outcome": "completed",
     "message": "The schedule finished.",

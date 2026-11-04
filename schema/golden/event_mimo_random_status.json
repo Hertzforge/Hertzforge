@@ -35,6 +35,28 @@
    "drive_labels": [
     "Shaker X",
     "Shaker Y"
+   ],
+   "bands": [
+    {
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    },
+    {
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    }
    ]
   },
   "mode": "auto",
@@ -57,7 +79,11 @@
    "coherence_floor": 0.5,
    "condition_max": 12.5,
    "condition_limit": 1000,
-   "passed": true
+   "passed": true,
+   "coherence": [
+    0.962,
+    0.981
+   ]
   },
   "caps": [
    1,
@@ -75,6 +101,7 @@
   },
   "faults": [],
   "override": null,
+  "overrides": [],
   "prediction": {
    "iteration": 1,
    "law": {
@@ -95,8 +122,32 @@
     0.5,
     -0.5
    ],
-   "drives_pass": true
+   "drives_pass": true,
+   "has_achievable": false,
+   "unreachable_db": [
+    0,
+    0
+   ],
+   "drive_accel": [
+    1.25,
+    1.1
+   ],
+   "accel_control": [
+    0,
+    1
+   ],
+   "feasibility": [
+    {
+     "verdict": "pass",
+     "message": ""
+    },
+    {
+     "verdict": "not_evaluated",
+     "message": "no shaker record"
+    }
+   ]
   },
+  "excluded": [],
   "end": null
  }
 }

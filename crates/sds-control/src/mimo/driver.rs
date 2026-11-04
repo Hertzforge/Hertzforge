@@ -51,6 +51,10 @@ pub struct Gates {
     /// The largest condition number of the FRF over the band.
     pub condition_max: f64,
     pub condition_limit: f64,
+    /// Each controlled quantity's multiple coherence over the band, in the setup's
+    /// order (NaN for one excluded at the gate); empty when not measured per
+    /// control.
+    pub coherence: Vec<f64>,
 }
 
 impl Gates {
@@ -78,6 +82,62 @@ pub struct Prediction {
     pub ceiling_vrms: Vec<f64>,
     /// Per controlled quantity: the predicted rms error over the band, dB.
     pub error_db: Vec<f64>,
+    /// True when controls outnumber the drives, so only part of the reference is
+    /// reachable (the achievable reference, `pred_sdm` on the display).
+    pub has_achievable: bool,
+    /// Per controlled quantity: the achievable reference's rms against the
+    /// reference's over the band, dB (0 where all of it is reachable).
+    pub unreachable_db: Vec<f64>,
+    /// Per drive: the predicted rms acceleration at its shaker at full level, in
+    /// the controls' unit, read at the control that drive moves most. Empty when
+    /// the run cannot say.
+    pub drive_accel: Vec<f64>,
+    /// Per drive: the control position that acceleration is read at.
+    pub accel_control: Vec<usize>,
+    /// Per drive: the shaker's feasibility against that acceleration.
+    pub feasibility: Vec<DriveVerdict>,
+}
+
+/// One drive's feasibility verdict, as the wire names it (`pass`, `advisory`,
+/// `exceeded`, `not_evaluated`), with what failed in words.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveVerdict {
+    pub verdict: &'static str,
+    pub message: String,
+}
+
+/// What an override acknowledges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideReason {
+    /// Identification failed a gate (low coherence, ill-conditioned lines).
+    Gate,
+    /// The prediction asks a drive for more than its ceiling.
+    Prediction,
+}
+
+impl OverrideReason {
+    pub fn name(self) -> &'static str {
+        match self {
+            OverrideReason::Gate => "gate_failed",
+            OverrideReason::Prediction => "prediction_exceeded",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<OverrideReason> {
+        match s {
+            "gate_failed" => Some(OverrideReason::Gate),
+            "prediction_exceeded" => Some(OverrideReason::Prediction),
+            _ => None,
+        }
+    }
+}
+
+/// An operator's acknowledgement: who, their words, and what it overrode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OverrideAck {
+    pub by: String,
+    pub text: String,
+    pub reason: OverrideReason,
 }
 
 impl Prediction {
@@ -115,9 +175,14 @@ pub struct MimoStatus {
     pub drive_rms_v: Vec<f64>,
     pub law: LawRef,
     pub faults: Vec<Fault>,
-    /// The operator's acknowledgement when the gate was overridden: `(by, text)`.
-    pub override_ack: Option<(String, String)>,
+    /// The operator's acknowledgements, in order (a failed gate, then a prediction
+    /// over a ceiling, each needs its own).
+    pub override_ack: Vec<OverrideAck>,
     pub prediction: Option<Prediction>,
+    /// Controls taken out of control at the gate, by position in the setup's
+    /// order: still measured and recorded, as monitors. Their entries in the
+    /// per-control lists are empty (null).
+    pub excluded: Vec<usize>,
     pub end: Option<End>,
     /// Display frames are due: from the start of identification.
     pub streaming: bool,
@@ -161,6 +226,9 @@ pub enum QuantitySelector {
     SdmBlock(Vec<usize>),
     /// The predicted error of a control, per line (`pred_error_db(i)`).
     PredErrorDb(usize),
+    /// The achievable reference `P G_ref P^H` of the listed controls, packed, with
+    /// the reference's (`pred_sdm`, the Predict page's grid).
+    PredSdmBlock(Vec<usize>),
     /// A law diagnostic by its key, at a control or drive for a per-channel
     /// layout.
     LawDiag(String, Option<usize>),
@@ -221,7 +289,7 @@ pub struct MimoReport {
     pub drive_rms_v: Vec<f64>,
     pub min_cap: Vec<f64>,
     pub gates: Option<Gates>,
-    pub override_ack: Option<(String, String)>,
+    pub override_ack: Vec<OverrideAck>,
 }
 
 /// What a run starts on: the station the service selected.
@@ -292,8 +360,17 @@ pub trait MimoRunDriver: Send {
     fn start(&mut self, ctx: &StartContext) -> Result<(), MethodError>;
     /// Release the review hold after identification passed its gates.
     fn proceed(&mut self) -> Result<(), MethodError>;
-    /// Engage although a gate failed, with the operator's own words, kept with the run.
-    fn override_gate(&mut self, ack: &str, by: &str) -> Result<(), MethodError>;
+    /// Engage past what holds the run (a failed gate, or a prediction over a
+    /// ceiling), with the operator's own words, kept with the run. `reason` names
+    /// what the operator acknowledges; `None`: whatever holds the run now. One
+    /// acknowledgement passes one hold: after a gate override a prediction over a
+    /// ceiling still holds the run until it is acknowledged too.
+    fn override_gate(
+        &mut self,
+        ack: &str,
+        by: &str,
+        reason: Option<OverrideReason>,
+    ) -> Result<(), MethodError>;
     /// Recompute the prediction during the review hold, with a changed law or law
     /// parameters (`None`: the run's own).
     fn iterate_prediction(
@@ -331,6 +408,17 @@ pub trait MimoRunDriver: Send {
         _table: &hertzforge_channel_table::ChannelTable,
     ) -> Result<IdentificationInfo, MethodError> {
         Err(not_offered("Loading an identification set"))
+    }
+    /// Take the controls at `positions` out of control at a failed gate, with the
+    /// operator's words: each is kept as a monitor, the reference is reduced to
+    /// the rest, and the gate is judged again on them.
+    fn exclude_controls(
+        &mut self,
+        _positions: &[usize],
+        _ack: &str,
+        _by: &str,
+    ) -> Result<(), MethodError> {
+        Err(not_offered("Excluding a control"))
     }
     /// Copy this run's identification set into the folder `path`.
     fn save_identification(

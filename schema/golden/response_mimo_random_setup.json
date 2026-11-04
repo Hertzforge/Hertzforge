@@ -35,6 +35,28 @@
     "drive_labels": [
      "Shaker X",
      "Shaker Y"
+    ],
+    "bands": [
+     {
+      "alarm_db": [
+       3,
+       3
+      ],
+      "abort_db": [
+       6,
+       6
+      ]
+     },
+     {
+      "alarm_db": [
+       3,
+       3
+      ],
+      "abort_db": [
+       6,
+       6
+      ]
+     }
     ]
    },
    "mode": "auto",
@@ -60,7 +82,9 @@
    },
    "faults": [],
    "override": null,
+   "overrides": [],
    "prediction": null,
+   "excluded": [],
    "end": null
   },
   "validation": {

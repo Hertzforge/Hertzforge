@@ -32,7 +32,20 @@ PAYLOADS = {
     'response_mimo_random_reference_build_rigid_body': ('result', 'mimoRigidResult'),
     'request_mimo_random_reference_import': ('params', 'mimoReferenceImportParams'),
     'response_mimo_random_reference_import': ('result', 'mimoReferenceResult'),
+    'request_mimo_random_override_prediction': ('params', 'mimoOverrideParams'),
+    'request_mimo_random_setup_virtual': ('params', 'mimoSetupParams'),
+    'request_mimo_random_subscribe_pred_sdm': ('params', 'mimoSubscribeParams'),
+    'request_mimo_random_exclude': ('params', 'mimoExcludeParams'),
 }
+
+
+def test_every_mimo_text_golden_is_checked_here():
+    # The Rust, TypeScript and Python suites read the same files in schema/golden/.
+    names = {p.stem for p in GOLDEN.glob('*.json')
+             if ('mimo_random' in p.stem or '_laws_' in p.stem)
+             and not p.name.endswith('.expected.json')}
+    names.add('response_error_setup_invalid')
+    assert names == set(PAYLOADS), sorted(names ^ set(PAYLOADS))
 
 
 def _text(name):
@@ -125,8 +138,8 @@ def test_law_entries_say_which_world_they_are_for(validate):
 def test_every_new_refusal_is_a_listed_reason(validate):
     error = _text('response_error_setup_invalid')
     validate(error)
-    for reason in ('gate_failed', 'law_import_failed', 'catalog_unavailable',
-                   'identification_mismatch'):
+    for reason in ('gate_failed', 'prediction_exceeded', 'law_import_failed',
+                   'catalog_unavailable', 'identification_mismatch'):
         e = copy.deepcopy(error)
         e['error']['reason'] = reason
         validate(e)
@@ -137,7 +150,7 @@ def test_every_new_refusal_is_a_listed_reason(validate):
 
 def _mimo_data():
     from hertzforge.service import frames
-    wire, arrays = frames.to_wire(frames.decode((GOLDEN / 'event_mimo_random_data.bin').read_bytes()))
+    wire, _arrays = frames.to_wire(frames.decode((GOLDEN / 'event_mimo_random_data.bin').read_bytes()))
     return wire
 
 

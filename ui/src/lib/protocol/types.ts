@@ -412,6 +412,7 @@ export type RefusalReason =
 	// MIMO Random and the law catalog
 	| 'setup_invalid'
 	| 'gate_failed'
+	| 'prediction_exceeded'
 	| 'law_import_failed'
 	| 'catalog_unavailable';
 

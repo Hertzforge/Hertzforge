@@ -6,7 +6,7 @@ use super::{Conn, Feed, Out, Service, DATA_SLACK, LIVE_TICK};
 use crate::codec::{self, Arrays};
 use crate::laws;
 use crate::mimo::display;
-use crate::mimo::driver::{LawRef, StartContext, StopOutcome};
+use crate::mimo::driver::{LawRef, OverrideReason, StartContext, StopOutcome};
 use crate::mimo::setup::{self, SetupContext};
 use crate::mimo::{view as mview, MimoRun};
 use crate::protocol::{self, ErrorCode, MethodError};
@@ -321,12 +321,70 @@ impl Service {
                 ))
             }
         };
+        let reason = match params.get("reason") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(r)) => Some(OverrideReason::from_name(r).ok_or_else(|| {
+                MethodError::bad_params(
+                    "reason",
+                    "\"reason\" is \"gate_failed\" or \"prediction_exceeded\": what the override acknowledges",
+                )
+            })?),
+            Some(_) => {
+                return Err(MethodError::bad_params(
+                    "reason",
+                    "\"reason\" is \"gate_failed\" or \"prediction_exceeded\": what the override acknowledges",
+                ))
+            }
+        };
         let run = self.controlled_mimo(conn).await?;
         let by = {
             let inner = self.inner.lock().await;
             inner.session.client_name(conn.id, &conn.peer)
         };
-        run.with(|d| d.override_gate(&ack, &by))?;
+        run.with(|d| d.override_gate(&ack, &by, reason))?;
+        Ok(run.status().1)
+    }
+
+    /// Take controls out of control at a failed gate, kept as monitors, with the
+    /// operator's reason.
+    pub(super) async fn mimo_exclude(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        let ack = match params.get("ack") {
+            Some(Value::String(s)) if !s.trim().is_empty() => s.trim().to_owned(),
+            _ => {
+                return Err(MethodError::bad_params(
+                    "ack",
+                    "Excluding a control is the operator's decision in their own words; the reason cannot be empty.",
+                ))
+            }
+        };
+        let positions: Vec<usize> = match params.get("controls").and_then(Value::as_array) {
+            Some(a) if !a.is_empty() => a
+                .iter()
+                .map(|v| v.as_u64().map(|x| x as usize))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    MethodError::bad_params(
+                        "controls",
+                        "\"controls\" lists control positions, counted from 0",
+                    )
+                })?,
+            _ => {
+                return Err(MethodError::bad_params(
+                    "controls",
+                    "\"controls\" lists the control positions to exclude, counted from 0",
+                ))
+            }
+        };
+        let run = self.controlled_mimo(conn).await?;
+        let by = {
+            let inner = self.inner.lock().await;
+            inner.session.client_name(conn.id, &conn.peer)
+        };
+        run.with(|d| d.exclude_controls(&positions, &ack, &by))?;
         Ok(run.status().1)
     }
 

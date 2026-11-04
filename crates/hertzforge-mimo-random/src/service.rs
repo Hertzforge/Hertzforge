@@ -192,6 +192,10 @@ pub struct MimoRandomService {
     /// What the plant can reach of the reference (`P G_ref P^H`), for the core's
     /// divergence judgement; the reference itself on a square plant.
     achievable_diag: Vec<f64>,
+    /// The whole achievable reference `P G_ref P^H` (full level, control space),
+    /// once identification has measured `P`, when controls outnumber the law's
+    /// drives.
+    achievable: Option<Arc<HermitianStack>>,
     t_resp: Option<MatrixStack>,
     t_drive: Option<MatrixStack>,
     t_drive_pinv: Option<MatrixStack>,
@@ -230,6 +234,8 @@ pub struct MimoRandomService {
     level_target_db: f64,
     level_index: usize,
     ramp: Arc<DriveRamp>,
+    /// The soft start's floor while the loop still climbs to the start level.
+    soft_start_floor_db: Option<f64>,
     elapsed_at_level_s: f64,
     loop_count: u64,
     full_level_loops: u64,
@@ -270,10 +276,10 @@ impl MimoRandomService {
         station: StationClass,
         data_root: impl Into<PathBuf>,
     ) -> Result<Self, MimoError> {
-        // The loop measures `frames_per_loop` Welch frames at 50% overlap.
-        let k = cfg.estimation.frames_per_loop;
+        // The loop measures `frames_per_loop` Welch frames at the setup's overlap.
+        // The synthesis keeps its own 50% hop (`loop_cfg.overlap`).
         loop_cfg.overlap = 0.5;
-        loop_cfg.blocks_per_window = k.div_ceil(2) + 1;
+        loop_cfg.blocks_per_window = cfg.estimation.blocks_per_loop(loop_cfg.nfft);
         let lines = loop_cfg.nbins();
         let df = loop_cfg.df();
         cfg.validate(lines, df)?;
@@ -387,6 +393,7 @@ impl MimoRandomService {
         let tolerances_shared = Arc::new(cfg.reference.tolerances.clone());
         Ok(MimoRandomService {
             achievable_diag: ref_diag.clone(),
+            achievable: None,
             cfg,
             loop_cfg,
             backend: Some(backend),
@@ -440,6 +447,7 @@ impl MimoRandomService {
             level_target_db: -f64::INFINITY,
             level_index: 0,
             ramp,
+            soft_start_floor_db: None,
             elapsed_at_level_s: 0.0,
             loop_count: 0,
             full_level_loops: 0,
@@ -548,6 +556,13 @@ impl MimoRandomService {
         self.ls.response_full.as_ref()
     }
     /// The reference in the control space.
+    /// The achievable reference `P G_ref P^H` with `P = H H^+` (full level, control
+    /// space): the part of the reference the drives can reach. Known after
+    /// identification, on a test with more controlled quantities than drives.
+    pub fn achievable_reference(&self) -> Option<&HermitianStack> {
+        self.achievable.as_deref()
+    }
+
     pub fn reference(&self) -> &HermitianStack {
         &self.reference
     }
@@ -568,6 +583,10 @@ impl MimoRandomService {
 
     pub(crate) fn reference_shared(&self) -> Arc<HermitianStack> {
         self.reference_shared.clone()
+    }
+
+    pub(crate) fn achievable_shared(&self) -> Option<Arc<HermitianStack>> {
+        self.achievable.clone()
     }
 
     pub(crate) fn tolerances_shared(&self) -> Arc<hertzforge_sdm::law::Tolerances> {
@@ -757,8 +776,6 @@ impl MimoRandomService {
     }
 
     fn assess_feasibility(&mut self) {
-        use hertzforge_breakpoints::LineSpectrum;
-        use hertzforge_shaker_db::{FeasibilityCalculator, Verdict};
         // Before identification the acceleration at each shaker is taken as the
         // controls' mean reference PSD (the rigid-body estimate).
         let (lo, hi) = self.band;
@@ -767,10 +784,24 @@ impl MimoRandomService {
             let d = &self.ref_diag[line * self.n_r..(line + 1) * self.n_r];
             *p = d.iter().sum::<f64>() / self.n_r as f64;
         }
-        let profile = LineSpectrum {
+        self.feasibility = self.feasibility_rows(&vec![psd; self.n_d]);
+    }
+
+    /// The feasibility the run armed on (the rigid-body estimate), one row per
+    /// drive.
+    pub fn feasibility_rows_now(&self) -> Vec<DriveFeasibilityRow> {
+        self.feasibility.clone()
+    }
+
+    /// Each drive's shaker against an acceleration PSD at that shaker (one per
+    /// drive, on the line grid, full level).
+    fn feasibility_rows(&self, psd: &[Vec<f64>]) -> Vec<DriveFeasibilityRow> {
+        use hertzforge_breakpoints::LineSpectrum;
+        use hertzforge_shaker_db::{FeasibilityCalculator, Verdict};
+        let profile = |k: usize| LineSpectrum {
             f0_hz: 0.0,
             df_hz: self.df_hz,
-            psd,
+            psd: psd.get(k).cloned().unwrap_or_default(),
         };
         let shakers: Vec<(usize, &crate::config::DriveSpec)> = self
             .cfg
@@ -783,10 +814,11 @@ impl MimoRandomService {
             .iter()
             .map(|(_, d)| (d.shaker.clone().unwrap_or_default(), d.moving_mass))
             .collect();
+        let profiles: Vec<LineSpectrum> = shakers.iter().map(|(k, _)| profile(*k)).collect();
         let shared = FeasibilityCalculator::assess_shared(
             &pairs,
             self.cfg.article_mass_lb,
-            &vec![profile; pairs.len()],
+            &profiles,
             self.cfg.crest_factor,
         );
         let mut rows = Vec::new();
@@ -813,7 +845,44 @@ impl MimoRandomService {
                     .unwrap_or_else(|| "no shaker record".into()),
             });
         }
-        self.feasibility = rows;
+        rows
+    }
+
+    /// The acceleration each drive's shaker would see at full level, predicted
+    /// from the identification FRF and the physical drive `played`: per drive, the
+    /// PSD of the physical control that drive moves most in band. Returns the
+    /// rms per drive, that control's position, and the PSDs.
+    fn drive_accelerations(
+        &self,
+        played: &HermitianStack,
+    ) -> (Vec<f64>, Vec<usize>, Vec<Vec<f64>>) {
+        let (lo, hi) = self.band;
+        let Some(h) = self.frf_c.as_ref() else {
+            return (Vec::new(), Vec::new(), Vec::new());
+        };
+        let Ok(resp) = pool::response_from_drive(h, played, self.band) else {
+            return (Vec::new(), Vec::new(), Vec::new());
+        };
+        let (mut rms, mut at, mut psds) = (Vec::new(), Vec::new(), Vec::new());
+        for k in 0..self.n_d {
+            let mut best = (0usize, -1.0f64);
+            for i in 0..self.n_c {
+                let g: f64 = (lo..hi).map(|l| h.get(l, i, k).norm_sqr()).sum();
+                if g > best.1 {
+                    best = (i, g);
+                }
+            }
+            let i = best.0;
+            let mut psd = vec![0.0; self.lines];
+            for (l, p) in psd.iter_mut().enumerate().take(hi).skip(lo) {
+                *p = resp.get(l, i, i).re.max(0.0);
+            }
+            let ms: f64 = psd.iter().sum::<f64>() * self.df_hz;
+            rms.push(ms.sqrt());
+            at.push(i);
+            psds.push(psd);
+        }
+        (rms, at, psds)
     }
 
     /// Acknowledge what holds the run (a feasibility verdict, a failed gate, a
@@ -877,10 +946,11 @@ impl MimoRandomService {
         let mut lc = self.loop_cfg.clone();
         lc.cola_seed = self.cfg.seed;
         self.synth = Some(DriveSynth::with_outputs(&lc, self.n_d));
-        self.estimator = Some(SdmEstimator::new(
+        self.estimator = Some(SdmEstimator::with_window(
             self.loop_cfg.nfft,
             self.loop_cfg.fs_hz,
-            0.5,
+            self.cfg.estimation.overlap,
+            self.cfg.estimation.window,
             self.band,
         ));
         self.kinematic = self.build_kinematic();
@@ -1391,6 +1461,7 @@ impl MimoRandomService {
                 self.band,
             ))?;
             self.achievable_diag = hertzforge_sdm::linalg::diagonals(&ach);
+            self.achievable = Some(Arc::new(ach));
         }
         self.coherence = set.coherence.clone();
         self.condition = set.condition.clone();
@@ -1419,6 +1490,175 @@ impl MimoRandomService {
         self.gate = Some(self.gate_report());
         self.transition(MimoState::Gate);
         Ok(())
+    }
+
+    /// Take the controls at positions `drop` (in the configured control order) out
+    /// of control at the gate, with the operator's words: each is still measured
+    /// and recorded (as a monitor), the reference and its tolerances are reduced to
+    /// the controls kept, and the identification is adopted again on them, so the
+    /// gate is judged afresh. Physical control only: under virtual control every
+    /// control channel feeds the degrees of freedom through the response
+    /// transformation, which is changed in the setup instead.
+    pub fn exclude_controls(&mut self, drop: &[usize], ack: &str) -> Result<(), MimoError> {
+        if self.state != MimoState::Gate {
+            return Err(MimoError::BadState(format!(
+                "a control is excluded at the identification gate; the run is {:?}",
+                self.state
+            )));
+        }
+        if ack.trim().is_empty() {
+            return Err(MimoError::Blocked(
+                "excluding a control needs the operator's reason in words".into(),
+            ));
+        }
+        if !matches!(self.cfg.control_space, ControlSpace::Physical) {
+            return Err(MimoError::Blocked(
+                "under virtual control every control channel feeds the degrees of freedom; \
+                 change the response transformation in the setup instead"
+                    .into(),
+            ));
+        }
+        let mut drop: Vec<usize> = drop.to_vec();
+        drop.sort_unstable();
+        drop.dedup();
+        if let Some(bad) = drop.iter().find(|&&i| i >= self.n_c) {
+            return Err(MimoError::Blocked(format!(
+                "there is no control at position {bad}; the test has {} controls",
+                self.n_c
+            )));
+        }
+        let keep: Vec<usize> = (0..self.n_c).filter(|i| !drop.contains(i)).collect();
+        if keep.is_empty() || drop.is_empty() {
+            return Err(MimoError::Blocked(
+                "name at least one control to exclude and keep at least one to control".into(),
+            ));
+        }
+        let set = self.ident.clone().ok_or_else(|| {
+            MimoError::BadState("there is no identification set to reduce".into())
+        })?;
+        let (lines, n_c, n_l) = (self.lines, self.n_c, self.n_l);
+        // The rows kept: the kept controls, then every limit channel.
+        let rows: Vec<usize> = keep.iter().copied().chain(n_c..n_c + n_l).collect();
+        let pick_h = |g: &HermitianStack, idx: &[usize]| {
+            let mut out = HermitianStack::zeros(g.lines(), idx.len());
+            for line in 0..g.lines() {
+                for (r, &i) in idx.iter().enumerate() {
+                    for (c, &j) in idx.iter().enumerate().skip(r) {
+                        out.set(line, r, c, g.get(line, i, j));
+                    }
+                }
+            }
+            out
+        };
+        let pick_rows = |m: &MatrixStack, idx: &[usize]| {
+            let (l, _, cols) = m.dims();
+            let mut out = MatrixStack::zeros(l, idx.len(), cols);
+            for line in 0..l {
+                for (r, &i) in idx.iter().enumerate() {
+                    for c in 0..cols {
+                        out.set(line, r, c, m.get(line, i, c));
+                    }
+                }
+            }
+            out
+        };
+        let pick_lines = |v: &[f64], n: usize| -> Vec<f64> {
+            if v.len() != lines * n {
+                return v.to_vec();
+            }
+            (0..lines)
+                .flat_map(|l| keep.iter().map(move |&i| v[l * n + i]))
+                .collect()
+        };
+        // The configuration and the reference, on the controls kept.
+        let excluded: Vec<u32> = drop.iter().map(|&i| self.cfg.controls[i]).collect();
+        let t = &self.cfg.reference.tolerances;
+        let tolerances = hertzforge_sdm::law::Tolerances {
+            alarm_upper: pick_lines(&t.alarm_upper, n_c),
+            alarm_lower: pick_lines(&t.alarm_lower, n_c),
+            abort_upper: pick_lines(&t.abort_upper, n_c),
+            abort_lower: pick_lines(&t.abort_lower, n_c),
+        };
+        let law_factory =
+            if hertzforge_random_laws::BuiltinMimo::from_id(&self.cfg.law.id).is_some() {
+                Some(
+                    crate::law::builtin_factory(&self.cfg.law, keep.len()).map_err(|e| {
+                        MimoError::Law(format!(
+                    "the law's parameters do not fit {} controls ({e}); change the per-control \
+                     parameters in the setup instead",
+                    keep.len()
+                ))
+                    })?,
+                )
+            } else {
+                None
+            };
+        self.cfg.controls = keep.iter().map(|&i| self.cfg.controls[i]).collect();
+        self.cfg.reference.sdm = pick_h(&self.cfg.reference.sdm, &keep);
+        self.cfg.reference.tolerances = tolerances.clone();
+        self.reference = pick_h(&self.reference, &keep);
+        self.reference_shared = Arc::new(self.reference.clone());
+        self.tolerances_shared = Arc::new(tolerances);
+        self.ref_diag = hertzforge_sdm::linalg::diagonals(&self.reference);
+        self.achievable_diag = self.ref_diag.clone();
+        self.achievable = None;
+        self.response_slots = keep
+            .iter()
+            .map(|&i| self.response_slots[i])
+            .chain(self.response_slots[n_c..].iter().copied())
+            .collect();
+        self.n_c = keep.len();
+        self.n_r = keep.len();
+        self.ls.div_streak = vec![0; self.n_r];
+        self.ls.div_best = vec![f64::INFINITY; self.n_r];
+        if let Some(f) = law_factory {
+            self.law_factory = Some(f);
+        }
+        // The identification on the controls kept; its coherence and conditioning
+        // are judged again.
+        let frf = pick_rows(&set.frf, &rows);
+        let h_c = crate::estimate::rows(&frf, 0..self.n_c);
+        let condition = la(pool::condition_numbers(&h_c, self.band))?;
+        let reduced = IdentificationSet {
+            setup_hash: setup_hash_of(&self.cfg, &self.table, self.lines, self.df_hz),
+            g_cc: pick_h(&set.g_cc, &keep),
+            g_rd: pick_rows(&set.g_rd, &rows),
+            noise: pick_h(&set.noise, &keep),
+            coherence: pick_lines(&set.coherence, n_c),
+            condition,
+            frf,
+            ..set
+        };
+        for ch in &excluded {
+            self.log.push(MimoEventKind::ControlExcluded {
+                channel_index: *ch,
+                ack: ack.into(),
+            });
+        }
+        self.note(format!(
+            "Control channel{} {} excluded at the gate and kept as a monitor; {} controls remain.",
+            if excluded.len() == 1 { "" } else { "s" },
+            excluded
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.n_c
+        ));
+        let loaded = self.ident_loaded;
+        self.adopt_identification(reduced, loaded)
+    }
+
+    /// The control channels taken out of control at the gate, by table index.
+    pub fn excluded_controls(&self) -> Vec<u32> {
+        self.log
+            .events()
+            .iter()
+            .filter_map(|e| match &e.kind {
+                MimoEventKind::ControlExcluded { channel_index, .. } => Some(*channel_index),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Load an identification set from an earlier run on the same setup, skipping
@@ -1670,6 +1910,12 @@ impl MimoRandomService {
         let mut played = requested;
         let cf = guards::apply_ceilings(&mut played, self.band, self.df_hz, &ceilings);
         let (_, limited) = self.apply_limits(&mut played);
+        let (drive_accel_rms, accel_control, accel_psd) = self.drive_accelerations(&played);
+        let feasibility = if accel_psd.is_empty() {
+            Vec::new()
+        } else {
+            self.feasibility_rows(&accel_psd)
+        };
         let frf = self.frf_law.clone().expect("identified");
         let played_u = self.reduce_drive(&played)?;
         let resp = la(pool::response_from_drive(&frf, &played_u, self.band))?;
@@ -1706,11 +1952,17 @@ impl MimoRandomService {
             iterations,
             has_achievable: self.n_r > self.n_u,
             unreachable_db,
+            drive_accel_rms,
+            accel_control,
+            feasibility,
         });
         Ok(())
     }
 
-    /// Engage at the schedule's start level: `Predict -> Engaged`.
+    /// Engage: `Predict -> Engaged`. With a soft start (single-output Random's
+    /// rule) the loop takes hold `soft_start_db` below the lowest scheduled level
+    /// and ramps up to the start level; the first rung's dwell begins when it is
+    /// reached, and until then the envelope is judged with relaxed bands.
     fn engage(&mut self) {
         self.drive_discontinuity();
         self.ls.settle = self.cfg.protections.settle_loops;
@@ -1719,9 +1971,40 @@ impl MimoRandomService {
         self.kinematic = self.build_kinematic();
         self.level_index = 0;
         let start = self.cfg.schedule.start_db;
-        self.set_level_now(start);
-        self.level_target_db = start;
-        self.ramp.set(start);
+        let lowest = self
+            .cfg
+            .schedule
+            .table_db
+            .iter()
+            .copied()
+            .fold(start, f64::min);
+        let soft = self.cfg.soft_start_db.max(0.0);
+        if soft > 0.0 {
+            let floor = lowest - soft;
+            self.soft_start_floor_db = Some(floor);
+            self.set_level_now(floor);
+            self.ramp.set(floor);
+            self.level_target_db = start;
+            let ramp_s = if self.cfg.level_ramp_s > f64::EPSILON {
+                self.cfg.level_ramp_s
+            } else {
+                crate::config::DEFAULT_SOFT_START_S
+            };
+            let rate = ((start - floor).abs() / ramp_s).max(0.1);
+            self.ramp.ramp_to(start, rate);
+            self.note(format!(
+                "Soft start: engaging at {floor:.1} dB ({soft:.0} dB below the lowest scheduled \
+                 level) and ramping to {start:.1} dB over {ramp_s:.0} s; envelope bands widened \
+                 by {:.0} dB until the start level is reached.",
+                self.cfg.soft_start_relax_db
+            ));
+        } else {
+            self.soft_start_floor_db = None;
+            self.set_level_now(start);
+            self.level_target_db = start;
+            self.ramp.set(start);
+        }
+        self.elapsed_at_level_s = 0.0;
         self.transition(MimoState::Engaged);
         if self.cfg.schedule.mode == RunMode::Auto {
             // Start on the first rung at or above the start level.
@@ -1768,7 +2051,36 @@ impl MimoRandomService {
         });
     }
 
+    /// The soft start's level while it climbs, if it is still climbing.
+    pub fn soft_start_floor_db(&self) -> Option<f64> {
+        self.soft_start_floor_db
+    }
+
+    /// Extra dB on the envelope's bands now: the soft start's relaxation while it
+    /// is still below the start level, else 0.
+    fn envelope_relax_db(&self) -> f64 {
+        match self.soft_start_floor_db {
+            Some(_) if self.schedule_level_db < self.cfg.schedule.start_db - 1e-9 => {
+                self.cfg.soft_start_relax_db.max(0.0)
+            }
+            _ => 0.0,
+        }
+    }
+
     fn maybe_advance_auto(&mut self) {
+        // The soft start ends where the climb reaches the start level; the first
+        // rung's dwell is counted from there.
+        if self.soft_start_floor_db.is_some()
+            && self.schedule_level_db >= self.cfg.schedule.start_db - 1e-9
+        {
+            self.soft_start_floor_db = None;
+            self.elapsed_at_level_s = 0.0;
+            self.note("Soft start done: at the start level.".to_owned());
+            return;
+        }
+        if self.soft_start_floor_db.is_some() {
+            return;
+        }
         if self.state != MimoState::Engaged || self.cfg.schedule.mode != RunMode::Auto {
             return;
         }
@@ -2100,13 +2412,17 @@ impl MimoRandomService {
         }
         let n = self.n_r;
         let tol = self.cfg.reference.tolerances.clone();
+        // While the soft start climbs, the bands are widened (alarm and abort alike).
+        let relax = 10f64.powf(self.envelope_relax_db() / 10.0);
         for i in 0..n {
             let (mut abort, mut alarm) = (0usize, 0usize);
             let mut worst = 0.0f64;
             for line in self.band.0..self.band.1 {
                 let k = line * n + i;
                 let m = resp.get(line, i, i).re;
-                let out = |hi: f64, lo: f64| (!hi.is_nan() && m > hi) || (!lo.is_nan() && m < lo);
+                let out = |hi: f64, lo: f64| {
+                    (!hi.is_nan() && m > hi * relax) || (!lo.is_nan() && m < lo / relax)
+                };
                 if out(tol.abort_upper[k], tol.abort_lower[k]) {
                     abort += 1;
                 }
@@ -2534,6 +2850,37 @@ impl MimoRandomService {
         Ok(())
     }
 
+    /// The settings the run actually holds, as recorded with it: every value the
+    /// operator can set, so a record says what the run did.
+    pub fn config_json(&self) -> serde_json::Value {
+        let c = &self.cfg;
+        serde_json::json!({
+            "drives": c.drives.iter().map(|d| serde_json::json!({
+                "channel": d.channel_index,
+                "ceiling_vrms": d.ceiling_vrms,
+                "peak_v": d.peak_v,
+                "abort_vrms": d.abort_level_vrms(),
+                "shaker": d.shaker.as_ref().map(|s| s.name.clone()),
+                "moving_mass_lb": d.moving_mass.total(),
+            })).collect::<Vec<_>>(),
+            "limits": c.limits.iter().map(|l| serde_json::json!({
+                "channel": l.channel_index,
+                "ceiling": l.ceiling_psd,
+                "abort_margin_db": l.abort_margin_db,
+            })).collect::<Vec<_>>(),
+            "article_mass_lb": c.article_mass_lb,
+            "frf": match c.frf_mode {
+                FrfMode::Hold => serde_json::json!({"mode": "hold"}),
+                FrfMode::Update { blend } => serde_json::json!({"mode": "update", "blend": blend}),
+            },
+            "estimation": c.estimation,
+            "caps": c.caps,
+            "law_budget": c.law_guards.budget_fraction,
+            "soft_start_db": c.soft_start_db,
+            "law_misses": c.law_guards.max_misses,
+        })
+    }
+
     fn settings_json(&self) -> String {
         serde_json::json!({
             "test": "mimo_random",
@@ -2550,6 +2897,7 @@ impl MimoRandomService {
             "setup_hash": self.setup_hash(),
             "station": self.station.to_string(),
             "source": if self.station.is_hardware() { "HARDWARE" } else { "SIM" },
+            "config": self.config_json(),
         })
         .to_string()
     }

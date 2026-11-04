@@ -6,7 +6,7 @@
 //! size, a law that does not admit the test's shape) is a validation item, so the
 //! operator sees every problem at once in the validation report.
 
-use crate::protocol::{num, MethodError};
+use crate::protocol::{num, ErrorCode, MethodError};
 use crate::table::{unit_name, Item, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_law_host::{MimoManifest, ParamKind};
@@ -62,6 +62,11 @@ pub struct LimitRow {
     pub abort_margin_db: f64,
 }
 
+/// A controlled quantity's alarm and abort bands when none are given,
+/// `[below, above]` dB.
+pub const DEFAULT_ALARM_DB: [f64; 2] = [3.0, 3.0];
+pub const DEFAULT_ABORT_DB: [f64; 2] = [6.0, 6.0];
+
 /// The crest factor a drive's default peak assumes.
 pub const DEFAULT_CREST: f64 = 3.0;
 /// The service's per-loop change caps on each drive's PSD, dB.
@@ -73,6 +78,8 @@ pub const MAX_CAP_UP_DB: f64 = 6.0;
 /// a row that stop the run.
 pub const DEFAULT_LAW_BUDGET: f64 = 0.25;
 pub const DEFAULT_LAW_MISSES: u32 = 3;
+/// The soft start's depth when the setup gives none, dB (single-output Random's).
+pub const DEFAULT_SOFT_START_DB: f64 = 9.0;
 /// The FRF update's blend weight when the FRF is updated during the run.
 pub const DEFAULT_FRF_BLEND: f64 = 0.5;
 
@@ -163,6 +170,9 @@ pub struct Control {
     /// in a row that stop the run.
     pub law_budget: f64,
     pub law_misses: u32,
+    /// The soft start: dB below the lowest scheduled level the loop engages at
+    /// before it ramps to the first rung (0: none).
+    pub soft_start_db: f64,
 }
 
 /// The level schedule, as single-output Random's.
@@ -185,6 +195,11 @@ pub struct MimoSetup {
     /// The test article's mass, split across the shakers for feasibility, lb.
     pub article_mass_lb: f64,
     pub space: ControlSpace,
+    /// Under virtual control, each degree of freedom's alarm and abort bands,
+    /// `([below, above], [below, above])` dB, in the order of the degrees of
+    /// freedom (empty under physical control, where each control row carries its
+    /// own).
+    pub dof_bands: Vec<([f64; 2], [f64; 2])>,
     pub reference: Reference,
     pub law: LawSetup,
     pub estimation: Estimation,
@@ -214,6 +229,18 @@ impl MimoSetup {
             ControlSpace::Physical => self.controls.iter().map(|c| c.label.clone()).collect(),
             ControlSpace::Virtual { dofs, .. } => dofs.clone(),
         }
+    }
+
+    /// The alarm and abort bands of controlled quantity `i`, `[below, above]` dB:
+    /// its control row's under physical control, its degree of freedom's under
+    /// virtual control (the reference and its tolerances are in the control
+    /// space).
+    pub fn band_of(&self, i: usize) -> ([f64; 2], [f64; 2]) {
+        let own = match &self.space {
+            ControlSpace::Physical => self.controls.get(i).map(|c| (c.alarm_db, c.abort_db)),
+            ControlSpace::Virtual { .. } => self.dof_bands.get(i).copied(),
+        };
+        own.unwrap_or((DEFAULT_ALARM_DB, DEFAULT_ABORT_DB))
     }
 
     /// The test's shape, controls against drives.
@@ -434,8 +461,8 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
         let channel = whole(c, "channel", &path)?
             .and_then(|n| u32::try_from(n).ok())
             .ok_or_else(|| bad(&format!("{path}.channel"), "each control names its channel"))?;
-        let alarm_db = band(c, "alarm_db", &path, [3.0, 3.0])?;
-        let abort_db = band(c, "abort_db", &path, [6.0, 6.0])?;
+        let alarm_db = band(c, "alarm_db", &path, DEFAULT_ALARM_DB)?;
+        let abort_db = band(c, "abort_db", &path, DEFAULT_ABORT_DB)?;
         if alarm_db[0] > abort_db[0] || alarm_db[1] > abort_db[1] {
             report.warnings.push(Item::field(
                 "alarm_wider_than_abort",
@@ -542,7 +569,20 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
         }
         let shaker = match opt(d, "shaker") {
             None => None,
-            Some(v @ Value::Object(_)) => Some(v.clone()),
+            Some(v @ Value::Object(_)) => {
+                if let Err(e) =
+                    serde_json::from_value::<hertzforge_shaker_db::ShakerRecord>(v.clone())
+                {
+                    return Err(MethodError::named(
+                        ErrorCode::BadRequest,
+                        "shaker_record_invalid",
+                        format!(
+                            "{path}.shaker: the shaker record does not parse ({e}); give the record in the shaker database's form, or leave it out to skip that drive's feasibility check"
+                        ),
+                    ));
+                }
+                Some(v.clone())
+            }
             Some(_) => {
                 return Err(bad(
                     &format!("{path}.shaker"),
@@ -736,6 +776,49 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
                 }
             }
         }
+    };
+
+    // Tolerance bands per degree of freedom, under virtual control.
+    let dof_bands = match (&space, opt(s, "space").and_then(Value::as_object)) {
+        (ControlSpace::Virtual { dofs, .. }, Some(m)) => match opt(m, "dof_bands") {
+            None => vec![(DEFAULT_ALARM_DB, DEFAULT_ABORT_DB); dofs.len()],
+            Some(v) => {
+                let list = v.as_array().ok_or_else(|| {
+                    bad(
+                        "setup.space.dof_bands",
+                        "\"dof_bands\" lists one {\"alarm_db\",\"abort_db\"} per degree of freedom",
+                    )
+                })?;
+                let mut out = Vec::new();
+                for (k, b) in list.iter().enumerate() {
+                    let path = format!("setup.space.dof_bands[{k}]");
+                    let o = obj(b, &path)?;
+                    let alarm = band(o, "alarm_db", &path, DEFAULT_ALARM_DB)?;
+                    let abort = band(o, "abort_db", &path, DEFAULT_ABORT_DB)?;
+                    if alarm[0] > abort[0] || alarm[1] > abort[1] {
+                        report.warnings.push(Item::field(
+                            "alarm_wider_than_abort",
+                            &path,
+                            format!("The alarm band of degree of freedom {} is wider than its abort band, so it aborts before it alarms; narrow the alarm band or widen the abort band.", dofs.get(k).map(String::as_str).unwrap_or("?")),
+                        ));
+                    }
+                    out.push((alarm, abort));
+                }
+                if out.len() != dofs.len() {
+                    report.errors.push(Item::field(
+                        "transform_shape",
+                        "setup.space.dof_bands",
+                        format!(
+                            "There are {} tolerance bands for {} degrees of freedom; give one per degree of freedom, in their order.",
+                            out.len(),
+                            dofs.len()
+                        ),
+                    ));
+                }
+                out
+            }
+        },
+        _ => Vec::new(),
     };
 
     // Estimation.
@@ -990,6 +1073,7 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
         cap_down_db: number(&c, "cap_down_db", p)?.unwrap_or(DEFAULT_CAP_DOWN_DB),
         law_budget: number(&c, "law_budget", p)?.unwrap_or(DEFAULT_LAW_BUDGET),
         law_misses: whole(&c, "law_misses", p)?.unwrap_or(DEFAULT_LAW_MISSES as u64) as u32,
+        soft_start_db: number(&c, "soft_start_db", p)?.unwrap_or(DEFAULT_SOFT_START_DB),
     };
     for (key, x) in [
         ("level_ramp_s", control.level_ramp_s),
@@ -1003,7 +1087,12 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
             ));
         }
     }
-    let checks: [(&str, bool, &str); 5] = [
+    let checks: [(&str, bool, &str); 6] = [
+        (
+            "soft_start_db",
+            (0.0..=30.0).contains(&control.soft_start_db),
+            "The soft start is from 0 (none) to 30 dB below the lowest scheduled level.",
+        ),
         (
             "frf_blend",
             control.frf_blend > 0.0 && control.frf_blend <= 1.0,
@@ -1126,6 +1215,7 @@ pub fn parse(setup: &Value, ctx: &SetupContext<'_>) -> Result<(MimoSetup, Report
             limits,
             article_mass_lb,
             space,
+            dof_bands,
             reference,
             law,
             estimation,
@@ -1301,6 +1391,10 @@ pub fn setup_json(s: &MimoSetup) -> Value {
             "kind": "virtual", "dofs": dofs,
             "response_transform": matrix_json(response),
             "drive_transform": drive.as_ref().map(matrix_json),
+            "dof_bands": s.dof_bands.iter().map(|(a, b)| json!({
+                "alarm_db": [num(a[0]), num(a[1])],
+                "abort_db": [num(b[0]), num(b[1])],
+            })).collect::<Vec<_>>(),
         }),
     };
     json!({
@@ -1313,8 +1407,14 @@ pub fn setup_json(s: &MimoSetup) -> Value {
             })).collect::<Vec<_>>(),
             "drives": s.drives.iter().map(|d| json!({
                 "channel": d.channel, "ceiling_vrms": num(d.ceiling_vrms),
-                "abort_vrms": d.abort_vrms.map(num),
+                "abort_vrms": d.abort_vrms.map(num), "peak_v": num(d.peak_v),
+                "shaker": d.shaker, "moving_mass_lb": num(d.moving_mass_lb),
             })).collect::<Vec<_>>(),
+            "limits": s.limits.iter().map(|l| json!({
+                "channel": l.channel, "ceiling": num(l.ceiling),
+                "abort_margin_db": num(l.abort_margin_db),
+            })).collect::<Vec<_>>(),
+            "article_mass_lb": num(s.article_mass_lb),
         },
         "space": space,
         "reference": reference,
@@ -1336,6 +1436,12 @@ pub fn setup_json(s: &MimoSetup) -> Value {
             "level_ramp_s": num(s.control.level_ramp_s),
             "shutdown_ramp_s": num(s.control.shutdown_ramp_s),
             "max_loops_out": s.control.max_loops_out,
+            "frf_blend": num(s.control.frf_blend),
+            "cap_up_db": num(s.control.cap_up_db),
+            "cap_down_db": num(s.control.cap_down_db),
+            "law_budget": num(s.control.law_budget),
+            "law_misses": s.control.law_misses,
+            "soft_start_db": num(s.control.soft_start_db),
         },
         "schedule": {
             "mode": crate::random::view::mode_name(s.schedule.mode),

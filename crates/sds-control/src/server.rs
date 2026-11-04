@@ -63,7 +63,7 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     random.proceed, random.level, random.mode, random.stop, random.abort, random.reset, \
     random.clear, random.state, random.config, random.log, random.subscribe, mimo_random.setup, \
     mimo_random.validate, mimo_random.start, mimo_random.proceed, mimo_random.override, \
-    mimo_random.iterate_prediction, mimo_random.stop, mimo_random.abort, mimo_random.status, \
+    mimo_random.exclude, mimo_random.iterate_prediction, mimo_random.stop, mimo_random.abort, mimo_random.status, \
     mimo_random.report, mimo_random.subscribe, mimo_random.identification.save, \
     mimo_random.identification.load, mimo_random.reference.build_breakpoints, \
     mimo_random.reference.build_rigid_body, mimo_random.reference.validate, \
@@ -687,6 +687,7 @@ impl Service {
             "mimo_random.start" => self.mimo_start(conn).await,
             "mimo_random.proceed" => self.mimo_proceed(conn).await,
             "mimo_random.override" => self.mimo_override(conn, params).await,
+            "mimo_random.exclude" => self.mimo_exclude(conn, params).await,
             "mimo_random.iterate_prediction" => self.mimo_iterate(conn, params).await,
             "mimo_random.stop" => self.mimo_end(conn, false).await,
             "mimo_random.abort" => self.mimo_end(conn, true).await,

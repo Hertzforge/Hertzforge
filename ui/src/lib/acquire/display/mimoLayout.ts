@@ -50,6 +50,7 @@ export const MIMO_QUANTITY_ORDER: MimoQuantity[] = [
 	'phase',
 	'csd_mag',
 	'error_db',
+	'coh_error',
 	'sdm',
 	'trace',
 	'drive_psd',
@@ -62,6 +63,8 @@ export const MIMO_QUANTITY_ORDER: MimoQuantity[] = [
 	'dof_rms',
 	'pred_drive_rms',
 	'pred_error_db',
+	'pred_sdm',
+	'pred_drive_accel',
 	'law_diag',
 	'readings'
 ];
@@ -72,6 +75,7 @@ export const MIMO_QUANTITY_WORDS: Record<MimoQuantity, string> = {
 	phase: 'Phase',
 	csd_mag: 'Cross Spectrum',
 	error_db: 'Error Heatmap',
+	coh_error: 'Coherence Error Heatmap',
 	sdm: 'Matrix Grid',
 	trace: 'Overall Level',
 	drive_psd: 'Drive Spectrum',
@@ -84,6 +88,8 @@ export const MIMO_QUANTITY_WORDS: Record<MimoQuantity, string> = {
 	dof_rms: 'Degree-of-Freedom RMS',
 	pred_drive_rms: 'Predicted Drive',
 	pred_error_db: 'Predicted Error',
+	pred_sdm: 'Achievable Reference',
+	pred_drive_accel: 'Predicted Shaker Acceleration',
 	law_diag: 'Law Diagnostic',
 	readings: 'Run Numbers'
 };
@@ -98,6 +104,7 @@ export const SELECTOR_KINDS: Record<MimoQuantity, SelectorKind[]> = {
 	phase: ['pair'],
 	csd_mag: ['pair'],
 	error_db: ['rows'],
+	coh_error: ['rows'],
 	sdm: ['block'],
 	trace: ['none'],
 	drive_psd: ['index', 'diagonal'],
@@ -110,13 +117,15 @@ export const SELECTOR_KINDS: Record<MimoQuantity, SelectorKind[]> = {
 	dof_rms: ['none'],
 	pred_drive_rms: ['diagonal', 'index'],
 	pred_error_db: ['index'],
+	pred_sdm: ['block'],
+	pred_drive_accel: ['diagonal', 'index'],
 	law_diag: ['key'],
 	readings: ['none']
 };
 
 /** Whether a quantity's positions count drives (otherwise controls). */
 export function countsDrives(q: MimoQuantity): boolean {
-	return q === 'drive_psd' || q === 'drive_coh' || q === 'cap' || q === 'pred_drive_rms';
+	return q === 'drive_psd' || q === 'drive_coh' || q === 'cap' || q === 'pred_drive_rms' || q === 'pred_drive_accel';
 }
 
 /** A pair of two different channels, for the quantities that are between two. */

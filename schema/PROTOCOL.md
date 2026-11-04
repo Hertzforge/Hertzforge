@@ -367,7 +367,8 @@ plain words: it never names a protocol method.
 | `config_invalid` | `bad_request` | The Random configuration has errors | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
-| `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` engages anyway | `gates` |
+| `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` with reason `gate_failed` goes on anyway | `gates` |
+| `prediction_exceeded` | `refused` | `mimo_random.proceed` while the prediction asks a drive for more than its ceiling; `mimo_random.override` with reason `prediction_exceeded` engages anyway | |
 | `identification_mismatch` | `refused` | `mimo_random.identification.load` (or the start that loads it) with a set measured on another setup | `setup_hash`, `identification_hash` |
 | `law_import_failed` | `refused` | The file is not a control law this program can run, or cannot be read | `path` |
 | `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
@@ -953,7 +954,7 @@ single-output Random run (or a `sim.start` run) exclude each other exactly as tw
 would: each is refused `run_active` while the other is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
 `mimo_random.abort`); `mimo_random.setup` (other than a dry run), `start`, `proceed`,
-`override` and `iterate_prediction` need control; everything that only reads is open to every
+`override`, `exclude` and `iterate_prediction` need control; everything that only reads is open to every
 connection.
 
 **Conventions.** A spectral matrix is `G = lim (1/T) E[X X^H]` per line, so a response `Y = H X`
@@ -970,7 +971,8 @@ what every index on the wire counts.
 | `mimo_random.validate` | `{"setup"}` (optional) | any | `{"validation"}` |
 | `mimo_random.start` | `{}` | `configured` | status |
 | `mimo_random.proceed` | `{}` | `review`, `awaiting_review` | status |
-| `mimo_random.override` | `{"ack"}` | `review`, `gate_failed` | status |
+| `mimo_random.override` | `{"ack","reason"}` (`reason` optional) | `review`, `gate_failed` or `prediction_exceeded` | status |
+| `mimo_random.exclude` | `{"controls","ack"}` | `review`, `gate_failed` | status |
 | `mimo_random.iterate_prediction` | `{"law"}` (optional) | `review` | `{"prediction"}` |
 | `mimo_random.stop` | `{}` | any | status |
 | `mimo_random.abort` | `{}` | any | status |
@@ -1019,12 +1021,12 @@ identification and goes to the gates. `{"identification"}` is
 | `channels.drives` | (required) | The drives, by table `index` (each an enabled `drive` row), each with its own `ceiling_vrms` (above 0, at most 10) and optional `abort_vrms` (above the ceiling), `peak_v` (the clip level, at least the ceiling and at most 10; default 3 times the ceiling, at most 10), `shaker` (the shaker record, as Random's feasibility takes it; absent: feasibility not evaluated for that drive) and `moving_mass_lb` (that shaker's own moving mass, default 0) |
 | `channels.limits` | none | Monitored responses the core holds under a ceiling: each an enabled `monitor` row by `index`, with its PSD `ceiling` (above 0, the unit squared per hertz, at full level) and `abort_margin_db` (above 0, default 3): a measured PSD that far above the ceiling aborts. `limit_unknown_channel` otherwise |
 | `channels.article_mass_lb` | 0 | The test article's mass, split equally across the shakers for feasibility |
-| `space` | physical | `{"kind":"physical"}`: control the channels themselves. `{"kind":"virtual","dofs":[names],"response_transform","drive_transform"}`: control the named degrees of freedom; `response_transform` is degrees of freedom by control channels, `drive_transform` (optional) drives by virtual drives. A transformation is `{"rows","cols","values"}`, real, row by row |
-| `reference` | (required) | Inline, for a small reference: `{"kind":"inline","freqs_hz","n","re","im"}`, the packed matrices of `n` channels (or degrees of freedom) on the lines `freqs_hz` (at least 8, rising), at most 262,144 values. By file, for a large one: `{"kind":"file","path","sha256"}`, a native reference file on the computer that runs the test, named with the SHA-256 of its bytes; the run reads it when it starts and refuses a file whose hash differs |
+| `space` | physical | `{"kind":"physical"}`: control the channels themselves. `{"kind":"virtual","dofs":[names],"response_transform","drive_transform","dof_bands"}`: control the named degrees of freedom; `response_transform` is degrees of freedom by control channels, `drive_transform` (optional) drives by virtual drives. A transformation is `{"rows","cols","values"}`, real, row by row. `dof_bands` (optional) gives one `{"alarm_db","abort_db"}` per degree of freedom, in their order (defaults `[3,3]` and `[6,6]`): under virtual control the reference and its tolerances are in the control space, so the bands are the degrees of freedom's and the control rows' own bands are not used for tolerance |
+| `reference` | (required) | Inline, for a small reference: `{"kind":"inline","freqs_hz","n","re","im"}`, the packed matrices of `n` channels (or degrees of freedom) on the lines `freqs_hz` (at least 8, rising), at most 262,144 values; lines off the run's grid are interpolated onto it, each packed element linearly between the two reference lines around a grid line (a mix of two positive semi-definite matrices stays one), so a programmatic client need not build on the grid. By file, for a large one (which must already be on the run's grid; a file off the grid is refused): `{"kind":"file","path","sha256"}`, a native reference file on the computer that runs the test, named with the SHA-256 of its bytes; the run reads it when it starts and refuses a file whose hash differs |
 | `law` | `{"id":"pinv_closed"}` | The control law, by its catalog `id` (see "Control Laws"), and values for the parameters its manifest declares |
 | `estimation` | as shown | The frame (`fs_hz` 256 to 204,800, `n_pts` a power of two from 64), frames per loop (1 to 1024), window (`hann` or `rectangular`), overlap (0 to 0.75) and how many loops the estimate remembers (1 to 64) |
 | `identification` | as shown | The identification level (-60 to 0 dB relative to the reference), its frames and the noise-floor frames, the gates (the smallest multiple coherence over the band, `coherence_floor`, and the largest FRF condition number, `condition_limit`), and whether to hold for review afterwards |
-| `control` | as shown | `frf` `hold` (the FRF from identification) or `update` (re-estimated each loop); ramp times; consecutive loops out of tolerance before the divergence abort; `frf_blend` (under `update`, the weight of each loop's estimate against identification's, above 0 and at most 1, default 0.5); `cap_up_db` and `cap_down_db` (the core's per-loop rise and fall caps on each drive's PSD, default 3.5 and 6 dB, the rise at most 6); `law_budget` (the law call's time budget, a fraction of the loop, default 0.25) and `law_misses` (unusable law calls in a row that stop the run, 1 to 100, default 3) |
+| `control` | as shown | `frf` `hold` (the FRF from identification) or `update` (re-estimated each loop); ramp times; consecutive loops out of tolerance before the divergence abort; `frf_blend` (under `update`, the weight of each loop's estimate against identification's, above 0 and at most 1, default 0.5); `cap_up_db` and `cap_down_db` (the core's per-loop rise and fall caps on each drive's PSD, default 3.5 and 6 dB, the rise at most 6); `law_budget` (the law call's time budget, a fraction of the loop, default 0.25) and `law_misses` (unusable law calls in a row that stop the run, 1 to 100, default 3); `soft_start_db` (single-output Random's soft start: the loop engages this many dB below the lowest scheduled level and ramps to the first rung over the level ramp, or 5 s when that is 0, with the envelope's bands widened by 6 dB until it arrives; the first rung's dwell starts there; 0 to 30, default 9, 0 for none) |
 | `schedule` | (required) | Single-output Random's schedule |
 | `backend` | the selected station | `{"kind":"sim"}` or `{"kind":"ni"}`; must be the station selected (`backend_not_selected` otherwise) |
 
@@ -1095,7 +1097,7 @@ alarm, faults or prediction.
 | `configured` | `idle` | Set up; nothing open |
 | `armed` | `armed` | Station open; nothing driven yet |
 | `running` | `sysid_noise`, `sysid`, `engaged`, `full_level` | Driving: the noise floor with the drives off, identification, the ladder, full level |
-| `review` | `awaiting_review`, `gate_failed` | Identification is done; nothing drives until `proceed` (gates passed) or `override` (a gate failed) |
+| `review` | `awaiting_review`, `gate_failed`, `prediction_exceeded` | Identification is done; nothing drives until `proceed` (gates passed, prediction within every ceiling) or an `override` of what holds the run (a failed gate, or a prediction over a ceiling) |
 | `stopping` | `ramping_down` | A controlled stop or a safe stop is ramping the level down |
 | `finished` | `stopped`, `aborted` | Ended; `end` says how (Random's outcomes and trips) |
 
@@ -1104,17 +1106,46 @@ channels, or degrees of freedom under virtual control) and the drives. `control_
 each controlled quantity's rms over the band against the reference's, in dB (empty before the
 first loop). `gates` is null until identification has measured them. `caps` is each drive's
 cap factor this loop (1 when the core did not hold it down). `prediction`, once identification
-is done: `{"iteration","law","drive_rms_v","ceiling_vrms","error_db","drives_pass"}`, what the
-law would ask of each drive and leave on each control. `override` is `{"by","text"}` once the
-gate was overridden. `faults` lists `{"kind","message"}`.
+is done: `{"iteration","law","drive_rms_v","ceiling_vrms","error_db","drives_pass",
+"has_achievable","unreachable_db","drive_accel","accel_control","feasibility"}`, what the law
+would ask of each drive and leave on each control. `has_achievable` is true when controls
+outnumber the drives, so only the achievable reference `P G_ref P^H` (`P = H H^+`) can be reached;
+`unreachable_db` is each controlled quantity's achievable rms against the reference's over the
+band (0 where all of it is reachable), and the whole achievable matrix is the `pred_sdm`
+quantity. `drive_accel` is each drive's predicted rms acceleration at its shaker at full level,
+read at the physical control that drive moves most (`accel_control`, a control position), from
+the identification FRF and the predicted drive; `feasibility` is each drive's shaker against that
+acceleration (`{"verdict","message"}`, `verdict` `pass`, `advisory`, `exceeded` or
+`not_evaluated`). `override` is the latest acknowledgement, `{"by","text","reason"}`, and
+`overrides` lists every one in order. `shape.bands` gives each controlled quantity's
+`{"alarm_db","abort_db"}`: its control row's, or under virtual control its degree of freedom's.
+`excluded` lists the control positions taken out of control at the gate
+(`mimo_random.exclude`). `faults` lists `{"kind","message"}`.
 
 - **`mimo_random.start`** arms the station and runs identification, then holds for review when
   `identification.review` is true or a gate failed; otherwise it engages. It answers at once.
 - **`mimo_random.proceed`** engages from `awaiting_review`. After a failed gate it is refused
   `gate_failed`.
-- **`mimo_random.override`** engages after a failed gate. `ack` is the operator's own words,
-  kept with the run and in its report; an empty one is `bad_params`, and an override when no
-  gate failed is `override_not_needed`.
+- **`mimo_random.override`** goes on past what holds the run, in the operator's own words: a
+  failed identification gate (`reason` `gate_failed`), or a prediction that asks a drive for more
+  than its ceiling (`reason` `prediction_exceeded`, the single-output feasibility pattern: the
+  ceilings still hold every drive during the run). One acknowledgement passes one hold: after a
+  gate override the run goes on to the prediction, and engages only when the prediction is within
+  every ceiling; otherwise it holds again at `prediction_exceeded` for its own acknowledgement.
+  `reason` absent means whatever holds the run now; a `reason` that names something else is
+  `override_not_needed` and says what holds the run. `ack` is kept with the run and in its
+  report; an empty one is `bad_params`, and an override when nothing holds the run is
+  `override_not_needed`.
+- **`mimo_random.exclude`** takes the controls at the listed positions out of control at a
+  failed gate (physical control only), in the operator's words (`ack`): each is still measured
+  and recorded, as a monitor; the reference and its tolerances are reduced to the controls kept,
+  and identification's coherence and conditioning are judged again on them, so the run goes on
+  to the prediction when the gate now passes and holds again when it does not. Positions keep
+  counting the setup's controls: an excluded control is listed in the status's `excluded`, its
+  entries in the per-control lists are null, its curves are not sent and its heatmap row is
+  empty. Refusals: `wrong_state` (no failed gate, or under virtual control, where the response
+  transformation is changed in the setup instead), `bad_params` (an empty reason, a position the
+  setup does not have, one already excluded).
 - **`mimo_random.iterate_prediction`** recomputes the prediction during the review hold, with
   another law or other parameters (`{"law":{"id","params"}}`, checked like the setup's) or the
   run's own. A law chosen here is the one that engages.
@@ -1251,6 +1282,8 @@ once when the run has streamed.
 | `pred_error_db` | `index` | one `spectrum`: a control's predicted error per line, dB |
 | `law_diag` | `key` (and `index`) | one `spectrum` for a per-line layout, one `reading` for a scalar |
 | `sdm` | `block` | one `sdm`: the block of the response matrix and the reference's |
+| `pred_sdm` | `block` | one `sdm`: the block of the achievable reference `P G_ref P^H` at full level (as `measured`) and the reference's, after identification, when controls outnumber drives |
+| `pred_drive_accel` | `index` or `diagonal` (default) | one `reading`: each drive's predicted acceleration at its shaker, marked by its shaker's verdict |
 | `readings` | none | one `reading`: the run's numbers (loop, level, largest error, gates, elapsed) |
 
 **Decimation.** The service reduces every quantity to the plot's width before it is framed:

@@ -3,7 +3,7 @@
 //! contract's order.
 
 use super::check::sig;
-use super::driver::{Gates, LawRef, MimoReport, MimoStatus, Prediction};
+use super::driver::{Gates, LawRef, MimoReport, MimoStatus, OverrideAck, Prediction};
 use super::setup::{shape_name, ControlSpace, MimoSetup};
 use crate::protocol::{num, opt_num};
 use crate::random::config::Grid;
@@ -41,6 +41,7 @@ fn gates_json(g: &Option<Gates>) -> Value {
             "coherence_min": r(g.coherence_min, 3), "coherence_floor": num(g.coherence_floor),
             "condition_max": num(sig(g.condition_max, 4)), "condition_limit": num(g.condition_limit),
             "passed": g.passed(),
+            "coherence": list(&g.coherence, 6),
         })
     })
 }
@@ -54,9 +55,18 @@ fn end_json(e: &Option<End>) -> Value {
     })
 }
 
-fn override_json(o: &Option<(String, String)>) -> Value {
-    o.as_ref()
-        .map_or(Value::Null, |(by, text)| json!({"by": by, "text": text}))
+fn ack_json(a: &OverrideAck) -> Value {
+    json!({"by": a.by, "text": a.text, "reason": a.reason.name()})
+}
+
+/// The latest acknowledgement (null when none).
+fn override_json(o: &[OverrideAck]) -> Value {
+    o.last().map_or(Value::Null, ack_json)
+}
+
+/// Every acknowledgement, in order.
+fn overrides_json(o: &[OverrideAck]) -> Value {
+    Value::Array(o.iter().map(ack_json).collect())
 }
 
 /// The prediction object.
@@ -68,6 +78,11 @@ pub fn prediction_json(p: &Prediction) -> Value {
         "ceiling_vrms": list(&p.ceiling_vrms, 4),
         "error_db": list(&p.error_db, 2),
         "drives_pass": p.drives_pass(),
+        "has_achievable": p.has_achievable,
+        "unreachable_db": list(&p.unreachable_db, 2),
+        "drive_accel": list(&p.drive_accel, 4),
+        "accel_control": p.accel_control,
+        "feasibility": p.feasibility.iter().map(|v| json!({"verdict": v.verdict, "message": v.message})).collect::<Vec<_>>(),
     })
 }
 
@@ -87,6 +102,10 @@ fn shape_json(s: &MimoSetup) -> Value {
         "shape": shape_name(s.shape()),
         "labels": s.controlled_labels(),
         "drive_labels": s.drives.iter().map(|d| d.label.clone()).collect::<Vec<_>>(),
+        "bands": (0..s.controlled()).map(|i| {
+            let (a, b) = s.band_of(i);
+            json!({"alarm_db": [num(a[0]), num(a[1])], "abort_db": [num(b[0]), num(b[1])]})
+        }).collect::<Vec<_>>(),
     })
 }
 
@@ -99,7 +118,7 @@ pub fn status_json(f: Option<(&RunFacts<'_>, &MimoStatus)>) -> Value {
             "mode": null, "levels_db": null, "level_db": null, "elapsed_s": null,
             "at_level_s": null, "remaining_at_level_s": null, "loop": 0, "alarm": false,
             "control_error_db": [], "gates": null, "caps": [], "drive_rms_v": [], "law": null,
-            "faults": [], "override": null, "prediction": null, "end": null,
+            "faults": [], "override": null, "overrides": [], "prediction": null, "excluded": [], "end": null,
         });
     };
     let mut m = Map::new();
@@ -153,10 +172,12 @@ pub fn status_json(f: Option<(&RunFacts<'_>, &MimoStatus)>) -> Value {
         ),
     );
     m.insert("override".into(), override_json(&s.override_ack));
+    m.insert("overrides".into(), overrides_json(&s.override_ack));
     m.insert(
         "prediction".into(),
         s.prediction.as_ref().map_or(Value::Null, prediction_json),
     );
+    m.insert("excluded".into(), Value::from(s.excluded.clone()));
     m.insert("end".into(), end_json(&s.end));
     Value::Object(m)
 }
@@ -205,6 +226,7 @@ pub fn report_json(f: &RunFacts<'_>, rep: &MimoReport) -> Value {
         })).collect::<Vec<_>>(),
         "gates": gates_json(&rep.gates),
         "override": override_json(&rep.override_ack),
+        "overrides": overrides_json(&rep.override_ack),
         "end": end_json(&rep.end),
     })
 }

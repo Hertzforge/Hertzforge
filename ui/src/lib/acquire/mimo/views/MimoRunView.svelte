@@ -41,7 +41,7 @@
 	const ceil = $derived(ceilings ?? status?.prediction?.ceiling_vrms ?? []);
 </script>
 
-<div class="live" class:compact data-testid="mimo-run-view">
+<div class="live" class:compact data-testid="mimo-run-view" data-state={status?.state ?? ""} data-phase={status?.phase ?? ""} data-loop={status?.loop ?? 0}>
 	{#if bar}{@render bar()}{/if}
 	<MimoPageBar {views} {onpopout} {end} />
 

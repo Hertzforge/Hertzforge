@@ -7,6 +7,7 @@
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
+import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -429,6 +430,8 @@ export class AppState {
 	readonly tests: TestTypeView;
 	/** The Random run's display: its pages and plots, and the data this window asks for. */
 	readonly display: DisplayState;
+	/** The MIMO Random run's views: its pages and this window's subscription. */
+	readonly mimoViews: MimoViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -451,6 +454,13 @@ export class AppState {
 			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),
 			showing: () => config.popout || (this.workspace === 'acquire' && this.tests.screen === 'random' && this.acquire.tab === 'live'),
 			page: config.page
+		});
+		const mimoPopout = config.popout && config.popoutTest === 'mimo_random';
+		this.mimoViews = new MimoViewsState(this.control, {
+			setupTitle: () => this.mimo.status?.title ?? (config.popout ? null : this.mimo.setup.title),
+			showing: () => mimoPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_random' && this.mimo.step === 'run'),
+			page: mimoPopout ? config.page : null,
+			windowIndex: mimoPopout ? 1 : 0
 		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
@@ -477,10 +487,12 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
+		if (test === 'mimo_random') q.set('test', 'mimo_random');
+		else q.delete('test');
 		this.windows += 1;
 		const w = window.open(`${location.pathname}?${q.toString()}#acquire`, `hertzforge-display-${Date.now()}-${this.windows}`, 'popup,width=1280,height=820');
 		return w !== null;
@@ -489,12 +501,19 @@ export class AppState {
 	/** A display window: the control service only, the run's state and one page. */
 	startDisplayWindow(): void {
 		this.workspace = 'acquire';
+		const mimo = this.config.popoutTest === 'mimo_random';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
 			});
+			if (mimo) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimo.sync();
+				});
+			}
 		});
-		this.display.watch();
+		if (mimo) this.mimoViews.watch();
+		else this.display.watch();
 		this.control.connect();
 	}
 
@@ -558,6 +577,7 @@ export class AppState {
 		this.mimo.watch();
 		this.tests.watch();
 		this.display.watch();
+		this.mimoViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

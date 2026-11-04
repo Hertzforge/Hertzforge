@@ -83,6 +83,10 @@ export class MimoFeed {
 		return () => {
 			this.cancelTimer();
 			stop();
+			// The subscription belongs to the connection: another feed on it may replace it
+			// while this one is not watching, so the next watch sends again.
+			this.want = null;
+			this.sentKey = '';
 		};
 	}
 

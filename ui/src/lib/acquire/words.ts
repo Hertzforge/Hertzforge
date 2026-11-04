@@ -247,6 +247,7 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	shaker_record_invalid: 'The Shaker Record Does Not Read',
 	setup_invalid: 'The Setup Has Errors',
 	gate_failed: 'Identification Failed a Gate',
+	prediction_exceeded: 'A Drive Is Predicted Over Its Ceiling',
 	law_import_failed: 'The Law Was Not Imported',
 	catalog_unavailable: 'The Law Catalog Cannot Be Read'
 };

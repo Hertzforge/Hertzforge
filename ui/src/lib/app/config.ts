@@ -21,6 +21,8 @@ export interface ShellConfig {
 	 */
 	popout: boolean;
 	page: string | null;
+	/** `&test=mimo_random`: the pop-out shows a MIMO Random run's page; otherwise Random's. */
+	popoutTest: 'random' | 'mimo_random';
 	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
@@ -56,6 +58,7 @@ export function readConfig(search: string): ShellConfig {
 		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
 		popout: q.get('popout') === '1',
 		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
+		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : 'random',
 		mockControl: {
 			speed: num(q.get('mock_speed')),
 			niReal: q.get('mock_ni') === 'real' ? true : undefined,

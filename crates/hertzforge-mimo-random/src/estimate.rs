@@ -137,7 +137,27 @@ pub struct SdmEstimator {
 impl SdmEstimator {
     /// `nfft` a power of two, `overlap` in `[0, 0.95]`, cross spectra on `band`.
     pub fn new(nfft: usize, fs_hz: f64, overlap: f64, band: (usize, usize)) -> Self {
-        let window = window::hann(nfft);
+        Self::with_window(
+            nfft,
+            fs_hz,
+            overlap,
+            crate::config::EstimationWindow::Hann,
+            band,
+        )
+    }
+
+    /// As [`Self::new`], through the chosen window.
+    pub fn with_window(
+        nfft: usize,
+        fs_hz: f64,
+        overlap: f64,
+        kind: crate::config::EstimationWindow,
+        band: (usize, usize),
+    ) -> Self {
+        let window = match kind {
+            crate::config::EstimationWindow::Hann => window::hann(nfft),
+            crate::config::EstimationWindow::Rectangular => vec![1.0; nfft],
+        };
         let s2: f64 = window.iter().map(|w| w * w).sum();
         SdmEstimator {
             nfft,

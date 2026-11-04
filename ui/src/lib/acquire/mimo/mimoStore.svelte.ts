@@ -23,10 +23,13 @@ import type {
 	MimoRigidResult,
 	MimoSetup,
 	MimoSetupResult,
+	MimoOverrideReason,
 	MimoStatus,
 	MimoValidation
 } from '$lib/protocol/mimo';
 import { MIMO_TOPICS } from '$lib/protocol/mimo';
+import { MimoFeed } from '../display/mimoFeed.svelte';
+import { gridWindow, newMimoPlot, type MimoPlotSpec } from '../display/mimoLayout';
 import { LIVE_STATES, type ActionId, type ActionState, type SetupStatus } from '../actions';
 import { errorCount, mergeErrors, type FieldErrors } from '../setup';
 import type { AcquireState } from '../store.svelte';
@@ -152,6 +155,16 @@ export class MimoState {
 	/** The setup this screen applied: the run it made and the setup's key. */
 	held = $state.raw<{ runId: string | null; key: string } | null>(null);
 
+	// ---- the Predict page's plots -----------------------------------------------------------
+	/** The first control of the achievable reference's grid window on the Predict page. */
+	predictFirst = $state(0);
+	/** The grid's width on screen, in points the service decimates to. */
+	predictPoints = $state(256);
+	/** Whether the Predict page is on screen and showing the achievable reference. */
+	predictShown = $state(false);
+	/** The Predict page's subscription: the achievable reference's block, while it is shown. */
+	readonly predictFeed: MimoFeed;
+
 	// ---- feedback --------------------------------------------------------------------------
 	busy = $state<string | null>(null);
 	#refusal = $state.raw<Refusal | null>(null);
@@ -181,12 +194,25 @@ export class MimoState {
 				this.held = null;
 			}
 		}
+		this.predictFeed = new MimoFeed(this.control, {
+			plots: () => this.predictPlots,
+			rate: () => 2
+		});
 		this.control.on(MIMO_TOPICS.status, (d) => this.onStatus(d as unknown as MimoStatus));
 		this.control.on(MIMO_TOPICS.report, (d) => (this.report = (d as unknown as MimoReportResult).report ?? null));
 	}
 
 	// =========================================================================================
 	// Derived state
+
+	/** The plots the Predict page asks for: the achievable reference, when there is one. */
+	get predictPlots(): MimoPlotSpec[] {
+		const p = this.status?.prediction;
+		const n = this.status?.shape?.labels.length ?? 0;
+		if (!this.predictShown || !p?.has_achievable || !n) return [];
+		const block = gridWindow(Math.min(this.predictFirst, Math.max(0, n - 1)), n);
+		return [{ ...newMimoPlot('predict:achievable', 'pred_sdm', { kind: 'block', block }), points: this.predictPoints }];
+	}
 
 	get connected(): boolean {
 		return this.acq.connected;
@@ -372,8 +398,8 @@ export class MimoState {
 			'engage',
 			s?.phase === 'gate_failed'
 				? 'A gate failed at identification. Engage only through an override, on the Predict page.'
-				: p && !p.drives_pass
-					? 'The prediction asks a drive for more than its ceiling. Change the law or its parameters and predict again.'
+				: s?.phase === 'prediction_exceeded' || (p && !p.drives_pass)
+					? 'The prediction asks a drive for more than its ceiling. Change the law or its parameters and predict again, or engage through an override on the Predict page.'
 					: null
 		);
 		const stop = gate(live, 'stop', state === 'stopping' ? 'The run is already ramping down.' : null, false);
@@ -760,9 +786,22 @@ export class MimoState {
 		return res !== null;
 	}
 
-	/** Engage after a failed gate, with the operator's own words. */
-	async override(ack: string): Promise<boolean> {
-		const res = await this.act<MimoStatus>('Override', 'mimo_random.override', { ack });
+	/**
+	 * Engage past what holds the run, with the operator's own words: a failed gate, or a
+	 * prediction over a drive ceiling. Each hold needs its own acknowledgement.
+	 */
+	async override(ack: string, reason: MimoOverrideReason = 'gate_failed'): Promise<boolean> {
+		const res = await this.act<MimoStatus>('Override', 'mimo_random.override', { ack, reason });
+		if (res) this.onStatus(res);
+		return res !== null;
+	}
+
+	/**
+	 * Take controls out of control at a failed gate, kept as monitors, with the operator's reason:
+	 * the reference is reduced to the rest and the gate is judged again.
+	 */
+	async exclude(positions: number[], ack: string): Promise<boolean> {
+		const res = await this.act<MimoStatus>('Exclude', 'mimo_random.exclude', { controls: positions, ack });
 		if (res) this.onStatus(res);
 		return res !== null;
 	}

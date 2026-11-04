@@ -120,6 +120,7 @@ pub struct QuantitySnapshot {
     pub(crate) level_db: f64,
     pub(crate) reference: std::sync::Arc<HermitianStack>,
     pub(crate) tolerances: std::sync::Arc<Tolerances>,
+    pub(crate) achievable: Option<std::sync::Arc<HermitianStack>>,
     pub(crate) response_full: Option<HermitianStack>,
     pub(crate) error_lines: Vec<f64>,
     pub(crate) drive_full: HermitianStack,
@@ -168,6 +169,12 @@ impl QuantitySnapshot {
     /// The reference at full level, in the control space.
     pub fn reference(&self) -> &HermitianStack {
         &self.reference
+    }
+
+    /// The achievable reference `P G_ref P^H` at full level, in the control space
+    /// ([`MimoRandomService::achievable_reference`]).
+    pub fn achievable(&self) -> Option<&HermitianStack> {
+        self.achievable.as_deref()
     }
 
     /// The level the run was at, dB (not finite before the loop engages).
@@ -264,6 +271,7 @@ impl MimoRandomService {
             level_db: v.level_db,
             reference: self.reference_shared(),
             tolerances: self.tolerances_shared(),
+            achievable: self.achievable_shared(),
             response_full: v.response_full.cloned(),
             error_lines: v.error_lines.to_vec(),
             drive_full: v.drive_full.clone(),

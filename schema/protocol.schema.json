@@ -336,7 +336,7 @@
                "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
-               "shaker_record_invalid", "setup_invalid", "gate_failed", "identification_mismatch", "law_import_failed",
+               "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable"]
     },
     "itemReason": {
@@ -1081,6 +1081,10 @@
       }
     },
     "mimoTolerance": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2},
+    "mimoBands": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"alarm_db": {"$ref": "#/$defs/mimoTolerance"}, "abort_db": {"$ref": "#/$defs/mimoTolerance"}}
+    },
     "mimoSetup": {
       "type": "object", "required": ["channels", "reference", "schedule"], "additionalProperties": false,
       "properties": {
@@ -1124,7 +1128,8 @@
                "kind": {"const": "virtual"},
                "dofs": {"type": "array", "minItems": 1, "maxItems": 72, "items": {"type": "string", "minLength": 1}},
                "response_transform": {"$ref": "#/$defs/mimoTransform"},
-               "drive_transform": {"oneOf": [{"$ref": "#/$defs/mimoTransform"}, {"type": "null"}]}
+               "drive_transform": {"oneOf": [{"$ref": "#/$defs/mimoTransform"}, {"type": "null"}]},
+               "dof_bands": {"type": "array", "maxItems": 72, "items": {"$ref": "#/$defs/mimoBands"}}
              }}
           ]
         },
@@ -1178,6 +1183,7 @@
             "cap_down_db": {"type": "number", "exclusiveMinimum": 0, "maximum": 60},
             "law_budget": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
             "law_misses": {"type": "integer", "minimum": 1, "maximum": 100},
+            "soft_start_db": {"type": "number", "minimum": 0, "maximum": 30},
             "level_ramp_s": {"type": "number", "minimum": 0, "maximum": 60},
             "shutdown_ramp_s": {"type": "number", "minimum": 0, "maximum": 60},
             "max_loops_out": {"type": "integer", "minimum": 0}
@@ -1285,9 +1291,19 @@
       "type": "object", "required": ["validation"], "additionalProperties": false,
       "properties": {"validation": {"oneOf": [{"$ref": "#/$defs/mimoValidation"}, {"type": "null"}]}}
     },
+    "mimoExcludeParams": {
+      "type": "object", "required": ["controls", "ack"], "additionalProperties": false,
+      "properties": {
+        "controls": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mimoPosition"}},
+        "ack": {"type": "string", "minLength": 1, "pattern": "\\S"}
+      }
+    },
     "mimoOverrideParams": {
       "type": "object", "required": ["ack"], "additionalProperties": false,
-      "properties": {"ack": {"type": "string", "minLength": 1, "pattern": "\\S"}}
+      "properties": {
+        "ack": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "reason": {"enum": ["gate_failed", "prediction_exceeded", null]}
+      }
     },
     "mimoIdentificationParams": {
       "type": "object", "required": ["path"], "additionalProperties": false,
@@ -1328,8 +1344,18 @@
         "law": {"$ref": "#/$defs/mimoLawRef"},
         "drive_rms_v": {"type": "array", "items": {"type": "number", "minimum": 0}},
         "ceiling_vrms": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}},
-        "error_db": {"type": "array", "items": {"type": "number"}},
-        "drives_pass": {"type": "boolean"}
+        "error_db": {"type": "array", "items": {"type": ["number", "null"]}},
+        "drives_pass": {"type": "boolean"},
+        "has_achievable": {"type": "boolean"},
+        "unreachable_db": {"type": "array", "items": {"type": ["number", "null"]}},
+        "drive_accel": {"type": "array", "items": {"type": "number", "minimum": 0}},
+        "accel_control": {"type": "array", "items": {"$ref": "#/$defs/mimoPosition"}},
+        "feasibility": {"type": "array", "items": {
+          "type": "object", "required": ["verdict", "message"], "additionalProperties": false,
+          "properties": {
+            "verdict": {"enum": ["pass", "advisory", "exceeded", "not_evaluated"]},
+            "message": {"type": "string"}
+          }}}
       }
     },
     "mimoPredictionResult": {
@@ -1337,7 +1363,7 @@
       "properties": {"prediction": {"$ref": "#/$defs/mimoPrediction"}}
     },
     "mimoPhase": {"enum": ["idle", "armed", "sysid_noise", "sysid", "awaiting_review", "gate_failed",
-                           "engaged", "full_level", "ramping_down", "stopped", "aborted"]},
+                           "prediction_exceeded", "engaged", "full_level", "ramping_down", "stopped", "aborted"]},
     "mimoGates": {
       "type": ["object", "null"],
       "required": ["coherence_min", "coherence_floor", "condition_max", "condition_limit", "passed"],
@@ -1347,7 +1373,8 @@
         "coherence_floor": {"type": "number", "minimum": 0, "maximum": 1},
         "condition_max": {"type": "number", "minimum": 1},
         "condition_limit": {"type": "number", "minimum": 1},
-        "passed": {"type": "boolean"}
+        "passed": {"type": "boolean"},
+        "coherence": {"type": "array", "items": {"type": ["number", "null"], "minimum": 0, "maximum": 1}}
       }
     },
     "mimoShapeInfo": {
@@ -1361,19 +1388,25 @@
         "dofs": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}]},
         "shape": {"$ref": "#/$defs/mimoShape"},
         "labels": {"type": "array", "items": {"type": "string"}},
-        "drive_labels": {"type": "array", "items": {"type": "string"}}
+        "drive_labels": {"type": "array", "items": {"type": "string"}},
+        "bands": {"type": "array", "items": {"$ref": "#/$defs/mimoBands"}}
       }
     },
     "mimoOverride": {
       "type": ["object", "null"], "required": ["by", "text"], "additionalProperties": false,
-      "properties": {"by": {"type": "string"}, "text": {"type": "string", "minLength": 1}}
+      "properties": {
+        "by": {"type": "string"},
+        "text": {"type": "string", "minLength": 1},
+        "reason": {"enum": ["gate_failed", "prediction_exceeded"]}
+      }
     },
+    "mimoOverrides": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/mimoOverride"}, {"type": "object"}]}},
     "mimoStatus": {
       "type": "object",
       "required": ["run_id", "state", "phase", "title", "source", "station", "grid", "clock", "shape",
                    "mode", "levels_db", "level_db", "elapsed_s", "at_level_s", "remaining_at_level_s",
                    "loop", "alarm", "control_error_db", "gates", "caps", "drive_rms_v", "law",
-                   "faults", "override", "prediction", "end"],
+                   "faults", "override", "overrides", "prediction", "excluded", "end"],
       "additionalProperties": false,
       "properties": {
         "run_id": {"type": ["string", "null"]},
@@ -1393,7 +1426,7 @@
         "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
         "loop": {"type": "integer", "minimum": 0},
         "alarm": {"type": "boolean"},
-        "control_error_db": {"type": "array", "items": {"type": "number"}},
+        "control_error_db": {"type": "array", "items": {"type": ["number", "null"]}},
         "gates": {"$ref": "#/$defs/mimoGates"},
         "caps": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
         "drive_rms_v": {"type": "array", "items": {"type": "number", "minimum": 0}},
@@ -1402,7 +1435,9 @@
           "type": "object", "required": ["kind", "message"], "additionalProperties": false,
           "properties": {"kind": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}}},
         "override": {"$ref": "#/$defs/mimoOverride"},
+        "overrides": {"$ref": "#/$defs/mimoOverrides"},
         "prediction": {"oneOf": [{"$ref": "#/$defs/mimoPrediction"}, {"type": "null"}]},
+        "excluded": {"type": "array", "items": {"$ref": "#/$defs/mimoPosition"}},
         "end": {"$ref": "#/$defs/runEnd"}
       },
       "allOf": [
@@ -1417,7 +1452,7 @@
     "mimoReport": {
       "type": "object",
       "required": ["run_id", "title", "source", "grid", "shape", "law", "loops", "controls", "drives",
-                   "gates", "override", "end"],
+                   "gates", "override", "overrides", "end"],
       "additionalProperties": false,
       "properties": {
         "run_id": {"type": "string", "minLength": 1},
@@ -1446,6 +1481,7 @@
           }}},
         "gates": {"$ref": "#/$defs/mimoGates"},
         "override": {"$ref": "#/$defs/mimoOverride"},
+        "overrides": {"$ref": "#/$defs/mimoOverrides"},
         "end": {"$ref": "#/$defs/runEnd"}
       }
     },
@@ -1685,7 +1721,8 @@
     },
     "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "coh_error", "drive_psd", "drive_coh",
                               "frf", "sv", "cond", "mcoh", "cap", "dof_rms", "trace", "pred_drive_rms",
-                              "pred_error_db", "law_diag", "sdm", "readings"]},
+                              "pred_error_db", "law_diag", "sdm", "readings", "pred_sdm",
+                              "pred_drive_accel"]},
     "mimoPosition": {"type": "integer", "minimum": 0},
     "mimoSelector": {
       "type": "object", "additionalProperties": false,
@@ -1718,13 +1755,13 @@
         {"if": {"properties": {"quantity": {"enum": ["psd", "drive_psd", "mcoh"]}}},
          "then": {"oneOf": [{"required": ["index"]}, {"required": ["diagonal"]}],
                   "properties": {"pair": false, "rows": false, "block": false, "key": false}}},
-        {"if": {"properties": {"quantity": {"enum": ["cap", "pred_drive_rms"]}}},
+        {"if": {"properties": {"quantity": {"enum": ["cap", "pred_drive_rms", "pred_drive_accel"]}}},
          "then": {"properties": {"pair": false, "rows": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "pred_error_db"}}},
          "then": {"required": ["index"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false, "key": false}}},
         {"if": {"properties": {"quantity": {"enum": ["error_db", "coh_error"]}}},
          "then": {"properties": {"index": false, "pair": false, "diagonal": false, "block": false, "key": false}}},
-        {"if": {"properties": {"quantity": {"const": "sdm"}}},
+        {"if": {"properties": {"quantity": {"enum": ["sdm", "pred_sdm"]}}},
          "then": {"required": ["block"], "properties": {"index": false, "pair": false, "rows": false, "diagonal": false, "key": false}}},
         {"if": {"properties": {"quantity": {"const": "law_diag"}}},
          "then": {"required": ["key"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false}}},

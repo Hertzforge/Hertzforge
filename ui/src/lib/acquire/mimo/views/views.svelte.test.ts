@@ -54,10 +54,13 @@ describe('what each page subscribes to', () => {
 	it('the heatmap: every row, or the rows chosen by name; the coherence mode only when offered', () => {
 		expect(wire(page('heatmap'), ctx({ widths: { main: 800 } }))).toEqual([{ id: 'mp-9:heat', quantity: 'error_db', rows: 'all', points: 800 }]);
 		expect(wire(page('heatmap', { rows: ['A3', 'A70', 'nobody'] }))[0]).toMatchObject({ rows: [2, 69] });
-		expect(wire(page('heatmap', { mode: 'coherence' }))[0]).toMatchObject({ quantity: 'error_db' });
-		// When the service offers the coherence error, the mode asks for it by that name.
+		const without = MIMO_QUANTITY_ORDER.filter((q) => q !== COH_ERROR);
+		expect(wire(page('heatmap', { mode: 'coherence' }), ctx({ quantities: without }))[0]).toMatchObject({ quantity: 'error_db' });
+		// When the service offers the coherence error, the mode asks for it by that name, and the
+		// request carries it (it was dropped before the quantity joined the selector table).
 		const offered = pagePlots(page('heatmap', { mode: 'coherence' }), ctx({ quantities: [...MIMO_QUANTITY_ORDER, COH_ERROR as MimoQuantity] }));
 		expect(offered[0].quantity).toBe(COH_ERROR);
+		expect(mimoSubscriptionFor(offered)).toEqual([{ id: 'mp-9:heat', quantity: 'coh_error', rows: 'all', points: expect.any(Number) }]);
 	});
 
 	it('the drive and plant page: its drive, drive pair, response, singular values, condition, caps, and a chosen diagnostic', () => {

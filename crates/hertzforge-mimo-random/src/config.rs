@@ -30,6 +30,13 @@ pub const DEFAULT_IDENT_BELOW_REFERENCE_DB: f64 = 20.0;
 pub const DEFAULT_SNAPSHOT_EVERY_S: f64 = 30.0;
 /// Default lines outside the abort lines, on one control, that abort the run.
 pub const DEFAULT_ENVELOPE_ABORT_LINES: usize = 10;
+/// The soft start's depth below the lowest scheduled level, dB (single-output
+/// Random's default).
+pub const DEFAULT_SOFT_START_DB: f64 = 9.0;
+/// The envelope's relaxation while the soft start climbs, dB.
+pub const DEFAULT_SOFT_START_RELAX_DB: f64 = 6.0;
+/// The soft start's climb when no level ramp is set, seconds.
+pub const DEFAULT_SOFT_START_S: f64 = 5.0;
 /// Largest per-loop rise cap the operator may set, dB.
 pub const MAX_CAP_UP_DB: f64 = 6.0;
 
@@ -141,15 +148,39 @@ pub enum FrfMode {
     Update { blend: f64 },
 }
 
+/// The window each Welch frame of the estimate is taken through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EstimationWindow {
+    /// Periodic Hann (the default).
+    #[default]
+    Hann,
+    /// No window.
+    Rectangular,
+}
+
+/// The overlap of the estimate's Welch frames when none is given.
+pub const DEFAULT_OVERLAP: f64 = 0.5;
+
+fn default_overlap() -> f64 {
+    DEFAULT_OVERLAP
+}
+
 /// The per-loop estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Estimation {
-    /// Welch frames (Hann, 50% overlap) per loop. The loop's length follows.
+    /// Welch frames per loop. The loop's length follows from the count and the
+    /// overlap.
     pub frames_per_loop: usize,
     /// Exponential memory across loops, as an equivalent count of loops: the
     /// estimate is a plain mean until it holds this many, then an exponential
     /// average with `alpha = 2 / (memory_loops + 1)`. 1 means no memory.
     pub memory_loops: f64,
+    /// The window of each frame.
+    #[serde(default)]
+    pub window: EstimationWindow,
+    /// The overlap of consecutive frames, `[0, 0.75]`.
+    #[serde(default = "default_overlap")]
+    pub overlap: f64,
 }
 
 impl Default for Estimation {
@@ -157,7 +188,23 @@ impl Default for Estimation {
         Estimation {
             frames_per_loop: DEFAULT_FRAMES_PER_LOOP,
             memory_loops: 4.0,
+            window: EstimationWindow::Hann,
+            overlap: DEFAULT_OVERLAP,
         }
+    }
+}
+
+impl Estimation {
+    /// Blocks of `nfft` samples one loop's segment holds: room for every frame at
+    /// the overlap. At 50% overlap this is `ceil(frames / 2) + 1`, as before the
+    /// overlap was a setting.
+    pub fn blocks_per_loop(&self, nfft: usize) -> usize {
+        let k = self.frames_per_loop.max(1);
+        if (self.overlap - DEFAULT_OVERLAP).abs() < 1e-12 {
+            return k.div_ceil(2) + 1;
+        }
+        let step = ((nfft as f64) * (1.0 - self.overlap)).round().max(1.0) as usize;
+        (nfft + (k - 1) * step).div_ceil(nfft.max(1)) + 1
     }
 }
 
@@ -330,6 +377,15 @@ pub struct MimoConfig {
     pub level_ramp_s: f64,
     /// Seconds a controlled stop takes to ramp the drive down.
     pub shutdown_ramp_s: f64,
+    /// The soft start, as single-output Random's: the loop engages this many dB
+    /// below the lowest scheduled level and ramps up to the first rung (over
+    /// `level_ramp_s`, or [`DEFAULT_SOFT_START_S`] when that is 0), so the article
+    /// is taken hold of gently. 0 engages at the first rung.
+    pub soft_start_db: f64,
+    /// While the soft start climbs, the envelope's alarm and abort bands are
+    /// widened by this many dB (the bands are written for the test level). The
+    /// drive ceilings, kinematic limits, limit channels and overloads are not.
+    pub soft_start_relax_db: f64,
     /// Seconds at full level before the run stops by itself (`None`: until stopped).
     pub full_level_duration_s: Option<f64>,
     pub protections: Protections,
@@ -364,6 +420,8 @@ impl MimoConfig {
             schedule: LevelSchedule::auto_default(),
             level_ramp_s: 0.0,
             shutdown_ramp_s: 2.0,
+            soft_start_db: DEFAULT_SOFT_START_DB,
+            soft_start_relax_db: DEFAULT_SOFT_START_RELAX_DB,
             full_level_duration_s: None,
             protections: Protections::default(),
             article_mass_lb: 0.0,
@@ -585,6 +643,13 @@ impl MimoConfig {
         }
         if self.estimation.frames_per_loop < 2 {
             return err("frames per loop must be at least 2");
+        }
+        if !(self.estimation.overlap.is_finite() && (0.0..=0.75).contains(&self.estimation.overlap))
+        {
+            return err(format!(
+                "a frame overlap of {} is outside 0 to 0.75; choose an overlap in that range",
+                self.estimation.overlap
+            ));
         }
         if !(self.estimation.memory_loops.is_finite() && self.estimation.memory_loops >= 1.0) {
             return err("the estimate's memory must be at least 1 loop");

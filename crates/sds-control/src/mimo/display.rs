@@ -19,7 +19,7 @@ use serde_json::{json, Map, Value};
 use std::ops::Range;
 
 /// The quantities MIMO Random offers, in the order the result lists them.
-pub const MIMO_QUANTITIES: [&str; 20] = [
+pub const MIMO_QUANTITIES: [&str; 22] = [
     "psd",
     "coh",
     "phase",
@@ -40,6 +40,8 @@ pub const MIMO_QUANTITIES: [&str; 20] = [
     "law_diag",
     "sdm",
     "readings",
+    "pred_sdm",
+    "pred_drive_accel",
 ];
 
 /// Frames per second: the default and its bounds (as Random's).
@@ -91,11 +93,11 @@ impl Selector {
 fn selectors(q: &str) -> &'static [&'static str] {
     match q {
         "psd" | "drive_psd" | "mcoh" => &["index", "diagonal"],
-        "cap" | "pred_drive_rms" => &["diagonal", "index"],
+        "cap" | "pred_drive_rms" | "pred_drive_accel" => &["diagonal", "index"],
         "coh" | "phase" | "csd_mag" | "drive_coh" | "frf" => &["pair"],
         "error_db" | "coh_error" => &["rows"],
         "pred_error_db" => &["index"],
-        "sdm" => &["block"],
+        "sdm" | "pred_sdm" => &["block"],
         "law_diag" => &["key"],
         _ => &["none"],
     }
@@ -565,6 +567,9 @@ pub fn resolve(p: &MimoPlot, controls: usize, drives: usize) -> Vec<QuantitySele
         ("sdm", Selector::Block(b)) if b.iter().all(|i| c(*i)) => {
             q(QuantitySelector::SdmBlock(b.clone()))
         }
+        ("pred_sdm", Selector::Block(b)) if b.iter().all(|i| c(*i)) => {
+            q(QuantitySelector::PredSdmBlock(b.clone()))
+        }
         ("law_diag", Selector::Key(k, i)) => q(QuantitySelector::LawDiag(k.clone(), *i)),
         _ => Vec::new(),
     }
@@ -575,7 +580,12 @@ pub fn plot_labels(p: &MimoPlot, ctx: &PlotContext<'_>) -> Vec<String> {
     let n = ctx.labels.len();
     let nd = ctx.drive_labels.len();
     match &p.selector {
-        Selector::Index(i) if matches!(p.quantity, "drive_psd" | "cap" | "pred_drive_rms") => {
+        Selector::Index(i)
+            if matches!(
+                p.quantity,
+                "drive_psd" | "cap" | "pred_drive_rms" | "pred_drive_accel"
+            ) =>
+        {
             vec![label(ctx.drive_labels, *i)]
         }
         Selector::Index(i) => vec![label(ctx.labels, *i)],
@@ -592,7 +602,12 @@ pub fn plot_labels(p: &MimoPlot, ctx: &PlotContext<'_>) -> Vec<String> {
             .filter(|i| **i < n)
             .map(|i| label(ctx.labels, *i))
             .collect(),
-        Selector::Diagonal if matches!(p.quantity, "drive_psd" | "cap" | "pred_drive_rms") => {
+        Selector::Diagonal
+            if matches!(
+                p.quantity,
+                "drive_psd" | "cap" | "pred_drive_rms" | "pred_drive_accel"
+            ) =>
+        {
             ctx.drive_labels.to_vec()
         }
         Selector::Diagonal => ctx.labels.to_vec(),
@@ -727,7 +742,7 @@ pub fn plot_views(
         _ => None,
     };
     match p.quantity {
-        "cap" | "pred_drive_rms" => {
+        "cap" | "pred_drive_rms" | "pred_drive_accel" => {
             let ks: Vec<usize> = match &p.selector {
                 Selector::Index(k) if *k < ctx.drive_labels.len() => vec![*k],
                 Selector::Diagonal => (0..ctx.drive_labels.len()).collect(),
@@ -740,7 +755,28 @@ pub fn plot_views(
                 .iter()
                 .map(|k| {
                     let name = label(ctx.drive_labels, *k);
-                    if p.quantity == "cap" {
+                    if p.quantity == "pred_drive_accel" {
+                        let pr = status.prediction.as_ref();
+                        match pr.and_then(|pr| pr.drive_accel.get(*k)) {
+                            Some(a) => {
+                                let verdict = pr
+                                    .and_then(|pr| pr.feasibility.get(*k))
+                                    .map_or("not_evaluated", |v| v.verdict);
+                                Row::number(
+                                    &name,
+                                    views::round_to(*a, 3),
+                                    Some(&format!("{u} rms")),
+                                    match verdict {
+                                        "pass" => Status::Pass,
+                                        "exceeded" => Status::Fail,
+                                        "advisory" => Status::Warn,
+                                        _ => Status::Info,
+                                    },
+                                )
+                            }
+                            None => Row::text(&name, "after identification", Status::Info),
+                        }
+                    } else if p.quantity == "cap" {
                         match status.caps.get(*k) {
                             Some(c) => Row::number(
                                 &name,
@@ -769,6 +805,8 @@ pub fn plot_views(
                 .collect();
             let title = if p.quantity == "cap" {
                 "Drive Caps"
+            } else if p.quantity == "pred_drive_accel" {
+                "Predicted Shaker Acceleration"
             } else {
                 "Predicted Drive"
             };
@@ -884,7 +922,7 @@ pub fn plot_views(
             }
             _ => Vec::new(),
         },
-        "sdm" => match data.first() {
+        "sdm" | "pred_sdm" => match data.first() {
             Some(Some(Series::Packed {
                 freqs,
                 measured,
@@ -1090,16 +1128,7 @@ pub fn context(setup: &MimoSetup) -> SetupDisplay {
         .controls
         .first()
         .map_or_else(|| "g".to_owned(), |c| c.unit.clone());
-    let bands = match &setup.space {
-        super::setup::ControlSpace::Physical => setup
-            .controls
-            .iter()
-            .map(|c| (c.alarm_db, c.abort_db))
-            .collect(),
-        super::setup::ControlSpace::Virtual { dofs, .. } => {
-            vec![([3.0, 3.0], [6.0, 6.0]); dofs.len()]
-        }
-    };
+    let bands = (0..setup.controlled()).map(|i| setup.band_of(i)).collect();
     SetupDisplay {
         labels,
         drive_labels,

@@ -445,7 +445,8 @@ MIMO_LAW_REF = {'id': 'pinv_closed', 'name': 'pseudo-inverse, closed loop', 'ver
                 'sha256': None}
 
 MIMO_SHAPE = {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None, 'shape': 'square',
-              'labels': ['Control X', 'Control Y'], 'drive_labels': ['Shaker X', 'Shaker Y']}
+              'labels': ['Control X', 'Control Y'], 'drive_labels': ['Shaker X', 'Shaker Y'],
+              'bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
 
 MIMO_GRID = {'fs_hz': 8192, 'n_pts': 4096, 'df_hz': 2, 'lines': 8, 'loop_s': 2.25, 'actual': False}
 
@@ -458,7 +459,7 @@ def _mimo_state(**over) -> dict:
         'levels_db': [-6, 0], 'level_db': None, 'elapsed_s': None, 'at_level_s': None,
         'remaining_at_level_s': None, 'loop': 0, 'alarm': False, 'control_error_db': [],
         'gates': None, 'caps': [], 'drive_rms_v': [], 'law': MIMO_LAW_REF, 'faults': [],
-        'override': None, 'prediction': None, 'end': None,
+        'override': None, 'overrides': [], 'prediction': None, 'excluded': [], 'end': None,
     }
     state.update(over)
     return state
@@ -482,14 +483,18 @@ def _mimo_validation(errors=(), law_admitted=True) -> dict:
 
 
 MIMO_GATES = {'coherence_min': 0.962, 'coherence_floor': 0.5, 'condition_max': 12.5,
-              'condition_limit': 1000, 'passed': True}
+              'condition_limit': 1000, 'passed': True, 'coherence': [0.962, 0.981]}
 
 MIMO_RUNNING = _mimo_state(
     state='running', phase='engaged', level_db=-6, elapsed_s=31.5, at_level_s=4.5,
     remaining_at_level_s=5.5, loop=14, control_error_db=[0.42, -0.31], gates=MIMO_GATES,
     caps=[1, 0.875], drive_rms_v=[0.412, 0.388],
     prediction={'iteration': 1, 'law': MIMO_LAW_REF, 'drive_rms_v': [0.82, 0.77],
-                'ceiling_vrms': [2, 2], 'error_db': [0.5, -0.5], 'drives_pass': True})
+                'ceiling_vrms': [2, 2], 'error_db': [0.5, -0.5], 'drives_pass': True,
+                'has_achievable': False, 'unreachable_db': [0, 0], 'drive_accel': [1.25, 1.1],
+                'accel_control': [0, 1],
+                'feasibility': [{'verdict': 'pass', 'message': ''},
+                                {'verdict': 'not_evaluated', 'message': 'no shaker record'}]})
 
 LAW_PINV_CLOSED = {'id': 'pinv_closed',
      'world': 'mimo',
@@ -652,6 +657,52 @@ MIMO_TEXT_GOLDENS = {
         'type': 'request', 'id': 33, 'method': 'mimo_random.override',
         'params': {'ack': 'Coherence is low below 30 Hz where the fixture is stiff; accepted.'},
     },
+    # A prediction over a drive ceiling holds the run until it too is acknowledged.
+    'request_mimo_random_override_prediction': {
+        'type': 'request', 'id': 39, 'method': 'mimo_random.override',
+        'params': {'ack': 'Drive 2 is predicted 0.4 dB over its ceiling; the ceiling holds it '
+                          'and the error is accepted for this run.',
+                   'reason': 'prediction_exceeded'},
+    },
+    # Virtual control with a tolerance band per degree of freedom, and every
+    # optional setup field the run service takes.
+    'request_mimo_random_setup_virtual': {
+        'type': 'request', 'id': 40, 'method': 'mimo_random.setup',
+        'params': {'setup': {
+            **MIMO_SETUP,
+            'channels': {
+                'controls': [{'channel': 1}, {'channel': 2}],
+                'drives': [{'channel': 3, 'ceiling_vrms': 2, 'abort_vrms': None, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5},
+                           {'channel': 4, 'ceiling_vrms': 2, 'abort_vrms': 3, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5}],
+                'limits': [{'channel': 5, 'ceiling': 0.04, 'abort_margin_db': 3}],
+                'article_mass_lb': 40,
+            },
+            'space': {'kind': 'virtual', 'dofs': ['Sum', 'Difference'],
+                      'response_transform': {'rows': 2, 'cols': 2, 'values': [0.5, 0.5, 1, -1]},
+                      'drive_transform': None,
+                      'dof_bands': [{'alarm_db': [2, 2], 'abort_db': [4, 4]},
+                                    {'alarm_db': [3, 3], 'abort_db': [6, 6]}]},
+            'control': {'frf': 'update', 'frf_blend': 0.25, 'level_ramp_s': 3,
+                        'shutdown_ramp_s': 3, 'max_loops_out': 5, 'cap_up_db': 2,
+                        'cap_down_db': 4, 'law_budget': 0.2, 'law_misses': 2},
+        }},
+    },
+    # A control with low coherence taken out of control at the gate, kept as a monitor.
+    'request_mimo_random_exclude': {
+        'type': 'request', 'id': 42, 'method': 'mimo_random.exclude',
+        'params': {'controls': [1],
+                   'ack': 'Control Y sits on a fixture node; kept as a monitor for this run.'},
+    },
+    # The achievable reference on the Predict page, as a block of the grid.
+    'request_mimo_random_subscribe_pred_sdm': {
+        'type': 'request', 'id': 41, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 2, 'plots': [
+            {'id': 'ach', 'quantity': 'pred_sdm', 'block': [0, 1], 'points': 256},
+            {'id': 'acc', 'quantity': 'pred_drive_accel', 'diagonal': True},
+        ]},
+    },
     'response_mimo_random_report': {
         'type': 'response', 'id': 34,
         'result': {'report': {
@@ -667,7 +718,7 @@ MIMO_TEXT_GOLDENS = {
                 {'channel': 4, 'label': 'Shaker Y', 'rms_v': 0.7764, 'ceiling_vrms': 2,
                  'min_cap': 1},
             ],
-            'gates': MIMO_GATES, 'override': None,
+            'gates': MIMO_GATES, 'override': None, 'overrides': [],
             'end': {'outcome': 'completed', 'message': 'The schedule finished.', 'at_s': 102.5,
                     'level_db': 0, 'trip': None},
         }},

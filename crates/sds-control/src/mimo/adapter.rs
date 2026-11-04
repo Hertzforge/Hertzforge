@@ -26,8 +26,9 @@
 
 use super::check::Validation;
 use super::driver::{
-    Curve, Fault, Gates, IdentificationInfo, LawRef, MimoReport, MimoRunDriver, MimoStatus,
-    PackedBlock, Prediction, QuantitySelector, Series, StartContext, StopOutcome,
+    Curve, DriveVerdict, Fault, Gates, IdentificationInfo, LawRef, MimoReport, MimoRunDriver,
+    MimoStatus, OverrideAck, OverrideReason, PackedBlock, Prediction, QuantitySelector, Series,
+    StartContext, StopOutcome,
 };
 use super::setup::{ControlSpace, MimoSetup, RealMatrix, Reference};
 use crate::protocol::{ErrorCode, MethodError};
@@ -41,6 +42,7 @@ use hertzforge_hal::{
     AcquisitionConfig, Backend, BackendStatus, Caps, ConfiguredActual, HalError, InputRead,
 };
 use hertzforge_law_host::{Breakpoint, Param, ParamKind, ParamSpec, ParamValue};
+use hertzforge_mimo_random::config::{Caps as DriveCaps, EstimationWindow, LimitSpec};
 use hertzforge_mimo_random::guards::OutputFault;
 use hertzforge_mimo_random::quantities::QuantitySnapshot;
 use hertzforge_mimo_random::{
@@ -55,6 +57,7 @@ use hertzforge_random_laws::{
 };
 use hertzforge_sdm::law::Tolerances;
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
+use hertzforge_shaker_db::{MovingMass, ShakerRecord};
 use hertzforge_station::{BackendKind, SimPlant, SimPlantSpec, SimStandardPlant, StationSpec};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -65,11 +68,6 @@ use std::time::{Duration, Instant};
 
 /// How long a driver call waits for the run thread to answer a command.
 const ANSWER_WAIT: Duration = Duration::from_secs(60);
-
-/// The default control and alarm bands, `[below, above]` dB, for a controlled
-/// quantity with no control row of its own (a virtual degree of freedom).
-const DEFAULT_ALARM_DB: [f64; 2] = [3.0, 3.0];
-const DEFAULT_ABORT_DB: [f64; 2] = [6.0, 6.0];
 
 /// The law catalog the control service keeps, shared with the driver so a law file
 /// chosen in the setup is resolved through the law host.
@@ -133,12 +131,8 @@ fn grid_of(setup: &MimoSetup) -> (usize, f64) {
 fn tolerances_about(sdm: &HermitianStack, band: (usize, usize), setup: &MimoSetup) -> Tolerances {
     let n = sdm.n();
     let mut t = Tolerances::none(sdm.lines(), n);
-    let physical = matches!(setup.space, ControlSpace::Physical);
     for i in 0..n {
-        let (alarm, abort) = match (physical, setup.controls.get(i)) {
-            (true, Some(c)) => (c.alarm_db, c.abort_db),
-            _ => (DEFAULT_ALARM_DB, DEFAULT_ABORT_DB),
-        };
+        let (alarm, abort) = setup.band_of(i);
         for line in band.0..band.1 {
             let p = sdm.get(line, i, i).re;
             let k = line * n + i;
@@ -391,17 +385,49 @@ pub fn config_of(
     reference: &GridReference,
     law: LawChoice,
 ) -> Result<(MimoConfig, LoopConfig), String> {
-    let drives = setup
-        .drives
-        .iter()
-        .map(|d| {
-            let mut s = DriveSpec::new(d.channel, d.ceiling_vrms);
-            s.abort_vrms = d.abort_vrms;
-            s
-        })
-        .collect();
+    let mut drives = Vec::with_capacity(setup.drives.len());
+    for d in &setup.drives {
+        let mut s = DriveSpec::new(d.channel, d.ceiling_vrms);
+        s.abort_vrms = d.abort_vrms;
+        s.peak_v = d.peak_v;
+        s.shaker = d
+            .shaker
+            .as_ref()
+            .map(|v| serde_json::from_value::<ShakerRecord>(v.clone()))
+            .transpose()
+            .map_err(|e| {
+                format!(
+                    "the shaker record of channel {} does not parse ({e}); give it in the shaker \
+                     database's form or leave it out",
+                    d.channel
+                )
+            })?;
+        // The setup carries the shaker's own moving mass as one figure.
+        s.moving_mass = MovingMass {
+            armature_lb: d.moving_mass_lb,
+            ..MovingMass::default()
+        };
+        drives.push(s);
+    }
     let controls = setup.controls.iter().map(|c| c.channel).collect();
     let mut cfg = MimoConfig::new(controls, drives, reference.spec.clone());
+    cfg.limits = setup
+        .limits
+        .iter()
+        .map(|l| LimitSpec {
+            channel_index: l.channel,
+            ceiling_psd: vec![l.ceiling],
+            abort_margin_db: l.abort_margin_db,
+        })
+        .collect();
+    cfg.article_mass_lb = setup.article_mass_lb;
+    cfg.caps = DriveCaps {
+        up_db: setup.control.cap_up_db,
+        down_db: setup.control.cap_down_db,
+    };
+    cfg.soft_start_db = setup.control.soft_start_db;
+    cfg.law_guards.budget_fraction = setup.control.law_budget;
+    cfg.law_guards.max_misses = setup.control.law_misses;
     if let ControlSpace::Virtual {
         response, drive, ..
     } = &setup.space
@@ -413,12 +439,19 @@ pub fn config_of(
     }
     cfg.law = law;
     cfg.frf_mode = if setup.control.frf_update {
-        FrfMode::Update { blend: 0.5 }
+        FrfMode::Update {
+            blend: setup.control.frf_blend,
+        }
     } else {
         FrfMode::Hold
     };
     cfg.estimation.frames_per_loop = setup.estimation.frames_per_loop;
     cfg.estimation.memory_loops = setup.estimation.memory_loops.max(1) as f64;
+    cfg.estimation.overlap = setup.estimation.overlap;
+    cfg.estimation.window = match setup.estimation.window.as_str() {
+        "rectangular" => EstimationWindow::Rectangular,
+        _ => EstimationWindow::Hann,
+    };
     let n_d = setup.drives.len();
     cfg.identification.below_reference_db = -setup.identification.level_db;
     cfg.identification.frames = setup.identification.frames.max(2 * n_d);
@@ -571,6 +604,9 @@ fn wrong_state(verb: &str, phase: &str) -> MethodError {
 struct Published {
     status: MimoStatus,
     snapshot: Option<Arc<QuantitySnapshot>>,
+    /// The setup's control positions the run controls (after any excluded at the
+    /// gate); `None`: every one.
+    kept: Option<Vec<usize>>,
     report: Option<MimoReport>,
     /// The identification set's record folder, once the run has written one.
     ident_dir: Option<PathBuf>,
@@ -613,11 +649,18 @@ enum Cmd {
     Override {
         ack: String,
         by: String,
+        reason: Option<OverrideReason>,
         reply: Reply<()>,
     },
     Iterate {
         law: Option<(LawRef, Map<String, Value>)>,
         reply: Reply<Prediction>,
+    },
+    Exclude {
+        positions: Vec<usize>,
+        ack: String,
+        by: String,
+        reply: Reply<()>,
     },
     Stop,
     Abort {
@@ -652,8 +695,9 @@ fn idle_status(law: LawRef) -> MimoStatus {
         drive_rms_v: Vec::new(),
         law,
         faults: Vec::new(),
-        override_ack: None,
+        override_ack: Vec::new(),
         prediction: None,
+        excluded: Vec::new(),
         end: None,
         streaming: false,
     }
@@ -674,6 +718,7 @@ impl ServiceDriver {
                 published: Mutex::new(Published {
                     status: idle_status(law.clone()),
                     snapshot: None,
+                    kept: None,
                     report: None,
                     ident_dir: None,
                 }),
@@ -788,11 +833,12 @@ impl MimoRunDriver for ServiceDriver {
             lock: None,
             review: true,
             ended: false,
-            override_ack: None,
+            override_ack: Vec::new(),
             min_cap: Vec::new(),
             faults: Vec::new(),
             report: None,
             pending_ident: self.pending_ident.clone(),
+            kept: None,
         };
         std::thread::Builder::new()
             .name("mimo-random".into())
@@ -809,11 +855,39 @@ impl MimoRunDriver for ServiceDriver {
         self.ask(|reply| Cmd::Proceed { reply }, "Proceeding")
     }
 
-    fn override_gate(&mut self, ack: &str, by: &str) -> Result<(), MethodError> {
+    fn override_gate(
+        &mut self,
+        ack: &str,
+        by: &str,
+        reason: Option<OverrideReason>,
+    ) -> Result<(), MethodError> {
         let (ack, by) = (ack.to_owned(), by.to_owned());
         self.ask(
-            |reply| Cmd::Override { ack, by, reply },
-            "Overriding the gate",
+            |reply| Cmd::Override {
+                ack,
+                by,
+                reason,
+                reply,
+            },
+            "Overriding",
+        )
+    }
+
+    fn exclude_controls(
+        &mut self,
+        positions: &[usize],
+        ack: &str,
+        by: &str,
+    ) -> Result<(), MethodError> {
+        let (positions, ack, by) = (positions.to_vec(), ack.to_owned(), by.to_owned());
+        self.ask(
+            |reply| Cmd::Exclude {
+                positions,
+                ack,
+                by,
+                reply,
+            },
+            "Excluding a control",
         )
     }
 
@@ -882,9 +956,15 @@ impl MimoRunDriver for ServiceDriver {
     }
 
     fn quantity(&mut self, q: &QuantitySelector) -> Option<Series> {
-        let snap = lock(&self.shared.published).snapshot.clone()?;
+        let (snap, kept) = {
+            let p = lock(&self.shared.published);
+            (p.snapshot.clone()?, p.kept.clone())
+        };
         let setup = self.setup.as_ref()?;
-        quantity_of(&snap, setup, q)
+        match kept {
+            None => quantity_of(&snap, setup, q),
+            Some(kept) => quantity_kept(&snap, setup, q, &kept),
+        }
     }
 
     fn report(&mut self) -> Option<MimoReport> {
@@ -1160,7 +1240,102 @@ pub fn quantity_of(
             Some(lines_of(s, &[]))
         }
         QuantitySelector::SdmBlock(idx) => sdm_block(snap, idx),
+        QuantitySelector::PredSdmBlock(idx) => achievable_block(snap, idx),
     }
+}
+
+/// A quantity on the setup's positions after controls were excluded at the gate:
+/// each position is mapped to the run's; an excluded control has no curve of its
+/// own (nothing is shown), and its heatmap row is empty (NaN).
+fn quantity_kept(
+    snap: &QuantitySnapshot,
+    setup: &MimoSetup,
+    q: &QuantitySelector,
+    kept: &[usize],
+) -> Option<Series> {
+    use QuantitySelector as Q;
+    let p = |i: &usize| kept.iter().position(|k| k == i);
+    let all = |b: &[usize]| b.iter().map(p).collect::<Option<Vec<_>>>();
+    let rows = |rows: &[usize], make: fn(Vec<usize>) -> Q| -> Option<Series> {
+        let mapped: Vec<Option<usize>> = rows.iter().map(p).collect();
+        let present: Vec<usize> = mapped.iter().flatten().copied().collect();
+        let Series::Rows { freqs, rows: got } = quantity_of(snap, setup, &make(present))? else {
+            return None;
+        };
+        let width = freqs.len();
+        let mut it = got.into_iter();
+        let out = mapped
+            .iter()
+            .map(|m| match m {
+                Some(_) => it.next().unwrap_or_else(|| vec![f64::NAN; width]),
+                None => vec![f64::NAN; width],
+            })
+            .collect();
+        Some(Series::Rows { freqs, rows: out })
+    };
+    let mapped = match q {
+        Q::Psd(i) => Q::Psd(p(i)?),
+        Q::Coh(i, j) => Q::Coh(p(i)?, p(j)?),
+        Q::Phase(i, j) => Q::Phase(p(i)?, p(j)?),
+        Q::CsdMag(i, j) => Q::CsdMag(p(i)?, p(j)?),
+        Q::Frf(i, k) => Q::Frf(p(i)?, *k),
+        Q::Mcoh(i) => Q::Mcoh(p(i)?),
+        Q::PredErrorDb(i) => Q::PredErrorDb(p(i)?),
+        Q::SdmBlock(b) => Q::SdmBlock(all(b)?),
+        Q::PredSdmBlock(b) => Q::PredSdmBlock(all(b)?),
+        Q::ErrorDb(r) => return rows(r, Q::ErrorDb),
+        Q::CohError(r) => return rows(r, Q::CohError),
+        other => other.clone(),
+    };
+    quantity_of(snap, setup, &mapped)
+}
+
+/// A feasibility verdict as the wire names it.
+fn verdict_name(v: &str) -> &'static str {
+    match v {
+        "Pass" => "pass",
+        "Advisory" => "advisory",
+        "Exceeded" => "exceeded",
+        _ => "not_evaluated",
+    }
+}
+
+/// The packed block `idx` of `g`, on the band's lines, scaled by `p`.
+fn packed_of(g: &HermitianStack, idx: &[usize], band: (usize, usize), p: f64) -> PackedBlock {
+    let m = idx.len();
+    let per = HermitianStack::packed_len(m);
+    let (lo, hi) = band;
+    let mut b = PackedBlock {
+        n: m,
+        re: Vec::with_capacity((hi - lo) * per),
+        im: Vec::with_capacity((hi - lo) * per),
+    };
+    for line in lo..hi {
+        for (r, i) in idx.iter().enumerate() {
+            for j in &idx[r..] {
+                let v = g.get(line, *i, *j) * p;
+                b.re.push(v.re);
+                b.im.push(v.im);
+            }
+        }
+    }
+    b
+}
+
+/// The achievable reference's block `idx` at full level, with the reference's:
+/// what the drives can reach of the reference when controls outnumber them.
+fn achievable_block(snap: &QuantitySnapshot, idx: &[usize]) -> Option<Series> {
+    let ach = snap.achievable()?;
+    let reference = snap.reference();
+    if idx.is_empty() || idx.iter().any(|i| *i >= reference.n()) {
+        return None;
+    }
+    let band = snap.band();
+    Some(Series::Packed {
+        freqs: Arc::new((band.0..band.1).map(|l| l as f64 * snap.df_hz()).collect()),
+        measured: packed_of(ach, idx, band, 1.0),
+        reference: Some(packed_of(reference, idx, band, 1.0)),
+    })
 }
 
 fn sdm_block(snap: &QuantitySnapshot, idx: &[usize]) -> Option<Series> {
@@ -1218,13 +1393,16 @@ struct Actor {
     /// Hold for the operator after identification (the setup's `review`).
     review: bool,
     ended: bool,
-    override_ack: Option<(String, String)>,
+    override_ack: Vec<OverrideAck>,
     /// Per drive, the smallest cap factor of the run.
     min_cap: Vec<f64>,
     faults: Vec<Fault>,
     report: Option<MimoReport>,
     /// An identification set to load once armed.
     pending_ident: Option<PathBuf>,
+    /// The setup's control positions the run still controls, after some were
+    /// excluded at the gate (`None`: every one).
+    kept: Option<Vec<usize>>,
 }
 
 /// A service call that panicked: the run ends with the drive at zero.
@@ -1385,8 +1563,23 @@ impl Actor {
                 self.publish();
                 let _ = reply.send(r);
             }
-            Cmd::Override { ack, by, reply } => {
-                let r = self.override_cmd(&ack, &by);
+            Cmd::Override {
+                ack,
+                by,
+                reason,
+                reply,
+            } => {
+                let r = self.override_cmd(&ack, &by, reason);
+                self.publish();
+                let _ = reply.send(r);
+            }
+            Cmd::Exclude {
+                positions,
+                ack,
+                by,
+                reply,
+            } => {
+                let r = self.exclude_cmd(&positions, &ack, &by);
                 self.publish();
                 let _ = reply.send(r);
             }
@@ -1579,10 +1772,32 @@ impl Actor {
             }
             Ok(Some(Err(e))) => {
                 let words = e.to_string();
+                let blocked = matches!(e, MimoError::Blocked(_));
+                let rows = self
+                    .svc
+                    .as_ref()
+                    .map(|s| s.feasibility_rows_now())
+                    .unwrap_or_default();
                 let _ = self.call(|s| s.abort_now("not armed"));
                 self.svc = None;
                 self.lock = None;
                 *lock(&self.shared.started) = None;
+                if blocked {
+                    let which: Vec<String> = rows
+                        .iter()
+                        .filter(|r| r.verdict == "Exceeded")
+                        .map(|r| format!("channel {} ({})", r.channel_index, r.detail))
+                        .collect();
+                    return Err(refused(
+                        "feasibility_exceeded",
+                        format!(
+                            "The reference would exceed the shaker on {}; lower the reference, \
+                             correct the shaker record, the moving mass or the article mass, or \
+                             remove the shaker record to run without the check.",
+                            which.join(", ")
+                        ),
+                    ));
+                }
                 Err(refused(
                     "arm_refused",
                     format!("The station refused to arm: {words}"),
@@ -1610,7 +1825,7 @@ impl Actor {
         }
         if self.prediction_breach() {
             return Err(refused(
-                "gate_failed",
+                "prediction_exceeded",
                 "The prediction puts a drive over its ceiling, so the run holds; change the law \
                  or its parameters, or override with your reason (the ceilings still hold the \
                  drive).",
@@ -1630,44 +1845,179 @@ impl Actor {
         }
     }
 
-    fn override_cmd(&mut self, ack: &str, by: &str) -> Result<(), MethodError> {
+    fn override_cmd(
+        &mut self,
+        ack: &str,
+        by: &str,
+        reason: Option<OverrideReason>,
+    ) -> Result<(), MethodError> {
         let st = self.svc_state();
-        let gate_failed = st == Some(MimoState::Gate);
+        let gate_failed = st == Some(MimoState::Gate) && !self.gate_passed();
         let breach = st == Some(MimoState::Predict) && self.prediction_breach();
-        if !gate_failed && !breach {
+        let holds = if gate_failed {
+            Some(OverrideReason::Gate)
+        } else if breach {
+            Some(OverrideReason::Prediction)
+        } else {
+            None
+        };
+        let Some(holds) = holds else {
             return match st {
-                Some(MimoState::Predict) => Err(refused(
+                Some(MimoState::Predict) | Some(MimoState::Gate) => Err(refused(
                     "override_not_needed",
                     "Identification passed its gates and the prediction is within every \
                      ceiling; proceed instead.",
                 )),
-                _ => Err(wrong_state("Overriding the gate", self.review_phase())),
+                _ => Err(wrong_state("Overriding", self.review_phase())),
             };
+        };
+        if let Some(r) = reason {
+            if r != holds {
+                let what = match holds {
+                    OverrideReason::Gate => "a failed identification gate",
+                    OverrideReason::Prediction => "a prediction over a drive ceiling",
+                };
+                return Err(refused(
+                    "override_not_needed",
+                    format!(
+                        "The run holds for {what}, not for what this override names; read the \
+                         Predict page and acknowledge what holds the run (reason \"{}\").",
+                        holds.name()
+                    ),
+                ));
+            }
         }
         let ack2 = ack.to_owned();
         let r = self.call(move |s| -> Result<(), MimoError> {
             s.override_with(&ack2)?;
-            if s.state() == MimoState::Gate {
-                s.proceed()?;
-            }
-            if s.state() == MimoState::Predict {
-                if s.prediction().is_some_and(|p| !p.breaches.is_empty()) {
-                    s.override_with(&ack2)?;
+            match holds {
+                // Past the gate to the prediction; it engages only when the
+                // prediction is within every ceiling.
+                OverrideReason::Gate => {
+                    s.proceed()?;
+                    if s.state() == MimoState::Predict
+                        && s.prediction().is_some_and(|p| p.breaches.is_empty())
+                    {
+                        s.proceed()?;
+                    }
                 }
-                s.proceed()?;
+                OverrideReason::Prediction => s.proceed()?,
             }
             Ok(())
         });
-        self.override_ack = Some((by.to_owned(), ack.to_owned()));
-        lock(&self.shared.log).push(format!("override by {by}: {ack}"));
+        self.override_ack.push(OverrideAck {
+            by: by.to_owned(),
+            text: ack.to_owned(),
+            reason: holds,
+        });
+        lock(&self.shared.log).push(format!("override ({}) by {by}: {ack}", holds.name()));
         match r {
             Ok(Some(Ok(()))) => Ok(()),
             Ok(Some(Err(e))) => Err(refused(
                 "gate_failed",
-                format!("The run did not engage after the override: {e}."),
+                format!("The run did not go on after the override: {e}."),
             )),
             _ => Err(MethodError::internal("the run failed while engaging")),
         }
+    }
+
+    /// The setup's control positions, in order, that the run controls now.
+    fn kept_positions(&self) -> Vec<usize> {
+        self.kept
+            .clone()
+            .unwrap_or_else(|| (0..self.setup.controlled()).collect())
+    }
+
+    /// The setup's positions excluded at the gate.
+    fn excluded_positions(&self) -> Vec<usize> {
+        let kept = self.kept_positions();
+        (0..self.setup.controlled())
+            .filter(|i| !kept.contains(i))
+            .collect()
+    }
+
+    /// A per-control list of the run's, laid out on the setup's positions: an
+    /// excluded control's entry is NaN (null on the wire).
+    fn on_setup_positions(&self, v: &[f64]) -> Vec<f64> {
+        let Some(kept) = self.kept.as_ref() else {
+            return v.to_vec();
+        };
+        let mut out = vec![f64::NAN; self.setup.controlled()];
+        for (k, &i) in kept.iter().enumerate() {
+            if let (Some(o), Some(x)) = (out.get_mut(i), v.get(k)) {
+                *o = *x;
+            }
+        }
+        out
+    }
+
+    fn exclude_cmd(&mut self, positions: &[usize], ack: &str, by: &str) -> Result<(), MethodError> {
+        let st = self.svc_state();
+        if st != Some(MimoState::Gate) || self.gate_passed() {
+            return Err(refused(
+                "wrong_state",
+                "A control is excluded when identification has failed a gate and the run holds \
+                 for it; it is not offered now.",
+            ));
+        }
+        let n = self.setup.controlled();
+        if let Some(bad) = positions.iter().find(|&&i| i >= n) {
+            return Err(MethodError::bad_params(
+                "controls",
+                format!("there is no control at position {bad}; the setup has {n} controls"),
+            ));
+        }
+        let kept = self.kept_positions();
+        let mut svc_pos = Vec::new();
+        for &i in positions {
+            match kept.iter().position(|&k| k == i) {
+                Some(k) => svc_pos.push(k),
+                None => {
+                    return Err(MethodError::bad_params(
+                        "controls",
+                        format!("the control at position {i} is already excluded"),
+                    ))
+                }
+            }
+        }
+        let ack2 = ack.to_owned();
+        match self.call(move |s| s.exclude_controls(&svc_pos, &ack2)) {
+            Ok(Some(Ok(()))) => {}
+            Ok(Some(Err(e))) => {
+                return Err(refused(
+                    "wrong_state",
+                    format!("The control was not excluded: {e}."),
+                ))
+            }
+            _ => return Err(MethodError::internal("the run failed while excluding")),
+        }
+        let keep: Vec<usize> = kept
+            .into_iter()
+            .filter(|i| !positions.contains(i))
+            .collect();
+        self.kept = Some(keep);
+        let labels = self.setup.controlled_labels();
+        let names: Vec<String> = positions
+            .iter()
+            .map(|&i| {
+                labels
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("control {i}"))
+            })
+            .collect();
+        lock(&self.shared.log).push(format!(
+            "excluded at the gate by {by}: {} ({ack})",
+            names.join(", ")
+        ));
+        Ok(())
+    }
+
+    fn gate_passed(&self) -> bool {
+        self.svc
+            .as_ref()
+            .and_then(|s| s.gate())
+            .is_some_and(|g| g.passed)
     }
 
     fn iterate_cmd(
@@ -1737,7 +2087,25 @@ impl Actor {
             law: self.law.clone(),
             drive_rms_v: p.drive_rms.clone(),
             ceiling_vrms: p.ceilings.clone(),
-            error_db: p.error_db.clone(),
+            error_db: self.on_setup_positions(&p.error_db),
+            has_achievable: p.has_achievable,
+            unreachable_db: self.on_setup_positions(&p.unreachable_db),
+            drive_accel: p.drive_accel_rms.clone(),
+            accel_control: {
+                let kept = self.kept_positions();
+                p.accel_control
+                    .iter()
+                    .map(|&i| kept.get(i).copied().unwrap_or(i))
+                    .collect()
+            },
+            feasibility: p
+                .feasibility
+                .iter()
+                .map(|r| DriveVerdict {
+                    verdict: verdict_name(&r.verdict),
+                    message: r.detail.clone(),
+                })
+                .collect(),
         })
     }
 
@@ -1759,6 +2127,7 @@ impl Actor {
             coherence_floor: g.coherence_threshold,
             condition_max,
             condition_limit: g.condition_threshold.max(1.0),
+            coherence: self.on_setup_positions(&g.coherence),
         })
     }
 
@@ -1784,7 +2153,7 @@ impl Actor {
             }
             MimoState::Predict => {
                 if self.prediction_breach() {
-                    (State::Review, "gate_failed")
+                    (State::Review, "prediction_exceeded")
                 } else if self.review {
                     (State::Review, "awaiting_review")
                 } else {
@@ -1836,13 +2205,9 @@ impl Actor {
             }
         }
         let error = svc.error_db().to_vec();
+        let kept = self.kept_positions();
         let alarm = error.iter().enumerate().any(|(i, e)| {
-            let a = self
-                .setup
-                .controls
-                .get(i)
-                .filter(|_| matches!(self.setup.space, ControlSpace::Physical))
-                .map_or(DEFAULT_ALARM_DB, |c| c.alarm_db);
+            let a = self.setup.band_of(kept.get(i).copied().unwrap_or(i)).0;
             e.is_finite() && *e > a[0].min(a[1])
         });
         let level = svc.level_db();
@@ -1861,10 +2226,12 @@ impl Actor {
             remaining_at_level_s: svc.remaining_at_full_level_s(),
             loop_index: svc.loop_count(),
             alarm,
-            control_error_db: error
-                .iter()
-                .map(|e| if e.is_finite() { *e } else { 0.0 })
-                .collect(),
+            control_error_db: self.on_setup_positions(
+                &error
+                    .iter()
+                    .map(|e| if e.is_finite() { *e } else { 0.0 })
+                    .collect::<Vec<_>>(),
+            ),
             gates: self.gates(),
             caps,
             drive_rms_v: svc.drive_rms().to_vec(),
@@ -1872,6 +2239,7 @@ impl Actor {
             faults,
             override_ack: self.override_ack.clone(),
             prediction: self.prediction(),
+            excluded: self.excluded_positions(),
             end: None,
             streaming: true,
         };
@@ -1881,6 +2249,7 @@ impl Actor {
         let mut p = lock(&self.shared.published);
         p.status = st;
         p.snapshot = Some(snapshot);
+        p.kept = self.kept.clone();
         if ident_dir.is_some() {
             p.ident_dir = ident_dir;
         }
@@ -1995,11 +2364,15 @@ impl Actor {
                 law: self.law.clone(),
                 end: Some(end.clone()),
                 loops: svc.loop_count(),
-                control_rms: (0..n)
-                    .map(|i| snap.response_full().map_or(0.0, |g| rms(g, i)))
-                    .collect(),
-                reference_rms: (0..n).map(|i| rms(snap.reference(), i)).collect(),
-                control_error_db: svc.error_db().to_vec(),
+                control_rms: self.on_setup_positions(
+                    &(0..n)
+                        .map(|i| snap.response_full().map_or(0.0, |g| rms(g, i)))
+                        .collect::<Vec<_>>(),
+                ),
+                reference_rms: self.on_setup_positions(
+                    &(0..n).map(|i| rms(snap.reference(), i)).collect::<Vec<_>>(),
+                ),
+                control_error_db: self.on_setup_positions(svc.error_db()),
                 drive_rms_v: svc.drive_rms().to_vec(),
                 min_cap: self.min_cap.clone(),
                 gates: self.gates(),

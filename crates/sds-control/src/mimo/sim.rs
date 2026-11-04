@@ -12,8 +12,8 @@
 
 use super::check::{self, Validation};
 use super::driver::{
-    Curve, Fault, Gates, LawRef, MimoReport, MimoRunDriver, MimoStatus, PackedBlock, Prediction,
-    QuantitySelector, Series, StartContext, StopOutcome,
+    Curve, Fault, Gates, LawRef, MimoReport, MimoRunDriver, MimoStatus, OverrideAck,
+    OverrideReason, PackedBlock, Prediction, QuantitySelector, Series, StartContext, StopOutcome,
 };
 use super::setup::{MimoSetup, Reference};
 use crate::protocol::{ErrorCode, MethodError};
@@ -94,7 +94,7 @@ pub struct SimulatedMimoDriver {
     started_at: Option<f64>,
     gates: Option<Gates>,
     prediction: Option<Prediction>,
-    override_ack: Option<(String, String)>,
+    override_ack: Vec<OverrideAck>,
     end: Option<End>,
     faults: Vec<Fault>,
     /// Loops run, frozen at the end.
@@ -125,7 +125,7 @@ impl SimulatedMimoDriver {
             started_at: None,
             gates: None,
             prediction: None,
-            override_ack: None,
+            override_ack: Vec::new(),
             end: None,
             faults: Vec::new(),
             loops_at_end: 0,
@@ -291,6 +291,7 @@ impl SimulatedMimoDriver {
             coherence_floor: id.coherence_floor,
             condition_max: 4.0 + 8.5 * (n / nd).max(nd / n),
             condition_limit: id.condition_limit,
+            coherence: Vec::new(),
         });
         self.prediction = Some(self.predict(1, self.law.clone(), &Map::new()));
     }
@@ -312,6 +313,11 @@ impl SimulatedMimoDriver {
             error_db: (0..self.n())
                 .map(|i| 0.25 / gain.max(0.1) * ((i + 1) as f64).sin())
                 .collect(),
+            has_achievable: false,
+            unreachable_db: vec![0.0; self.n()],
+            drive_accel: Vec::new(),
+            accel_control: Vec::new(),
+            feasibility: Vec::new(),
         }
     }
 
@@ -514,11 +520,27 @@ impl MimoRunDriver for SimulatedMimoDriver {
         }
     }
 
-    fn override_gate(&mut self, ack: &str, by: &str) -> Result<(), MethodError> {
+    fn override_gate(
+        &mut self,
+        ack: &str,
+        by: &str,
+        reason: Option<OverrideReason>,
+    ) -> Result<(), MethodError> {
         self.advance();
+        if reason == Some(OverrideReason::Prediction) {
+            return Err(MethodError::named(
+                ErrorCode::Refused,
+                "override_not_needed",
+                "The prediction is within every ceiling; proceed instead.",
+            ));
+        }
         match self.step {
             Step::Review { failed: true, .. } => {
-                self.override_ack = Some((by.to_owned(), ack.to_owned()));
+                self.override_ack.push(OverrideAck {
+                    by: by.to_owned(),
+                    text: ack.to_owned(),
+                    reason: OverrideReason::Gate,
+                });
                 self.log.push(format!("gate overridden by {by}: {ack}"));
                 self.step = Step::Engaged {
                     t: self.clock.now(),
@@ -723,6 +745,7 @@ impl MimoRunDriver for SimulatedMimoDriver {
             faults: self.faults.clone(),
             override_ack: self.override_ack.clone(),
             prediction: self.prediction.clone(),
+            excluded: Vec::new(),
             end: self.end.clone(),
             streaming: self.streaming(),
         }

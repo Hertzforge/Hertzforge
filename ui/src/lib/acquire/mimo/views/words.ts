@@ -10,6 +10,7 @@ export const MIMO_PHASE_WORDS: Record<MimoPhase, string> = {
 	sysid: 'Identifying the plant',
 	awaiting_review: 'Identification passed, holding for review',
 	gate_failed: 'Held: identification did not pass its gates',
+	prediction_exceeded: 'Held: a drive is predicted over its ceiling',
 	engaged: 'Controlling',
 	full_level: 'Controlling at full level',
 	ramping_down: 'Stopping',
@@ -34,6 +35,7 @@ export function mimoLevelStatus(s: MimoStatus | null): MimoLevelStatus {
 		case 'awaiting_review':
 			return { mark: 'hold', text: words, tone: 'info' };
 		case 'gate_failed':
+		case 'prediction_exceeded':
 			return { mark: 'hold', text: words, tone: 'warn' };
 		case 'engaged':
 			return { mark: 'ramp', text: s.level_db !== null ? `Controlling at ${formatDb(s.level_db)}` : words, tone: s.alarm ? 'warn' : 'pass' };
