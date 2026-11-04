@@ -27,6 +27,18 @@ dependencies = [
     "pandas",
     # BSD-3-Clause
     "threadpoolctl",
+    # BSD-3-Clause, pure Python: the sparse modal solve's factorization
+    # on x86-64 Windows and Linux (`core.sparse_solve.PardisoFactor`), as
+    # Visual Dynamics has it. It brings Intel's oneMKL (`mkl`, `tbb`,
+    # `tcmlib`: the Intel Simplified Software License; `intel-openmp` and
+    # `intel-cmplr-lib-ur`: Intel's developer-tools EULA), proprietary and
+    # the one exception to the permissive rule (README, THIRD_PARTY_NOTICES),
+    # taken on 2026-11-03 so a large model solves in minutes on Windows and
+    # Linux, as it does through Accelerate on a Mac. The packaged builds
+    # carry only the libraries PARDISO loads, threaded through TBB, so none
+    # of the EULA'd OpenMP runtime. oneMKL is built for x86-64 only and no
+    # longer for the Mac, hence the marker; every other machine uses SuperLU.
+    "pypardiso; sys_platform != 'darwin' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')",
     # Apache-2.0 bindings over the OpenCASCADE kernel (LGPL-2.1 with an
     # exception): the solids' booleans, areas, volumes and surfaces, and
     # STEP and IGES import. The build without VTK: cadquery-ocp requires

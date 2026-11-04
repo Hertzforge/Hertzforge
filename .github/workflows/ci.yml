@@ -112,6 +112,10 @@ jobs:
         # which other xdist workers break by sharing the runner's cores. They run
         # here alone, without xdist. The marker is registered in pyproject.toml.
         run: python -m pytest tests/service -q -m timing
+      - name: The sparse solver is the one this runner should have
+        # Accelerate on the Mac, PARDISO on the x86-64 Linux and Windows runners:
+        # an install that fell back to SuperLU still passes every test, slowly.
+        run: python -m hertzforge check-solver
       - name: No GPL package installed, every import accounted for
         run: python tools/check_licenses.py --scope package
 

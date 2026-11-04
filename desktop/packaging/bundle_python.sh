@@ -86,6 +86,51 @@ sys.exit(1 if findings else 0)
 PY
 )
 
+# oneMKL, PARDISO's library (core.sparse_solve), on x86-64 Windows and Linux, where
+# pypardiso is a dependency: only what PARDISO loads, threaded through TBB, as Visual
+# Dynamics' builds carry it. The runtime, the core and its interface, the TBB threading
+# layer, every processor's kernels and their vector math (another machine loads another
+# one), and TBB with its allocator and thread manager. Not the OpenMP runtime, which is
+# under Intel's developer-tools EULA and which TBB threading does not need, nor
+# ScaLAPACK, BLACS or CDFT, nor the wheels' unversioned second copy of each library.
+# `hertzforge check-solver` below is what proves the bundle still factors with it.
+if [[ $TRIPLE == x86_64-pc-windows-msvc || $TRIPLE == x86_64-unknown-linux-gnu ]]; then
+  "$PY" -m pip uninstall -q -y intel-openmp intel-cmplr-lib-ur umf 2>/dev/null || true
+  "$PY" - <<'TRIM'
+import re
+from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
+
+PARTS = (r'rt|core|intel_lp64|tbb_thread|def|mc3|avx2|avx512|avx10'
+         r'|vml_(?:def|mc3|avx2|avx512|avx10|cmpt)')
+KEEP = re.compile(rf'(?:libmkl_(?:{PARTS})|libtbb|libtbbmalloc|libtcm)\.so\.\d+'
+                  rf'|(?:mkl_(?:{PARTS})\.\d+|tbb\d+|tbbmalloc|tcm)\.dll')
+LIBRARY = re.compile(r'.*\.(?:so(?:\.\d+)*|dll)$')
+removed = kept = 0
+for name in ('mkl', 'tbb', 'tcmlib'):
+    try:
+        files = distribution(name).files or ()
+    except PackageNotFoundError:
+        continue
+    for entry in files:
+        path = Path(entry.locate())
+        if not path.is_file() or not LIBRARY.match(path.name.lower()):
+            continue
+        if KEEP.fullmatch(path.name.lower()):
+            kept += 1
+        else:
+            path.unlink()
+            removed += 1
+print(f'bundle_python: oneMKL trimmed to what PARDISO loads: {kept} libraries kept, '
+      f'{removed} removed')
+TRIM
+fi
+
+# The solver the service will factor with, from the bundle itself: Accelerate on a
+# Mac, PARDISO on x86-64 Windows and Linux. A bundle that fell back to SuperLU would
+# still pass every test and solve a large model many times slower.
+"$PY" -m hertzforge check-solver
+
 # What the service never uses: the installer, headers, command scripts, the test
 # suites, the Tk GUI kit, and the dbm module (whose library on some platforms carries
 # a license this project does not take; `dbm` falls back to its pure-Python form).

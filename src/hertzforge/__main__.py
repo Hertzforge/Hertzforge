@@ -1,5 +1,6 @@
 """The ``hertzforge`` command: ``hertzforge --version`` prints the version,
-``hertzforge serve`` starts the analysis service."""
+``hertzforge serve`` starts the analysis service, ``hertzforge check-solver``
+says which sparse solver this installation factors with."""
 
 import argparse
 
@@ -23,11 +24,23 @@ def main(argv: list[str] | None = None) -> int:
     # the service parses its own options, so `hertzforge serve --help` is its help
     commands.add_parser("serve", add_help=False,
                         help="start the analysis service (sds/1 over WebSocket)")
+    # the packaged builds are tested with it: a bundle that leaves oneMKL out
+    # still solves, through SuperLU, many times slower on a large model
+    commands.add_parser("check-solver",
+                        help="check that the sparse modal solve uses the solver this "
+                             "machine should: Accelerate on a Mac, PARDISO on x86-64 "
+                             "Windows and Linux; exit 1 when it does not")
     args, rest = parser.parse_known_args(argv)
     if args.command == "serve":
         from hertzforge.service.__main__ import main as serve
 
         return serve(rest)
+    if args.command == "check-solver":
+        from hertzforge.core.sparse_solve import check
+
+        code, said = check()
+        print(said)
+        return code
     if rest:
         parser.error(f"unrecognized arguments: {' '.join(rest)}")
     parser.print_help()
