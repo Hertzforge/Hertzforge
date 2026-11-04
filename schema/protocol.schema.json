@@ -426,6 +426,23 @@
         "note": {"type": "string"}
       }
     },
+    "action": {
+      "type": "object", "required": ["id", "title", "workspace", "fill"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "workspace": {"type": "string"},
+        "fill": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "actions": {
+      "type": "object", "required": ["readings", "acts", "project"], "additionalProperties": false,
+      "properties": {
+        "readings": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "acts": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "project": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+      }
+    },
     "solidRow": {
       "type": "object", "required": ["id", "label", "kind", "children"],
       "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "kind": {"type": "string"},

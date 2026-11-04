@@ -372,6 +372,7 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.show` | `{"objects","records"?,"part"?}` | `{"title","views","note"}` |
+| `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
@@ -403,6 +404,16 @@ PSD's envelope), a channel table on a geometry marks its channels, two shape set
 measurement beside its requirement gives the comparison's spectra, two PSDs overlay. A selection with
 no joint reading shows each object on its own, and `note` says what was left out. The views come in the
 connection's display units, as an operation's do.
+
+**The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
+the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
+every operation on the project whose object params the selected objects fill, each object on a param
+that takes its kind (or whose verb applies to it), every object used and every required object param
+filled. Each entry is `{"id","title","workspace","fill"}`, `fill` the params to set from the selection
+(and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
+how the selection is read; `acts` change the project (the operations named for the project's journaled
+verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
+Geometry, New Channel Table).
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts
