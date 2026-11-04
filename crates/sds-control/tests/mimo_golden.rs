@@ -415,3 +415,132 @@ fn a_law_that_does_not_admit_the_shape_or_a_parameter_is_named() {
     let v = parse(&setup);
     assert!(v.report.errors.iter().any(|i| i.reason == "law_unknown"));
 }
+
+fn read_bin(name: &str) -> Vec<u8> {
+    std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../schema/golden")
+            .join(name),
+    )
+    .unwrap()
+}
+
+/// `event_mimo_random_data`, built with the service's own display builders from the
+/// quantities a driver returns.
+#[test]
+fn the_mimo_data_frame_is_built_byte_for_byte() {
+    use sds_control::codec::{self, Arrays};
+    use sds_control::mimo::display::{self, MimoPlot, PlotContext, Selector};
+    use sds_control::mimo::driver::{Curve, PackedBlock, Series};
+    use sds_control::views::Role;
+    use std::sync::Arc;
+
+    let lines: Vec<f64> = (0..4).map(|k| 100.0 + 6.25 * k as f64).collect();
+    let rep = |v: [f64; 3]| v.repeat(3);
+    let labels = vec!["Control X".to_owned(), "Control Y".to_owned()];
+    let drive_labels = vec!["Shaker X".to_owned(), "Shaker Y".to_owned()];
+    let ctx = PlotContext {
+        labels: &labels,
+        drive_labels: &drive_labels,
+        unit: "g",
+        bands: vec![([3.0, 3.0], [6.0, 6.0]); 2],
+        df_hz: 6.25,
+    };
+    let plot = |id: &str, quantity: &'static str, selector: Selector| MimoPlot {
+        id: id.into(),
+        quantity,
+        selector,
+        points: 64,
+    };
+    let status = MimoStatus {
+        state: State::Running,
+        phase: "full_level",
+        streaming: true,
+        ..configured()
+    };
+    let plots = [
+        (
+            plot("grid", "sdm", Selector::Block(vec![0, 1])),
+            Series::Packed {
+                freqs: Arc::new(lines[..3].to_vec()),
+                measured: PackedBlock {
+                    n: 2,
+                    re: rep([0.0390625, 0.01171875, 0.041015625]),
+                    im: rep([0.0, 0.015625, 0.0]),
+                },
+                reference: Some(PackedBlock {
+                    n: 2,
+                    re: rep([0.0390625, 0.01171875, 0.0390625]),
+                    im: rep([0.0, 0.015625, 0.0]),
+                }),
+            },
+        ),
+        (
+            plot("coh01", "coh", Selector::Pair(0, 1)),
+            Series::Lines {
+                freqs: Arc::new(lines.clone()),
+                curves: vec![
+                    Curve {
+                        name: "Measured".into(),
+                        role: Role::Measured,
+                        y: vec![0.25, 0.2421875, 0.25, 0.234375],
+                    },
+                    Curve {
+                        name: "Reference".into(),
+                        role: Role::Reference,
+                        y: vec![0.25; 4],
+                    },
+                ],
+            },
+        ),
+        (
+            plot("heat", "error_db", Selector::Rows(None)),
+            Series::Rows {
+                freqs: Arc::new(lines.clone()),
+                rows: vec![
+                    vec![0.5, -0.25, 0.125, 0.0],
+                    vec![-0.5, 0.25, 0.375, -0.125],
+                ],
+            },
+        ),
+    ];
+    let mut arrays = Arrays::new();
+    let plots: Vec<Value> = plots
+        .into_iter()
+        .map(|(p, s)| {
+            let views = display::plot_views(&p, &ctx, &status, &[Some(s)], &mut arrays);
+            display::plot_json(&p, display::plot_labels(&p, &ctx), views)
+        })
+        .collect();
+    let message = serde_json::json!({
+        "type": "event", "topic": "mimo_random.data", "seq": 120,
+        "data": {
+            "run_id": "m-0003", "source": "SIM", "state": "running", "phase": "full_level",
+            "loop": 30, "elapsed_s": 70.5, "level_db": 0, "plots": plots,
+        },
+    });
+    let bytes = read_bin("event_mimo_random_data.bin");
+    assert_eq!(
+        codec::encode(&message, &arrays).unwrap(),
+        bytes,
+        "byte for byte"
+    );
+    let d = codec::decode(&bytes).unwrap();
+    same(
+        &d.expanded(),
+        &golden("event_mimo_random_data.expected.json"),
+        "expected",
+    );
+    let order = codec::header_array_order(&bytes).unwrap();
+    let order: Vec<&str> = order.iter().map(String::as_str).collect();
+    assert_eq!(codec::reencode(&d, &order).unwrap(), bytes, "round trip");
+    // The packed block: two rows per line by three values, real and imaginary apart.
+    let sdm = &d.message["data"]["plots"][0]["views"][0];
+    let re = d.array(&sdm["measured"]["re"]).unwrap();
+    assert_eq!(re.shape, vec![3, 3]);
+    let heat = d
+        .array(&d.message["data"]["plots"][2]["views"][0]["values"])
+        .unwrap();
+    assert_eq!(heat.shape, vec![2, 4]);
+    assert!(matches!(heat.data, sds_control::codec::ArrayData::F32(_)));
+}

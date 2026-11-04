@@ -96,6 +96,11 @@ computed the data decides it. Spectral content is plotted the way it is calculat
   polyline is within a pixel of it. Drawn as a line.
 - `line`: anything that is a sample at a point (an FRF, a coherence, a time history).
 
+`y_min` (optional) makes a series an envelope: the service decimated it to the plot's width,
+and each point stands for an interval of the original lines, `y` the largest value in it and
+`y_min` the smallest. The shell draws the band between them (and with `steps`, each interval
+flat across its `edges`), so no peak or notch is lost to the decimation.
+
 This is Visual Dynamics' drawing rule (`plot.drawing_shape`, `plot.bin_edges`); the analysis
 service takes it from there rather than restating it.
 
@@ -204,6 +209,37 @@ c's shape with row r's, since a real mode is defined only up to its sign and a c
 rotation. Clicking cell (r, c) shows mode r with overlay c drawn over it, rotated by that angle and
 in one flat color, scaled to the same amplitude; the playback and the camera carry on through a
 click. Visual Dynamics draws a MAC pair the same way.
+
+**`heatmap`** (rows of values against frequency, such as MIMO Random's error per control)
+
+```
+{"view":"heatmap","title":"Control Error",
+ "rows":{"label":"Control","ticks":["Control X",...]},         one tick per row
+ "x":{"label":"Frequency","unit":"Hz","scale":"log"},
+ "x_values":{"$array":.. f64 [C]},          the frequency of each column
+ "values":{"$array":.. f32 [R,C]},          row r, column c
+ "value":{"label":"Error","unit":"dB"},
+ "row_bands":[{"alarm_db":[3,3],"abort_db":[6,6]}, ...]}         one per row
+```
+
+The color breaks are each row's own alarm and abort bands. The scale is lightness-ordered so the
+bands read without hue, and hovering a cell reads its row, frequency and value. The service sends
+one column per pixel of the plot, each the line nearest the column's center.
+
+**`sdm`** (a block of a spectral density matrix, such as MIMO Random's matrix grid)
+
+```
+{"view":"sdm","title":"Spectral Matrix","channels":["Control X","Control Y"],
+ "packing":"upper","unit":"g²/Hz",
+ "x":{"label":"Frequency","unit":"Hz","scale":"log"},"x_values":{"$array":.. f64 [L]},
+ "measured":{"re":{"$array":.. f64 [L,P]},"im":{"$array":.. f64 [L,P]}},
+ "reference":{"re":..,"im":..}}
+```
+
+`P = n (n + 1) / 2` for the `n` channels: each line's upper triangle, row by row (see "MIMO
+Random"). The diagonal is each channel's PSD; an element above it gives the coherence
+`|G_ij|² / (G_ii G_jj)` and the phase of `G_ij`, under the `E[X X^H]` convention. `measured` is
+null until the run has measured; `reference` is null when there is none.
 
 ## Operations: Declarative Panels
 
@@ -1077,6 +1113,80 @@ gate was overridden. `faults` lists `{"kind","message"}`.
  "drives":[{"channel","label","rms_v","ceiling_vrms","min_cap"}],
  "gates","override","end"}
 ```
+
+### MIMO Random Display
+
+A screen asks for the quantities its plots show, by name and selector, at the rate it wants, and
+the service sends that connection only those, each decimated to its plot's width. Nothing is sent
+that is not on screen: a 72 by 72 spectral matrix is never streamed whole. The mechanics are
+Random's: a subscription replaces the connection's last as a whole, belongs to the connection and
+carries over from run to run, is open to every connection, and is answered with one frame at
+once when the run has streamed.
+
+| Method | Params | Result |
+|---|---|---|
+| `mimo_random.subscribe` | `{"rate_hz","plots":[plot...]}`, or `{"default":true}` | `{"default","rate_hz","plots","quantities"}` |
+
+```
+{"rate_hz":10,"plots":[{"id":"c01","quantity":"coh","pair":[0,1],"points":512},
+                       {"id":"heat","quantity":"error_db","rows":"all","points":512},
+                       {"id":"grid","quantity":"sdm","block":[0,1,2,3,4,5,6,7],"points":256}]}
+```
+
+- With no subscription (the default) a connection receives `mimo_random.status` only.
+- `rate_hz` is 0.5 to 10 (default 5); `plots` holds up to 64 entries, each
+  `{"id","quantity",<selector>,"points"}`. `points` is the plot's width in pixels, 64 to 8192
+  (default 1024): the service sends at most that many points per series.
+- A selector is one of `index` (a control or drive), `pair` (two of them), `rows` (`"all"` or a
+  list of controls: the heatmap's rows), `diagonal: true` (every control or drive), `block`
+  (1 to 8 controls: a block of the spectral matrix, the grid's window) or `key` (a law
+  diagnostic, with an `index` for a per-control or per-drive layout). Positions count the setup's
+  controlled quantities and drives from 0, in order; the status's `shape.labels` and
+  `shape.drive_labels` name them. A position the run does not have is left out (the plot has no
+  views), never refused.
+- Refusals: `bad_params` with `param` naming the field: an unknown quantity, a selector the
+  quantity does not take or two selectors, a pair of one channel where two are needed, a block
+  over 8 or with a repeat, a value out of range, a duplicate `id`.
+
+| `quantity` | Selector | Views |
+|---|---|---|
+| `psd` | `index` or `diagonal` | one `spectrum`, stepped: the control's PSD against the reference and its alarm and abort lines (`index`), or every control's PSD (`diagonal`) |
+| `coh` | `pair` | one `spectrum`: the coherence of two controls against the reference's, 0 to 1 |
+| `phase` | `pair` | one `spectrum`: the phase of `G_ij`, degrees, against the reference's |
+| `csd_mag` | `pair` | one `spectrum`, stepped: the cross-spectrum magnitude against the reference's |
+| `error_db` | `rows` | one `heatmap`: each control's dB error against the reference per line |
+| `drive_psd` | `index` or `diagonal` | one `spectrum`, stepped, V²/Hz |
+| `drive_coh` | `pair` | one `spectrum`: the coherence of two drives |
+| `frf` | `pair` (`[control, drive]`) | two `spectrum`s: the FRF's magnitude and phase |
+| `sv` | none | one `spectrum`: the FRF's singular values per line |
+| `cond` | none | one `spectrum`: the FRF's condition number per line, with the gate as a `limit` |
+| `mcoh` | `index` or `diagonal` | one `spectrum`: a control's multiple coherence with the drives |
+| `cap` | `index` or `diagonal` (default) | one `reading`: each drive's cap factor this loop |
+| `dof_rms` | none | one `reading`: each controlled quantity's rms over the band |
+| `trace` | none | one `spectrum`, stepped: the sum of the control PSDs against the reference's |
+| `pred_drive_rms` | `index` or `diagonal` (default) | one `reading`: each drive's predicted rms against its ceiling |
+| `pred_error_db` | `index` | one `spectrum`: a control's predicted error per line, dB |
+| `law_diag` | `key` (and `index`) | one `spectrum` for a per-line layout, one `reading` for a scalar |
+| `sdm` | `block` | one `sdm`: the block of the response matrix and the reference's |
+| `readings` | none | one `reading`: the run's numbers (loop, level, largest error, gates, elapsed) |
+
+**Decimation.** The service reduces every quantity to the plot's width before it is framed:
+a spectrum to one point per pixel column (columns spaced on the plot's frequency axis), each the
+minimum and maximum of the lines in it (`y_min` and `y`, with the column's `edges` for a stepped
+series), so every original line lies inside its column's envelope; a heatmap row and a matrix
+block to the line nearest each column's center; readings not at all. When the run has no more
+lines than the plot has columns, nothing is decimated and each line is sent as it is.
+
+Event topic `mimo_random.data`, a binary frame to one connection, at most `rate_hz` times a
+second from the start of identification until the run finishes, and once more at the end:
+
+```
+{"run_id","source","state","phase","loop","elapsed_s","level_db",
+ "plots":[{"id","quantity","selector":{"pair":[0,1]},"labels":["Control X","Control Y"],"views":[...]}]}
+```
+
+`selector` echoes the plot's selector; `labels` names what it resolved to (the two channels of a
+pair, the rows of a heatmap, the channels of a block).
 
 ## Control Laws
 

@@ -99,6 +99,12 @@ pub struct SimulatedMimoDriver {
     faults: Vec<Fault>,
     /// Loops run, frozen at the end.
     loops_at_end: u64,
+    /// Per line, the mean of the reference's PSDs; per drive, its rms at 0 dB; and the
+    /// per-control error of the last engaged loop asked for. Cached: a status is
+    /// asked for many times a second.
+    ref_mean: Vec<f64>,
+    drive_rms0: Vec<f64>,
+    error_cache: Option<(u64, Vec<f64>)>,
     log: Vec<String>,
 }
 
@@ -123,6 +129,9 @@ impl SimulatedMimoDriver {
             end: None,
             faults: Vec::new(),
             loops_at_end: 0,
+            ref_mean: Vec::new(),
+            drive_rms0: Vec::new(),
+            error_cache: None,
             log: Vec::new(),
         }
     }
@@ -355,13 +364,9 @@ impl SimulatedMimoDriver {
 
     fn drive_psd(&self, k: usize, db: f64) -> Vec<f64> {
         let lin = 10f64.powf(db / 10.0);
-        let n = self.n().max(1) as f64;
         (0..self.freqs.len())
             .map(|l| {
-                let mean: f64 = (0..self.n())
-                    .map(|i| self.ref_element(l, i, i).0)
-                    .sum::<f64>()
-                    / n;
+                let mean = self.ref_mean.get(l).copied().unwrap_or(0.0);
                 let w = 0.5 * (1.0 + 0.5 * (2.0 * PI * self.freqs[l] / 700.0 + k as f64).sin());
                 lin * mean * w * 4.0
             })
@@ -369,12 +374,7 @@ impl SimulatedMimoDriver {
     }
 
     fn drive_rms_at(&self, k: usize, db: f64) -> f64 {
-        let df = self.setup().df_hz();
-        self.drive_psd(k, db)
-            .iter()
-            .sum::<f64>()
-            .mul_add(df, 0.0)
-            .sqrt()
+        self.drive_rms0.get(k).copied().unwrap_or(0.0) * 10f64.powf(db / 20.0)
     }
 
     /// The modal FRF from drive `k` to control `i` on line `l`.
@@ -468,6 +468,19 @@ impl MimoRunDriver for SimulatedMimoDriver {
             self.law = l;
         }
         self.setup = Some(setup);
+        let n = self.n().max(1) as f64;
+        self.ref_mean = (0..self.freqs.len())
+            .map(|l| {
+                (0..self.n())
+                    .map(|i| self.ref_element(l, i, i).0)
+                    .sum::<f64>()
+                    / n
+            })
+            .collect();
+        let df = self.setup().df_hz();
+        self.drive_rms0 = (0..self.nd())
+            .map(|k| (self.drive_psd(k, 0.0).iter().sum::<f64>() * df).sqrt())
+            .collect();
         v
     }
 
@@ -637,8 +650,17 @@ impl MimoRunDriver for SimulatedMimoDriver {
             _ => (None, None),
         };
         let lines = self.freqs.len();
+        let kk = k.floor();
+        let cached = self
+            .error_cache
+            .as_ref()
+            .filter(|(at, _)| *at == kk as u64)
+            .map(|(_, e)| e.clone());
         let control_error_db =
-            if driving || matches!(self.step, Step::Finished) && self.gates.is_some() {
+            if let Some(e) = cached.filter(|_| driving || matches!(self.step, Step::Finished)) {
+                e
+            } else if driving || matches!(self.step, Step::Finished) && self.gates.is_some() {
+                let k = kk;
                 (0..self.n())
                     .map(|i| {
                         let p = self.ref_psd(i);
@@ -656,6 +678,9 @@ impl MimoRunDriver for SimulatedMimoDriver {
             } else {
                 Vec::new()
             };
+        if !control_error_db.is_empty() {
+            self.error_cache = Some((kk as u64, control_error_db.clone()));
+        }
         let (caps, drive_rms_v) = match (driving, level) {
             (true, Some(db)) => (0..self.nd())
                 .map(|d| {

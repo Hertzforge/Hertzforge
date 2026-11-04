@@ -12,7 +12,8 @@ import type {
 	ReportItem,
 	RunEnd,
 	Schedule,
-	StationRef
+	StationRef,
+	View
 } from './types';
 
 /** Event topics of MIMO Random. */
@@ -310,4 +311,98 @@ export interface LawsImportParams {
 
 export interface LawsImportResult {
 	law: LawEntry;
+}
+
+// --- the display (PROTOCOL.md, "MIMO Random Display") ---------------------------------------
+
+/** What a MIMO plot can show. */
+export type MimoQuantity =
+	| 'psd'
+	| 'coh'
+	| 'phase'
+	| 'csd_mag'
+	| 'error_db'
+	| 'drive_psd'
+	| 'drive_coh'
+	| 'frf'
+	| 'sv'
+	| 'cond'
+	| 'mcoh'
+	| 'cap'
+	| 'dof_rms'
+	| 'trace'
+	| 'pred_drive_rms'
+	| 'pred_error_db'
+	| 'law_diag'
+	| 'sdm'
+	| 'readings';
+
+/**
+ * Which part of a quantity a plot shows. Positions count the setup's controlled quantities (or
+ * drives) from 0, in order; the status's `shape.labels` and `shape.drive_labels` name them.
+ */
+export type MimoSelector =
+	| Record<string, never>
+	| { index: number }
+	| { pair: [number, number] }
+	| { rows: 'all' | number[] }
+	| { diagonal: true }
+	| { block: number[] }
+	| { key: string; index?: number };
+
+export type MimoSubscribePlot = { id: string; quantity: MimoQuantity; points?: number } & MimoSelector;
+
+export type MimoSubscribeParams = { rate_hz?: number; plots: MimoSubscribePlot[] } | { default: true };
+
+export interface MimoSubscribeResult {
+	default: boolean;
+	rate_hz: number;
+	plots: (MimoSubscribePlot & { points: number })[] | null;
+	quantities: MimoQuantity[];
+}
+
+/** One plot's data in a `mimo_random.data` frame. */
+export interface MimoDataPlot {
+	id: string;
+	quantity: MimoQuantity;
+	selector: MimoSelector;
+	/** What the selector resolved to: the two channels of a pair, the rows of a heatmap. */
+	labels: string[];
+	views: View[];
+}
+
+/** The `mimo_random.data` event: a subscribed connection's own frame. */
+export interface MimoData {
+	run_id: string;
+	source: DataSource;
+	state: 'running' | 'review' | 'stopping' | 'finished';
+	phase: MimoPhase;
+	loop: number;
+	elapsed_s: number | null;
+	level_db: number | null;
+	plots: MimoDataPlot[];
+}
+
+/** Where element (r, c) of an n by n Hermitian matrix sits in one packed line (r <= c). */
+export function packedIndex(n: number, r: number, c: number): number {
+	if (r > c) [r, c] = [c, r];
+	return (r * (2 * n - r + 1)) / 2 + (c - r);
+}
+
+/**
+ * Element (r, c) of line `line` of a packed block, as [re, im]. Below the diagonal it is the
+ * conjugate of its mirror.
+ */
+export function packedElement(re: ArrayLike<number>, im: ArrayLike<number>, n: number, line: number, r: number, c: number): [number, number] {
+	const per = (n * (n + 1)) / 2;
+	const k = line * per + packedIndex(n, r, c);
+	return [re[k], r <= c ? im[k] : -im[k]];
+}
+
+/** Coherence of channels r and c on one line of a packed block, `|G_rc|² / (G_rr G_cc)`. */
+export function packedCoherence(re: ArrayLike<number>, im: ArrayLike<number>, n: number, line: number, r: number, c: number): number {
+	const [a, b] = packedElement(re, im, n, line, r, c);
+	const grr = packedElement(re, im, n, line, r, r)[0];
+	const gcc = packedElement(re, im, n, line, c, c)[0];
+	return grr > 0 && gcc > 0 ? (a * a + b * b) / (grr * gcc) : 0;
 }

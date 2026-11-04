@@ -124,3 +124,55 @@ def test_every_new_refusal_is_a_listed_reason(validate):
     e = copy.deepcopy(error)
     e['error']['reason'] = 'setup_rejected'
     _refused(validate, e, None)
+
+
+def _mimo_data():
+    from hertzforge.service import frames
+    wire, arrays = frames.to_wire(frames.decode((GOLDEN / 'event_mimo_random_data.bin').read_bytes()))
+    return wire
+
+
+def test_the_mimo_data_frame_validates_and_carries_a_packed_block(validate):
+    from hertzforge.service import frames
+    raw = (GOLDEN / 'event_mimo_random_data.bin').read_bytes()
+    decoded = frames.decode(raw)
+    wire = _mimo_data()
+    validate(wire)
+    validate(wire['data'], 'mimoData')
+    plots = wire['data']['plots']
+    assert [p['quantity'] for p in plots] == ['sdm', 'coh', 'error_db']
+    sdm = decoded['data']['plots'][0]['views'][0]
+    n = len(sdm['channels'])
+    assert sdm['measured']['re'].shape == (3, n * (n + 1) // 2)
+    assert sdm['measured']['re'].dtype.name == 'float64'
+    heat = decoded['data']['plots'][2]['views'][0]['values']
+    assert heat.shape == (2, 4) and heat.dtype.name == 'float32'
+    # the frame re-encodes to the same bytes
+    expected = json.loads((GOLDEN / 'event_mimo_random_data.expected.json').read_text())
+    assert expected['data']['plots'][1]['views'][0]['series'][0]['y']['values'] == \
+        list(decoded['data']['plots'][1]['views'][0]['series'][0]['y'])
+
+
+def test_a_mimo_plot_takes_the_selector_its_quantity_names(validate):
+    validate({'plots': [{'id': 'a', 'quantity': 'coh', 'pair': [0, 1]}]}, 'mimoSubscribeParams')
+    validate({'plots': [{'id': 'a', 'quantity': 'psd', 'diagonal': True, 'points': 400}]},
+             'mimoSubscribeParams')
+    validate({'plots': [{'id': 'a', 'quantity': 'error_db', 'rows': 'all'}]}, 'mimoSubscribeParams')
+    validate({'plots': [{'id': 'a', 'quantity': 'sdm', 'block': [0, 1, 2]}]}, 'mimoSubscribeParams')
+    validate({'default': True}, 'mimoSubscribeParams')
+    for bad in ({'id': 'a', 'quantity': 'coh', 'index': 0},
+                {'id': 'a', 'quantity': 'coh'},
+                {'id': 'a', 'quantity': 'psd'},
+                {'id': 'a', 'quantity': 'psd', 'pair': [0, 1]},
+                {'id': 'a', 'quantity': 'sdm', 'block': list(range(9))},
+                {'id': 'a', 'quantity': 'trace', 'index': 0},
+                {'id': 'a', 'quantity': 'psd', 'index': 0, 'points': 10},
+                {'id': 'a', 'quantity': 'control'}):
+        _refused(validate, {'plots': [bad]}, 'mimoSubscribeParams')
+
+
+def test_a_decimated_series_is_an_envelope(validate):
+    series = {'name': 'Control', 'role': 'measured', 'x': {'$array': 'a0'}, 'y': {'$array': 'a1'},
+              'y_min': {'$array': 'a2'}, 'shape': 'steps', 'edges': {'$array': 'a3'}}
+    validate(series, 'series')
+    _refused(validate, {**series, 'y_min': [1, 2]}, 'series')

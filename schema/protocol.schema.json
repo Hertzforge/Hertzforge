@@ -87,6 +87,7 @@
         "role": {"enum": ["measured", "reference", "tolerance", "abort", "limit", "drive", "other"]},
         "x": {"$ref": "#/$defs/arrayRef"},
         "y": {"$ref": "#/$defs/arrayRef"},
+        "y_min": {"$ref": "#/$defs/arrayRef"},
         "shape": {"enum": ["line", "steps", "law"]},
         "edges": {"$ref": "#/$defs/arrayRef"}
       },
@@ -221,7 +222,50 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}]},
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/heatmapView"}, {"$ref": "#/$defs/sdmView"}]},
+    "heatmapView": {
+      "type": "object",
+      "required": ["view", "title", "rows", "x", "x_values", "values", "value", "row_bands"],
+      "additionalProperties": false,
+      "properties": {
+        "view": {"const": "heatmap"},
+        "title": {"type": "string"},
+        "rows": {
+          "type": "object", "required": ["label", "ticks"], "additionalProperties": false,
+          "properties": {"label": {"type": "string"}, "ticks": {"type": "array", "items": {"type": "string"}}}
+        },
+        "x": {"$ref": "#/$defs/axis"},
+        "x_values": {"$ref": "#/$defs/arrayRef"},
+        "values": {"$ref": "#/$defs/arrayRef"},
+        "value": {
+          "type": "object", "required": ["label", "unit"], "additionalProperties": false,
+          "properties": {"label": {"type": "string"}, "unit": {"type": ["string", "null"]}}
+        },
+        "row_bands": {"type": "array", "items": {
+          "type": "object", "required": ["alarm_db", "abort_db"], "additionalProperties": false,
+          "properties": {"alarm_db": {"$ref": "#/$defs/mimoTolerance"}, "abort_db": {"$ref": "#/$defs/mimoTolerance"}}}}
+      }
+    },
+    "packedRef": {
+      "type": ["object", "null"], "required": ["re", "im"], "additionalProperties": false,
+      "properties": {"re": {"$ref": "#/$defs/arrayRef"}, "im": {"$ref": "#/$defs/arrayRef"}}
+    },
+    "sdmView": {
+      "type": "object",
+      "required": ["view", "title", "channels", "packing", "unit", "x", "x_values", "measured", "reference"],
+      "additionalProperties": false,
+      "properties": {
+        "view": {"const": "sdm"},
+        "title": {"type": "string"},
+        "channels": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}},
+        "packing": {"const": "upper"},
+        "unit": {"type": "string"},
+        "x": {"$ref": "#/$defs/axis"},
+        "x_values": {"$ref": "#/$defs/arrayRef"},
+        "measured": {"$ref": "#/$defs/packedRef"},
+        "reference": {"$ref": "#/$defs/packedRef"}
+      }
+    },
     "views": {"type": "array", "items": {"$ref": "#/$defs/view"}},
     "param": {
       "type": "object", "required": ["name", "label", "type"],
@@ -1464,6 +1508,103 @@
     "lawsImportResult": {
       "type": "object", "required": ["law"], "additionalProperties": false,
       "properties": {"law": {"$ref": "#/$defs/lawEntry"}}
+    },
+    "mimoQuantity": {"enum": ["psd", "coh", "phase", "csd_mag", "error_db", "drive_psd", "drive_coh",
+                              "frf", "sv", "cond", "mcoh", "cap", "dof_rms", "trace", "pred_drive_rms",
+                              "pred_error_db", "law_diag", "sdm", "readings"]},
+    "mimoPosition": {"type": "integer", "minimum": 0},
+    "mimoSelector": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "index": {"$ref": "#/$defs/mimoPosition"},
+        "pair": {"type": "array", "items": {"$ref": "#/$defs/mimoPosition"}, "minItems": 2, "maxItems": 2},
+        "rows": {"oneOf": [{"const": "all"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mimoPosition"}}]},
+        "diagonal": {"const": true},
+        "block": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/mimoPosition"}},
+        "key": {"type": "string", "minLength": 1}
+      }
+    },
+    "mimoSubscribePlot": {
+      "type": "object", "required": ["id", "quantity"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/mimoQuantity"},
+        "index": {"$ref": "#/$defs/mimoPosition"},
+        "pair": {"type": "array", "items": {"$ref": "#/$defs/mimoPosition"}, "minItems": 2, "maxItems": 2},
+        "rows": {"oneOf": [{"const": "all"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mimoPosition"}}]},
+        "diagonal": {"const": true},
+        "block": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/mimoPosition"}},
+        "key": {"type": "string", "minLength": 1},
+        "points": {"type": "integer", "minimum": 64, "maximum": 8192}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {"if": {"properties": {"quantity": {"enum": ["coh", "phase", "csd_mag", "drive_coh", "frf"]}}},
+         "then": {"required": ["pair"], "properties": {"index": false, "rows": false, "diagonal": false, "block": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"enum": ["psd", "drive_psd", "mcoh"]}}},
+         "then": {"oneOf": [{"required": ["index"]}, {"required": ["diagonal"]}],
+                  "properties": {"pair": false, "rows": false, "block": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"enum": ["cap", "pred_drive_rms"]}}},
+         "then": {"properties": {"pair": false, "rows": false, "block": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"const": "pred_error_db"}}},
+         "then": {"required": ["index"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"const": "error_db"}}},
+         "then": {"properties": {"index": false, "pair": false, "diagonal": false, "block": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"const": "sdm"}}},
+         "then": {"required": ["block"], "properties": {"index": false, "pair": false, "rows": false, "diagonal": false, "key": false}}},
+        {"if": {"properties": {"quantity": {"const": "law_diag"}}},
+         "then": {"required": ["key"], "properties": {"pair": false, "rows": false, "diagonal": false, "block": false}}},
+        {"if": {"properties": {"quantity": {"enum": ["sv", "cond", "dof_rms", "trace", "readings"]}}},
+         "then": {"properties": {"index": false, "pair": false, "rows": false, "diagonal": false, "block": false, "key": false}}}
+      ]
+    },
+    "mimoSubscribeParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "default": {"type": ["boolean", "null"]},
+        "rate_hz": {"type": ["number", "null"], "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mimoSubscribePlot"}}, {"type": "null"}]}
+      },
+      "oneOf": [
+        {"required": ["default"], "properties": {"default": {"const": true}, "plots": {"type": "null"}}},
+        {"required": ["plots"], "properties": {"default": {"enum": [false, null]}, "plots": {"type": "array"}}}
+      ]
+    },
+    "mimoSubscribeResult": {
+      "type": "object", "required": ["default", "rate_hz", "plots", "quantities"], "additionalProperties": false,
+      "properties": {
+        "default": {"type": "boolean"},
+        "rate_hz": {"type": "number", "minimum": 0.5, "maximum": 10},
+        "plots": {"oneOf": [{"type": "array", "items": {"allOf": [{"$ref": "#/$defs/mimoSubscribePlot"}, {"required": ["points"]}]}}, {"type": "null"}]},
+        "quantities": {"type": "array", "items": {"$ref": "#/$defs/mimoQuantity"}}
+      },
+      "if": {"properties": {"default": {"const": true}}},
+      "then": {"properties": {"plots": {"type": "null"}}},
+      "else": {"properties": {"plots": {"type": "array"}}}
+    },
+    "mimoDataPlot": {
+      "type": "object", "required": ["id", "quantity", "selector", "labels", "views"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 64},
+        "quantity": {"$ref": "#/$defs/mimoQuantity"},
+        "selector": {"$ref": "#/$defs/mimoSelector"},
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "views": {"type": "array", "items": {"$ref": "#/$defs/view"}}
+      }
+    },
+    "mimoData": {
+      "type": "object", "required": ["run_id", "source", "state", "phase", "loop", "elapsed_s", "level_db", "plots"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "state": {"enum": ["running", "review", "stopping", "finished"]},
+        "phase": {"$ref": "#/$defs/mimoPhase"},
+        "loop": {"type": "integer", "minimum": 0},
+        "elapsed_s": {"type": ["number", "null"], "minimum": 0},
+        "level_db": {"type": ["number", "null"]},
+        "plots": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mimoDataPlot"}}
+      }
     }
   }
 }

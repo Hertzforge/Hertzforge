@@ -693,6 +693,67 @@ MIMO_TEXT_GOLDENS = {
 }
 
 
+def _mimo_data_build() -> tuple[dict, dict]:
+    """`mimo_random.data` for a subscription of a 2 by 2 block of the spectral matrix
+    (packed, three lines), one coherence pair (four lines) and the error heatmap (two
+    rows by four columns, f32): what the service's builders give for that run (the
+    Rust golden test builds it so)."""
+    arrays: dict = {}
+
+    def push(dtype, shape, values):
+        ident = f'a{len(arrays)}'
+        arrays[ident] = (dtype, shape, values)
+        return {'$array': ident}
+
+    freq = {'label': 'Frequency', 'unit': 'Hz', 'scale': 'log'}
+    sdm_lines = MIMO_LINES[:3]
+    sdm = {'view': 'sdm', 'title': 'Spectral Matrix', 'channels': ['Control X', 'Control Y'],
+           'packing': 'upper', 'unit': 'g²/Hz', 'x': freq,
+           'x_values': push('f64', [3], sdm_lines)}
+    sdm['measured'] = {'re': push('f64', [3, 3], MIMO_DATA_RE), 'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    sdm['reference'] = {'re': push('f64', [3, 3], MIMO_DATA_REF_RE),
+                        'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    coh_lines = MIMO_LINES[:4]
+    series = []
+    for name, role, y in (('Measured', 'measured', MIMO_DATA_COH), ('Reference', 'reference', [0.25] * 4)):
+        series.append({'name': name, 'role': role, 'x': push('f64', [4], coh_lines),
+                       'y': push('f64', [4], y)})
+    coh = {'view': 'spectrum', 'title': 'Coherence: Control X, Control Y', 'x': freq,
+           'y': {'label': 'Coherence', 'unit': None, 'scale': 'linear'}, 'series': series,
+           'link': 'frequency'}
+    heat = {'view': 'heatmap', 'title': 'Control Error',
+            'rows': {'label': 'Control', 'ticks': ['Control X', 'Control Y']},
+            'x': freq, 'x_values': push('f64', [4], coh_lines),
+            'values': push('f32', [2, 4], MIMO_DATA_HEAT),
+            'value': {'label': 'Error', 'unit': 'dB'},
+            'row_bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
+    labels = ['Control X', 'Control Y']
+    message = {
+        'type': 'event', 'topic': 'mimo_random.data', 'seq': 120,
+        'data': {
+            'run_id': 'm-0003', 'source': 'SIM', 'state': 'running', 'phase': 'full_level',
+            'loop': 30, 'elapsed_s': 70.5, 'level_db': 0,
+            'plots': [
+                {'id': 'grid', 'quantity': 'sdm', 'selector': {'block': [0, 1]}, 'labels': labels,
+                 'views': [sdm]},
+                {'id': 'coh01', 'quantity': 'coh', 'selector': {'pair': [0, 1]}, 'labels': labels,
+                 'views': [coh]},
+                {'id': 'heat', 'quantity': 'error_db', 'selector': {'rows': 'all'},
+                 'labels': labels, 'views': [heat]},
+            ],
+        },
+    }
+    return message, arrays
+
+
+#: The block's packed lines (G00, G01, G11 per line), every value exact in binary.
+MIMO_DATA_RE = [0.0390625, 0.01171875, 0.041015625] * 3
+MIMO_DATA_IM = [0.0, 0.015625, 0.0] * 3
+MIMO_DATA_REF_RE = [0.0390625, 0.01171875, 0.0390625] * 3
+MIMO_DATA_COH = [0.25, 0.2421875, 0.25, 0.234375]
+MIMO_DATA_HEAT = [0.5, -0.25, 0.125, 0.0, -0.5, 0.25, 0.375, -0.125]
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -745,6 +806,9 @@ def main() -> None:
 
     # one connection's subscribed data: a control, a response and a time plot
     write('event_random_data', random_data(), random_data_arrays())
+
+    # one connection's MIMO data: a packed matrix block, a coherence pair, a heatmap
+    write('event_mimo_random_data', *_mimo_data_build())
 
     # a waterfall of two records; f32 values with u32 offsets. No NaN gap:
     # the expected JSON must parse in JavaScript, which has no NaN literal

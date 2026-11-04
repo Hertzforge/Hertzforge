@@ -2,8 +2,10 @@
 //! "MIMO Random" and "Control Laws"): a MIMO setup and its run beside the Random
 //! slot, under the same run exclusion and the same controller rules.
 
-use super::{Conn, Service, LIVE_TICK};
+use super::{Conn, Feed, Out, Service, DATA_SLACK, LIVE_TICK};
+use crate::codec::{self, Arrays};
 use crate::laws;
+use crate::mimo::display;
 use crate::mimo::driver::{LawRef, StartContext, StopOutcome};
 use crate::mimo::setup::{self, SetupContext};
 use crate::mimo::sim::{SimClock, SimulatedMimoDriver};
@@ -17,8 +19,11 @@ use hertzforge_random_laws::LawCatalog;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
-/// One connection's MIMO display subscription (filled in by the display module).
-pub struct MimoDisplay;
+/// One connection's MIMO display subscription and when it was last sent a frame.
+pub struct MimoDisplay {
+    sub: Arc<display::MimoSubscription>,
+    last: Option<std::time::Instant>,
+}
 
 impl Service {
     pub(super) fn mimo_displays(
@@ -451,11 +456,29 @@ impl Service {
                     .mimo
                     .as_ref()
                     .is_some_and(|m| Arc::ptr_eq(m, &run));
-                let (s, state) = run.status();
+                // The driver and the frames are computation: off the socket's threads.
+                let (svc2, run2) = (svc.clone(), run.clone());
+                let Ok((s, state)) = tokio::task::spawn_blocking(move || {
+                    let (s, state) = run2.status();
+                    (s, state)
+                })
+                .await
+                else {
+                    break;
+                };
                 let k = mview::status_key(Some(&s));
                 if k != key {
                     key = k;
                     svc.emit("mimo_random.status", state);
+                }
+                let last = s.state == State::Finished || !current;
+                let s2 = s.clone();
+                let run3 = run.clone();
+                if tokio::task::spawn_blocking(move || svc2.mimo_data_due(&run3, &s2, last))
+                    .await
+                    .is_err()
+                {
+                    break;
                 }
                 if s.state == State::Finished {
                     if let Some(report) = run.report() {
@@ -469,4 +492,132 @@ impl Service {
             }
         });
     }
+
+    /// `mimo_random.subscribe`: replace `conn`'s MIMO subscription, and send it the
+    /// run's latest data at once when the run has streamed.
+    pub(super) async fn mimo_subscribe(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        let sub = display::parse(params)?.map(Arc::new);
+        let result = display::result_json(sub.as_deref());
+        match &sub {
+            None => {
+                self.mimo_displays().remove(&conn.id);
+            }
+            Some(sub) => {
+                self.mimo_displays().insert(
+                    conn.id,
+                    MimoDisplay {
+                        sub: sub.clone(),
+                        last: None,
+                    },
+                );
+                let run = self.inner.lock().await.mimo.clone();
+                if let Some(run) = run {
+                    let (s, _) = run.status();
+                    if s.streaming {
+                        self.emit_mimo_data(conn.id, &run, &s, sub);
+                        if let Some(d) = self.mimo_displays().get_mut(&conn.id) {
+                            d.last = Some(std::time::Instant::now());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Send each subscribed connection whose frame is due its `mimo_random.data`
+    /// (every one of them when `last`).
+    fn mimo_data_due(&self, run: &Arc<MimoRun>, s: &crate::mimo::driver::MimoStatus, last: bool) {
+        if !s.streaming {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let due: Vec<(u64, Arc<display::MimoSubscription>)> = {
+            let mut displays = self.mimo_displays();
+            displays
+                .iter_mut()
+                .filter(|(_, d)| {
+                    last || d
+                        .last
+                        .is_none_or(|t| now + DATA_SLACK >= t + d.sub.period())
+                })
+                .map(|(id, d)| {
+                    d.last = Some(now);
+                    (*id, d.sub.clone())
+                })
+                .collect()
+        };
+        for (conn, sub) in due {
+            self.emit_mimo_data(conn, run, s, &sub);
+        }
+    }
+
+    /// One `mimo_random.data` frame of `run` for connection `conn`: only the
+    /// subscribed plots, each computed by the driver for its own selector and
+    /// decimated to its width.
+    fn emit_mimo_data(
+        &self,
+        conn: u64,
+        run: &Arc<MimoRun>,
+        s: &crate::mimo::driver::MimoStatus,
+        sub: &display::MimoSubscription,
+    ) {
+        let data = mimo_data_json(run, s, sub);
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (msg, arrays) = data;
+        match codec::encode(&protocol::event("mimo_random.data", seq, msg), &arrays) {
+            Ok(frame) => {
+                let _ = self.events.send(Arc::new(Out::To(conn, Feed::Mimo, frame)));
+            }
+            Err(e) => eprintln!("sds-control: mimo_random.data frame not encoded: {e}"),
+        }
+    }
+}
+
+/// The `mimo_random.data` message for `sub`, and its arrays.
+pub fn mimo_data_json(
+    run: &MimoRun,
+    s: &crate::mimo::driver::MimoStatus,
+    sub: &display::MimoSubscription,
+) -> (Value, Arrays) {
+    let display::SetupDisplay {
+        labels,
+        drive_labels,
+        unit,
+        bands,
+    } = display::context(&run.setup);
+    let ctx = display::PlotContext {
+        labels: &labels,
+        drive_labels: &drive_labels,
+        unit: &unit,
+        bands,
+        df_hz: run.setup.df_hz(),
+    };
+    let (n, nd) = (labels.len(), drive_labels.len());
+    let mut arrays = Arrays::new();
+    let plots: Vec<Value> = sub
+        .plots
+        .iter()
+        .map(|p| {
+            let sel = display::resolve(p, n, nd);
+            let data: Vec<_> = sel.iter().map(|q| run.with(|d| d.quantity(q))).collect();
+            let views = display::plot_views(p, &ctx, s, &data, &mut arrays);
+            display::plot_json(p, display::plot_labels(p, &ctx), views)
+        })
+        .collect();
+    let msg = json!({
+        "run_id": run.id,
+        "source": run.station.source(),
+        "state": s.state.name(),
+        "phase": s.phase,
+        "loop": s.loop_index,
+        "elapsed_s": s.elapsed_s.map(|x| protocol::num(crate::random::config::round(x, 2))),
+        "level_db": protocol::opt_num(s.level_db.map(|x| crate::random::config::round(x, 2))),
+        "plots": plots,
+    });
+    (msg, arrays)
 }

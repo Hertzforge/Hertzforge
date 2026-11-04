@@ -10,8 +10,10 @@
 //! - [`sim`]: [`sim::SimulatedMimoDriver`], a deterministic stand-in that lets every
 //!   wire test run without the controller's MIMO service.
 //! - [`view`]: the status, prediction and report objects.
+//! - [`display`]: the display quantities, their selectors and decimation.
 
 pub mod check;
+pub mod display;
 pub mod driver;
 pub mod setup;
 pub mod sim;

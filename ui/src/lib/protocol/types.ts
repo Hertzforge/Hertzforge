@@ -104,6 +104,12 @@ export interface Series {
 	shape?: SeriesShape;
 	/** Bin edges for `steps`: one more than there are y values, ascending. */
 	edges?: NumericArray;
+	/**
+	 * Present when the service decimated the series to the plot's width: each point stands for
+	 * an interval of the original lines, `y` its largest value and `y_min` its smallest. Drawn as
+	 * the band between them.
+	 */
+	y_min?: NumericArray;
 }
 
 export type SeriesShape = 'line' | 'steps' | 'law';
@@ -228,7 +234,42 @@ export interface MatrixView {
 	selects?: 'shape3d';
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView;
+/** Rows of values against frequency, such as MIMO Random's error per control (`heatmap`). */
+export interface HeatmapView {
+	view: 'heatmap';
+	title: string;
+	rows: { label: string; ticks: string[] };
+	x: Axis;
+	/** f64 [C]: the frequency of each column. */
+	x_values: Float64Array;
+	/** f32 [R, C], row-major. */
+	values: Float32Array;
+	value: { label: string; unit: string | null };
+	/** Each row's alarm and abort bands, `[below, above]` dB: the color breaks. */
+	row_bands: { alarm_db: [number, number]; abort_db: [number, number] }[];
+}
+
+/** A packed Hermitian block: per line, the upper triangle row by row. */
+export interface PackedArrays {
+	/** f64 [L, P], P = n (n + 1) / 2. */
+	re: Float64Array;
+	im: Float64Array;
+}
+
+/** A block of a spectral density matrix, such as MIMO Random's grid window (`sdm`). */
+export interface SdmView {
+	view: 'sdm';
+	title: string;
+	channels: string[];
+	packing: 'upper';
+	unit: string;
+	x: Axis;
+	x_values: Float64Array;
+	measured: PackedArrays | null;
+	reference: PackedArrays | null;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------

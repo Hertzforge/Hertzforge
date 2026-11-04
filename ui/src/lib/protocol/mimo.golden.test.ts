@@ -6,8 +6,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { decodeFrame, encodeFrame } from './codec';
-import type { Event, Request, ResponseErr, ResponseOk } from './types';
+import { decodeFrame, encodeFrame, shapeOf, withShape, dtypeOf } from './codec';
+import type { Dtype, Event, HeatmapView, Request, ResponseErr, ResponseOk, SdmView, SpectrumView } from './types';
 import type {
 	LawsImportResult,
 	LawsListResult,
@@ -16,9 +16,10 @@ import type {
 	MimoSetupResult,
 	MimoStatus,
 	MimoValidation,
-	MimoOverrideParams
+	MimoOverrideParams,
+	MimoData
 } from './mimo';
-import { MIMO_TOPICS } from './mimo';
+import { MIMO_TOPICS, packedCoherence, packedElement, packedIndex } from './mimo';
 
 const golden = (name: string) => fileURLToPath(new URL(`../../../../schema/golden/${name}`, import.meta.url));
 const readJson = (name: string) => JSON.parse(readFileSync(golden(name), 'utf-8'));
@@ -115,5 +116,54 @@ describe('MIMO messages match their types', () => {
 		const imported = (readJson('response_laws_import.json') as ResponseOk<LawsImportResult>).result.law;
 		expect(imported.sha256).toBe(imported.id);
 		expect([imported.check.status, imported.check.hardware]).toEqual(['unchecked', false]);
+	});
+});
+
+type Expected = { dtype: Dtype; shape: number[]; values: number[] };
+const isExpected = (v: unknown): v is Expected => typeof v === 'object' && v !== null && 'dtype' in v && 'values' in v;
+function toTyped(node: unknown): unknown {
+	if (isExpected(node)) {
+		const ctor = { f32: Float32Array, f64: Float64Array, i32: Int32Array, u32: Uint32Array, u8: Uint8Array }[node.dtype];
+		return withShape(ctor.from(node.values), node.shape);
+	}
+	if (Array.isArray(node)) return node.map(toTyped);
+	if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, toTyped(v)]));
+	return node;
+}
+const readBin = (name: string) => new Uint8Array(readFileSync(golden(name)));
+
+describe('mimo_random.data golden', () => {
+	it('encodes byte for byte from its expected form', () => {
+		const message = toTyped(readJson('event_mimo_random_data.expected.json')) as Record<string, unknown>;
+		expect(Array.from(encodeFrame(message) as Uint8Array)).toEqual(Array.from(readBin('event_mimo_random_data.bin')));
+	});
+
+	it('decodes a packed matrix block, a coherence pair and a heatmap', () => {
+		const event = decodeFrame(readBin('event_mimo_random_data.bin')) as unknown as Event<MimoData>;
+		expect(event.topic).toBe(MIMO_TOPICS.data);
+		const [grid, coh, heat] = event.data.plots;
+		expect(grid.selector).toEqual({ block: [0, 1] });
+		const sdm = grid.views[0] as SdmView;
+		expect(sdm.view).toBe('sdm');
+		expect(dtypeOf(sdm.measured!.re)).toBe('f64');
+		expect(shapeOf(sdm.measured!.re)).toEqual([3, 3]);
+		// G01 on line 0: 0.01171875 + 0.015625j; G10 is its conjugate.
+		expect(packedElement(sdm.measured!.re, sdm.measured!.im, 2, 0, 0, 1)).toEqual([0.01171875, 0.015625]);
+		expect(packedElement(sdm.measured!.re, sdm.measured!.im, 2, 0, 1, 0)).toEqual([0.01171875, -0.015625]);
+		const gamma = packedCoherence(sdm.reference!.re, sdm.reference!.im, 2, 0, 0, 1);
+		expect(gamma).toBeCloseTo((0.01171875 ** 2 + 0.015625 ** 2) / 0.0390625 ** 2, 12);
+		const spec = coh.views[0] as SpectrumView;
+		expect(spec.series.map((s) => s.role)).toEqual(['measured', 'reference']);
+		expect(spec.series[0].y_min).toBeUndefined();
+		const map = heat.views[0] as HeatmapView;
+		expect(dtypeOf(map.values)).toBe('f32');
+		expect(shapeOf(map.values)).toEqual([2, 4]);
+		expect(map.row_bands).toHaveLength(2);
+		expect(heat.labels).toEqual(['Control X', 'Control Y']);
+	});
+
+	it('packs the upper triangle row by row', () => {
+		// n = 3: (0,0) (0,1) (0,2) (1,1) (1,2) (2,2)
+		expect([packedIndex(3, 0, 0), packedIndex(3, 0, 2), packedIndex(3, 1, 1), packedIndex(3, 2, 1), packedIndex(3, 2, 2)]).toEqual([0, 2, 3, 4, 5]);
 	});
 });

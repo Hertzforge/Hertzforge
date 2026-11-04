@@ -24,6 +24,8 @@ pub struct Event {
     pub decoded: Option<Decoded>,
     /// When it was read.
     pub at: Instant,
+    /// The frame's size on the socket, bytes.
+    pub bytes: usize,
 }
 
 impl Event {
@@ -110,6 +112,7 @@ impl Client {
                         msg: v.clone(),
                         decoded: None,
                         at: Instant::now(),
+                        bytes: t.len(),
                     });
                 }
                 Some(v)
@@ -122,6 +125,7 @@ impl Client {
                     msg: v.clone(),
                     decoded: Some(decoded),
                     at: Instant::now(),
+                    bytes: b.len(),
                 });
                 Some(v)
             }
