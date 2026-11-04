@@ -5,6 +5,7 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
+import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
@@ -12,7 +13,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type {
+import type { ProjectChildren,
 	Catalog,
 	DatasetInfo,
 	DisplayEvent,
@@ -35,7 +36,7 @@ import type {
 	View,
 	Workspace
 } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
@@ -201,6 +202,25 @@ class AnalyzeState {
 			this.openError = message(err);
 		} finally {
 			if (seq === this.openSeq) this.opening = false;
+		}
+	}
+
+	/**
+	 * An object selected in the tree: the current tool's first object param that takes its kind
+	 * (or whose verb it answers to) is set to it, so picking in the tree is picking the source.
+	 */
+	followSelection(name: string): void {
+		const op = this.op;
+		const obj = this.app.project.summary?.objects.find((o) => o.name === name);
+		if (!op || !this.onProject || !obj) return;
+		for (const p of this.paramsOf(op)) {
+			const kinds = objectKinds(p);
+			const verb = objectVerb(p);
+			if ((kinds.length && kinds.includes(obj.kind)) || (verb && obj.verbs?.includes(verb))) {
+				if (this.currentValues[p.name] === name) return;
+				this.values = { ...this.values, [op.id]: { ...this.currentValues, [p.name]: name } };
+				return;
+			}
 		}
 	}
 
@@ -895,6 +915,17 @@ export class ProjectState {
 	error = $state<string | null>(null);
 	/** The object whose units are being declared, and its tables. */
 	units = $state.raw<UnitsTables | null>(null);
+	/** What the tree has selected: objects, records within them, a part of a geometry. */
+	selection = $state.raw<Selection>(EMPTY);
+	/** The objects whose rows are open in the tree. */
+	expanded = $state.raw<Set<string>>(new Set());
+	/** What each open object holds, as the service last answered. */
+	children = $state.raw<Record<string, ProjectChildren>>({});
+	/** The object being renamed in the tree, or null. */
+	renaming = $state<string | null>(null);
+	/** The last record clicked in each object's grid, where a Shift extension starts. */
+	private anchorRecord: Record<string, number> = {};
+	private childSeq = 0;
 
 	constructor(private readonly app: AppState) {
 		app.analysis.on('project.progress', (data) => {
@@ -906,7 +937,71 @@ export class ProjectState {
 	apply(summary: ProjectSummary): void {
 		this.summary = summary;
 		if (this.units && !summary.objects.some((o) => o.name === this.units?.name)) this.units = null;
+		const names = summary.objects.map((o) => o.name);
+		this.selection = pruned(this.selection, names);
+		if (this.renaming && !names.includes(this.renaming)) this.renaming = null;
+		// what an open row holds may have changed: ask again, and forget rows that are gone
+		const kept = new Set([...this.expanded].filter((n) => names.includes(n)));
+		this.expanded = kept;
+		const children: Record<string, ProjectChildren> = {};
+		for (const name of kept) if (this.children[name]) children[name] = this.children[name];
+		this.children = children;
+		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
+	}
+
+	/** Open or close an object's row; opening asks what it holds. */
+	toggleExpanded(name: string): void {
+		const next = new Set(this.expanded);
+		if (next.has(name)) next.delete(name);
+		else {
+			next.add(name);
+			void this.loadChildren(name);
+		}
+		this.expanded = next;
+	}
+
+	async loadChildren(name: string): Promise<void> {
+		const seq = ++this.childSeq;
+		try {
+			const held = await this.app.analysis.request<ProjectChildren>('project.children', { name });
+			if (!this.expanded.has(name) || !this.summary?.objects.some((o) => o.name === name)) return;
+			this.children = { ...this.children, [name]: held };
+		} catch (err) {
+			if (seq === this.childSeq) this.error = message(err);
+		}
+	}
+
+	private selected(next: Selection): void {
+		this.selection = next;
+		this.renaming = null;
+		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
+	}
+
+	/** An object's row clicked, with the modifiers held; `order` is the tree's rows. */
+	clickObject(name: string, order: string[], mods: Modifiers = {}): void {
+		this.selected(clickObject(this.selection, name, order, mods));
+	}
+
+	/** A cell of `name`'s grid clicked: its record; Shift takes the block from the last cell clicked. */
+	clickRecord(name: string, index: number, mods: Modifiers = {}, grid?: number[][]): void {
+		const from = this.anchorRecord[name];
+		const block = mods.extend && grid && from !== undefined ? { from, to: index, grid } : undefined;
+		if (!mods.extend) this.anchorRecord[name] = index;
+		this.selected(clickRecord(this.selection, name, index, mods, block));
+	}
+
+	clickPart(name: string, kind: string, id: string | number): void {
+		this.selected(clickPart(this.selection, name, kind, id));
+	}
+
+	clearSelection(): void {
+		this.selected(EMPTY);
+	}
+
+	/** Whether `name`, or one of its records, is selected. */
+	isSelected(name: string): boolean {
+		return this.selection.objects.includes(name);
 	}
 
 	/**
@@ -936,8 +1031,19 @@ export class ProjectState {
 		return this.call('Starting a project', 'project.new', { title });
 	}
 
-	rename(name: string, to: string): Promise<boolean> {
-		return this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
+	async rename(name: string, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
+		if (ok) {
+			this.selection = renamed(this.selection, name, to);
+			if (this.expanded.has(name)) {
+				const next = new Set(this.expanded);
+				next.delete(name);
+				next.add(to);
+				this.expanded = next;
+				void this.loadChildren(to);
+			}
+		}
+		return ok;
 	}
 
 	remove(names: string[]): Promise<boolean> {

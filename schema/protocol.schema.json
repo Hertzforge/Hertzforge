@@ -361,6 +361,8 @@
         "records": {"type": "integer", "minimum": 0},
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
+        "banded": {"type": "boolean"},
+        "holds": {"type": "string"},
         "stale": {"type": "string"},
         "groups": {"type": "array", "items": {"type": "string"}},
         "verbs": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
@@ -375,6 +377,51 @@
           }
         }
       }
+    },
+    "children": {
+      "type": "object", "required": ["kind"],
+      "properties": {"kind": {"enum": ["geometry", "grid", "modes", "channels", "photos", "matches", "none"]}},
+      "oneOf": [
+        {"properties": {"kind": {"const": "geometry"},
+          "parts": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
+            "properties": {"id": {"enum": ["nodes", "coordinate_systems"]}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}}},
+          "families": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count", "groups"],
+            "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
+              "groups": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
+                "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}}}}}},
+          "solids": {"type": "array", "items": {"$ref": "#/$defs/solidRow"}},
+          "mates": {"type": "array", "items": {"type": "object", "required": ["id", "label"],
+            "properties": {"id": {"type": "integer"}, "label": {"type": "string"}}}}},
+         "required": ["parts", "families", "solids", "mates"]},
+        {"properties": {"kind": {"const": "grid"},
+          "rows": {"type": "array", "items": {"type": "object", "required": ["label", "dof", "quantity"],
+            "properties": {"label": {"type": "string"}, "dof": {"type": "string"}, "quantity": {"type": "string"},
+              "role": {"enum": ["reference", "response", "monitor"]}}}},
+          "columns": {"type": "array", "items": {"type": "string"}},
+          "cells": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": -1}}},
+          "icons": {"type": "array", "items": {"type": "string"}},
+          "undefined": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+         "required": ["rows", "columns", "cells", "icons", "undefined"]},
+        {"properties": {"kind": {"const": "modes"},
+          "modes": {"type": "array", "items": {"type": "object", "required": ["index", "frequency", "damping", "description"],
+            "properties": {"index": {"type": "integer", "minimum": 1}, "frequency": {"type": "number"}, "damping": {"type": "number"}, "description": {"type": "string"}}}}},
+         "required": ["modes"]},
+        {"properties": {"kind": {"const": "channels"},
+          "channels": {"type": "array", "items": {"type": "object", "required": ["dof", "quantity"],
+            "properties": {"dof": {"type": "string"}, "quantity": {"type": "string"}}}}},
+         "required": ["channels"]},
+        {"properties": {"kind": {"const": "photos"}, "photos": {"type": "array", "items": {"type": "string"}}}, "required": ["photos"]},
+        {"properties": {"kind": {"const": "matches"},
+          "matches": {"type": "array", "items": {"type": "object", "required": ["first", "second", "mac"],
+            "properties": {"first": {"type": "integer"}, "second": {"type": "integer"}, "mac": {"type": "number"}}}}},
+         "required": ["matches"]},
+        {"properties": {"kind": {"const": "none"}}, "additionalProperties": false}
+      ]
+    },
+    "solidRow": {
+      "type": "object", "required": ["id", "label", "kind", "children"],
+      "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "kind": {"type": "string"},
+        "children": {"type": "array", "items": {"$ref": "#/$defs/solidRow"}}}
     },
     "project": {
       "type": "object", "required": ["title", "file", "modified", "objects"],
