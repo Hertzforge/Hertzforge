@@ -246,6 +246,9 @@
         "facing": {"enum": ["perspective", "top", "front"]},
         "x": {"$ref": "#/$defs/axis"},
         "z": {"$ref": "#/$defs/axis"},
+        "y": {"$ref": "#/$defs/axis"},
+        "y_values": {"$ref": "#/$defs/arrayRef"},
+        "y_range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
         "records": {"type": "array", "items": {"type": "string"}},
         "offsets": {"$ref": "#/$defs/arrayRef"},
         "x_values": {"$ref": "#/$defs/arrayRef"},
@@ -277,6 +280,7 @@
               "kind": {"enum": ["warning", "abort"]},
               "side": {"enum": ["upper", "lower"]},
               "x": {"$ref": "#/$defs/arrayRef"},
+              "y": {"$ref": "#/$defs/arrayRef"},
               "inner": {"$ref": "#/$defs/arrayRef"},
               "outer": {"$ref": "#/$defs/arrayRef"}
             }
@@ -291,6 +295,8 @@
               "side": {"enum": ["upper", "lower"]},
               "x0": {"$ref": "#/$defs/arrayRef"},
               "x1": {"$ref": "#/$defs/arrayRef"},
+              "y0": {"$ref": "#/$defs/arrayRef"},
+              "y1": {"$ref": "#/$defs/arrayRef"},
               "z": {"$ref": "#/$defs/arrayRef"}
             }
           }

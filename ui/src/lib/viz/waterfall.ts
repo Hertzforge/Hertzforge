@@ -185,19 +185,33 @@ export function stationOf(offsets: ArrayLike<number>, points: number, depths?: A
 	return out;
 }
 
-/** Where a value lands on the stage: x across, z up (null past the axis), station back. */
+/** Where a value lands on the stage: x across, z up (null past the axis), station or `y` back. */
 export interface StageMap {
 	x(v: number): number | null;
 	z(v: number): number | null;
 	depth(station: number): number;
+	/** On a stage of paths: the depth of a value on the `y` axis. */
+	y(v: number): number;
 }
 
-/** A map onto `STAGE` for these ranges; a level past the range is held at the top or floor. */
-export function stageMap(xRange: [number, number], logX: boolean, zRange: [number, number], logZ: boolean, stations: number): StageMap {
+/**
+ * A map onto `STAGE` for these ranges; a level past the range is held at the top or floor. With
+ * `yRange`, points stand at depths of their own on it (a stage of paths).
+ */
+export function stageMap(
+	xRange: [number, number],
+	logX: boolean,
+	zRange: [number, number],
+	logZ: boolean,
+	stations: number,
+	yRange?: [number, number]
+): StageMap {
+	const span = yRange ? yRange[1] - yRange[0] : 0;
 	return {
 		x: (v) => (drawable(v, logX) ? fraction(v, xRange, logX) * STAGE.x : null),
 		z: (v) => (drawable(v, logZ) ? Math.min(1, Math.max(0, fraction(v, zRange, logZ))) * STAGE.z : null),
-		depth: (s) => (stations > 1 ? (s / (stations - 1)) * STAGE.y : 0)
+		depth: (s) => (stations > 1 ? (s / (stations - 1)) * STAGE.y : 0),
+		y: (v) => (yRange && span > 0 ? Math.min(1, Math.max(0, (v - yRange[0]) / span)) * STAGE.y : 0)
 	};
 }
 
@@ -211,34 +225,35 @@ function quad(out: number[], a: number[], b: number[], c: number[], d: number[])
  * is left out.
  */
 export function zoneTriangles(
-	zone: { station: number; side: 'upper' | 'lower'; x: ArrayLike<number>; inner: ArrayLike<number>; outer?: ArrayLike<number> },
+	zone: { station: number; side: 'upper' | 'lower'; x: ArrayLike<number>; y?: ArrayLike<number>; inner: ArrayLike<number>; outer?: ArrayLike<number> },
 	map: StageMap,
 	out: number[] = []
 ): number[] {
-	const y = map.depth(zone.station);
+	const station = map.depth(zone.station);
 	const edge = zone.side === 'upper' ? STAGE.z : 0;
-	const at = (i: number): [number, number, number] | null => {
+	const at = (i: number): [number, number, number, number] | null => {
 		const x = map.x(zone.x[i]);
 		const a = map.z(zone.inner[i]);
 		const b = zone.outer ? map.z(zone.outer[i]) : edge;
-		return x === null || a === null || b === null ? null : [x, a, b];
+		const y = zone.y ? map.y(zone.y[i]) : station;
+		return x === null || a === null || b === null ? null : [x, y, a, b];
 	};
 	for (let i = 0; i + 1 < zone.x.length; i++) {
 		const p = at(i);
 		const q = at(i + 1);
 		if (!p || !q) continue;
-		quad(out, [p[0], y, p[1]], [q[0], y, q[1]], [q[0], y, q[2]], [p[0], y, p[2]]);
+		quad(out, [p[0], p[1], p[2]], [q[0], q[1], q[2]], [q[0], q[1], q[3]], [p[0], p[1], p[3]]);
 	}
 	return out;
 }
 
 /** Each line past an abort limit as a rectangle across its bin, from the limit to the top or floor. */
 export function exceedTriangles(
-	hit: { station: number; side: 'upper' | 'lower'; x0: ArrayLike<number>; x1: ArrayLike<number>; z: ArrayLike<number> },
+	hit: { station: number; side: 'upper' | 'lower'; x0: ArrayLike<number>; x1: ArrayLike<number>; y0?: ArrayLike<number>; y1?: ArrayLike<number>; z: ArrayLike<number> },
 	map: StageMap,
 	out: number[] = []
 ): number[] {
-	const y = map.depth(hit.station);
+	const station = map.depth(hit.station);
 	const edge = hit.side === 'upper' ? STAGE.z : 0;
 	for (let i = 0; i < hit.x0.length; i++) {
 		const a = map.x(hit.x0[i]);
@@ -247,7 +262,10 @@ export function exceedTriangles(
 		if (a === null || b === null || z === null) continue;
 		const lo = Math.max(0, Math.min(STAGE.x, a));
 		const hi = Math.max(0, Math.min(STAGE.x, b));
-		if (hi > lo) quad(out, [lo, y, z], [hi, y, z], [hi, y, edge], [lo, y, edge]);
+		const ya = hit.y0 ? map.y(hit.y0[i]) : station;
+		const yb = hit.y1 ? map.y(hit.y1[i]) : station;
+		// a path's rectangle runs along the path, so its two edges stand at their own depths
+		if (hi > lo || ya !== yb) quad(out, [a, ya, z], [b, yb, z], [b, yb, edge], [a, ya, edge]);
 	}
 	return out;
 }
