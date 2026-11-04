@@ -1,0 +1,86 @@
+{
+ "type": "response",
+ "id": 34,
+ "result": {
+  "report": {
+   "run_id": "m-0003",
+   "title": "Two-Axis Random",
+   "source": "SIM",
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 4096,
+    "df_hz": 2,
+    "lines": 8,
+    "loop_s": 2.25,
+    "actual": false
+   },
+   "shape": {
+    "controls": 2,
+    "drives": 2,
+    "space": "physical",
+    "dofs": null,
+    "shape": "square",
+    "labels": [
+     "Control X",
+     "Control Y"
+    ],
+    "drive_labels": [
+     "Shaker X",
+     "Shaker Y"
+    ]
+   },
+   "law": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null
+   },
+   "loops": 52,
+   "controls": [
+    {
+     "label": "Control X",
+     "rms": 0.5821,
+     "reference_rms": 0.5657,
+     "error_db": 0.25
+    },
+    {
+     "label": "Control Y",
+     "rms": 0.5528,
+     "reference_rms": 0.5657,
+     "error_db": -0.2
+    }
+   ],
+   "drives": [
+    {
+     "channel": 3,
+     "label": "Shaker X",
+     "rms_v": 0.8231,
+     "ceiling_vrms": 2,
+     "min_cap": 0.875
+    },
+    {
+     "channel": 4,
+     "label": "Shaker Y",
+     "rms_v": 0.7764,
+     "ceiling_vrms": 2,
+     "min_cap": 1
+    }
+   ],
+   "gates": {
+    "coherence_min": 0.962,
+    "coherence_floor": 0.5,
+    "condition_max": 12.5,
+    "condition_limit": 1000,
+    "passed": true
+   },
+   "override": null,
+   "end": {
+    "outcome": "completed",
+    "message": "The schedule finished.",
+    "at_s": 102.5,
+    "level_db": 0,
+    "trip": null
+   }
+  }
+ }
+}

@@ -43,6 +43,18 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-sdm",
     "hertzforge-shaker-db",
     "hertzforge-station",
+    // The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+    // choice, reviewed 2026-11-03: `hertzforge-random-laws` names no backend (its tests
+    // use the Sim as a fixture, which the Sim-leak lint already allows), and it brings
+    // the law host (the sandbox law files run in), the shared ratio-law math and the
+    // built-in MIMO laws (with the law SDK's plain types they are written against), all
+    // pure computation on the numbers they are handed. These are
+    // on LAW_CRATES, not IMPORTED_CONTROLLER_CRATES: written here, not imported.
+    "hertzforge-law-host",
+    "hertzforge-law-ratio-math",
+    "hertzforge-law-sdk",
+    "hertzforge-mimo-laws",
+    "hertzforge-random-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -97,7 +109,8 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// the control laws under `laws/` and the law host's test fixtures. Reviewed
 /// for license and hardware coupling when they came in: none names a backend
 /// (the catalog's tests use the Sim), and the guests can reach nothing but the
-/// numbers the host hands them. This crate reaches none of them yet. The
+/// numbers the host hands them. This crate reaches the catalog and what it needs
+/// (see REVIEWED_CONTROLLER_CRATES), never a guest crate. The
 /// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
 /// reviewed the same way: pure math on the stacks, no backend, synthetic plants
 /// in its tests.
@@ -326,7 +339,7 @@ fn every_package_built_from_this_repository_is_on_a_reviewed_list() {
     // This crate's allowlist is a subset of what the repository holds.
     let stray: Vec<&&str> = REVIEWED_CONTROLLER_CRATES
         .iter()
-        .filter(|n| !IMPORTED_CONTROLLER_CRATES.contains(*n))
+        .filter(|n| !IMPORTED_CONTROLLER_CRATES.contains(*n) && !LAW_CRATES.contains(*n))
         .collect();
     assert!(
         stray.is_empty(),

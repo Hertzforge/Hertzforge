@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 35,
+ "method": "laws.list",
+ "params": {
+  "world": "mimo"
+ }
+}

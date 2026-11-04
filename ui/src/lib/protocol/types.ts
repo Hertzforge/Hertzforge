@@ -367,7 +367,12 @@ export type RefusalReason =
 	| 'stale_revision'
 	| 'table_invalid'
 	| 'config_invalid'
-	| 'shaker_record_invalid';
+	| 'shaker_record_invalid'
+	// MIMO Random and the law catalog
+	| 'setup_invalid'
+	| 'gate_failed'
+	| 'law_import_failed'
+	| 'catalog_unavailable';
 
 export type ItemReason =
 	// channel table
@@ -409,7 +414,28 @@ export type ItemReason =
 	| 'weights_sum_not_positive'
 	| 'limit_unknown_channel'
 	| 'limit_rows_not_ascending'
-	| 'out_of_range';
+	| 'out_of_range'
+	// MIMO Random setup
+	| 'control_unknown_channel'
+	| 'drive_unknown_channel'
+	| 'duplicate_channel'
+	| 'no_drive_channel'
+	| 'transform_shape'
+	| 'transform_rank_deficient'
+	| 'transform_ill_conditioned'
+	| 'reference_shape'
+	| 'reference_too_large_inline'
+	| 'reference_not_hermitian'
+	| 'reference_not_psd'
+	| 'reference_repaired'
+	| 'reference_rank_above_drives'
+	| 'reference_file_unread'
+	| 'law_unknown'
+	| 'law_wrong_world'
+	| 'law_shape_not_supported'
+	| 'law_param_unknown'
+	| 'law_param_invalid'
+	| 'backend_not_selected';
 
 /** One validation finding, located by whichever of `channel`, `row` and `field` applies. */
 export interface ReportItem {
