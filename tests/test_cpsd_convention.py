@@ -108,7 +108,10 @@ def test_a_modal_response_exports_as_the_controller_forms_it(tmp_path):
     lines = np.linspace(10.0, 200.0, 96)
     lam, phi = eigh(stiffness, mass)
     damping = np.array([0.01, 0.02, 0.03, 0.01])
-    omega_n = np.sqrt(lam)
+    # the free-free chain's rigid mode: its zero comes back slightly negative
+    # on Linux's LAPACK and non-negative on a Mac's, and the root of the
+    # first is NaN
+    omega_n = np.sqrt(np.clip(lam, 0.0, None))
     shapes = ShapeSet(omega_n / (2 * np.pi), damping, dofs, phi.T,
                       mass_unit='kg')
     cross = 0.7 * np.exp(1j * lines / 40.0)
