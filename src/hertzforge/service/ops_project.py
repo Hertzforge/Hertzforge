@@ -245,9 +245,8 @@ def _shape_view(project: Any, shapes_name: str, geometry_name: str) -> dict:
     """A shape set's modes on a geometry, each a translation per node."""
     shapes, geometry = project[shapes_name], project[geometry_name]
     rows, triangles, lines = drawn_mesh(geometry)
-    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]),
-                    translations(geometry, shapes.coordinate,
-                                  shapes.shape_matrix[k], rows))
+    moved = translations(geometry, shapes.coordinate, shapes.shape_matrix, rows)
+    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[k])
              for k in range(shapes.num_shapes)]
     return v.shape3d(f'{shapes_name} on {geometry_name}',
                      'm' if geometry.units_defined else 'undefined',

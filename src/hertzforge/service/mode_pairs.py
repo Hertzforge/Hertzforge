@@ -14,22 +14,28 @@ from .mesh import drawn_mesh
 
 def translations(geometry: Any, dofs: Any, values: np.ndarray,
                   rows: np.ndarray) -> np.ndarray:
-    """One value per DOF as a translation per drawn node, [N, 3], complex
-    when the values are. Nodes with no measured DOF stay where they are."""
+    """One value per DOF as a translation per drawn node, [N, 3], or
+    [modes, N, 3] for a matrix of `values` with a row per mode, complex
+    when the values are. Nodes with no measured DOF stay where they are.
+    The DOFs are parsed once for all the modes."""
+    from scipy.sparse import csr_array
+
     from hertzforge.deform import dof_directions
 
     dof_rows, dof_vectors, dof_used = dof_directions(geometry, dofs)
-    values = np.asarray(values)[dof_used]
-
-    def spread(part: np.ndarray) -> np.ndarray:
-        return np.stack([np.bincount(dof_rows, dof_vectors[:, axis] * part,
-                                     minlength=geometry.num_nodes)
-                         for axis in range(3)], axis=1)[rows]
-
-    if np.iscomplexobj(values):
-        return spread(values.real) + 1j * spread(values.imag)
-    return spread(values)
-
+    values = np.asarray(values)[..., dof_used]
+    kept = np.asarray(rows)
+    # [used DOFs, 3 * drawn nodes]: each DOF's unit vector on its node, so one product spreads every mode
+    place = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    place[kept] = np.arange(len(kept))
+    drawn = place[dof_rows]
+    on = drawn >= 0
+    entries = dof_vectors[on]
+    columns = (3 * drawn[on][:, None] + np.arange(3)[None, :]).ravel()
+    lines = np.repeat(np.flatnonzero(on), 3)
+    spread = csr_array((entries.ravel(), (lines, columns)), shape=(len(dof_rows), 3 * len(kept)))
+    moved = np.asarray(values @ spread)
+    return moved.reshape(*values.shape[:-1], len(kept), 3)
 
 
 def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
@@ -38,27 +44,27 @@ def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
     view it `selects`: the row set's modes as `modes` and the column set's
     as `overlays`, each a translation per survey node, with each pair's
     `overlay_phase`, the angle that aligns the column mode with the row
-    mode (`core.shapes.alignment_factor`: a real mode is defined only up to
+    mode (`core.shapes.alignment_phases`: a real mode is defined only up to
     its sign, a complex one up to a rotation), as translations of the geometry's nodes. Without a geometry the
     matrix comes alone."""
-    from hertzforge.core.shapes import alignment_factor
+    from hertzforge.core.shapes import alignment_phases
 
     if geometry is None:
         return [matrix]
     drawn, triangles, lines = drawn_mesh(geometry)
 
-    def on_survey(shapes: Any, k: int) -> np.ndarray:
-        return translations(geometry, shapes.coordinate, shapes.shape_matrix[k], drawn)
-
-    modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]),
-                    on_survey(rows, r)) for r in row_modes]
+    row_modes, column_modes = [int(r) for r in row_modes], [int(c) for c in column_modes]
+    moved = translations(geometry, rows.coordinate, rows.shape_matrix[row_modes], drawn)
+    modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]), moved[k])
+             for k, r in enumerate(row_modes)]
     named = matrix['columns']['label']
-    overlays = [v.mode(int(c) + 1, float(columns.frequency[c]),
+    moved = (moved if columns is rows and column_modes == row_modes else
+             translations(geometry, columns.coordinate, columns.shape_matrix[column_modes], drawn))
+    overlays = [v.mode(c + 1, float(columns.frequency[c]),
                        float(columns.damping[c]) if columns.damping[c] > 0 else None,
-                       on_survey(columns, int(c)), label=f'{named} mode {int(c) + 1}')
-                for c in column_modes]
-    phase = np.array([[np.angle(alignment_factor(rows, r, columns, int(c)))
-                       for c in column_modes] for r in row_modes], dtype=np.float32)
+                       moved[k], label=f'{named} mode {c + 1}')
+                for k, c in enumerate(column_modes)]
+    phase = alignment_phases(rows, row_modes, columns, column_modes).astype(np.float32)
     matrix['selects'] = 'shape3d'
     shape = v.shape3d(matrix['title'], 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[drawn], modes,
