@@ -13,9 +13,9 @@ from hertzforge.service.ops_sine_shock import OPERATIONS as SHOCK_OPERATIONS
 from hertzforge.service.ops_stages import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
+from .conftest import wire_views
 from .test_compare import imported
 from .test_compare import run as run_compare
-from .test_ops import wire_views
 from .test_sine_shock import history
 
 OPS = {op.id: op for op in OPERATIONS + SHOCK_OPERATIONS}

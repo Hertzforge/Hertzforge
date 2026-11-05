@@ -699,7 +699,6 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.tone_readout', title='Tone Readout', workspace='sine',
-        accepts='project',
         summary='The tone nearest a frequency read off one record of an autospectrum: its '
                 'amplitude beside the spike it stands at, the floor and the window. '
                 'Blank starts at the tallest line.',
@@ -707,33 +706,28 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=tone_readout),
     Operation(
         id='project.transmissibility', title='Transmissibility', workspace='random',
-        accepts='project',
         summary='The ratio of the two autospectra behind one record of an FRF computed '
                 'here, beside H1 and the band its random error puts about it, read at a '
                 'line. Blank starts at the resonance.',
         params=(FRF, RECORD, AT), outputs=('spectrum', 'reading'), run=transmissibility),
     Operation(
         id='project.confidence_band', title='Confidence', workspace='random',
-        accepts='project',
         summary='The chi-square band the true spectrum lies in about one record of an '
                 'averaged PSD, at 90 or 95 %. A count of 0 takes the spectrum\'s own.',
         params=(PSD, RECORD, LEVEL, DOF), outputs=('spectrum', 'reading'),
         run=confidence_band),
     Operation(
         id='project.partial_coherence', title='Partial Coherence', workspace='random',
-        accepts='project',
         summary='Which reference explains a response once the others are removed, how '
                 'alike the references are, and how many drives the test had in effect.',
         params=(COHERENCE, RECORD), outputs=('spectrum', 'reading'), run=partial_coherence),
     Operation(
         id='project.rigid_body_residual', title='Rigid-Body Residual', workspace='modal',
-        accepts='project',
         summary='What the six rigid-body motions leave unexplained of a density '
                 'transformed through rigid shapes, and the frequency they hold to.',
         params=(TRANSFORMED,), outputs=('spectrum', 'reading'), run=rigid_body_residual),
     Operation(
         id='project.field_limit', title='Field Limit', workspace='specify',
-        accepts='project',
         summary='The statistical limit over a set of measured PSDs or SRSs and the '
                 'straight-line envelope over it, before a specification is derived. '
                 'A stated deviation of 0 is estimated from the records.',
@@ -742,26 +736,23 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=field_limit),
     Operation(
         id='project.octave_bands', title='Octave Bands', workspace='random',
-        accepts='project',
         summary='The octave bands a spectrum would be integrated onto, previewed as steps '
                 'over the narrowband record, before Compute Octave Bands makes them.',
         params=(DENSITY, RECORD, BANDS), outputs=('spectrum', 'reading'), run=octave_bands),
     Operation(
         id='project.sine_profile', title='Sine Profile', workspace='sine',
-        accepts='project',
         summary='A sine tone read back as segments of constant displacement, velocity and '
                 'acceleration, every crossover checked. Blank tone and channel take the '
                 'first.',
         params=(SINE, TONE, CONTROL, SLOPE, OWN_LEVEL), outputs=('spectrum', 'reading'),
         run=sine_profile),
     Operation(
-        id='project.cmif', title='CMIF', workspace='modal', accepts='project',
+        id='project.cmif', title='CMIF', workspace='modal',
         summary='The singular values of an FRF matrix at every line; peaks mark the '
                 'modes. Records "1-8"; blank for every record.',
         params=(FRF, RECORDS), outputs=('spectrum',), run=cmif),
     Operation(
         id='project.drive_points', title='Drive Points', workspace='modal',
-        accepts='project',
         summary='Only the FRFs whose response and reference are one DOF, or the '
                 'autospectra of a cross-spectral matrix.',
         params=(DIAGONAL, COMPONENT), outputs=('spectrum',), run=drive_points),

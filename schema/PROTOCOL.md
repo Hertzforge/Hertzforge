@@ -322,18 +322,15 @@ The analysis service describes each operation; the shell builds the panel from t
 A feature that fits this pattern needs no TypeScript.
 
 ```
-{"id":"random.psd_vs_spec","title":"PSD Against Specification","workspace":"random",
- "accepts":"random_run","summary":"one sentence",
- "params":[{"name":"tolerance_db","label":"Tolerance","type":"number","unit":"dB",
-            "default":3,"min":0,"max":12,"step":0.5},
-           {"name":"channel","label":"Channel","type":"enum",
-            "options":[{"value":"ch1","label":"Control 1"}],"default":"ch1"}],
- "outputs":["spectrum","reading"]}
+{"id":"project.fit_modes","title":"Fit Modes","workspace":"modal","summary":"one sentence",
+ "params":[{"name":"frf","label":"FRF","type":"enum","options_from":"verb:fit_modes"},
+           {"name":"low_hz","label":"From","type":"number","unit":"Hz","default":0,"min":0},
+           {"name":"high_hz","label":"To","type":"number","unit":"Hz","default":1000,"min":0},
+           {"name":"count","label":"Modes, at most","type":"integer","default":10,"min":1,"max":60}],
+ "outputs":["shape3d","reading"]}
 ```
 
-Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose options depend
-on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
-`channels` list returned by `dataset.open`.
+Param `type`: `number`, `integer`, `enum`, `boolean`, `string`.
 
 An `enum` that names one of the project's objects sets `"options_from":"objects:<kind>"`, or
 `"objects:<kind>|<kind>"` for more than one kind; the shell fills it with the names of the open
@@ -373,13 +370,15 @@ selection; they differ in which operations their Actions frame offers. An operat
 needs (Plot Records, View Table, Save As, the averaging, filter and truncation settings, a table's
 cell edit) says `"everywhere": true` and is offered in every analysis module, its `workspace`
 naming its home.
-`accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
-the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
-on the connection's own project: `op.run` names no `handle`, and is refused while no project is
-open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`, and
-the project counts as modified when the operation added an object. These operations are the
-core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes so far). A view drawn
-by a verb that adds an object offers no in-view choice, since choosing would run the verb again.
+Every operation runs on the connection's own project, and `op.run` is refused while no project
+is open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`,
+and the project counts as modified when the operation added an object. The operations are the
+core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes and the rest); the
+shell shows a tool only when the project holds something it runs on ("tools follow the data"). A
+view drawn by a verb that adds an object offers no in-view choice, since choosing would run the
+verb again. Until 2026-11-05 the service also offered a catalog of built-in datasets (the plate
+runs and three finite element models) with operations of their own; those are now example
+projects downloaded from hertzforge.com and opened like any other file.
 
 ## Methods
 
@@ -387,9 +386,8 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 
 | Method | Params | Result |
 |---|---|---|
-| `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
-| `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
-| `op.run` | `{"op","handle"?,"params":{...}}` | `{"views":[view...],"project"?}` |
+| `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
+| `op.run` | `{"op","params":{...}}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |

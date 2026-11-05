@@ -366,8 +366,6 @@ export type ViewKind = View['view'];
  */
 export type Workspace = 'acquire' | 'simulate' | 'signals' | 'random' | 'shock' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
-export type DatasetKind = 'random_run' | 'modal_model' | 'modal_run';
-
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 
 export interface ParamOption {
@@ -604,32 +602,13 @@ export interface OperationDescriptor {
 	workspace: Workspace;
 	/** Offered in every analysis module, not only its home: an act any study needs. */
 	everywhere?: boolean;
-	/** A dataset kind, or `project` for an operation on the connection's own project. */
-	accepts: DatasetKind | 'project';
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
 }
 
-export interface DatasetInfo {
-	id: string;
-	kind: DatasetKind;
-	title: string;
-	description?: string;
-}
-
 export interface Catalog {
 	operations: OperationDescriptor[];
-	datasets: DatasetInfo[];
-}
-
-export interface OpenedDataset {
-	handle: string;
-	/** `project` for the connection's own project, which Analyze shows as a dataset. */
-	kind: DatasetKind | 'project';
-	title: string;
-	summary: Record<string, unknown>;
-	channels: ParamOption[];
 }
 
 export interface OpResult {

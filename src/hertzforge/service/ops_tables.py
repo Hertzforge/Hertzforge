@@ -154,28 +154,27 @@ def shape_values(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.table', title='View Table', workspace='signals', everywhere=True, accepts='project',
+        id='project.table', title='View Table', workspace='signals', everywhere=True,
         summary='An object\'s table: a shape set\'s modes, a channel table\'s columns, or '
                 'matched modes beside both sets\' parameters.',
         params=(TABLED,), outputs=('table',), run=view_table),
     Operation(
-        id='project.match_modes', title='Match Modes', workspace='modal', accepts='project',
+        id='project.match_modes', title='Match Modes', workspace='modal',
         summary='Pair each mode of the basis set with the compared set\'s mode of highest '
                 'MAC, at or above the lowest MAC given, and keep the pairs as an object.',
         params=(FIRST, SECOND, THRESHOLD, NAME), outputs=('table',), run=match_modes),
     Operation(
-        id='project.add_matches', title='Add Matches', workspace='modal', accepts='project',
+        id='project.add_matches', title='Add Matches', workspace='modal',
         summary='Keep the picked MAC squares as matched modes of this pair of sets, with the '
                 'MAC as the comparison shows it; the Matched Modes object is created on first '
                 'use and added to after.',
         params=(FIRST, SECOND, PAIRS), outputs=('table',), run=add_matches),
     Operation(
         id='project.delete_matches', title='Delete Matches', workspace='modal',
-        accepts='project',
         summary='Take rows out of a set of matched modes, numbered as its table shows them.',
         params=(MATCHED, ROWS), outputs=('table',), run=delete_matches, edits=True),
     Operation(
-        id='project.shape_values', title='Shape Values', workspace='modal', accepts='project',
+        id='project.shape_values', title='Shape Values', workspace='modal',
         summary='A shape set\'s values at a choice of DOFs: the shapes, or the response or '
                 'reference transformation the modal transform applies.',
         params=(SHAPES, FORM, DOFS), outputs=('table',), run=shape_values),

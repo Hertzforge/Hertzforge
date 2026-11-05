@@ -142,7 +142,7 @@ def test_unknown_objects_and_an_empty_project_are_refused(plate):
 def test_the_fill_places_each_object_on_a_distinct_param():
     from hertzforge.service.descriptors import Operation, Param
 
-    op = Operation(id='x.y', title='Y', workspace='signals', accepts='project', summary='',
+    op = Operation(id='x.y', title='Y', workspace='signals', summary='',
                    params=(Param('first', 'First', 'enum', options_from='objects:psd'),
                            Param('second', 'Second', 'enum', options_from='objects:psd'),
                            Param('extra', 'Extra', 'enum', default='',

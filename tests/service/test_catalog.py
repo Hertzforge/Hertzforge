@@ -24,32 +24,22 @@ def test_catalog_validates(catalog, validate):
         validate(op, 'operation')
 
 
-def test_catalog_names_every_operation_and_dataset(catalog):
+def test_catalog_names_every_operation(catalog):
     ids = {op['id'] for op in catalog['operations']}
     assert ids == {op.id for op in OPERATIONS}
-    # the tools on the demonstration datasets, by name; the project's own are
-    # many and each is tested where it is defined
-    assert {'random.psd_vs_spec', 'random.error_db', 'random.waterfall',
-            'modal.modes', 'modal_run.waterfall', 'modal_run.modes',
-            'modal_run.ods', 'modal_run.mac', 'modal_run.motion',
-            'modal_run.resynthesis'} <= ids
-    assert all(op.accepts == 'project' for op in OPERATIONS if op.id.startswith('project.'))
-    kinds = {d['kind'] for d in catalog['datasets']}
-    assert kinds == {'random_run', 'modal_model', 'modal_run'}
-    assert 'plate-random' in {d['id'] for d in catalog['datasets']}
+    assert set(catalog) == {'operations'}
+    # a few by name; each is tested where it is defined
+    assert {'project.plot', 'project.waterfall', 'project.fit_modes', 'project.mac',
+            'project.mode_shapes', 'project.compute_psds'} <= ids
+    assert all(op['id'].startswith('project.') for op in catalog['operations'])
 
 
-def test_channel_param_comes_from_the_dataset(catalog):
-    taking = [op['id'] for op in catalog['operations']
-              if any(p['name'] == 'channel' for p in op['params'])]
-    assert taking == ['random.psd_vs_spec', 'random.error_db']
+def test_an_object_param_lists_no_options_of_its_own(catalog):
     for op in catalog['operations']:
-        channel = next((p for p in op['params'] if p['name'] == 'channel'), None)
-        if channel is None:
-            continue
-        assert channel['type'] == 'enum'
-        assert channel['options_from'] == 'channels'
-        assert 'options' not in channel
+        for param in op['params']:
+            if 'options_from' in param:
+                assert param['type'] == 'enum'
+                assert 'options' not in param
 
 
 def test_every_module_has_its_tools_and_the_shared_ones_say_so(catalog):
@@ -73,41 +63,57 @@ def test_every_module_has_its_tools_and_the_shared_ones_say_so(catalog):
 
 def test_workspaces_and_outputs(catalog):
     by_id = {op['id']: op for op in catalog['operations']}
-    assert by_id['random.psd_vs_spec']['workspace'] == 'random'
-    assert by_id['random.psd_vs_spec']['outputs'] == ['spectrum', 'reading']
-    assert 'everywhere' not in by_id['random.psd_vs_spec']
-    assert by_id['random.error_db']['outputs'] == ['spectrum']
-    assert by_id['modal.modes']['workspace'] == 'modal'
-    assert by_id['modal.modes']['outputs'] == ['shape3d']
+    assert by_id['project.fit_modes']['workspace'] == 'modal'
+    assert by_id['project.fit_modes']['outputs'] == ['shape3d', 'reading']
+    assert 'everywhere' not in by_id['project.fit_modes']
+    assert by_id['project.waterfall']['workspace'] == 'signals'
+    assert by_id['project.waterfall']['outputs'] == ['waterfall']
+    assert by_id['project.waterfall']['everywhere'] is True
+    assert by_id['project.mode_shapes']['outputs'] == ['shape3d']
 
 
 OPS = {op.id: op for op in OPERATIONS}
 
 
-def test_resolve_fills_defaults_and_the_first_channel():
-    values = OPS['random.psd_vs_spec'].resolve({}, ['a', 'b'])
-    assert values == {'channel': 'a', 'tolerance_db': 3.0}
-    assert OPS['modal.modes'].resolve({}, []) == {'count': 6, 'rigid': False}
+OBJECTS = {'Noise': 'time_history', 'PSDs': 'psd', 'Shock': 'srs',
+           'Required': 'shock_specification'}
+VERBS = {'Noise': ['compute_srs', 'compute_psds'], 'PSDs': []}
+
+
+def test_resolve_fills_defaults_and_the_first_object():
+    values = OPS['project.waterfall'].resolve({}, objects=OBJECTS)
+    assert values == {'data': 'Noise', 'component': 'magnitude', 'page': 1, 'quantity': ''}
+    values = OPS['project.compute_srs'].resolve({}, objects=OBJECTS, verbs=VERBS)
+    assert values['source'] == 'Noise'
+    assert set(values) == {'source', 'per_octave', 'q', 'kind'}
 
 
 @pytest.mark.parametrize('op, params, words', [
-    ('random.psd_vs_spec', {'channel': 'z'}, "'z', which is not one of"),
-    ('random.psd_vs_spec', {'tolerance_db': 13}, 'the most it takes is 12'),
-    ('random.psd_vs_spec', {'tolerance_db': -1}, 'the least it takes is 0'),
-    ('random.psd_vs_spec', {'tolerance_db': '3'}, "must be a number, not the string '3'"),
-    ('random.psd_vs_spec', {'tolerance_db': True}, 'must be a number'),
-    ('random.psd_vs_spec', {'level': 1}, "no param named 'level'"),
-    ('modal.modes', {'count': 2.5}, 'whole number'),
-    ('modal.modes', {'count': 0}, 'the least it takes is 1'),
-    ('modal.modes', {'rigid': 1}, 'true or false'),
+    ('project.compute_srs', {'kind': 'z'}, "'z', which is not one of"),
+    ('project.compute_srs', {'per_octave': 49}, 'the most it takes is 48'),
+    ('project.compute_srs', {'per_octave': 0}, 'the least it takes is 1'),
+    ('project.compute_srs', {'per_octave': 2.5}, 'whole number'),
+    ('project.compute_srs', {'q': '3'}, "must be a number, not the string '3'"),
+    ('project.compute_srs', {'q': True}, 'must be a number'),
+    ('project.compute_srs', {'q': 0.1}, 'the least it takes is 0.5'),
+    ('project.compute_srs', {'level': 1}, "no param named 'level'"),
+    ('project.waterfall', {'data': 'Nope'}, "'Nope', which is not one of"),
+    ('project.srs_points', {'limits': 1}, 'true or false'),
 ])
 def test_resolve_refuses_with_the_param_named(op, params, words):
     with pytest.raises(ProtocolError) as caught:
-        OPS[op].resolve(params, ['a', 'b'])
+        OPS[op].resolve(params, objects=OBJECTS, verbs=VERBS)
     assert caught.value.code == 'bad_request'
     assert words in caught.value.message
 
 
+def test_resolve_refuses_an_object_the_project_lacks():
+    with pytest.raises(ProtocolError) as caught:
+        OPS['project.mac'].resolve({}, objects=OBJECTS, verbs=VERBS)
+    assert caught.value.code == 'refused'
+    assert 'needs a shape set' in caught.value.message
+
+
 def test_resolve_refuses_params_that_are_not_an_object():
     with pytest.raises(ProtocolError, match='must be an object'):
-        OPS['modal.modes'].resolve([1], [])
+        OPS['project.waterfall'].resolve([1], objects=OBJECTS)

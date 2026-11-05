@@ -10,7 +10,6 @@
 	interface Props {
 		params: ParamDescriptor[];
 		values: ParamValues;
-		channels?: ParamOption[];
 		/** Show errors only after the user has touched a field or tried to run. */
 		showAllErrors?: boolean;
 		layout?: 'stack' | 'row';
@@ -23,7 +22,6 @@
 	let {
 		params,
 		values = $bindable(),
-		channels = [],
 		showAllErrors = false,
 		layout = 'stack',
 		disabled = false,
@@ -37,7 +35,7 @@
 
 	function errorFor(p: ParamDescriptor): string | null {
 		if (!showAllErrors && !touched[p.name]) return null;
-		return validate(p, values[p.name], channels);
+		return validate(p, values[p.name]);
 	}
 
 	function numberText(p: ParamDescriptor): string {
@@ -80,7 +78,7 @@
 
 	/** Short option lists read better as a segmented control than a menu. */
 	function segmented(p: ParamDescriptor): boolean {
-		const opts = optionsFor(p, channels);
+		const opts = optionsFor(p);
 		return opts.length > 0 && opts.length <= 3 && opts.every((o) => o.label.length <= 12);
 	}
 </script>
@@ -141,7 +139,7 @@
 						</div>
 					</div>
 				{:else if p.type === 'enum'}
-					{@const opts = optionsFor(p, channels)}
+					{@const opts = optionsFor(p)}
 					{#if segmented(p)}
 						<div class="seg" role="radiogroup" aria-labelledby={id} {id} data-testid={tid}>
 							{#each opts as o (o.value)}

@@ -59,6 +59,18 @@
     box-shadow: 0 0 48px rgba(22, 143, 255, 0.16), 0 24px 64px rgba(0, 0, 0, 0.7);
   }
   .demo figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 0.9em; }
+  .examples { margin: 2.6em auto 0; max-width: 760px; text-align: left; }
+  .examples h2 { font-size: 1.1rem; margin: 0 0 0.3em; color: var(--fg); }
+  .examples > p { font-size: 0.95rem; }
+  .examples ul { list-style: none; padding: 0; margin: 0.9em 0 0; display: grid; gap: 0.55em; }
+  .examples li {
+    display: grid; grid-template-columns: 1fr auto; gap: 0.2em 1em; align-items: baseline;
+    padding: 0.6em 0.9em; border: 1px solid rgba(22, 143, 255, 0.25); border-radius: 8px;
+    background: rgba(22, 143, 255, 0.05);
+  }
+  .examples li span { grid-column: 1 / -1; color: var(--muted); font-size: 0.9rem; }
+  .examples a { font-weight: 600; text-decoration: none; }
+  .examples .size { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
   .soon { color: var(--fg); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.9rem; margin-top: 2.2em; }
   a { color: var(--accent); }
   a:hover { color: var(--accent-hi); }
@@ -87,6 +99,22 @@
     </video>
     <figcaption>The first working prototype, October 2026.</figcaption>
   </figure>
+  <section class="examples" aria-labelledby="examples-title">
+    <h2 id="examples-title">Example projects</h2>
+    <p>Hertzforge project files (<code>.hforge</code>) to open with File &rsaquo; Open or drop on the window. Every number in them was computed by Hertzforge itself.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-random-run.hforge">Plate random run</a><em class="size">9.8 MB</em>
+        <span>A random vibration controller run on a free plate: eight control channels against a specification with warning and abort limits, four force channels, and the PSDs, 1/6-octave PSDs and multiple coherence the controller computed.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-modal-run.hforge">Plate modal run</a><em class="size">4.0 MB</em>
+        <span>A modal survey of the same plate on a simulated plant: FRFs of eleven responses to two references, their multiple coherence and the time captures, with the survey geometry.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/free-plate.hforge">Free plate model</a><em class="size">0.3 MB</em>
+        <span>A free square plate of 144 shell elements and its 30 lowest normal modes, six of them rigid.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/quadcopter.hforge">Quadcopter model</a><em class="size">2.2 MB</em>
+        <span>A quadcopter of shells and beams, 1,422 nodes, and its 30 lowest normal modes.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/frame-wing.hforge">Frame with thick wing</a><em class="size">37 MB</em>
+        <span>A frame of solid bricks with a thick wing screwed across two uprights, 65,585 nodes and 46,256 elements, with its 12 lowest modes: the large case.</span></li>
+    </ul>
+  </section>
   <p class="soon">Coming soon</p>
   <p><a href="https://github.com/Hertzforge/Hertzforge">GitHub</a></p>
 </main>

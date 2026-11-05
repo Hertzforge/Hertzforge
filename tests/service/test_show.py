@@ -14,7 +14,7 @@ from hertzforge.core.shapes import ShapeSet
 from hertzforge.service import frames, projects, show
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 from .test_server import _session
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'

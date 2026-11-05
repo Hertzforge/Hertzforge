@@ -541,7 +541,7 @@ def main() -> None:
         {'type': 'hello', 'protocol': 'sds/1', 'service': 'analysis', 'version': '0.1.0'}) + '\n')
     (HERE / 'response_error.json').write_text(json.dumps(
         {'type': 'response', 'id': 8,
-         'error': {'code': 'not_found', 'message': 'No dataset named "plate-x"; catalog.list names the ones that exist.'}}) + '\n')
+         'error': {'code': 'not_found', 'message': "No operation named 'random.nope'; catalog.list names the ones that exist."}}) + '\n')
 
     for name, message in TEXT_GOLDENS.items():
         (HERE / f'{name}.json').write_text(

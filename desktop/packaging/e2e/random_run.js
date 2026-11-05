@@ -3,9 +3,10 @@
 // drives it, and every step reported to the app's log.
 //
 //   1. Both services connected, as the window opened.
-//   2. Random opens the plate random run and runs a tool on it; Modal opens the
-//      quadcopter model and lists its modes (the bundled Python, its test data and
-//      its cache folder).
+//   2. Two example projects (HERTZFORGE_E2E_FILES: the plate random run, then the
+//      quadcopter model, from scripts/make_examples.py) dropped on the window as a
+//      person drops them: Random shows the run's PSDs from the tree, Modal the
+//      model's modes (the bundled Python alone).
 //   3. Acquire & Control: take control, the simulator, a channel table, a short
 //      bench profile and schedule, apply, arm, start, proceed past the review hold,
 //      and the run completes.
@@ -81,21 +82,23 @@
 		const remote = performance.getEntriesByType('resource').map((e) => e.name).filter((u) => !/^(tauri|http:\/\/(tauri|ipc)\.localhost|ipc|ws:\/\/127\.0\.0\.1|data|blob):/.test(u));
 		check('nothing loaded from the network', remote.length === 0, remote.join(', '));
 
-		// 2. Random and Modal, on the bundled Python and its test data.
+		// 2. Random and Modal, on the example projects and the bundled Python.
+		const files = window.__HERTZFORGE_E2E_FILES__ ?? [];
+		check('the two example files are named', files.length === 2, files.join(', '));
+		const [runFile, modelFile] = files;
+		const drop = (p) => window.__TAURI__.event.emitTo({ kind: 'Webview', label: 'main' }, 'tauri://drag-drop', { paths: [p], position: { x: 40, y: 40 } });
 		await click('rail-random');
-		await click('dataset-plate-random', 60000);
-		await until('the tools of the plate run', () => q('[data-testid^="tool-"]:not([data-testid="tool-list"])'), 120000);
-		const tool = q('[data-testid^="tool-"]:not([data-testid="tool-list"])');
-		tool.click();
-		await verb('run-op').catch(async () => click('run-op'));
-		await until('a result', () => document.querySelectorAll('[data-testid="result-card"]').length > 0, 120000);
-		check('Random: the plate random run opens and a tool runs on it', true, `${tool.textContent.trim()} -> ${q('[data-testid="result-card"]').getAttribute('data-op')}`);
+		await drop(runFile);
+		await until('the plate run in the tree', () => visible(tid('object-Time History PSDs')), 120000);
+		await click('object-Time History PSDs');
+		await until('the PSDs drawn', () => visible(tid('selection-view')) && q('[data-testid="selection-view"] [data-testid="view-spectrum"]'), 120000);
+		check('Random: the plate random run opens and its PSDs are shown', true, text('selection-view').slice(0, 60));
 		await click('rail-modal');
-		await click('dataset-drone-fem', 60000);
-		await click('tool-modal.modes', 120000);
-		await verb('run-op').catch(async () => click('run-op'));
-		await until('the modes of the quadcopter', () => document.querySelectorAll('[data-testid="result-card"][data-op="modal.modes"]').length > 0, 120000);
-		check('Modal: the quadcopter model solves and shows its modes', true, 'modal.modes result');
+		await drop(modelFile);
+		await until('the quadcopter in the tree', () => visible(tid('object-Modes')), 120000);
+		await click('object-Modes');
+		await until('the modes of the quadcopter', () => visible(tid('mode-row-7')), 120000);
+		check('Modal: the quadcopter model opens and shows its modes', true, text('mode-row-7'));
 
 		// 3. Acquire & Control: one Random run on the simulator, to completion.
 		await click('rail-acquire');
