@@ -13,7 +13,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_solids import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 OPS = {op.id: op for op in OPERATIONS}
 
@@ -50,7 +50,7 @@ def block(project, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model')
 
 
 def test_a_new_geometry_is_empty_and_records_its_unit(project, validate):

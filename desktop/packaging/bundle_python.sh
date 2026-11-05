@@ -7,10 +7,9 @@
 #
 #     desktop/packaging/bundle_python.sh <output dir> [<target triple>]
 #
-# The output dir gets `python/` (the runtime) and `testdata/plate/` (the plate data
-# the catalog's demonstration datasets read, from scripts/fetch_testdata.sh). The
-# target triple defaults to this machine's. Nothing here runs at the app's run time:
-# the installed app downloads nothing.
+# The output dir gets `python/` (the runtime). The target triple defaults to this
+# machine's. Nothing here runs at the app's run time: the installed app downloads
+# nothing.
 #
 # Why not a PyInstaller freeze, as Visual Dynamics ships: its bootloader is
 # GPL-2.0 with a linking exception, and this runtime avoids the question. The
@@ -38,7 +37,7 @@ URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PB
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 WORK="$OUT/.work"
-rm -rf "$WORK" "$OUT/python" "$OUT/testdata"
+rm -rf "$WORK" "$OUT/python"
 mkdir -p "$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -183,14 +182,6 @@ find "$OUT/python" -type d -name __pycache__ -prune -exec rm -rf {} +
 # bundle that is read only (and later signed) never has bytecode written into it.
 "$PY" -m compileall -q -j 0 --invalidation-mode unchecked-hash "$LIB" >/dev/null
 
-# The plate test data the demonstration datasets read (the app points
-# HERTZFORGE_TESTDATA here).
-if [[ ! -f "$ROOT/testdata/plate/random.nc4" ]]; then
-  bash "$ROOT/scripts/fetch_testdata.sh"
-fi
-mkdir -p "$OUT/testdata"
-cp -R "$ROOT/testdata/plate" "$OUT/testdata/plate"
-
 # Proof it runs from where it is: the package imports and says its version.
 "$PY" -I -B -c "import hertzforge, hertzforge.service.server as s; s.preload(); print('hertzforge', hertzforge.__version__, 'imports')"
-echo "bundle_python: $(du -sh "$OUT/python" | cut -f1) runtime, $(du -sh "$OUT/testdata" | cut -f1) test data, in $OUT"
+echo "bundle_python: $(du -sh "$OUT/python" | cut -f1) runtime in $OUT"

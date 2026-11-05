@@ -13,7 +13,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_files import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 RUN = str(PLATE / 'random.nc4')

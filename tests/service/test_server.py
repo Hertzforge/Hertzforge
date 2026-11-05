@@ -1,16 +1,16 @@
-"""The service over a real socket: hello, the three methods, the errors,
-and an event loop that stays free while the work runs."""
+"""The service over a real socket: hello, its methods, the errors, and an
+event loop that stays free while the work runs."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
-import os
 import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from websockets.asyncio.client import connect
@@ -19,6 +19,8 @@ from websockets.exceptions import ConnectionClosed
 from hertzforge.service import __main__ as entry
 from hertzforge.service import frames
 from hertzforge.service.server import OPERATIONS, SWITCH_INTERVAL, Service, preload, start
+
+PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 
 
 class Client:
@@ -31,8 +33,12 @@ class Client:
         await self.socket.send(frames.encode_text(
             {'type': 'request', 'id': self.ident, 'method': method,
              'params': {} if params is None else params}))
-        frame = await self.socket.recv()
-        message = frames.decode(frame)
+        while True:
+            frame = await self.socket.recv()
+            message = frames.decode(frame)
+            # a long import reports progress events before its response
+            if message['type'] != 'event':
+                break
         assert message['id'] == self.ident
         return (message, frame) if raw else message
 
@@ -111,35 +117,34 @@ def test_smoke(validate):
         validate(catalog)
         validate(catalog['result'], 'catalog')
 
-        opened = await client.call('dataset.open', {'id': 'plate-random'})
+        opened = await client.call('project.import', {'path': str(PLATE / 'random.nc4')})
         validate(opened)
-        result = opened['result']
-        assert result['kind'] == 'random_run'
-        assert len(result['channels']) == 12
-        channel = result['channels'][1]['value']
-        for op in ('random.psd_vs_spec', 'random.error_db'):
+        names = [o['name'] for o in opened['result']['project']['objects']]
+        assert 'Time History' in names
+        for op in ('project.plot', 'project.waterfall'):
             response, frame = await client.call('op.run', {
-                'op': op, 'handle': result['handle'],
-                'params': {'channel': channel}}, raw=True)
+                'op': op, 'params': {'data': 'Time History'}}, raw=True)
             assert isinstance(frame, bytes)
             validate(wire(response))
             validate(wire(response['result'])['views'], 'views')
             seen[op] = response['result']['views']
 
-        model = (await client.call('dataset.open', {'id': 'drone-fem'}))['result']
-        assert model['kind'] == 'modal_model' and model['channels'] == []
+        await client.call('project.new', {'title': 'Survey'})
+        await client.call('project.import', {'path': str(PLATE / 'modal_spectra.nc4')})
+        await client.call('project.import', {'path': str(PLATE / 'test_geometry.npz')})
         response, frame = await client.call('op.run', {
-            'op': 'modal.modes', 'handle': model['handle'],
-            'params': {'count': 4}}, raw=True)
+            'op': 'project.fit_modes',
+            'params': {'frf': 'FRF', 'low_hz': 300, 'high_hz': 1300, 'count': 4}}, raw=True)
         validate(wire(response))
-        (view,) = response['result']['views']
-        assert len(view['modes']) == 4
-        assert view['nodes'].dtype.name == 'float32'
-        seen['modal.modes'] = view
+        shape = next(v for v in response['result']['views'] if v['view'] == 'shape3d')
+        assert 1 <= len(shape['modes']) <= 4
+        assert shape['nodes'].dtype.name == 'float32'
+        seen['project.fit_modes'] = shape
 
     imported = set()
     lag = asyncio.run(_session(check, imported))
-    assert seen['random.psd_vs_spec'][0]['series'][0]['name'].startswith('104Z+')
+    assert seen['project.plot'][0]['view'] == 'spectrum'
+    assert seen['project.waterfall'][0]['view'] == 'waterfall'
     # Nothing heavy was first imported while serving: that is what stalls the
     # loop on a cold machine (server.PRELOAD), however fast this one is.
     assert not imported, f'imported while serving: {sorted(imported)}'
@@ -148,37 +153,46 @@ def test_smoke(validate):
     assert lag < 0.1, f'event loop held for {lag:.3f} s'
 
 
-#: Run in a fresh interpreter (argv: HEAVY and the dataset ids, as JSON):
-#: preload as the entry point does, then open each dataset and run every
-#: operation it accepts through the Service, framing each result as serving
-#: does, and print the heavy modules imported for the first time after the
-#: preload.
+#: Run in a fresh interpreter (argv: HEAVY and the plate folder, as JSON):
+#: preload as the entry point does, then import the plate's runs into a
+#: project, show every object and run the operations a study reaches
+#: through the Service, framing each result as serving does, and print the
+#: heavy modules imported for the first time after the preload.
 _FIRST_IMPORTS = '''
 import asyncio, json, sys
-from hertzforge.service import frames, server
+from hertzforge.service import frames, projects, server
 
-heavy_packages, datasets = (json.loads(arg) for arg in sys.argv[1:])
+heavy_packages, plate = (json.loads(arg) for arg in sys.argv[1:])
 
 def heavy():
     return {name for name, module in sys.modules.items()
             if module is not None and name.split('.')[0] in heavy_packages}
 
+RUNS = (('project.plot', {'data': 'Time History'}),
+        ('project.waterfall', {'data': 'Time History'}),
+        ('project.compute_psds', {'history': 'Time History'}),
+        ('project.fit_modes', {'frf': 'FRF', 'low_hz': 300, 'high_hz': 1300, 'count': 4}),
+        ('project.mac', {}), ('project.mode_shapes', {}))
+
 async def serve():
     service = server.Service()
-    handles = {}
+    call = service.in_worker
     try:
-        for dataset in datasets:
-            opened = await service.dataset_open({'id': dataset}, handles)
-            kind = handles[opened['handle']].entry.kind
-            for op in service.operations.values():
-                if op.accepts != kind:
-                    continue
-                params = ({'channel': opened['channels'][1]['value']}
-                          if any(p.name == 'channel' for p in op.params) else {})
-                result = await service.op_run({'op': op.id, 'handle': opened['handle'],
-                                               'params': params}, handles)
-                await service.in_worker(frames.pack, {'type': 'response', 'id': 1,
-                                                      'result': result})
+        state = None
+        for name in ('random.nc4', 'modal_spectra.nc4', 'test_geometry.npz'):
+            state, _added = await call(projects.import_file, state,
+                                       {'path': f'{plate}/{name}'}, None)
+        project = state.project
+        for name in list(project):
+            shown = await call(projects.show, state, {'objects': [name]})
+            await call(frames.pack, {'type': 'response', 'id': 1, 'result': shown})
+        for op_id, given in RUNS:
+            op = service.operations[op_id]
+            values = op.resolve(
+                given, objects={n: projects.kind_of(o) for n, o in project.items()},
+                verbs={n: projects.verbs_of(project, n) for n in project})
+            views = await call(op.run, project, values)
+            await call(frames.pack, {'type': 'response', 'id': 1, 'result': {'views': views}})
     finally:
         service.close()
 
@@ -190,21 +204,17 @@ print(json.dumps(sorted(heavy() - before)))
 
 
 @pytest.mark.xdist_group('serving')
-def test_the_preload_leaves_nothing_heavy_to_import_while_serving(tmp_path):
-    """`server.PRELOAD` covers every dataset open and operation, from an empty
-    cache and from a full one. In a fresh interpreter: in this one, other
-    tests import modules first and would hide a module the list misses.
-    The frame-wing model is left out, as `PRELOAD` leaves out its first
-    build (about 30 s)."""
-    datasets = ['plate-random', 'plate-modal', 'drone-fem', 'plate-fem']
-    env = {**os.environ, 'HERTZFORGE_CACHE_DIR': str(tmp_path / 'cache')}
-    for cache in ('empty', 'full'):
-        done = subprocess.run(
-            [sys.executable, '-c', _FIRST_IMPORTS, json.dumps(HEAVY), json.dumps(datasets)],
-            check=False, env=env, capture_output=True, text=True, timeout=300)
-        assert done.returncode == 0, done.stderr[-2000:]
-        imported = json.loads(done.stdout.splitlines()[-1])
-        assert not imported, f'cache {cache}: imported while serving: {imported}'
+def test_the_preload_leaves_nothing_heavy_to_import_while_serving():
+    """`server.PRELOAD` covers reading the controller's files, showing what
+    they hold and the operations a study reaches. In a fresh interpreter:
+    in this one, other tests import modules first and would hide a module
+    the list misses."""
+    done = subprocess.run(
+        [sys.executable, '-c', _FIRST_IMPORTS, json.dumps(HEAVY), json.dumps(str(PLATE))],
+        check=False, capture_output=True, text=True, timeout=300)
+    assert done.returncode == 0, done.stderr[-2000:]
+    imported = json.loads(done.stdout.splitlines()[-1])
+    assert not imported, f'imported while serving: {imported}'
 
 
 def test_errors_name_the_cause(validate):
@@ -213,14 +223,11 @@ def test_errors_name_the_cause(validate):
         cases = [
             (('nope', {}), 'unknown_method', 'no method'),
             (('catalog.list', {'x': 1}), 'bad_request', "no 'x'"),
-            (('dataset.open', {}), 'bad_request', 'needs "id"'),
-            (('dataset.open', {'id': 'plate-x'}), 'not_found',
-             ('No dataset named "plate-x"; catalog.list names the ones that '
-              'exist.')),
-            (('op.run', {'op': 'random.nope', 'handle': 'h1'}), 'not_found',
-             "No operation named 'random.nope'"),
-            (('op.run', {'op': 'modal.modes', 'handle': 'h999'}), 'not_found',
-             "No open handle 'h999'"),
+            (('op.run', {'op': 'random.nope'}), 'not_found',
+             "No operation named 'random.nope'; catalog.list names the ones that exist."),
+            (('op.run', {'op': 'project.waterfall', 'handle': 'h1'}), 'bad_request',
+             "no 'handle'"),
+            (('op.run', {'op': 'project.waterfall'}), 'refused', 'none is open'),
         ]
         for (method, params), code, words in cases:
             message = await client.call(method, params)
@@ -228,16 +235,14 @@ def test_errors_name_the_cause(validate):
             assert message['error']['code'] == code, message
             assert words in message['error']['message']
 
-        drone = (await client.call('dataset.open', {'id': 'drone-fem'}))['result']
-        message = await client.call('op.run', {'op': 'random.error_db',
-                                               'handle': drone['handle']})
+        await client.call('project.import', {'path': str(PLATE / 'modal_spectra.nc4')})
+        message = await client.call('op.run', {'op': 'project.mac'})
         assert message['error']['code'] == 'refused'
-        assert 'random_run' in message['error']['message']
+        assert 'needs a shape set' in message['error']['message']
         message = await client.call('op.run', {
-            'op': 'modal.modes', 'handle': drone['handle'],
-            'params': {'count': 99}})
+            'op': 'project.fit_modes', 'params': {'count': 99}})
         assert message['error']['code'] == 'bad_request'
-        assert 'the most it takes is 24' in message['error']['message']
+        assert 'the most it takes is 60' in message['error']['message']
 
         # not a request: the connection is closed with the reason
         await socket.send(frames.encode_text({'type': 'hello'}))
@@ -249,12 +254,11 @@ def test_errors_name_the_cause(validate):
     asyncio.run(_session(check))
 
 
-def test_a_handle_belongs_to_its_connection():
+def test_a_project_belongs_to_its_connection():
     async def check(client, socket):
         await socket.recv()
-        handle = (await client.call('dataset.open',
-                                    {'id': 'plate-fem'}))['result']['handle']
-        return handle
+        opened = await client.call('project.import', {'path': str(PLATE / 'random.nc4')})
+        assert 'Time History' in [o['name'] for o in opened['result']['project']['objects']]
 
     service = Service()
 
@@ -264,12 +268,13 @@ def test_a_handle_belongs_to_its_connection():
         url = f'ws://127.0.0.1:{port}/'
         try:
             async with connect(url, max_size=None) as first:
-                handle = await check(Client(first), first)
+                await check(Client(first), first)
             async with connect(url, max_size=None) as second:
                 await second.recv()
                 message = await Client(second).call('op.run', {
-                    'op': 'modal.modes', 'handle': handle})
-                assert message['error']['code'] == 'not_found'
+                    'op': 'project.plot', 'params': {'data': 'Time History'}})
+                assert message['error']['code'] == 'refused'
+                assert 'none is open' in message['error']['message']
         finally:
             server.close()
             await server.wait_closed()

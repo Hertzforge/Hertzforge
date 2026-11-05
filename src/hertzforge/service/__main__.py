@@ -75,7 +75,7 @@ async def _serve(host: str, port: int, *, watch_stdin: bool = False) -> None:
     # starts a server in its own process keeps its own settings. The heavy
     # imports (the core, numpy and scipy, what the operations reach)
     # load before the port opens: a launcher that waits for the line below
-    # gets a service whose first dataset.open does not pay for them.
+    # gets a service whose first project.open does not pay for them.
     preload()
     sys.setswitchinterval(SWITCH_INTERVAL)
 

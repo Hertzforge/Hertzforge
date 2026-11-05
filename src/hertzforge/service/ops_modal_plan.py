@@ -21,9 +21,9 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param
-from .ops_modal_run import _translations, paired
+from .mesh import drawn_mesh
+from .mode_pairs import paired, translations
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
 from .protocol import refused
@@ -141,7 +141,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
     it back, as a click does in Visual Dynamics' pane."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length
 
-    drawn, triangles, lines = _mesh(geometry)
+    drawn, triangles, lines = drawn_mesh(geometry)
     xyz = np.asarray(geometry.node_xyz, dtype=float)
     row_of = {int(n): k for k, n in enumerate(geometry.node_id)}
     frames = places.frames
@@ -162,7 +162,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
     nodes = np.vstack([points, xyz[seat_rows], tips])
     shown = [v.mode(m + 1, float(shapes.frequency[m]),
                     float(shapes.damping[m]) if shapes.damping[m] > 0 else None,
-                    np.real(_translations(geometry, shapes.coordinate,
+                    np.real(translations(geometry, shapes.coordinate,
                                           shapes.shape_matrix[m], rows)))
              for m in modes]
     extra: dict[str, Any] = {}
@@ -510,7 +510,6 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.plan_instrumentation', title='Plan Instrumentation', workspace='modal',
-        accepts='project',
         summary='Choose accelerometers on a finite element model by Effective Independence, '
                 'tri-axial ones first, and read how well they tell the modes apart; Keep adds '
                 'the geometry, channel table and shapes. Surfaces are left out or put back by '
@@ -520,7 +519,6 @@ OPERATIONS = (
         outputs=('shape3d', 'reading', 'matrix', 'table'), run=plan_instrumentation),
     Operation(
         id='project.export_state_space', title='Export State-Space Model', workspace='modal',
-        accepts='project',
         summary='A shape set at a channel table\'s channels as the modal state-space model '
                 'Rattlesnake\'s state-space hardware loads, previewed at the drive points and '
                 'written to a .npz when a file is named.',
@@ -528,14 +526,13 @@ OPERATIONS = (
         run=export_state_space),
     Operation(
         id='project.project_onto_channels', title='Project onto Picked Channels',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='A shape set sampled at some rows of a channel table, numbered from 1 as its '
                 'table shows them, by the nearest node and its direction; added to the project.',
         params=(PROJECTED, TABLE, ROWS, TOLERANCE), outputs=('shape3d', 'reading'),
         run=project_onto_channels),
     Operation(
         id='project.projection_overlay', title='Animate the Projection', workspace='modal',
-        accepts='project',
         summary='A shape set on another geometry projected onto the basis set\'s DOFs, their '
                 'MAC, and a pair drawn on the basis geometry, the projected mode over the basis '
                 'mode.',

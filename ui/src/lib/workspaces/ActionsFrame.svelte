@@ -34,7 +34,7 @@
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 </script>
 
-{#if a.opened && a.onProject}
+{#if a.onProject}
 		{@const picked = app.project.selection.objects}
 		{@const kinds = picked.map((n) => app.project.summary?.objects.find((o) => o.name === n)?.kind)}
 		{@const fitPair = picked.length === 2 && kinds.includes('frf') && kinds.includes('shape_set')}
@@ -112,7 +112,7 @@
 		</section>
 {/if}
 
-	{#if a.op && a.opened && (a.onProject || tools.includes(a.op))}
+	{#if a.op && a.onProject}
 		<section class="block panel" aria-labelledby="op-title">
 			<div class="phead">
 				<h2 id="op-title">{a.op.title}</h2>
@@ -122,7 +122,6 @@
 			<ParamForm
 				params={a.params.filter((p) => !p.in_view)}
 				bind:values={a.values[a.op.id]}
-				channels={a.opened.channels}
 				showAllErrors={a.triedRun}
 				idPrefix={a.op.id.replace('.', '-')}
 			/>

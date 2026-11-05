@@ -11,7 +11,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_model import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS}
@@ -34,7 +34,7 @@ def run(project, op_id, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model')
 
 
 def test_a_geometry_is_drawn_on_its_own(project, validate):

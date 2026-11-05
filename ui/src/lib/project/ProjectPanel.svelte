@@ -111,13 +111,13 @@
 	{#if p.error}<p class="error" role="alert" data-testid="project-error">{p.error}</p>{/if}
 
 	{#if p.summary}
-		<button class="choice" class:on={app.analyze.onProject} aria-pressed={app.analyze.onProject} data-testid="project-select" onclick={() => app.analyze.selectProject()}>
+		<div class="choice on" data-testid="project-select">
 			<span class="ctitle">
 				{p.summary.title}
 				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
 			</span>
 			<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
-		</button>
+		</div>
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
 			{#if p.summary.objects.length}
 				{@const picked = p.selection.objects}

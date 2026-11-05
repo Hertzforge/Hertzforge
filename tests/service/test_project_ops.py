@@ -15,7 +15,7 @@ from hertzforge.service.ops_project import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 from hertzforge.service.server import Service, start
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS}
@@ -65,7 +65,6 @@ def test_an_options_source_is_channels_or_objects_of_named_kinds(source):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.accepts == 'project'
 
 
 def test_a_waterfall_draws_any_data_object(plate, validate):

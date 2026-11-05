@@ -28,8 +28,8 @@ from hertzforge.core.sensor_catalog import CATALOG
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import chosen_records
-from .ops_random import FREQUENCY, NAMES, ROLES, _sig, _spec_line
 from .protocol import refused
+from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
 
 # ---- channel tables ------------------------------------------------------------------
@@ -467,13 +467,13 @@ def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
         if r is None:
             continue
         lines.append(v.shaped(channel, 'reference', spec,
-                              *_spec_line(spec, r, np.real(spec.ordinate[r]))))
+                              *spec_line(spec, r, np.real(spec.ordinate[r]))))
         if channel == banded:
             for key in spec.LIMITS:
                 curve = spec.limits.get(key)
                 if curve is not None:
                     lines.append(v.shaped(f'{channel}: {NAMES[key]}', ROLES[key], spec,
-                                          *_spec_line(spec, r, np.real(curve[r]))))
+                                          *spec_line(spec, r, np.real(curve[r]))))
     units = {_density_unit(dim) for dim in draft.dims}
     plot = v.spectrum(f'{name}: {draft.num_channels} channel'
                       f'{"s" * (draft.num_channels != 1)}, bands of {banded}', FREQUENCY,
@@ -487,7 +487,7 @@ def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
                      else 'lines'), None, 'info')]
     if draft.form == 'breakpoints':
         for k, (channel, dim) in enumerate(zip(draft.channels, draft.dims, strict=True)):
-            rows.append(v.row(f'{channel} rms', _sig(draft.reading(k).rms), unit_text(dim),
+            rows.append(v.row(f'{channel} rms', sig(draft.reading(k).rms), unit_text(dim),
                               'info'))
     unset = draft.unset_pairs()
     stated = len(draft.pairable()) - len(unset)
@@ -737,17 +737,15 @@ def predict(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.new_channel_table', title='New Channel Table', workspace='geometry',
-        accepts='project',
         summary='An empty channel table, to fill in by hand: Add Channel adds its rows.',
         params=(TABLE_NAME,), outputs=('table', 'reading'), run=new_channel_table),
     Operation(
-        id='project.add_channels', title='Add Channel', workspace='geometry', accepts='project',
+        id='project.add_channels', title='Add Channel', workspace='geometry',
         summary='Blank channels added at the end of a channel table, numbered on from its '
                 'highest, to type into.',
         params=(TABLE, COUNT), outputs=('table', 'reading'), run=add_channels, edits=True),
     Operation(
         id='project.set_channel_cell', title='Set Channel Cell', workspace='geometry', everywhere=True,
-        accepts='project',
         summary='One cell of a channel table typed over, by row and column; a value the '
                 'column cannot hold is refused and the cell is unchanged. The tables edit '
                 'through it.',
@@ -755,20 +753,17 @@ OPERATIONS = (
         run=set_channel_cell, edits=True),
     Operation(
         id='project.set_sensor_model', title='Sensor Model', workspace='geometry',
-        accepts='project',
         summary='A channel\'s model picked from the sensor catalog: its maker fills a blank '
                 'Make, and a triax fills its other legs at the node.',
         params=(TABLE, ROW, MODEL), outputs=('table', 'reading'), run=set_sensor_model,
         edits=True),
     Operation(
         id='project.calibration_check', title='Calibration Dates', workspace='geometry',
-        accepts='project',
         summary='Each sensor\'s calibration expiration against the test\'s first and last '
                 'day: in date, expired, lapsing during the test, or no date given.',
         params=(TABLE, START, END), outputs=('table', 'reading'), run=calibration_check),
     Operation(
         id='project.create_specification', title='Create Specification', workspace='specify',
-        accepts='project',
         summary='A specification sheet at a channel table\'s control channels or picked rows, '
                 'written beside the table: breakpoints, cross terms and bands. Left blank, a '
                 'flat starter from 20 to 2000 Hz with ±3 and ±6 dB bands.',
@@ -776,21 +771,19 @@ OPERATIONS = (
         outputs=('spectrum', 'table', 'reading'), run=create_specification),
     Operation(
         id='project.edit_specification', title='Edit Specification', workspace='specify',
-        accepts='project',
         summary='A specification opened as a sheet, on every channel or the ones named, its '
                 'breakpoints, cross terms, bands or form changed, and written back in place.',
         params=(SPECIFICATION, CHANNELS, *SHEET), outputs=('spectrum', 'table', 'reading'),
         run=edit_specification, edits=True),
     Operation(
         id='project.set_breakpoint', title='Set Breakpoint', workspace='specify',
-        accepts='project',
         summary='One cell of a specification\'s breakpoint table typed over, by row and '
                 'column, and written into it. The breakpoint tables edit through it.',
         params=(SPECIFICATION, ROW, Param('column', 'Column', 'string', default='frequency'),
                 VALUE, ENTRY, CHANNELS),
         outputs=('spectrum', 'table', 'reading'), run=set_breakpoint, edits=True),
     Operation(
-        id='project.predict', title='Enter Prediction', workspace='report', accepts='project',
+        id='project.predict', title='Enter Prediction', workspace='report',
         summary='One response channel\'s predicted peaks entered into a predictions object, '
                 'which a report reads a measurement against.',
         params=(PREDICTIONS, DOF, QUANTITY, PEAKS, UNIT, LEVEL, REFERENCE, FROM, CUSTOMER,

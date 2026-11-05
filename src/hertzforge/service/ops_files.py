@@ -614,42 +614,40 @@ def import_text(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.save_as', title='Save As', workspace='signals', everywhere=True, accepts='project',
+        id='project.save_as', title='Save As', workspace='signals', everywhere=True,
         summary='Write one object to a file on the service\'s machine, as a Hertzforge object '
                 'or in a format another tool reads; a format that cannot hold the object is '
                 'refused, naming those that can.',
         params=(OBJECT, FORMAT, PATH, UNITS, CREATOR), outputs=('reading',), run=save_as),
     Operation(
         id='project.rattlesnake_preview', title='Preview a Rattlesnake Run',
-        workspace='signals', everywhere=True, accepts='project',
+        workspace='signals', everywhere=True,
         summary='One channel of a long run over its whole length, the window to import shaded '
                 'off the rest, and what importing that window and those channels would cost.',
         params=(RUN, PREVIEWED, STREAM, START, STOP, LAST, CHANNELS),
         outputs=('spectrum', 'reading', 'table'), run=rattlesnake_preview),
     Operation(
         id='project.import_rattlesnake_part', title='Import Part of a Rattlesnake Run',
-        workspace='signals', everywhere=True, accepts='project',
+        workspace='signals', everywhere=True,
         summary='Import a window of a run and a pick of its channels, reading only that part '
                 'of the file.',
         params=(RUN, START, STOP, LAST, CHANNELS), outputs=('reading',),
         run=import_rattlesnake_part),
     Operation(
         id='project.truncate_rattlesnake_file', title='Truncate Rattlesnake File',
-        workspace='signals', everywhere=True, accepts='project',
+        workspace='signals', everywhere=True,
         summary='Write a run cut to a window as a .nc4 of its own, with every channel and '
                 'setting as the file has them and its clock starting at zero.',
         params=(RUN, START, STOP, LAST, TARGET), outputs=('reading',),
         run=truncate_rattlesnake_file),
     Operation(
         id='project.text_preview', title='Preview Delimited Text', workspace='signals', everywhere=True,
-        accepts='project',
         summary='The layout the reader finds in a text file, and the head of the file read '
                 'with the corrections given, as the import would read it.',
         params=(TEXT, DELIMITER, DECIMAL, TIME, RATE, COLUMNS, NAMES, UNITS),
         outputs=('reading', 'table', 'table', 'spectrum'), run=text_preview),
     Operation(
         id='project.import_text', title='Import Delimited Text', workspace='signals', everywhere=True,
-        accepts='project',
         summary='Import a text file as a time history, with the layout the reader found '
                 'corrected where it is wrong.',
         params=(TEXT, DELIMITER, DECIMAL, TIME, RATE, COLUMNS, NAMES, UNITS),

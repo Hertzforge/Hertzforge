@@ -1,7 +1,6 @@
-"""Operations on the connection's own project (`accepts: "project"`):
-each param that names an object lists the project's objects of the kinds
-it takes (`options_from: "objects:<kind>"`), and each operation is one of
-the core's verbs. A verb that adds an object returns a view of what it
+"""Operations on the connection's own project: each param that names an
+object lists the project's objects of the kinds it takes (`options_from:
+"objects:<kind>"`), and each operation is one of the core's verbs. A verb that adds an object returns a view of what it
 added; the server returns the project's summary beside the views.
 """
 
@@ -12,9 +11,9 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param, Workspace
-from .ops_modal_run import _translations
+from .mesh import drawn_mesh
+from .mode_pairs import translations
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
@@ -245,9 +244,9 @@ def _geometry(project: Any) -> str | None:
 def _shape_view(project: Any, shapes_name: str, geometry_name: str) -> dict:
     """A shape set's modes on a geometry, each a translation per node."""
     shapes, geometry = project[shapes_name], project[geometry_name]
-    rows, triangles, lines = _mesh(geometry)
+    rows, triangles, lines = drawn_mesh(geometry)
     modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]),
-                    _translations(geometry, shapes.coordinate,
+                    translations(geometry, shapes.coordinate,
                                   shapes.shape_matrix[k], rows))
              for k in range(shapes.num_shapes)]
     return v.shape3d(f'{shapes_name} on {geometry_name}',
@@ -349,7 +348,7 @@ def mac(project: Any, params: dict[str, Any]) -> list[dict]:
     shows two shape sets' MAC."""
     from hertzforge.core.shapes import cross_mac
 
-    from .ops_modal_run import paired
+    from .mode_pairs import paired
 
     first, second = params['first'], params['second']
     rows, columns = project[first], project[second]
@@ -380,8 +379,7 @@ def _derives(verb: str, title: str, summary: str, params: tuple = (),
              workspace: Workspace = 'signals', **fixed: Any) -> Operation:
     """A project operation that runs one core verb on an object it
     applies to and draws what it added, offered in the module `workspace`."""
-    return Operation(id=f'project.{verb}', title=title, workspace=workspace,
-                     accepts='project', summary=summary,
+    return Operation(id=f'project.{verb}', title=title, workspace=workspace, summary=summary,
                      params=(_source(verb), *params), outputs=('waterfall',),
                      run=_verb(verb, **fixed))
 
@@ -396,14 +394,13 @@ MODAL_VERB_OPERATIONS = (
              'through, at every DOF it covers.', (PARTNER,), workspace='modal'),
     Operation(
         id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='The six rigid-body shapes of a geometry, three translations and '
                 'three rotations about its reference point.',
         params=(_source('generate_rigid_body_modes', 'Geometry'),),
         outputs=('shape3d', 'reading'), run=rigid_body_modes),
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='model',
-        accepts='project',
         summary='The normal modes of a geometry whose element groups have properties: a '
                 'number of them, or all up to a highest frequency. Free-free unless a '
                 'group of points is ground; the damping is given to every mode.',
@@ -411,7 +408,7 @@ MODAL_VERB_OPERATIONS = (
         outputs=('shape3d', 'reading'), run=solve_modes),
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='A shape set sampled at another set\'s DOFs, or at a channel '
                 'table\'s sensors, by the nearest node and its direction.',
         params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
@@ -459,7 +456,6 @@ VERB_OPERATIONS = (
              'A PSD read as a requirement, which a test is controlled to.', workspace='random'),
     Operation(
         id='project.convert_to_psd', title='Convert to PSD', workspace='random',
-        accepts='project',
         summary='A specification read as a PSD, its limits left out; one written at '
                 'breakpoints is read onto lines at a spacing, 0 for the one its sheet '
                 'remembers.',
@@ -467,13 +463,11 @@ VERB_OPERATIONS = (
         run=convert_to_psd, edits=True),
     Operation(
         id='project.detect_shocks', title='Detect Shocks', workspace='shock',
-        accepts='project',
         summary='Mark the shocks in a time history, which Compute SRS reads.',
         params=(_source('detect_shocks'),), outputs=('reading',),
         run=detect_shocks, edits=True),
     Operation(
         id='project.extract_sine', title='Extract Sine', workspace='sine',
-        accepts='project',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
         params=(_source('extract_sine'),), outputs=('waterfall',),
@@ -484,43 +478,37 @@ VERB_OPERATIONS = (
 OPERATIONS = (
     Operation(
         id='project.waterfall', title='Waterfall', workspace='signals', everywhere=True,
-        accepts='project',
         summary='Any data object with every record at its own depth, colored '
                 'by level; an FRF as magnitude, a part or phase.',
         params=(DATA, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
         run=waterfall),
     Operation(
         id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
-        accepts='project',
         summary='Chosen records of any data object as curves on one plot, '
                 'numbered from 1 as "1-3, 7"; the first eight when none are named.',
         params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',
-        accepts='project',
         summary='PSDs from a time history\'s averages, added to the project.',
         params=(HISTORY,), outputs=('waterfall',), run=compute_psds),
     Operation(
         id='project.compute_frfs', title='Compute FRFs', workspace='modal',
-        accepts='project',
         summary='FRFs from a time history, one for each response and drive, '
                 'added to the project.',
         params=(FRF_HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
     Operation(
         id='project.fit_modes', title='Fit Modes', workspace='modal',
-        accepts='project',
         summary='Modes fitted to an FRF set within a band, added to the '
                 'project as a shape set and drawn on its geometry.',
         params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
         run=fit_modes),
     Operation(
-        id='project.mac', title='MAC', workspace='modal', accepts='project',
+        id='project.mac', title='MAC', workspace='modal',
         summary='One shape set\'s modes against another\'s, or a set against '
                 'itself; with a geometry, a cell shows that pair overlaid.',
         params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
     Operation(
         id='project.mode_shapes', title='Mode Shapes', workspace='modal',
-        accepts='project',
         summary='A shape set\'s modes on a geometry, one translation per node.',
         params=(SHAPES, GEOMETRY), outputs=('shape3d',), run=mode_shapes),
     *VERB_OPERATIONS,

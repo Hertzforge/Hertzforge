@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import _mesh
+from .mesh import drawn_mesh
 from .protocol import ProtocolError, refused
 
 #: how the shell numbers records when it asks an operation for some
@@ -567,13 +567,13 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
          prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """Two shape sets: their MAC, each axis ticked by its own frequencies,
     and on a geometry the stage the matrix selects a pair on, the column
-    mode overlaid on the row mode (`ops_modal_run.paired`). Sets on two
+    mode overlaid on the row mode (`mode_pairs.paired`). Sets on two
     geometries compare after projection onto the first's DOFs
     (`Project.comparison_mac`), and `prefs['projection']` animates the
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
     as `matched`, as VD's red checker."""
-    from .ops_modal_run import paired
+    from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
@@ -613,7 +613,7 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
 def _drawn_rows(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The mesh as the shape view draws it, and each geometry node's drawn
     index (-1 when it is not drawn)."""
-    drawn_rows, triangles, lines = _mesh(geometry)
+    drawn_rows, triangles, lines = drawn_mesh(geometry)
     drawn = np.full(geometry.num_nodes, -1, dtype=np.int64)
     drawn[drawn_rows] = np.arange(drawn_rows.size)
     return drawn_rows, triangles, lines, drawn
@@ -764,7 +764,7 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
     ids = []
     for name in (first, second):
         geometry = project[name]
-        rows, triangles, lines = _mesh(geometry)
+        rows, triangles, lines = drawn_mesh(geometry)
         views.append((np.asarray(geometry.node_xyz, dtype=float)[rows], triangles, lines,
                       geometry.units_defined))
         ids.append(np.asarray(geometry.node_id)[rows])

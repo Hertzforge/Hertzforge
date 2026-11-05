@@ -37,20 +37,13 @@ const LOGS_KEPT: usize = 10;
 pub struct Layout {
     pub control_exe: PathBuf,
     pub python_exe: PathBuf,
-    pub testdata: PathBuf,
-    pub cache_dir: PathBuf,
     pub log_root: PathBuf,
 }
 
 impl Layout {
     /// The parts as the installed app lays them out: the control service beside the
-    /// app's executable, the Python runtime and the test data in its resources.
-    pub fn installed(
-        exe_dir: &Path,
-        resource_dir: &Path,
-        cache_dir: PathBuf,
-        log_root: PathBuf,
-    ) -> Layout {
+    /// app's executable, the Python runtime in its resources.
+    pub fn installed(exe_dir: &Path, resource_dir: &Path, log_root: PathBuf) -> Layout {
         let control = if cfg!(windows) {
             "sds-control.exe"
         } else {
@@ -64,8 +57,6 @@ impl Layout {
         Layout {
             control_exe: exe_dir.join(control),
             python_exe: python,
-            testdata: resource_dir.join("testdata"),
-            cache_dir,
             log_root,
         }
     }
@@ -149,13 +140,6 @@ impl Services {
                 ));
             }
         }
-        fs::create_dir_all(&layout.cache_dir).map_err(|e| {
-            format!(
-                "Cannot make the cache folder {}: {e}",
-                layout.cache_dir.display()
-            )
-        })?;
-
         let mut control = Command::new(&layout.control_exe);
         control.args(["--port", "0", "--watch-stdin"]);
         let control = spawn("control", control, &log_dir)?;
@@ -165,9 +149,7 @@ impl Services {
         // site folder says; -B: never write bytecode into the installed app.
         analysis
             .args(["-I", "-B", "-m", "hertzforge", "serve"])
-            .args(["--port", "0", "--watch-stdin"])
-            .env("HERTZFORGE_TESTDATA", &layout.testdata)
-            .env("HERTZFORGE_CACHE_DIR", &layout.cache_dir);
+            .args(["--port", "0", "--watch-stdin"]);
         let analysis = match spawn("analysis", analysis, &log_dir) {
             Ok(a) => a,
             Err(e) => {

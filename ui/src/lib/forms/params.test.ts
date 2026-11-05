@@ -2,14 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
 import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
 
-const channels = [
-	{ value: 'ctrl1', label: 'Control 1' },
-	{ value: 'resp1', label: 'Response 1' }
-];
-
 const tol: ParamDescriptor = { name: 'tolerance_db', label: 'Tolerance', type: 'number', unit: 'dB', default: 3, min: 0.5, max: 6, step: 0.5 };
 const avg: ParamDescriptor = { name: 'averages', label: 'Averages', type: 'integer', default: 64, min: 8, max: 512 };
-const ch: ParamDescriptor = { name: 'channel', label: 'Channel', type: 'enum', options_from: 'channels', default: 'resp1' };
 const mode: ParamDescriptor = {
 	name: 'mode',
 	label: 'Mode',
@@ -24,7 +18,7 @@ const label: ParamDescriptor = { name: 'label', label: 'Label', type: 'string' }
 
 describe('defaults', () => {
 	it('uses valid defaults as given', () => {
-		expect(defaultValues([tol, avg, ch, flag], channels)).toEqual({ tolerance_db: 3, averages: 64, channel: 'resp1', unity: true });
+		expect(defaultValues([tol, avg, mode, flag])).toEqual({ tolerance_db: 3, averages: 64, mode: 'a', unity: true });
 	});
 
 	it('starts a second object param of the same objects on another object', () => {
@@ -54,14 +48,9 @@ describe('defaults', () => {
 		expect(defaultFor({ ...tol, default: 99 })).toBe(6);
 		expect(defaultFor({ ...avg, default: 2.5 })).toBe(8);
 		expect(defaultFor(mode)).toBe('a');
-		expect(defaultFor({ ...ch, default: 'nope' }, channels)).toBe('ctrl1');
+		expect(defaultFor({ ...mode, default: 'nope' })).toBe('a');
 		expect(defaultFor({ ...flag, default: undefined })).toBe(false);
 		expect(defaultFor(label)).toBe('');
-	});
-
-	it('fills options_from channels from the dataset, and is empty without one', () => {
-		expect(defaultFor(ch, [])).toBe('');
-		expect(validate(ch, '', [])).toMatch(/Open a dataset/);
 	});
 });
 
@@ -81,7 +70,6 @@ describe('validation', () => {
 	it('requires enum values from the options', () => {
 		expect(validate(mode, 'b')).toBeNull();
 		expect(validate(mode, 'c')).toBe('Choose one of the options.');
-		expect(validate(ch, 'resp1', channels)).toBeNull();
 	});
 
 	it('collects every error by name', () => {
@@ -108,10 +96,10 @@ describe('parsing and hints', () => {
 		expect(rangeHint(flag)).toBeNull();
 	});
 
-	it('keeps still-valid values when channels change', () => {
-		const prev = { channel: 'resp1', tolerance_db: 4 };
-		expect(reconcile([ch, tol], prev, channels)).toEqual({ channel: 'resp1', tolerance_db: 4 });
-		expect(reconcile([ch, tol], prev, [{ value: 'x', label: 'X' }])).toEqual({ channel: 'x', tolerance_db: 4 });
+	it('keeps still-valid values when the options change', () => {
+		const prev = { mode: 'b', tolerance_db: 4 };
+		expect(reconcile([mode, tol], prev)).toEqual({ mode: 'b', tolerance_db: 4 });
+		expect(reconcile([{ ...mode, options: [{ value: 'x', label: 'X' }] }, tol], prev)).toEqual({ mode: 'x', tolerance_db: 4 });
 	});
 });
 

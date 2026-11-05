@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * Command palette (Cmd/Ctrl+K): fuzzy search over workspaces, every catalog operation,
-	 * datasets and control actions. Fully keyboard driven: arrows move, Enter runs, Escape closes.
+	 * Command palette (Cmd/Ctrl+K): fuzzy search over workspaces, every catalog operation and
+	 * the control actions. Fully keyboard driven: arrows move, Enter runs, Escape closes.
 	 */
 	import { tick } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
@@ -16,7 +16,7 @@
 
 	let { app }: Props = $props();
 
-	type Group = 'Actions' | 'Workspaces' | 'Tools' | 'Datasets';
+	type Group = 'Actions' | 'Workspaces' | 'Tools';
 
 	interface Command {
 		id: string;
@@ -30,7 +30,7 @@
 		run: () => void;
 	}
 
-	const GROUP_ORDER: Group[] = ['Actions', 'Workspaces', 'Tools', 'Datasets'];
+	const GROUP_ORDER: Group[] = ['Actions', 'Workspaces', 'Tools'];
 
 	let query = $state('');
 	let active = $state(0);
@@ -110,16 +110,6 @@
 			},
 			...randomCommands(),
 			{
-				id: 'act:clear',
-				group: 'Actions',
-				title: 'Clear Analysis Results',
-				subtitle: `${app.analyze.results.length} across the modules`,
-				keywords: 'remove panes reset',
-				icon: 'trash',
-				disabledReason: app.analyze.results.length ? null : 'No results to clear',
-				run: () => app.analyze.clearResults()
-			},
-			{
 				id: 'act:retry',
 				group: 'Actions',
 				title: 'Reconnect Services',
@@ -161,38 +151,20 @@
 				id: `op:${op.id}`,
 				group: 'Tools',
 				title: op.title,
-				subtitle: `${workspaceInfo(op.workspace).title}, works on ${op.accepts.replace('_', ' ')} data`,
+				subtitle: workspaceInfo(op.workspace).title,
 				keywords: `${op.id} ${op.summary ?? ''}`,
 				icon: 'tool',
-				run: () => void openTool(op.id)
+				run: () => openTool(op.id)
 			});
 		}
 
-		for (const ds of app.catalog?.datasets ?? []) {
-			out.push({
-				id: `ds:${ds.id}`,
-				group: 'Datasets',
-				title: ds.title,
-				subtitle: `${ds.kind.replace('_', ' ')}, opens in ${workspaceInfo(app.analyze.moduleFor(ds) ?? 'signals').title}`,
-				keywords: `${ds.id} ${ds.description ?? ''}`,
-				icon: 'dataset',
-				run: () => {
-					app.go(app.analyze.moduleFor(ds) ?? 'signals');
-					void app.analyze.selectDataset(ds.id);
-				}
-			});
-		}
 		return out;
 	});
 
-	async function openTool(opId: string) {
+	function openTool(opId: string) {
 		const op = app.catalog?.operations.find((o) => o.id === opId);
 		if (!op) return;
 		app.go(op.workspace);
-		if (app.analyze.opened?.kind !== op.accepts) {
-			const ds = app.catalog?.datasets.find((d) => d.kind === op.accepts);
-			if (ds) await app.analyze.selectDataset(ds.id);
-		}
 		app.analyze.selectOp(op.id);
 	}
 
@@ -291,7 +263,7 @@
 				data-testid="palette-input"
 				bind:value={query}
 				onkeydown={onKey}
-				placeholder="Search workspaces, tools, datasets and actions"
+				placeholder="Search workspaces, tools and actions"
 				role="combobox"
 				aria-expanded="true"
 				aria-controls="palette-list"

@@ -107,8 +107,6 @@ def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> 
     acts: list[dict[str, Any]] = []
     whole: list[dict[str, Any]] = []
     for op in OPERATIONS:
-        if op.accepts != 'project':
-            continue
         if not chosen:
             if not _object_params(op):
                 whole.append(_entry(op, {}))

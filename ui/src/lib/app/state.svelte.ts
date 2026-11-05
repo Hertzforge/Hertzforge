@@ -16,9 +16,7 @@ import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
-	DatasetInfo,
 	DisplayEvent,
-	OpenedDataset,
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
@@ -29,8 +27,6 @@ import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	ReportEditor,
 	RunState,
 	SimProfile,
-	Pick3D,
-	Region,
 	SimStateResult,
 	TableEdit,
 	View,
@@ -50,37 +46,13 @@ function message(err: unknown): string {
 
 // ---------------------------------------------------------------------------------------------
 
-export interface AnalyzeResult {
-	id: number;
-	opId: string;
-	opTitle: string;
-	datasetTitle: string;
-	/** "Channel Control 1, Tolerance 3 dB" */
-	paramSummary: string;
-	views: View[];
-	at: Date;
-	/** What it ran with, so a choice made in its view can run it again. */
-	params: ParamValues;
-	handle: string;
-	/** A rerun from the view is under way. */
-	busy?: boolean;
-}
-
-/** The dataset id Analyze uses for the connection's own project. */
-export const PROJECT = 'project';
-
 class AnalyzeState {
-	datasetId = $state<string | null>(null);
-	opened = $state.raw<OpenedDataset | null>(null);
-	opening = $state(false);
-	openError = $state<string | null>(null);
 	opId = $state<string | null>(null);
-	/** Form values per operation id, kept while the dataset stays open. */
+	/** Form values per operation id, kept while the project stays open. */
 	values = $state<Record<string, ParamValues>>({});
 	triedRun = $state(false);
 	running = $state(false);
 	runError = $state<string | null>(null);
-	results = $state.raw<AnalyzeResult[]>([]);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
 	/** The bar's choices, remembered across launches as VD remembers 3D. */
@@ -99,51 +71,32 @@ class AnalyzeState {
 	actions = $state.raw<Actions | null>(null);
 	private showSeq = 0;
 	private actionSeq = 0;
-	private nextResult = 1;
-	private openSeq = 0;
 
 	constructor(private readonly app: AppState) {}
 
-	/** The datasets a module's tools accept: a kind of data shows up in a module once a tool there takes it. */
-	datasetsFor(workspace: Workspace): DatasetInfo[] {
-		const catalog = this.app.catalog;
-		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.accepts !== PROJECT && o.workspace === workspace).map((o) => o.accepts));
-		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
-	}
-
-	/** The module whose tools take a dataset's kind, where it opens. */
-	moduleFor(dataset: DatasetInfo): Workspace | null {
-		return (this.app.catalog?.operations ?? []).find((o) => o.accepts === dataset.kind)?.workspace ?? null;
-	}
-
-	/** The module's own tools and the ones every module offers, of those that take what is open. */
+	/** The module's own tools and the ones every module offers, of those with something to run on. */
 	toolsFor(workspace: Workspace): OperationDescriptor[] {
 		return this.tools.filter((o) => offeredIn(o, workspace));
 	}
 
-	/**
-	 * Tools follow the data: only operations that accept the open dataset's kind, and on the project
-	 * only those with an object to run on.
-	 */
+	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
-		const kind = this.opened?.kind;
-		if (!kind) return [];
-		return (this.app.catalog?.operations ?? []).filter(
-			(o) => o.accepts === kind && (kind !== PROJECT || hasObjectsFor(this.paramsOf(o)))
-		);
+		if (!this.onProject) return [];
+		return (this.app.catalog?.operations ?? []).filter((o) => hasObjectsFor(this.paramsOf(o)));
 	}
 
 	get op(): OperationDescriptor | null {
 		return this.tools.find((o) => o.id === this.opId) ?? null;
 	}
 
+	/** Whether there is a project to work on. */
 	get onProject(): boolean {
-		return this.datasetId === PROJECT;
+		return this.app.project.summary !== null;
 	}
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		return op.accepts === 'project' ? withObjects(op.params, this.app.project.summary?.objects ?? []) : op.params;
+		return withObjects(op.params, this.app.project.summary?.objects ?? []);
 	}
 
 	get params(): ParamDescriptor[] {
@@ -157,19 +110,12 @@ class AnalyzeState {
 	get errors(): Record<string, string> {
 		const op = this.op;
 		if (!op) return {};
-		return validateAll(this.paramsOf(op), this.currentValues, this.opened?.channels ?? []);
+		return validateAll(this.paramsOf(op), this.currentValues);
 	}
 
-	/** Work on the connection's own project, as a dataset whose tools take its objects. */
+	/** A project was opened: its tools take its objects. */
 	selectProject(): void {
-		const summary = this.app.project.summary;
-		if (!summary) return;
-		++this.openSeq;
-		this.datasetId = PROJECT;
-		this.opening = false;
-		this.openError = null;
 		this.projectChanged();
-		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
 	}
 
 	/** Per operation, the source and its settings its form was last filled from. */
@@ -191,45 +137,13 @@ class AnalyzeState {
 		this.values = { ...this.values, [op.id]: withSettings(this.paramsOf(op), values, source) };
 	}
 
-	/** The project's objects changed: its title, and every form's object choices, follow. */
+	/** The project's objects changed: every form's object choices follow. */
 	projectChanged(): void {
-		const summary = this.app.project.summary;
 		if (!this.onProject) return;
-		if (!summary) {
-			this.datasetId = null;
-			this.opened = null;
-			return;
-		}
-		this.opened = { handle: '', kind: 'project', title: summary.title, summary: {}, channels: [] };
 		const next = { ...this.values };
 		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
 		this.values = next;
 		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
-	}
-
-	async selectDataset(id: string): Promise<void> {
-		if (id === PROJECT) return this.selectProject();
-		if (this.datasetId === id && this.opened) return;
-		const seq = ++this.openSeq;
-		this.datasetId = id;
-		this.opening = true;
-		this.openError = null;
-		try {
-			const opened = await this.app.analysis.request<OpenedDataset>('dataset.open', { id });
-			if (seq !== this.openSeq) return;
-			this.opened = opened;
-			// Re-fit every remembered form to the new dataset's channels.
-			const next: Record<string, ParamValues> = {};
-			for (const op of this.tools) next[op.id] = reconcile(op.params, this.values[op.id], opened.channels);
-			this.values = next;
-			if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
-		} catch (err) {
-			if (seq !== this.openSeq) return;
-			this.opened = null;
-			this.openError = message(err);
-		} finally {
-			if (seq === this.openSeq) this.opening = false;
-		}
 	}
 
 	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
@@ -415,107 +329,41 @@ class AnalyzeState {
 		this.runError = null;
 		this.triedRun = false;
 		const op = this.op;
-		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
+		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op));
 	}
 
 	resetParams(): void {
 		const op = this.op;
-		if (op) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
+		if (op) this.values[op.id] = defaultValues(this.paramsOf(op));
 		this.triedRun = false;
 	}
 
 	async run(): Promise<void> {
 		const op = this.op;
-		const opened = this.opened;
-		if (!op || !opened || this.running) return;
+		if (!op || !this.onProject || this.running) return;
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
-		const shown = this.paramsOf(op);
 		this.running = true;
 		this.runError = null;
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
-			const res = await this.app.analysis.request<OpResult>('op.run', target(op, opened.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
-			if (this.onProject) {
-				// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
-				// takes the view until Back
-				const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
-				if (added.length) {
-					const order = (res.project?.objects ?? []).map((o) => o.name);
-					this.app.project.clickObject(added[0], order);
-				} else if (res.views.length) {
-					this.reading = { title: op.title, views: res.views };
-				}
-				this.triedRun = false;
-				return;
+			// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+			// takes the view until Back
+			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+			if (added.length) {
+				const order = (res.project?.objects ?? []).map((o) => o.name);
+				this.app.project.clickObject(added[0], order);
+			} else if (res.views.length) {
+				this.reading = { title: op.title, views: res.views };
 			}
-			this.results = [
-				{
-					id: this.nextResult++,
-					opId: op.id,
-					opTitle: op.title,
-					datasetTitle: opened.title,
-					paramSummary: summarize(shown, params, opened.channels),
-					views: res.views,
-					at: new Date(),
-					params,
-					handle: opened.handle
-				},
-				...this.results
-			];
 			this.triedRun = false;
 		} catch (err) {
 			this.runError = message(err);
 		} finally {
 			this.running = false;
-		}
-	}
-
-	/**
-	 * Run a result's operation again with `patch` over the params it ran with, as a choice made in
-	 * its view asks (an `in_view` param), and show the new views in the same card.
-	 */
-	async rerun(id: number, patch: ParamValues): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		const op = this.app.catalog?.operations.find((o) => o.id === result?.opId);
-		if (!result || !op || result.busy) return;
-		const params = { ...result.params, ...patch };
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', target(op, result.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, params, paramSummary: summarize(this.paramsOf(op), params, this.opened?.channels ?? []), busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	/**
-	 * Set one cell of a result's editable table (`TableEdit`): its operation runs, and the first table
-	 * it answers with takes that view's place. The refusal, when there is one, comes back as words.
-	 */
-	async editCell(id: number, viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
-		try {
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
-				{ timeoutMs: RUN_TIMEOUT_MS }
-			);
-			if (res.project) this.app.project.apply(res.project);
-			const table = res.views.find((v) => v.view === 'table');
-			if (table) {
-				this.results = this.results.map((r) =>
-					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
-				);
-			}
-			return null;
-		} catch (err) {
-			return message(err);
 		}
 	}
 
@@ -535,75 +383,10 @@ class AnalyzeState {
 			return message(err);
 		}
 	}
-
-	/** A span dragged on a result's plot: its operation runs with the new edges, and its views take the result's place. */
-	async dragSpan(id: number, drag: NonNullable<Region['drag']>, x0: number, x1: number): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		if (!result || result.busy) return;
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	/** A click in a result's 3-D view: the view's pick operation runs with what was clicked, and its views take the result's place. */
-	async pickIn(id: number, pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		if (!result || result.busy) return;
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	removeResult(id: number): void {
-		this.results = this.results.filter((r) => r.id !== id);
-	}
-
-	clearResults(): void {
-		this.results = [];
-	}
 }
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
-
-/** `op.run`'s params: a project operation names no handle, since it runs on the connection's project. */
-function target(op: OperationDescriptor, handle: string, params: ParamValues): Record<string, unknown> {
-	return op.accepts === 'project' ? { op: op.id, params } : { op: op.id, handle, params };
-}
-
-function summarize(params: ParamDescriptor[], values: ParamValues, channels: { value: string | number; label: string }[]): string {
-	return params
-		.filter((p) => !p.in_view)
-		.map((p) => {
-			const v = values[p.name];
-			let text: string;
-			if (p.type === 'enum') {
-				const opts = p.options_from === 'channels' ? channels : (p.options ?? []);
-				text = opts.find((o) => o.value === v)?.label ?? String(v);
-			} else if (p.type === 'boolean') text = v ? 'on' : 'off';
-			else if (p.type === 'string') text = v ? `"${v}"` : 'none';
-			else text = `${v}${p.unit ? ` ${p.unit}` : ''}`;
-			return `${p.label}: ${text}`;
-		})
-		.join(' \u00b7 ');
-}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -1062,7 +845,6 @@ export class UnitsState {
 			// not kept between launches; this session still uses it
 		}
 		// what is on screen was drawn in the old system: draw it again
-		for (const r of this.app.analyze.results) void this.app.analyze.rerun(r.id, {});
 		if (this.app.report.name) void this.app.report.show(this.app.report.name);
 	}
 }

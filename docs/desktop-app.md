@@ -12,12 +12,13 @@ development.
 | The window | the app's executable (`hertzforge`) | Tauri 2; the shell from `ui/build`, served from inside the app |
 | The control service | `sds-control`, beside the executable | the release build of `crates/sds-control` |
 | The analysis service's Python | `python/` in the app's resources | CPython 3.13 from python-build-standalone, with the `hertzforge` package and its dependencies installed as published wheels |
-| The demonstration data | `testdata/plate/` in the resources | the plate runs and models the catalog's datasets read (`scripts/fetch_testdata.sh`) |
 | License texts | `LICENSE`, `THIRD_PARTY_NOTICES.md` in the resources | |
 
 Built on an Apple silicon Mac (November 2, 2026): the app is 541 MB and its disk image 168 MB. The
 Python runtime is 471 MB of that, mostly the solid-modeling kernel's wheel (225 MB), SciPy (66 MB),
-pandas (37 MB) and netCDF4 (27 MB); the plate data is 55 MB.
+pandas (37 MB) and netCDF4 (27 MB). The 55 MB of plate test data the app carried until November 5
+is not in it: the example projects are downloads on hertzforge.com (`scripts/make_examples.py`
+writes them).
 
 The CI workflow `.github/workflows/desktop.yml` builds on every push to the desktop branch and on
 demand: a `.dmg` for macOS on Apple silicon, an NSIS installer (`*-setup.exe`) for Windows x64, and
@@ -185,12 +186,15 @@ through its test ids, and answers the quit question, which nothing can click:
 
 ```bash
 CARGO_TARGET_DIR=<a build folder> desktop/packaging/build.sh --e2e --bundles app
+python scripts/make_examples.py <a folder> --only plate-random-run quadcopter
 HERTZFORGE_E2E_SCRIPT=desktop/packaging/e2e/random_run.js HERTZFORGE_E2E_ANSWER=stop \
+  HERTZFORGE_E2E_FILES="<a folder>/plate-random-run.hforge:<a folder>/quadcopter.hforge" \
   "<a build folder>/release/bundle/macos/Hertzforge.app/Contents/MacOS/hertzforge"
 ```
 
 `desktop/packaging/e2e/random_run.js` checks both services connected and nothing loaded from the
-network; opens a dataset and runs a tool in Random and solves a model in Modal; runs Random on the
+network; drops the two example projects on the window (`HERTZFORGE_E2E_FILES`, separated as PATH
+is) and shows the run's PSDs in Random and the model's modes in Modal; runs Random on the
 simulator to completion from Acquire & Control; opens a display page in a window of its own; then
 starts a second run and quits while it drives. Each step is written to the app's log, and the control
 service's log says how the run ended. `desktop/packaging/e2e/drop_files.js` checks that the shell

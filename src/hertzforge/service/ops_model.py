@@ -13,8 +13,8 @@ import numpy as np
 
 from . import group_cells
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param
+from .mesh import drawn_mesh
 from .ops_geometry import entity_table
 from .protocol import refused
 
@@ -43,7 +43,7 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.view_geometry`: a geometry on its own, nodes and elements."""
     name = params['geometry']
     geometry = project[name]
-    rows, triangles, lines = _mesh(geometry)
+    rows, triangles, lines = drawn_mesh(geometry)
     return [v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[rows], [],
                       triangles=triangles, lines=lines,
@@ -256,12 +256,11 @@ def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.view_geometry', title='View Geometry', workspace='geometry', everywhere=True,
-        accepts='project', summary='A geometry on its own: its nodes and elements.',
+        id='project.view_geometry', title='View Geometry', workspace='geometry', everywhere=True, summary='A geometry on its own: its nodes and elements.',
         params=(GEOMETRY,), outputs=('shape3d',), run=view_geometry),
     Operation(
         id='project.group_properties', title='Element Group Properties',
-        workspace='model', accepts='project',
+        workspace='model',
         summary='What element groups are made of, for Solve Modes: a library '
                 'material, and for plates a thickness. Every group when none '
                 'are named, or "1, 3".',
@@ -269,39 +268,36 @@ OPERATIONS = (
         run=group_properties, edits=True),
     Operation(
         id='project.merge_coincident_nodes', title='Merge Coincident Nodes',
-        workspace='geometry', accepts='project',
+        workspace='geometry',
         summary='Each set of coincident nodes merged into one, so parts meshed '
                 'apart are joined; 0 for the core\'s own tolerance.',
         params=(GEOMETRY, TOLERANCE), outputs=('reading',),
         run=merge_coincident_nodes, edits=True),
     Operation(
         id='project.element_groups', title='Element Groups', workspace='model',
-        accepts='project',
         summary='A geometry\'s element groups: each one\'s name, what its elements are, '
                 'how many, and what it is made of.',
         params=(GEOMETRY,), outputs=('table',), run=element_groups),
     Operation(
         id='project.merge_element_groups', title='Merge Element Groups', workspace='model',
-        accepts='project',
         summary='Two or more element groups merged into the first named, which keeps its '
                 'name and properties, such as "1, 3".',
         params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=merge_element_groups,
         edits=True),
     Operation(
         id='project.delete_element_groups', title='Delete Element Groups', workspace='model',
-        accepts='project',
         summary='Element groups deleted with their elements and the nodes only they used, '
                 'keeping nodes where the project has data.',
         params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=delete_element_groups,
         edits=True),
     Operation(
-        id='project.tie_elements', title='Tie', workspace='model', accepts='project',
+        id='project.tie_elements', title='Tie', workspace='model',
         summary='A patch of elements tied rigidly to the part under it, each node to the '
                 'nearest node of an element group or a second patch.',
         params=(GEOMETRY, ELEMENTS, TIE_TO), outputs=('reading',), run=tie_elements,
         edits=True),
     Operation(
-        id='project.align_meshes', title='Align Meshes', workspace='geometry', accepts='project',
+        id='project.align_meshes', title='Align Meshes', workspace='geometry',
         summary='Where parts meshed apart meet, the coarser mesh\'s nodes moved onto the '
                 'finer one\'s, so Merge Coincident Nodes can join them; reach 0 for half '
                 'the coarsest spacing.',

@@ -21,10 +21,9 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import quantity_of
 from .descriptors import Operation, Option, Param
-from .ops_random import FREQUENCY, NAMES, ROLES, _positive, _sig, _spec_line
 from .protocol import refused
+from .spec_lines import FREQUENCY, NAMES, ROLES, positive, quantity_of, sig, spec_line
 from .waterfalls import unit_text
 
 SPECTRUM = Param('spectrum', 'Measured PSD', 'enum', options_from='objects:psd')
@@ -147,14 +146,14 @@ def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
     keep = x > 0.0
     measured = np.real(np.asarray(psd.ordinate[m])) * 10.0 ** (scale / 10.0)
     name = params['spectrum'] if not scale else f'{params["spectrum"]} ({scale:+d} dB)'
-    lines = [v.shaped(f'{name}: {label}', 'measured', psd, x[keep], _positive(measured[keep])),
+    lines = [v.shaped(f'{name}: {label}', 'measured', psd, x[keep], positive(measured[keep])),
              v.shaped('Specification', 'reference', spec,
-                      *_spec_line(spec, r, np.real(spec.ordinate[r])))]
+                      *spec_line(spec, r, np.real(spec.ordinate[r])))]
     for key in spec.LIMITS:
         curve = spec.limits.get(key)
         if curve is not None:
             lines.append(v.shaped(NAMES[key], ROLES[key], spec,
-                                  *_spec_line(spec, r, np.real(curve[r]))))
+                                  *spec_line(spec, r, np.real(curve[r]))))
     dimension = str(psd.ordinate_dim[m])
     plot = v.spectrum(f'{label}: {params["spectrum"]} against {params["specification"]}',
                       FREQUENCY, v.axis('PSD', unit_text(dimension), 'log'), lines,
@@ -162,8 +161,8 @@ def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
     found = []
     if result.get('lines'):
         unit = unit_text(quantity_of(dimension))
-        found += [v.row('Measured RMS', _sig(result['measured_rms']), unit, 'info'),
-                  v.row('Specification RMS', _sig(result['specification_rms']), unit, 'info')]
+        found += [v.row('Measured RMS', sig(result['measured_rms']), unit, 'info'),
+                  v.row('Specification RMS', sig(result['specification_rms']), unit, 'info')]
         db = float(result['difference_db'])
         found.append(v.row(f'RMS error (±{compliance.ERROR_DB:g} dB)', _db(db), 'dB',
                            _status(compliance.rms_state(db))) if np.isfinite(db)
@@ -319,8 +318,8 @@ def spec_chance(project: Any, params: dict[str, Any]) -> list[dict]:
             f'{label}, {result["combine"]} lines combined at {result["judged_dof"]:.4g} DOF')
     plot = v.spectrum(head, FREQUENCY, v.axis('Measured over target', 'dB', 'linear'), lines,
                       link='frequency')
-    rows = [v.row('DOF per line', _sig(result['dof']), '', 'info'),
-            v.row('DOF judged', _sig(result['judged_dof']), '', 'info'),
+    rows = [v.row('DOF per line', sig(result['dof']), '', 'info'),
+            v.row('DOF judged', sig(result['judged_dof']), '', 'info'),
             v.row(f'{unit.capitalize()} judged',
                   float(result['lines']) if not combined
                   else f'{result["lines"]} groups of {result["combine"]}', None, 'info')]
@@ -397,20 +396,20 @@ def spec_composite(project: Any, params: dict[str, Any]) -> list[dict]:
     keep = fx > 0.0
     band, outer = reading.composite_band, reading.individual_band
     lines = [v.shaped('Reference', 'reference', band,
-                      *_spec_line(band, 0, np.real(band.ordinate[0])))]
+                      *spec_line(band, 0, np.real(band.ordinate[0])))]
     for which, data, role in (('Composite band', band, 'tolerance'),
                               ('Channel band', outer, 'abort')):
         for edge in ('lower', 'upper'):
             values = data.limits.get(f'abort_{edge}')
             if values is not None:
                 lines.append(v.shaped(f'{which}, {edge}', role, data,
-                                      *_spec_line(data, 0, np.real(values[0]))))
+                                      *spec_line(data, 0, np.real(values[0]))))
     for channel in reading.channels:
         y = np.real(np.asarray(psd.ordinate[channel.record])) * factor
-        lines.append(v.shaped(channel.label, 'measured', psd, fx[keep], _positive(y[keep])))
+        lines.append(v.shaped(channel.label, 'measured', psd, fx[keep], positive(y[keep])))
     y = np.real(np.asarray(reading.composite.ordinate[0])) * factor
     lines.append(v.shaped(f'Composite, {reading.strategy} of {len(reading.channels)}',
-                          'measured', psd, fx[keep], _positive(y[keep])))
+                          'measured', psd, fx[keep], positive(y[keep])))
     dimension = str(spec.ordinate_dim[reading.spec_record])
     plot = v.spectrum(f'Composite of {name} against {spec_name}', FREQUENCY,
                       v.axis('PSD', unit_text(dimension), 'log'), lines, link='frequency')
@@ -496,7 +495,7 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
         label = pair_label((str(spec.response_dof[i]),
                             str(spec.response_dof[i] if references is None else references[i])))
         if np.isfinite(level):
-            rows.append(v.row(label, _sig(level), unit, 'info'))
+            rows.append(v.row(label, sig(level), unit, 'info'))
             if top is None or level > top[0]:
                 top = (level, label, unit)
         else:
@@ -537,7 +536,7 @@ def psd_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
         for pair in pairs:
             y = np.real(np.asarray(data.ordinate[pair[index]]))
             lines.append(v.shaped(f'{name}: {pair[2]}', role, data, x[keep],
-                                  _positive(y[keep])))
+                                  positive(y[keep])))
     dims = {str(loud.ordinate_dim[i]) for i, _j, _d, _q in pairs}
     unit = unit_text(dims.pop()) if len(dims) == 1 else None
     return [v.spectrum(f'{loud_name} over {quiet_name}', FREQUENCY, v.axis('PSD', unit, 'log'),
@@ -804,11 +803,11 @@ def srs_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
         event = '' if measured.block is None else f', {measured.block[i]}'
         lines.append(v.shaped(f'{dof}{event}', 'measured', measured, x[good], y[good]))
     x = np.asarray(spec.abscissa, dtype=float)
-    lines.append(v.shaped('Required', 'reference', spec, x, _positive(np.real(spec.ordinate[j]))))
+    lines.append(v.shaped('Required', 'reference', spec, x, positive(np.real(spec.ordinate[j]))))
     for key in getattr(spec, 'LIMITS', ()):
         curve = (getattr(spec, 'limits', None) or {}).get(key)
         if curve is not None:
-            lines.append(v.shaped(NAMES[key], ROLES[key], spec, x, _positive(np.real(curve[j]))))
+            lines.append(v.shaped(NAMES[key], ROLES[key], spec, x, positive(np.real(curve[j]))))
     plot = v.spectrum(f'{dof}: {len(keep)} event{"s" * (len(keep) != 1)} against the one '
                       'required', FREQUENCY,
                       v.axis('Peak response', unit_text(str(spec.ordinate_dim[j])), 'log'),
@@ -875,7 +874,7 @@ OUTER_HIGH = Param('outer_high', 'Outer band, above', 'number', default=6.0, uni
 def _edge(name: str, role: str, x: np.ndarray, target: np.ndarray, db: Any) -> dict:
     with np.errstate(invalid='ignore'):
         y = target * 10.0 ** (np.asarray(db, dtype=float) / 20.0)
-    return v.series(name, role, x, _positive(np.broadcast_to(y, x.shape)))
+    return v.series(name, role, x, positive(np.broadcast_to(y, x.shape)))
 
 
 def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -917,8 +916,8 @@ def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
     target = log_interpolate(x, spec.abscissa, np.real(np.atleast_2d(spec.ordinate)[j]))
     keep = x > 0.0
     lines = [v.series(f'{dof}' + ('' if result['event'] is None else f', {result["event"]}'),
-                      'measured', x[keep], _positive(got[keep])),
-             v.series('Required', 'reference', x[keep], _positive(target[keep]))]
+                      'measured', x[keep], positive(got[keep])),
+             v.series('Required', 'reference', x[keep], positive(target[keep]))]
     for band, role, which in ((result['inner'], 'tolerance', 'Inner band'),
                               (result['outer'], 'abort', 'Outer band')):
         if band is None:
@@ -950,7 +949,7 @@ def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
             rows.append(v.row('Outside the outer band', float(result['outer_count']), '',
                               'fail' if result['outer_count'] else 'pass'))
         rows += [v.row('Worst point', _db(result['worst_db']), 'dB', 'info'),
-                 v.row('Worst at', _sig(result['worst_frequency']), 'Hz', 'info')]
+                 v.row('Worst at', sig(result['worst_frequency']), 'Hz', 'info')]
     if result.get('note'):
         rows.append(v.row('Note', str(result['note']), None, 'warn'))
     return [plot, v.reading(f'Points rule: {where}', rows)]
@@ -1161,28 +1160,28 @@ PAIR = (SPECTRUM, SPECIFICATION)
 
 OPERATIONS = (
     Operation(
-        id='project.spec_spectra', title='Spectra', workspace='random', accepts='project',
+        id='project.spec_spectra', title='Spectra', workspace='random',
         summary='One channel of a measured PSD over its specification and limits, scaled as '
                 'the comparison scales it, with its RMS error and lines out.',
         params=(*PAIR, RECORD), outputs=('spectrum', 'reading'), run=spec_spectra),
     Operation(
-        id='project.spec_rms_error', title='RMS Error', workspace='random', accepts='project',
+        id='project.spec_rms_error', title='RMS Error', workspace='random',
         summary='How far each channel\'s RMS sits from the level its specification asks for, '
                 'in dB, against a floor and a ceiling.',
         params=(*PAIR, ERROR_LOW, ERROR_HIGH), outputs=('reading',), run=spec_rms_error),
     Operation(
-        id='project.spec_lines_out', title='Lines Out', workspace='random', accepts='project',
+        id='project.spec_lines_out', title='Lines Out', workspace='random',
         summary='How much of each channel\'s band fell outside its abort limits, against a '
                 'ceiling.',
         params=(*PAIR, LINES_CEILING), outputs=('reading',), run=spec_lines_out),
     Operation(
-        id='project.spec_chance', title='Chance', workspace='random', accepts='project',
+        id='project.spec_chance', title='Chance', workspace='random',
         summary='One channel\'s miss from its target in dB, and the lines outside each band '
                 'beside how many chance alone puts there at its degrees of freedom.',
         params=(*PAIR, RECORD, COMBINE, DOF), outputs=('spectrum', 'reading'),
         run=spec_chance),
     Operation(
-        id='project.spec_composite', title='Composite', workspace='random', accepts='project',
+        id='project.spec_composite', title='Composite', workspace='random',
         summary='The control channels combined as the controller held them: the composite '
                 'against its band and each channel against its own.',
         params=(*PAIR, STRATEGY, WEIGHTS, COMPOSITE_BAND, COMPOSITE_LOW, COMPOSITE_HIGH,
@@ -1190,57 +1189,53 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=spec_composite),
     Operation(
         id='project.comparison_scale', title='Comparison Scaling', workspace='random',
-        accepts='project',
         summary='Hold the decibels a measured PSD is scaled by when it is compared with a '
                 'specification, or leave it blank to detect them; the data is not changed.',
         params=(*PAIR, SCALE), outputs=('reading',), run=comparison_scale, edits=True),
     Operation(
         id='project.spec_rms', title='Specification RMS', workspace='random',
-        accepts='project',
         summary='The RMS level each channel of a specification asks for.',
         params=(SPECIFICATION,), outputs=('reading',), run=spec_rms),
     Operation(
-        id='project.psd_overlay', title='Overlaid', workspace='random', accepts='project',
+        id='project.psd_overlay', title='Overlaid', workspace='random',
         summary='Two densities drawn over each other, channel by channel, the louder solid '
                 'and the quieter dashed.',
         params=(FIRST, SECOND), outputs=('spectrum',), run=psd_overlay),
     Operation(
         id='project.signal_to_noise', title='Signal to Noise (dB)', workspace='random',
-        accepts='project',
         summary='The louder density over the quieter, line by line in dB: the louder less '
                 'the quieter, over the quieter.',
         params=(FIRST, SECOND), outputs=('spectrum', 'reading'), run=signal_to_noise),
     Operation(
         id='project.rms_signal_to_noise', title='RMS Signal to Noise', workspace='random',
-        accepts='project',
         summary='Each channel\'s signal over its noise across the whole band, from the RMS '
                 'of the two densities, against a floor.',
         params=(FIRST, SECOND, FLOOR), outputs=('reading',), run=rms_signal_to_noise),
     Operation(
-        id='project.signature', title='Signature', workspace='modal', accepts='project',
+        id='project.signature', title='Signature', workspace='modal',
         summary='Two signatures of one article, before and after a test, compared mode by '
                 'mode: each mode\'s frequency and height shift against its limits.',
         params=(BEFORE, AFTER, SIGNATURE_RECORD, MODES, FIND, FREQUENCY_LIMIT, AMPLITUDE_LIMIT),
         outputs=('spectrum', 'reading'), run=signature),
     Operation(
-        id='project.matrix_comparison', title='Matrix', workspace='random', accepts='project',
+        id='project.matrix_comparison', title='Matrix', workspace='random',
         summary='A cross-spectral matrix judged whole against its specification: the levels '
                 'on the diagonal, each cross term\'s coherence above it and phase below it.',
         params=(SPECIFICATION, CPSD, COHERENCE_TOLERANCE, PHASE_TOLERANCE, COHERENCE_FLOOR),
         outputs=('matrix', 'reading'), run=matrix_comparison),
     Operation(
-        id='project.srs_spectra', title='Shock Spectra', workspace='shock', accepts='project',
+        id='project.srs_spectra', title='Shock Spectra', workspace='shock',
         summary='Every event\'s shock spectrum at one channel against the one it had to meet '
                 'and its limits, with each event\'s RMS deviation in dB.',
         params=(SRS, REQUIREMENT, REQUIREMENT_RECORD), outputs=('spectrum', 'reading'),
         run=srs_spectra),
     Operation(
-        id='project.srs_error', title='SRS Error', workspace='shock', accepts='project',
+        id='project.srs_error', title='SRS Error', workspace='shock',
         summary='How far each channel\'s shock spectrum sits from the one it had to meet, '
                 'RMS across the band in dB, against a floor and a ceiling.',
         params=(SRS, REQUIREMENT, SRS_LOW, SRS_HIGH), outputs=('reading',), run=srs_error),
     Operation(
-        id='project.srs_points', title='Points Rule', workspace='shock', accepts='project',
+        id='project.srs_points', title='Points Rule', workspace='shock',
         summary='One shock spectrum against its requirement\'s tolerance band point by point: '
                 'how many points are inside, under the rule the test plan names.',
         params=(SRS, REQUIREMENT, SRS_POINT, RULE, PERCENT, LIMITS, INNER_LOW, INNER_HIGH,
@@ -1248,21 +1243,18 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=srs_points),
     Operation(
         id='project.replication_waveforms', title='Waveforms', workspace='shock',
-        accepts='project',
         summary='One channel of a transient run over one playing of the waveform it was '
                 'controlled to, aligned, with its waveform error.',
         params=(HISTORY, REFERENCE, REFERENCE_RECORD, PLAYING), outputs=('spectrum', 'reading'),
         run=replication_waveforms),
     Operation(
         id='project.waveform_error', title='Waveform Error', workspace='shock',
-        accepts='project',
         summary='Every control channel\'s waveform error at every playing of the reference, '
                 'against a ceiling.',
         params=(HISTORY, REFERENCE, WAVEFORM_CEILING), outputs=('reading',),
         run=waveform_error),
     Operation(
         id='project.replication_segments', title='Segments', workspace='shock',
-        accepts='project',
         summary='One channel of a transient run judged segment by segment, each marked '
                 'segment by the rule for its kind, beside the whole-record error.',
         params=(HISTORY, REFERENCE, REFERENCE_RECORD, PLAYING, SEGMENTS, TAPER, BAND_LOW,

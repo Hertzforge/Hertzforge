@@ -23,8 +23,8 @@ import numpy as np
 
 from . import group_cells
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param, Workspace
+from .mesh import drawn_mesh
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
 from .protocol import refused
@@ -57,7 +57,7 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     """The geometry with every node, its faces and lines, and `extra_nodes`
     joined by `extra_lines` (indices into `extra_nodes`): the axes, arrows
     or bodies drawn on it, which a `shape3d` has no markers for."""
-    used, triangles, lines = _mesh(geometry)
+    used, triangles, lines = drawn_mesh(geometry)
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
     nodes = xyz
     lines = used[lines].reshape(-1, 2)
@@ -1244,7 +1244,7 @@ def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, ru
            edits: bool = True, workspace: Workspace = 'geometry') -> Operation:
     """An act on a geometry: in the Geometry module unless it is the finite
     element model's (element groups, solving)."""
-    return Operation(id=id_, title=title, workspace=workspace, accepts='project',
+    return Operation(id=id_, title=title, workspace=workspace,
                      summary=summary, params=params, outputs=outputs, run=run, edits=edits)
 
 
@@ -1252,7 +1252,7 @@ def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, r
             edits: bool = True, workspace: Workspace = 'signals') -> Operation:
     """An act on the project every module offers: the groups, a channel's
     role or DOF, the project's type. `workspace` is its home."""
-    return Operation(id=id_, title=title, workspace=workspace, accepts='project',
+    return Operation(id=id_, title=title, workspace=workspace,
                      summary=summary, params=params, outputs=outputs, run=run, edits=edits,
                      everywhere=True)
 
@@ -1349,7 +1349,6 @@ OPERATIONS = (
              (OBJECT, NEW_NAME), GROUPS, name_object_group),
     Operation(
         id='project.set_entity_cell', title='Set Entity Cell', workspace='geometry', everywhere=True,
-        accepts='project',
         summary='One cell of an entity table typed over in place, by row and column; the '
                 'tables edit through it.',
         params=(GEOMETRY, KIND, Param('row', 'Row', 'integer', default=1, min=1, step=1),
