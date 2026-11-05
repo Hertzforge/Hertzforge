@@ -1,17 +1,19 @@
 """Write the example projects hertzforge.com offers for download.
 
-Five `.hforge` files, each built by this package alone: the three finite
-element models of `hertzforge.demo` with their lowest normal modes (30,
-six of them rigid; 12 for the frame-wing, whose 393,510 DOFs make each
-mode 3 MB), and the plate's random and modal controller runs read from
-`testdata/plate` (`scripts/fetch_testdata.sh`). They were the analysis
-service's built-in datasets until 2026-11-05; now a person downloads the
-ones they want and opens them like any other project.
+Five `.hforge` files, each built by this package alone: the quadcopter
+and the free plate of `hertzforge.demo` with their 30 lowest normal
+modes (six of them rigid), the Frame-Wing as `frame_wing.project`
+builds it (the frame, each wing alone and the frame with each wing,
+every one solved to 1500 Hz, a 170 MB file), and the plate's random and
+modal controller runs read from `testdata/plate`
+(`scripts/fetch_testdata.sh`). They were the analysis service's built-in
+datasets until 2026-11-05; now a person downloads the ones they want and
+opens them like any other project.
 
     python scripts/make_examples.py OUT_DIR [--only NAME ...]
 
-The frame-wing model takes about 30 s to build and solve and needs the
-CAD kernel (OCP); the others take seconds.
+The frame-wing project takes a minute or two to build and solve and
+needs the CAD kernel (OCP); the others take seconds.
 """
 
 from __future__ import annotations
@@ -27,13 +29,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PLATE = ROOT / 'testdata' / 'plate'
 
 
-def _model(title: str, build: Callable[[], Any], modes: int = 30) -> Any:
+def _model(title: str, build: Callable[[], Any]) -> Any:
     import hertzforge as hz
 
     model = build()
     project = hz.Project(title)
     project.add('Geometry', model.geometry())
-    project.add('Modes', model.eigensolution(num_modes=modes))
+    project.add('Modes', model.eigensolution(num_modes=30))
     return project
 
 
@@ -49,8 +51,7 @@ def free_plate() -> Any:
 
 def frame_wing() -> Any:
     from hertzforge.demo import frame_wing
-    return _model('Frame With Thick Wing', lambda: frame_wing.build('thick wing'),
-                  modes=12)
+    return frame_wing.project(solved=True)
 
 
 def plate_random_run() -> Any:
