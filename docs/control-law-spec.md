@@ -132,10 +132,19 @@ conventions in its comments too.
 
 **Conventions.**
 
-- **Spectral matrix.** An SDM is `G = lim (1/T) E[X X^H]` per line, so a response `Y = H X` has
-  `G_yy = H G_xx H^H`. This is the complex conjugate of the Bendat and Piersol definition
-  (`G_xy = E[X* Y]`) that much analysis software uses; mixing the two silently conjugates every
-  cross-spectral phase. A law that brings in cross spectra from elsewhere conjugates them first.
+- **Spectral matrix.** An SDM is `G = lim (1/T) E[X X^H]` per line, with `X` the spectrum under the
+  negative-exponent forward transform, `X[k] = sum_n x[n] exp(-j 2 pi k n / N)`. The off-diagonal
+  entry `(i, j)` is `E[X_i conj(X_j)]`, its angle the phase of channel `i` minus the phase of
+  channel `j`, and a response `Y = H X` has `G_yy = H G_xx H^H`, with `H` response over drive and
+  `H^H` its conjugate transpose; the response-to-drive cross spectrum has entries
+  `E[Y_c conj(V_d)]`, so `H = S_yv inv(S_vv)`. Rattlesnake and SDynPy hold this form, so a law
+  ported from either needs no conjugation. It is the complex conjugate of the Bendat and Piersol
+  definition (`G_xy = E[X* Y]`) that Hertzforge's analysis files and much other software hold,
+  under which the same relation reads `S_yy = conj(H) S_vv transpose(H)`; mixing the two silently
+  conjugates every cross-spectral phase. The core forms the boundary's form directly: its estimator
+  conjugates the workspace FFT's positive-exponent spectra (`SdmEstimator` in
+  `hertzforge-mimo-random`, pinned by a known-delay test), and every reference import converts
+  where its source holds the other form (`docs/reference-file.md`). A law never converts.
 - **One-sided.** The integral of a PSD over frequency is the signal's variance.
 - **Whole grid.** One call covers every line, in line order, so a law may work across lines (for
   example, smoothing its correction in frequency). Lines outside the band carry no drive.
@@ -195,7 +204,7 @@ megabytes a loop, so a law that does not read one never pays for it):
 | Need | Shape per line | Meaning |
 |---|---|---|
 | Last drive | `n_d` x `n_d`, packed | The drive played last loop, after the core's limits, at full level |
-| Response-drive cross spectrum | `n_c` x `n_d` | This loop's measurement, so a law can adapt its own FRF estimate |
+| Response-drive cross spectrum | `n_c` x `n_d` | This loop's measurement, `E[Y_c conj(V_d)]`, so a law can adapt its own FRF estimate as `H = S_yv inv(S_vv)` |
 | Identification response | `n_c` x `n_c`, packed | The control SDM measured during system identification; used by laws that match the identification's coherence and phase |
 | Identification drive | `n_d` x `n_d`, packed | The drive SDM of system identification |
 | Identification noise | `n_c` x `n_c`, packed | The control SDM measured with the drives off |
@@ -306,3 +315,7 @@ for now. A law should pass `law check` before it is used on hardware.
 9. **Transport.** *Answered:* Hermitian matrices travel packed, the upper triangle row-major;
    rectangular matrices in full. The SDK unpacks them.
 10. **Cadence.** One call per control loop. Does any law need a different cadence?
+11. **Cross-term form.** *Answered:* the boundary carries `S_ij = E[Z_i conj(Z_j)]` under the
+    negative-exponent transform (section 7), so `S_yy = H S_vv H^H` and a law ported from
+    Rattlesnake needs no conjugation. The core forms it directly and converts where a file holds
+    the other form; the conversion is the core's, never a law's.

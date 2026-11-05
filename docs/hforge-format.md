@@ -145,6 +145,18 @@ the project's `data_index`, as every imported file is.
   or more is chunked along its last axis (time, for a time history) and
   stored with gzip at level 1 and the shuffle filter. Every HDF5 build
   reads both, so nothing about reading the file changes.
+- A cross term is stored as conj(X)·Y, as Bendat and Piersol write it.
+  The controller and sdynpy hold X·conj(Y), its elementwise conjugate,
+  so the phase of one is the reverse of the other. The Rattlesnake
+  specification file, the controller's `.nc4` and the sdynpy data array
+  file are converted on the way in and on the way out. Every other
+  format that can hold a cross term (the universal file, MATLAB, ADF,
+  ESCDF) has the values as they are stored here, because none of them
+  says which form it holds. A project saved before this conversion was
+  added (2026-11-04) keeps a CPSD or specification imported from those
+  files in the controller's form, and nothing in the file marks it, so
+  import it again to correct it. A specification `.npz` exported before
+  that date reads back conjugated, for the same reason.
 
 ## `geometry/`
 

@@ -7,10 +7,19 @@ package hertzforge:control-law@0.1.0;
 // Conventions (docs/control-law-spec.md, section 7):
 //
 // - Spectral matrix. A spectral density matrix (SDM) is
-//   G = lim (1/T) E[X X^H] per line, so a response Y = H X has
-//   G_yy = H G_xx H^H. This is the complex conjugate of the Bendat and
-//   Piersol definition (G_xy = E[X* Y]) that much analysis software uses. A
-//   law that brings in cross spectra from elsewhere conjugates them first.
+//   G = lim (1/T) E[X X^H] per line, with X the spectrum under the
+//   negative-exponent forward transform, X[k] = sum_n x[n] exp(-j 2 pi k n / N).
+//   The off-diagonal entry (i, j) is E[X_i conj(X_j)], its angle the phase of
+//   channel i minus the phase of channel j, and a response Y = H X has
+//   G_yy = H G_xx H^H with H response over drive and H^H its conjugate
+//   transpose; the response-to-drive cross spectrum has entries
+//   E[Y_c conj(V_d)], so H = S_yv inv(S_vv). Rattlesnake and SDynPy hold this
+//   form, so a law ported from either needs no conjugation. It is the complex
+//   conjugate of the Bendat and Piersol definition (G_xy = E[X* Y]) that
+//   Hertzforge's analysis files and much other software hold. The core forms
+//   this one directly (its estimator conjugates the workspace FFT's
+//   positive-exponent spectra) and converts at every file crossing; a law
+//   never converts.
 // - One-sided. SDMs are one-sided: the integral of a power spectral density
 //   over frequency is the signal's variance.
 // - One call covers the whole grid: every line, in line order. Line `k` is at
@@ -186,7 +195,10 @@ interface mimo-types {
         loop-index: u64,
         /// Present only when the manifest declares `last-drive`.
         last-drive: option<hermitian-stack>,
-        /// Present only when the manifest declares `response-drive-csd`.
+        /// Present only when the manifest declares `response-drive-csd`: this
+        /// loop's measured response-to-drive cross spectrum, controls by
+        /// drives per line, entry (c, d) = E[Y_c conj(V_d)], so a law can
+        /// adapt its own plant estimate as H = S_yv inv(S_vv).
         response-drive-csd: option<matrix-stack>,
         /// Present only when the manifest declares `sysid-response`.
         sysid-response: option<hermitian-stack>,
