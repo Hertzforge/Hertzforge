@@ -37,14 +37,15 @@
 //!
 //! # The cross-spectral convention
 //!
-//! The file's convention is not documented. This controller works in
-//! `G = E[X X^H]`; the usual scientific-Python estimator gives the Bendat and
-//! Piersol form, its conjugate, and a file made with it carries every cross term
-//! conjugated relative to the controller. [`NpzImport::conjugate_on_import`]
-//! decides, and **defaults to conjugating**: a file whose `cpsd[k, 0, 1]` has
-//! phase `-phi` (channel 1 lagging channel 0 by `phi` in the Bendat form) arrives
-//! with `G_01` at phase `+phi`. The choice is recorded in the provenance and is
-//! open for a ruling once a file with a known phase is available.
+//! The file does not say which form its cross terms hold. The analysis side
+//! established (docs/hforge-format.md) that Rattlesnake and SDynPy hold
+//! `X conj(Y)`, which is this controller's own `G = E[X X^H]`, and its writer of
+//! this layout now writes the same form. So the file is **read unchanged by
+//! default**: `cpsd[k, 0, 1]` at phase `+phi` is channel 1 lagging channel 0 by
+//! `phi`, and arrives as `G_01` at `+phi`. [`NpzImport::conjugate_on_import`]
+//! conjugates every cross term instead, for a file made with an estimator that
+//! gives the Bendat and Piersol form (`scipy.signal.csd` does). The choice is
+//! recorded in the provenance.
 //!
 //! # The `.npy` reader
 //!
@@ -499,21 +500,22 @@ pub struct NpzImport {
     pub labels: Option<Vec<String>>,
     /// The unit of the controls (the file cannot state one).
     pub unit: String,
-    /// Conjugate every cross term on the way in (default true; see the module
-    /// docs).
+    /// Conjugate every cross term on the way in (default false: the file is
+    /// read in the form it holds; see the module docs).
     pub conjugate_on_import: bool,
     /// Repair a line that is not positive semi-definite under this policy.
     pub repair: Option<RepairPolicy>,
 }
 
 impl NpzImport {
-    /// The defaults: labels from the file, unit `g`, conjugate, no repair.
+    /// The defaults: labels from the file, unit `g`, cross terms as stored, no
+    /// repair.
     pub fn new(grid: Grid) -> Self {
         NpzImport {
             grid,
             labels: None,
             unit: "g".into(),
-            conjugate_on_import: true,
+            conjugate_on_import: false,
             repair: None,
         }
     }
@@ -669,12 +671,12 @@ pub fn import(
     provenance.conjugated_on_import = Some(opts.conjugate_on_import);
     provenance.assumptions = vec![
         if opts.conjugate_on_import {
-            "the file's cross-spectral convention is not documented; it was taken as the Bendat \
-             and Piersol form, the conjugate of E[X X^H], and every cross term was conjugated"
+            "every cross term was conjugated on import: the file was taken as the Bendat and \
+             Piersol form, the conjugate of E[X X^H]"
                 .to_string()
         } else {
-            "the file's cross-spectral convention is not documented; it was taken as E[X X^H] \
-             and read unchanged"
+            "the file does not state its cross-spectral convention; it was read unchanged, as \
+             the X conj(Y) form Rattlesnake and SDynPy write, which is E[X X^H]"
                 .to_string()
         },
         format!(
@@ -809,28 +811,33 @@ pub(crate) mod tests {
         assert_eq!(r.tolerances.abort_upper[5 * 2 + 1], 16.0);
         assert!(r.tolerances.abort_upper[6 * 2 + 1].is_nan());
         assert_eq!(r.provenance.method, Method::SpecificationNpz);
-        assert_eq!(r.provenance.conjugated_on_import, Some(true));
+        assert_eq!(r.provenance.conjugated_on_import, Some(false));
         assert!(r
             .provenance
             .source_sha256
             .as_ref()
             .unwrap()
             .starts_with("sha256:"));
-        assert!(r.provenance.assumptions[0].contains("not documented"));
+        assert!(r.provenance.assumptions[0].contains("read unchanged"));
     }
 
     #[test]
     fn a_known_phase_arrives_with_the_documented_sign() {
-        // Channel 1 lags channel 0 by 30 degrees. In the Bendat form the file holds
-        // cpsd[k, 0, 1] at -30 degrees; the controller's E[X X^H] holds +30.
+        // The file holds cpsd[k, 0, 1] at -30 degrees. In the form Rattlesnake and
+        // SDynPy write, the controller's own E[X X^H], that is channel 0 lagging
+        // channel 1 by 30 degrees, and it arrives unchanged at -30. Conjugating on
+        // request (a file in the Bendat form, where -30 means channel 1 lags) gives
+        // the controller +30.
         let bytes = npz(&base_entries(), false);
         let (r, _) = import(&bytes, "s.npz", &NpzImport::new(grid())).unwrap();
-        assert!((r.sdm.get(2, 0, 1).arg().to_degrees() - 30.0).abs() < 1e-12);
-        let mut keep = NpzImport::new(grid());
-        keep.conjugate_on_import = false;
-        let (r, _) = import(&bytes, "s.npz", &keep).unwrap();
         assert!((r.sdm.get(2, 0, 1).arg().to_degrees() + 30.0).abs() < 1e-12);
         assert_eq!(r.provenance.conjugated_on_import, Some(false));
+        let mut flip = NpzImport::new(grid());
+        flip.conjugate_on_import = true;
+        let (r, _) = import(&bytes, "s.npz", &flip).unwrap();
+        assert!((r.sdm.get(2, 0, 1).arg().to_degrees() - 30.0).abs() < 1e-12);
+        assert_eq!(r.provenance.conjugated_on_import, Some(true));
+        assert!(r.provenance.assumptions[0].contains("conjugated on import"));
     }
 
     #[test]

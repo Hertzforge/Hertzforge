@@ -152,16 +152,21 @@ channels in the test's order.
   fine.
 - **A coarser file.** A file at twice the grid's spacing leaves every other line inside its band at
   zero, and is refused: run at the file's spacing.
-- **Convention.** The file does not document its cross-spectral convention. Hertzforge assumes the
-  Bendat and Piersol form and conjugates every cross term on the way in, a choice that can be
-  turned off and is recorded in the provenance.
+- **Convention.** The file does not say which form its cross terms hold. Rattlesnake and SDynPy
+  write `X conj(Y)`, the controller's own `E[X X^H]` (`hforge-format.md`), and the analysis
+  service's writer of this layout writes the same, so the file is read unchanged. A file made with
+  an estimator that gives the Bendat and Piersol form (`scipy.signal.csd` does) is conjugated on
+  request; either way the choice is recorded in the provenance.
 
 ### A Specification `.mat` File
 
 The same variables with the axes transposed: `cpsd` channels by channels by lines, each limit
 channels by lines. MATLAB v5 and v7.3 files are read by the analysis service's converter, which
 writes the reference folder; channel names are read from a v5 file's `dof` or given to the
-converter. The same matching rules and convention apply.
+converter. The same matching rules apply. The convention differs: the analysis side takes a MATLAB
+file's cross terms as the form it stores itself, the Bendat and Piersol `conj(X) Y`, so the converter
+conjugates every cross term on the way to the controller by default and records that in the
+provenance.
 
 ### A `.hforge` Specification
 

@@ -171,10 +171,11 @@ Rules every import follows:
 - **A coarser file is refused.** A file at twice the test's line spacing would leave every other
   line in the band at zero. The message says to set the test's frame to the file's spacing.
 - **Convention.** This program writes a cross spectrum as `G_ij = E[X_i X_j*]`, so a positive phase
-  in `G_ij` means channel `j` lags channel `i`. Much analysis software writes the complex
-  conjugate. Specification files do not say which they use, so the `.npz` import assumes the
-  conjugate form and conjugates every cross term on the way in, and the provenance records that it
-  did. The CSV layout is this program's own and is read as written.
+  in `G_ij` means channel `j` lags channel `i`. Rattlesnake and SDynPy write the same form, and so
+  does the analysis package's writer of this layout, so the `.npz` import reads every cross term as
+  it is. Much analysis software writes the complex conjugate; a file made that way is conjugated on
+  request, and the provenance records which was done. The CSV layout is this program's own and is
+  read as written.
 
 Other formats go through the analysis package's converter, which writes a reference folder to
 import:
@@ -186,7 +187,9 @@ import:
   `hertzforge.io.reference_convert.from_hforge(path, folder, df_hz=..., lines=...)`.
 
 `df_hz` and `lines` are the test's line spacing and number of grid lines. The converter applies the
-same matching rules and the same convention, and refuses early what the controller would refuse.
+same matching rules, conjugates every cross term from the form the analysis package stores (the
+complex conjugate of this program's) to this program's, records that in the provenance, and refuses
+early what the controller would refuse.
 Its `repair=True` applies the same repair described above and records it.
 
 ### Breakpoints
