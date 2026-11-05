@@ -604,10 +604,15 @@ def from_hforge(path: str | os.PathLike, folder: str | os.PathLike, *, df_hz: fl
         rattlesnake_specification.save(spec, npz)
         with np.load(npz, allow_pickle=False) as d:
             arrays = {k: np.asarray(d[k]) for k in d.files}
+    # `save` writes the controller's X·conj(Y) (since 2026-11-04); back to the
+    # conj(X)·Y the file stores, so `build` converts once, as
+    # `conjugate_on_import` says. Before this line the conversion happened
+    # twice and a 40 degree lag arrived as a lead.
+    cpsd = np.conj(arrays['cpsd'])
     if unit is None:
         units = {u for u in (spec.ordinate_unit or []) if u}
         unit = units.pop() if len(units) == 1 else 'as stored'
-    ref = build(arrays['cpsd'], arrays['f'], df_hz=df_hz, lines=lines,
+    ref = build(cpsd, arrays['f'], df_hz=df_hz, lines=lines,
                 labels=[str(x) for x in arrays['dof']], unit=unit,
                 limits={k: arrays[k] for k in LIMITS if k in arrays},
                 conjugate_on_import=conjugate_on_import, method='hforge', source=name,
