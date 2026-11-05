@@ -55,6 +55,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-law-sdk",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
+    // The band-average law's math, which `hertzforge-mimo-laws` brings, reviewed
+    // 2026-11-10: pure computation on `hertzforge-sdm`'s stacks, MIT, with no other
+    // dependency. Written here, so on LAW_CRATES.
+    "hertzforge-law-band-average-math",
     // The MIMO Random run service and the reference reader behind the wire's MIMO
     // driver (src/mimo/adapter.rs), reviewed 2026-11-03: `hertzforge-mimo-random`
     // reaches hardware only through the station backend the control service hands it
@@ -206,10 +210,15 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// `sine-template` host fixtures. So was the TWR set (2026-11-08): the choice and
 /// check of a law (`hertzforge-twr-laws`, written with the contracts), and, before
 /// they exist, the `twr-correct` law file and the `twr-misbehave` and
-/// `twr-template` host fixtures.
+/// `twr-template` host fixtures. So was the band-average MIMO law (2026-11-10):
+/// its math (`hertzforge-law-band-average-math`, on `hertzforge-sdm`'s stacks and
+/// factorizations and nothing else), the law in `hertzforge-mimo-laws` and the
+/// `mimo-band-average` law file.
 const LAW_CRATES: &[&str] = &[
+    "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
     "hertzforge-law-host",
+    "hertzforge-law-mimo-band-average",
     "hertzforge-law-mimo-buzz",
     "hertzforge-law-mimo-min-drive",
     "hertzforge-law-mimo-open-loop",

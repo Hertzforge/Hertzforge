@@ -31,6 +31,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod band_average;
 mod buzz;
 mod factor;
 mod min_drive;
@@ -45,6 +46,7 @@ mod zero;
 #[cfg(feature = "law-file")]
 pub mod law_file;
 
+pub use band_average::BandAverageLaw;
 pub use buzz::{buzz_reference, BuzzConfig, BuzzMatchedLaw};
 pub use min_drive::{MinimumDriveConfig, MinimumDriveLaw};
 pub use open_loop::{OpenLoopConfig, OpenLoopLaw};

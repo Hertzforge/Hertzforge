@@ -288,6 +288,20 @@ The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnosti
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove
 the path a law file takes.
 
+The `band average` law (`laws/mimo-band-average`) is Brandon Zwink's, and is a law file, not one of
+the built-in five. It solves the inverse in fractional-octave bands: one flat correlated drive per
+band whose band-averaged response matches the band-averaged reference, with a threshold per band
+chosen by a sweep at the first solve, then a gain correction band by band from the measured
+response. Its arithmetic is `crates/hertzforge-law-band-average-math`, a port of his Python law
+that the crate's `parity` example holds to it call for call; `crates/hertzforge-mimo-laws` carries
+it across the boundary, and the tests hold the law file to the native law within `1e-12`. It leaves
+to the core what the core does: limit channels, the drive ceilings (its own RMS limit is off unless
+set) and the plant estimate (with its FRF update on, it solves again from the FRF and multiple
+coherence the core hands it, so the test's FRF mode must be update). Its buzz cross terms are the
+buzz-test law's reference. It reports each band's threshold and gain correction, and counts of the
+channels its check has left out, the FRF updates it has accepted and the bands it has held. Its
+first solve takes a few seconds on a large test, more than a loop's law budget.
+
 ## Classical shock laws
 
 A classical shock law closes the loop between pulses. The controller identifies the system with

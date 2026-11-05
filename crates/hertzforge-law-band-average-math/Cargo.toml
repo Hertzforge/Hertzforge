@@ -1,0 +1,15 @@
+[package]
+name = "hertzforge-law-band-average-math"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The math of Brandon Zwink's band-average MIMO random-vibration control law,
+# ported from his Python law, with nothing around it: the control SDMs as packed
+# stacks and the rest as flat slices in, a flat drive CPSD out, log lines returned
+# rather than printed. Its factorizations are hertzforge-sdm's. The band solves
+# split over threads only when asked to, and it has no OS access, so it builds to
+# wasm32-wasip2.
+[dependencies]
+hertzforge-sdm = { path = "../hertzforge-sdm" }
