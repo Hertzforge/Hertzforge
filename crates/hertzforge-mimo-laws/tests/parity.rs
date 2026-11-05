@@ -98,7 +98,7 @@ fn a_one_percent_parameter_change_is_detected() {
 }
 
 // -------------------------------------------------------------------------
-// The four built-in laws
+// The built-in laws
 // -------------------------------------------------------------------------
 
 use hertzforge_mimo_laws::BuiltinMimo;
@@ -110,6 +110,7 @@ fn file_of(law: BuiltinMimo) -> &'static str {
         BuiltinMimo::OpenLoop => "hertzforge_law_mimo_open_loop",
         BuiltinMimo::ShapeConstrained => "hertzforge_law_mimo_shape",
         BuiltinMimo::BuzzMatched => "hertzforge_law_mimo_buzz",
+        BuiltinMimo::MinimumDrive => "hertzforge_law_mimo_min_drive",
     }
 }
 
@@ -154,6 +155,15 @@ fn non_default(law: BuiltinMimo) -> (Given, OnePercent) {
         ),
         BuiltinMimo::BuzzMatched => (
             vec![("coherence_floor", num(0.3)), ("convergence", num(0.9))],
+            ("convergence", 0.5, 0.505),
+        ),
+        BuiltinMimo::MinimumDrive => (
+            vec![
+                ("tradeoff", choice("fixed")),
+                ("tradeoff_value", num(0.1)),
+                ("residual", choice("absolute")),
+                ("convergence", num(0.7)),
+            ],
             ("convergence", 0.5, 0.505),
         ),
     }

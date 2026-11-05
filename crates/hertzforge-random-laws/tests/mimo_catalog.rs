@@ -90,7 +90,16 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
     let scratch = Scratch::new("mimo-list");
     let mut cat = open(scratch.path());
     let ids: Vec<String> = cat.mimo_entries().into_iter().map(|e| e.id).collect();
-    assert_eq!(ids, ["pinv_closed", "pinv_open", "shape_svd", "buzz_match"]);
+    assert_eq!(
+        ids,
+        [
+            "pinv_closed",
+            "pinv_open",
+            "shape_svd",
+            "buzz_match",
+            "min_drive"
+        ]
+    );
     assert_eq!(DEFAULT_MIMO_LAW_ID, "pinv_closed");
     for e in cat.mimo_entries() {
         assert!(e.builtin);
@@ -127,6 +136,7 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             ("pseudo-inverse, open loop".to_string(), true),
             ("shape-constrained (SVD)".to_string(), true),
             ("buzz-test matched".to_string(), true),
+            ("minimum drive".to_string(), true),
             ("misbehaving multiple-output fixture".to_string(), false),
             ("zero drive".to_string(), false),
         ]

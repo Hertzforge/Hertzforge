@@ -139,6 +139,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
     "hertzforge-law-mimo-buzz",
+    "hertzforge-law-mimo-min-drive",
     "hertzforge-law-mimo-open-loop",
     "hertzforge-law-mimo-pinv",
     "hertzforge-law-mimo-shape",

@@ -255,7 +255,7 @@ with a drive the checks accept, and that no protection trips. Then:
 
 Each case reports the loops it took to converge, the trip if one ended the run, the calls not used
 and the drives refused, the drive-lines the controller repaired or held back, and the slowest call
-against its budget. The four built-in laws pass; the zero-drive law fails every case (the envelope
+against its budget. The five built-in laws pass; the zero-drive law fails every case (the envelope
 ends each run), and a law whose drive is refused fails with that reason.
 
 In the application, import the file and choose "Check before hardware" (`laws.check` on the
@@ -270,9 +270,10 @@ whether the file is cleared for hardware.
 
 ### The built-in MIMO laws
 
-Four multiple-output laws are built in, each from the published literature, each running natively
+Five multiple-output laws are built in, each from the published literature, each running natively
 and also built as a law file from the same source (`laws/mimo-pinv`, `laws/mimo-open-loop`,
-`laws/mimo-shape`, `laws/mimo-buzz`, all on the crate `crates/hertzforge-mimo-laws`), with tests
+`laws/mimo-shape`, `laws/mimo-buzz`, `laws/mimo-min-drive`, all on the crate
+`crates/hertzforge-mimo-laws`), with tests
 that hold every law file to its native law within `1e-12`, relative:
 
 | Id | Law | What it does |
@@ -281,6 +282,7 @@ that hold every law file to its native law within `1e-12`, relative:
 | `pinv_open` | Pseudo-inverse, open loop | The pseudo-inverse drive every loop, the method of the template above, with optional error weighting as well |
 | `shape_svd` | Shape-constrained (SVD) | Holds the drive on each line to the `m` directions the plant responds to most, for much lower drive; `m` fixed, or set by a singular-value ratio; closed loop inside the constraint |
 | `buzz_match` | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent; then the default law's closed loop |
+| `min_drive` | Minimum drive | Takes the reference's cross terms from the drive that needs the least power to produce its autospectra: on each line the drive minimizing the autospectrum residuals plus a trade-off times the drive power, over the positive semi-definite cone, and the plant's predicted response to it as the target (K. Coletti, R. B. Davis and R. Schultz, "Pareto-optimal target definition for multi-axis random vibration testing", 2026; Smallwood's minimum input trace at the exact-control end). The trade-off is picked at the knee of drive against residual, or set; closed loop by the default law's correction on that target |
 
 The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnostic of each layout.
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove

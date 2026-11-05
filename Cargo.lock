@@ -1118,6 +1118,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-min-drive"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-laws",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-open-loop"
 version = "0.1.0"
 dependencies = [

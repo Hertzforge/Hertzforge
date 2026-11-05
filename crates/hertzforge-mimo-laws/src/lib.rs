@@ -10,7 +10,7 @@
 //! inputs once, as a [`LawSpec`]; the law file's manifest and the controller's
 //! catalog entry are both built from it.
 //!
-//! The four built-in laws ([`BuiltinMimo`]), each from the published
+//! The five built-in laws ([`BuiltinMimo`]), each from the published
 //! literature and cited in its module by author, title and venue:
 //!
 //! - [`PseudoInverseLaw`], the default: the regularized pseudo-inverse drive,
@@ -21,6 +21,9 @@
 //!   singular directions, closed loop inside the constraint.
 //! - [`BuzzMatchedLaw`]: the reference's autospectra with the coherence and
 //!   phase of the identification response, then the default closed loop.
+//! - [`MinimumDriveLaw`]: the reference's autospectra, as far as a trade-off
+//!   against drive power allows, with the cross terms of the drive that needs
+//!   the least power to produce them, then the default closed loop.
 //!
 //! And [`ZeroLaw`]: always the zero drive. It proves the path a law takes; it
 //! controls nothing.
@@ -30,7 +33,9 @@
 
 mod buzz;
 mod factor;
+mod min_drive;
 mod open_loop;
+mod pareto;
 mod pinv;
 mod shape;
 pub mod spec;
@@ -41,6 +46,7 @@ mod zero;
 pub mod law_file;
 
 pub use buzz::{buzz_reference, BuzzConfig, BuzzMatchedLaw};
+pub use min_drive::{MinimumDriveConfig, MinimumDriveLaw};
 pub use open_loop::{OpenLoopConfig, OpenLoopLaw};
 pub use pinv::{PseudoInverseConfig, PseudoInverseLaw};
 pub use shape::{ShapeConfig, ShapeConstrainedLaw};
@@ -64,15 +70,18 @@ pub enum BuiltinMimo {
     ShapeConstrained,
     /// Buzz-test matched control.
     BuzzMatched,
+    /// The minimum-drive target.
+    MinimumDrive,
 }
 
 impl BuiltinMimo {
     /// Every built-in law, the default first.
-    pub const ALL: [BuiltinMimo; 4] = [
+    pub const ALL: [BuiltinMimo; 5] = [
         BuiltinMimo::PseudoInverse,
         BuiltinMimo::OpenLoop,
         BuiltinMimo::ShapeConstrained,
         BuiltinMimo::BuzzMatched,
+        BuiltinMimo::MinimumDrive,
     ];
 
     /// The stable id a choice of law names it by.
@@ -82,6 +91,7 @@ impl BuiltinMimo {
             BuiltinMimo::OpenLoop => "pinv_open",
             BuiltinMimo::ShapeConstrained => "shape_svd",
             BuiltinMimo::BuzzMatched => "buzz_match",
+            BuiltinMimo::MinimumDrive => "min_drive",
         }
     }
 
@@ -97,6 +107,7 @@ impl BuiltinMimo {
             BuiltinMimo::OpenLoop => OpenLoopLaw::spec(),
             BuiltinMimo::ShapeConstrained => ShapeConstrainedLaw::spec(),
             BuiltinMimo::BuzzMatched => BuzzMatchedLaw::spec(),
+            BuiltinMimo::MinimumDrive => MinimumDriveLaw::spec(),
         }
     }
 
@@ -111,6 +122,7 @@ impl BuiltinMimo {
             BuiltinMimo::OpenLoop => Box::new(OpenLoopLaw::build(setup, params)?),
             BuiltinMimo::ShapeConstrained => Box::new(ShapeConstrainedLaw::build(setup, params)?),
             BuiltinMimo::BuzzMatched => Box::new(BuzzMatchedLaw::build(setup, params)?),
+            BuiltinMimo::MinimumDrive => Box::new(MinimumDriveLaw::build(setup, params)?),
         })
     }
 }

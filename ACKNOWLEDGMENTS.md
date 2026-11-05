@@ -66,9 +66,16 @@ Random were written from these papers, and their code comments cite them the sam
   built on.
 - **D. O. Smallwood**, the multiple-shaker random control papers: "Multiple Shaker Random Vibration
   Control: An Update", Proceedings of the IEST, 1999, the source of the default law's closed-loop
-  correction of a factor of the reference and its per-loop limits; and "Random Vibration Testing of
+  correction of a factor of the reference and its per-loop limits; "Random Vibration Testing of
   a Single Test Item with a Multiple Input Control System", Proceedings of the IES, 1982, where the
-  lineage starts.
+  lineage starts; and "Multiple-Input Multiple-Output (MIMO) Linear Systems Extreme Inputs/Outputs",
+  Shock and Vibration, 2007, with "Minimum Input Trace for Multiple Input Multiple Output Linear
+  Systems", Journal of the IEST, 2013: the minimum drive principle, the exact-control end of the
+  minimum-drive law.
+- **K. Coletti, R. B. Davis and R. Schultz**, "Pareto-optimal target definition for multi-axis
+  random vibration testing", 2026: the minimum-drive law's problem, the drive power traded against
+  the autospectrum residuals over the positive semi-definite cone, and the automatic choice of the
+  trade-off at the knee of the curve.
 - **D. O. Smallwood and T. L. Paez**, "A Frequency Domain Method for the Generation of Partially
   Coherent Normal Stationary Time Domain Signals", Shock and Vibration, 1993: drive synthesis from
   a drive spectral density matrix.
