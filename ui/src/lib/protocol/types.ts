@@ -342,6 +342,8 @@ export interface TableEdit {
 	choices?: Record<string, string[]>;
 	/** How a column's cells are edited, by key: a flag is a check box, a choice a drop-down, a date a date field. */
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
+	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
+	rows?: number[];
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
@@ -483,6 +485,8 @@ export interface ShowPrefs {
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
 	/** A lone shape set's three views, one always up, and where and in what form its values are read. */
+	/** A lone shape set's modes animated on its geometry; off, that pane is put away and not computed. */
+	animation: boolean;
 	mode_table: boolean;
 	mac: boolean;
 	shape_values: boolean;

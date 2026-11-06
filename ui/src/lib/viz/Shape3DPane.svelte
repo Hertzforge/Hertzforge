@@ -52,6 +52,7 @@
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapGradient } from './colormap';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
@@ -104,8 +105,8 @@
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
-	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
-	const AMP_FULL_SCALE = 0.15;
+	/** An amplitude of 1, as a fraction of the model's diagonal: the slider's default position, and its scale. */
+	const AMP_UNIT = 0.075;
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
@@ -149,14 +150,20 @@
 	let host: HTMLDivElement;
 	let canvasHost: HTMLDivElement;
 	let triad: SVGSVGElement;
+	/** The labeled axes over the canvas: ticks, values and a titled edge per axis, redrawn each frame the view moves. */
+	let axesSvg: SVGSVGElement;
 
 	let playing = $state(true);
-	let amplitude = $state(0.5);
+	/** The deflection amplitude, a multiple of `AMP_UNIT`: the slider runs from 0 to `amplitudeMax`, which the field beside it sets. */
+	let amplitude = $state(1);
+	let amplitudeMax = $state(4);
 	let wireframe = $state(false);
+	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
+	let opacity = $state(1);
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
 	let colored = $state(true);
-	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, its extents written out. */
+	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, one edge per axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
@@ -167,12 +174,12 @@
 		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
 		return nodeCaption(n, view.node_ids, groupsFor.groups);
 	}
-	/** The deflection scale as a typed multiplier of the slider's middle, VD's scale box: 0.01 to 1000. */
-	const scaleFactor = $derived(amplitude / 0.5);
-	function setScale(text: string) {
+	/** The slider's top, typed: 0.1 to 1000; the slider is pulled down to it when it was above. */
+	function setAmplitudeMax(text: string) {
 		const value = Number(text);
 		if (!Number.isFinite(value)) return;
-		amplitude = Math.min(1000, Math.max(0.01, value)) * 0.5;
+		amplitudeMax = Math.min(1000, Math.max(0.1, value));
+		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
 	}
 	let fps = $state<number | null>(null);
 	let failure = $state<string | null>(null);
@@ -203,7 +210,7 @@
 		return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
 	});
 
-	const peak = $derived(amplitude * AMP_FULL_SCALE * diagonal);
+	const peak = $derived(amplitude * AMP_UNIT * diagonal);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
 	const extents = $derived.by(() => {
@@ -638,6 +645,55 @@
 		}
 	}
 
+	const corner = new Vector3();
+	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
+	function updateAxes() {
+		if (!axesSvg) return;
+		if (!bounds || !boundsBox) {
+			if (axesSvg.firstChild) axesSvg.replaceChildren();
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		axesSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		const { lo, hi } = extents;
+		const onPicture = (): Point => ({ x: ((corner.x + 1) / 2) * w, y: ((1 - corner.y) / 2) * h });
+		const corners: Point[] = [];
+		for (let i = 0; i < 8; i++) {
+			corner.set(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]).project(camera);
+			corners.push(onPicture());
+		}
+		corner.set((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).project(camera);
+		const centre = onPicture();
+		const unit = view.unit === 'undefined' ? '' : ` ${view.unit}`;
+		// a label `by` pixels out from `p`, kept on the canvas by its anchor and its width (about 6.5 px a character)
+		const at = (p: Point, out: Point, by: number, anchor: string, text: string) => {
+			const half = 3.3 * text.length;
+			const least = anchor === 'start' ? 3 : anchor === 'end' ? 3 + 2 * half : 3 + half;
+			const most = anchor === 'start' ? w - 3 - 2 * half : anchor === 'end' ? w - 3 : w - 3 - half;
+			const x = Math.min(most, Math.max(least, p.x + out.x * by));
+			const y = Math.min(h - 8, Math.max(8, p.y + out.y * by));
+			return `x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}"`;
+		};
+		let drawn = '';
+		labeledEdges(corners, centre).forEach((edge, k) => {
+			const a = corners[edge.from];
+			const b = corners[edge.to];
+			// a tick every 70 px or so, and only the ends of an edge seen short
+			const { values, decimals } = niceTicks(lo[k], hi[k], Math.max(1, Math.min(5, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 70))));
+			const anchor = Math.abs(edge.out.x) < 0.35 ? 'middle' : edge.out.x > 0 ? 'start' : 'end';
+			for (const v of values) {
+				const p = along(a, b, lo[k], hi[k], v);
+				drawn += `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(p.x + edge.out.x * 5).toFixed(1)}" y2="${(p.y + edge.out.y * 5).toFixed(1)}"/>`;
+				const text = v.toFixed(decimals);
+				drawn += `<text ${at(p, edge.out, 9, anchor, text)} dominant-baseline="middle">${text}</text>`;
+			}
+			const title = `${'XYZ'[k]}${unit}`;
+			drawn += `<text class="title" ${at(along(a, b, 0, 1, 0.5), edge.out, 30, 'middle', title)} dominant-baseline="middle">${title}</text>`;
+		});
+		axesSvg.innerHTML = drawn;
+	}
+
 	function loop(now: number) {
 		raf = requestAnimationFrame(loop);
 		if (!renderer) return;
@@ -676,6 +732,7 @@
 		dirty = false;
 		renderer.render(scene, camera);
 		updateTriad();
+		updateAxes();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -714,7 +771,13 @@
 
 	$effect(() => {
 		if (!renderer) return;
-		for (const m of [surface.material as MeshLambertMaterial]) m.wireframe = wireframe;
+		for (const m of [surface.material as MeshLambertMaterial]) {
+			m.wireframe = wireframe;
+			m.transparent = opacity < 1;
+			m.opacity = opacity;
+			m.depthWrite = opacity >= 1;
+			m.needsUpdate = true;
+		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
 		dirty = true;
@@ -926,7 +989,9 @@
 		onpointerup={onPointerUp}
 		onpointermove={onPointerMove}
 		onpointerleave={() => (hoverNode = null)}
-	></div>
+	>
+		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
+	</div>
 
 	{#if pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">
@@ -962,18 +1027,24 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max={Math.max(1, amplitude)} step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={amplitudeMax} step={amplitudeMax / 400} bind:value={amplitude} aria-valuetext="Amplitude {formatFixed(amplitude, 3)}, peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
-			<label class="scale" title="The deflection scale as a multiplier of the slider's middle, 0.01 to 1000">
-				<span class="lbl">×</span>
-				<input class="field mono num" data-testid="shape3d-scale" type="number" min="0.01" max="1000" step="any" value={Number(scaleFactor.toPrecision(3))} onchange={(e) => setScale(e.currentTarget.value)} aria-label="Deflection scale" />
+			<label class="scale" title="The slider's top: the amplitude at its right end, 0.1 to 1000">
+				<span class="lbl">to</span>
+				<input class="field mono num" data-testid="shape3d-amplitude-max" type="number" min="0.1" max="1000" step="any" value={Number(amplitudeMax.toPrecision(3))} onchange={(e) => setAmplitudeMax(e.currentTarget.value)} aria-label="The slider's top amplitude" />
 			</label>
 			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
 				<button role="radio" data-testid="shape3d-surface" aria-checked={!wireframe} class:on={!wireframe} onclick={() => (wireframe = false)} title="Surface (W)">Surface</button>
 				<button role="radio" data-testid="shape3d-wireframe" aria-checked={wireframe} class:on={wireframe} onclick={() => (wireframe = true)} title="Wireframe (W)">Wireframe</button>
 			</div>
+			{#if !wireframe}
+				<label class="amp opacity" title="How solid the surface is drawn; lower it to see through to what is inside">
+					<span class="lbl">Opacity</span>
+					<input type="range" data-testid="shape3d-opacity" min="0.1" max="1" step="0.01" bind:value={opacity} aria-valuetext="{Math.round(opacity * 100)} %" />
+				</label>
+			{/if}
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-ghost" class:on={ghost} aria-pressed={ghost} onclick={() => (ghost = !ghost)} title="Undeformed ghost (G)">
 				<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="5" width="12" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6" /></svg>
@@ -983,7 +1054,7 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
-			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, its extents written out">Axes</button>
+			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1074,13 +1145,6 @@
 				{#if hovered !== null && !pick}
 					<span class="hovercap" data-testid="shape3d-hover">{caption(hovered)}</span>
 				{/if}
-				{#if bounds}
-					<span class="extents" data-testid="shape3d-extents" aria-label="Model extents">
-						{#each ['X', 'Y', 'Z'] as axis, k (axis)}
-							<span>{axis} {formatFixed(extents.lo[k], 4)} to {formatFixed(extents.hi[k], 4)}{view.unit === 'undefined' ? '' : ` ${view.unit}`}</span>
-						{/each}
-					</span>
-				{/if}
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
@@ -1123,6 +1187,31 @@
 
 	.canvas.picking {
 		cursor: crosshair;
+	}
+
+	.axes {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.axes :global(line) {
+		stroke: var(--text-2);
+		stroke-width: 1;
+	}
+
+	.axes :global(text) {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		fill: var(--text-2);
+	}
+
+	.axes :global(text.title) {
+		font-size: 12px;
+		fill: var(--text-1);
 	}
 
 	.pickbar {
@@ -1195,11 +1284,6 @@
 		color: var(--text-1);
 	}
 
-	.extents {
-		display: inline-flex;
-		gap: var(--sp-2);
-	}
-
 	.amp {
 		display: inline-flex;
 		align-items: center;
@@ -1211,6 +1295,10 @@
 
 	.amp input {
 		width: 110px;
+	}
+
+	.opacity input {
+		width: 70px;
 	}
 
 	.ampval {

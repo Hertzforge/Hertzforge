@@ -84,7 +84,8 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'mode_table': True, 'mac': True, 'shape_values': False,
+         'projection': False, 'animation': True, 'mode_table': True, 'mac': True,
+         'shape_values': False,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
@@ -112,6 +113,11 @@ def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | No
 
 #: past this many shape values the table is not offered (VD's limit)
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
+
+#: a lone shape set's own DOFs are marked with arrows up to this many: a
+#: measured set has a few dozen, a finite element set hundreds of thousands,
+#: and an arrow on every node of a mesh says nothing
+ARROW_DOF_LIMIT = 2_000
 
 #: where a shape set's values are read: every DOF, or a channel choice of the
 #: table in its group (VD's `_VALUES_CHOICES`)
@@ -174,7 +180,7 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 ) -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
     table's channels, a force or a drive pointing in, else a lone shape
-    set's DOFs."""
+    set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
 
@@ -185,7 +191,9 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
-        return [str(dof) for dof in project[objects[0]].coordinate], []
+        dofs = project[objects[0]].coordinate
+        if len(dofs) <= ARROW_DOF_LIMIT:
+            return [str(dof) for dof in dofs], []
     return [], []
 
 
@@ -270,32 +278,57 @@ def _alone(project: Any, name: str, picks: list[int],
     if isinstance(obj, Geometry):
         return _run(project, 'project.view_geometry', geometry=name), []
     if isinstance(obj, ShapeSet):
-        # a lone set's three views, each on or off, one always up (VD's
-        # `_shape_views`): the mode list, the auto-MAC beside it since how
-        # distinct the modes are is part of reading the list, and the
-        # values themselves; on its geometry the modes animate above them
+        # a lone set's four views, each on or off, one always up (VD's
+        # `_shape_views`): on its geometry the modes animate, the mode
+        # list, the auto-MAC beside it since how distinct the modes are is
+        # part of reading the list, and the values themselves. The shell
+        # draws each in a pane of its own and minimizes one by turning its
+        # preference off, so a pane put away costs nothing to compute.
+        # Modes picked in the tree limit every view to those modes.
+        from .ops_project import _shape_view, mac_views
+
         prefs = {**PREFS, **(prefs or {})}
         geometry = _geometry_for(project, name)
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < obj.num_shapes})
         count = int(obj.num_shapes) * len(obj.coordinate)
         fits = count <= SHAPE_VALUES_CELL_LIMIT
-        up = {'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
+        up = {'animation': bool(prefs['animation']) and geometry is not None,
+              'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
               'values': bool(prefs['shape_values']) and fits}
         if not any(up.values()):
             up['table'] = True
         views: list[dict] = []
-        notes = [f'mode {picks[0] + 1} picked' if len(picks) == 1 else
-                 f'{len(picks)} modes picked'] if picks else []
-        if geometry is not None:
-            views += _run(project, 'project.mode_shapes', shapes=name, geometry=geometry)
+        notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} modes picked'] if picked else []
+        paired = (mac_views(project, name, name, picked or None, picked or None)
+                  if up['mac'] else [])
+        if up['animation']:
+            stage = _shape_view(project, name, geometry, picked or None)
+            selected = next((view for view in paired if view['view'] == 'shape3d'), None)
+            if selected is not None:
+                # a square picked on the auto-MAC animates its row mode with its
+                # column mode overlaid; the shell leaves the overlay off on the diagonal
+                stage['overlays'] = selected['overlays']
+                stage['overlay_phase'] = selected['overlay_phase']
+            views.append(stage)
         if up['table']:
-            views += _run(project, 'project.table', object=name)
-        if up['mac']:
-            views += [view for view in _run(project, 'project.mac', first=name, second=name)
-                      if view['view'] == 'matrix']
+            (table,) = _run(project, 'project.table', object=name)
+            if picked and len(table['rows']) == obj.num_shapes:
+                table['rows'] = [table['rows'][k] for k in picked]
+                if 'edit' in table:
+                    table['edit']['rows'] = [k + 1 for k in picked]
+            views.append(table)
+        views += [view for view in paired if view['view'] == 'matrix']
         if up['values']:
             table, said = _values_view(project, name, obj, prefs)
             notes += said
             if table is not None:
+                if picked and len(table['columns']) == obj.num_shapes + 1:
+                    keep = [0] + [k + 1 for k in picked]
+                    table['columns'] = [table['columns'][i] for i in keep]
+                    table['rows'] = [[row[i] for i in keep] for row in table['rows']]
+                elif picked and len(table['rows']) == obj.num_shapes:
+                    table['rows'] = [table['rows'][k] for k in picked]
                 views.append(table)
         if prefs['shape_values'] and not fits:
             notes.append(f'{count:,} shape values, too many for a table')

@@ -34,6 +34,9 @@ FORM = Param('form', 'Form', 'enum', default='shapes', options=(
     Option('shapes', 'Shapes, Φ'), Option('response', 'Response transformation, Φ⁺'),
     Option('reference', 'Reference transformation, Φᵀ')))
 DOFS = Param('dofs', 'DOFs', 'string', default='')
+MODE_ROW = Param('row', 'Mode', 'integer', default=1, min=1, step=1)
+MODE_COLUMN = Param('column', 'Column', 'string', default='description')
+DESCRIPTION = Param('value', 'Description', 'string', default='')
 
 
 def _table(project: Any, name: str) -> dict:
@@ -46,7 +49,30 @@ def _table(project: Any, name: str) -> dict:
     if found is None:
         raise refused(f'{name} has no table')
     headers, rows = found
+    from hertzforge.core.shapes import ShapeSet
+
+    if isinstance(obj, ShapeSet):
+        # the Description column is typed into, as VD's mode table takes it
+        return v.table(name, headers, rows, v.editing(
+            'project.describe_mode', {'shapes': name}, [None, None, None, 'description'],
+            kinds={'description': 'text'}))
     return v.table(name, headers, rows)
+
+
+def describe_mode(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.describe_mode`: the free text against one mode of a shape
+    set (`ShapeSet.set_description`, journaled), the row numbered from 1
+    as the mode table shows it; the table comes back."""
+    name, number = params['shapes'], int(params['row'])
+    shapes = project[name]
+    if params['column'].strip() != 'description':
+        raise refused('only the Description column of a mode table is typed into')
+    if not 1 <= number <= shapes.num_shapes:
+        raise refused(f'{name} has {shapes.num_shapes} modes; there is no mode {number}')
+    text = params['value'].strip()
+    shapes.set_description(number - 1, text)
+    project.record_call(shapes, 'set_description', number - 1, text)
+    return [_table(project, name)]
 
 
 def view_table(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -158,6 +184,12 @@ OPERATIONS = (
         summary='An object\'s table: a shape set\'s modes, a channel table\'s columns, or '
                 'matched modes beside both sets\' parameters.',
         params=(TABLED,), outputs=('table',), run=view_table),
+    Operation(
+        id='project.describe_mode', title='Describe Mode', workspace='modal',
+        summary='Write free text against one mode of a shape set, in the mode table\'s '
+                'Description column.',
+        params=(SHAPES, MODE_ROW, MODE_COLUMN, DESCRIPTION), outputs=('table',),
+        run=describe_mode, edits=True),
     Operation(
         id='project.match_modes', title='Match Modes', workspace='modal',
         summary='Pair each mode of the basis set with the compared set\'s mode of highest '

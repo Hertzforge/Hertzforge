@@ -387,7 +387,12 @@ def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
         assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix']
         assert out['offers']['shapes'] is True and out['offers']['values_dofs'] == ['all']
         off = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False}, validate=validate)
-        assert [v['view'] for v in off['views']] == ['shape3d', 'table'], 'one view always up'
+        assert [v['view'] for v in off['views']] == ['shape3d'], 'the animation alone'
+        still = shown(plate, 'Lone', prefs={'animation': False, 'mode_table': False, 'mac': False},
+                      validate=validate)
+        assert [v['view'] for v in still['views']] == ['table'], 'one view always up'
+        quiet = shown(plate, 'Lone', prefs={'animation': False}, validate=validate)
+        assert [v['view'] for v in quiet['views']] == ['table', 'matrix']
         values = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False,
                                              'shape_values': True}, validate=validate)
         assert [v['view'] for v in values['views']] == ['shape3d', 'table']
@@ -451,6 +456,62 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
     finally:
         table.set_cell('model', 0, was)
+
+
+def test_picked_modes_limit_every_view_of_a_lone_shape_set(plate, validate):
+    """Modes picked in the tree are what the panes show: the animation
+    steps through them, the table lists them, the auto-MAC is theirs and
+    the values keep their columns, each still numbered as the set numbers
+    it (Brandon, 2026-11-05)."""
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    project.add('Three', ShapeSet(frequency=[10.0, 20.0, 30.0], damping=[0.01, 0.02, 0.03],
+                                  shape_matrix=np.arange(18.0).reshape(3, 6), coordinate=dofs))
+    try:
+        two = shown(plate, 'Three', records={'Three': [2, 0]},
+                    prefs={'shape_values': True}, validate=validate)
+        stage, table, matrix, values = two['views']
+        assert [m['index'] for m in stage['modes']] == [1, 3]
+        assert [o['index'] for o in stage['overlays']] == [1, 3], 'the MAC picks a pair to overlay'
+        assert matrix['selects'] == 'shape3d'
+        assert [row[0] for row in table['rows']] == ['1', '3']
+        assert table['edit']['rows'] == [1, 3], 'an edit of the second shown row is mode 3'
+        assert matrix['values'].shape == (2, 2)
+        assert matrix['rows']['ticks'] == ['10.0 Hz', '30.0 Hz']
+        assert values['columns'] == ['DOF', 'M1', 'M3']
+        assert '2 modes picked' in two['note']
+        one = shown(plate, 'Three', records={'Three': [1]}, validate=validate)
+        assert [m['index'] for m in one['views'][0]['modes']] == [2]
+        assert one['views'][2]['values'].shape == (1, 1)
+        every = shown(plate, 'Three', validate=validate)
+        assert len(every['views'][0]['modes']) == 3 and every['views'][2]['values'].shape == (3, 3)
+    finally:
+        project.remove('Three')
+
+
+def test_a_finite_element_set_offers_no_dof_arrows(plate, validate):
+    """A measured set's few DOFs are worth marking; a mesh's hundreds of
+    thousands are not (`ARROW_DOF_LIMIT`)."""
+    from hertzforge.service import show
+    from hertzforge.service.show import ARROW_DOF_LIMIT
+
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    few = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    n = ARROW_DOF_LIMIT + 1
+    project.add('Few', ShapeSet(frequency=[10.0], damping=[0.01],
+                                shape_matrix=np.ones((1, 6)), coordinate=few))
+    project.add('Dense', ShapeSet(frequency=[10.0], damping=[0.01], shape_matrix=np.ones((1, n)),
+                                  coordinate=[f'{k + 1}X+' for k in range(n)]))
+    try:
+        # the plate's channel table would mark its own channels; a set with no table marks its DOFs
+        assert len(show._arrow_dofs(project, ['Few'], None)[0]) == 6
+        assert show._arrow_dofs(project, ['Dense'], None) == ([], [])
+        assert shown(plate, 'Few', validate=validate)['offers']['arrows'] is True
+    finally:
+        project.remove('Dense')
+        project.remove('Few')
 
 
 def test_a_channel_table_shows_typed_into_with_its_widgets(plate, validate):

@@ -531,6 +531,25 @@ class ShapeSet:
             si_factor(self.mass_unit, 'mass')  # validates
         self._sort_by_frequency()
 
+
+    def set_description(self, mode: int, text: str) -> None:
+        """Write free text against one mode, as the mode table's
+        Description column takes it.
+
+        Parameters
+        ----------
+        mode : int
+            The mode, from 0.
+        text : str
+            The description; stripped, and blank clears it.
+
+        Returns
+        -------
+        None
+        """
+        if not 0 <= int(mode) < self.num_shapes:
+            raise IndexError(f'mode {int(mode) + 1} of {self.num_shapes}')
+        self.description[int(mode)] = str(text).strip()
     def _sort_by_frequency(self) -> None:
         """Modes in ascending frequency, always.
 

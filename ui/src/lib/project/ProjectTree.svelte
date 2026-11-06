@@ -40,7 +40,7 @@
 	}
 
 	function rowClick(e: MouseEvent, o: ProjectObject) {
-		if (p.renaming === o.name) return;
+		if (p.renaming === o.name || justDragged) return;
 		p.clickObject(o.name, order, mods(e));
 	}
 
@@ -52,9 +52,63 @@
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
+			// Delete deletes, as VD's does: the journal keeps what went
 			e.preventDefault();
-			p.confirming = true;
+			void p.removeSelected();
 		}
+	}
+
+	/** Cmd-C copies the selected objects, Cmd-V pastes them as copies; typing in a field is left alone. */
+	function treeKey(e: KeyboardEvent) {
+		const target = e.target as HTMLElement | null;
+		if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+		const cmd = isMac ? e.metaKey : e.ctrlKey;
+		if (!cmd || e.altKey || e.shiftKey) return;
+		if (e.key === 'c' || e.key === 'C') {
+			if (p.copySelection()) e.preventDefault();
+		} else if (e.key === 'v' || e.key === 'V') {
+			e.preventDefault();
+			void p.paste();
+		}
+	}
+
+	/**
+	 * A row dragged with the pointer: past a few pixels it carries the selection it is in (or itself),
+	 * the row under the pointer lights as the drop target, and letting go there moves the dragged
+	 * objects into that object's group; letting go on the tree's empty part takes them out of theirs.
+	 * The pointer, not HTML5 drag and drop, since the desktop window takes native drags for files.
+	 */
+	let dragging = $state<string[] | null>(null);
+	let dropOn = $state<string | null>(null);
+	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
+	let justDragged = false;
+	function dragDown(e: PointerEvent, o: ProjectObject) {
+		if (e.button !== 0 || p.renaming === o.name) return;
+		dragFrom = { name: o.name, x: e.clientX, y: e.clientY, id: e.pointerId };
+	}
+	function dragMove(e: PointerEvent) {
+		if (!dragFrom) return;
+		if (!dragging) {
+			if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < 6) return;
+			dragging = p.isSelected(dragFrom.name) ? [...p.selection.objects] : [dragFrom.name];
+			(e.currentTarget as HTMLElement).setPointerCapture?.(dragFrom.id);
+		}
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
+		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
+		dropOn = name && !dragging.includes(name) ? name : null;
+	}
+	function dragUp(e: PointerEvent) {
+		const moving = dragging;
+		const target = dropOn;
+		const inside = !!treeBox && treeBox.contains(document.elementFromPoint(e.clientX, e.clientY));
+		dragging = null;
+		dropOn = null;
+		dragFrom = null;
+		if (!moving) return;
+		justDragged = true;
+		setTimeout(() => (justDragged = false), 0);
+		if (target) void p.moveInto(moving, target);
+		else if (inside) void p.moveInto(moving, null);
 	}
 
 	/** A DOF label in a grid being typed over: the object and the row, and the text. */
@@ -173,7 +227,8 @@
 	{/each}
 {/snippet}
 
-<div class="tree" class:bracketed={painted.length > 0} role="tree" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
+<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
 	{#if painted.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
@@ -198,7 +253,7 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if OPENS.has(o.kind)}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -428,6 +483,15 @@
 	.row.on {
 		background: var(--blue-weak);
 		box-shadow: inset 0 0 0 1px var(--blue-line);
+	}
+
+	.row.drop {
+		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+
+	.tree.dragging {
+		cursor: grabbing;
+		user-select: none;
 	}
 
 	.row:focus-visible,

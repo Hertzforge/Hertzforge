@@ -176,6 +176,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
+						animation: this.prefs.animation,
 						mode_table: this.prefs.mode_table,
 						mac: this.prefs.mac,
 						shape_values: this.prefs.shape_values,
@@ -372,12 +373,14 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value } },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.project) this.app.project.apply(res.project);
 			const table = res.views.find((v) => v.view === 'table');
-			if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
+			// a table showing a pick of its rows is shown again, since the one that comes back has them all
+			if (edit.rows) void this.showSelection();
+			else if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
 			return null;
 		} catch (err) {
 			return message(err);
@@ -863,6 +866,7 @@ function readPrefs(): ShowPrefs {
 		projection: false,
 		bars: true,
 		overlay: true,
+		animation: true,
 		mode_table: true,
 		mac: true,
 		shape_values: false,
@@ -879,7 +883,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+		for (const key of ['projection', 'bars', 'overlay', 'animation', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
@@ -1066,6 +1070,52 @@ export class ProjectState {
 
 	unlink(name: string): Promise<boolean> {
 		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
+	}
+
+	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V), as VD pastes its own objects. */
+	copied = $state.raw<string[]>([]);
+
+	copySelection(): boolean {
+		const names = [...this.selection.objects];
+		if (!names.length) return false;
+		this.copied = names;
+		this.error = null;
+		try {
+			void navigator.clipboard?.writeText(names.join('\n')).catch(() => {});
+		} catch {
+			// no clipboard here; the copy still lives in the shell
+		}
+		return true;
+	}
+
+	paste(): Promise<boolean> {
+		const ours = this.copied.filter((n) => this.summary?.objects.some((o) => o.name === n));
+		if (!ours.length) {
+			this.error = this.copied.length ? 'The copied objects are not in this project' : 'Nothing copied to paste';
+			return Promise.resolve(false);
+		}
+		return this.duplicate(ours);
+	}
+
+	/**
+	 * Objects dragged onto `target` join its group and leave their own, as VD's drag moves them;
+	 * dragged onto nothing (`target` null) they leave their groups.
+	 */
+	async moveInto(names: string[], target: string | null): Promise<boolean> {
+		const groupOf = (n: string) => (this.summary?.links ?? []).find((g) => g.members.includes(n));
+		const moving = names.filter((n) => n !== target && this.summary?.objects.some((o) => o.name === n));
+		if (!moving.length) return false;
+		if (target === null) {
+			for (const n of moving) if (groupOf(n) && !(await this.unlink(n))) return false;
+			return true;
+		}
+		for (const n of moving) {
+			const home = groupOf(target);
+			const own = groupOf(n);
+			if (own && own !== home && !(await this.unlink(n))) return false;
+		}
+		const joining = moving.filter((n) => groupOf(n) !== groupOf(target) || !groupOf(n));
+		return joining.length ? this.link([target, ...joining]) : true;
 	}
 
 	setBasis(name: string): Promise<boolean> {
