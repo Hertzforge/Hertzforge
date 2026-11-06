@@ -126,12 +126,12 @@ def test_deleting_an_element_group_takes_its_elements():
 def test_a_patch_ties_to_a_group_by_name():
     project = _parts()
     patch = project['Plate'].elements_in('foot')[:1]
-    (reading,) = run(project, 'project.tie_elements', geometry='Plate',
+    (reading,) = run(project, 'project.tie_elements', geometry='Plate', keep=True,
                      elements=str(int(patch[0])), to='floor')
     found = {row['label']: row['value'] for row in reading['rows']}
     assert found['Links added'] == 4 and found['Links in group'] == '3'
     with pytest.raises(ProtocolError, match='name what the patch ties to'):
-        run(project, 'project.tie_elements', geometry='Plate', elements='1')
+        run(project, 'project.tie_elements', geometry='Plate', elements='1', keep=True)
 
 
 def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
@@ -148,3 +148,27 @@ def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
     found = {row['label']: row['value'] for row in reading['rows']}
     assert found['Nodes moved'] == 16
     assert 0 < found['Farthest move'] <= 0.5 / 3 * 25.4
+
+
+def test_tie_picks_its_patch_by_clicking_and_lists_the_groups(validate):
+    project = _parts()
+    reading, view = run(project, 'project.tie_elements', geometry='Plate')
+    wire_views([reading, view], validate)
+    rows = {row['label']: row['value'] for row in reading['rows']}
+    assert rows['Patch'] == 'none yet' and rows['Tie to'] == 'not set'
+    pick = view['pick']
+    assert pick['target'] == 'faces' and pick['kept'] == []
+    first = int(project['Plate'].elem_id[0])
+    assert first in pick['faces'].tolist()
+    assert len(pick['faces']) == len(view['triangles']) // (3 if view['triangles'].ndim == 1 else 1)
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate', add=str(first))
+    assert view['pick']['kept'] == [first]
+    assert view['pick']['params']['elements'] == str(first)
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate',
+                         elements=str(first), drop=str(first))
+    assert view['pick']['kept'] == []
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate', elements=str(first),
+                         side='second', add=str(first + 1))
+    assert view['pick']['kept'] == [first + 1], 'the second patch is what shows'
+    assert view['pick']['params']['to'] == str(first + 1)
+    assert view['pick']['params']['elements'] == str(first)
