@@ -273,6 +273,8 @@ FORM = Param('form', 'Form', 'enum', default='keep', options=(
 SPACING = Param('spacing', 'Line spacing (0: the specification\'s own, or a time history\'s)',
                 'number', default=0.0, min=0.0, unit='Hz')
 DRAWN = Param('drawn', 'Bands drawn for channel', 'integer', default=1, min=1, step=1)
+BREAKPOINT_AT = Param('frequency', 'Frequency', 'number', default=100.0, unit='Hz', min=0.0)
+SCALE_DB = Param('decibels', 'Change', 'number', default=0.0, unit='dB', step=1.0)
 SHEET = (BREAKPOINTS, ENTRY, PAIRS, ALL_PAIRS, WARNING, ABORT, SYMMETRIC, UNIFORM, FORM,
          SPACING, DRAWN)
 
@@ -559,6 +561,80 @@ def _write(project: Any, name: str, draft: Any) -> None:
         raise refused(f'{name}: {error}') from None
 
 
+def _areas_table(name: str, draft: Any, drawn: int) -> dict:
+    """VD's Areas and running rms: each segment of the drawn channel's breakpoints, its
+    slope, its area, its share of the whole and the rms accumulated to its end."""
+    reading = draft.reading(drawn - 1)
+    whole = reading.total_area or 1.0
+    rows = [[f'{reading.frequencies[k]:g} to {reading.frequencies[k + 1]:g}',
+             f'{reading.slopes[k]:.3g}', f'{reading.areas[k]:.4g}',
+             f'{100.0 * reading.areas[k] / whole:.1f}', f'{reading.running[k]:.4g}']
+            for k in range(len(reading.areas))]
+    return v.table(f'{name}, {draft.channels[drawn - 1]}: areas and running rms',
+                   ['Hz', 'dB/octave', 'Area', 'Share (%)', 'Running rms'], rows)
+
+
+def specification_areas(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.specification_areas`: the Areas and running rms of a channel's breakpoints,
+    written nowhere (`SpecificationDraft.reading`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    if not 1 <= params['drawn'] <= draft.num_channels:
+        raise refused(f'{name} has {draft.num_channels} channels; not {params["drawn"]}')
+    if draft.form != 'breakpoints':
+        raise refused(f'{name} is written at lines; areas are read from breakpoints')
+    return [_areas_table(name, draft, params['drawn'])]
+
+
+def add_breakpoint(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_breakpoint`: a breakpoint at a frequency, its levels read off the power
+    law between its neighbors and the segment's band kept on both halves
+    (`SpecificationDraft.with_breakpoint`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    frequency = float(params['frequency'])
+    if frequency in [float(f) for f in draft.frequencies]:
+        raise refused(f'{name} already has a breakpoint at {frequency:g} Hz')
+    try:
+        draft = draft.with_breakpoint(frequency)
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'], f'{name}, a breakpoint added',
+                       params['channels'])
+
+
+def remove_breakpoint(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.remove_breakpoint`: a breakpoint gone, its neighbors joined
+    (`SpecificationDraft.without_breakpoint`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    frequency = float(params['frequency'])
+    if frequency not in [float(f) for f in draft.frequencies]:
+        raise refused(f'{name} has no breakpoint at {frequency:g} Hz')
+    try:
+        draft = draft.without_breakpoint(frequency)
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'], f'{name}, a breakpoint removed',
+                       params['channels'])
+
+
+def scale_specification(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.scale_specification`: a specification's levels raised or lowered by decibels,
+    on every channel or the ones named (`SpecificationDraft.scaled_db`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    try:
+        draft = draft.scaled_db(params['decibels'])
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'],
+                       f'{name}, scaled {params["decibels"]:+g} dB', params['channels'])
+
+
 def edit_specification(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.edit_specification`: a specification opened as a sheet
     (`SpecificationDraft.from_specification`), on every channel or the
@@ -782,6 +858,27 @@ OPERATIONS = (
         params=(SPECIFICATION, ROW, Param('column', 'Column', 'string', default='frequency'),
                 VALUE, ENTRY, CHANNELS),
         outputs=('spectrum', 'table', 'reading'), run=set_breakpoint, edits=True),
+    Operation(
+        id='project.specification_areas', title='Areas and Running RMS', workspace='specify',
+        summary='Each segment of a channel\'s breakpoints: its slope, its area, its share of '
+                'the whole and the rms accumulated to its end.',
+        params=(SPECIFICATION, CHANNELS, DRAWN), outputs=('table',), run=specification_areas),
+    Operation(
+        id='project.add_breakpoint', title='Add Breakpoint', workspace='specify',
+        summary='A breakpoint at a frequency, its levels read off the power law between its '
+                'neighbors.',
+        params=(SPECIFICATION, BREAKPOINT_AT, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=add_breakpoint, edits=True),
+    Operation(
+        id='project.remove_breakpoint', title='Remove Breakpoint', workspace='specify',
+        summary='A breakpoint gone, its neighbors joined.',
+        params=(SPECIFICATION, BREAKPOINT_AT, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=remove_breakpoint, edits=True),
+    Operation(
+        id='project.scale_specification', title='Scale Specification', workspace='specify',
+        summary='The levels raised or lowered by decibels, on every channel or the ones named.',
+        params=(SPECIFICATION, SCALE_DB, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=scale_specification, edits=True),
     Operation(
         id='project.predict', title='Enter Prediction', workspace='report',
         summary='One response channel\'s predicted peaks entered into a predictions object, '

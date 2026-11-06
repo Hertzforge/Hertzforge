@@ -167,6 +167,39 @@ def test_breakpoints_by_slope_reach_their_levels(project):
     assert level == pytest.approx(0.01 * 4.0 ** (3 / 3.0103), rel=1e-4)
 
 
+def test_breakpoints_are_added_and_removed_and_a_sheet_scaled(project, validate):
+    run(project, 'project.create_specification', table='Channel Table', rows='1-2',
+        name='Sheet', breakpoints='20, 0.01\n2000, 0.01')
+    views = run(project, 'project.add_breakpoint', specification='Sheet', frequency=200.0)
+    wire_views(views, validate)
+    table = next(view for view in views if view['view'] == 'table')
+    assert [row[0] for row in table['rows']] == ['20', '200', '2000']
+    assert float(table['rows'][1][1]) == pytest.approx(0.01)
+    with pytest.raises(ProtocolError, match='already has a breakpoint'):
+        run(project, 'project.add_breakpoint', specification='Sheet', frequency=200.0)
+    views = run(project, 'project.scale_specification', specification='Sheet', decibels=3.0103)
+    table = next(view for view in views if view['view'] == 'table')
+    assert float(table['rows'][0][1]) == pytest.approx(0.02, rel=1e-4)
+    views = run(project, 'project.remove_breakpoint', specification='Sheet', frequency=200.0)
+    table = next(view for view in views if view['view'] == 'table')
+    assert [row[0] for row in table['rows']] == ['20', '2000']
+    with pytest.raises(ProtocolError, match='no breakpoint at 200'):
+        run(project, 'project.remove_breakpoint', specification='Sheet', frequency=200.0)
+
+
+def test_the_areas_read_each_segment_of_a_channel(project, validate):
+    run(project, 'project.create_specification', table='Channel Table', rows='1-2',
+        name='Sheet', breakpoints='20, 0.01\n220, 0.01\n2020, 0.01')
+    (table,) = run(project, 'project.specification_areas', specification='Sheet')
+    wire_views([table], validate)
+    assert [row[0] for row in table['rows']] == ['20 to 220', '220 to 2020']
+    assert float(table['rows'][0][2]) == pytest.approx(2.0, rel=1e-3), 'flat: 0.01 x 200 Hz'
+    assert float(table['rows'][1][3]) == pytest.approx(90.0, abs=0.1)
+    assert float(table['rows'][1][4]) == pytest.approx(np.sqrt(20.0), rel=1e-3)
+    with pytest.raises(ProtocolError, match='not 9'):
+        run(project, 'project.specification_areas', specification='Sheet', drawn=9)
+
+
 def test_set_breakpoint_moves_a_level_and_a_frequency(project, validate):
     run(project, 'project.create_specification', table='Channel Table', rows='1-2',
         name='Sheet', breakpoints='20, 0.01\n2000, 0.01')
