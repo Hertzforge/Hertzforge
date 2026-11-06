@@ -149,7 +149,7 @@
 				<button class="btn ghost sm" onclick={() => a.resetParams()} title="Reset every field to its default">Defaults</button>
 			</div>
 			{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
-			<ParamForm params={a.params.filter((f) => !f.in_view)} bind:values={a.values[a.op.id]} showAllErrors={a.triedRun} idPrefix={a.op.id.replace('.', '-')} />
+			<ParamForm params={a.formParams} bind:values={a.values[a.op.id]} showAllErrors={a.triedRun} idPrefix={a.op.id.replace('.', '-')} />
 			<div class="runrow">
 				<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>
 					{#if a.running}Running{:else}<Icon name="play" size={13} /> Run{/if}

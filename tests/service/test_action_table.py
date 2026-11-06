@@ -88,8 +88,8 @@ def test_a_geometry_alone(plate, validate):
     assert animate['kind'] == 'default' and animate['ready']
     assert set(animate['candidates']) == {n for n, o in plate.project.items()
                                           if projects.kind_of(o) == 'time_history'}
-    missing = row(column(rest, 'geometry', 'shape_set'), 'Animate')
-    assert not missing['ready'] and missing['candidates'] == [] and 'shape set' in missing['reason']
+    missing = row(column(rest, 'geometry', 'specification'), 'Animate')
+    assert not missing['ready'] and missing['candidates'] == [] and 'specification' in missing['reason']
     assert 'Link' in verbs_in(column(rest, 'geometry', '*'))
 
 
@@ -226,3 +226,34 @@ def test_a_lone_shape_set_animates_only_on_a_geometry(plate):
         project.remove('Shapes')
     assert action_table.defaults(project, ['geometry'], []) == ['Plot']
     assert action_table.defaults(project, ['report'], []) == []
+
+
+def test_export_lists_the_formats_of_the_object_it_was_reached_from(plate, validate):
+    from hertzforge.io import exporters
+
+    name = named(plate, 'geometry')
+    first = table(plate, name, validate=validate)[0]
+    row = next(r for r in first['rows'] if r['id'] == 'project.save_as')
+    assert row['fill'] == {'object': name}
+    values = [f['value'] for f in row['formats']]
+    assert values == ['hforge', *(e.name for e in exporters(plate.project[name]))]
+    assert 'unv' in values and 'delimited' not in values and 'sdynpy_shapes' not in values
+    assert row['formats'][0]['suffix'] == '.hforge'
+
+
+def test_adding_a_geometry_to_shape_sets_is_not_offered(plate):
+    project = plate.project
+    project.add('Shapes', _shapes())
+    project.add('Shapes B', _shapes())
+    try:
+        for selected in (['Shapes'], ['Shapes', 'Shapes B']):
+            with_geometry = [c for c in table(plate, *selected)[1:] if 'geometry' in c['kinds']]
+            assert not [r for c in with_geometry for r in c['rows'] if r['kind'] == 'default']
+        with_shapes = [c for c in table(plate, named(plate, 'geometry'))[1:]
+                       if c['kinds'] == ['geometry', 'shape_set']]
+        assert not [r for c in with_shapes for r in c['rows'] if r['kind'] == 'default']
+        # selected by hand they still draw together
+        assert action_table.defaults(project, ['geometry', 'shape_set'], []) == ['Animate', 'Table']
+    finally:
+        project.remove('Shapes')
+        project.remove('Shapes B')

@@ -15,6 +15,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod probe;
+#[cfg(target_os = "macos")]
+mod save_panel;
 mod services;
 
 #[cfg(feature = "e2e")]
@@ -320,7 +322,16 @@ fn main() {
             let _ = tauri::Emitter::emit(app, "file-menu", act);
         }
     });
-    #[cfg(feature = "e2e")]
+    #[cfg(all(target_os = "macos", not(feature = "e2e")))]
+    let builder =
+        builder.invoke_handler(tauri::generate_handler![save_panel::save_with_file_types]);
+    #[cfg(all(target_os = "macos", feature = "e2e"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        e2e::e2e_log,
+        e2e::e2e_quit,
+        save_panel::save_with_file_types
+    ]);
+    #[cfg(all(not(target_os = "macos"), feature = "e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![e2e::e2e_log, e2e::e2e_quit]);
     let app = builder
         .build(tauri::generate_context!())

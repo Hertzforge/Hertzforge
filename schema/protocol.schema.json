@@ -491,7 +491,11 @@
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},
         "candidates": {"type": "array", "items": {"type": "string"}},
-        "part": {"const": true}
+        "part": {"const": true},
+        "formats": {"type": "array", "items": {
+          "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
+          "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}
+        }}
       }
     },
     "solidRow": {

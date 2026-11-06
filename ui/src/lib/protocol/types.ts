@@ -437,6 +437,14 @@ export interface Actions {
 }
 
 /** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
+export interface ExportFormat {
+	/** The `format` param's value. */
+	value: string;
+	label: string;
+	/** The file's suffix with its dot; empty for a folder. */
+	suffix: string;
+}
+
 export interface ActionRow {
 	/** `show.*` for a default, an operation's id, or `self.*`. */
 	id: string;
@@ -452,6 +460,8 @@ export interface ActionRow {
 	candidates?: string[];
 	/** An operation on the part of a geometry picked in the tree. */
 	part?: true;
+	/** Export: the formats this object can be written in. */
+	formats?: ExportFormat[];
 }
 
 /** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */

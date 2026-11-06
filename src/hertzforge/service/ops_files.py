@@ -53,15 +53,25 @@ def _formats() -> tuple[Option, ...]:
     return (NATIVE, *(Option(e.name, e.description) for e in exporters()))
 
 
+def export_formats(obj: Any) -> list[dict[str, str]]:
+    """The formats `obj` can be written in, `.hforge` first since only it reads
+    back complete: what the shell's save window lists as file types."""
+    from hertzforge.io import exporters
+
+    return [{'value': NATIVE.value, 'label': NATIVE.label, 'suffix': '.hforge'},
+            *({'value': e.name, 'label': e.description, 'suffix': e.suffix}
+              for e in exporters(obj))]
+
+
 OBJECT = Param('object', 'Object', 'enum', options_from='objects:' + '|'.join(SAVED_KINDS))
 FORMAT = Param('format', 'Format', 'enum', default='hforge', options=_formats())
-PATH = Param('path', 'File', 'string', default='')
+PATH = Param('path', 'Path on the service\'s machine', 'string', default='')
 CREATOR = Param('creator', 'Creator, for ESCDF (blank: the login name)', 'string',
                 default='')
 #: the units a foreign format is written in: the window's display unit
 #: system, as VD exports (the server puts the connection's system in for
 #: 'display'), or SI as stored
-UNITS = Param('units', 'Units', 'enum', default='display', options=(
+WRITTEN_IN = Param('units', 'Units', 'enum', default='display', options=(
     Option('display', 'The display unit system'), Option('si', 'SI, as stored')))
 
 RUN = Param('path', 'Rattlesnake run (.nc4)', 'string', default='')
@@ -618,7 +628,7 @@ OPERATIONS = (
         summary='Write one object to a file on the service\'s machine, as a Hertzforge object '
                 'or in a format another tool reads; a format that cannot hold the object is '
                 'refused, naming those that can.',
-        params=(OBJECT, FORMAT, PATH, UNITS, CREATOR), outputs=('reading',), run=save_as),
+        params=(OBJECT, FORMAT, PATH, WRITTEN_IN, CREATOR), outputs=('reading',), run=save_as),
     Operation(
         id='project.rattlesnake_preview', title='Preview a Rattlesnake Run',
         workspace='signals', everywhere=True,
