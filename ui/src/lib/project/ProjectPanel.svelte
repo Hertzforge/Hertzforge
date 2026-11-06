@@ -8,7 +8,6 @@
 	import Icon from '$lib/shell/Icon.svelte';
 	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
 	import ProjectTree from './ProjectTree.svelte';
-	import UnitsEditor from './UnitsEditor.svelte';
 
 	interface Props {
 		app: AppState;
@@ -53,13 +52,6 @@
 
 	/** An unresolved reference whose drop waits on a second click. */
 	let confirming = $state<string | null>(null);
-	/** The group name being typed in the strip. */
-	let groupName = $state('');
-	function focusField(node: HTMLInputElement) {
-		node.focus();
-		node.select();
-	}
-
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
 </script>
 
@@ -120,54 +112,6 @@
 		</div>
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
 			{#if p.summary.objects.length}
-				{@const picked = p.selection.objects}
-				{@const one = picked.length === 1 ? p.summary.objects.find((o) => o.name === picked[0]) : undefined}
-				<div class="strip" data-testid="selection-strip" aria-label="Acts on the selection">
-					{#if p.confirming && picked.length}
-						{@const parts = Object.entries(p.pickedParts)}
-						{#if parts.length}
-							<span class="oname">Delete {parts.map(([name, picks]) => `${picks.length} of ${name}`).join(', ')}?</span>
-							<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
-						{:else}
-							<span class="oname">Remove {picked.length === 1 ? picked[0] : `${picked.length} objects`}?</span>
-							<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Remove</button>
-						{/if}
-						<button class="btn ghost sm" onclick={() => (p.confirming = false)}>Keep</button>
-					{:else if p.namingGroup && one}
-						<form class="row" onsubmit={(e) => { e.preventDefault(); const text = groupName; p.namingGroup = null; void p.nameGroup(one.name, text); }}>
-							<input class="field" aria-label="Name for the group of {one.name}" data-testid="group-name" bind:value={groupName} use:focusField placeholder="Group name; blank removes it" onkeydown={(e) => e.key === 'Escape' && (p.namingGroup = null)} />
-							<button class="btn primary sm" type="submit">Name</button>
-						</form>
-					{:else if picked.length === 0}
-						<span class="hint">Select an object to act on it. Cmd-click adds, Shift-click extends.</span>
-					{:else}
-						{#if one?.kind === 'geometry' && one.name !== p.summary.active_geometry}
-							<button class="link" data-testid="activate-{one.name}" title="Draw data on this geometry" onclick={() => p.activate(one.name)} disabled={p.busy !== null}>Make active</button>
-						{/if}
-						{#if one?.units_defined !== undefined}
-							<button class="link" class:on={p.units?.name === one.name} data-testid="units-{one.name}" onclick={() => p.toggleUnits(one.name)} disabled={p.busy !== null}>Units</button>
-						{/if}
-						{#if picked.some((n) => p.summary?.objects.find((o) => o.name === n)?.stale)}
-							<button class="link" data-testid="refresh-{picked[0]}" title="Compute again from the source" onclick={() => p.refresh(picked.filter((n) => p.summary?.objects.find((o) => o.name === n)?.stale))} disabled={p.busy !== null}>Recompute</button>
-						{/if}
-						{#if picked.length >= 2}
-							<button class="link" data-testid="link-objects" title="Link these objects into one group" onclick={() => p.link([...picked])} disabled={p.busy !== null}>Link</button>
-						{/if}
-						{#if one && (p.summary.links ?? []).some((g) => g.members.includes(one.name))}
-							{@const group = (p.summary.links ?? []).find((g) => g.members.includes(one.name))}
-							<button class="link" data-testid="unlink-{one.name}" title="Take it out of its group" onclick={() => p.unlink(one.name)} disabled={p.busy !== null}>Unlink</button>
-							{#if group?.role !== 'Basis'}
-								<button class="link" data-testid="basis-{one.name}" title="Make its group the Basis of comparisons" onclick={() => p.setBasis(one.name)} disabled={p.busy !== null}>Basis</button>
-							{/if}
-							<button class="link" data-testid="name-group-{one.name}" title={group?.name ? `Rename the group "${group.name}"` : 'Name its group; a named group exports as an activity'} onclick={() => { groupName = group?.name ?? ''; p.namingGroup = one.name; }} disabled={p.busy !== null}>{group?.name ? 'Rename group' : 'Name group'}</button>
-						{/if}
-						<button class="link" data-testid="duplicate-{picked[0]}" title="Add a copy" onclick={() => p.duplicate([...picked])} disabled={p.busy !== null}>Copy</button>
-						{#if one}
-							<button class="link" data-testid="rename-{one.name}" onclick={() => (p.renaming = one.name)} disabled={p.busy !== null}>Rename</button>
-						{/if}
-						<button class="link danger" data-testid="remove-{picked[0]}" onclick={() => (p.confirming = true)} disabled={p.busy !== null}>Remove</button>
-					{/if}
-				</div>
 				<ProjectTree {app} />
 			{/if}
 			{#if p.summary.unresolved?.length}
@@ -199,7 +143,6 @@
 					Held in files that were not found or have changed. Saving keeps them; put the file back, or beside the project, and open it again.
 				</p>
 			{/if}
-			{#if p.units}<UnitsEditor project={p} tables={p.units} />{/if}
 		{:else}
 			<p class="muted">Empty. Import a file, or drop one on the window in the desktop app.</p>
 		{/if}

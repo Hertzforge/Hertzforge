@@ -14,7 +14,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
+import type { Action, ActionColumn, ActionRow, Actions, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -69,6 +69,16 @@ class AnalyzeState {
 	reading = $state.raw<{ title: string; views: View[] } | null>(null);
 	/** What the selection can take, as the service last answered; null while nothing is selected. */
 	actions = $state.raw<Actions | null>(null);
+	/** The operation's form is open in the action column, in place of the table. */
+	formOpen = $state(false);
+	/** The reading drawn in place of what the selection shows, by its row's id. */
+	readingId = $state<string | null>(null);
+	/** A combination's row whose partner is being picked in the tree. */
+	picking = $state<{ verb: string; kind: string; row: ActionRow } | null>(null);
+	/** The row to run once the object it needed has joined the selection. */
+	private joined: string | null = null;
+	/** The fit about to begin by hand, when a coherence could weight it. */
+	fitWeighing = $state(false);
 	private showSeq = 0;
 	private actionSeq = 0;
 
@@ -143,7 +153,6 @@ class AnalyzeState {
 		const next = { ...this.values };
 		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
 		this.values = next;
-		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
 	}
 
 	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
@@ -151,6 +160,7 @@ class AnalyzeState {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
 		this.reading = null;
+		this.readingId = null;
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
@@ -213,23 +223,76 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<Actions>('project.actions', {
 				objects: selection.objects,
-				records: selection.records
+				records: selection.records,
+				part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null
 			});
 			if (seq !== this.actionSeq) return;
 			this.actions = res;
 			if (!this.onProject) return;
-			const offered = [...res.readings, ...res.acts, ...res.project];
-			const current = offered.find((e) => e.id === this.opId);
-			if (current) this.pickAction(current);
-			else if (offered.length) this.pickAction(offered[0]);
+			const current = res.table.columns.find((column) => column.current);
+			if (this.joined) {
+				const row = current?.rows.find((r) => r.id === this.joined);
+				this.joined = null;
+				if (row?.ready && current) void this.perform(row, current);
+				return;
+			}
+			// an open form follows the selection while the selection can still take it
+			if (this.formOpen) {
+				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
+				if (row) this.pickAction({ id: row.id, fill: row.fill ?? {} });
+				else this.closeForm();
+			}
+			this.fitWeighing = false;
 		} catch (err) {
 			if (seq === this.actionSeq) this.actions = null;
 			void err;
 		}
 	}
 
+	/** A row of the action table, clicked. */
+	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
+		if (!row.ready) return;
+		if (!column.current) {
+			const partner = column.kinds[column.kinds.length - 1];
+			const candidates = row.candidates ?? [];
+			if (candidates.length === 1) this.join(candidates[0], row);
+			else this.picking = { verb: row.verb, kind: partner, row };
+			return;
+		}
+		if (row.kind === 'default') {
+			this.endReading();
+			return;
+		}
+		if (row.kind === 'self') {
+			await this.app.project.ownAct(row.id);
+			return;
+		}
+		this.pickAction({ id: row.id, fill: row.fill ?? {} });
+		const op = this.op;
+		if (!op) return;
+		const filled = new Set(Object.keys(row.fill ?? {}));
+		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
+		if (asks.length) this.formOpen = true;
+		else await this.run();
+	}
+
+	/** The object a combination needed was chosen: it joins the selection, and the row runs once the table has caught up. */
+	join(name: string, row: ActionRow): void {
+		this.picking = null;
+		this.joined = row.kind === 'default' ? null : row.id;
+		const p = this.app.project;
+		p.clickObject(name, p.summary?.objects.map((o) => o.name) ?? [], { toggle: true });
+	}
+
+	/** Back from a form to the table. */
+	closeForm(): void {
+		this.formOpen = false;
+		this.runError = null;
+		this.triedRun = false;
+	}
+
 	/** An action chosen in the frame: its tool, with the selection filled into its params. */
-	pickAction(entry: Action): void {
+	pickAction(entry: Pick<Action, 'id' | 'fill'>): void {
 		if (this.opId !== entry.id) this.selectOp(entry.id);
 		const op = this.op;
 		if (!op) return;
@@ -296,6 +359,7 @@ class AnalyzeState {
 	/** Back from a reading to what the selection shows. */
 	endReading(): void {
 		this.reading = null;
+		this.readingId = null;
 	}
 
 	/** A reading's own control changed (a waterfall's quantity): run it again with the patch. */
@@ -357,8 +421,12 @@ class AnalyzeState {
 			if (added.length) {
 				const order = (res.project?.objects ?? []).map((o) => o.name);
 				this.app.project.clickObject(added[0], order);
+				this.closeForm();
 			} else if (res.views.length) {
 				this.reading = { title: op.title, views: res.views };
+				this.readingId = op.id;
+			} else {
+				this.closeForm();
 			}
 			this.triedRun = false;
 		} catch (err) {
@@ -1047,6 +1115,32 @@ export class ProjectState {
 
 	remove(names: string[]): Promise<boolean> {
 		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
+	}
+
+	/** An act of the action table's on the selection itself, by its row's id. */
+	async ownAct(id: string): Promise<void> {
+		const picked = [...this.selection.objects];
+		const one = picked.length === 1 ? picked[0] : null;
+		const stale = picked.filter((n) => this.summary?.objects.find((o) => o.name === n)?.stale);
+		const kinds = picked.map((n) => this.summary?.objects.find((o) => o.name === n)?.kind);
+		const coherent = (this.summary?.objects ?? []).some((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence');
+		if (id === 'self.activate' && one) await this.activate(one);
+		else if (id === 'self.units' && one) await this.toggleUnits(one);
+		else if (id === 'self.recompute') await this.refresh(stale);
+		else if (id === 'self.link') await this.link(picked);
+		else if (id === 'self.unlink' && one) await this.unlink(one);
+		else if (id === 'self.basis' && one) await this.setBasis(one);
+		else if (id === 'self.name_group' && one) this.namingGroup = one;
+		else if (id === 'self.copy') await this.duplicate(picked);
+		else if (id === 'self.rename' && one) this.renaming = one;
+		else if (id === 'self.remove') this.confirming = true;
+		else if (id === 'self.fit' || id === 'self.edit_fit') {
+			if (coherent) {
+				this.app.analyze.fitWeighing = true;
+				return;
+			}
+			await this.app.fit.start(picked[kinds.indexOf('frf')], id === 'self.edit_fit' ? picked[kinds.indexOf('shape_set')] : undefined);
+		}
 	}
 
 	duplicate(names: string[]): Promise<boolean> {

@@ -100,9 +100,8 @@ def actions(project: Any, objects: list[str], records: dict[str, list[int]],
     entry `{'id', 'title', 'fill'}`; with nothing selected, the acts that
     take no object (`'project'`); and the same answered as the action table
     (`'table'`, `action_table`)."""
-    from .action_table import action_table
-
     from . import projects
+    from .action_table import action_table
     from .server import OPERATIONS
 
     chosen = [(name, projects.kind_of(project[name]), projects.verbs_of(project, name))

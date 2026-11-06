@@ -315,6 +315,7 @@ def action_table(project: Any, objects: list[str], records: dict[str, list[int]]
         taken = {row['id'] for row in current['rows']}
         columns += _partner_columns(project, chosen, taken, by_kind)
         others = [name for name in by_name if name not in objects]
-        columns.append({'kinds': [*current['kinds'], '*'],
-                        'rows': [_needs(_row('self.link', 'Link', 'self'), 'other object', others)]})
+        if len(objects) == 1:
+            columns.append({'kinds': [*current['kinds'], '*'],
+                            'rows': [_needs(_row('self.link', 'Link', 'self'), 'other object', others)]})
     return {'columns': columns}

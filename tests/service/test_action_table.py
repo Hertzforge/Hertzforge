@@ -104,10 +104,12 @@ def test_two_geometries_default_to_the_overlay(plate):
     project = plate.project
     project.add('Second', project[named(plate, 'geometry')])
     try:
-        first = table(plate, named(plate, 'geometry'), 'Second')[0]
+        columns = table(plate, named(plate, 'geometry'), 'Second')
+        first = columns[0]
         assert first['rows'][0]['verb'] == 'Overlay' and first['rows'][0]['kind'] == 'default'
         assert 'Merge' in verbs_in(first) and 'Link' in verbs_in(first)
         assert not row(first, 'Rename')['ready']
+        assert not [c for c in columns if c['kinds'][-1] == '*'], 'Link is already in the first column'
     finally:
         project.remove('Second')
 
@@ -161,8 +163,8 @@ def _shapes():
 
 def _psd():
     f = np.linspace(20, 2000, 50)
-    return dict(abscissa=f, ordinate=np.full((2, 50), 0.01), response_dof=['1Z+', '2Z+'],
-                ordinate_unit=['g**2/Hz'] * 2)
+    return {'abscissa': f, 'ordinate': np.full((2, 50), 0.01), 'response_dof': ['1Z+', '2Z+'],
+            'ordinate_unit': ['g**2/Hz'] * 2}
 
 
 def test_the_declared_pairs_are_what_show_draws(plate):
@@ -180,7 +182,7 @@ def test_the_declared_pairs_are_what_show_draws(plate):
              'shape_set': 'Shapes', 'psd': 'Measured', 'specification': 'Spec'}
     second = {'geometry': 'Stage 2', 'shape_set': 'Shapes 2', 'psd': 'Measured 2'}
     try:
-        for (a, b), _verbs in action_table.JOINT.items():
+        for a, b in action_table.JOINT:
             if a not in names or b not in names:
                 continue
             first, other = names[a], second[b] if a == b else names[b]
