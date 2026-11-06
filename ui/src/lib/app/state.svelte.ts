@@ -1072,6 +1072,52 @@ export class ProjectState {
 		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
 	}
 
+	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V), as VD pastes its own objects. */
+	copied = $state.raw<string[]>([]);
+
+	copySelection(): boolean {
+		const names = [...this.selection.objects];
+		if (!names.length) return false;
+		this.copied = names;
+		this.error = null;
+		try {
+			void navigator.clipboard?.writeText(names.join('\n')).catch(() => {});
+		} catch {
+			// no clipboard here; the copy still lives in the shell
+		}
+		return true;
+	}
+
+	paste(): Promise<boolean> {
+		const ours = this.copied.filter((n) => this.summary?.objects.some((o) => o.name === n));
+		if (!ours.length) {
+			this.error = this.copied.length ? 'The copied objects are not in this project' : 'Nothing copied to paste';
+			return Promise.resolve(false);
+		}
+		return this.duplicate(ours);
+	}
+
+	/**
+	 * Objects dragged onto `target` join its group and leave their own, as VD's drag moves them;
+	 * dragged onto nothing (`target` null) they leave their groups.
+	 */
+	async moveInto(names: string[], target: string | null): Promise<boolean> {
+		const groupOf = (n: string) => (this.summary?.links ?? []).find((g) => g.members.includes(n));
+		const moving = names.filter((n) => n !== target && this.summary?.objects.some((o) => o.name === n));
+		if (!moving.length) return false;
+		if (target === null) {
+			for (const n of moving) if (groupOf(n) && !(await this.unlink(n))) return false;
+			return true;
+		}
+		for (const n of moving) {
+			const home = groupOf(target);
+			const own = groupOf(n);
+			if (own && own !== home && !(await this.unlink(n))) return false;
+		}
+		const joining = moving.filter((n) => groupOf(n) !== groupOf(target) || !groupOf(n));
+		return joining.length ? this.link([target, ...joining]) : true;
+	}
+
 	setBasis(name: string): Promise<boolean> {
 		return this.act(`Making the group of ${name} the Basis`, 'project.set_basis', { object: name });
 	}

@@ -533,8 +533,20 @@ class ShapeSet:
 
 
     def set_description(self, mode: int, text: str) -> None:
-        """Write `text` against `mode` (from 0), the free text the mode
-        table takes in its Description column."""
+        """Write free text against one mode, as the mode table's
+        Description column takes it.
+
+        Parameters
+        ----------
+        mode : int
+            The mode, from 0.
+        text : str
+            The description; stripped, and blank clears it.
+
+        Returns
+        -------
+        None
+        """
         if not 0 <= int(mode) < self.num_shapes:
             raise IndexError(f'mode {int(mode) + 1} of {self.num_shapes}')
         self.description[int(mode)] = str(text).strip()
