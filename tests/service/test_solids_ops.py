@@ -308,10 +308,10 @@ def test_mesh_solids_takes_a_size_per_piece(monkeypatch):
     views = run(project, 'project.mesh_solids', **params)
     pieces = next(view for view in views if view.get('title') == 'Pieces')
     assert {int(row[0]) for row in pieces['rows']} == {cut, bar}
-    assert all(row[3] == 0.01 for row in pieces['rows'])
+    assert all(float(row[3]) == 0.01 for row in pieces['rows'])
     views = run(project, 'project.mesh_solids', sizes=f'{bar}: 0.005', **params)
     pieces = next(view for view in views if view.get('title') == 'Pieces')
-    assert {int(row[0]): row[3] for row in pieces['rows']} == {cut: 0.01, bar: 0.005}
+    assert {int(row[0]): float(row[3]) for row in pieces['rows']} == {cut: 0.01, bar: 0.005}
     refused(project, 'project.mesh_solids', 'a piece and', sizes='3', **params)
     refused(project, 'project.mesh_solids', 'a piece and', sizes='3: 0', **params)
 

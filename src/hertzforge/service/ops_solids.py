@@ -790,7 +790,8 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     sizes = _piece_sizes(params['sizes']) if elements == 'hexes' else {}
     pieces = _pieces_table(geometry, ids, size, sizes) if elements == 'hexes' else None
     if params['detect'] and pieces is not None:
-        sizes = {int(row[0]): float(row[4]) for row in pieces['rows']}
+        sizes = {int(entry['id']): _likely_or_refused(geometry, [int(entry['id'])])
+                 for entry in _call(lambda: solids.piece_plan(geometry, ids, size)) if 'id' in entry}
         pieces = _pieces_table(geometry, ids, size, sizes)
     said = [v.row('Solids', ', '.join(_label(solids.solid(geometry, i)) for i in ids),
                   None, 'info'),
