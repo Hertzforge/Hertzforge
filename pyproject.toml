@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hertzforge"
-version = "0.0.1"
+version = "0.1.0"
 description = "Data acquisition and structural dynamics in one toolset. Early release; the merged code is on its way."
 readme = "README.md"
 license = "MIT"

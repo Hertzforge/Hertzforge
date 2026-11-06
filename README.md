@@ -7,9 +7,10 @@ Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
 Visual Dynamics' analysis core is in this repository now, under
-`src/hertzforge/`. The `hertzforge` package on PyPI (0.0.1) predates it and
-installs only a command that prints its version; the next release carries
-the core.
+`src/hertzforge/`. The `hertzforge` package on PyPI at 0.0.1 predates it and
+installs only a command that prints its version; 0.1.0 is the release that
+carries the core, and the desktop app of the same number is on
+[hertzforge.com](https://hertzforge.com).
 
 ```
 pip install hertzforge

@@ -40,7 +40,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 #: the directories whose Python files each environment imports from
 SCOPES = {
-    'package': ('src', 'tests', 'tools', 'schema', 'testdata', 'scripts'),
+    'package': ('src', 'tests', 'tools', 'schema', 'testdata', 'scripts', 'desktop'),
 }
 
 #: license families refused outright
