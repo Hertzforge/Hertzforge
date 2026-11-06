@@ -394,6 +394,8 @@
 	}
 
 	.shown {
+		/* its own column with the table put away too, when nothing sits in the table's */
+		grid-column: 3;
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
