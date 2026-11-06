@@ -463,8 +463,9 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the second set projected onto the
-first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's three
-views are `prefs.mode_table`, `prefs.mac` and `prefs.shape_values` (one always up; `offers.shapes`), the
+first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's four
+views are `prefs.animation` (its modes on its geometry), `prefs.mode_table`, `prefs.mac` and
+`prefs.shape_values` (one always up; `offers.shapes`), each a pane the shell can put away, the
 values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in
 `offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and

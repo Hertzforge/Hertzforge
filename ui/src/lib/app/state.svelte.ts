@@ -176,6 +176,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
+						animation: this.prefs.animation,
 						mode_table: this.prefs.mode_table,
 						mac: this.prefs.mac,
 						shape_values: this.prefs.shape_values,
@@ -863,6 +864,7 @@ function readPrefs(): ShowPrefs {
 		projection: false,
 		bars: true,
 		overlay: true,
+		animation: true,
 		mode_table: true,
 		mac: true,
 		shape_values: false,
@@ -879,7 +881,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+		for (const key of ['projection', 'bars', 'overlay', 'animation', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;

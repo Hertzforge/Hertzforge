@@ -387,7 +387,12 @@ def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
         assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix']
         assert out['offers']['shapes'] is True and out['offers']['values_dofs'] == ['all']
         off = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False}, validate=validate)
-        assert [v['view'] for v in off['views']] == ['shape3d', 'table'], 'one view always up'
+        assert [v['view'] for v in off['views']] == ['shape3d'], 'the animation alone'
+        still = shown(plate, 'Lone', prefs={'animation': False, 'mode_table': False, 'mac': False},
+                      validate=validate)
+        assert [v['view'] for v in still['views']] == ['table'], 'one view always up'
+        quiet = shown(plate, 'Lone', prefs={'animation': False}, validate=validate)
+        assert [v['view'] for v in quiet['views']] == ['table', 'matrix']
         values = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False,
                                              'shape_values': True}, validate=validate)
         assert [v['view'] for v in values['views']] == ['shape3d', 'table']

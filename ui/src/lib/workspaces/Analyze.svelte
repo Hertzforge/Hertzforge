@@ -6,7 +6,7 @@
 	 * tree; a reading takes the view until Back.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
-	import type { Workspace } from '$lib/protocol/types';
+	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionsFrame from './ActionsFrame.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
@@ -34,12 +34,19 @@
 
 	const a = $derived(app.analyze);
 
-	// a lone shape set's mode table and MAC are panes of their own now, not sections to turn on
-	$effect(() => {
-		if (!a.shown?.offers?.shapes) return;
-		if (!a.prefs.mode_table) a.setPref('mode_table', true);
-		if (!a.prefs.mac) a.setPref('mac', true);
-	});
+	/** A lone shape set's panes, each on a preference the service reads: off, the pane is put away and its view not computed. */
+	const PANES = [
+		['animation', 'Animation'],
+		['mode_table', 'Mode Table'],
+		['mac', 'MAC'],
+		['shape_values', 'Shape Values']
+	] as const;
+	/** The preference a pane's view sits on: the mode table is the first table when it is up, the values table the one after it. */
+	function paneOf(v: View, views: View[]): (typeof PANES)[number][0] {
+		if (v.view === 'shape3d') return 'animation';
+		if (v.view === 'matrix') return 'mac';
+		return a.prefs.mode_table && v === views.find((w) => w.view === 'table') ? 'mode_table' : 'shape_values';
+	}
 	const tools = $derived(a.toolsFor(only));
 
 	// a module works on one of its own tools
@@ -111,6 +118,16 @@
 					{#if a.shown?.offers}
 						{@const offers = a.shown.offers}
 						{@const panes = !!offers.shapes}
+						{#if panes}
+							{@const away = PANES.filter(([pref]) => !a.prefs[pref])}
+							{#if away.length}
+								<div class="away" role="toolbar" aria-label="Panes put away">
+									{#each away as [pref, label] (pref)}
+										<button class="btn ghost sm chip" data-testid="restore-{pref}" title="Bring the {label} pane back" onclick={() => a.setPref(pref, true)}><Icon name="chevron" size={12} />{label}</button>
+									{/each}
+								</div>
+							{/if}
+						{/if}
 						<div class="bar" role="toolbar" aria-label="How the data is read">
 							{#if offers.flat}
 								<div class="seg" role="radiogroup" aria-label="Stage or plot">
@@ -184,10 +201,10 @@
 					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
 					{@const offers = a.shown.offers}
 					{@const panes = !!offers?.shapes}
-					{@const modeTable = a.shown.views.findIndex((v) => v.view === 'table')}
-					<div class="svviews" class:several={a.shown.views.length > 1} class:panes>
-						{#each a.shown.views as v, i (i)}
-							<div class="view {v.view}" class:pane={panes} data-testid={panes ? `pane-${v.view}${v.view === 'table' && i !== modeTable ? '-values' : ''}` : undefined}>
+					{@const views = a.shown.views}
+					<div class="svviews" class:several={views.length > 1} class:panes style:--rows={Math.max(1, views.length - 1)}>
+						{#each views as v, i (i)}
+							<div class="view {v.view}" class:pane={panes} data-testid={panes ? `pane-${paneOf(v, views)}` : undefined}>
 								{#if panes && offers}
 									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own -->
 									<header class="phead">
@@ -204,9 +221,7 @@
 												<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
 												<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
 											</div>
-										{:else if v.view === 'table' && i === modeTable}
-											<button class="btn ghost sm" class:on={a.prefs.shape_values} aria-pressed={a.prefs.shape_values} data-testid="read-shape-values" title="The shape values in a pane of their own: a row per DOF and a column per mode" onclick={() => a.setPref('shape_values', !a.prefs.shape_values)}>Shape Values</button>
-										{:else if v.view === 'table'}
+										{:else if v.view === 'table' && paneOf(v, views) === 'shape_values'}
 											{#if offers.values_dofs.length > 1}
 												<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
 													{#each offers.values_dofs as choice (choice)}
@@ -219,8 +234,8 @@
 												<option value="response">Response transformation Φ⁺</option>
 												<option value="reference">Reference transformation Φᵀ</option>
 											</select>
-											<button class="btn ghost icon sm" data-testid="close-values" aria-label="Close the shape values" title="Close the shape values" onclick={() => a.setPref('shape_values', false)}><Icon name="close" size={12} /></button>
 										{/if}
+										<button class="btn ghost icon sm" data-testid="minimize-{paneOf(v, views)}" aria-label="Put this pane away" title="Put this pane away; its name in the frame's header brings it back" disabled={views.length === 1} onclick={() => a.setPref(paneOf(v, views), false)}><Icon name="chevron" size={12} /></button>
 									</header>
 								{/if}
 								<div class="pbody">
@@ -449,6 +464,46 @@
 			grid-row: 1 / span 2;
 			min-height: 520px;
 		}
+
+		/* the panes share the frame's height instead of growing past it */
+		.svviews.panes.several:has(.view.shape3d) {
+			grid-auto-rows: minmax(0, 1fr);
+			align-content: stretch;
+			overflow: hidden;
+		}
+
+		.svviews.panes.several .view.shape3d {
+			grid-row: 1 / span var(--rows);
+			height: auto;
+			min-height: 0;
+		}
+
+		.svviews.panes.several .view.matrix,
+		.svviews.panes.several .view.table {
+			height: auto;
+			min-height: 0;
+		}
+	}
+
+	.svviews.panes {
+		overflow-y: auto;
+	}
+
+	.away {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--sp-2);
+	}
+
+	.chip {
+		display: inline-flex;
+		gap: 4px;
+		align-items: center;
+		border: 1px dashed var(--line-2);
+	}
+
+	.chip :global(svg) {
+		transform: rotate(180deg);
 	}
 
 	.svviews {
@@ -463,9 +518,10 @@
 		min-height: 0;
 	}
 
+	/* the view fills what its pane leaves; a basis of auto keeps a pane with no set height at its content's */
 	.pbody {
 		display: grid;
-		flex: 1;
+		flex: 1 1 auto;
 		min-height: 0;
 	}
 

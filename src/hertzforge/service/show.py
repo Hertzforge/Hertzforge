@@ -84,7 +84,8 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'mode_table': True, 'mac': True, 'shape_values': False,
+         'projection': False, 'animation': True, 'mode_table': True, 'mac': True,
+         'shape_values': False,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
@@ -270,22 +271,25 @@ def _alone(project: Any, name: str, picks: list[int],
     if isinstance(obj, Geometry):
         return _run(project, 'project.view_geometry', geometry=name), []
     if isinstance(obj, ShapeSet):
-        # a lone set's three views, each on or off, one always up (VD's
-        # `_shape_views`): the mode list, the auto-MAC beside it since how
-        # distinct the modes are is part of reading the list, and the
-        # values themselves; on its geometry the modes animate above them
+        # a lone set's four views, each on or off, one always up (VD's
+        # `_shape_views`): on its geometry the modes animate, the mode
+        # list, the auto-MAC beside it since how distinct the modes are is
+        # part of reading the list, and the values themselves. The shell
+        # draws each in a pane of its own and minimizes one by turning its
+        # preference off, so a pane put away costs nothing to compute.
         prefs = {**PREFS, **(prefs or {})}
         geometry = _geometry_for(project, name)
         count = int(obj.num_shapes) * len(obj.coordinate)
         fits = count <= SHAPE_VALUES_CELL_LIMIT
-        up = {'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
+        up = {'animation': bool(prefs['animation']) and geometry is not None,
+              'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
               'values': bool(prefs['shape_values']) and fits}
         if not any(up.values()):
             up['table'] = True
         views: list[dict] = []
         notes = [f'mode {picks[0] + 1} picked' if len(picks) == 1 else
                  f'{len(picks)} modes picked'] if picks else []
-        if geometry is not None:
+        if up['animation']:
             views += _run(project, 'project.mode_shapes', shapes=name, geometry=geometry)
         if up['table']:
             views += _run(project, 'project.table', object=name)
