@@ -111,7 +111,7 @@
 					{#if hint}<span class="hint num">{hint}</span>{/if}
 				</label>
 				{#if p.type === 'number' || p.type === 'integer'}
-					<div class="numeric">
+					<div class="numeric" style:--unit-length="{p.unit?.length ?? 0}ch">
 						<input
 							{id}
 							class="field num"
@@ -245,7 +245,7 @@
 	}
 
 	.numeric .field {
-		padding-right: 52px;
+		padding-right: max(52px, calc(34px + var(--unit-length, 0ch)));
 		text-align: right;
 	}
 

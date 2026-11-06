@@ -3353,6 +3353,9 @@ class Project(dict):
                                     {'draft': draft.as_dict()}))
 
     def generate_rigid_body_modes(self, source: Any, *,
+                                  point: Sequence[float] | None = None,
+                                  mass: float | None = None,
+                                  inertia: Sequence[float] | None = None,
                                   name: str | None = None) -> str:
         """Generate the six rigid-body mode shapes of a geometry (Generate
         Rigid Body Mode Shapes): three translations and three rotations
@@ -3371,6 +3374,15 @@ class Project(dict):
         ----------
         source : str or object
             The geometry, by name or as the object itself.
+        point : sequence of float, optional
+            The reference point in meters, which replaces the geometry's
+            `mass_properties`. Without it they stay as they are.
+        mass : float, optional
+            The mass in kg about `point`; with `inertia`, for
+            mass-normalized shapes.
+        inertia : sequence of float, optional
+            The tensor's six terms about `point` in kg m^2
+            (`core.rigid.INERTIA_TERMS`).
         name : str, optional
             What to call the result. Defaults to the geometry's name
             followed by 'Rigid Body Modes'.
@@ -3381,12 +3393,16 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
-        from .core.rigid import rigid_body_shapes
+        from .core.rigid import MassProperties, rigid_body_shapes
 
         source = self.name_of(source)
         geometry = self[source]
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{source!r} is not a geometry')
+        if point is not None:
+            geometry.mass_properties = MassProperties(tuple(point), mass, inertia)
+        elif mass is not None or inertia is not None:
+            raise ValueError('mass and inertia are about a point: give the point too')
         if geometry.mass_properties is None:
             geometry.mass_properties = geometry.suggest_mass_properties()
         return self._derive(
