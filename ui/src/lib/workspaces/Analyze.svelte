@@ -33,6 +33,13 @@
 	let { app, only }: Props = $props();
 
 	const a = $derived(app.analyze);
+
+	// a lone shape set's mode table and MAC are panes of their own now, not sections to turn on
+	$effect(() => {
+		if (!a.shown?.offers?.shapes) return;
+		if (!a.prefs.mode_table) a.setPref('mode_table', true);
+		if (!a.prefs.mac) a.setPref('mac', true);
+	});
 	const tools = $derived(a.toolsFor(only));
 
 	// a module works on one of its own tools
@@ -90,7 +97,7 @@
 				<div class="svviews" class:several={a.reading.views.length > 1}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
-							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} />
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} />
 						</div>
 					{/each}
 				</div>
@@ -103,6 +110,7 @@
 					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
 					{#if a.shown?.offers}
 						{@const offers = a.shown.offers}
+						{@const panes = !!offers.shapes}
 						<div class="bar" role="toolbar" aria-label="How the data is read">
 							{#if offers.flat}
 								<div class="seg" role="radiogroup" aria-label="Stage or plot">
@@ -121,7 +129,7 @@
 									<option value="phase">Phase</option>
 								</select>
 							{/if}
-							{#if a.shown?.views.some((v) => v.view === 'matrix')}
+							{#if !panes && a.shown?.views.some((v) => v.view === 'matrix')}
 								<div class="seg" role="radiogroup" aria-label="Bars or grid">
 									<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
 									<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
@@ -132,26 +140,6 @@
 							{/if}
 							{#if offers.projection}
 								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
-							{/if}
-							{#if offers.shapes}
-								{@const up = [a.prefs.mode_table, a.prefs.mac, a.prefs.shape_values].filter(Boolean).length}
-								<button class="btn ghost sm" class:on={a.prefs.mode_table} aria-pressed={a.prefs.mode_table} disabled={up === 1 && a.prefs.mode_table} data-testid="read-mode-table" title="The mode list: frequency, damping and a description to fill in" onclick={() => a.setPref('mode_table', !a.prefs.mode_table)}>Mode Table</button>
-								<button class="btn ghost sm" class:on={a.prefs.mac} aria-pressed={a.prefs.mac} disabled={up === 1 && a.prefs.mac} data-testid="read-mac" title="The MAC of the set against itself: how distinct its modes are" onclick={() => a.setPref('mac', !a.prefs.mac)}>MAC</button>
-								<button class="btn ghost sm" class:on={a.prefs.shape_values} aria-pressed={a.prefs.shape_values} disabled={up === 1 && a.prefs.shape_values} data-testid="read-shape-values" title="The shape values: a row per DOF and a column per mode" onclick={() => a.setPref('shape_values', !a.prefs.shape_values)}>Shape Values</button>
-								{#if a.prefs.shape_values}
-									{#if offers.values_dofs.length > 1}
-										<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
-											{#each offers.values_dofs as choice (choice)}
-												<option value={choice}>{VALUES_CHOICES[choice] ?? choice}</option>
-											{/each}
-										</select>
-									{/if}
-									<select class="field sm" aria-label="Form" data-testid="read-values-form" value={a.prefs.values_form} onchange={(e) => a.setPref('values_form', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.values_form)} title="The shapes at the DOFs (u = Φq), or a transformation there: the response transformation Φ⁺ (q = Φ⁺u), applied to motions, or the reference transformation Φᵀ, applied to forces and drive signals">
-										<option value="shapes">Shapes Φ</option>
-										<option value="response">Response transformation Φ⁺</option>
-										<option value="reference">Reference transformation Φᵀ</option>
-									</select>
-								{/if}
 							{/if}
 							{#if offers.environments.length > 1}
 								<select class="field sm" aria-label="Environment" data-testid="read-environment" value={a.prefs.environment ?? offers.environments[0]} onchange={(e) => a.setPref('environment', (e.currentTarget as HTMLSelectElement).value)} title="Which environment's control channels the Control column shows, and whose transformation the view drop-down offers">
@@ -174,10 +162,10 @@
 									<button role="radio" aria-checked={a.prefs.sine_reading === 'bars'} class:on={a.prefs.sine_reading === 'bars'} data-testid="read-sine-bars" title="Each channel's signed RMS deviation from its tone across the sweep, in dB" onclick={() => a.prefs.sine_reading !== 'bars' && a.setPref('sine_reading', 'bars')}>Level Error</button>
 								</div>
 							{/if}
-							{#if offers.arrows}
+							{#if !panes && offers.arrows}
 								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
 							{/if}
-							{#if offers.sensors}
+							{#if !panes && offers.sensors}
 								<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
 							{/if}
 							{#if a.comparison && a.picks.length}
@@ -194,23 +182,63 @@
 				</header>
 				{#if a.shown}
 					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
-					<div class="svviews" class:several={a.shown.views.length > 1}>
+					{@const offers = a.shown.offers}
+					{@const panes = !!offers?.shapes}
+					{@const modeTable = a.shown.views.findIndex((v) => v.view === 'table')}
+					<div class="svviews" class:several={a.shown.views.length > 1} class:panes>
 						{#each a.shown.views as v, i (i)}
-							<div class="view {v.view}">
-								<ViewRenderer
-									view={v}
-									layout="strip"
-									showTitle={v.view === 'spectrum'}
-									minHeight={240}
-									scope="selection"
-									selected={v.view === 'matrix' && v.selects ? a.pair : null}
-									picks={v.view === 'matrix' && v.selects ? a.picks : []}
-									onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
-									bars={v.view === 'matrix' && a.prefs.bars}
-									mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
-									overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
-									onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
-								/>
+							<div class="view {v.view}" class:pane={panes} data-testid={panes ? `pane-${v.view}${v.view === 'table' && i !== modeTable ? '-values' : ''}` : undefined}>
+								{#if panes && offers}
+									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own -->
+									<header class="phead">
+										<h4>{v.title}</h4>
+										{#if v.view === 'shape3d'}
+											{#if offers.arrows}
+												<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
+											{/if}
+											{#if offers.sensors}
+												<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
+											{/if}
+										{:else if v.view === 'matrix'}
+											<div class="seg" role="radiogroup" aria-label="Bars or grid">
+												<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
+												<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
+											</div>
+										{:else if v.view === 'table' && i === modeTable}
+											<button class="btn ghost sm" class:on={a.prefs.shape_values} aria-pressed={a.prefs.shape_values} data-testid="read-shape-values" title="The shape values in a pane of their own: a row per DOF and a column per mode" onclick={() => a.setPref('shape_values', !a.prefs.shape_values)}>Shape Values</button>
+										{:else if v.view === 'table'}
+											{#if offers.values_dofs.length > 1}
+												<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
+													{#each offers.values_dofs as choice (choice)}
+														<option value={choice}>{VALUES_CHOICES[choice] ?? choice}</option>
+													{/each}
+												</select>
+											{/if}
+											<select class="field sm" aria-label="Form" data-testid="read-values-form" value={a.prefs.values_form} onchange={(e) => a.setPref('values_form', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.values_form)} title="The shapes at the DOFs (u = Φq), or a transformation there: the response transformation Φ⁺ (q = Φ⁺u), applied to motions, or the reference transformation Φᵀ, applied to forces and drive signals">
+												<option value="shapes">Shapes Φ</option>
+												<option value="response">Response transformation Φ⁺</option>
+												<option value="reference">Reference transformation Φᵀ</option>
+											</select>
+											<button class="btn ghost icon sm" data-testid="close-values" aria-label="Close the shape values" title="Close the shape values" onclick={() => a.setPref('shape_values', false)}><Icon name="close" size={12} /></button>
+										{/if}
+									</header>
+								{/if}
+								<div class="pbody">
+									<ViewRenderer
+										view={v}
+										layout="strip"
+										showTitle={v.view === 'spectrum' || (v.view === 'table' && !panes)}
+										minHeight={240}
+										scope="selection"
+										selected={v.view === 'matrix' && v.selects ? a.pair : null}
+										picks={v.view === 'matrix' && v.selects ? a.picks : []}
+										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
+										bars={v.view === 'matrix' && a.prefs.bars}
+										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
+										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
+										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
+									/>
+								</div>
 							</div>
 						{/each}
 					</div>
@@ -427,6 +455,49 @@
 		flex: 1;
 		min-height: 0;
 		align-content: start;
+	}
+
+	.view {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+
+	.pbody {
+		display: grid;
+		flex: 1;
+		min-height: 0;
+	}
+
+	.pane {
+		overflow: hidden;
+		background: var(--bg-0);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-md);
+	}
+
+	.phead {
+		display: flex;
+		flex: none;
+		align-items: center;
+		gap: var(--sp-2);
+		padding: var(--sp-2) var(--sp-3);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	.phead h4 {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		font-size: var(--text-sm);
+		font-weight: var(--weight-strong);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.phead .btn.on {
+		color: var(--text-1);
+		background: var(--bg-3);
 	}
 
 	.selected .view.spectrum {

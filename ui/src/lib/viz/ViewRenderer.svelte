@@ -85,7 +85,7 @@
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
-	<TablePane {view} {onedit} />
+	<TablePane {view} {showTitle} {onedit} />
 {:else if view.view === 'image'}
 	<ImagePane {view} {showTitle} />
 {:else}
