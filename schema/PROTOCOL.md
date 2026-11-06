@@ -587,7 +587,7 @@ project, and opening or starting another project ends it.
 
 | Method | Params | Result |
 |---|---|---|
-| `fit.start` | `{"frf","shapes"?,"coherence"?}` | `{"fit"}` |
+| `fit.start` | `{"frf","shapes"?,"coherence"?,"records"?}` | `{"fit"}` |
 | `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
 | `fit.move` | `{"frequency"}` | `{"fit"}` |
 | `fit.damping` | `{"damping"}` | `{"fit"}` |
@@ -600,7 +600,7 @@ project, and opening or starting another project ends it.
 | `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
 | `fit.end` | `{}` | `{}` |
 
-`fit.start` fits the FRF `frf`, or, with `shapes`, edits that shape set's fit (Edit Fit): its
+`fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
 modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left

@@ -658,7 +658,9 @@ export class FitState {
 
 	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}) });
+		// records picked in the tree limit the fit, as in Visual Dynamics; an Edit Fit takes its set's own
+		const records = shapes ? [] : (this.app.project.selection.records[frf] ?? []);
+		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}), ...(records.length ? { records } : {}) });
 	}
 
 	find(): Promise<boolean> {
