@@ -58,6 +58,10 @@ export class RunLogState {
 	shown = $state(stored(SHOWN_KEY) === '1');
 	/** The log alone fills the window, for a keeper who analyzes elsewhere. */
 	alone = $state(false);
+	/** The log is in a window of its own (`ownWindow`), and the window here gives its space back. */
+	windowed = $state(false);
+	/** Closes that window. */
+	closeWindow: (() => void) | null = null;
 	/** The window's width beside a workspace, in CSS pixels. */
 	width = $state(Number(stored(WIDTH_KEY)) || 560);
 	log = $state.raw<RunLogView | null>(null);
@@ -86,6 +90,8 @@ export class RunLogState {
 	constructor(private readonly analysis: ServiceClient) {}
 
 	toggle(): void {
+		// the log comes back beside the workspace, and the next hides it
+		if (this.windowed) return this.closeWindow?.();
 		this.shown = !this.shown;
 		if (!this.shown) this.alone = false;
 		store(SHOWN_KEY, this.shown ? '1' : '0');
