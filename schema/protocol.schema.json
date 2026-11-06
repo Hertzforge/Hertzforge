@@ -357,7 +357,7 @@
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
       }
     },
-    "workspace": {"enum": ["acquire", "simulate", "signals", "random", "shock", "sine", "modal", "geometry", "model", "specify", "report"]},
+    "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
     "operation": {
       "type": "object", "required": ["id", "title", "workspace", "modules", "params", "outputs"],
       "properties": {

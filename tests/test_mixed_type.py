@@ -332,3 +332,22 @@ def test_many_sweeps_on_few_channels_tile_into_a_grid_per_sweep():
     assert len(grids) == 9
     assert all(len(g['rows']) == 1 and len(g['rows'][0]['cells']) == 3 for g in grids)
     assert grids[0]['columns'] == dofs
+
+
+def test_a_mixed_run_worked_up_in_random_then_sine_has_both_reports():
+    """Work Up goes by the module, so a mixed run is worked up in each."""
+    import numpy as np
+    from test_extract_sine import _recording, _spec
+
+    from hertzforge.core.report import Report
+
+    spec = _spec()
+    project = hertzforge.Project()
+    project.add('Time History', _recording(spec, noise=0.5))
+    project.add('Sine Specification', spec)
+    assert np.size(project['Time History'].ordinate) > 0
+    project.work_up('Random Vibration')
+    project.work_up('Sine Sweep')
+    titles = {obj.title for _name, obj in project.items() if isinstance(obj, Report)}
+    assert len(titles) == 2
+    assert project.work_up('Sine Sweep') == []

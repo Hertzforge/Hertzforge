@@ -17,8 +17,9 @@ from __future__ import annotations
 from typing import Any
 
 #: the analysis modules, which share one host and one table
-STUDIES = ('signals', 'random', 'shock', 'sine', 'modal', 'geometry', 'model', 'specify')
-_RECORDED = ('signals', 'random', 'shock', 'sine', 'modal')
+STUDIES = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal', 'geometry',
+           'model', 'specify')
+_RECORDED = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal')
 
 HIDDEN = frozenset(f'project.{name}' for name in (
     # what a selection draws by itself
@@ -63,8 +64,10 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'add_coordinate_system': 'Add System', 'add_element': 'Add Element',
     'add_element_group': 'Add Group', 'delete_entities': 'Delete Picks',
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
-    'reset_rotation': 'Reset Rotation', 'sensors': 'Sensors', 'set_project_type': 'Project Type',
-    'work_up': 'Work Up', 'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
+    'reset_rotation': 'Reset Rotation', 'sensors': 'Sensors',
+    'work_up_sysid': 'Work Up', 'work_up_random': 'Work Up', 'work_up_shock': 'Work Up',
+    'work_up_transient': 'Work Up', 'work_up_sine': 'Work Up', 'work_up_modal': 'Work Up',
+    'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',
     'plan_instrumentation': 'Plan Sensors', 'export_state_space': 'Export Model',
@@ -106,20 +109,23 @@ VERBS = {f'project.{name}': verb for name, verb in {
 }.items()}
 
 MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modules in {
-    'set_averaging': ('signals', 'random', 'modal'),
-    'detect_averaging': ('signals', 'random', 'modal'),
+    'set_averaging': ('signals', 'sysid', 'random', 'modal'),
+    'detect_averaging': ('signals', 'sysid', 'random', 'modal'),
     'set_filter': _RECORDED,
     'set_truncation': _RECORDED,
     'set_channel_role': (*_RECORDED, 'geometry'),
     'rename_dof': (*_RECORDED, 'geometry'),
-    'set_control': ('geometry', 'random', 'shock', 'sine'),
+    'set_control': ('geometry', 'random', 'shock', 'transient', 'sine'),
+    'compute_psds': ('sysid', 'random', 'transient'),
+    'compute_frfs': ('sysid', 'modal'),
+    'compute_multiple_coherence': ('sysid', 'random'),
+    'conditioning': ('sysid', 'modal'),
+    'wavelet': ('shock', 'transient'),
     'rattlesnake_preview': ('signals',),
     'import_rattlesnake_part': ('signals',),
     'truncate_rattlesnake_file': ('signals',),
     'text_preview': ('signals',),
     'import_text': ('signals',),
-    'set_project_type': ('signals',),
-    'work_up': ('signals',),
 }.items()}
 
 #: the part of a geometry in the tree each of these operations belongs to:

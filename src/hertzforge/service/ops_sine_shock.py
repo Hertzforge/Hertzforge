@@ -1135,7 +1135,7 @@ OPERATIONS = (
         params=(HISTORY, CHOSEN, *STROKE_RATINGS),
         outputs=('spectrum', 'reading'), run=stroke),
     Operation(
-        id='project.replication_fit', title='Replication Fit', workspace='shock',
+        id='project.replication_fit', title='Replication Fit', workspace='transient',
         summary='Whether a shaker can play a reference record: its travel, velocity and '
                 'force at each candidate high-pass cutoff against the ratings, and what each '
                 'cutoff costs.',

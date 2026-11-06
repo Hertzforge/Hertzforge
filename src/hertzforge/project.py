@@ -7568,10 +7568,9 @@ class Project(dict):
                             'report')
         return report
 
-    def work_up(self) -> list[str]:
-        """Compute every missing object the project's type expects from
-        what is loaded, with the report last (Automatic on the tree's
-        bar).
+    def work_up(self, project_type: str | None = None) -> list[str]:
+        """Compute every missing object a kind of test expects from what
+        is loaded, with the report last (Work Up, in that kind's module).
 
         The empty slots are filled in their own order, each from the
         objects already there, the way the workflow guide makes them:
@@ -7591,6 +7590,12 @@ class Project(dict):
         `merge` is. The verbs it calls are the ones the guide describes,
         and a script that wants them one at a time can call them.
 
+        Parameters
+        ----------
+        project_type : str, optional
+            The kind of test, one of `core.report.PROJECT_TYPES`, which
+            becomes the project's type. Defaults to the type it has.
+
         Returns
         -------
         list of str
@@ -7603,7 +7608,7 @@ class Project(dict):
             When the project has no type, so there are no slots to
             fill.
         """
-        # Automatic on the tree bar (Brandon, 2026-09-30).
+        # Work Up, by module (Brandon, 2026-09-30 and 2026-11-06).
         from .core.data import Psd, Specification, TransientSpecification
         from .core.report import (
             PROJECT_TEMPLATES,
@@ -7613,11 +7618,10 @@ class Project(dict):
         )
         from .core.shapes import ShapeSet
 
-        project_type = self.project_type
+        project_type = self.project_type = project_type or self.project_type
         if not project_type:
             raise ValueError('the project has no type, so there is nothing '
-                             'to work up — Set Project Type says what a '
-                             'finished project holds')
+                             'to work up: name the kind of test')
         added: list[str] = []
 
         def make(verb, *args, **kwargs):
@@ -7659,9 +7663,11 @@ class Project(dict):
             return done or make(self.filter_data, record)[0]
 
         for slot in project_expectations(project_type):
-            if slot not in self.missing():
-                continue
             _label, _cls, icon, ordinal, _optional, side = slot
+            # a report from another kind of test does not fill this one's:
+            # the branch below goes by which are here, by title
+            if icon != 'Report' and slot not in self.missing():
+                continue
             side = side or 'Basis'
             try:
                 if icon == 'Psd':
