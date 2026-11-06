@@ -4,7 +4,7 @@
 //
 //   1. Both services connected, as the window opened.
 //   2. Two example projects (HERTZFORGE_E2E_FILES: the plate random run, then the
-//      quadcopter model, from scripts/make_examples.py) dropped on the window as a
+//      free plate model, from scripts/make_examples.py) dropped on the window as a
 //      person drops them: Random shows the run's PSDs from the tree, Modal the
 //      model's modes (the bundled Python alone).
 //   3. Acquire & Control: take control, the simulator, a channel table, a short
@@ -95,10 +95,10 @@
 		check('Random: the plate random run opens and its PSDs are shown', true, text('selection-view').slice(0, 60));
 		await click('rail-modal');
 		await drop(modelFile);
-		await until('the quadcopter in the tree', () => visible(tid('object-Modes')), 120000);
+		await until('the plate model in the tree', () => visible(tid('object-Modes')), 120000);
 		await click('object-Modes');
-		await until('the modes of the quadcopter', () => visible(tid('mode-row-7')), 120000);
-		check('Modal: the quadcopter model opens and shows its modes', true, text('mode-row-7'));
+		await until('the modes of the plate', () => visible(tid('mode-row-7')), 120000);
+		check('Modal: the plate model opens and shows its modes', true, text('mode-row-7'));
 
 		// 3. Acquire & Control: one Random run on the simulator, to completion.
 		await click('rail-acquire');

@@ -186,9 +186,9 @@ through its test ids, and answers the quit question, which nothing can click:
 
 ```bash
 CARGO_TARGET_DIR=<a build folder> desktop/packaging/build.sh --e2e --bundles app
-python scripts/make_examples.py <a folder> --only plate-random-run quadcopter
+python scripts/make_examples.py <a folder> --only plate-random-run free-plate
 HERTZFORGE_E2E_SCRIPT=desktop/packaging/e2e/random_run.js HERTZFORGE_E2E_ANSWER=stop \
-  HERTZFORGE_E2E_FILES="<a folder>/plate-random-run.hforge:<a folder>/quadcopter.hforge" \
+  HERTZFORGE_E2E_FILES="<a folder>/plate-random-run.hforge:<a folder>/free-plate.hforge" \
   "<a build folder>/release/bundle/macos/Hertzforge.app/Contents/MacOS/hertzforge"
 ```
 

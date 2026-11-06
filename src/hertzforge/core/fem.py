@@ -23,8 +23,7 @@ is how an Exodus file describes a structure and how a model of a simple
 test article is built in the app. The third is to draw a shape as a
 surface mesh and let `from_geometry`, given one material and one
 section, put a beam along every edge of it. That is the shortest route
-from any geometry to a set of modes, and it is how
-`hertzforge.demo.drone` is built.
+from any geometry to a set of modes.
 
 This is not a general finite element code. The quad plate is
 rectangular only: a skewed or warped quad is refused rather than solved
@@ -66,7 +65,7 @@ does everywhere else.
 The beam is Euler-Bernoulli with a consistent mass matrix: no shear
 flexibility and no section rotary inertia. That is accurate while a
 member is slender (length more than about ten times its depth), and
-the frequencies come out increasingly high when it is not. A drone arm
+the frequencies come out increasingly high when it is not. An arm
 180 mm long and 16 mm deep is well inside that limit; a short, deep
 mounting stub is not, and its frequencies read high.
 
@@ -991,8 +990,8 @@ class LumpedMass:
 class Face:
     """A face for drawing: shading, not stiffness.
 
-    A grillage of beams draws as a wireframe, and a wireframe of a drone
-    deck is hard to read. Faces spanning nodes that are already there give
+    A grillage of beams draws as a wireframe, and a wireframe of a deck
+    is hard to read. Faces spanning nodes that are already there give
     the renderer something to shade and the animation something to deform,
     and they add nothing to the matrices. That is why they are a separate
     kind rather than a zero-stiffness element.
@@ -1008,7 +1007,7 @@ def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
 
     One piece is a structure; more than one is that many free bodies, each
     with its own six zero-frequency modes. The model (over its elements)
-    and the drone's drawing (over its face edges, before a model exists)
+    and a geometry's drawing (over its face edges, before a model exists)
     both use this one search, so the two agree about what "joined" means.
     """
     seen: set[int] = set()

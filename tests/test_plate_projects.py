@@ -1,6 +1,6 @@
 """The four demonstration projects build complete, one per workflow.
 
-Marked `slow` like the demonstration drone: each build runs a real
+Marked `slow` like the Frame-Wing: each build runs a real
 fit, real spectra and offscreen renders, and what they guard — that
 `generate_plate_projects.py` still fills every slot of every project
 type — is checked when the demos or the workflows change, not on
