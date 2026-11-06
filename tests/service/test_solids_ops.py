@@ -281,3 +281,52 @@ def test_the_solids_are_listed(project, validate):
     reading, view, table = run(project, 'project.solids')
     wire_views([reading, view, table], validate)
     assert rows(reading)['Parts']['value'] == 1.0 and table['rows'][0][0] == '1'
+
+
+def _union_in_pieces():
+    """A slab with a tilted hole, which is fitted, and a bar swept on top of it: two pieces."""
+    import hertzforge
+
+    project = hertzforge.Project('p')
+    name = project.new_geometry('Part', unit='in')
+    block = project.add_solid_block(name, (0, 0, 0), (4, 2, 1), name='slab', unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 0.6, 3.0, angles=(30, 0, 0), unit='in')
+    cut = project.combine_solids(name, 'subtract', [block, tilted], 'slab')
+    bar = project.add_solid_block(name, (1.5, 0, 1.0), (1, 2, 1), name='bar', unit='in')
+    return project, project.combine_solids(name, 'union', [cut, bar], 'both'), cut, bar
+
+
+def test_mesh_solids_takes_a_size_per_piece(monkeypatch):
+    """VD's table: a union meshed in pieces lists a row a piece, each takes its own size,
+    and Detect fills every row with the size that piece is likely to hold at. The fit
+    itself is the core's test, stood in for here."""
+    from hertzforge.service import ops_solids
+
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    project, both, cut, bar = _union_in_pieces()
+    params = {'solids': str(both), 'size': 0.01}
+    views = run(project, 'project.mesh_solids', **params)
+    pieces = next(view for view in views if view.get('title') == 'Pieces')
+    assert {int(row[0]) for row in pieces['rows']} == {cut, bar}
+    assert all(row[3] == 0.01 for row in pieces['rows'])
+    views = run(project, 'project.mesh_solids', sizes=f'{bar}: 0.005', **params)
+    pieces = next(view for view in views if view.get('title') == 'Pieces')
+    assert {int(row[0]): row[3] for row in pieces['rows']} == {cut: 0.01, bar: 0.005}
+    refused(project, 'project.mesh_solids', 'a piece and', sizes='3', **params)
+    refused(project, 'project.mesh_solids', 'a piece and', sizes='3: 0', **params)
+
+
+def test_detect_fills_each_piece_and_the_sizes_reach_the_mesh(monkeypatch):
+    project, both, cut, bar = _union_in_pieces()
+    asked = {}
+    monkeypatch.setattr(project, 'mesh_solids', lambda *_a, **kw: asked.update(kw) or {
+        'nodes': 0, 'elements': 0, 'replaced': 0, 'groups': []})
+    with pytest.raises((KeyError, TypeError)):
+        run(project, 'project.mesh_solids', solids=str(both), size=0.01, detect=True, keep=True,
+            anyway=True)
+    likely = asked['sizes']
+    assert set(likely) == {cut, bar} and all(size > 0 for size in likely.values())
+    with pytest.raises((KeyError, TypeError)):
+        run(project, 'project.mesh_solids', solids=str(both), size=0.01, sizes=f'{bar}: 0.005',
+            keep=True, anyway=True)
+    assert asked['sizes'] == {bar: 0.005}
