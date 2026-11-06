@@ -55,20 +55,20 @@ def test_every_module_has_its_tools_and_the_shared_ones_say_so(catalog):
         assert module in homes.values(), module
     assert homes['project.shocks'] == 'shock' and homes['project.dwell'] == 'sine'
     assert homes['project.add_solid_block'] == 'geometry' and homes['project.mesh_solids'] == 'model'
-    shared = {op['id'] for op in catalog['operations'] if op.get('everywhere')}
-    assert {'project.plot', 'project.table', 'project.save_as', 'project.set_averaging',
-            'project.set_channel_cell'} <= shared
-    assert 'project.shocks' not in shared
+    offered = {op['id']: op['modules'] for op in catalog['operations']}
+    assert all(module in offered['project.save_as'] for module in ('signals', 'shock', 'model'))
+    assert offered['project.set_averaging'] == ['signals', 'random', 'modal']
+    assert offered['project.shocks'] == ['shock']
 
 
 def test_workspaces_and_outputs(catalog):
     by_id = {op['id']: op for op in catalog['operations']}
     assert by_id['project.fit_modes']['workspace'] == 'modal'
     assert by_id['project.fit_modes']['outputs'] == ['shape3d', 'reading']
-    assert 'everywhere' not in by_id['project.fit_modes']
+    assert by_id['project.fit_modes']['modules'] == ['modal']
     assert by_id['project.waterfall']['workspace'] == 'signals'
     assert by_id['project.waterfall']['outputs'] == ['waterfall']
-    assert by_id['project.waterfall']['everywhere'] is True
+    assert 'shock' in by_id['project.waterfall']['modules']
     assert by_id['project.mode_shapes']['outputs'] == ['shape3d']
 
 

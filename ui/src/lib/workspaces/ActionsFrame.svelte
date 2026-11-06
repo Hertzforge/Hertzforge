@@ -21,7 +21,7 @@
 
 	const a = $derived(app.analyze);
 	const tools = $derived(a.toolsFor(only));
-	const inModule = (e: { workspace: Workspace; everywhere?: boolean }) => offeredIn(e, only);
+	const inModule = (e: { modules?: Workspace[] }) => offeredIn(e, only);
 
 	// the project's FRFs a fit can start on, and the coherences that can weight it
 	const objects = $derived(app.project.summary?.objects ?? []);

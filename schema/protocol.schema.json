@@ -359,12 +359,12 @@
     },
     "workspace": {"enum": ["acquire", "simulate", "signals", "random", "shock", "sine", "modal", "geometry", "model", "specify", "report"]},
     "operation": {
-      "type": "object", "required": ["id", "title", "workspace", "params", "outputs"],
+      "type": "object", "required": ["id", "title", "workspace", "modules", "params", "outputs"],
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
         "workspace": {"$ref": "#/$defs/workspace"},
-        "everywhere": {"type": "boolean"},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}
@@ -464,21 +464,47 @@
       }
     },
     "action": {
-      "type": "object", "required": ["id", "title", "workspace", "fill"], "additionalProperties": false,
+      "type": "object", "required": ["id", "title", "workspace", "modules", "fill"], "additionalProperties": false,
       "properties": {
         "id": {"type": "string"},
         "title": {"type": "string"},
         "workspace": {"$ref": "#/$defs/workspace"},
-        "everywhere": {"type": "boolean"},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "fill": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },
     "actions": {
-      "type": "object", "required": ["readings", "acts", "project"], "additionalProperties": false,
+      "type": "object", "required": ["readings", "acts", "project", "table"], "additionalProperties": false,
       "properties": {
         "readings": {"type": "array", "items": {"$ref": "#/$defs/action"}},
         "acts": {"type": "array", "items": {"$ref": "#/$defs/action"}},
-        "project": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+        "project": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "table": {
+          "type": "object", "required": ["columns"], "additionalProperties": false,
+          "properties": {"columns": {"type": "array", "items": {"$ref": "#/$defs/actionColumn"}}}
+        }
+      }
+    },
+    "actionColumn": {
+      "type": "object", "required": ["kinds", "rows"], "additionalProperties": false,
+      "properties": {
+        "kinds": {"type": "array", "items": {"type": "string"}},
+        "current": {"const": true},
+        "rows": {"type": "array", "items": {"$ref": "#/$defs/actionRow"}}
+      }
+    },
+    "actionRow": {
+      "type": "object", "required": ["id", "verb", "kind", "ready"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "verb": {"type": "string"},
+        "kind": {"enum": ["default", "reading", "act", "self"]},
+        "ready": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
+        "fill": {"type": "object", "additionalProperties": {"type": "string"}},
+        "candidates": {"type": "array", "items": {"type": "string"}},
+        "part": {"const": true}
       }
     },
     "solidRow": {

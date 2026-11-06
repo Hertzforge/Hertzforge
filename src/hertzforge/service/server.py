@@ -282,7 +282,7 @@ class Connection:
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
         if method == 'project.actions':
-            _only(params, ('objects', 'records'), method)
+            _only(params, ('objects', 'records', 'part'), method)
             return await call(projects.actions, self.project, params)
         if method == 'project.show':
             _only(params, ('objects', 'records', 'part', 'prefs'), method)

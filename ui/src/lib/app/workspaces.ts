@@ -45,7 +45,7 @@ export function isWorkspace(value: string): value is Workspace {
 	return WORKSPACES.some((w) => w.id === value);
 }
 
-/** The module an operation is offered in, or every study when it says `everywhere`. */
-export function offeredIn(op: { workspace: Workspace; everywhere?: boolean }, workspace: Workspace): boolean {
-	return op.workspace === workspace || (Boolean(op.everywhere) && STUDIES.has(workspace));
+/** Whether a module offers an operation or a table row; a row with no list is offered in every module. */
+export function offeredIn(op: { modules?: Workspace[] }, workspace: Workspace): boolean {
+	return !op.modules || op.modules.includes(workspace);
 }

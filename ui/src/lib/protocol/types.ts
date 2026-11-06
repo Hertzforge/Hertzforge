@@ -436,8 +436,8 @@ export interface Action {
 	id: string;
 	title: string;
 	workspace: Workspace;
-	/** Offered in every analysis module. */
-	everywhere?: boolean;
+	/** The modules that offer it. */
+	modules: Workspace[];
 	fill: Record<string, string>;
 }
 
@@ -446,6 +446,36 @@ export interface Actions {
 	readings: Action[];
 	acts: Action[];
 	project: Action[];
+	table: ActionTable;
+}
+
+/** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
+export interface ActionRow {
+	/** `show.*` for a default, an operation's id, or `self.*`. */
+	id: string;
+	verb: string;
+	kind: 'default' | 'reading' | 'act' | 'self';
+	ready: boolean;
+	/** Why it cannot run now. */
+	reason?: string;
+	/** The modules that offer it; absent, every module. */
+	modules?: Workspace[];
+	fill?: Record<string, string>;
+	/** In a combination column, the objects that complete the row. */
+	candidates?: string[];
+	/** An operation on the part of a geometry picked in the tree. */
+	part?: true;
+}
+
+/** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */
+export interface ActionColumn {
+	kinds: string[];
+	current?: true;
+	rows: ActionRow[];
+}
+
+export interface ActionTable {
+	columns: ActionColumn[];
 }
 
 /** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
@@ -604,8 +634,8 @@ export interface OperationDescriptor {
 	title: string;
 	/** The module that offers it, its home. */
 	workspace: Workspace;
-	/** Offered in every analysis module, not only its home: an act any study needs. */
-	everywhere?: boolean;
+	/** The modules that offer it. */
+	modules: Workspace[];
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];

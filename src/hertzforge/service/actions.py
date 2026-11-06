@@ -86,18 +86,22 @@ def _runs(indices: list[int]) -> str:
 
 
 def _entry(op: Any, fill: dict[str, str]) -> dict[str, Any]:
-    """One action as the shell lists it: the operation, its module, and
-    whether every module offers it."""
-    entry = {'id': op.id, 'title': op.title, 'workspace': op.workspace, 'fill': fill}
-    if op.everywhere:
-        entry['everywhere'] = True
-    return entry
+    """One action as the shell lists it: the operation, its module, and the
+    modules that offer it."""
+    from .verbs import modules_of
+
+    return {'id': op.id, 'title': op.title, 'workspace': op.workspace,
+            'modules': list(modules_of(op)), 'fill': fill}
 
 
-def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> dict[str, Any]:
+def actions(project: Any, objects: list[str], records: dict[str, list[int]],
+            part: dict[str, Any] | None = None) -> dict[str, Any]:
     """What `objects` can take: `{'readings': [...], 'acts': [...]}`, each
     entry `{'id', 'title', 'fill'}`; with nothing selected, the acts that
-    take no object (`'project'`)."""
+    take no object (`'project'`); and the same answered as the action table
+    (`'table'`, `action_table`)."""
+    from .action_table import action_table
+
     from . import projects
     from .server import OPERATIONS
 
@@ -119,4 +123,5 @@ def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> 
             picked = next(r for r in picks if r)
             fill['records'] = _runs(picked)
         (acts if _is_act(op) else readings).append(_entry(op, fill))
-    return {'readings': readings, 'acts': acts, 'project': whole}
+    return {'readings': readings, 'acts': acts, 'project': whole,
+            'table': action_table(project, objects, records, part)}
