@@ -105,8 +105,8 @@
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
-	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
-	const AMP_FULL_SCALE = 0.15;
+	/** An amplitude of 1, as a fraction of the model's diagonal: the slider's default position, and its scale. */
+	const AMP_UNIT = 0.075;
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
@@ -154,8 +154,12 @@
 	let axesSvg: SVGSVGElement;
 
 	let playing = $state(true);
-	let amplitude = $state(0.5);
+	/** The deflection amplitude, a multiple of `AMP_UNIT`: the slider runs from 0 to `amplitudeMax`, which the field beside it sets. */
+	let amplitude = $state(1);
+	let amplitudeMax = $state(4);
 	let wireframe = $state(false);
+	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
+	let opacity = $state(1);
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
 	let colored = $state(true);
@@ -170,12 +174,12 @@
 		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
 		return nodeCaption(n, view.node_ids, groupsFor.groups);
 	}
-	/** The deflection scale as a typed multiplier of the slider's middle, VD's scale box: 0.01 to 1000. */
-	const scaleFactor = $derived(amplitude / 0.5);
-	function setScale(text: string) {
+	/** The slider's top, typed: 0.1 to 1000; the slider is pulled down to it when it was above. */
+	function setAmplitudeMax(text: string) {
 		const value = Number(text);
 		if (!Number.isFinite(value)) return;
-		amplitude = Math.min(1000, Math.max(0.01, value)) * 0.5;
+		amplitudeMax = Math.min(1000, Math.max(0.1, value));
+		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
 	}
 	let fps = $state<number | null>(null);
 	let failure = $state<string | null>(null);
@@ -206,7 +210,7 @@
 		return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
 	});
 
-	const peak = $derived(amplitude * AMP_FULL_SCALE * diagonal);
+	const peak = $derived(amplitude * AMP_UNIT * diagonal);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
 	const extents = $derived.by(() => {
@@ -767,7 +771,13 @@
 
 	$effect(() => {
 		if (!renderer) return;
-		for (const m of [surface.material as MeshLambertMaterial]) m.wireframe = wireframe;
+		for (const m of [surface.material as MeshLambertMaterial]) {
+			m.wireframe = wireframe;
+			m.transparent = opacity < 1;
+			m.opacity = opacity;
+			m.depthWrite = opacity >= 1;
+			m.needsUpdate = true;
+		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
 		dirty = true;
@@ -1017,18 +1027,24 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max={Math.max(1, amplitude)} step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={amplitudeMax} step={amplitudeMax / 400} bind:value={amplitude} aria-valuetext="Amplitude {formatFixed(amplitude, 3)}, peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
-			<label class="scale" title="The deflection scale as a multiplier of the slider's middle, 0.01 to 1000">
-				<span class="lbl">×</span>
-				<input class="field mono num" data-testid="shape3d-scale" type="number" min="0.01" max="1000" step="any" value={Number(scaleFactor.toPrecision(3))} onchange={(e) => setScale(e.currentTarget.value)} aria-label="Deflection scale" />
+			<label class="scale" title="The slider's top: the amplitude at its right end, 0.1 to 1000">
+				<span class="lbl">to</span>
+				<input class="field mono num" data-testid="shape3d-amplitude-max" type="number" min="0.1" max="1000" step="any" value={Number(amplitudeMax.toPrecision(3))} onchange={(e) => setAmplitudeMax(e.currentTarget.value)} aria-label="The slider's top amplitude" />
 			</label>
 			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
 				<button role="radio" data-testid="shape3d-surface" aria-checked={!wireframe} class:on={!wireframe} onclick={() => (wireframe = false)} title="Surface (W)">Surface</button>
 				<button role="radio" data-testid="shape3d-wireframe" aria-checked={wireframe} class:on={wireframe} onclick={() => (wireframe = true)} title="Wireframe (W)">Wireframe</button>
 			</div>
+			{#if !wireframe}
+				<label class="amp opacity" title="How solid the surface is drawn; lower it to see through to what is inside">
+					<span class="lbl">Opacity</span>
+					<input type="range" data-testid="shape3d-opacity" min="0.1" max="1" step="0.01" bind:value={opacity} aria-valuetext="{Math.round(opacity * 100)} %" />
+				</label>
+			{/if}
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-ghost" class:on={ghost} aria-pressed={ghost} onclick={() => (ghost = !ghost)} title="Undeformed ghost (G)">
 				<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="5" width="12" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6" /></svg>
@@ -1279,6 +1295,10 @@
 
 	.amp input {
 		width: 110px;
+	}
+
+	.opacity input {
+		width: 70px;
 	}
 
 	.ampval {
