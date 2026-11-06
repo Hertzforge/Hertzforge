@@ -87,7 +87,7 @@
 					<p class="meta">{a.shown?.title ?? ''}</p>
 					<button class="btn ghost sm" data-testid="reading-back" onclick={() => a.endReading()}>Back</button>
 				</header>
-				<div class="svviews" class:pair={a.reading.views.length === 2}>
+				<div class="svviews" class:several={a.reading.views.length > 1}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
 							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} />
@@ -194,7 +194,7 @@
 				</header>
 				{#if a.shown}
 					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
-					<div class="svviews" class:pair={a.shown.views.length === 2}>
+					<div class="svviews" class:several={a.shown.views.length > 1}>
 						{#each a.shown.views as v, i (i)}
 							<div class="view {v.view}">
 								<ViewRenderer
@@ -317,7 +317,10 @@
 		color: var(--text-2);
 	}
 
-	/* the selection's views: what the tree's selection shows, filling the width; a pair side by side */
+	/* the selection's views: what the tree's selection shows, filling the width. Several share rows two
+	   abreast, as VD's data pane puts a shape set's mode table beside its MAC. A 3-D view stands apart
+	   from the rest as VD's scene pane stands apart from its data pane: on a wide frame it takes the
+	   left three fifths with the other views stacked beside it, on a narrow one a row of its own. */
 	.selected {
 		display: flex;
 		flex: 1;
@@ -327,6 +330,7 @@
 		background: var(--bg-1);
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-lg);
+		container-type: inline-size;
 	}
 
 	.selected header {
@@ -398,8 +402,25 @@
 		min-height: 0;
 	}
 
-	.svviews.pair {
+	.svviews.several {
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+	}
+
+	.svviews.several .view.shape3d {
+		grid-column: 1 / -1;
+	}
+
+	@container (min-width: 900px) {
+		.svviews.several:has(.view.shape3d) {
+			grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+			grid-auto-rows: minmax(0, auto);
+		}
+
+		.svviews.several .view.shape3d {
+			grid-column: 1;
+			grid-row: 1 / span 2;
+			min-height: 520px;
+		}
 	}
 
 	.svviews {

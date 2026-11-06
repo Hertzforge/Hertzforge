@@ -52,6 +52,7 @@
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapGradient } from './colormap';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
@@ -149,6 +150,8 @@
 	let host: HTMLDivElement;
 	let canvasHost: HTMLDivElement;
 	let triad: SVGSVGElement;
+	/** The labeled axes over the canvas: ticks, values and a titled edge per axis, redrawn each frame the view moves. */
+	let axesSvg: SVGSVGElement;
 
 	let playing = $state(true);
 	let amplitude = $state(0.5);
@@ -156,7 +159,7 @@
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
 	let colored = $state(true);
-	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, its extents written out. */
+	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, one edge per axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
@@ -638,6 +641,55 @@
 		}
 	}
 
+	const corner = new Vector3();
+	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
+	function updateAxes() {
+		if (!axesSvg) return;
+		if (!bounds || !boundsBox) {
+			if (axesSvg.firstChild) axesSvg.replaceChildren();
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		axesSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		const { lo, hi } = extents;
+		const onPicture = (): Point => ({ x: ((corner.x + 1) / 2) * w, y: ((1 - corner.y) / 2) * h });
+		const corners: Point[] = [];
+		for (let i = 0; i < 8; i++) {
+			corner.set(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]).project(camera);
+			corners.push(onPicture());
+		}
+		corner.set((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).project(camera);
+		const centre = onPicture();
+		const unit = view.unit === 'undefined' ? '' : ` ${view.unit}`;
+		// a label `by` pixels out from `p`, kept on the canvas by its anchor and its width (about 6.5 px a character)
+		const at = (p: Point, out: Point, by: number, anchor: string, text: string) => {
+			const half = 3.3 * text.length;
+			const least = anchor === 'start' ? 3 : anchor === 'end' ? 3 + 2 * half : 3 + half;
+			const most = anchor === 'start' ? w - 3 - 2 * half : anchor === 'end' ? w - 3 : w - 3 - half;
+			const x = Math.min(most, Math.max(least, p.x + out.x * by));
+			const y = Math.min(h - 8, Math.max(8, p.y + out.y * by));
+			return `x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}"`;
+		};
+		let drawn = '';
+		labeledEdges(corners, centre).forEach((edge, k) => {
+			const a = corners[edge.from];
+			const b = corners[edge.to];
+			// a tick every 70 px or so, and only the ends of an edge seen short
+			const { values, decimals } = niceTicks(lo[k], hi[k], Math.max(1, Math.min(5, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 70))));
+			const anchor = Math.abs(edge.out.x) < 0.35 ? 'middle' : edge.out.x > 0 ? 'start' : 'end';
+			for (const v of values) {
+				const p = along(a, b, lo[k], hi[k], v);
+				drawn += `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(p.x + edge.out.x * 5).toFixed(1)}" y2="${(p.y + edge.out.y * 5).toFixed(1)}"/>`;
+				const text = v.toFixed(decimals);
+				drawn += `<text ${at(p, edge.out, 9, anchor, text)} dominant-baseline="middle">${text}</text>`;
+			}
+			const title = `${'XYZ'[k]}${unit}`;
+			drawn += `<text class="title" ${at(along(a, b, 0, 1, 0.5), edge.out, 30, 'middle', title)} dominant-baseline="middle">${title}</text>`;
+		});
+		axesSvg.innerHTML = drawn;
+	}
+
 	function loop(now: number) {
 		raf = requestAnimationFrame(loop);
 		if (!renderer) return;
@@ -676,6 +728,7 @@
 		dirty = false;
 		renderer.render(scene, camera);
 		updateTriad();
+		updateAxes();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -926,7 +979,9 @@
 		onpointerup={onPointerUp}
 		onpointermove={onPointerMove}
 		onpointerleave={() => (hoverNode = null)}
-	></div>
+	>
+		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
+	</div>
 
 	{#if pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">
@@ -983,7 +1038,7 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
-			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, its extents written out">Axes</button>
+			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1074,13 +1129,6 @@
 				{#if hovered !== null && !pick}
 					<span class="hovercap" data-testid="shape3d-hover">{caption(hovered)}</span>
 				{/if}
-				{#if bounds}
-					<span class="extents" data-testid="shape3d-extents" aria-label="Model extents">
-						{#each ['X', 'Y', 'Z'] as axis, k (axis)}
-							<span>{axis} {formatFixed(extents.lo[k], 4)} to {formatFixed(extents.hi[k], 4)}{view.unit === 'undefined' ? '' : ` ${view.unit}`}</span>
-						{/each}
-					</span>
-				{/if}
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
@@ -1123,6 +1171,31 @@
 
 	.canvas.picking {
 		cursor: crosshair;
+	}
+
+	.axes {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.axes :global(line) {
+		stroke: var(--text-2);
+		stroke-width: 1;
+	}
+
+	.axes :global(text) {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		fill: var(--text-2);
+	}
+
+	.axes :global(text.title) {
+		font-size: 12px;
+		fill: var(--text-1);
 	}
 
 	.pickbar {
@@ -1193,11 +1266,6 @@
 
 	.hovercap {
 		color: var(--text-1);
-	}
-
-	.extents {
-		display: inline-flex;
-		gap: var(--sp-2);
 	}
 
 	.amp {
