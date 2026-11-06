@@ -93,6 +93,25 @@ def test_a_geometry_alone(plate, validate):
     assert 'Link' in verbs_in(column(rest, 'geometry', '*'))
 
 
+def test_each_object_goes_on_the_param_that_takes_it_whichever_was_picked_first(plate):
+    project = plate.project
+    project.add('Measured', Psd(**_psd()))
+    project.add('Spec', Specification(**_psd()))
+    try:
+        first = table(plate, 'Spec', 'Measured')[0]
+        assert row(first, 'RMS Error')['fill'] == {'spectrum': 'Measured', 'specification': 'Spec'}
+        assert first['rows'][0]['verb'] == 'Compare' and first['rows'][0]['kind'] == 'default'
+    finally:
+        project.remove('Measured')
+        project.remove('Spec')
+
+
+def test_an_act_changes_the_project_and_a_reading_does_not(plate):
+    first = table(plate, named(plate, 'time_history'))[0]
+    assert row(first, 'Compute FRFs')['kind'] == 'act' and row(first, 'Integrate')['kind'] == 'act'
+    assert row(first, 'Kurtosis')['kind'] == 'reading'
+
+
 def test_the_stage_rule_makes_no_false_combinations(plate):
     """A geometry stands by beside data as the stage, so Averaging fills from a
     time history alone; it is not something the two do together."""

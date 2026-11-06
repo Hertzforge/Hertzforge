@@ -196,6 +196,14 @@ def _own_rows(project: Any, objects: list[str]) -> list[dict[str, Any]]:
     return rows
 
 
+def _project_rows(project: Any) -> list[dict[str, Any]]:
+    """The acts on the project as a whole, with nothing selected."""
+    return [_row('self.open', 'Open', 'self'), _row('self.import', 'Import', 'self'),
+            _row('self.save', 'Save', 'self'),
+            _row('self.recompute_all', 'Recompute All', 'self',
+                 '' if project.stale() else 'Nothing is out of date')]
+
+
 def _fit_rows(kinds: list[str]) -> list[dict[str, Any]]:
     """The fitting screen's way in, which is not an operation: an FRF to fit by
     hand, or an FRF with the shape set to go on editing."""
@@ -215,6 +223,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     kinds = [c[1] for c in chosen]
     rows = [_row(f'show.{verb.lower()}', verb, 'default') for verb in defaults(project, kinds, names)]
     rows += _fit_rows(kinds)
+    if not chosen:
+        rows += _project_rows(project)
     where = verbs.part_key(part)
     for op in _rows_of(OPERATIONS):
         home = verbs.PARTS.get(op.id)

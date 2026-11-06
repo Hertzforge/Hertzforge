@@ -6,6 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
+import { chooseFiles, chooseSavePath, hasNativeFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -14,7 +15,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { Action, ActionColumn, ActionRow, Actions, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -291,8 +292,8 @@ class AnalyzeState {
 		this.triedRun = false;
 	}
 
-	/** An action chosen in the frame: its tool, with the selection filled into its params. */
-	pickAction(entry: Pick<Action, 'id' | 'fill'>): void {
+	/** A row chosen in the action table: its tool, with the selection filled into its params. */
+	pickAction(entry: { id: string; fill: Record<string, string> }): void {
 		if (this.opId !== entry.id) this.selectOp(entry.id);
 		const op = this.op;
 		if (!op) return;
@@ -982,8 +983,10 @@ export class ProjectState {
 	renamingPart = $state<{ name: string; index: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
-	/** The group being named from the strip: the member it is reached by, or null. */
+	/** The group being named from the action table: the member it is reached by, or null. */
 	namingGroup = $state<string | null>(null);
+	/** The path a browser is asking for in the top bar, and what it is for. */
+	asking = $state<'open' | 'import' | 'save' | null>(null);
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1041,6 +1044,7 @@ export class ProjectState {
 		this.renamingPart = null;
 		this.confirming = false;
 		this.namingGroup = null;
+		this.units = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
 		void this.app.analyze.showSelection();
 	}
@@ -1117,8 +1121,39 @@ export class ProjectState {
 		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
 	}
 
+	/**
+	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
+	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
+	 */
+	async fileAct(what: 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+		if (what === 'save' && this.summary?.file && !this.summary.file.endsWith('.vdyn')) {
+			await this.save();
+			return;
+		}
+		const asked = what === 'save-as' ? 'save' : what;
+		if (hasNativeFiles()) {
+			if (asked === 'save') {
+				const path = await chooseSavePath(this.summary?.title ?? 'Project');
+				if (path) await this.save(path);
+				return;
+			}
+			const paths = await chooseFiles(asked);
+			if (paths) await this.openPaths(paths);
+			return;
+		}
+		this.asking = this.asking === asked ? null : asked;
+	}
+
 	/** An act of the action table's on the selection itself, by its row's id. */
 	async ownAct(id: string): Promise<void> {
+		if (id === 'self.open' || id === 'self.import' || id === 'self.save') {
+			await this.fileAct(id === 'self.open' ? 'open' : id === 'self.import' ? 'import' : 'save');
+			return;
+		}
+		if (id === 'self.recompute_all') {
+			await this.refresh();
+			return;
+		}
 		const picked = [...this.selection.objects];
 		const one = picked.length === 1 ? picked[0] : null;
 		const stale = picked.filter((n) => this.summary?.objects.find((o) => o.name === n)?.stale);

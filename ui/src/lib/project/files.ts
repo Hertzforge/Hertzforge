@@ -33,6 +33,9 @@ interface DragDropEvent {
 
 /** The part of Tauri's global API the shell uses. */
 interface TauriGlobals {
+	event?: {
+		listen: (name: string, handler: (event: { payload: string }) => void) => Promise<() => void>;
+	};
 	dialog?: {
 		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
@@ -142,4 +145,24 @@ export async function chooseRunLog(purpose: 'open' | 'new'): Promise<string | nu
 	if (purpose === 'new') return dialog.save({ title: 'New Run Log', defaultPath: 'Run log.hflog', filters: [RUN_LOG_FILTER] });
 	const chosen = await dialog.open({ title: 'Open Run Log', multiple: false, filters: [RUN_LOG_FILTER] });
 	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
+}
+
+/** Whether the app has a File menu (the macOS desktop app): without one, the top bar has the buttons. */
+export function hasFileMenu(): boolean {
+	return hasNativeFiles() && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent);
+}
+
+/** The File menu chosen ('open', 'import', 'save', 'save-as'); returns how to stop listening. */
+export function listenForFileMenu(onAct: (act: string) => void): () => void {
+	const events = tauri()?.event;
+	if (!events) return () => {};
+	let stop: (() => void) | null = null;
+	let stopped = false;
+	void events
+		.listen('file-menu', (event) => onAct(event.payload))
+		.then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+	return () => {
+		stopped = true;
+		stop?.();
+	};
 }

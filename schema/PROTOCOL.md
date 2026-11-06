@@ -401,7 +401,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
-| `project.actions` | `{"objects","records"?,"part"?}` | `{"readings","acts","project","table"}` |
+| `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
@@ -478,17 +478,15 @@ transformations (`offers.table_views`). `project.save_as` takes `units`: `displa
 display unit system (the server puts its name in), `si` for the stored values.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
-the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
-every operation on the project whose object params the selected objects fill, each object on a param
-that takes its kind (or whose verb applies to it), every object used and every required object param
-filled. Each entry is `{"id","title","workspace","modules","fill"}`, `fill` the params to set from the selection
-(and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
-how the selection is read; `acts` change the project (the operations named for the project's journaled
-verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
-Geometry, New Channel Table).
+for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
+when the selected objects fill its object params: each object on a param that takes its kind (or whose
+verb applies to it), every object used and every required object param filled. `reading` rows change how
+the selection is read; `act` rows change the project (the operations named for the project's journaled
+verbs, and the edits). With nothing selected, the first column is the project: the acts that take no object
+and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
+when records are picked and the operation takes them).
 
-`table` answers the same for the action table beside the project tree, as `{"columns":[...]}`. The
-first column has `"current": true` and is the selection; each other column is the selection with one
+The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is
 `{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
 for what the selection draws by itself (`id` starting `show.`), `reading` or `act` for an operation (`id`

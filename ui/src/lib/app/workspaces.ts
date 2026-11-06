@@ -8,7 +8,7 @@ export interface WorkspaceInfo {
 	/** One line for the palette and the rail's tooltip. */
 	summary: string;
 	/**
-	 * A study: the shared host (the project tree, the selection shown, the Actions frame) with this
+	 * A study: the shared host (the project tree, the selection shown, the action table) with this
 	 * module's operations. The others have screens of their own.
 	 */
 	study?: boolean;

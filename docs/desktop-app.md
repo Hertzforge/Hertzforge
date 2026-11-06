@@ -242,8 +242,8 @@ later app updates from.
 ## Not Done Yet
 
 - The Windows and Linux installers are built by CI and have not been installed and run.
-- File menu items and the `.hforge` file association: the macOS menu has the standard application,
-  Edit, View and Window menus only. The Open, Import and Save buttons use the native dialogs, and
+- The `.hforge` file association. On macOS the File menu has Open, Import, Save and Save As; on Windows
+  and Linux, which have no menu bar yet, those are buttons in the top bar. They use the native dialogs, and
   files dropped on the window open or import by their paths (`capabilities/main.json` grants the
   main window its events and the two dialogs; the display windows get nothing).
 - Intel Macs and Windows on Arm.

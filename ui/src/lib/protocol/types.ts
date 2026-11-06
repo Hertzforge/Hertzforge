@@ -431,21 +431,8 @@ export interface ProjectSummary {
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
-/** One operation a selection can run, with the params the selection fills. */
-export interface Action {
-	id: string;
-	title: string;
-	workspace: Workspace;
-	/** The modules that offer it. */
-	modules: Workspace[];
-	fill: Record<string, string>;
-}
-
-/** `project.actions`: what a selection can take; `project` is what takes no object, with nothing selected. */
+/** `project.actions`: the action table for a selection. */
 export interface Actions {
-	readings: Action[];
-	acts: Action[];
-	project: Action[];
 	table: ActionTable;
 }
 

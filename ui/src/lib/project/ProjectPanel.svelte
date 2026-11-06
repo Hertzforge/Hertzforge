@@ -1,12 +1,10 @@
 <script lang="ts">
 	/**
-	 * The connection's own project: Open, Import and Save, what is under way, and the objects it
-	 * holds. In the desktop app the buttons open the native dialogs; in a browser they ask for a
-	 * path, since a browser never gives the shell a file's path (files.ts).
+	 * The connection's own project: what is under way and the objects it holds. Files are the File
+	 * menu's, or the top bar's where there is none (FileBar); an empty panel offers them too.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
-	import { chooseFiles, chooseSavePath, hasNativeFiles } from './files';
 	import ProjectTree from './ProjectTree.svelte';
 
 	interface Props {
@@ -15,41 +13,6 @@
 	let { app }: Props = $props();
 
 	const p = $derived(app.project);
-	/** The path field a browser shows in place of a dialog, and what it is for. */
-	let asking = $state<'open' | 'import' | 'save' | null>(null);
-	let typed = $state('');
-	let field = $state<HTMLInputElement | null>(null);
-
-	const PROMPTS = { open: 'Project file to open', import: 'File to import', save: 'Save the project as' } as const;
-
-	async function act(what: 'open' | 'import' | 'save') {
-		if (what === 'save' && p.summary?.file && !p.summary.file.endsWith('.vdyn')) {
-			await p.save();
-			return;
-		}
-		if (hasNativeFiles()) {
-			if (what === 'save') {
-				const path = await chooseSavePath(p.summary?.title ?? 'Project');
-				if (path) await p.save(path);
-				return;
-			}
-			const paths = await chooseFiles(what);
-			if (paths) await p.openPaths(paths);
-			return;
-		}
-		asking = asking === what ? null : what;
-		typed = '';
-		queueMicrotask(() => field?.focus());
-	}
-
-	async function submit(e: SubmitEvent) {
-		e.preventDefault();
-		const path = typed.trim();
-		if (!path || !asking) return;
-		const ok = asking === 'save' ? await p.save(path) : asking === 'open' ? await p.open(path) : await p.importFile(path);
-		if (ok) asking = null;
-	}
-
 	/** An unresolved reference whose drop waits on a second click. */
 	let confirming = $state<string | null>(null);
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
@@ -58,38 +21,15 @@
 <section class="project" aria-labelledby="project-title" data-testid="project-panel">
 	<div class="head">
 		<h2 id="project-title" class="eyebrow">Project</h2>
-		<div class="actions">
-			<button class="btn ghost sm" data-testid="project-open" onclick={() => act('open')} disabled={!app.analysis.isOpen || p.busy !== null}>Open</button>
-			<button class="btn ghost sm" data-testid="project-import" onclick={() => act('import')} disabled={!app.analysis.isOpen || p.busy !== null}>Import</button>
-			{#if p.summary}
-				{#if p.summary.objects.filter((o) => o.stale).length > 1}
-					<button class="btn ghost sm" data-testid="project-refresh" title="Compute every stale object again, sources first" onclick={() => p.refresh()} disabled={p.busy !== null}>Recompute All</button>
-				{/if}
-				<button class="btn ghost sm" data-testid="project-save" onclick={() => act('save')} disabled={p.busy !== null}>Save</button>
-			{/if}
-		</div>
-	</div>
-
-	{#if asking}
-		<form class="ask" onsubmit={submit} data-testid="project-path-form">
-			<label for="project-path">{PROMPTS[asking]}</label>
-			<div class="row">
-				<input
-					id="project-path"
-					bind:this={field}
-					bind:value={typed}
-					class="field mono"
-					data-testid="project-path"
-					placeholder={asking === 'save' ? '/path/to/project.hforge' : '/path/to/file'}
-					spellcheck="false"
-					autocomplete="off"
-					onkeydown={(e) => e.key === 'Escape' && (asking = null)}
-				/>
-				<button class="btn primary sm" type="submit" disabled={!typed.trim() || p.busy !== null}>{asking === 'save' ? 'Save' : asking === 'open' ? 'Open' : 'Import'}</button>
+		{#if p.summary}
+			<span class="counts">{p.summary.objects.length} objects</span>
+		{:else}
+			<div class="actions">
+				<button class="btn ghost sm" data-testid="panel-open" onclick={() => p.fileAct('open')} disabled={!app.analysis.isOpen || p.busy !== null}>Open</button>
+				<button class="btn ghost sm" data-testid="panel-import" onclick={() => p.fileAct('import')} disabled={!app.analysis.isOpen || p.busy !== null}>Import</button>
 			</div>
-			<p class="hint">In the desktop app this is the file dialog, and files can be dropped on the window.</p>
-		</form>
-	{/if}
+		{/if}
+	</div>
 
 	{#if p.busy}
 		<div class="busy" role="status" data-testid="project-busy">
@@ -146,7 +86,7 @@
 		{:else}
 			<p class="muted">Empty. Import a file, or drop one on the window in the desktop app.</p>
 		{/if}
-	{:else if !asking && !p.busy}
+	{:else if !p.asking && !p.busy}
 		<p class="muted">Open a project or import your own files. In the desktop app, drop them on the window.</p>
 	{/if}
 </section>
@@ -169,22 +109,8 @@
 		gap: 2px;
 	}
 
-	.ask {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		margin-bottom: var(--sp-2);
-	}
 
-	.ask label {
-		font-size: var(--text-xs);
-		color: var(--text-3);
-	}
 
-	.row {
-		display: flex;
-		gap: 4px;
-	}
 
 	.hint {
 		font-size: var(--text-xs);
@@ -276,39 +202,10 @@
 		border-radius: 50%;
 	}
 
-	.strip {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 8px;
-		min-height: 22px;
-		margin-top: var(--sp-2);
-		padding: 2px 4px;
-		font-size: var(--text-xs);
-	}
 
-	.strip .link {
-		padding: 0;
-		font-size: 11px;
-		color: var(--text-2);
-		background: none;
-		border: none;
-		cursor: pointer;
-	}
 
-	.strip .link:hover,
-	.strip .link.on {
-		color: var(--text-1);
-	}
 
-	.strip .link.danger:hover {
-		color: var(--status-bad, var(--amber-2));
-	}
 
-	.strip .link:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
 
 	.objects {
 		margin-top: var(--sp-2);
@@ -372,5 +269,9 @@
 		color: var(--amber-2);
 		border: 1px solid var(--amber-line);
 		border-radius: var(--radius-sm);
+	}
+	.counts {
+		color: var(--text-3);
+		font-size: var(--text-xs);
 	}
 </style>
