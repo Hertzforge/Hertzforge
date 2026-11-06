@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles } from '$lib/project/files';
+import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -1255,11 +1255,17 @@ export class ProjectState {
 		return true;
 	}
 
-	paste(): Promise<boolean> {
+	async paste(): Promise<boolean> {
+		// files copied elsewhere since, as VD reads the clipboard: a copy here puts text on it and no file
+		const paths = await pastedFiles();
+		if (paths.length) {
+			await this.openPaths(paths);
+			return true;
+		}
 		const ours = this.copied.filter((n) => this.summary?.objects.some((o) => o.name === n));
 		if (!ours.length) {
 			this.error = this.copied.length ? 'The copied objects are not in this project' : 'Nothing copied to paste';
-			return Promise.resolve(false);
+			return false;
 		}
 		return this.duplicate(ours);
 	}

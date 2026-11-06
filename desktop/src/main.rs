@@ -16,6 +16,8 @@
 
 mod probe;
 #[cfg(target_os = "macos")]
+mod pasted_files;
+#[cfg(target_os = "macos")]
 mod save_panel;
 mod services;
 
@@ -324,11 +326,15 @@ fn main() {
     });
     #[cfg(all(target_os = "macos", not(feature = "e2e")))]
     let builder =
-        builder.invoke_handler(tauri::generate_handler![save_panel::save_with_file_types]);
+        builder.invoke_handler(tauri::generate_handler![
+            pasted_files::pasted_files,
+            save_panel::save_with_file_types
+        ]);
     #[cfg(all(target_os = "macos", feature = "e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         e2e::e2e_log,
         e2e::e2e_quit,
+        pasted_files::pasted_files,
         save_panel::save_with_file_types
     ]);
     #[cfg(all(not(target_os = "macos"), feature = "e2e"))]
