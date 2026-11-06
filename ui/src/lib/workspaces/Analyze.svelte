@@ -202,7 +202,12 @@
 					{@const offers = a.shown.offers}
 					{@const panes = !!offers?.shapes}
 					{@const views = a.shown.views}
-					<div class="svviews" class:several={views.length > 1} class:panes style:--rows={Math.max(1, views.length - 1)}>
+					{@const beside = views.filter((v) => v.view !== 'shape3d')}
+					<!-- a pane fills the frame unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
+					<div class="svviews" class:several={views.length > 1} class:panes
+						style:--rows={Math.max(1, beside.length)}
+						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
+						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
 							<div class="view {v.view}" class:pane={panes} data-testid={panes ? `pane-${paneOf(v, views)}` : undefined}>
 								{#if panes && offers}
@@ -373,7 +378,7 @@
 		background: var(--bg-1);
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-lg);
-		container-type: inline-size;
+		container-type: size;
 	}
 
 	.selected header {
@@ -465,28 +470,35 @@
 			min-height: 520px;
 		}
 
-		/* the panes share the frame's height instead of growing past it */
+		/* the panes share the frame's height instead of growing past it: the 3-D pane down the left, the rest in rows beside it */
 		.svviews.panes.several:has(.view.shape3d) {
-			grid-auto-rows: minmax(0, 1fr);
-			align-content: stretch;
+			grid-template-rows: var(--rows-wide);
 			overflow: hidden;
 		}
 
 		.svviews.panes.several .view.shape3d {
 			grid-row: 1 / span var(--rows);
-			height: auto;
-			min-height: 0;
-		}
-
-		.svviews.panes.several .view.matrix,
-		.svviews.panes.several .view.table {
-			height: auto;
-			min-height: 0;
 		}
 	}
 
+	/* a pane's track sizes it: a 3-D view or a matrix fills what the frame gives, a table takes its rows */
 	.svviews.panes {
+		grid-template-rows: var(--rows-stacked);
+		align-content: stretch;
 		overflow-y: auto;
+	}
+
+	.svviews.panes .view,
+	.svviews.panes .view.shape3d,
+	.svviews.panes .view.matrix,
+	.svviews.panes .view.table {
+		height: auto;
+		min-height: 0;
+	}
+
+	/* a table pane scrolls inside itself once it is taller than the frame, instead of growing past it */
+	.pane.table :global(.scroll) {
+		max-height: calc(100cqh - 150px);
 	}
 
 	.away {

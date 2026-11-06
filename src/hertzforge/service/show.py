@@ -114,6 +114,11 @@ def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | No
 #: past this many shape values the table is not offered (VD's limit)
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
 
+#: a lone shape set's own DOFs are marked with arrows up to this many: a
+#: measured set has a few dozen, a finite element set hundreds of thousands,
+#: and an arrow on every node of a mesh says nothing
+ARROW_DOF_LIMIT = 2_000
+
 #: where a shape set's values are read: every DOF, or a channel choice of the
 #: table in its group (VD's `_VALUES_CHOICES`)
 VALUES_CHOICES = {'all': 'All DOFs', 'control': 'Control channels', 'reference': 'References',
@@ -175,7 +180,7 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 ) -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
     table's channels, a force or a drive pointing in, else a lone shape
-    set's DOFs."""
+    set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
 
@@ -186,7 +191,9 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
-        return [str(dof) for dof in project[objects[0]].coordinate], []
+        dofs = project[objects[0]].coordinate
+        if len(dofs) <= ARROW_DOF_LIMIT:
+            return [str(dof) for dof in dofs], []
     return [], []
 
 
