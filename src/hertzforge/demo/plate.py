@@ -3,13 +3,12 @@
 A 12 in x 12 in x 0.5 in plate of 6061-T6, free-free. A completely free
 square plate is a classical benchmark: its nondimensional frequencies
 are tabulated (Leissa, NASA SP-160), and most test engineers have tapped
-one with a hammer. The drone shows a large model; the plate is the one
-whose answers can be checked against a book.
+one with a hammer. The Frame-Wing shows a large model; the plate is
+the one whose answers can be checked against a book.
 
 It is built with `hertzforge.fem` only, from the rectangular MITC4
 shell element, which `tests/test_fem.py` checks against the same tables.
-The small test fixtures are made from this model (`testdata/generate_plate.py`),
-as the large ones are made from the drone.
+The small test fixtures are made from this model (`testdata/generate_plate.py`).
 
     from hertzforge.demo import plate
 

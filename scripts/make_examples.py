@@ -1,8 +1,8 @@
 """Write the example projects hertzforge.com offers for download.
 
-Five `.hforge` files, each built by this package alone: the quadcopter
-and the free plate of `hertzforge.demo` with their 30 lowest normal
-modes (six of them rigid), the Frame-Wing as `frame_wing.project`
+Four `.hforge` files, each built by this package alone: the free plate
+of `hertzforge.demo` with its 30 lowest normal modes (six of them
+rigid), the Frame-Wing as `frame_wing.project`
 builds it (the frame, each wing alone and the frame with each wing,
 every one solved to 1500 Hz, a 170 MB file), and the plate's random and
 modal controller runs read from `testdata/plate`
@@ -39,11 +39,6 @@ def _model(title: str, build: Callable[[], Any]) -> Any:
     return project
 
 
-def quadcopter() -> Any:
-    from hertzforge.demo import drone
-    return _model('Quadcopter', drone.build)
-
-
 def free_plate() -> Any:
     from hertzforge.demo import plate
     return _model('Free Plate', plate.build)
@@ -74,7 +69,6 @@ def plate_modal_run() -> Any:
 
 
 EXAMPLES: dict[str, Callable[[], Any]] = {
-    'quadcopter': quadcopter,
     'free-plate': free_plate,
     'frame-wing': frame_wing,
     'plate-random-run': plate_random_run,

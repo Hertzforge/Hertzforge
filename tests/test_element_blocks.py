@@ -9,7 +9,7 @@ is that anything it reads, it writes.
 They earn their place beyond the round trip: `fem.Model.from_geometry`
 reads the section for a member off the element group of the element it came from,
 so a geometry is a complete description of a structure and a saved file
-rebuilds it with nothing passed alongside. `tests/test_demo_drone.py`
+rebuilds it with nothing passed alongside. `tests/test_demo_plate.py`
 pins that end of it.
 """
 
