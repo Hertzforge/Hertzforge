@@ -117,8 +117,7 @@
 					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
 					{#if a.shown?.offers}
 						{@const offers = a.shown.offers}
-						{@const panes = !!offers.shapes}
-						{#if panes}
+						{#if offers.shapes}
 							{@const away = PANES.filter(([pref]) => !a.prefs[pref])}
 							{#if away.length}
 								<div class="away" role="toolbar" aria-label="Panes put away">
@@ -145,12 +144,6 @@
 									<option value="imag">Imaginary part</option>
 									<option value="phase">Phase</option>
 								</select>
-							{/if}
-							{#if !panes && a.shown?.views.some((v) => v.view === 'matrix')}
-								<div class="seg" role="radiogroup" aria-label="Bars or grid">
-									<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
-									<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
-								</div>
 							{/if}
 							{#if a.shown?.views.some((v) => v.view === 'shape3d' && v.overlays?.length)}
 								<button class="btn ghost sm" class:on={a.prefs.overlay} aria-pressed={a.prefs.overlay} data-testid="read-overlay" title="Animate the picked pair of modes over each other, the second phase-aligned to the first" onclick={() => a.setPref('overlay', !a.prefs.overlay)}>Overlay</button>
@@ -179,12 +172,6 @@
 									<button role="radio" aria-checked={a.prefs.sine_reading === 'bars'} class:on={a.prefs.sine_reading === 'bars'} data-testid="read-sine-bars" title="Each channel's signed RMS deviation from its tone across the sweep, in dB" onclick={() => a.prefs.sine_reading !== 'bars' && a.setPref('sine_reading', 'bars')}>Level Error</button>
 								</div>
 							{/if}
-							{#if !panes && offers.arrows}
-								<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
-							{/if}
-							{#if !panes && offers.sensors}
-								<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
-							{/if}
 							{#if a.comparison && a.picks.length}
 								<button class="btn sm" data-testid="add-matches" title="Add the picked MAC squares to the matched modes for this pair of sets; created on first use" onclick={() => void a.addMatches()}>Add Matches</button>
 							{/if}
@@ -200,18 +187,19 @@
 				{#if a.shown}
 					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
 					{@const offers = a.shown.offers}
-					{@const panes = !!offers?.shapes}
+					{@const shapes = !!offers?.shapes}
 					{@const views = a.shown.views}
 					{@const beside = views.filter((v) => v.view !== 'shape3d')}
-					<!-- a pane fills the frame unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
-					<div class="svviews" class:several={views.length > 1} class:panes
+					<!-- every view is a pane that fills the frame, unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
+					<div class="svviews panes" class:several={views.length > 1}
 						style:--rows={Math.max(1, beside.length)}
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
-							<div class="view {v.view}" class:pane={panes} data-testid={panes ? `pane-${paneOf(v, views)}` : undefined}>
-								{#if panes && offers}
-									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own -->
+							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors))}
+							<div class="view pane {v.view}" data-testid="pane-{shapes ? paneOf(v, views) : v.view}">
+								{#if headed && offers}
+									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own; a lone view with nothing to set leaves its title to the frame -->
 									<header class="phead">
 										<h4>{v.title}</h4>
 										{#if v.view === 'shape3d'}
@@ -226,7 +214,7 @@
 												<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
 												<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
 											</div>
-										{:else if v.view === 'table' && paneOf(v, views) === 'shape_values'}
+										{:else if shapes && v.view === 'table' && paneOf(v, views) === 'shape_values'}
 											{#if offers.values_dofs.length > 1}
 												<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
 													{#each offers.values_dofs as choice (choice)}
@@ -240,14 +228,16 @@
 												<option value="reference">Reference transformation Φᵀ</option>
 											</select>
 										{/if}
-										<button class="btn ghost icon sm" data-testid="minimize-{paneOf(v, views)}" aria-label="Put this pane away" title="Put this pane away; its name in the frame's header brings it back" disabled={views.length === 1} onclick={() => a.setPref(paneOf(v, views), false)}><Icon name="chevron" size={12} /></button>
+										{#if shapes}
+											<button class="btn ghost icon sm" data-testid="minimize-{paneOf(v, views)}" aria-label="Put this pane away" title="Put this pane away; its name in the frame's header brings it back" disabled={views.length === 1} onclick={() => a.setPref(paneOf(v, views), false)}><Icon name="chevron" size={12} /></button>
+										{/if}
 									</header>
 								{/if}
 								<div class="pbody">
 									<ViewRenderer
 										view={v}
 										layout="strip"
-										showTitle={v.view === 'spectrum' || (v.view === 'table' && !panes)}
+										showTitle={!headed && (v.view === 'spectrum' || v.view === 'table')}
 										minHeight={240}
 										scope="selection"
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
@@ -451,7 +441,7 @@
 	}
 
 	.svviews.several {
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
 	}
 
 	.svviews.several .view.shape3d {
@@ -470,9 +460,15 @@
 			min-height: 520px;
 		}
 
-		/* the panes share the frame's height instead of growing past it: the 3-D pane down the left, the rest in rows beside it */
+		/* the panes share the frame's height instead of growing past it: the 3-D pane down the left, the rest in rows beside it; without one, the rows share the height */
 		.svviews.panes.several:has(.view.shape3d) {
 			grid-template-rows: var(--rows-wide);
+			overflow: hidden;
+		}
+
+		.svviews.panes.several:not(:has(.view.shape3d)) {
+			grid-template-rows: none;
+			grid-auto-rows: minmax(0, 1fr);
 			overflow: hidden;
 		}
 
@@ -491,7 +487,9 @@
 	.svviews.panes .view,
 	.svviews.panes .view.shape3d,
 	.svviews.panes .view.matrix,
-	.svviews.panes .view.table {
+	.svviews.panes .view.table,
+	.svviews.panes .view.spectrum,
+	.svviews.panes .view.waterfall {
 		height: auto;
 		min-height: 0;
 	}
