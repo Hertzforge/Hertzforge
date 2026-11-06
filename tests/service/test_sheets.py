@@ -167,6 +167,23 @@ def test_breakpoints_by_slope_reach_their_levels(project):
     assert level == pytest.approx(0.01 * 4.0 ** (3 / 3.0103), rel=1e-4)
 
 
+def test_a_band_edge_drags_through_its_handle(project, validate):
+    run(project, 'project.create_specification', table='Channel Table', rows='1-2',
+        name='Sheet', breakpoints='20, 0.01\n200, 0.01\n2000, 0.01', abort='-6, 6')
+    views = run(project, 'project.edit_specification', specification='Sheet')
+    wire_views(views, validate)
+    plot = next(view for view in views if view['view'] == 'spectrum')
+    handles = [h for h in plot['handles'] if h['params']['kind'] == 'abort']
+    upper = next(h for h in handles if h['params']['side'] == 'upper')
+    assert upper['decibels'] == 6.0
+    assert 'bort' in plot['series'][upper['series']]['name']
+    views = run(project, upper['op'], **upper['params'], decibels=9.1)
+    plot = next(view for view in views if view['view'] == 'spectrum')
+    moved = next(h for h in plot['handles'] if h['params']['kind'] == 'abort'
+                 and h['params']['side'] == 'upper')
+    assert moved['decibels'] == 9.0, 'it lands on the quarter-decibel grid'
+
+
 def test_set_breakpoint_moves_a_level_and_a_frequency(project, validate):
     run(project, 'project.create_specification', table='Channel Table', rows='1-2',
         name='Sheet', breakpoints='20, 0.01\n2000, 0.01')

@@ -410,7 +410,7 @@ class AnalyzeState {
 	}
 
 	/** A click in the reading's 3-D view: runs the view's operation with what was clicked, and the form holds what it left. */
-	async pickInReading(pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
+	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
