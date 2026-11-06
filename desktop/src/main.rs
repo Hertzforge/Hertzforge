@@ -270,6 +270,11 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Check for Updates, from the shell's palette: the updater reads the latest
+        // release's manifest, verifies the archive against the public key in
+        // tauri.conf.json, installs it, and the process plugin relaunches.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppLog::new())
         .manage(Quit::default())
         .setup(|app| {

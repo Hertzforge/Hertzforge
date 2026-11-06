@@ -23,6 +23,12 @@
       "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "SET ME: the public half of the updater key, from `npx tauri signer generate` (docs/desktop-app.md, Updates)",
+      "endpoints": ["https://github.com/Hertzforge/Hertzforge/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

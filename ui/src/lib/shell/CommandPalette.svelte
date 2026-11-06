@@ -3,6 +3,7 @@
 	 * Command palette (Cmd/Ctrl+K): fuzzy search over workspaces, every catalog operation and
 	 * the control actions. Fully keyboard driven: arrows move, Enter runs, Escape closes.
 	 */
+	import { checkForUpdates, hasUpdater } from './updates';
 	import { tick } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
@@ -121,6 +122,19 @@
 					app.control.retryNow();
 				}
 			},
+			...(hasUpdater()
+				? [
+						{
+							id: 'act:update',
+							group: 'Actions',
+							title: 'Check for Updates',
+							subtitle: 'The desktop app',
+							keywords: 'update upgrade version new release',
+							icon: 'reset',
+							run: () => void checkForUpdates()
+						} satisfies Command
+					]
+				: []),
 			...(['system', 'dark', 'light'] as const).map(
 				(t): Command => ({
 					id: `act:theme-${t}`,

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hertzforge</title>
-<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset. Coming soon.">
+<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://hertzforge.com/">
 <meta property="og:site_name" content="Hertzforge">
@@ -99,6 +99,16 @@
     </video>
     <figcaption>The first working prototype, October 2026.</figcaption>
   </figure>
+  <section class="examples download" aria-labelledby="download-title">
+    <h2 id="download-title">Download</h2>
+    <p>The desktop app for macOS, signed and notarized. <span id="dl-release">The latest release</span> is on <a href="https://github.com/Hertzforge/Hertzforge/releases/latest">GitHub</a> with its notes and checksums.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-AppleSilicon.dmg">Hertzforge for Apple silicon</a><em class="size" data-asset="Hertzforge-macOS-AppleSilicon.dmg"></em>
+        <span>M1 and later. Open the disk image and drag Hertzforge to Applications.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-Intel.dmg">Hertzforge for Intel Macs</a><em class="size" data-asset="Hertzforge-macOS-Intel.dmg"></em>
+        <span>macOS 11 or later.</span></li>
+    </ul>
+  </section>
   <section class="examples" aria-labelledby="examples-title">
     <h2 id="examples-title">Example projects</h2>
     <p>Hertzforge project files (<code>.hforge</code>) to open with File &rsaquo; Open or drop on the window. Every number in them was computed by Hertzforge itself.</p>
@@ -113,10 +123,23 @@
         <span>The round-robin frame and its two wings as five models of solid bricks: the frame, each wing alone, and the frame with each wing screwed across two uprights (65,585 nodes with the thick one), every model with its modes to 1500 Hz. The large case.</span></li>
     </ul>
   </section>
-  <p class="soon">Coming soon</p>
   <p><a href="https://github.com/Hertzforge/Hertzforge">GitHub</a></p>
 </main>
 <script>
+  // The download links go through releases/latest, so they need no change per release; the
+  // version, date and sizes come from GitHub when the visitor's browser can reach it.
+  fetch('https://api.github.com/repos/Hertzforge/Hertzforge/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((release) => {
+      if (!release || !release.tag_name) return;
+      const when = release.published_at ? new Date(release.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+      document.getElementById('dl-release').textContent = `Version ${release.tag_name.replace(/^v/, '')}${when ? `, ${when},` : ''}`;
+      for (const el of document.querySelectorAll('em.size[data-asset]')) {
+        const asset = (release.assets || []).find((a) => a.name === el.dataset.asset);
+        if (asset) el.textContent = `${(asset.size / 1e6).toFixed(0)} MB`;
+      }
+    })
+    .catch(() => {});
   // Respect reduced motion: no autoplay, and give the visitor the controls instead.
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const demo = document.getElementById('demo');
