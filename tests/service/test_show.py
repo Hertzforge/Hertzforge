@@ -473,7 +473,10 @@ def test_picked_modes_limit_every_view_of_a_lone_shape_set(plate, validate):
                     prefs={'shape_values': True}, validate=validate)
         stage, table, matrix, values = two['views']
         assert [m['index'] for m in stage['modes']] == [1, 3]
+        assert [o['index'] for o in stage['overlays']] == [1, 3], 'the MAC picks a pair to overlay'
+        assert matrix['selects'] == 'shape3d'
         assert [row[0] for row in table['rows']] == ['1', '3']
+        assert table['edit']['rows'] == [1, 3], 'an edit of the second shown row is mode 3'
         assert matrix['values'].shape == (2, 2)
         assert matrix['rows']['ticks'] == ['10.0 Hz', '30.0 Hz']
         assert values['columns'] == ['DOF', 'M1', 'M3']

@@ -373,12 +373,14 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value } },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.project) this.app.project.apply(res.project);
 			const table = res.views.find((v) => v.view === 'table');
-			if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
+			// a table showing a pick of its rows is shown again, since the one that comes back has them all
+			if (edit.rows) void this.showSelection();
+			else if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
 			return null;
 		} catch (err) {
 			return message(err);

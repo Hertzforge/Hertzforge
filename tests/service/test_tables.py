@@ -27,6 +27,27 @@ def run(project, op_id, **given):
     return op.run(project, values)
 
 
+def test_a_mode_table_takes_descriptions(fitted, validate):
+    """The Description column is typed into (Brandon, 2026-11-05): the
+    edit names the mode by its row, the text is kept on the set and
+    journaled, and a row the table does not have is refused."""
+    project = fitted
+    (table,) = run(project, 'project.table', object='Three')
+    assert table['edit']['op'] == 'project.describe_mode'
+    assert table['edit']['columns'] == [None, None, None, 'description']
+    (after,) = run(project, 'project.describe_mode', shapes='Three', row=2, column='description',
+                   value='  first bending ')
+    assert after['rows'][1][3] == 'first bending'
+    assert project['Three'].description[1] == 'first bending'
+    assert any('set_description' in line for line in project.journal)
+    wire_views([after], validate)
+    with pytest.raises(ProtocolError, match='no mode 9'):
+        run(project, 'project.describe_mode', shapes='Three', row=9, column='description',
+            value='x')
+    run(project, 'project.describe_mode', shapes='Three', row=2, column='description', value='')
+    assert project['Three'].description[1] == ''
+
+
 @pytest.fixture(scope='module')
 def fitted():
     """The plate's modal run with two fits of its modes: three, then two

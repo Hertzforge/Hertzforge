@@ -300,17 +300,25 @@ def _alone(project: Any, name: str, picks: list[int],
         views: list[dict] = []
         notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
                  f'{len(picked)} modes picked'] if picked else []
+        paired = (mac_views(project, name, name, picked or None, picked or None)
+                  if up['mac'] else [])
         if up['animation']:
-            views.append(_shape_view(project, name, geometry, picked or None))
+            stage = _shape_view(project, name, geometry, picked or None)
+            selected = next((view for view in paired if view['view'] == 'shape3d'), None)
+            if selected is not None:
+                # a square picked on the auto-MAC animates its row mode with its
+                # column mode overlaid; the shell leaves the overlay off on the diagonal
+                stage['overlays'] = selected['overlays']
+                stage['overlay_phase'] = selected['overlay_phase']
+            views.append(stage)
         if up['table']:
             (table,) = _run(project, 'project.table', object=name)
             if picked and len(table['rows']) == obj.num_shapes:
                 table['rows'] = [table['rows'][k] for k in picked]
+                if 'edit' in table:
+                    table['edit']['rows'] = [k + 1 for k in picked]
             views.append(table)
-        if up['mac']:
-            views += [view for view in mac_views(project, name, name, picked or None,
-                                                 picked or None)
-                      if view['view'] == 'matrix']
+        views += [view for view in paired if view['view'] == 'matrix']
         if up['values']:
             table, said = _values_view(project, name, obj, prefs)
             notes += said

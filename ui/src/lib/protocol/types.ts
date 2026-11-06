@@ -342,6 +342,8 @@ export interface TableEdit {
 	choices?: Record<string, string[]>;
 	/** How a column's cells are edited, by key: a flag is a check box, a choice a drop-down, a date a date field. */
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
+	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
+	rows?: number[];
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */

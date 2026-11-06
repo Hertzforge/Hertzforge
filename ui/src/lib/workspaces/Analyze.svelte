@@ -186,6 +186,7 @@
 				</header>
 				{#if a.shown}
 					{@const linked = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d')}
+					{@const selfMac = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d' && v.rows.label === v.columns.label)}
 					{@const offers = a.shown.offers}
 					{@const shapes = !!offers?.shapes}
 					{@const views = a.shown.views}
@@ -245,7 +246,7 @@
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
 										bars={v.view === 'matrix' && a.prefs.bars}
 										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
-										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair ? a.pair.column : null}
+										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 									/>
 								</div>
