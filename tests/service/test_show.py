@@ -458,6 +458,35 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         table.set_cell('model', 0, was)
 
 
+def test_picked_modes_limit_every_view_of_a_lone_shape_set(plate, validate):
+    """Modes picked in the tree are what the panes show: the animation
+    steps through them, the table lists them, the auto-MAC is theirs and
+    the values keep their columns, each still numbered as the set numbers
+    it (Brandon, 2026-11-05)."""
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    project.add('Three', ShapeSet(frequency=[10.0, 20.0, 30.0], damping=[0.01, 0.02, 0.03],
+                                  shape_matrix=np.arange(18.0).reshape(3, 6), coordinate=dofs))
+    try:
+        two = shown(plate, 'Three', records={'Three': [2, 0]},
+                    prefs={'shape_values': True}, validate=validate)
+        stage, table, matrix, values = two['views']
+        assert [m['index'] for m in stage['modes']] == [1, 3]
+        assert [row[0] for row in table['rows']] == ['1', '3']
+        assert matrix['values'].shape == (2, 2)
+        assert matrix['rows']['ticks'] == ['10.0 Hz', '30.0 Hz']
+        assert values['columns'] == ['DOF', 'M1', 'M3']
+        assert '2 modes picked' in two['note']
+        one = shown(plate, 'Three', records={'Three': [1]}, validate=validate)
+        assert [m['index'] for m in one['views'][0]['modes']] == [2]
+        assert one['views'][2]['values'].shape == (1, 1)
+        every = shown(plate, 'Three', validate=validate)
+        assert len(every['views'][0]['modes']) == 3 and every['views'][2]['values'].shape == (3, 3)
+    finally:
+        project.remove('Three')
+
+
 def test_a_finite_element_set_offers_no_dof_arrows(plate, validate):
     """A measured set's few DOFs are worth marking; a mesh's hundreds of
     thousands are not (`ARROW_DOF_LIMIT`)."""

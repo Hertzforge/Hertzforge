@@ -284,8 +284,12 @@ def _alone(project: Any, name: str, picks: list[int],
         # part of reading the list, and the values themselves. The shell
         # draws each in a pane of its own and minimizes one by turning its
         # preference off, so a pane put away costs nothing to compute.
+        # Modes picked in the tree limit every view to those modes.
+        from .ops_project import _shape_view, mac_views
+
         prefs = {**PREFS, **(prefs or {})}
         geometry = _geometry_for(project, name)
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < obj.num_shapes})
         count = int(obj.num_shapes) * len(obj.coordinate)
         fits = count <= SHAPE_VALUES_CELL_LIMIT
         up = {'animation': bool(prefs['animation']) and geometry is not None,
@@ -294,19 +298,29 @@ def _alone(project: Any, name: str, picks: list[int],
         if not any(up.values()):
             up['table'] = True
         views: list[dict] = []
-        notes = [f'mode {picks[0] + 1} picked' if len(picks) == 1 else
-                 f'{len(picks)} modes picked'] if picks else []
+        notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} modes picked'] if picked else []
         if up['animation']:
-            views += _run(project, 'project.mode_shapes', shapes=name, geometry=geometry)
+            views.append(_shape_view(project, name, geometry, picked or None))
         if up['table']:
-            views += _run(project, 'project.table', object=name)
+            (table,) = _run(project, 'project.table', object=name)
+            if picked and len(table['rows']) == obj.num_shapes:
+                table['rows'] = [table['rows'][k] for k in picked]
+            views.append(table)
         if up['mac']:
-            views += [view for view in _run(project, 'project.mac', first=name, second=name)
+            views += [view for view in mac_views(project, name, name, picked or None,
+                                                 picked or None)
                       if view['view'] == 'matrix']
         if up['values']:
             table, said = _values_view(project, name, obj, prefs)
             notes += said
             if table is not None:
+                if picked and len(table['columns']) == obj.num_shapes + 1:
+                    keep = [0] + [k + 1 for k in picked]
+                    table['columns'] = [table['columns'][i] for i in keep]
+                    table['rows'] = [[row[i] for i in keep] for row in table['rows']]
+                elif picked and len(table['rows']) == obj.num_shapes:
+                    table['rows'] = [table['rows'][k] for k in picked]
                 views.append(table)
         if prefs['shape_values'] and not fits:
             notes.append(f'{count:,} shape values, too many for a table')

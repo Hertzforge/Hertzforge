@@ -241,13 +241,17 @@ def _geometry(project: Any) -> str | None:
                  if isinstance(obj, Geometry)), None)
 
 
-def _shape_view(project: Any, shapes_name: str, geometry_name: str) -> dict:
-    """A shape set's modes on a geometry, each a translation per node."""
+def _shape_view(project: Any, shapes_name: str, geometry_name: str,
+                modes: list[int] | None = None) -> dict:
+    """A shape set's modes on a geometry, each a translation per node:
+    all of them, or the `modes` picked (indices from 0), numbered as the
+    set numbers them."""
     shapes, geometry = project[shapes_name], project[geometry_name]
     rows, triangles, lines = drawn_mesh(geometry)
-    moved = translations(geometry, shapes.coordinate, shapes.shape_matrix, rows)
-    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[k])
-             for k in range(shapes.num_shapes)]
+    picked = list(modes) if modes else list(range(shapes.num_shapes))
+    moved = translations(geometry, shapes.coordinate, shapes.shape_matrix[picked], rows)
+    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[i])
+             for i, k in enumerate(picked)]
     return v.shape3d(f'{shapes_name} on {geometry_name}',
                      'm' if geometry.units_defined else 'undefined',
                      np.asarray(geometry.node_xyz, dtype=float)[rows], modes,
@@ -339,17 +343,15 @@ FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
 SECOND = Param('second', 'Columns', 'enum', options_from='objects:shape_set')
 
 
-def mac(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.mac`: the Modal Assurance Criterion of one shape set's
-    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
-    or a set against itself. With a geometry the matrix selects the pair it
-    shows, the column mode overlaid on the row mode, as Visual Dynamics
-    shows two shape sets' MAC."""
+def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None = None,
+              column_modes: list[int] | None = None) -> list[dict]:
+    """The MAC of `first`'s modes against `second`'s (`mac`), limited to
+    the `row_modes` and `column_modes` picked (indices from 0) when
+    given, its axes ticked with those modes' frequencies."""
     from hertzforge.core.shapes import cross_mac
 
     from .mode_pairs import paired
 
-    first, second = params['first'], params['second']
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
         raise refused(f'{first if not rows.num_shapes else second} has no modes')
@@ -357,16 +359,28 @@ def mac(project: Any, params: dict[str, Any]) -> list[dict]:
         values = rows.auto_mac() if first == second else cross_mac(rows, columns)
     except ValueError as error:
         raise refused(str(error)) from None
+    row_modes = list(row_modes) if row_modes else list(range(rows.num_shapes))
+    column_modes = list(column_modes) if column_modes else list(range(columns.num_shapes))
+    values = np.asarray(values)[np.ix_(row_modes, column_modes)]
 
-    def axis(name: str, shapes: Any) -> dict:
-        return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
+    def axis(name: str, shapes: Any, modes: list[int]) -> dict:
+        return {'label': name, 'ticks': [f'{shapes.frequency[k]:.1f} Hz' for k in modes]}
 
     title = f'Auto-MAC of {first}' if first == second else f'MAC of {first} Against {second}'
-    matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
-                      (0.0, 1.0))
+    matrix = v.matrix(title, axis(first, rows, row_modes), axis(second, columns, column_modes),
+                      values, 'MAC', (0.0, 1.0))
     geometry = _geometry(project)
-    return paired(None if geometry is None else project[geometry], matrix, rows,
-                  range(rows.num_shapes), columns, range(columns.num_shapes))
+    return paired(None if geometry is None else project[geometry], matrix, rows, row_modes,
+                  columns, column_modes)
+
+
+def mac(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.mac`: the Modal Assurance Criterion of one shape set's
+    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    or a set against itself. With a geometry the matrix selects the pair it
+    shows, the column mode overlaid on the row mode, as Visual Dynamics
+    shows two shape sets' MAC."""
+    return mac_views(project, params['first'], params['second'])
 
 
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
