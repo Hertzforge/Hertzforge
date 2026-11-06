@@ -212,6 +212,9 @@ class Operation:
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
+    #: copy of its geometry, so nothing in the project changes
+    previews: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`
@@ -223,6 +226,8 @@ class Operation:
         from .verbs import modules_of
 
         out['modules'] = list(modules_of(self))
+        if self.previews:
+            out['previews'] = True
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,

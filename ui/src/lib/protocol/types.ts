@@ -636,6 +636,8 @@ export interface OperationDescriptor {
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
+	/** The form shows this while it is typed: `op.run` with `preview`, on a copy. */
+	previews?: boolean;
 }
 
 export interface Catalog {

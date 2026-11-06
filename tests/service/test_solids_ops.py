@@ -281,3 +281,47 @@ def test_the_solids_are_listed(project, validate):
     reading, view, table = run(project, 'project.solids')
     wire_views([reading, view, table], validate)
     assert rows(reading)['Parts']['value'] == 1.0 and table['rows'][0][0] == '1'
+
+
+def test_a_form_previews_on_a_copy(validate):
+    """VD's live preview of a solid: nothing reaches the project or its journal."""
+    import hertzforge
+    from hertzforge.service import display_units, server
+
+    project = hertzforge.Project('p')
+    name = project.new_geometry('Part', unit='m')
+    project.add_solid_block(name, (0, 0, 0), (1, 1, 1))
+    held = len(project[name].solids)
+    journal = list(project.journal)
+    scratch = server._preview_copy(project, name)
+    assert next(o for o in server.OPERATIONS if o.id == 'project.add_solid_block').previews
+    views = server._said_as_preview(run(scratch, 'project.add_solid_block', x=2.0),
+                                    display_units.DEFAULT)
+    wire_views(views, validate)
+    assert views[0]['rows'][0]['label'] == 'Would add'
+    assert len(scratch[name].solids) == held + 1
+    assert len(project[name].solids) == held and project.journal == journal
+
+
+def test_a_preview_over_the_socket_leaves_the_project_unmodified():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    block = {'geometry': 'Part', 'x': 2.0, 'y': 0.0, 'z': 0.0, 'width_x': 1.0, 'width_y': 1.0,
+             'width_z': 1.0, 'angle_x': 0.0, 'angle_y': 0.0, 'angle_z': 0.0, 'corner': 0.0,
+             'name': ''}
+    responses = asyncio.run(_exchange([
+        ('project.new', {}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'm'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': block, 'preview': True}),
+        ('op.run', {'op': 'project.new_channel_table', 'params': {'name': 'x'}, 'preview': True}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': block}),
+    ]))
+    results = [got[-1] for got in responses]
+    previewed = results[2]['result']
+    assert 'project' not in previewed
+    assert previewed['views'][0]['rows'][0]['label'] == 'Would add'
+    assert 'Would add' not in str(results[4]['result']['views'][0])
+    assert 'x' in [o['name'] for o in results[3]['result']['project']['objects']], (
+        'an operation with no preview runs for real')
