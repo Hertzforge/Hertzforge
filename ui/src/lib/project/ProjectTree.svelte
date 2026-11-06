@@ -13,7 +13,7 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
 	import { spans, type Span } from './brackets';
-	import { treeOrder } from './order';
+	import { landsBefore, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 
@@ -89,6 +89,15 @@
 	 */
 	let dragging = $state<string[] | null>(null);
 	let dropOn = $state<string | null>(null);
+	let dropOut = $state(false);
+	/** The row the bar sits above, where the dragged objects will land: null at the bottom, undefined when letting go moves nothing. */
+	const place = $derived.by(() => {
+		if (!dragging) return undefined;
+		const links = p.summary?.links;
+		if (dropOn) return landsBefore(p.summary?.objects ?? [], links, dragging, dropOn);
+		if (dropOut && (links ?? []).some((g) => g.members.some((m) => dragging?.includes(m)))) return landsBefore(p.summary?.objects ?? [], links, dragging, null);
+		return undefined;
+	});
 	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
 	let justDragged = false;
 	function dragDown(e: PointerEvent, o: ProjectObject) {
@@ -105,13 +114,20 @@
 		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
 		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
 		dropOn = name && !dragging.includes(name) ? name : null;
+		dropOut = !name && overBlank(e);
+	}
+	/** Whether the pointer is on the panel's blank space, from the tree's top down, where letting go takes the dragged objects out of their groups. */
+	function overBlank(e: PointerEvent): boolean {
+		if (!treeBox || e.clientY < treeBox.getBoundingClientRect().top) return false;
+		return (treeBox.closest('aside') ?? treeBox).contains(document.elementFromPoint(e.clientX, e.clientY));
 	}
 	function dragUp(e: PointerEvent) {
 		const moving = dragging;
 		const target = dropOn;
-		const inside = !!treeBox && treeBox.contains(document.elementFromPoint(e.clientX, e.clientY));
+		const inside = overBlank(e);
 		dragging = null;
 		dropOn = null;
+		dropOut = false;
 		dragFrom = null;
 		if (!moving) return;
 		justDragged = true;
@@ -237,7 +253,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
-<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
+<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
 	{#if painted.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
@@ -262,7 +278,7 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if OPENS.has(o.kind)}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -484,6 +500,7 @@
 	}
 
 	.row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 5px;
@@ -503,6 +520,26 @@
 
 	.row.drop {
 		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+
+	/* where the dragged objects will land */
+	.row.place::before,
+	.tree.place-end::after {
+		content: '';
+		position: absolute;
+		right: 0;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+		pointer-events: none;
+	}
+	.row.place::before {
+		top: -1px;
+		left: 0;
+	}
+	.tree.place-end::after {
+		bottom: -3px;
+		left: 12px;
 	}
 
 	.tree.dragging {

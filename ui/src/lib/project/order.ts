@@ -33,3 +33,20 @@ export function treeOrder(listed: Listed[], links: ProjectSummary['links'] | und
 		.sort(byKind);
 	return [...out, ...rest.map((m) => m.o)];
 }
+
+/** The links once `moving` is dragged onto `target`, or out of their groups (null), as `moveInto` leaves them: a group of one is no group, and a new one comes last. */
+function linksAfterMove(links: ProjectSummary['links'] | undefined, moving: string[], target: string | null): NonNullable<ProjectSummary['links']> {
+	const home = target === null ? undefined : (links ?? []).find((g) => g.members.includes(target));
+	const after = (links ?? [])
+		.map((g) => (g === home ? { ...g, members: [...new Set([...g.members, ...moving])] } : { ...g, members: g.members.filter((m) => !moving.includes(m)) }))
+		.filter((g) => g.members.length >= 2);
+	if (target !== null && !home) after.push({ members: [target, ...moving], role: null, name: '' });
+	return after;
+}
+
+/** The row `moving` will land above when dragged onto `target` (null: out of their groups), or null when it lands at the bottom. */
+export function landsBefore(listed: Listed[], links: ProjectSummary['links'] | undefined, moving: string[], target: string | null): string | null {
+	const order = treeOrder(listed, linksAfterMove(links, moving, target)).map((o) => o.name);
+	const first = order.findIndex((name) => moving.includes(name));
+	return order.slice(first).find((name) => !moving.includes(name)) ?? null;
+}
