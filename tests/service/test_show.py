@@ -461,6 +461,7 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
 def test_a_finite_element_set_offers_no_dof_arrows(plate, validate):
     """A measured set's few DOFs are worth marking; a mesh's hundreds of
     thousands are not (`ARROW_DOF_LIMIT`)."""
+    from hertzforge.service import show
     from hertzforge.service.show import ARROW_DOF_LIMIT
 
     project = plate.project
@@ -472,10 +473,10 @@ def test_a_finite_element_set_offers_no_dof_arrows(plate, validate):
     project.add('Dense', ShapeSet(frequency=[10.0], damping=[0.01], shape_matrix=np.ones((1, n)),
                                   coordinate=[f'{k + 1}X+' for k in range(n)]))
     try:
+        # the plate's channel table would mark its own channels; a set with no table marks its DOFs
+        assert len(show._arrow_dofs(project, ['Few'], None)[0]) == 6
+        assert show._arrow_dofs(project, ['Dense'], None) == ([], [])
         assert shown(plate, 'Few', validate=validate)['offers']['arrows'] is True
-        dense = shown(plate, 'Dense', validate=validate)
-        assert dense['offers']['arrows'] is False
-        assert 'marks' not in dense['views'][0]
     finally:
         project.remove('Dense')
         project.remove('Few')
