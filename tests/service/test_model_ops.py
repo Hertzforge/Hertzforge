@@ -70,7 +70,7 @@ def test_what_the_groups_cannot_take_is_refused(project, given, match):
 
 
 def test_coincident_nodes_are_merged_and_counted(project):
-    (reading,) = run(project, 'project.merge_coincident_nodes')
+    (reading,) = run(project, 'project.merge_coincident_nodes', keep=True)
     rows = {row['label']: row['value'] for row in reading['rows']}
     assert rows['Nodes before'] == rows['Nodes now'] + rows['Nodes merged away']
 
@@ -134,6 +134,72 @@ def test_a_patch_ties_to_a_group_by_name():
         run(project, 'project.tie_elements', geometry='Plate', elements='1')
 
 
+def _apart():
+    """Two plates sharing a line of coincident nodes, meshed apart."""
+    import hertzforge
+    from hertzforge import mesh
+
+    left = mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'left', unit='m')
+    right = mesh.block((1, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'right', unit='m')
+    project = hertzforge.Project('p')
+    project.add('Geometry', mesh.assemble(left, right, apart=True))
+    return project
+
+
+def test_merge_marks_the_places_and_a_click_leaves_one_out(validate):
+    """VD's merge pane: every place is marked before anything merges, and a click on a
+    place moves it between in and out, dim once it is out."""
+    project = _apart()
+    before = project['Geometry'].num_nodes
+    reading, view = run(project, 'project.merge_coincident_nodes')
+    wire_views([reading, view], validate)
+    assert project['Geometry'].num_nodes == before, 'marking merges nothing'
+    places = view['pick']['ids']
+    assert len(places) == 4 and view['pick']['off'] == 0 and view['pick']['count'] == 1
+    assert view['node_ids'][:4].tolist() == places, 'a pick addresses the first rows'
+    _reading, view = run(project, 'project.merge_coincident_nodes', toggle=str(places[0]))
+    held = view['pick']
+    assert held['off'] == 1 and held['ids'][-1] == places[0]
+    assert held['params']['left_out'] == str(places[0])
+    assert view['node_ids'][:4].tolist() == held['ids']
+    _reading, view = run(project, 'project.merge_coincident_nodes', left_out=str(places[0]),
+                         toggle=str(places[0]))
+    assert view['pick']['off'] == 0, 'a second click puts it back'
+    (done,) = run(project, 'project.merge_coincident_nodes', left_out=str(places[0]), keep=True)
+    rows = {row['label']: row['value'] for row in done['rows']}
+    assert rows['Nodes merged away'] == 3 and rows['Places left out'] == 1
+    assert project['Geometry'].num_nodes == before - 3
+
+
+def test_merge_leaves_every_place_out_with_all(validate):
+    project = _apart()
+    before = project['Geometry'].num_nodes
+    _reading, view = run(project, 'project.merge_coincident_nodes', left_out='all')
+    assert view['pick']['off'] == 4
+    (done,) = run(project, 'project.merge_coincident_nodes', left_out='all', keep=True)
+    assert {row['label']: row['value'] for row in done['rows']}['Nodes merged away'] == 0
+    assert project['Geometry'].num_nodes == before
+
+
+def test_align_marks_each_move_and_a_click_leaves_one_out(validate):
+    import hertzforge
+    from hertzforge import mesh
+
+    fine = mesh.block((0, 0, -0.5), (1, 0, 0), (0, 1, 0), (0, 0, 0.5), 0.25, 'frame',
+                      unit='in')
+    coarse = mesh.block((0.02, 0.01, 0.05), (1, 0, 0), (0, 1, 0), (0, 0, 1 / 3), 1 / 3,
+                        'wing', unit='in')
+    project = hertzforge.Project('p')
+    project.add('Wing', mesh.assemble(fine, coarse, apart=True))
+    reading, view = run(project, 'project.align_meshes', geometry='Wing')
+    wire_views([reading, view], validate)
+    moves = view['pick']['ids']
+    assert len(moves) == 16
+    (done,) = run(project, 'project.align_meshes', geometry='Wing', left_out=str(moves[0]),
+                  keep=True)
+    assert {row['label']: row['value'] for row in done['rows']}['Nodes moved'] == 15
+
+
 def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
     import hertzforge
     from hertzforge import mesh
@@ -144,7 +210,7 @@ def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
                         'wing', unit='in')
     project = hertzforge.Project('p')
     project.add('Wing', mesh.assemble(fine, coarse, apart=True))
-    (reading,) = run(project, 'project.align_meshes', geometry='Wing')
+    (reading,) = run(project, 'project.align_meshes', geometry='Wing', keep=True)
     found = {row['label']: row['value'] for row in reading['rows']}
     assert found['Nodes moved'] == 16
     assert 0 < found['Farthest move'] <= 0.5 / 3 * 25.4

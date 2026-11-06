@@ -149,7 +149,7 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 `pick` (optional) says what a click in the view does, as Visual Dynamics' Add mode and its
 planning pane take clicks. A click is a press and release in one place; a drag still turns the
 view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
-the result's place:
+the result's place: With `off`, the `ids` are marked places that show through the model, and that many of the last ones are left out and drawn dim (Merge Coincident Nodes, Align Meshes).
 
 ```
 "pick":{"op":"project.add_node","params":{"geometry":"Plate"},
