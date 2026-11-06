@@ -23,7 +23,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .mesh import drawn_mesh
+from .mesh import drawn_mesh, places_view
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -907,6 +907,42 @@ def edit_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
         _mates_table(name, geometry)]
 
 
+MATE_SIDE = Param('side', 'Side', 'enum', default='a', options=(
+    Option('a', 'First group'), Option('b', 'Second group')))
+MATE_NODE = Param('toggle', 'Node clicked', 'string', default='', in_view=True)
+
+
+def edit_mate_sides(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.edit_mate_sides`: the nodes of a kept set's one side, marked among the nodes
+    of that side's group, a click adding one or taking it away
+    (`Project.edit_mated_surfaces`): VD's node clicks on a set's pane. Only that group's
+    nodes are marked, so coincident nodes of the two sides are told apart."""
+    name, geometry = _geometry(project, params)
+    known = {m.id: m for m in geometry.mates}
+    mated = known.get(params['mate'])
+    if mated is None:
+        raise refused(f'the geometry has mated surfaces '
+                      f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
+    field, group = (('nodes_a', mated.groups[0]) if params['side'] == 'a'
+                    else ('nodes_b', mated.groups[1]))
+    if params['toggle'].strip():
+        node = int(params['toggle'])
+        held = [int(n) for n in getattr(mated, field)]
+        changed = [n for n in held if n != node] if node in held else [*held, node]
+        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(changed)}))
+        (mated,) = [m for m in geometry.mates if m.id == params['mate']]
+    held = {int(n) for n in getattr(mated, field)}
+    places = [int(n) for n in geometry.nodes_in([group])]
+    return [v.reading(f'{mated.name} on {name}', [
+        v.row('Holds', mated.describe(), None, 'info'),
+        v.row('First side', float(len(mated.nodes_a)), 'nodes', 'info'),
+        v.row('Second side', float(len(mated.nodes_b)), 'nodes', 'info')]),
+        places_view(geometry, f'{mated.name}, {"first" if params["side"] == "a" else "second"} '
+                    'side', 'project.edit_mate_sides',
+                    {'geometry': name, 'mate': mated.id, 'side': params['side']}, places,
+                    set(places) - held, 'Click a node to add it to this side or take it away')]
+
+
 MATES = Param('mates', 'Mated surfaces (ids, as "1, 3")', 'string', default='')
 
 
@@ -1092,6 +1128,12 @@ OPERATIONS = (
                                    'name.',
         params=(GEOMETRY, MATE, NORMAL, NORMAL_STIFFNESS, SHEAR, SHEAR_STIFFNESS, MATE_NAME),
         outputs=('reading', 'table'), run=edit_mated_surfaces, edits=True),
+    Operation(
+        id='project.edit_mate_sides', title='Edit Mate Sides', workspace='geometry',
+        summary='The nodes of one side of a kept set of mated surfaces, by clicking them in '
+                'the view.',
+        params=(GEOMETRY, MATE, MATE_SIDE, MATE_NODE), outputs=('reading', 'shape3d'),
+        run=edit_mate_sides, edits=True),
     Operation(
         id='project.delete_mated_surfaces', title='Delete Mated Surfaces', workspace='geometry', summary='Delete kept sets of mated surfaces, by id.',
         params=(GEOMETRY, MATES), outputs=('reading', 'table'), run=delete_mated_surfaces,
