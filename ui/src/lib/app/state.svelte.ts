@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseSavePath, hasNativeFiles } from '$lib/project/files';
+import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -15,7 +15,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ActionColumn, ActionRow, Actions, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -72,6 +72,8 @@ class AnalyzeState {
 	actions = $state.raw<Actions | null>(null);
 	/** The operation's form is open in the action column, in place of the table. */
 	formOpen = $state(false);
+	/** The table's row the open form came from; null when it came from elsewhere. */
+	formRow = $state<ActionRow | null>(null);
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
 	/** A combination's row whose partner is being picked in the tree. */
@@ -112,6 +114,14 @@ class AnalyzeState {
 
 	get params(): ParamDescriptor[] {
 		return this.op ? this.paramsOf(this.op) : [];
+	}
+
+	/** What the form asks: not the objects the selection already filled, and of a format only those the object can be written in. */
+	get formParams(): ParamDescriptor[] {
+		const row = this.formRow;
+		return this.params
+			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill))
+			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
 
 	get currentValues(): ParamValues {
@@ -240,7 +250,7 @@ class AnalyzeState {
 			// an open form follows the selection while the selection can still take it
 			if (this.formOpen) {
 				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
-				if (row) this.pickAction({ id: row.id, fill: row.fill ?? {} });
+				if (row) this.openRow(row);
 				else this.closeForm();
 			}
 			this.fitWeighing = false;
@@ -268,13 +278,40 @@ class AnalyzeState {
 			await this.app.project.ownAct(row.id);
 			return;
 		}
-		this.pickAction({ id: row.id, fill: row.fill ?? {} });
+		if (row.formats && hasNativeFiles()) {
+			await this.exportObject(row, row.formats);
+			return;
+		}
+		this.openRow(row);
 		const op = this.op;
 		if (!op) return;
 		const filled = new Set(Object.keys(row.fill ?? {}));
 		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
 		if (asks.length) this.formOpen = true;
 		else await this.run();
+	}
+
+	/** A row's operation, filled from the selection, with a format the object can be written in. */
+	private openRow(row: ActionRow): void {
+		this.pickAction({ id: row.id, fill: row.fill ?? {} });
+		this.formRow = row;
+		const formats = row.formats;
+		if (formats && !formats.some((f) => f.value === this.currentValues.format)) {
+			this.pickAction({ id: row.id, fill: { format: formats[0].value } });
+		}
+	}
+
+	/** Export in the desktop app: the native save window says where and in which format, as in Visual Dynamics. */
+	private async exportObject(row: ActionRow, formats: ExportFormat[]): Promise<void> {
+		this.runError = null;
+		try {
+			const chosen = await chooseObjectFile(row.fill?.object ?? '', formats);
+			if (!chosen) return;
+			this.pickAction({ id: row.id, fill: { ...row.fill, format: chosen.format, path: chosen.path, units: 'display', creator: '' } });
+			await this.run();
+		} catch (err) {
+			this.runError = message(err);
+		}
 	}
 
 	/** The object a combination needed was chosen: it joins the selection, and the row runs once the table has caught up. */
@@ -288,6 +325,7 @@ class AnalyzeState {
 	/** Back from a form to the table. */
 	closeForm(): void {
 		this.formOpen = false;
+		this.formRow = null;
 		this.runError = null;
 		this.triedRun = false;
 	}

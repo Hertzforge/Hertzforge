@@ -180,6 +180,7 @@
 		if (!op) return;
 		app.go(op.workspace);
 		app.analyze.selectOp(op.id);
+		app.analyze.formRow = null;
 		app.analyze.formOpen = true;
 	}
 

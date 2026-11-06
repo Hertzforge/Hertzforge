@@ -217,6 +217,7 @@ def _fit_rows(kinds: list[str]) -> list[dict[str, Any]]:
 def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
              part: dict[str, Any] | None) -> dict[str, Any]:
     from .actions import _fill, _runs
+    from .ops_files import export_formats
     from .server import OPERATIONS
 
     names = [c[0] for c in chosen]
@@ -251,7 +252,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
-        rows.append(_op_row(op, fill=fill, **({'part': True} if home else {})))
+        more: dict[str, Any] = {'part': True} if home else {}
+        if op.id == 'project.save_as':
+            more['formats'] = export_formats(project[fill['object']])
+        rows.append(_op_row(op, fill=fill, **more))
     if chosen:
         rows += _own_rows(project, names)
     return {'kinds': kinds, 'current': True, 'rows': rows}
@@ -281,7 +285,7 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
         joined = [*kinds, kind]
         present = [c for c in by_kind.get(kind, []) if c[0] not in names]
         rows = []
-        for verb in defaults(project, joined, []):
+        for verb in [] if _shapes_on_their_geometry(joined) else defaults(project, joined, []):
             rows.append(_needs(_row(f'show.{verb.lower()}', verb, 'default', modules=None),
                                kind, [c[0] for c in present]))
         for row in _fit_rows(joined):
@@ -296,6 +300,12 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
         if rows:
             columns.append({'kinds': joined, 'rows': rows})
     return columns
+
+
+def _shapes_on_their_geometry(kinds: list[str]) -> bool:
+    """Shape sets and one geometry: selecting the shape sets alone draws them on
+    their geometry, so nothing is gained by offering to add it."""
+    return sorted(set(kinds)) == ['geometry', 'shape_set'] and kinds.count('geometry') == 1
 
 
 def _needs(row: dict[str, Any], kind: str, candidates: list[str]) -> dict[str, Any]:

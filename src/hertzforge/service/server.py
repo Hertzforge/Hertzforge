@@ -321,6 +321,8 @@ class Connection:
                 objects={name: projects.kind_of(obj)
                          for name, obj in project.items()},
                 verbs={name: projects.verbs_of(project, name) for name in project})
+            if op.id == 'project.save_as' and values['units'] == 'display':
+                values['units'] = self.units
             before = list(project)
             views = await self.service.in_worker(op.run, project, values)
             if op.edits or list(project) != before:

@@ -477,6 +477,9 @@ Control column shows (`offers.environments`) and `prefs.table_view` the table or
 transformations (`offers.table_views`). `project.save_as` takes `units`: `display` for the connection's
 display unit system (the server puts its name in), `si` for the stored values.
 
+**Export's formats.** The Export row carries `formats`, each `{"value","label","suffix"}`: what that
+object can be written in, `.hforge` first. The desktop app lists them as the save window's file types.
+
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose
