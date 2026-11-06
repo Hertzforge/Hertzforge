@@ -174,6 +174,8 @@ export interface Motion {
 	direction: Float32Array;
 	/** f32 [D, S]: DOF d at sample k is values[d * S + k]. */
 	values: Float32Array;
+	/** f32 [M, D, 3]: each mode's offset at each moved node; then `values` is [M, S], modal coordinates. */
+	modes?: Float32Array;
 	/** The furthest any node gets, in value_unit. */
 	peak: number;
 }

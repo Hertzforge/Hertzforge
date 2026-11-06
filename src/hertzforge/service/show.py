@@ -667,6 +667,82 @@ def _played(data: Any, picks: list[int]) -> tuple[list[int], str, list[str]]:
     return records, quantity, notes
 
 
+def _three_played(project: Any, objects: list[str], records: dict[str, list[int]]
+                  ) -> tuple[list[dict], list[str]] | None:
+    """A geometry, a shape set and modal coordinates selected together: the coordinates
+    played through that set. None for any other three."""
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    def only(cls: Any) -> str | None:
+        found = [name for name in objects if isinstance(project[name], cls)]
+        return found[0] if len(found) == 1 else None
+
+    geometry, shapes, history = only(Geometry), only(ShapeSet), only(TimeHistory)
+    if not (geometry and shapes and history):
+        return None
+    return _modal_motion(project, geometry, history, records.get(history, []), shapes)
+
+
+def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[int],
+                  shapes_name: str | None = None) -> tuple[list[dict], list[str]] | None:
+    """Modal coordinates played on a geometry through their shape set, as Visual Dynamics
+    plays them: the set selected with them, or the one they came from
+    (`Project.modal_basis`). Each frame is the modes' shapes scaled by their values at that
+    sample and summed, by the shell, so the physical response is never formed
+    (`deform.modal_deflection`). None when the records are not modal coordinates."""
+    from hertzforge.core.validate import modal_coordinate
+    from hertzforge.deform import modal_deflection
+
+    from .waterfalls import unit_text
+
+    geometry, data = project[geometry_name], project[data_name]
+    records, quantity, notes = _played(data, picks)
+    modal = [i for i in records if modal_coordinate(data.response_dof[i]) is not None]
+    if not modal:
+        return None
+    basis = shapes_name or project.modal_basis(data_name, modal)
+    if basis is None:
+        said = (f'{data_name}: its records are modal coordinates; select their shape set too, '
+                'to play them')
+        return [], [said]
+    try:
+        deflection = modal_deflection(geometry, project[basis], data, modal)
+    except ValueError as error:
+        return [], [f'{data_name}: {error}']
+    drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
+    shown = drawn[deflection.rows] >= 0
+    if not shown.any():
+        return [], [f'{basis} has no DOF on {geometry_name}']
+    played = [i for i in modal if modal_coordinate(data.response_dof[i]) <= project[basis].num_shapes]
+    fields = deflection.fields.reshape(len(played), -1, 3)[:, shown, :]
+    values = np.asarray(data.ordinate)[played].real
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    # the modal factors cancel: a mass-normalized shape times its coordinate is the motion
+    dim = data.known_dim(played[0]).removeprefix('modal_')
+    title = f'{data_name} on {geometry_name}'
+    plot = v.spectrum(title, v.axis('Time', 's', 'linear'),
+                      v.axis(f'Modal {quantity}', unit_text(data.known_dim(played[0])) or None,
+                             'linear'),
+                      [v.series(data.record_label(i), 'measured', abscissa, values[d])
+                       for d, i in enumerate(played)], link='time')
+    stage = v.shape3d(
+        title, 'm' if geometry.units_defined else 'undefined',
+        np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [], triangles=triangles,
+        lines=lines, node_ids=np.asarray(geometry.node_id)[drawn_rows], link='time',
+        motion={'label': 'Time', 'unit': 's', 'start': float(abscissa[0]),
+                'step': float(abscissa[1] - abscissa[0]) if abscissa.size > 1 else 0.0,
+                'quantity': dim.capitalize(), 'value_unit': unit_text(dim) or '',
+                'node': drawn[deflection.rows[shown]].astype(np.uint32),
+                'direction': np.empty((0, 3), dtype=np.float32),
+                'modes': np.ascontiguousarray(fields, np.float32),
+                'values': np.ascontiguousarray(values, np.float32),
+                'peak': deflection.peak_magnitude})
+    notes.append(f'{len(played)} mode shapes of {basis} scaled by the record and summed')
+    return [stage, plot], notes
+
+
 def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
             ) -> tuple[list[dict], list[str]]:
     """A time history played back on a geometry, sample by sample, with
@@ -856,7 +932,8 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         if isinstance(obj, ChannelTable):
             return _run(project, 'project.dof_arrows', source=other), []
         if isinstance(obj, TimeHistory):
-            return _motion(project, geometry, other, picks)
+            return (_modal_motion(project, geometry, other, picks)
+                    or _motion(project, geometry, other, picks))
         if _is_data(obj):
             abscissa = getattr(obj, 'abscissa_dim', '')
             if isinstance(obj, Psd) or (abscissa == 'frequency'
@@ -1036,6 +1113,8 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
+        elif len(objects) == 3 and (played := _three_played(project, objects, records)):
+            views, notes = played
         elif len(objects) == 3:
             compared = _compared(project, objects, prefs)
             if compared is not None:

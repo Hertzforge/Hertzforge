@@ -143,6 +143,8 @@ def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
         return ['Stack']
     if len(kinds) == 3 and sorted(kinds) == ['geometry', 'shape_set', 'shape_set']:
         return ['MAC']
+    if len(kinds) == 3 and sorted(kinds) == ['geometry', 'shape_set', 'time_history']:
+        return ['Animate']
     return []
 
 

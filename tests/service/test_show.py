@@ -622,3 +622,56 @@ def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
     assert 'at 101Z+' in picked['views'][0]['title']
     unknown = shown(swept, 'Profile', prefs={**flat, 'tone': 'Down'}, validate=validate)
     assert unknown['views'][0]['title'].startswith('Up'), 'a tone the set lacks falls to the first'
+
+
+def _played_modes():
+    """A plate's rigid modes and modal responses computed through them."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'geometry.unv'),
+                                           'units': {'length_unit': 'mm'}})
+    project = state.project
+    shapes = project.generate_rigid_body_modes('Geometry')
+    set_ = project[shapes]
+    time = np.arange(50) / 100.0
+    rows = np.vstack([np.sin(2 * np.pi * (k + 1) * time) for k in range(set_.num_shapes)])
+    project.add('Responses', TimeHistory(
+        time, rows, [f'M{k + 1}' for k in range(set_.num_shapes)], ordinate_dim='modal_length',
+        comment=[f'{shapes}: modal displacement, mode {k + 1}' for k in range(set_.num_shapes)]))
+    return state, shapes
+
+
+def test_modal_responses_play_on_a_geometry_with_or_without_their_set(validate):
+    """As VD plays them: the geometry and the responses are enough, since the responses name
+    the set they came from, and the set can be selected with them."""
+    state, shapes = _played_modes()
+    project = state.project
+    out = projects.show(state, {'objects': ['Geometry', 'Responses'], 'records': {}, 'prefs': {}})
+    wire_views(out['views'], validate)
+    stage = out['views'][0]
+    assert stage['view'] == 'shape3d' and 'motion' in stage and out['views'][1]['view'] == 'spectrum'
+    motion = stage['motion']
+    held = project[shapes]
+    assert motion['modes'].shape == (held.num_shapes, len(motion['node']), 3)
+    assert motion['values'].shape == (held.num_shapes, 50)
+    assert motion['quantity'] == 'Length' and motion['value_unit'] == 'm'
+    # one sample by hand: the offsets the shell sums are u = Phi q
+    k = 7
+    summed = np.tensordot(motion['values'][:, k], motion['modes'], axes=1)
+    q = project['Responses'].ordinate[:, k]
+    u = held.shape_matrix.T @ q
+    first = list(held.coordinate).index(f'{int(stage["node_ids"][motion["node"][0]])}X+')
+    assert summed[0, 0] == pytest.approx(u[first], rel=1e-5)
+    assert motion['peak'] > 0
+    three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
+                                  'prefs': {}})
+    assert three['views'][0]['motion']['modes'].shape == motion['modes'].shape
+
+
+def test_modal_responses_with_no_set_to_name_say_what_to_select():
+    state, shapes = _played_modes()
+    project = state.project
+    project['Responses'].comment = ['nothing here'] * project['Responses'].num_records
+    out = projects.show(state, {'objects': ['Geometry', 'Responses'], 'records': {}, 'prefs': {}})
+    assert 'select their shape set' in ' '.join(out.get('notes', [out.get('note', '')]))
+    three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
+                                  'prefs': {}})
+    assert 'motion' in three['views'][0]

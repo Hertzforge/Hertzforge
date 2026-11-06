@@ -180,6 +180,10 @@ how each measured DOF moves, sample by sample.
           "peak":130.4}                          the furthest any node gets, in value_unit
 ```
 
+With `modes` (f32 [M,D,3]), `values` is instead [M,S], modal coordinates: `node` lists the D nodes
+that move, `direction` is empty, and sample k's offset at node d is the sum over modes of
+`modes[m, d] * values[m, k]`, so the physical response never has to be formed or sent.
+
 At sample k each node is offset by the sum over its DOFs of `direction * values[d, k]`, scaled
 so that `peak` is the amplitude the person chose. Sending each DOF's samples rather than a frame
 of every node keeps a large mesh with a few sensors as small as the sensors' data; nodes with no
