@@ -663,6 +663,20 @@ def _frame(geometry: Any, cs: int) -> tuple[int, np.ndarray]:
     return cs, np.asarray(geometry.cs_matrix[row], dtype=float)
 
 
+def _with_gizmo(views: list[dict], name: str, geometry: Any, cs: int) -> list[dict]:
+    """The drawn geometry with VD's arrows and rings on coordinate system `cs`, along its
+    own axes: dragging them runs Slide or Rotate."""
+    _cs, matrix = _frame(geometry, cs)
+    held = {'geometry': name, 'cs': cs}
+    views[0]['gizmo'] = v.gizmo(
+        matrix[3], matrix[:3],
+        {'op': 'project.slide_coordinate_system', 'params': held,
+         'values': dict.fromkeys('xyz', 'distance'), 'adds': {a: {'axis': a} for a in 'xyz'}},
+        {'op': 'project.rotate_coordinate_system', 'params': held,
+         'values': dict.fromkeys('xyz', 'angle'), 'adds': {a: {'axis': a} for a in 'xyz'}})
+    return views
+
+
 def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.rotate_coordinate_system`: a coordinate system turned by
     a typed angle about one of its own axes (`rotate.rotate_frame`) and
@@ -675,8 +689,9 @@ def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]
     cs, matrix = _frame(geometry, params['cs'])
     turned = rotate_frame(matrix, 'xyz'.index(params['axis']), np.radians(params['angle']))
     geometry.place_coordinate_system(cs, angles=angles_of(turned))
-    return _shown(name, geometry, 'coordinate_systems',
-                  f'turned {cs} {params["angle"]:+g}° about its {params["axis"].upper()}')
+    return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
+                              f'turned {cs} {params["angle"]:+g}° about its '
+                              f'{params["axis"].upper()}'), name, geometry, cs)
 
 
 def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -692,8 +707,9 @@ def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     cs, matrix = _frame(geometry, params['cs'])
     moved = translate_frame(matrix, 'xyz'.index(params['axis']), params['distance'])
     geometry.place_coordinate_system(cs, origin=moved[3])
-    return _shown(name, geometry, 'coordinate_systems',
-                  f'moved {cs} {params["distance"]:+g} along its {params["axis"].upper()}')
+    return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
+                              f'moved {cs} {params["distance"]:+g} along its '
+                              f'{params["axis"].upper()}'), name, geometry, cs)
 
 
 def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:

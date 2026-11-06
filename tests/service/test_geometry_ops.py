@@ -191,6 +191,10 @@ def test_a_coordinate_system_turns_slides_and_resets(project, validate):
     run(project, 'project.add_coordinate_system', x=0.1, name='gauge')
     view, table = run(project, 'project.rotate_coordinate_system', cs=2, axis='z',
                       angle=30.0)
+    assert view['gizmo']['turn']['op'] == 'project.rotate_coordinate_system'
+    assert view['gizmo']['slide']['values']['y'] == 'distance'
+    assert view['gizmo']['slide']['adds']['y'] == {'axis': 'y'}
+    assert view['gizmo']['slide']['params']['cs'] == 2
     wire_views([view, table], validate)
     assert float(cells(table)[1]['Rotation Z [°]']) == pytest.approx(30.0)
     _view, table = run(project, 'project.slide_coordinate_system', cs=2, axis='x',

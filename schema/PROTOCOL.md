@@ -407,6 +407,10 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
 
+**Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
+Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
+in the param `values` names for that axis, and what `adds` (optional) gives for that axis.
+
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
 the first line making the project. The shell shows it read-only along the bottom of the window, as

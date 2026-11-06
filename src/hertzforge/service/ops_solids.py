@@ -437,12 +437,27 @@ def move_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     ids = _ids(geometry, params['solids'])
     offset = tuple(params[f'offset_{a}'] for a in 'xyz')
     turn = _angles(params, 'turn')
-    if not any(offset) and not any(turn):
-        raise refused('type how far to move it or how far to turn it')
-    moved = _call(lambda: project.move_solids(name, ids, offset, turn))
-    return _result(name, geometry, f'Moved in {name}', [
-        v.row('Moved', f'{", ".join(map(str, ids))}: {moved} solids with what they are '
-              'made of', None, 'pass')])
+    said = 'nothing yet: type how far, or drag an arrow or a ring'
+    if any(offset) or any(turn):
+        moved = _call(lambda: project.move_solids(name, ids, offset, turn))
+        said = f'{", ".join(map(str, ids))}: {moved} solids with what they are made of'
+    views = _result(name, geometry, f'Moved in {name}', [v.row('Moved', said, None, 'pass')])
+    views[1]['gizmo'] = _solids_gizmo(name, geometry, ids)
+    return views
+
+
+def _solids_gizmo(name: str, geometry: Any, ids: list[int]) -> dict:
+    """VD's arrows and rings at the middle of the parts' extent, along the model's axes:
+    dragging them runs Move Part."""
+    from hertzforge.core.tetmesh import _extent
+
+    low, high = _extent(geometry, ids)
+    held = {'geometry': name, 'solids': ', '.join(map(str, ids))}
+    return v.gizmo((np.asarray(low) + np.asarray(high)) / 2.0, np.eye(3),
+                   {'op': 'project.move_solids', 'params': held,
+                    'values': {axis: f'offset_{axis}' for axis in 'xyz'}},
+                   {'op': 'project.move_solids', 'params': held,
+                    'values': {axis: f'turn_{axis}' for axis in 'xyz'}})
 
 
 INTO = Param('into', 'Into geometry', 'enum', options_from='objects:geometry')

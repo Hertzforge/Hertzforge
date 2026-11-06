@@ -206,6 +206,27 @@ export interface Shape3DView {
 	note?: string;
 	/** What a click in the view does. */
 	pick?: Pick3D;
+	gizmo?: Gizmo3D;
+}
+
+/** What a drag on a gizmo's arrow or ring runs. */
+export interface GizmoAct {
+	op: string;
+	params: Record<string, unknown>;
+	/** The param a drag along each axis goes in. */
+	values: Record<'x' | 'y' | 'z', string>;
+	/** What else each axis adds. */
+	adds?: Record<'x' | 'y' | 'z', Record<string, unknown>>;
+}
+
+/** Arrows and rings to drag in a `shape3d` view (schema/PROTOCOL.md). */
+export interface Gizmo3D {
+	origin: [number, number, number];
+	axes: [number, number, number][];
+	slide: GizmoAct;
+	turn: GizmoAct;
+	/** A drag's length in the view's unit, to meters. */
+	to_si?: number;
 }
 
 /** A click in a `shape3d` view: the operation it runs, and what it sends (schema/PROTOCOL.md). */

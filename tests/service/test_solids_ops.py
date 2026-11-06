@@ -155,7 +155,6 @@ def test_parts_are_moved_and_turned_whole(project):
     assert solids.solid(part, 1).center[2] == pytest.approx(0.5)
     assert solids.solid(part, 2).center[2] == pytest.approx(0.5)
     assert rows(reading)['Moved']['value'].startswith('3: 2 solids')
-    refused(project, 'project.move_solids', 'how far', solids='3')
 
 
 def test_solids_are_copied_into_another_geometry(project):
@@ -281,3 +280,19 @@ def test_the_solids_are_listed(project, validate):
     reading, view, table = run(project, 'project.solids')
     wire_views([reading, view, table], validate)
     assert rows(reading)['Parts']['value'] == 1.0 and table['rows'][0][0] == '1'
+
+
+def test_move_part_offers_arrows_and_rings(project, validate):
+    moved = run(project, 'project.add_solid_block', x=0.5)
+    wire_views(moved, validate)
+    ids = str(project['Part'].solids[-1].id)
+    views = run(project, 'project.move_solids', solids=ids)
+    wire_views(views, validate)
+    gizmo = next(view for view in views if view['view'] == 'shape3d')['gizmo']
+    assert gizmo['origin'] == pytest.approx([0.5, 0.0, 0.0])
+    assert gizmo['slide']['values']['x'] == 'offset_x'
+    assert gizmo['turn']['values']['z'] == 'turn_z'
+    run(project, gizmo['slide']['op'], **gizmo['slide']['params'], offset_x=0.25)
+    views = run(project, 'project.move_solids', solids=ids)
+    gizmo = next(view for view in views if view['view'] == 'shape3d')['gizmo']
+    assert gizmo['origin'] == pytest.approx([0.75, 0.0, 0.0]), 'the handles follow'
