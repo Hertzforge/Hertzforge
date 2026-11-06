@@ -571,7 +571,9 @@ linked channel table describes a time history; `verb:` params are filled from th
 a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A geometry's are `rigid`: the
+reference point `x`, `y`, `z` in meters, `normalize`, and with it `mass` and the inertia terms
+`ixx`, `iyy`, `izz`, `ixy`, `ixz`, `iyz`. A report's `settings` are
 `features` (each report feature's key, true where it is on) and `identity` (each identification
 field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
