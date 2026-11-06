@@ -149,7 +149,7 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 `pick` (optional) says what a click in the view does, as Visual Dynamics' Add mode and its
 planning pane take clicks. A click is a press and release in one place; a drag still turns the
 view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
-the result's place: With `off`, the `ids` are marked places that show through the model, and that many of the last ones are left out and drawn dim (Merge Coincident Nodes, Align Meshes).
+the result's place:
 
 ```
 "pick":{"op":"project.add_node","params":{"geometry":"Plate"},
@@ -160,7 +160,9 @@ the result's place: With `off`, the `ids` are marked places that show through th
         "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
         "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
         "kept":[1,3],                  faces: the surfaces in use now
-        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+        "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
+        "off":2}                       nodes: marked places, shown through the model; this many of
+                                       the last `ids` are left out and drawn dim
 ```
 
 A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
