@@ -10,7 +10,7 @@
 	import { choosePdf, chooseReportPath, hasNativeFiles } from '$lib/project/files';
 	import { theme } from '$lib/theme/theme.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
-	import ActionsFrame from './ActionsFrame.svelte';
+	import ActionTable from './ActionTable.svelte';
 
 	interface Props {
 		app: AppState;
@@ -20,7 +20,7 @@
 	const r = $derived(app.report);
 	const reports = $derived((app.project.summary?.objects ?? []).filter((o) => o.kind === 'report').map((o) => o.name));
 
-	// the report shown is the selection the Actions frame works on: Report Features, Identity,
+	// the report shown is the selection the action table works on: Report Features, Identity,
 	// the findings and chronology, every report operation, offered as the module's acts
 	$effect(() => {
 		const name = r.name;
@@ -218,7 +218,7 @@
 			</section>
 		{/if}
 		{#if r.name && app.project.summary}
-			<ActionsFrame {app} only="report" />
+			<ActionTable {app} only="report" />
 			{#if a.reading}
 				<section class="block" data-testid="report-result" aria-label="The reading">
 					<div class="phead">

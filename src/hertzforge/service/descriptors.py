@@ -220,8 +220,9 @@ class Operation:
                'workspace': self.workspace, 'summary': self.summary,
                'params': [param.to_json() for param in self.params],
                'outputs': list(self.outputs)}
-        if self.everywhere:
-            out['everywhere'] = True
+        from .verbs import modules_of
+
+        out['modules'] = list(modules_of(self))
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,

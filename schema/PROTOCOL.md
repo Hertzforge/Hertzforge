@@ -366,10 +366,9 @@ the person picks one there.
 `modal`, `geometry`, `model`, `specify` or `report`. Visual Dynamics put every analysis under one
 window and typed the project instead; Hertzforge splits the analysis by what is studied, so a sine
 test is not offered shock tools. The modules share one project, one tree and one way of showing a
-selection; they differ in which operations their Actions frame offers. An operation every study
-needs (Plot Records, View Table, Save As, the averaging, filter and truncation settings, a table's
-cell edit) says `"everywhere": true` and is offered in every analysis module, its `workspace`
-naming its home.
+selection; they differ in which operations their action table offers. An operation's `modules`
+lists the modules that offer it: its own `workspace`, or more when several studies need it (Export
+in all of them, Averaging in Signals, Random and Modal).
 Every operation runs on the connection's own project, and `op.run` is refused while no project
 is open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`,
 and the project counts as modified when the operation added an object. The operations are the
@@ -402,7 +401,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
-| `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
+| `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
@@ -479,14 +478,23 @@ transformations (`offers.table_views`). `project.save_as` takes `units`: `displa
 display unit system (the server puts its name in), `si` for the stored values.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
-the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
-every operation on the project whose object params the selected objects fill, each object on a param
-that takes its kind (or whose verb applies to it), every object used and every required object param
-filled. Each entry is `{"id","title","workspace","everywhere"?,"fill"}`, `fill` the params to set from the selection
-(and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
-how the selection is read; `acts` change the project (the operations named for the project's journaled
-verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
-Geometry, New Channel Table).
+for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
+when the selected objects fill its object params: each object on a param that takes its kind (or whose
+verb applies to it), every object used and every required object param filled. `reading` rows change how
+the selection is read; `act` rows change the project (the operations named for the project's journaled
+verbs, and the edits). With nothing selected, the first column is the project: the acts that take no object
+and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
+when records are picked and the operation takes them).
+
+The first column has `"current": true` and is the selection; each other column is the selection with one
+more object of the last type in its `kinds`, `"*"` meaning any object. A row is
+`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
+for what the selection draws by itself (`id` starting `show.`), `reading` or `act` for an operation (`id`
+is the operation's), and `self` for an act on the selection that is not an operation (`id` starting
+`self.`). A row that cannot run has `ready` false and a `reason` to show. A row without `modules` is
+offered in every module. In a combination column, `candidates` names the project's objects that
+complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
+as `project.show` takes it, adds the operations on that part, which carry `"part": true`.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts

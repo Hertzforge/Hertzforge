@@ -252,6 +252,25 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             &P::select_all(app, None)?,
         ],
     )?;
+    // The project's files: the shell answers, since the dialogs and the service are its.
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, "file-open", "Open...", true, Some("CmdOrCtrl+O"))?,
+            &MenuItem::with_id(app, "file-import", "Import...", true, Some("CmdOrCtrl+I"))?,
+            &P::separator(app)?,
+            &MenuItem::with_id(app, "file-save", "Save", true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(
+                app,
+                "file-save-as",
+                "Save As...",
+                true,
+                Some("CmdOrCtrl+Shift+S"),
+            )?,
+        ],
+    )?;
     let view = Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?;
     let window = Submenu::with_items(
         app,
@@ -264,7 +283,7 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             &P::close_window(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &view, &window])
+    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
 }
 
 fn main() {
@@ -296,6 +315,9 @@ fn main() {
     let builder = builder.on_menu_event(|app, event| {
         if event.id() == QUIT_ID {
             Quit::request(app);
+        } else if let Some(act) = event.id().as_ref().strip_prefix("file-") {
+            // nothing to tell when the window is gone
+            let _ = tauri::Emitter::emit(app, "file-menu", act);
         }
     });
     #[cfg(feature = "e2e")]

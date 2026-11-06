@@ -1,5 +1,7 @@
 <script lang="ts">
 	/** Top bar: where you are, the palette trigger, the SIM badge, service state and theme. */
+	import FileBar from '$lib/project/FileBar.svelte';
+	import { hasFileMenu } from '$lib/project/files';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
@@ -55,6 +57,7 @@
 	</button>
 
 	<div class="right">
+		{#if !hasFileMenu()}<FileBar {app} />{/if}
 		{#if app.config.mock}
 			<span class="mock" data-testid="mock-indicator" title="In-process mock services with synthetic data. Remove ?mock=1 to use the real services.">
 				<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" /></svg>

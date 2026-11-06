@@ -39,14 +39,23 @@
 		return { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey };
 	}
 
+	/** Picking the object a combination in the action table needs: the tree answers that, and nothing else. */
+	const picking = $derived(app.analyze.picking);
+	function pick(o: ProjectObject): boolean {
+		if (!picking) return false;
+		if (picking.row.candidates?.includes(o.name)) app.analyze.join(o.name, picking.row);
+		return true;
+	}
+
 	function rowClick(e: MouseEvent, o: ProjectObject) {
-		if (p.renaming === o.name || justDragged) return;
+		if (p.renaming === o.name || justDragged || pick(o)) return;
 		p.clickObject(o.name, order, mods(e));
 	}
 
 	function rowKey(e: KeyboardEvent, o: ProjectObject) {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
+			if (pick(o)) return;
 			p.clickObject(o.name, order, { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey });
 		} else if (e.key === 'ArrowRight' && OPENS.has(o.kind) && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
@@ -228,7 +237,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
-<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
+<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
 	{#if painted.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
@@ -253,7 +262,7 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if OPENS.has(o.kind)}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -439,6 +448,13 @@
 </div>
 
 <style>
+	.tree.picking .row:not(.candidate) {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.tree.picking .row.candidate {
+		box-shadow: inset 2px 0 0 var(--accent);
+	}
 	.tree {
 		position: relative;
 		margin-top: var(--sp-2);

@@ -1,14 +1,11 @@
-"""The actions a selection can take.
+"""Which operations a selection fills.
 
-Visual Dynamics puts the acts a selection allows on its bar, decided by
-the same rules as its readings, and nothing else (`PRINCIPLES.md`, "show
-only what applies"; `Project.selection_verbs`). `project.actions` answers
-the same for the shell's actions frame: of the service's operations on a
-project, the ones whose object params the selected objects fill, every
-selected object used and every required object param filled. Each comes
-with the params to fill from the selection, so picking in the tree is
-picking the source, and the records picked in a grid fill a `records`
-param as the shell numbers them.
+`project.actions` answers with the action table (`action_table`), whose rows
+come from here: of the service's operations on a project, the ones whose
+object params the selected objects fill, every selected object used and every
+required object param filled. Each comes with the params to fill from the
+selection, so picking in the tree is picking the source, and the records
+picked in a grid fill a `records` param as the shell numbers them.
 
 Readings change how the selection is read (a plot, a comparison, a
 check); acts change the project (a verb that adds an object, an edit).
@@ -85,38 +82,11 @@ def _runs(indices: list[int]) -> str:
     return _runs(indices)
 
 
-def _entry(op: Any, fill: dict[str, str]) -> dict[str, Any]:
-    """One action as the shell lists it: the operation, its module, and
-    whether every module offers it."""
-    entry = {'id': op.id, 'title': op.title, 'workspace': op.workspace, 'fill': fill}
-    if op.everywhere:
-        entry['everywhere'] = True
-    return entry
 
+def actions(project: Any, objects: list[str], records: dict[str, list[int]],
+            part: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What `objects` can take, as the action table beside the tree
+    (`action_table`): `{'table': {'columns': [...]}}`."""
+    from .action_table import action_table
 
-def actions(project: Any, objects: list[str], records: dict[str, list[int]]) -> dict[str, Any]:
-    """What `objects` can take: `{'readings': [...], 'acts': [...]}`, each
-    entry `{'id', 'title', 'fill'}`; with nothing selected, the acts that
-    take no object (`'project'`)."""
-    from . import projects
-    from .server import OPERATIONS
-
-    chosen = [(name, projects.kind_of(project[name]), projects.verbs_of(project, name))
-              for name in objects]
-    readings: list[dict[str, Any]] = []
-    acts: list[dict[str, Any]] = []
-    whole: list[dict[str, Any]] = []
-    for op in OPERATIONS:
-        if not chosen:
-            if not _object_params(op):
-                whole.append(_entry(op, {}))
-            continue
-        fill = _fill(op, chosen)
-        if fill is None:
-            continue
-        picks = [records.get(name, []) for name in fill.values()]
-        if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
-            picked = next(r for r in picks if r)
-            fill['records'] = _runs(picked)
-        (acts if _is_act(op) else readings).append(_entry(op, fill))
-    return {'readings': readings, 'acts': acts, 'project': whole}
+    return {'table': action_table(project, objects, records, part)}

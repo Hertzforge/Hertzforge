@@ -1,14 +1,13 @@
 <script lang="ts">
 	/**
-	 * The study host every analysis module shares: the project tree, what the selection shows, the
-	 * Actions frame and the tool panel. A module (`only`) differs in which operations its Actions
-	 * frame and tool list offer, its own and those offered everywhere. An act's result joins the
-	 * tree; a reading takes the view until Back.
+	 * The study host every analysis module shares: the project tree, the action table beside it, and
+	 * what the selection shows. A module (`only`) differs in which verbs the table offers. An act's
+	 * result joins the tree; a reading takes the view until its default row is clicked.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
-	import ActionsFrame from './ActionsFrame.svelte';
+	import ActionTable from './ActionTable.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
@@ -47,13 +46,40 @@
 		if (v.view === 'matrix') return 'mac';
 		return a.prefs.mode_table && v === views.find((w) => w.view === 'table') ? 'mode_table' : 'shape_values';
 	}
-	const tools = $derived(a.toolsFor(only));
 
-	// a module works on one of its own tools
-	$effect(() => {
-		if (a.onProject && tools.length && !tools.some((o) => o.id === a.opId)) a.selectOp(tools[0].id);
-	});
-
+	// the action column's width, dragged by its edge and remembered; put away, it waits in the frame's header
+	const TABLE_KEY = 'hertzforge.actionTable';
+	function remembered(): { width: number; away: boolean } {
+		try {
+			return { width: 320, away: false, ...JSON.parse(localStorage.getItem(TABLE_KEY) ?? '{}') };
+		} catch {
+			return { width: 320, away: false };
+		}
+	}
+	let tableWidth = $state(remembered().width);
+	let tableAway = $state(remembered().away);
+	function keepTable() {
+		try {
+			localStorage.setItem(TABLE_KEY, JSON.stringify({ width: tableWidth, away: tableAway }));
+		} catch {
+			// kept for this session only
+		}
+	}
+	function dragEdge(e: PointerEvent) {
+		e.preventDefault();
+		const start = e.clientX;
+		const from = tableWidth;
+		const move = (m: PointerEvent) => {
+			tableWidth = Math.min(900, Math.max(160, from + m.clientX - start));
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			keepTable();
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+	}
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
@@ -78,8 +104,8 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="analyze">
-	<aside class="side" aria-label="Dataset and tools">
+<div class="analyze" style="--table-width: {tableAway || !a.onProject ? 0 : tableWidth}px">
+	<aside class="side" aria-label="The project">
 		<ProjectPanel {app} />
 		{#if !app.catalog}
 			<section class="block">
@@ -89,17 +115,28 @@
 				</p>
 			</section>
 		{/if}
-
-		<ActionsFrame {app} {only} />
 	</aside>
 
+	{#if a.onProject && !tableAway}
+		<aside class="actions" aria-label="What the selection can do">
+			<div class="tablehead">
+				<h2 class="eyebrow">Actions</h2>
+				<button class="btn ghost icon sm" data-testid="action-table-away" aria-label="Put the action table away" title="Put the action table away" onclick={() => { tableAway = true; keepTable(); }}><Icon name="close" size={12} /></button>
+			</div>
+			<ActionTable {app} {only} />
+			<div class="edge" role="separator" aria-orientation="vertical" aria-label="Width of the action table" data-testid="action-table-edge" onpointerdown={dragEdge}></div>
+		</aside>
+	{/if}
+
 	<main class="shown" aria-label="What the selection shows">
+		{#if a.onProject && tableAway}
+			<button class="btn ghost sm chip tablechip" data-testid="action-table-back" title="Bring the action table back" onclick={() => { tableAway = false; keepTable(); }}><Icon name="chevron" size={12} /> Actions</button>
+		{/if}
 		{#if a.reading}
 			<section class="selected" data-testid="reading-view" aria-label="The reading">
 				<header>
 					<h3>{a.reading.title}</h3>
 					<p class="meta">{a.shown?.title ?? ''}</p>
-					<button class="btn ghost sm" data-testid="reading-back" onclick={() => a.endReading()}>Back</button>
 				</header>
 				<div class="svviews" class:several={a.reading.views.length > 1}>
 					{#each a.reading.views as v, i (i)}
@@ -275,9 +312,44 @@
 </div>
 
 <style>
+	.actions {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		min-width: 0;
+		border-right: 1px solid var(--line-1);
+	}
+	.tablehead {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--sp-2) var(--sp-3);
+		background: var(--bg-1);
+		border-bottom: 1px solid var(--line-1);
+	}
+	.edge {
+		position: absolute;
+		top: 0;
+		right: -3px;
+		bottom: 0;
+		z-index: 3;
+		width: 6px;
+		cursor: col-resize;
+	}
+	.edge:hover {
+		background: var(--blue-line);
+	}
+	.tablechip {
+		position: sticky;
+		top: 0;
+		z-index: 4;
+		align-self: flex-start;
+		margin-bottom: var(--sp-2);
+	}
 	.analyze {
 		display: grid;
-		grid-template-columns: 316px minmax(0, 1fr);
+		grid-template-columns: 316px var(--table-width) minmax(0, 1fr);
 		height: 100%;
 		min-height: 0;
 	}
