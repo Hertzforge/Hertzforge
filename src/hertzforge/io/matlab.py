@@ -68,8 +68,9 @@ SI; the reader clears the labels and declares them again
 
 The stamp `hertzforge_schema` is written as a variable, and the
 reader follows the `.hforge` rule: a newer stamp is refused, and an
-older one always loads. A `.mat` Visual Dynamics wrote carries
-`visualdynamics_schema` instead and reads the way its `.vdyn` files do. A `.mat` with no stamp is accepted in one case
+older one always loads. An older `.mat` carries the `.vdyn` stamp
+(`native.VDYN_STAMP`) instead and reads the way `.vdyn` files do. A `.mat`
+with no stamp is accepted in one case
 only, a single struct in the documented layout of one object (a data
 array with `abscissa`, `ordinate` and `data_class` or `function_type`,
 a geometry with `node_xyz`, a shape set with `shape_matrix`, a channel
@@ -496,7 +497,7 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Any:
     project. Values written in a display system are converted
     back to SI. Raises ValueError for a version 7.3 file, for a schema
     stamp newer than this version reads, and for a file that has no
-    `hertzforge_schema` or `visualdynamics_schema` stamp and is not a
+    `hertzforge_schema` or `.vdyn` stamp and is not a
     single struct in the documented layout."""
     from scipy.io import loadmat
 

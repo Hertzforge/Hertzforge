@@ -1,4 +1,4 @@
-"""Planning a modal test and handing its model on: Visual Dynamics'
+"""Planning a modal test and handing its model on:
 Plan Instrumentation, Export State-Space Model, Project onto Basis DOFs
 narrowed to picked channels, and Animate the Projection.
 
@@ -26,26 +26,9 @@ from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
+from .parsing import parse_id_runs, parse_optional_picks
 from .protocol import refused
 from .waterfalls import unit_text
-
-
-def _picks(text: str, count: int, what: str) -> list[int] | None:
-    """The 0-based items '1-3, 7' names, numbered from 1; None when
-    `text` is blank."""
-    if not text.strip():
-        return None
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a {what} number or a range such as 3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'{what}s run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return list(dict.fromkeys(out))
 
 
 def _runs(indices: Any) -> str:
@@ -58,13 +41,6 @@ def _runs(indices: Any) -> str:
         else:
             runs.append([n])
     return ', '.join(f'{r[0]}' if len(r) == 1 else f'{r[0]}-{r[-1]}' for r in runs)
-
-
-def _numbers(text: str, what: str) -> set[int]:
-    try:
-        return {int(t) for t in text.replace(',', ' ').split()}
-    except ValueError:
-        raise refused(f'{text!r} is not a list of {what} numbers') from None
 
 
 # ---- Plan Instrumentation ---------------------------------------------------------
@@ -90,7 +66,7 @@ KEEP = Param('keep', 'Keep: add the geometry, channels and shapes', 'boolean', d
 
 def _plannable_groups(geometry: Any, text: str) -> tuple[list[int], bool]:
     """The element groups sensors may go on, and whether that is every
-    group with solids, plates or beams: the groups Visual Dynamics'
+    group with solids, plates or beams: the groups the
     pane lists, all checked when opened."""
     offered = [g for g in (int(g) for g in geometry.groups.ids)
                if _family(geometry, g) in ('volume', 'face', 'line', 'mixed')]
@@ -138,7 +114,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
 
     `surfaces` is (found, offered ids, kept ids, params): the model's
     faces are then its surfaces', and a click on one leaves it out or puts
-    it back, as a click does in Visual Dynamics' pane."""
+    it back, as a click does in the pane."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length
 
     drawn, triangles, lines = drawn_mesh(geometry)
@@ -183,10 +159,16 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
                      else 'mass')
 
 
+def _useful_directions(blocks: np.ndarray) -> int:
+    """How many of a sensor's three directions these modes move in: a flat
+    plate's bending modes give each tri-axial one, however many it measures."""
+    energy = np.sum(np.asarray(blocks) ** 2, axis=(0, 2))
+    return max(int(np.count_nonzero(energy > 1e-6 * energy.sum())), 1)
+
+
 def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plan_instrumentation`: accelerometers chosen on a finite
-    element model by Effective Independence, tri-axial ones first, as
-    Visual Dynamics' Plan Instrumentation pane previews them: the
+    element model by Effective Independence, tri-axial ones first: the
     model's surfaces (`core.instrumentation.skin`, small ones left out
     by `default_surfaces`), the places on them (`candidates`), the modes
     in each place's directions (`local_shapes`), the choice
@@ -212,7 +194,7 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     source = params['source']
     shapes = project[source]
     geometry_name, geometry = project.geometry_for(source)
-    modes = _picks(params['modes'], shapes.num_shapes, 'mode') or elastic(shapes)
+    modes = parse_optional_picks(params['modes'], shapes.num_shapes, 'mode') or elastic(shapes)
     if not modes:
         raise refused('every mode is a rigid-body mode at 0 Hz: name the modes to measure')
     groups, every_group = _plannable_groups(geometry, params['groups'])
@@ -221,7 +203,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     angle = float(params['edge_angle'])
     found = skin(geometry, edge_angle=angle)
     numbers = {s.id for s in found}
-    out, back = (_numbers(params[key], 'surface') for key in ('leave_out', 'put_back'))
+    out, back = (set(parse_id_runs(params[key], 'a surface number'))
+                 for key in ('leave_out', 'put_back'))
     unknown = sorted((out | back) - numbers)
     if unknown:
         raise refused(f'the model has surfaces 1 to {len(found)} at a {angle:g}° edge; '
@@ -234,13 +217,14 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     kept = [s.id for s in offered if (s.id in default or s.id in back) and s.id not in out]
     triaxial, uniaxial = params['triaxial'], params['uniaxial']
     opened = not triaxial and not uniaxial
-    if opened:
-        triaxial = -(-len(modes) // 3) + 1
     distance = float(params['edge_distance'])
     axes = AXES[params['axes']]
     places = candidates(geometry, groups, kept, edge_angle=angle, found=found,
                         edge_distance=distance)
     blocks, measured = local_shapes(shapes, modes, places, geometry)
+    directions = _useful_directions(blocks)
+    if opened:
+        triaxial = -(-len(modes) // directions) + 1
     try:
         placement = effective_independence(blocks, triaxial, uniaxial, axes=axes,
                                            allowed=measured, sources=places.source,
@@ -260,7 +244,9 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Surfaces', f'sensors on {len(kept)} of {len(offered)}', None, 'info'),
             v.row('Sensors', f'{len(placement.triaxial)} tri-axial and '
                   f'{len(placement.uniaxial)} uni-axial'
-                  + (', the tri-axial count a third of the modes, and one' if opened else ''),
+                  + ((', the tri-axial count a third of the modes, and one' if directions == 3
+                      else f', the tri-axial count the modes over the {directions} direction'
+                      f'{"s" * (directions != 1)} they move in, and one') if opened else ''),
                   None, 'info'),
             v.row('Channels', float(plan.channels.num_channels), '', 'info'),
             v.row('Places', f'{plan.geometry.num_nodes} of {len(places.source):,}', None, 'info'),
@@ -343,7 +329,7 @@ MAXIMUM = Param('maximum', 'Maximum (0 keeps every mode)', 'number', default=0.0
 RIGID = Param('rigid', 'Rigid', 'number', default=1.0, unit='Hz', min=0.01, step=0.5)
 PATH = Param('path', 'File (.npz; blank previews only)', 'string', default='')
 
-#: lines in the preview's FRFs, as Visual Dynamics draws them
+#: lines in the preview's FRFs
 PREVIEW_LINES = 1600
 
 
@@ -352,7 +338,7 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
     channels as the modal state-space model Rattlesnake's state-space
     hardware loads (`core.state_space.state_space_model`), modes at and
     above the maximum frequency left out and those below the rigid
-    frequency moved up to it. The preview is Visual Dynamics': each
+    frequency moved up to it. The preview: each
     drive point's FRF from the model's own matrices, beside the whole
     set's synthesized FRF dashed (`ShapeSet.synthesize_frf`), and the
     pane's rows. Given a file, the model is written there
@@ -432,7 +418,7 @@ OTHER = Param('second', 'Projected', 'enum', options_from='objects:shape_set')
 
 
 def _report_rows(report: dict, units_defined: bool) -> list[dict]:
-    """What a projection matched, as Visual Dynamics' status line says it."""
+    """What a projection matched."""
     unit = 'm' if units_defined else 'model units'
     rows = [v.row('Nodes matched', f'{report["matched"]} of {report["total"]}', None,
                   'pass' if report['matched'] == report['total'] else 'warn'),
@@ -447,13 +433,12 @@ def _report_rows(report: dict, units_defined: bool) -> list[dict]:
 def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_channels`: a shape set sampled at some rows
     of a channel table, by the nearest node and its direction
-    (`Project.project_onto_basis` with `channels`), as Visual Dynamics
-    projects onto rows picked in the table's grid, with the node match
+    (`Project.project_onto_basis` with `channels`), with the node match
     tolerance its dialog asks for. The set is added, drawn on the
     table's geometry, beside what the projection matched."""
     source, table = params['source'], params['table']
     count = len(project[table].dof_strings())
-    rows = _picks(params['rows'], count, 'row')
+    rows = parse_optional_picks(params['rows'], count, 'row')
     try:
         added = project.project_onto_basis(source, onto=table, channels=rows,
                                            tolerance=params['tolerance'] / 100.0)
@@ -474,7 +459,7 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     (`core.correlate.project_shapes`), their MAC after projection
     (`core.shapes.cross_mac`, as `Project.comparison_mac` reads it), and
     the pair a cell picks drawn on the basis geometry, the projected
-    mode over the basis mode: Visual Dynamics' Animate the Projection.
+    mode over the basis mode: Animate the Projection.
     Nothing is added."""
     from hertzforge.core.correlate import project_shapes
     from hertzforge.core.shapes import cross_mac

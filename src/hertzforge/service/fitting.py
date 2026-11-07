@@ -1,4 +1,4 @@
-"""Fitting modes by hand on the connection's project: Visual Dynamics'
+"""Fitting modes by hand on the connection's project: the
 fitting screen over the protocol (`fit.*`).
 
 One mode at a time, on the residual. Find Mode moves the cursor to the
@@ -65,9 +65,10 @@ def _number(params: Mapping[str, Any], key: str, method: str) -> float:
 
 def start(project: Any, params: Mapping[str, Any]) -> Fit:
     """`fit.start`: a session on the FRF `frf`, on the `records` picked when
-    given, from the shape set `shapes` when given (Edit Fit)."""
+    given, from the shape set `shapes` when given (Edit Fit), on the records
+    that set holds."""
     from hertzforge.core.data import Frf
-    from hertzforge.core.modal_fit import ModalFitSession
+    from hertzforge.core.modal_fit import ModalFitSession, adoptable_records, fit_refusal
     from hertzforge.core.shapes import ShapeSet
 
     name = params.get('frf')
@@ -92,6 +93,13 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
                                   or kind_of(project[coherence]) not in COHERENCES):
         raise refused(f'{coherence!r} is not a coherence in the project')
     try:
+        if shapes is not None:
+            # a set is edited on the records it says something about: the
+            # rest are not read as a mode shape of zero
+            why = fit_refusal(project[name], records, project[shapes])
+            if why:
+                raise refused(why)
+            records = adoptable_records(project[name], project[shapes], records)
         session = ModalFitSession(project[name], records=records, coherence=None if coherence is None
                                   else project[coherence])
         if shapes is not None:
@@ -115,7 +123,7 @@ def act(fit: Fit, method: str, params: Mapping[str, Any]) -> None:
         elif method == 'fit.move':
             session.move_to(_number(params, 'frequency', method))
         elif method == 'fit.damping':
-            session.override_damping(_number(params, 'damping', method))
+            session.override_damping(_damping(params, method))
         elif method == 'fit.fit':
             session.fit_pending()
         elif method == 'fit.confirm':
@@ -153,8 +161,7 @@ def _indices(params: Mapping[str, Any], method: str, count: int) -> list[int]:
 
 
 def delete(session: Any, indices: list[int]) -> None:
-    """`fit.delete`: confirmed modes taken back, as Visual Dynamics' fit
-    table deletes rows: each leaves the modes and the replay list, and the
+    """`fit.delete`: confirmed modes taken back: each leaves the modes and the replay list, and the
     preview, fitted against a residual that is gone, is dropped."""
     for k in sorted(set(indices), reverse=True):
         pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
@@ -164,10 +171,23 @@ def delete(session: Any, indices: list[int]) -> None:
     session.preview = None
 
 
+def _damping(params: Mapping[str, Any], method: str) -> float:
+    """The fraction of critical `params` gives, within what a fit's modes can
+    have (`modal_fit.DAMPING_LIMITS`), or refused in those words."""
+    from hertzforge.core.modal_fit import DAMPING_LIMITS
+
+    value = _number(params, 'damping', method)
+    low, high = DAMPING_LIMITS
+    if not low <= value <= high:
+        raise refused(f'damping is a fraction of critical, from {low:g} ({low * 100:g} %) '
+                      f'to {high:g} ({high * 100:g} %); not {value:g}')
+    return value
+
+
 def edit(session: Any, params: Mapping[str, Any]) -> None:
-    """`fit.edit`: a confirmed mode's damping (a fraction of critical,
-    above 0 and up to 1) or description typed into its row, as Visual
-    Dynamics' fit table takes them."""
+    """`fit.edit`: a confirmed mode's damping or description typed into its
+    row. The replay list follows the
+    damping, so taking the mode back or replaying the fit finds it."""
     k = params.get('mode')
     if isinstance(k, bool) or not isinstance(k, int):
         raise bad_request('fit.edit needs "mode", a mode index from 0')
@@ -176,9 +196,10 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
     if damping is None and description is None:
         raise bad_request('fit.edit needs "damping" or "description"')
     if damping is not None:
-        value = _number(params, 'damping', 'fit.edit')
-        if not 0.0 < value <= 1.0:
-            raise refused('damping is a fraction of critical, above 0 and up to 1 (100 %)')
+        value = _damping(params, 'fit.edit')
+        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        if pick in session.confirmed:
+            session.confirmed[session.confirmed.index(pick)] = (pick[0], value)
         session.modes[k]['damping'] = value
     if description is not None:
         if not isinstance(description, str):
@@ -197,19 +218,35 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
         shapes.source = project[fit.frf].source
     if fit.shapes is not None and fit.shapes in project:
         project[fit.shapes] = shapes
+        _journal(project, fit)
         return fit.shapes
     name = params.get('name') or f'{fit.frf} Modes'
     if not isinstance(name, str) or not name.strip():
         raise bad_request('fit.publish "name" is a name')
-    added = project.add(name.strip(), shapes)
-    # in the FRF's group, as the core's own fit is (`Project.fit_modes`), so
-    # it animates on that group's geometry
-    try:
-        project.link(fit.frf, added)
-    except ValueError:
-        pass
+    # the fit is the record of this stretch, as `_journal` writes it
+    with project.journal_as(None):
+        added = project.add(name.strip(), shapes)
+        # in the FRF's group, as the core's own fit is (`Project.fit_modes`), so
+        # it animates on that group's geometry
+        try:
+            project.link(fit.frf, added)
+        except ValueError:
+            pass
     fit.shapes = added
+    _journal(project, fit)
     return added
+
+
+def _journal(project: Any, fit: Fit) -> None:
+    """The published fit as the line that replays it, settling in place as the
+    fit grows."""
+    line = project.fit_replay_line(fit.frf, fit.shapes, fit.session, fit.coherence)
+    prefix = f'project.fit_modes({fit.frf!r}, at='
+    journal = project.journal
+    if journal and journal[-1].startswith(prefix) and journal[-1].endswith(f'name={fit.shapes!r})'):
+        journal[-1] = line
+    else:
+        journal.append(line)
 
 
 def state(fit: Fit) -> dict[str, Any]:
@@ -240,10 +277,14 @@ def state(fit: Fit) -> dict[str, Any]:
 
 def _half_power(fit: Fit) -> dict[str, Any]:
     """The half-power reading of the residual CMIF peak under the cursor
-    (`ModalFitSession.half_power`), as Visual Dynamics shows it beside the
-    fit: the peak's frequency, the two crossings, Q and the damping they
+    (`ModalFitSession.half_power`): the peak's frequency, the two crossings, Q and the damping they
     give, or why it could not be read."""
-    reading = fit.session.half_power(warn=False)
+    try:
+        reading = fit.session.half_power(warn=False)
+    except ValueError as error:
+        # too few lines to hold a peak is a reading of nothing, not a failure
+        return {'frequency': float(fit.session.pending['frequency']), 'low': None, 'high': None,
+                'q': None, 'damping': None, 'notes': [str(error)]}
 
     def number(value: Any) -> float | None:
         return None if value is None or not np.isfinite(value) else float(value)
@@ -255,7 +296,7 @@ def _half_power(fit: Fit) -> dict[str, Any]:
 
 def _mac(fit: Fit) -> dict[str, Any] | None:
     """The auto-MAC of the confirmed modes, with the preview's row and
-    column last, as VD shows it beside the fit: how alike the modes'
+    column last: how alike the modes'
     shapes are, which a close pair or a mode split in two shows off the
     diagonal. None for fewer than two."""
     from hertzforge.core.shapes import mac_matrix

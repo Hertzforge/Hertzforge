@@ -3,8 +3,7 @@
 A requirement can be a curve between breakpoints, a controller's
 density per line, or either banded; a measurement can be on lines or
 on bands. One rule judges all six pairings (`compliance.cells`,
-`compliance.judge`; PLAN.md "A comparison is an area against an
-area"), and these are the cases the guide page draws — a measurement
+`compliance.judge`), and these are the cases the guide page draws — a measurement
 on its target is out nowhere, a departure wide enough to move a band
 is out everywhere, a requirement's hole is judged nowhere.
 """

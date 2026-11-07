@@ -1,4 +1,4 @@
-"""Visual Dynamics' 3-D stages: two densities paired by channel, a
+"""The 3-D stages: two densities paired by channel, a
 specification with its bands and a measurement's exceedances, and a
 scalogram as a surface."""
 

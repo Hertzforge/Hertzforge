@@ -1,4 +1,4 @@
-"""Visual Dynamics' file-level tools: saving one object in a foreign
+"""The file-level tools: saving one object in a foreign
 format, importing part of a long Rattlesnake run on a preview of it,
 cutting a run and writing it back, and reading delimited text with the
 layout its reader found corrected where it is wrong.
@@ -8,8 +8,8 @@ A file reaches the service by its path on the service's machine, as
 own reader or writer (`Project.export`, `io.save`,
 `io.rattlesnake.stream_summary`, `stream_preview`, `save_window`,
 `io.delimited.text_layout`, `read_delimited`, `Project.import_file`);
-the previews add nothing to the project, and the imports add what the
-same import in Visual Dynamics adds.
+the previews add nothing to the project, and the imports add what
+`Project.import_file` adds.
 """
 
 from __future__ import annotations
@@ -29,8 +29,7 @@ from .waterfalls import unit_text
 
 GB = 2 ** 30
 
-#: how many data rows a text preview reads from the head of the file:
-#: Visual Dynamics' dialog's own `PREVIEW_ROWS`
+#: how many data rows a text preview reads from the head of the file
 TEXT_PREVIEW_ROWS = 20000
 #: how many of them the preview lists as rows of text
 LISTED_ROWS = 10
@@ -69,8 +68,7 @@ PATH = Param('path', 'Path on the service\'s machine', 'string', default='')
 CREATOR = Param('creator', 'Creator, for ESCDF (blank: the login name)', 'string',
                 default='')
 #: the units a foreign format is written in: the window's display unit
-#: system, as VD exports (the server puts the connection's system in for
-#: 'display'), or SI as stored
+#: system, or SI as stored
 WRITTEN_IN = Param('units', 'Units', 'enum', default='display', options=(
     Option('display', 'The display unit system'), Option('si', 'SI, as stored')))
 
@@ -118,7 +116,7 @@ def _file(given: str, what: str) -> str:
 
 def _noted(call: Callable[[], Any]) -> tuple[Any, list[str]]:
     """What `call` returns and the notes its reader gave on the way
-    (`io.ImportNote`), which Visual Dynamics lists after an import."""
+    (`io.ImportNote`), listed after an import."""
     from hertzforge.io import ImportNote
 
     with warnings.catch_warnings(record=True) as caught:
@@ -152,8 +150,8 @@ def _added(project: Any, added: list[str], notes: list[str]) -> list[dict]:
 # ---- Save As -------------------------------------------------------------------
 
 def _exodus_geometry(project: Any, name: str, obj: Any) -> tuple[str, Any]:
-    """The geometry shapes or data ride on in an Exodus file, as Visual
-    Dynamics picks it: the one in the object's group, else the active
+    """The geometry shapes or data ride on in an Exodus file: the one in the object's
+    group, else the active
     one, else the only one; refused when there is none, or when none of
     the object's DOFs are on it."""
     from hertzforge.core.geometry import Geometry
@@ -194,7 +192,7 @@ def _export_system(units: Any) -> Any:
 
 def save_as(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.save_as`: one object written to a file in the format
-    chosen, as Visual Dynamics' Save As writes it: a `.hforge` object
+    chosen: a `.hforge` object
     (`io.save`), or a foreign format by `Project.export`, in the display
     unit system (the `units` param, 'display' or 'si'). The format's suffix is added when
     the path lacks it. A format that cannot write the object is refused,
@@ -320,8 +318,7 @@ def _channels(text: str, dofs: list[str]) -> list[int | str] | None:
 
 
 def rattlesnake_preview(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.rattlesnake_preview`: a long run as Visual Dynamics'
-    import window shows it before anything is read whole: the size of
+    """`project.rattlesnake_preview`: a long run before anything is read whole: the size of
     each stream (`io.rattlesnake.stream_summary`), one channel's envelope
     over a stream (`stream_preview`, in SI), the window chosen shaded off
     the rest, and what importing that window and those channels would
@@ -398,7 +395,7 @@ def rattlesnake_preview(project: Any, params: dict[str, Any]) -> list[dict]:
 def import_rattlesnake_part(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.import_rattlesnake_part`: a window of a run and a pick of
     its channels imported, with the `Project.import_file(path, start=...,
-    stop=..., channels=...)` call Visual Dynamics' import window makes,
+    stop=..., channels=...)` call the import window makes,
     holding only what differs from importing the whole run. Adds what
     that import adds: the windowed histories, the channel table and the
     environments' results, linked as one group."""
@@ -430,10 +427,9 @@ def truncate_rattlesnake_file(project: Any, params: dict[str, Any]) -> list[dict
     """`project.truncate_rattlesnake_file`: a run cut to a window and
     written as a `.nc4` of its own (`io.rattlesnake.save_window`), every
     channel and every setting as the file has them and its clock
-    starting at zero, as Visual Dynamics' Truncate Rattlesnake File
-    writes it. Named for the window beside the run
+    starting at zero. Named for the window beside the run
     (`rattlesnake.window_name`) unless a copy is named. A window that is
-    the whole run is refused, as Visual Dynamics offers no copy of it.
+    the whole run is refused.
     Adds nothing to the project; the project's journal records the
     call."""
     from hertzforge.io import rattlesnake
@@ -492,8 +488,7 @@ def _list(text: str) -> list[str]:
 def _text_options(path: str, params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     """(layout, options): the file's layout as read with the delimiter and
     decimal point given, and `read_delimited`'s keywords for the
-    corrections, holding only what differs from what the reader found,
-    as Visual Dynamics' text import dialog answers."""
+    corrections, holding only what differs from what the reader found."""
     from hertzforge.io import delimited
 
     names = {name: mark for mark, name in delimited.DELIMITER_NAMES.items()}
@@ -540,8 +535,8 @@ def _line(label: str, number: int) -> dict:
 
 
 def text_preview(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.text_preview`: a delimited text file as Visual Dynamics'
-    text import dialog shows it: the layout `io.delimited.text_layout`
+    """`project.text_preview`: a delimited text file before it is imported: the layout
+    `io.delimited.text_layout`
     found (delimiter, decimal point, header lines, time column, a stated
     sample rate), its columns, and the head of the file read by the same
     `read_delimited` call the import makes with the corrections given,
@@ -607,7 +602,7 @@ def text_preview(project: Any, params: dict[str, Any]) -> list[dict]:
 def import_text(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.import_text`: a delimited text file imported as one time
     history with the layout's corrections, by the
-    `Project.import_file(path, **options)` call Visual Dynamics' text
+    `Project.import_file(path, **options)` call the text
     import dialog makes, holding only what differs from what the reader
     found; the notes the read gives are listed."""
     path = _text(params['path'])

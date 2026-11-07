@@ -1,9 +1,9 @@
 <script lang="ts">
 	/**
-	 * Report: Visual Dynamics' report on the project, generated from a starter template bound to its
-	 * objects and edited as VD's report editor edits it. The page is the core's edit page in a
+	 * Report: the report on the project, generated from a starter template bound to its
+	 * objects and edited. The page is the core's edit page in a
 	 * sandboxed frame; a click on a block selects it, and every act (insert, move, delete, a source,
-	 * the caption, the text, the title and marking) is on the bar and the pane here, as on VD's. In
+	 * the caption, the text, the title and marking) is on the bar and the pane here. In
 	 * the desktop app Save opens the dialog; in a browser it asks for a path.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
@@ -27,7 +27,7 @@
 		if (!name || !app.project.summary || app.project.selection.objects.includes(name)) return;
 		app.project.clickObject(name, app.project.summary.objects.map((o) => o.name));
 	});
-	// a report operation run on the project gives a reading (as Visual Dynamics' acts do, until
+	// a report operation run on the project gives a reading (as the acts do, until
 	// Back); it shows here, and the page follows what the act changed
 	const a = $derived(app.analyze);
 	$effect(() => {
@@ -67,7 +67,7 @@
 		r.html ? r.html.replace(/<\/body>/i, `<script>addEventListener('load', () => scrollTo(0, ${Math.round(r.scroll)}));<\/script></body>`) : null
 	);
 
-	// typing rests before the page re-renders, as VD's editor waits
+	// typing rests before the page re-renders
 	let text = $state('');
 	let typing: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {
@@ -184,11 +184,11 @@
 						<button class="btn primary sm" type="submit" disabled={!path.trim() || r.busy !== null}>Save</button>
 					</form>
 				{/if}
-				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>.</p>{/if}
+				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>. {r.exportedNote}</p>{/if}
 				{#if r.held}
 					<div class="ask held" data-testid="report-held" role="alertdialog" aria-label="The report is not ready">
 						{#if r.held.owed.length}
-							<p class="muted">{r.name} still owes {r.held.owed.length} {r.held.owed.length === 1 ? 'section' : 'sections'}:</p>
+							<p class="muted">{r.name} still owes:</p>
 							<ul class="owed">{#each r.held.owed as line (line)}<li>{line}</li>{/each}</ul>
 						{/if}
 						{#if r.held.index.length}
@@ -196,7 +196,7 @@
 							<ul class="owed">{#each r.held.index as entry (entry.name)}<li>{entry.name}: {entry.status}</li>{/each}</ul>
 						{/if}
 						<div class="row">
-							<button class="btn sm danger" data-testid="report-anyway" onclick={() => r.anyway()} disabled={r.busy !== null}>{r.held.act === 'export' ? 'Export anyway' : 'Issue anyway'}</button>
+							<button class="btn sm danger" data-testid="report-anyway" onclick={() => r.anyway()} disabled={r.busy !== null}>{{ export: 'Export anyway', print: 'Print anyway', issue: 'Issue anyway' }[r.held.act]}</button>
 							<button class="btn ghost sm" onclick={() => (r.held = null)}>Not yet</button>
 						</div>
 					</div>
@@ -204,10 +204,10 @@
 				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
 					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
 				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
-					title="Mark the report issued, print it, then name the PDF so the issue is recorded with its hash">Issue</button>
+					title="Print the page as issued, then name the PDF, which issues the report and records its hash">Issue</button>
 				{#if r.issuing}
 					<form class="ask" onsubmit={recordIssue} data-testid="report-issue-form">
-						<p class="muted">Marked {r.issuing}. Save the page from the print dialog as a PDF, then name it here so the issue is recorded.</p>
+						<p class="muted">Not issued yet. Save the page from the print dialog as a PDF, then name it here to record the issue.</p>
 						<label class="lbl" for="report-pdf">The PDF printed</label>
 						<input id="report-pdf" class="field mono" bind:value={pdf} placeholder={hasNativeFiles() ? 'Leave empty to choose it' : '/path/to/report.pdf'} data-testid="report-pdf" spellcheck="false" />
 						<button class="btn primary sm" type="submit" disabled={r.busy !== null || (!pdf.trim() && !hasNativeFiles())}>Record the Issue</button>

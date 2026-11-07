@@ -63,11 +63,6 @@ DECADE_FRACTION = 3.0 / 10.0
 #: follow the shape of a response and coarse enough to be worth doing.
 PER_OCTAVE = 6
 
-#: the fractions offered in the app. Whole octaves through
-#: twenty-fourths, which is the range anyone asks for in practice.
-CHOICES = (1, 2, 3, 6, 12, 24)
-
-
 def ratio(per_octave: int = PER_OCTAVE) -> float:
     """The ratio of each band's center to the center of the band below it.
 
@@ -161,6 +156,9 @@ def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
         upper = (widths + np.sqrt(widths * widths
                                   + 4.0 * centers * centers)) / 2.0
         return upper - widths, upper
+    if centers.size < 2:
+        raise ValueError('a spectrum of fewer than two lines has no line '
+                         'spacing, so its lines have no bins')
     spacing = np.gradient(centers)
     return centers - spacing / 2.0, centers + spacing / 2.0
 

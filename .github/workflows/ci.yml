@@ -2,7 +2,7 @@ name: tests
 
 # On every pull request, every push to main, in the merge queue, weekly and
 # on demand. The weekly run matters because dependencies are declared by name
-# with no pin (Visual Dynamics' principle 12): a new release upstream is
+# with no pin: a new release upstream is
 # something new to test even when nothing here changed.
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     # The core suite takes about eight minutes on four workers on a recent
-    # Mac; Visual Dynamics measured hosted runners at several times that.
+    # Mac; hosted runners take several times that.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -74,10 +74,26 @@ jobs:
             echo
             python -m coverage report --format=markdown --sort=cover
           } >> "$GITHUB_STEP_SUMMARY"
-          # The floor Visual Dynamics kept: a change that adds code without
-          # tests fails the way a license finding does. Measured at 95% on
-          # 2026-11-01; raise it when the number rises, never lower it to pass.
-          python -m coverage report --fail-under=90 > /dev/null
+          # A floor: a change that adds code without tests fails the way a
+          # license finding does. Measured at 95.7% on 2026-11-07; raise it when
+          # the number rises, never lower it to pass.
+          python -m coverage report --fail-under=95 > /dev/null
+
+  # The guide's mesh table: 11 CPU-minutes here and 17 minutes of a runner, so
+  # weekly and on demand rather than on every pull request.
+  guide:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist
+      - name: Test
+        run: python -m pytest tests/test_demo_shapes.py -q -n auto -m guide
 
   # The analysis service (hertzforge.service) on every platform a desktop
   # build targets, in the package's own environment.
@@ -238,8 +254,7 @@ jobs:
           pip install pytest
           python -m pytest tools -q
 
-  # The head branch of a pull request is named for what it carries, the
-  # scheme Visual Dynamics uses. Skipped outside pull requests, where there
+  # The head branch of a pull request is named for what it carries. Skipped outside pull requests, where there
   # is no head branch to name.
   branch:
     if: github.event_name == 'pull_request'

@@ -6,7 +6,7 @@ project is a template: the same figures and text, bound again to
 whatever project loads it. The file is JSON with one marker key and the
 fields the project file keeps for a report (title, marking, marking
 color, blocks, and the report features when any are enabled; see
-`native.save_report`), under its own suffix, `.vdreport`. A lab's house
+`native.save_report`), under its own suffix, `.hftemplate`. A lab's house
 template therefore carries its choice of report features, and the
 laboratory's name, address and reproduction statement from the
 report's identification; never a report number, revision, status or
@@ -15,7 +15,8 @@ project is an unbound card there, to be pointed at an object in the
 editor's pane, as an unbound block of a built-in template is.
 
 Templates saved in `templates_folder()` are offered by Generate Report
-beside the built-in ones in every project.
+beside the built-in ones in every project. Older templates, under
+`OLDER_SUFFIX` with `OLDER_MARKER`, are read the same way and never written.
 """
 
 from __future__ import annotations
@@ -32,8 +33,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # Brandon, 2026-09-08: "Is there a way for the user to save a report
 # template or load a saved report template?"
 
-SUFFIX = '.vdreport'
-MARKER = 'visualdynamics_report_template'
+SUFFIX = '.hftemplate'
+MARKER = 'hertzforge_report_template'
+OLDER_SUFFIX = '.vdreport'
+OLDER_MARKER = 'visualdynamics_report_template'
 
 #: what a block keeps that belongs to one test, not to the template:
 #: the test dates of `report.calibration` (`START`, `END`)
@@ -48,22 +51,28 @@ def handles(obj: Any) -> bool:
     return isinstance(obj, Report)
 
 
-def sniff(path: str | os.PathLike) -> bool:
-    """True for a path ending in `.vdreport`, or a `.json` file whose first
-    4096 characters hold the template marker.
+def is_template_path(path: str | os.PathLike) -> bool:
+    """True for a path ending in `SUFFIX` or `OLDER_SUFFIX`."""
+    return str(path).endswith((SUFFIX, OLDER_SUFFIX))
 
-    A `.vdreport` is claimed without being opened, so a damaged one reaches
+
+def sniff(path: str | os.PathLike) -> bool:
+    """True for a path ending in a template suffix, or a `.json` file whose
+    first 4096 characters hold a template marker.
+
+    A template suffix is claimed without being opened, so a damaged one reaches
     `load` and is refused with a reason rather than passed over. Other tools
     write `.json`, so that suffix is opened and checked.
     """
     path = str(path)
-    if path.endswith(SUFFIX):
+    if is_template_path(path):
         return True
     if not path.endswith('.json'):
         return False
     try:
         with open(path, encoding='utf-8') as handle:
-            return MARKER in handle.read(4096)
+            head = handle.read(4096)
+        return MARKER in head or OLDER_MARKER in head
     except OSError:
         return False
 
@@ -111,8 +120,8 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Report:
 
     with open(path, encoding='utf-8') as handle:
         data = json.load(handle)
-    if not isinstance(data, dict) or MARKER not in data:
-        raise ValueError(f'{path} is not a Visual Dynamics report template')
+    if not isinstance(data, dict) or not (MARKER in data or OLDER_MARKER in data):
+        raise ValueError(f'{path} is not a report template')
     features = data.get('features', [])
     if (not isinstance(features, list)
             or not all(isinstance(key, str) for key in features)):
@@ -140,11 +149,11 @@ def templates_folder() -> Path:
     It is `Hertzforge/Report Templates` in the user's application
     data folder for the platform (`~/Library/Application Support` on
     macOS, `APPDATA` on Windows, `XDG_DATA_HOME` or `~/.local/share`
-    elsewhere), or the folder `VISUALDYNAMICS_TEMPLATES` names when that
+    elsewhere), or the folder `HERTZFORGE_TEMPLATES` names when that
     environment variable is set. The folder is not created here; whatever
     writes to it creates it.
     """
-    override = os.environ.get('VISUALDYNAMICS_TEMPLATES')
+    override = os.environ.get('HERTZFORGE_TEMPLATES')
     if override:
         return Path(override)
     if sys.platform == 'darwin':
@@ -157,11 +166,14 @@ def templates_folder() -> Path:
 
 
 def saved_templates() -> list[tuple[str, Path]]:
-    """(name, path) for every `.vdreport` file in `templates_folder()`,
-    sorted by name; empty when the folder does not exist."""
+    """(name, path) for every template file in `templates_folder()`, sorted
+    by name, the newer suffix taken when a name has both; empty when the
+    folder does not exist."""
     folder = templates_folder()
     if not folder.is_dir():
         return []
-    return sorted((path.name[:-len(SUFFIX)], path)
-                  for path in folder.iterdir()
-                  if path.is_file() and path.name.endswith(SUFFIX))
+    found: dict[str, Path] = {}
+    for suffix in (OLDER_SUFFIX, SUFFIX):
+        found.update((path.name[:-len(suffix)], path) for path in folder.iterdir()
+                     if path.is_file() and path.name.endswith(suffix))
+    return sorted(found.items())

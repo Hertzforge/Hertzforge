@@ -1,7 +1,7 @@
 """Hertzforge carries no Qt, no VTK and no plotting stack: the shell draws.
 
-Visual Dynamics' code came with its Qt interface, VTK scenes and pyqtgraph
-plots left behind, and its drawing decisions moved into
+The core's Qt interface, VTK scenes and pyqtgraph plots were left
+behind, and its drawing decisions moved into
 `hertzforge.drawing` without the code that draws. These tests hold that
 line, for an import written at the top of a module and for one written
 inside a function, which only fails when the function is called.

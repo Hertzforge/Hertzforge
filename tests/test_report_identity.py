@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +26,7 @@ from hertzforge.report import features as rf
 from hertzforge.report import identity as ri
 from hertzforge.report import page, render_html
 from hertzforge.report import skeleton as sk
+from hertzforge.service import reports
 
 #: every field the identification needs, entered
 COMPLETE = {
@@ -68,9 +71,13 @@ def _project(report, name='Report'):
 
 
 def _issue(project, name, file='R-0037.pdf'):
-    """Issue through the project's one sequence, with a stand-in for the
-    print: everything but the web engine."""
-    project._issue(project[name], None, lambda _page: PDF, file)
+    """Issue through the service's steps, with a stand-in for the PDF the
+    shell prints."""
+    reports.issue(project, {'name': name, 'step': 'begin'})
+    with tempfile.TemporaryDirectory() as folder:
+        printed = Path(folder) / file
+        printed.write_bytes(PDF)
+        reports.issue(project, {'name': name, 'step': 'record', 'path': str(printed)})
 
 
 def _page(project, name):
@@ -271,18 +278,6 @@ def test_issue_records_the_revision_and_says_issued():
     assert 'Revision 0";' in ri.page_css(report), 'no Draft beside it'
 
 
-def test_a_failed_print_leaves_the_report_a_draft():
-    project, name = _project(_report(**COMPLETE))
-
-    def fail(_page):
-        raise OSError('the printer caught fire')
-
-    with pytest.raises(OSError, match='caught fire'):
-        project._issue(project[name], None, fail, 'x.pdf')
-    assert ri.value(project[name], 'status') == 'draft'
-    assert ri.record(project[name]) == []
-
-
 def test_the_number_and_revision_of_an_issued_report_are_fixed():
     project, name = _project(_report(**COMPLETE))
     _issue(project, name)
@@ -382,26 +377,26 @@ def test_a_template_carries_the_laboratory_and_never_the_issue(tmp_path):
 
     project, name = _project(_report(**COMPLETE, full_only=False))
     _issue(project, name)
-    report_template.save(project[name], tmp_path / 'house.vdreport')
-    saved = json.loads((tmp_path / 'house.vdreport').read_text('utf-8'))
+    report_template.save(project[name], tmp_path / 'house.hftemplate')
+    saved = json.loads((tmp_path / 'house.hftemplate').read_text('utf-8'))
     assert saved['identity'] == {'laboratory': 'Test Lab',
                                  'address': '1 Main Street, Albuquerque',
                                  'full_only': False}
-    back = report_template.load(tmp_path / 'house.vdreport')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert back.identity == saved['identity']
     assert ri.value(back, 'status') == 'draft' and ri.record(back) == []
-    report_template.save(Report('R'), tmp_path / 'plain.vdreport')
-    assert 'identity' not in (tmp_path / 'plain.vdreport').read_text('utf-8')
-    (tmp_path / 'bad.vdreport').write_text(json.dumps(
+    report_template.save(Report('R'), tmp_path / 'plain.hftemplate')
+    assert 'identity' not in (tmp_path / 'plain.hftemplate').read_text('utf-8')
+    (tmp_path / 'bad.hftemplate').write_text(json.dumps(
         {report_template.MARKER: 1, 'identity': ['x']}), 'utf-8')
     with pytest.raises(ValueError, match='identity must be a mapping'):
-        report_template.load(tmp_path / 'bad.vdreport')
+        report_template.load(tmp_path / 'bad.hftemplate')
     # a forged number in a template file does not reach the report
-    (tmp_path / 'forged.vdreport').write_text(json.dumps(
+    (tmp_path / 'forged.hftemplate').write_text(json.dumps(
         {report_template.MARKER: 1, 'identity': {'number': 'R-1',
                                                  'status': 'issued'}}),
         'utf-8')
-    assert report_template.load(tmp_path / 'forged.vdreport').identity == {}
+    assert report_template.load(tmp_path / 'forged.hftemplate').identity == {}
 
 
 def test_the_project_verbs_are_journaled():
@@ -414,36 +409,6 @@ def test_the_project_verbs_are_journaled():
         project.report_identity(name, colour='red')
     assert project.journal == before, 'a refusal is not journaled'
     assert rf.FEATURES[ri.FEATURE].available
-
-
-#: reads a PDF's pages as text, in a process of its own
-_READ_PAGES = """
-import json, sys
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtPdf import QPdfDocument
-app = QGuiApplication([])
-document = QPdfDocument()
-document.load(sys.argv[1])
-print(json.dumps([' '.join(document.getAllText(at).text().split())
-                  for at in range(document.pageCount())]))
-"""
-
-
-def _pdf_pages(path):
-    """The text of each page of the PDF at `path`, read with QtPdf in a
-    separate process. QtPdf is never loaded into a process running Qt
-    WebEngine: both carry the browser engine's own libraries, and a
-    test worker that loaded QtPdf beside a live web engine crashed in
-    its next event loop on Linux."""
-    import os
-    import subprocess
-    import sys
-
-    run = subprocess.run(
-        [sys.executable, '-c', _READ_PAGES, str(path)], capture_output=True,
-        text=True, encoding='utf-8', timeout=120, check=True,
-        env=dict(os.environ, QT_QPA_PLATFORM='offscreen'))
-    return json.loads(run.stdout.strip().splitlines()[-1])
 
 
 def test_only_the_revision_the_report_carries_counts_as_issued():

@@ -1,18 +1,17 @@
-"""Visual Dynamics' spectral answers, checked against sdynpy's — as data.
+"""Hertzforge's spectral answers, checked against sdynpy's — as data.
 
 sdynpy is the tool this package's audience already trusts, and this
 package will be scrutinized precisely because it was built with AI
 assistance, so agreement is worth demonstrating (Brandon, 2026-08-28).
 What must never happen is an import: sdynpy is GPL-3.0, and one import
-from anything distributed with Visual Dynamics would settle its
+from anything distributed with Hertzforge would settle its
 licensing permanently. So the comparison arrives the way the ADF
 corpus's truth files do — sdynpy runs privately in the generators
 repository, and its *numbers* are frozen into
 `testdata/sdynpy_oracle/oracle.npz` beside the exact input signals.
 Running a GPL program privately carries no conditions, and a program's
 numerical output is not a covered work; nothing here imports sdynpy,
-and `test_license_boundary` now checks the tests as well as the
-package.
+and `tools/check_licenses.py` checks the tests as well as the package.
 
 **An agreement oracle, not a truth oracle.** sdynpy has around 13% test
 coverage, so when the two disagree the discrepancy is investigated from
@@ -28,7 +27,7 @@ What building the oracle actually found, for the record:
   framings provably match — same frames, same periodic windows, same
   Welch scaling — so these are two implementations of the same
   definitions, not merely similar answers.
-* **CPSD is conjugated between the tools.** Visual Dynamics computes
+* **CPSD is conjugated between the tools.** Hertzforge computes
   Bendat & Piersol's `Gxy = conj(X)·Y`; sdynpy computes `X·conj(Y)`.
   Both are self-consistent conventions with opposite phase sign; the
   comparison conjugates and says so, and neither side is wrong.

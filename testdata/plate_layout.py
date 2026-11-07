@@ -31,7 +31,7 @@ MODAL = ['101Z+', '107Z+', '113Z+', '701Z+', '707Z+', '713Z+',
 #: and the rest scattered 3-14 dB low, which made the demonstration
 #: report read as a failed test and (before the detection learned
 #: the floor veto) read to the scale detection as a -4 dB run.
-#: Four against eight is the drone's ratio, and it controls.
+#: Four against eight controls.
 RANDOM_DRIVES = ['101Z+', '110Z+', '1304Z+', '1310Z+']
 
 #: the random test: eight control channels on the perimeter ring —

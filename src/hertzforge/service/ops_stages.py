@@ -1,4 +1,4 @@
-"""Visual Dynamics' 3-D stages of two objects together: frequency across,
+"""The 3-D stages of two objects together: frequency across,
 channels receding, level up, as the waterfall stands.
 
 The paired stage draws two densities at each channel they share, the louder
@@ -177,14 +177,13 @@ def spec_stage(project: Any, params: dict[str, Any]) -> list[dict]:
     scales it."""
     import hertzforge as hz
     from hertzforge.core.compliance import matched_records
+    from hertzforge.core.data import autospectrum
     from hertzforge.drawing.viz.waterfall import drawn_span, waterfall_arrays
 
     spec_name, name = params['specification'], params['spectrum']
     spec = project[spec_name]
     dofs = [str(d) for d in spec.response_dof]
-    references = spec.reference_dof
-    autos = [i for i, dof in enumerate(dofs)
-             if references is None or str(references[i]) == dof]
+    autos = [i for i in range(spec.num_records) if autospectrum(spec, i)]
     if not autos:
         raise refused(f'{spec_name} has no channel of its own to stand on the stage')
     grid, on_grid = _grid(spec)

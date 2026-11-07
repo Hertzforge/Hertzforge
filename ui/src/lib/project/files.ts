@@ -2,7 +2,7 @@
  * Files by path. In the desktop app (a Tauri window) the shell gets a dropped file's path and the
  * native dialogs; the service then reads the file where it is, and nothing is uploaded. In a
  * browser, which gives a dropped file's contents but never its path, the project panel takes a
- * typed path instead (OPENING_FILES_PLAN.md, section 1).
+ * typed path instead.
  *
  * Tauri is reached through the globals a Tauri v2 window exposes with `withGlobalTauri`, so the
  * shell needs no Tauri package of its own and runs unchanged in a browser.
@@ -17,6 +17,24 @@ export const PROJECT_SUFFIXES = ['.hforge', '.vdyn', '.mat', '.h5', '.hdf5', '.e
 export function isProjectFile(path: string): boolean {
 	const lower = path.toLowerCase();
 	return PROJECT_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+}
+
+/**
+ * Which of several paths opens and which import into it. The first project file opens, whatever
+ * order they came in: an import before it would go with the project it replaces, and a second project
+ * file opened after it would replace the first.
+ */
+export function openingOrder(paths: string[]): { opens: string | null; imports: string[] } {
+	const opens = paths.find(isProjectFile) ?? null;
+	return { opens, imports: paths.filter((path) => path !== opens) };
+}
+
+/** Whether the person will lose the unsaved changes in `title` to open `next`. */
+export async function askToReplace(title: string, next: string): Promise<boolean> {
+	const text = `${title} has unsaved changes, and opening ${next} replaces it. Open it anyway?`;
+	const ask = tauri()?.dialog?.ask;
+	if (ask) return ask(text, { title: 'Hertzforge', okLabel: 'Open', cancelLabel: 'Keep Working' });
+	return globalThis.confirm?.(text) ?? false;
 }
 
 /** The last part of a path, for messages. */
@@ -44,6 +62,7 @@ interface TauriGlobals {
 	dialog?: {
 		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
+		ask?(text: string, options: { title?: string; okLabel?: string; cancelLabel?: string }): Promise<boolean>;
 	};
 	webview?: {
 		getCurrentWebview(): { onDragDropEvent(handler: (event: DragDropEvent) => void): Promise<() => void> };

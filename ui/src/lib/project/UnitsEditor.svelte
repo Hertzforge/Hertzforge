@@ -1,7 +1,6 @@
 <script lang="ts">
 	/**
-	 * Declare the units a file did not state, by channel, beside the data rather than over it (Visual
-	 * Dynamics' Imported Units pane). Each row is a channel, or the object itself; an FRF's response
+	 * Declare the units a file did not state, by channel, beside the data rather than over it. Each row is a channel, or the object itself; an FRF's response
 	 * and reference channels are two tables. The choices are a shortlist: any unit Hertzforge reads
 	 * can be typed.
 	 */

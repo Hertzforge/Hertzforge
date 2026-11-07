@@ -460,15 +460,6 @@ def _boundary(hexes):
     return faces[pick], owner[pick]
 
 
-def _outward(xyz, hexes, faces, face_hex):
-    """Each boundary face's unit normal, pointing out of its brick."""
-    a, b, c, d = (xyz[faces[:, m]] for m in range(4))
-    normal = np.cross(c - a, d - b)
-    normal /= np.linalg.norm(normal, axis=1)[:, None] + 1e-30
-    away = (a + b + c + d) / 4.0 - xyz[hexes[face_hex]].mean(axis=1)
-    return normal * np.sign(np.einsum('ij,ij->i', normal, away))[:, None]
-
-
 def _pillow(xyz, hexes, groups, size):
     """A layer of bricks under the skin: each surface node gets a twin
     `PILLOW_DEPTH` sizes in, toward the middle of the bricks it is a

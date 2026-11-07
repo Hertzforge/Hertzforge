@@ -41,8 +41,8 @@ export function withObjects(params: ParamDescriptor[], objects: ProjectObject[])
 
 /**
  * Whether a project tool has something to run on: every param filled from the project's objects
- * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does not is not shown, as Visual Dynamics
- * offers a verb only where it applies.
+ * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does
+ * not is not shown.
  */
 export function hasObjectsFor(params: ParamDescriptor[]): boolean {
 	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || p.default === '' || (p.options ?? []).length > 0);
@@ -169,6 +169,37 @@ export function withSettings(params: ParamDescriptor[], values: ParamValues, sou
 		const [group, field] = p.setting.split('.');
 		const held = source?.settings?.[group]?.[field];
 		if (held !== undefined && validate(p, held) === null) out[p.name] = held;
+	}
+	return out;
+}
+
+/**
+ * The params as the display system shows them: a `length` param in `unit`, for its unit and for
+ * '[m]' in its label; with none, an undefined geometry's numbers, no unit at all.
+ */
+export function withDisplayLengths(params: ParamDescriptor[], unit: string | null): ParamDescriptor[] {
+	return params.map((p) =>
+		p.length ? { ...p, unit: p.unit && unit ? unit : undefined, label: p.label.replace(' [m]', unit ? ` [${unit}]` : '') } : p
+	);
+}
+
+function roundedLength(value: number): number {
+	return Number(value.toPrecision(10));
+}
+
+/**
+ * What a form holds after the display system changed: each `length` param times `ratio`, the old
+ * unit in the new one, so it is the same length; a piece's id before its colon is not a length.
+ */
+export function rescaled(params: ParamDescriptor[], values: ParamValues, ratio: number): ParamValues {
+	const out = { ...values };
+	for (const p of params) {
+		if (!p.length) continue;
+		const held = out[p.name];
+		if (typeof held === 'number' && Number.isFinite(held)) out[p.name] = roundedLength(held * ratio);
+		else if (typeof held === 'string') {
+			out[p.name] = held.replace(/(\d+\s*:)|([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)/gi, (found, piece) => piece ?? String(roundedLength(Number(found) * ratio)));
+		}
 	}
 	return out;
 }

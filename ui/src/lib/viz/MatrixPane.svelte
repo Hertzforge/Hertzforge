@@ -89,7 +89,7 @@
 				}
 			}
 		}
-		// committed matches wear a red checker, as VD's grid marks them
+		// committed matches wear a red checker
 		for (const [r, c] of view.matched ?? []) {
 			if (r >= ROWS || c >= COLUMNS) continue;
 			const x = l.x0 + c * l.cellW;

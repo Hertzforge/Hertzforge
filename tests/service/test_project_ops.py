@@ -356,6 +356,151 @@ def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate
                                                   plate[other].num_shapes)
 
 
+def test_the_mac_op_reads_as_the_selection_does_for_sets_on_two_geometries():
+    from hertzforge import Project
+    from hertzforge.core import fem
+
+    def beam(ids):
+        model = fem.Model('beam')
+        material = fem.Material('al', youngs_modulus=70e9, density=2700, poissons_ratio=0.3)
+        for k, node in enumerate(ids):
+            model.add_node(node, k * 0.1, 0.0, 0.0)
+        model.add_chain(list(ids), material, fem.Section.rectangle('bar', 0.02, 0.01))
+        model.add_ground(ids[0], True)
+        return model
+
+    ids = list(range(1, 12))
+    project = Project()
+    for name, nodes in (('A', ids), ('Reversed', ids[::-1]), ('Offset', [i + 100 for i in ids])):
+        model = beam(nodes)
+        geometry = project.add(f'{name} Geometry', model.geometry())
+        project.link(geometry, project.add(name, model.eigensolution(num_modes=6, damping=0.01)))
+    for other in ('Reversed', 'Offset'):
+        (matrix, *_) = run(project, 'project.mac', first='A', second=other)
+        values = np.asarray(matrix['values'])
+        assert np.allclose(values, project.comparison_mac('A', other), atol=1e-5)
+        assert np.allclose(np.diag(values), 1.0, atol=1e-5)
+
+
+def test_one_mode_of_zero_does_not_stop_match_modes():
+    from hertzforge import Project
+    from hertzforge.core.shapes import ShapeSet
+
+    dofs = ['1Z+', '2Z+', '3Z+']
+    project = Project()
+    project.add('A', ShapeSet([10, 20], [0.01, 0.01], dofs, [[1, 1, 1.0], [1, 0, -1.0]]))
+    project.add('B', ShapeSet([0, 10, 20], [0, 0.01, 0.01], dofs,
+                              [[0, 0, 0.0], [1, 1, 1.0], [1, 0, -1.0]]))
+    from hertzforge.service.server import OPERATIONS as EVERY
+
+    op = next(op for op in EVERY if op.id == 'project.match_modes')
+    op.run(project, op.resolve({'first': 'A', 'second': 'B', 'threshold': 0.7, 'name': 'M'},
+                               objects={name: 'shape_set' for name in project},
+                               verbs={name: projects.verbs_of(project, name) for name in project}))
+    assert project['M'].pairs == [[0, 1], [1, 2]]
+    assert project['M'].macs == pytest.approx([1.0, 1.0])
+
+
+def test_an_frf_with_physical_references_expands_after_its_transform():
+    from hertzforge import Project
+    from hertzforge.core.data import Frf
+    from hertzforge.core.shapes import ShapeSet
+
+    dofs = ['1X+', '2X+', '3X+', '4X+']
+    phi = np.array([[1, 1, 1, 1.0], [1, 0.5, -0.5, -1]]) * 0.3
+    shapes = ShapeSet([10, 20], [0.01, 0.01], dofs, phi, mass_unit='kg')
+    lines = np.linspace(1, 50, 200)
+    measured = shapes.synthesize_frf(lines, dofs, ['1X+'] * 4, power=2)
+    project = Project()
+    project.add('Set', shapes)
+    project.add('H', Frf(lines, measured, response_dof=dofs, reference_dof=['1X+'] * 4,
+                         ordinate_dim=['acceleration/force'] * 4))
+    modal = project.transform('H', 'Set')
+    assert set(project[modal].reference_dof) == {'1X+'} and project[modal].response_dof[0] == 'M1'
+    assert 'expand' in projects.verbs_of(project, modal)
+    assert 'transform' not in projects.verbs_of(project, modal)
+    back = project.expand(modal, 'Set')
+    assert np.allclose(project[back].ordinate, measured)
+
+
+def _cantilever(defined=True):
+    """A rod on a ground point, its groups given their properties."""
+    from hertzforge.core import fem
+    from hertzforge.core.geometry import Geometry
+
+    material = fem.Material('al', youngs_modulus=70e9, density=2700, poissons_ratio=0.3)
+    section = fem.Section.rod('rod', 0.01)
+    model = fem.Model('beam')
+    for k in range(11):
+        model.add_node(k + 1, k * 0.1, 0, 0)
+    model.add_chain(range(1, 12), material, section)
+    built = model.geometry()
+    geometry = built if defined else Geometry(
+        built.node_id, built.node_xyz, elem_id=built.elem_id, elem_type=built.elem_type,
+        elem_conn=built.elem_conn, elem_group=built.elem_group, group_id=built.group_id,
+        group_name=built.group_name)
+    geometry.group_properties = {int(group): fem.GroupProperties(material, section=section)
+                                 for group in geometry.group_id}
+    point = geometry.add_group('ground')
+    geometry.add_elements([[1]], [161], [point])
+    geometry.group_properties[point] = fem.GroupProperties(ground=True)
+    return geometry
+
+
+def test_a_top_frequency_below_every_mode_is_refused_with_the_lowest():
+    from hertzforge import Project
+
+    project = Project()
+    project.add('G', _cantilever())
+    with pytest.raises(ProtocolError, match='no mode up to 1 Hz; its lowest is at'):
+        run(project, 'project.solve_modes', source='G', maximum_frequency=1.0)
+    assert [name for name in project] == ['G']
+
+
+def test_a_model_with_no_length_unit_has_no_mass_unit():
+    from hertzforge import Project
+
+    project = Project()
+    bare = _cantilever(defined=False)
+    project.add('Bare', bare)
+    assert not bare.units_defined
+    run(project, 'project.solve_modes', source='Bare', num_modes=2, maximum_frequency=0)
+    assert project['Bare Modes'].mass_unit is None
+
+
+def test_a_complex_set_is_refused_on_the_rows_it_would_refuse_when_run():
+    from hertzforge import Project
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.core.shapes import ShapeSet
+    from hertzforge.service.action_table import action_table
+
+    dofs = ['1X+', '2X+']
+    project = Project()
+    project.add('C', ShapeSet([10.0], [0.01], dofs, [[1.0 + 1j, 1.0]], modal_mass=[2j]))
+    project.add('Real', ShapeSet([10.0], [0.01], dofs, [[1.0, 1.0]]))
+    project.add('Run', TimeHistory(np.arange(4.0), np.ones((2, 4)), response_dof=dofs,
+                                   ordinate_dim=['force'] * 2))
+    rows = {row['id']: row for row in action_table(project, ['Run', 'C'], {})['columns'][0]['rows']}
+    for op_id in ('project.transform', 'project.compute_modal_responses'):
+        assert not rows[op_id]['ready'] and 'complex' in rows[op_id]['reason']
+    assert 'transform' in projects.verbs_of(project, 'Run'), 'through the real set'
+    project.remove('Real')
+    assert 'transform' not in projects.verbs_of(project, 'Run')
+
+
+def test_the_rigid_form_says_the_mass_properties_are_about_the_cg():
+    assert 'the reference point must be the CG' in next(
+        param.label for param in OPS['project.generate_rigid_body_modes'].params
+        if param.name == 'normalize')
+
+
+def test_ids_read_back_in_order_from_a_set_and_as_named_from_a_list():
+    from hertzforge.service.ops_model import _id_text
+
+    assert _id_text({8, 1}) == '1, 8'
+    assert _id_text([8, 1]) == '8, 1'
+
+
 def test_mac_without_a_geometry_is_the_matrix_alone(plate):
     run(plate, 'project.compute_frfs', method='H1')
     plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
@@ -378,13 +523,14 @@ def test_plot_leaves_out_records_of_another_quantity_and_says_so(plate):
 
 
 @pytest.mark.parametrize(('text', 'expected'), [('', list(range(8))), ('2', [1]),
-                                                ('1-3, 3, 7', [0, 1, 2, 6])])
+                                                ('1-3, 3, 7', [0, 1, 2, 6]), ('5-3', [2, 3, 4]),
+                                                ('1 2', [0, 1])])
 def test_records_are_named_from_one(text, expected):
     from hertzforge.service.ops_project import chosen_records
     assert chosen_records(text, 13) == expected
 
 
-@pytest.mark.parametrize('text', ['0', '14', '3-x', '5-2'])
+@pytest.mark.parametrize('text', ['0', '14', '3-x', '1.5'])
 def test_records_outside_the_object_are_refused(text):
     from hertzforge.service.ops_project import chosen_records
     with pytest.raises(ProtocolError) as error:

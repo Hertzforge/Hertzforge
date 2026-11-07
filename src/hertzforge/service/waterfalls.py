@@ -1,7 +1,7 @@
 """One data object as a `waterfall` view, for any operation that offers one.
 
 The numbers are `hertzforge.drawing.viz.waterfall`'s, the arithmetic of
-Visual Dynamics' 3-D data view, asked for values rather than log10
+the 3-D data view, asked for values rather than log10
 exponents because the shell takes the log itself. Values are SI, as the
 service's other views are.
 """
@@ -88,10 +88,10 @@ def waterfall_view(title: str, data: Any, page: int = 1,
     history is peak-decimated to the point budget, a PSD keeps every tread
     of its steps, and a specification fills in along its power law.
     `component` applies to complex frequency data: a signed part or the
-    phase reads on a linear axis, as in VD. One quantity is drawn, the
+    phase reads on a linear axis. One quantity is drawn, the
     group `quantity` names (`quantity_key`) or else the largest; when the
     object has more than one, the view lists them as `quantities` for the
-    shell to offer, as Visual Dynamics' quantity box does. An object with
+    shell to offer. An object with
     no records is refused."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import (

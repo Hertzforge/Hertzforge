@@ -254,7 +254,7 @@ class SpecificationDraft:
                     'the shape set has no mass unit, so its modal '
                     'coordinates have no unit and a specification written '
                     'at them would be in nothing — declare the set\'s mass '
-                    'unit first (Define Units)')
+                    'unit first')
             dims.append(dim)
         return cls.at_dofs([names[k] for k in which], dims)
 
@@ -414,11 +414,10 @@ class SpecificationDraft:
             has no autospectrum, a channel's units are not declared, or
             fewer than two lines have every autospectrum positive.
         """
-        from .data import channel_quantities
+        from .data import autospectrum, channel_quantities
 
         references = spec.reference_dof or list(spec.response_dof)
-        autos = [i for i in range(spec.num_records)
-                 if references[i] == spec.response_dof[i]]
+        autos = [i for i in range(spec.num_records) if autospectrum(spec, i)]
         if channels is not None:
             wanted = set(channels)
             missing = wanted - {spec.response_dof[i] for i in autos}
@@ -440,7 +439,7 @@ class SpecificationDraft:
             raise ValueError(
                 f'{len(undeclared)} of its channels ({shown}) have no declared '
                 'units, so the sheet cannot tell what its levels are; declare '
-                'them in the Imported Units pane, then press Edit again')
+                'them, then edit the specification again')
         notes = []
         # a sheet holds positive levels at positive frequencies; a
         # controller's target starts at 0 Hz and rolls off to nothing at
@@ -1813,14 +1812,13 @@ class SpecificationDraft:
 
         Raises `ValueError` when the sheet spans several specifications.
         """
-        from .data import Specification
+        from .data import Specification, autospectrum
 
         if len(set(self.sources)) > 1:
             raise ValueError('the sheet spans several specifications; '
                              'preview each with for_source')
         spec = self._copy(sources=[]).make()
-        autos = [i for i in range(spec.num_records)
-                 if spec.response_dof[i] == spec.reference_dof[i]]
+        autos = [i for i in range(spec.num_records) if autospectrum(spec, i)]
         preview = Specification(
             spec.abscissa, np.real(spec.ordinate[autos]),
             response_dof=[spec.response_dof[i] for i in autos],

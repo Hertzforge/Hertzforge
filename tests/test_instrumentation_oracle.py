@@ -5,7 +5,7 @@ three problems (`generate_instrumentation_oracle.py` in the private
 generators repository; README.md beside the data says why the numbers
 travel and the code never does). sdynpy removes one candidate at a time
 by the same measure `core.instrumentation.effective_independence` uses,
-so where Visual Dynamics also removes one at a time the two must choose
+so where Hertzforge also removes one at a time the two must choose
 the same sensors. Where it thins in batches, the choice may differ, and
 the information kept is what is compared.
 """
@@ -46,7 +46,7 @@ def test_uni_axial_points_on_a_plate_are_chosen_as_sdynpy_chooses_them(frozen):
 
 
 def test_thinned_in_batches_the_information_kept_is_no_less(frozen):
-    """315 points for 12 sensors: Visual Dynamics removes a tenth at a time
+    """315 points for 12 sensors: Hertzforge removes a tenth at a time
     until 48 remain, sdynpy one at a time throughout. The sets differ;
     the determinant of the information they keep is within 1% of
     sdynpy's or above it (12.857 against 12.847 as frozen)."""

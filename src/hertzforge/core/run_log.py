@@ -18,10 +18,9 @@ read is skipped and named the same way, and the rest is read.
 **Versions.** `FORMAT_VERSION` is the newest version this build reads,
 and the one it writes. Each version has its own reader, so a later
 build reads every earlier version, and a file from a newer version is
-refused with a message to update. Visual Dynamics' run log (`.vdlog`,
-stamped `visualdynamics-run-log`) is the same format under another
-stamp, so its files are read by the same readers, and a log Visual
-Dynamics started takes further entries in its own file, under its own
+refused with a message to update. An older `.vdlog` file is the same
+format under another stamp (`VDLOG_FORMAT`), so its files are read by the
+same readers, and an older log takes further entries in its own file, under its own
 stamp, rather than splitting a test's record across two files. While
 Hertzforge is an alpha
 the format may still change; from the first release that is not an
@@ -83,13 +82,13 @@ from . import data_index, findings
 #: the extension of a run log
 SUFFIX = '.hflog'
 
-#: the extension of a run log Visual Dynamics wrote
+#: the extension of an older run log
 VDLOG_SUFFIX = '.vdlog'
 
 #: the stamp on a run log's first line, which says what the file is
 FORMAT = 'hertzforge-run-log'
 
-#: the stamp on a run log Visual Dynamics wrote: the same format, whose
+#: the stamp on an older run log: the same format, whose
 #: versions are numbered the same way
 VDLOG_FORMAT = 'visualdynamics-run-log'
 
@@ -359,8 +358,7 @@ class Header:
     title: str = ''
     login: str = ''
     computer: str = ''
-    #: the stamp the log carries: `FORMAT`, or `VDLOG_FORMAT` for a log
-    #: Visual Dynamics started
+    #: the stamp the log carries: `FORMAT`, or `VDLOG_FORMAT` for an older log
     format: str = FORMAT
 
 
@@ -1225,15 +1223,14 @@ class RunLog:
                               'not its header)') from None
         if not isinstance(header_raw, dict) or header_raw.get('format') not in (
                 FORMAT, VDLOG_FORMAT):
-            raise RunLogError(f'{path} is not a run log (no {FORMAT!r} or '
-                              f'{VDLOG_FORMAT!r} stamp on its first line)')
+            raise RunLogError(f'{path} is not a run log (no {FORMAT!r} stamp on '
+                              'its first line)')
         version = header_raw.get('version')
         if isinstance(version, bool) or not isinstance(version, int):
             raise RunLogError(f'{path}: its header has no format version')
         if version > FORMAT_VERSION:
             raise RunLogError(
-                f'{path} was written by a newer '
-                f'{"Hertzforge" if header_raw["format"] == FORMAT else "Visual Dynamics"} '
+                f'{path} was written by a newer version '
                 f'(run log format {version}; this build reads up to '
                 f'{FORMAT_VERSION}). Update Hertzforge to open it.')
         if version not in _READERS:

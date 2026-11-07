@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Fitting modes by hand, as Visual Dynamics' fitting screen does: the bar reads left to right as
+	 * Fitting modes by hand: the bar reads left to right as
 	 * the loop does. Find Mode puts the cursor on the most prominent residual peak inside the
 	 * frequencies on screen (the zoom is the search band), Fit Mode previews the mode there so its
 	 * dashed synthesis can be judged against the measured CMIF, and Confirm Mode adds it. A click on
@@ -28,7 +28,8 @@
 	/** Where the half-power reading crosses, drawn beside the cursor. */
 	const crossings = $derived([s?.half_power?.low, s?.half_power?.high].filter((x): x is number => x !== null && x !== undefined));
 
-	/** The plot's whole height is the damping: 0.01 % at the top, 10 % at the bottom, log-linear between, as in Visual Dynamics. */
+	/** The plot's whole height is the damping: 0.01 % at the top, 10 % at the bottom, log-linear
+	 * between. */
 	const DAMPING_TOP = 1e-4;
 	const DAMPING_BOTTOM = 0.1;
 	let dragged = $state<number | null>(null);
@@ -231,7 +232,7 @@
 		padding: 2px 6px 2px 0;
 	}
 
-	/* a row's damping and description are typed in place, as in Visual Dynamics' fit table */
+	/* a row's damping and description are typed in place */
 	.cell {
 		width: 100%;
 		padding: 1px 4px;

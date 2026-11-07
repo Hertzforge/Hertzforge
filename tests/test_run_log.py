@@ -324,7 +324,7 @@ def test_a_file_that_is_not_a_run_log_is_refused(tmp_path):
         RunLog.read(other)
     other.write_text('{"format": "something else"}\n')
     with pytest.raises(RunLogError,
-                       match="no 'hertzforge-run-log' or 'visualdynamics-run-log' stamp"):
+                       match="no 'hertzforge-run-log' stamp"):
         RunLog.read(other)
     other.write_text('{"format": "hertzforge-run-log", "ver')
     with pytest.raises(RunLogError, match='first line is torn'):
@@ -604,7 +604,7 @@ def test_a_mirror_is_never_the_log_itself(tmp_path):
 
 
 CORPUS = fixture_path('hflog_corpus')
-#: the run log Visual Dynamics froze, which this build reads too
+#: the frozen older run log, which this build reads too
 VDLOG_CORPUS = fixture_path('vdlog_corpus')
 FROZEN = sorted(glob.glob(str(CORPUS) + '/*.hflog')
                 + glob.glob(str(VDLOG_CORPUS) + '/*.vdlog'))
@@ -656,8 +656,8 @@ def test_version_1_values_are_intact(path):
     assert log.chains() == ['log', 'test 1', 'test 2']
 
 
-def test_a_visual_dynamics_log_takes_entries_under_its_own_stamp(tmp_path):
-    """A log Visual Dynamics started stays one file: entries added here go
+def test_an_older_log_takes_entries_under_its_own_stamp(tmp_path):
+    """An older log stays one file: entries added here go
     on its chains, its header is not rewritten, and it still verifies."""
     path = tmp_path / 'started.vdlog'
     shutil.copy(os.path.join(str(VDLOG_CORPUS), 'v1.vdlog'), path)
@@ -677,7 +677,7 @@ def test_a_log_from_a_newer_version_is_refused_with_a_message_to_update(
     lines = lines_of(path)
     lines[0] = lines[0].replace(b'"version": 1', b'"version": 2')
     write_lines(path, lines)
-    with pytest.raises(RunLogError, match='newer Hertzforge.*format 2; '
+    with pytest.raises(RunLogError, match='newer version.*format 2; '
                        'this build reads up to 1.*Update'):
         RunLog.read(path)
     lines[0] = lines[0].replace(b'"version": 2', b'"version": 0')

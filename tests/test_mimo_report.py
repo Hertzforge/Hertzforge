@@ -120,11 +120,17 @@ def _project(*, frf=True, specification='cross', matrix=True, dead=None,
         project.compute_cpsds('Run')
     else:
         project.compute_psds('Run')
+    # the estimators refuse a sample that is not a number, so what the
+    # page is shown of such a record comes from elsewhere, not a number
+    # at any line
+    clean = _history(dead, None) if gap else history
     if frf:
-        project.add('FRF', history.compute_frfs(references=DRIVES,
-                                                method='H1'))
+        estimate = clean.compute_frfs(references=DRIVES, method='H1')
+        if gap:
+            estimate.ordinate = np.full_like(estimate.ordinate, np.nan)
+        project.add('FRF', estimate)
     project.add('Coherence',
-                history.compute_multiple_coherence(references=DRIVES))
+                clean.compute_multiple_coherence(references=DRIVES))
     if specification is not None:
         project.add('Specification',
                     _specification(full, specification == 'cross'))

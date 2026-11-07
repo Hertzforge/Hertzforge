@@ -192,6 +192,7 @@
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
+        "note": {"type": "string"},
         "gizmo": {
           "type": "object", "required": ["origin", "axes", "slide", "turn"],
           "properties": {
@@ -378,7 +379,8 @@
         },
         "options_from": {"type": "string", "pattern": "^(objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
         "in_view": {"type": "boolean"},
-        "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
+        "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"},
+        "length": {"type": "boolean"}
       }
     },
     "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
@@ -511,7 +513,7 @@
       "properties": {
         "id": {"type": "string"},
         "verb": {"type": "string"},
-        "kind": {"enum": ["default", "reading", "act", "self"]},
+        "kind": {"enum": ["default", "run", "self"]},
         "ready": {"type": "boolean"},
         "reason": {"type": "string"},
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
@@ -616,7 +618,11 @@
     },
     "projectRenameParams": {
       "type": "object", "required": ["name", "to"], "additionalProperties": false,
-      "properties": {"name": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "to": {"type": "string", "minLength": 1},
+        "index": {"type": "integer", "minimum": 0}
+      }
     },
     "projectRemoveParams": {
       "type": "object", "required": ["names"], "additionalProperties": false,
@@ -634,9 +640,25 @@
       "type": "object", "required": ["name", "html"],
       "properties": {"name": {"type": "string"}, "html": {"type": "string"}}
     },
+    "reportHeld": {
+      "type": "object", "required": ["owed", "index"],
+      "properties": {
+        "owed": {"type": "array", "items": {"type": "string"}},
+        "index": {"type": "array", "items": {
+          "type": "object", "required": ["name", "status"],
+          "properties": {"name": {"type": "string"}, "status": {"type": "string"}}
+        }}
+      }
+    },
     "reportExportResult": {
+      "allOf": [{"$ref": "#/$defs/reportHeld"}],
       "type": "object", "required": ["path"],
-      "properties": {"path": {"type": "string"}}
+      "properties": {"path": {"type": ["string", "null"]}, "note": {"type": "string"}}
+    },
+    "reportPrintResult": {
+      "allOf": [{"$ref": "#/$defs/reportHeld"}],
+      "type": "object", "required": ["html"],
+      "properties": {"html": {"type": ["string", "null"]}}
     },
     "reportField": {
       "type": "object", "required": ["field", "label", "value", "options"],

@@ -17,8 +17,8 @@ alter behavior (a cache size, `>` against `>=` where equality never
 happens). Telling which is the reading of the code; the tool only
 finds where to read.
 
-It is AGENTS.md's "falsify every fix" run over a whole module rather
-than one line (2026-10-10, the first pass: srs.py went from 51 of 58
+It is "falsify every fix" run over a whole module rather than one line
+(2026-10-10, the first pass: srs.py went from 51 of 58
 mutants killed to 58, and found its coefficients checked only through
 a DC gain that is exact whatever the damped frequency is).
 

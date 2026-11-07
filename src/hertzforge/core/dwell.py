@@ -287,31 +287,12 @@ def _crossing(x: np.ndarray, y: np.ndarray, level: float,
     return float(x[k - 1] + share * (x[k] - x[k - 1]))
 
 
-def default_channel(history: Any,
-                    specification: SineSweepSpecification) -> str:
-    """The channel `read_dwell` reads when none is named: the first the
-    specification does not control, since a dwell's build-up is a
-    response's (the control is held at its level by the controller, and
-    barely builds), else the first control channel. Raises ValueError
-    when the recording carries neither.
-
-    Parameters
-    ----------
-    history : TimeHistory
-        The recording.
-    specification : SineSweepSpecification
-        Whose control channels are passed over.
-
-    Returns
-    -------
-    str
-        The channel's DOF.
-    """
-    return str(history.response_dof[_default_row(history, specification)])
-
-
 def _default_row(history: Any, specification: SineSweepSpecification) -> int:
-    """`default_channel`'s row."""
+    """The row `read_dwell` reads when none is named: the first channel
+    the specification does not control, since a dwell's build-up is a
+    response's (the control is held at its level by the controller, and
+    barely builds), else the first control channel. Raises ValueError when
+    the recording carries neither."""
     dofs = [str(dof) for dof in history.response_dof]
     controlled = {str(dof) for dof in specification.response_dof}
     for row, dof in enumerate(dofs):

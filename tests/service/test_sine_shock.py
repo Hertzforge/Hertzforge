@@ -331,7 +331,7 @@ def test_a_shock_window_is_typed_added_and_removed():
 
 
 def test_the_shock_windows_drag_on_the_record_and_on_its_stage(validate):
-    """Visual Dynamics' shock windows: spans on the record and on the 3-D
+    """The shock windows: spans on the record and on the 3-D
     stage, each dragged to move it through Shock Window."""
     from .conftest import wire_views
 

@@ -24,13 +24,6 @@ from hertzforge.core.report import (
     sine_template,
 )
 
-STRESS = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), 'stressdata', 'plate')
-
-needs_stress = pytest.mark.skipif(
-    not os.path.exists(os.path.join(STRESS, 'mixed.nc4')),
-    reason='stressdata/plate/mixed.nc4 not generated')
-
 
 def _labels(project_type):
     return [name for name, *_rest in project_expectations(project_type)]

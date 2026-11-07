@@ -40,30 +40,6 @@ def part() -> Geometry:
                     length_unit='m')
 
 
-def actors_of(plotter):
-    """(dataset, actor) for every actor drawn, the dataset being what
-    the mapper holds."""
-    return [(actor.mapper.dataset, actor)
-            for actor in plotter.renderer.actors.values()
-            if getattr(actor, 'mapper', None) is not None]
-
-
-def skin_actor(plotter):
-    for dataset, actor in actors_of(plotter):
-        if dataset.n_faces == 24:
-            return actor
-    raise AssertionError('no skin of 24 faces drawn')
-
-
-def verts_drawn(plotter) -> set[int]:
-    """The node rows drawn as points."""
-    rows = set()
-    for dataset, _actor in actors_of(plotter):
-        if dataset.n_verts:
-            rows.update(int(v) for v in np.asarray(dataset.verts).reshape(-1, 2)[:, 1])
-    return rows
-
-
 def test_element_cells_still_hands_the_html_export_one_set_of_faces():
     faces, _lines, _points = element_cells(part())
     assert sum(len(polys) for polys in faces.values()) == 25

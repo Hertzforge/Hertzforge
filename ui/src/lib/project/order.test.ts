@@ -85,4 +85,9 @@ describe('a solid dragged among its siblings', () => {
 		expect(reordered([1, 2, 3], 1, null)).toEqual([2, 3, 1]);
 		expect(reordered([1, 2, 3], 2, 3)).toEqual([1, 2, 3]);
 	});
+
+	it('stays where it is when let go on its own row, or on the lower half of the row above', () => {
+		expect(reordered([1, 2, 3], 2, 2)).toEqual([1, 2, 3]);
+		expect(reordered([1, 2, 3, 4], 1, 1)).toEqual([1, 2, 3, 4]);
+	});
 });

@@ -76,12 +76,6 @@ def cell_text(value: Any, decimals: int | None) -> str:
     return str(value) if decimals is None else f'{value:.{decimals}f}'
 
 
-def mode_heading(mode: int) -> str:
-    """The column heading of mode `mode` (from 0) in a table of shape
-    values: 'M1' for the first."""
-    return f'M{mode + 1}'
-
-
 def shape_value_text(value: Any) -> str:
     """One shape value as text, to six significant figures; a complex
     one as its real and imaginary parts, '0.5-0.25j'."""

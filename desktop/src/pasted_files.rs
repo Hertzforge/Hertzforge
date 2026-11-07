@@ -1,5 +1,5 @@
 //! The files on the macOS clipboard, by path: a webview's paste gives a copied file's contents
-//! at most, and Visual Dynamics imports files pasted from Finder the way it imports them dropped.
+//! at most, and files pasted from Finder are imported the way they are imported when dropped.
 
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
 use objc2_foundation::NSURL;

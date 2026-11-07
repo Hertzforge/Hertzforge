@@ -17,9 +17,9 @@ from conftest import fixture_path
 import hertzforge
 from hertzforge.core.report import (
     Report,
+    _whole_project_series,
     dof_quantities,
     modal_template,
-    quantity_dofs,
     series_dof_quantities,
     series_quantity_dofs,
 )
@@ -35,14 +35,18 @@ def project(survey):
             'Shape Set': shapes, 'FRF': frfs}
 
 
+def _whole_project_dofs(objects, quantity):
+    return series_quantity_dofs(_whole_project_series(objects), quantity)
+
+
 def test_quantities_and_dofs_come_from_the_whole_project(project):
     assert dof_quantities(project) == ['acceleration', 'force']
     frf = project['FRF']
-    assert quantity_dofs(project, 'force') == sorted(
+    assert _whole_project_dofs(project, 'force') == sorted(
         set(frf.reference_dof)), 'an FRF per force names its force DOFs'
-    accelerations = quantity_dofs(project, 'acceleration')
+    accelerations = _whole_project_dofs(project, 'acceleration')
     assert set(accelerations) == set(frf.response_dof)
-    assert quantity_dofs(project, 'voltage') == []
+    assert _whole_project_dofs(project, 'voltage') == []
 
 
 def test_a_record_pick_narrows_the_dofs(project):
@@ -73,8 +77,7 @@ def test_a_dofs_scene_carries_labeled_arrows(project):
     assert len(payload['blocks']) == 2, (
         'no voltage anywhere, so that scene renders nothing')
     force, response = payload['blocks']
-    assert [a['label'] for a in force['arrows']] == quantity_dofs(
-        project, 'force')
+    assert [a['label'] for a in force['arrows']] == _whole_project_dofs(project, 'force')
     geometry = project['Geometry']
     rows = {int(n): i for i, n in enumerate(geometry.node_id)}
     axis_color = {'X': '#e5534b', 'Y': '#3fb950', 'Z': '#4c92d9'}

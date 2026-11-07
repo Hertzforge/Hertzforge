@@ -4,8 +4,7 @@
 The pairing — the second mode phase-aligned to the first, through the
 projection when the two sets live on different geometries — the caption
 and the opacities are one implementation each, shared by the window,
-the report's overlay block and these calls (PLAN.md, "Saving an
-animation").
+the report's overlay block and these calls.
 """
 
 from __future__ import annotations

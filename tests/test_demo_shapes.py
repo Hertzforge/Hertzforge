@@ -74,8 +74,8 @@ def test_the_guides_tetrahedra_are_as_the_table_says(key):
     of fitting each and are left to the tool that makes the table: the
     public runner's hour was not enough for both. `guide`: the three
     together are 11 CPU-minutes here and 17 minutes of the public
-    runner's demo job, so CI runs them on main and weekly, not on every
-    pull request (2026-10-28)."""
+    runner, so CI's guide job runs them weekly, not on every pull
+    request."""
     got = shapes.mesh(shapes.SHAPES[key](), 'tetras')
     # the worst on the round shapes is a flat one on a convex wall,
     # 0.02 here and 0.0002 on the public runner (the triangulation

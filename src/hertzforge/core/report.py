@@ -642,11 +642,6 @@ def dof_quantities(objects: Mapping[str, Any]) -> list[str]:
     return series_dof_quantities(_whole_project_series(objects))
 
 
-def quantity_dofs(objects: Mapping[str, Any], quantity: str) -> list[str]:
-    """Every DOF in the whole project measured as `quantity`."""
-    return series_quantity_dofs(_whole_project_series(objects), quantity)
-
-
 def dofs_source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) -> list[str]:
     """The data objects a DOFs scene could read its arrows from.
 
@@ -742,8 +737,7 @@ def takes_shapes(block: Mapping[str, Any]) -> bool:
 # 2026-09-24). Until then a mixed run took the random type and carried
 # the sine half beside it. It made one combined report until
 # 2026-10-05, and makes two since: a random report and a sine report,
-# each read the way its own test is (Visual Dynamics' PLAN.md, "Random and sine: two
-# reports").
+# each read the way its own test is.
 PROJECT_TYPES = ('Modal Test', 'Random Vibration', 'Transient', 'Shock',
                  'Sine Sweep', 'Random and Sine', 'System ID')
 # the templates a typed project's Generate Report makes, in order —

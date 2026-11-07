@@ -16,12 +16,14 @@ from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .mode_pairs import translations
+from .parsing import parse_picks
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
 #: the data objects a waterfall draws, by kind
 DATA_KINDS = ('time_history', 'psd', 'frf', 'coherence', 'multiple_coherence',
-              'spectrum', 'srs', 'specification')
+              'spectrum', 'srs', 'specification', 'shock_specification',
+              'transient_specification')
 
 DATA = Param('data', 'Data', 'enum', options_from='objects:' + '|'.join(DATA_KINDS))
 COMPONENT = Param('component', 'Component', 'enum', default='magnitude',
@@ -58,24 +60,12 @@ def chosen_records(text: str, count: int) -> list[int]:
     shows them; the first `FIRST_RECORDS` when `text` is blank."""
     if not text.strip():
         return list(range(min(count, FIRST_RECORDS)))
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a record number or a range such as '
-                          '3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'records run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return list(dict.fromkeys(out))
+    return parse_picks(text, count, 'record')
 
 
 def plot(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plot`: chosen records of a data object as curves on one
-    plot, as Visual Dynamics' data pane draws the records picked in the
-    tree. Records of another quantity than the first are left out, since
+    plot. Records of another quantity than the first are left out, since
     they do not share an axis; the view's title says how many."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
@@ -132,6 +122,10 @@ def _source(verb: str, label: str = 'Source') -> Param:
     return Param('source', label, 'enum', options_from='verb:' + verb)
 
 
+def _zero_is_unset(value: float) -> float | None:
+    return float(value) or None
+
+
 def _verb(verb: str, **fixed: Any) -> Any:
     """An operation's run that calls the core verb on `source` with the
     other params as its keywords, and draws what it added. A param named
@@ -154,6 +148,10 @@ Q = Param('q', 'Q', 'number', default=10.0, min=0.5, step=1.0)
 SRS_KIND = Param('kind', 'Peak', 'enum', default='maximax', options=(
     Option('maximax', 'Maximax'), Option('positive', 'Positive'),
     Option('negative', 'Negative')))
+SRS_LOW = Param('low', 'Lowest line, 0 for the record\'s band', 'number', default=0.0,
+                unit='Hz', min=0.0, step=10.0)
+SRS_HIGH = Param('high', 'Highest line, 0 for the record\'s band', 'number', default=0.0,
+                 unit='Hz', min=0.0, step=100.0)
 BANDS = Param('per_octave', 'Bands per octave', 'enum', default=6, options=tuple(
     Option(n, label) for n, label in ((1, 'Full octave'), (3, 'Third octave'),
                                       (6, 'Sixth octave'), (12, 'Twelfth octave'),
@@ -164,7 +162,10 @@ KEEP_DIAGONAL = Param('keep_diagonal', 'Keep the diagonal', 'boolean', default=T
 def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.detect_shocks`: mark the shocks found on a time history
     (`Project.detect_shocks`), which Compute SRS then reads."""
+    from .ops_sine_shock import _editable
+
     source = params['source']
+    _editable(project[source])
     try:
         count = project.detect_shocks(source)
     except ValueError as error:
@@ -173,20 +174,26 @@ def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
         v.row('Shocks marked', float(count), '', 'info')])]
 
 
+SINE_SPECIFICATION = Param('specification', 'Specification', 'enum', default='',
+                           options_from='objects:sine_sweep_specification')
+
+
 def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.extract_sine`: the levels of each tone of the project's
-    sine specification found in a time history (`Project.extract_sine`),
-    one sine-level set added per tone."""
+    """`project.extract_sine`: the levels of each tone of a sine
+    specification found in a time history (`Project.extract_sine`), one
+    sine-level set added per tone. The project's one specification when
+    none is picked."""
     try:
-        added = project.extract_sine(params['source'])
+        added = project.extract_sine(params['source'], params['specification'] or None)
     except ValueError as error:
         raise refused(str(error)) from None
+    from .show import _sine
+
     views = []
     for name in added:
-        view = waterfall_view(name, project[name])
-        view.pop('quantities', None)
-        view.pop('quantity', None)
-        views.append(view)
+        spec = project.provenance[name]['params']['specification']
+        drawn, _notes = _sine(project, spec, name, {}, {})
+        views += drawn
     return views
 
 
@@ -200,7 +207,7 @@ def convert_to_psd(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.convert_to_psd`). One written at breakpoints is read onto
     evenly spaced lines at the spacing given, or the one its sheet
     remembers (`core.author.read_onto_lines`); one on lines converts as it
-    is. Drawn with what Visual Dynamics' Convert pane gives: the
+    is. Drawn with what the Convert pane gives: the
     breakpoints, the range, the lines and the sheet's notes."""
     from hertzforge.core.author import read_onto_lines
 
@@ -333,7 +340,8 @@ def _inertia_param(term: str, default: float) -> Param:
 
 
 RIGID_POINT = tuple(_point_param(axis) for axis in 'xyz')
-RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia', 'boolean',
+RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia about the CG; '
+                        'the reference point must be the CG', 'boolean',
                         default=False, setting='rigid.normalize')
 RIGID_MASS = Param('mass', 'Mass', 'number', default=1.0, unit='kg', min=0.0,
                    setting='rigid.mass')
@@ -345,8 +353,8 @@ RIGID_KEEP = Param('keep', 'Add the shape set (else the preview)', 'boolean', de
 def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.generate_rigid_body_modes`: the six rigid-body shapes of a
     geometry about a point, and scaled by a mass and inertia about it when
-    asked (`Project.generate_rigid_body_modes`), as VD's Modes pane sets
-    them. Without `keep`, the shapes drawn and nothing added."""
+    asked (`Project.generate_rigid_body_modes`). Without `keep`, the shapes drawn and
+    nothing added."""
     name = params['source']
     geometry = project[name]
     point = tuple(float(params[axis]) for axis in 'xyz')
@@ -370,7 +378,7 @@ def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.solve_modes`: the normal modes of a geometry whose element
     groups have properties (`Project.solve_modes`), a number of them or all
-    up to a highest frequency, as Visual Dynamics' Modes pane asks."""
+    up to a highest frequency."""
     top = params['maximum_frequency']
     limit = {'maximum_frequency': top} if top > 0 else {'num_modes': params['num_modes']}
     return _added_shapes(project, lambda: project.solve_modes(
@@ -380,8 +388,7 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
     DOFs, or at a channel table's (`Project.project_onto_basis`), a node
-    matched within a share of the basis model's size, 2 % as Visual
-    Dynamics' dialog opens."""
+    matched within a share of the basis model's size, 2 %."""
     return _added_shapes(project, lambda: project.project_onto_basis(
         params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
 
@@ -395,15 +402,13 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
     """The MAC of `first`'s modes against `second`'s (`mac`), limited to
     the `row_modes` and `column_modes` picked (indices from 0) when
     given, its axes ticked with those modes' frequencies."""
-    from hertzforge.core.shapes import cross_mac
-
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
         raise refused(f'{first if not rows.num_shapes else second} has no modes')
     try:
-        values = rows.auto_mac() if first == second else cross_mac(rows, columns)
+        values = rows.auto_mac() if first == second else project.comparison_mac(first, second)
     except ValueError as error:
         raise refused(str(error)) from None
     row_modes = list(row_modes) if row_modes else list(range(rows.num_shapes))
@@ -423,16 +428,24 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
 
 def mac(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mac`: the Modal Assurance Criterion of one shape set's
-    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    modes against another's (`Project.comparison_mac`, so across two
+    geometries after projection, as the selection and Match Modes read it),
     or a set against itself. With a geometry the matrix selects the pair it
-    shows, the column mode overlaid on the row mode, as Visual Dynamics
-    shows two shape sets' MAC."""
+    shows, the column mode overlaid on the row mode."""
     return mac_views(project, params['first'], params['second'])
 
 
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mode_shapes`: a shape set's modes on a geometry."""
     return [_shape_view(project, params['shapes'], params['geometry'])]
+
+
+def compute_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.compute_spectra`, the view saying its numbers are raw: under
+    an axis in the record's units a sine of 3 reads tens of thousands."""
+    views = _verb('compute_spectra')(project, params)
+    views[0]['z']['label'] += ', raw FFT: a sine of amplitude A on a line reads A·N/2'
+    return views
 
 
 def _derives(verb: str, title: str, summary: str, params: tuple = (),
@@ -496,15 +509,22 @@ VERB_OPERATIONS = (
              'The time history at a lower sample rate, a whole division of '
              'its own, through a zero-phase anti-alias filter.',
              (RATE, ANTI_ALIAS)),
-    _derives('compute_spectra', 'Compute Spectra',
-             'Linear spectra from a time history\'s averages.'),
+    Operation(
+        id='project.compute_spectra', title='Compute Spectra', workspace='signals',
+        summary='Raw linear spectra: each capture of a time history transformed whole, with '
+                'no window and no amplitude scaling, and averaged as a complex mean. A sine '
+                'of amplitude A on a line reads A times N over 2; the Amplitude Spectrum '
+                'reads amplitudes. The history\'s averaging is not read.',
+        params=(_source('compute_spectra'),), outputs=('waterfall',), run=compute_spectra),
     _derives('compute_cpsds', 'Compute CPSDs',
              'The cross-spectral matrix of a time history\'s channels, from '
              'its averages.', workspace='random'),
     _derives('compute_srs', 'Compute SRS',
              'Shock response spectra, one curve per channel per shock marked '
-             'on the history (detected first when none is marked).',
-             (SRS_PER_OCTAVE, Q, SRS_KIND), workspace='shock'),
+             'on the history (detected first when none is marked), over its own band '
+             'or the one asked for.',
+             (SRS_PER_OCTAVE, Q, SRS_KIND, SRS_LOW, SRS_HIGH), workspace='shock',
+             low=_zero_is_unset, high=_zero_is_unset),
     _derives('compute_multiple_coherence', 'Compute Multiple Coherence',
              'How much of each response the references explain, frequency by '
              'frequency.', workspace='random'),
@@ -532,7 +552,7 @@ VERB_OPERATIONS = (
         id='project.extract_sine', title='Extract Sine', workspace='sine',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
-        params=(_source('extract_sine'),), outputs=('waterfall',),
+        params=(_source('extract_sine'), SINE_SPECIFICATION), outputs=('waterfall',),
         run=extract_sine),
 )
 

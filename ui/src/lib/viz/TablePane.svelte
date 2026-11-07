@@ -4,7 +4,7 @@
 	 * that reads as a number sits at the right of its column. Copy puts the table on the clipboard
 	 * as tab-separated text, headings first, so it pastes into a spreadsheet.
 	 *
-	 * A table with `edit` behaves as Visual Dynamics' tables do, every one alike. A click selects a
+	 * Every table with `edit` behaves alike. A click selects a
 	 * cell, a drag or Shift a block, and the arrows move. Typing, Enter or a double-click opens the
 	 * cell; Enter commits and moves down, Tab across, Escape cancels. Typed with a block selected,
 	 * the value goes to every cell of it (Batch Edit). Delete clears the block. Cmd or Ctrl+C copies

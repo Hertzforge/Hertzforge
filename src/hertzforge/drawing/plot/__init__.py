@@ -1,4 +1,4 @@
-"""Drawing decisions from Visual Dynamics' `plot`: what a figure needs
+"""Drawing decisions for plots: what a figure needs
 to know, with none of the code that draws it."""
 
 from __future__ import annotations

@@ -154,6 +154,23 @@ _VOLUME_FAMILIES = {4: 'tetras', 10: 'tetras', 6: 'wedges', 15: 'wedges',
                     32: 'hexes', 5: 'pyramids', 13: 'pyramids'}
 
 
+def pen_up_runs(entries: Sequence[int]) -> list[list[int]]:
+    """The runs of a traceline's node list, in which 0 lifts the pen.
+
+    A file's traceline is one node list in which 0 moves without drawing;
+    a run of fewer than two nodes draws nothing and is left out.
+    """
+    runs, run = [], []
+    for entry in map(int, entries):
+        if entry == 0:
+            runs.append(run)
+            run = []
+        else:
+            run.append(entry)
+    runs.append(run)
+    return [r for r in runs if len(r) >= 2]
+
+
 def element_family(code: int) -> str:
     """Which family a 2412 element code belongs to.
 
@@ -667,8 +684,7 @@ class Geometry:
             or springs made when a model is built (`core.mates`).
     """
 
-    # No tracelines (2026-09-30): one storage for one drawn idea, Visual Dynamics' PLAN.md
-    # "Geometry by element family".
+    # No tracelines (2026-09-30): one storage for one drawn idea.
     dimension = 'length'
 
     def __init__(self, node_id: Ids, node_xyz: ArrayLike,
@@ -784,6 +800,11 @@ class Geometry:
         #: definitions the model builder makes links of, kept in step as
         #: nodes and element groups are renumbered, merged or deleted
         self.mates: list = []
+        #: {element group id: the solids Mesh Solids meshed into it}: a part meshed again
+        #: replaces this mesh, whatever the group or the solid has been renamed. An empty
+        #: tuple is a mesh whose solids have gone; a group absent is one from no solid, or
+        #: from a file written before this was kept, and is found by its name
+        self.group_solids: dict[int, tuple[int, ...]] = {}
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -1446,8 +1467,7 @@ class Geometry:
         -------
         bool
         """
-        # the one test, on screen and in every file (Visual Dynamics' PLAN.md "Geometry by
-        # element family")
+        # the one test, on screen and in every file
         group = int(group)
         if group in self.group_properties:
             return False
@@ -1784,6 +1804,10 @@ class Geometry:
         old = int(self.group_id[row])
         self.group_id[row] = group_id
         self.elem_group[self.elem_group == old] = group_id
+        if old != group_id:
+            for held in (self.group_properties, self.group_solids):
+                if old in held:
+                    held[group_id] = held.pop(old)
         self._mates_follow(groups={old: group_id})
 
     def renumber_coordinate_system(self, row: int, cs_id: int) -> None:
@@ -2614,6 +2638,7 @@ class Geometry:
         self.group_name = [name for name, k in zip(self.group_name, staying) if k]
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
+            self.group_solids.pop(group, None)
         self.group_id = self.group_id[staying]
         self._mates_follow(groups={group: None for group in wanted})
         return {'groups': removed, 'elements': len(doomed),
@@ -2650,6 +2675,10 @@ class Geometry:
         held = [self.group_properties.get(group) for group in ids]
         if any(other != held[0] for other in held[1:]):
             return ('the element groups differ in material, thickness or section')
+        # merged, a set's two sides would be one group, and its tie would be lost
+        joined = [m for m in self.mates if len(set(m.groups)) == 2 and set(m.groups) <= set(ids)]
+        if joined:
+            return f'mated surfaces {joined[0].name} join them: delete the set first'
         return None
 
     def merge_groups(self, group_ids: Ids) -> dict[str, int]:
@@ -2682,8 +2711,13 @@ class Geometry:
         self.elem_group[moved] = into
         keep = ~np.isin(self.group_id, list(others))
         self.group_name = [name for name, k in zip(self.group_name, keep) if k]
+        solids = {s for group in ids for s in self.group_solids.get(group, ())}
+        tied = any(group in self.group_solids for group in ids)
         for group in others:
             self.group_properties.pop(group, None)
+            self.group_solids.pop(group, None)
+        if tied:
+            self.group_solids[into] = tuple(sorted(solids))
         self.group_id = self.group_id[keep]
         self._mates_follow(groups={group: into for group in others})
         return {'into': into, 'groups': len(others),

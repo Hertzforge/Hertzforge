@@ -52,8 +52,8 @@ measurement's noise floor and would double the number of objects for
 something rarely looked at.
 
 The reader does not write `.nc4` files. A `.nc4` records a controller
-run, including hardware settings and environments, that Visual
-Dynamics does not hold, so a file written from here would describe a
+run, including hardware settings and environments, that this
+package does not hold, so a file written from here would describe a
 test that never happened (see docs/export.md). The one exception adds
 nothing of its own: `save_window` copies a run with its streams cut to
 a time window, and every other attribute, dimension and variable as
@@ -83,7 +83,8 @@ from ..core.data import (
     TransientSpecification,
 )
 from ..core.sine import SineSweepSpecification, SineTone
-from ..units import UNKNOWN, dimension_of, fold_unit_case, si_factor
+from ..units import UNKNOWN, dimension_of, fold_unit_case, si_transform
+from .stated_units import unit_problem
 
 # save_window, the one writer here, makes the same run shorter and
 # nothing else (Brandon, 2026-10-13: truncate a run and write it back
@@ -103,7 +104,7 @@ READ_SAMPLES = 1 << 19
 #: dialog): a quarter, because the import
 #: holds the stream once and the flat plot then holds a converted copy
 #: of every row it draws beside it, so a stream is twice its size on
-#: the way to the screen (Visual Dynamics' PLAN.md "A long run costs its own size").
+#: the way to the screen.
 LARGE_STREAM_SHARE = 0.25
 
 #: how many points a stream's preview envelope is thinned to — enough
@@ -1042,13 +1043,23 @@ def _unit_scale(unit):
     than being silently treated as dimensionless. The case is the
     controller's user's, not pint's: a table typed `G` or `LBF` is read
     as g and lbf, and the record carries that spelling
-    (`units.fold_unit_case`).
+    (`units.fold_unit_case`). A unit that reads as something no channel
+    measures (`Gs`, gigaseconds) imports unit-less the same way, by the rule
+    every reader of a stated unit shares (`stated_units.unit_problem`).
+
+    The scale of an offset unit (degC) is what its differences need, which is
+    all a spectrum holds; a stream also adds the offset (`_stream_offsets`).
     """
     normalized = fold_unit_case(unit.replace('^', '**').strip())
-    dim = dimension_of(normalized) if normalized else None
-    if dim is None:
+    if not normalized or unit_problem(normalized) is not None:
         return 1.0, UNKNOWN, None
-    return si_factor(normalized), dim, normalized
+    return si_transform(normalized)[0], dimension_of(normalized), normalized
+
+
+def _stream_offsets(rows_unit):
+    """What each stream row adds after its scale to reach SI: nonzero only
+    for an offset unit, a temperature in degC or degF."""
+    return np.array([si_transform(unit)[1] if unit else 0.0 for unit in rows_unit])
 
 
 def _frequency_lines(group, sample_rate):
@@ -1470,6 +1481,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             rows_dof = [dofs[i] for i in rows]
             rows_dim = [scales_dims[i][1] for i in rows]
             rows_unit = [scales_dims[i][2] for i in rows]
+            offsets = _stream_offsets(rows_unit)
             # a windowed record says so on every row: the clock is the
             # run's, and a record starting at 120 s with nothing to say
             # why would read as a recording that began late
@@ -1509,6 +1521,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             # else holds it, and a scaled copy beside it was the second
             # of the two whole copies an import cost (2026-09-18)
             time_data *= scales[:, np.newaxis]
+            time_data += offsets[:, np.newaxis]
             values = (np.vstack([time_data, *virtual]) if virtual
                       else time_data)
             frames = 0 if partial else _frame_count(ds, time_data.shape[1])
@@ -1704,6 +1717,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                     phase=sub.variables['spec_phase'][()],
                     segment_type=sub.variables['spec_sweep_type'][()][:n - 1],
                     segment_rate=sub.variables['spec_sweep_rate'][()][:n - 1],
+                    from_file=True,
                     **bands))
             dim = control_dims.pop()
             unit = (control_units.pop()

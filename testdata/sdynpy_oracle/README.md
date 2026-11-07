@@ -3,27 +3,25 @@
 `oracle.npz` holds sdynpy's own answers — PSDs, the CPSD matrix, FRFs
 (H1, H2, Hv), coherence, an SRS, and RMS values — for input signals
 stored in the same file, so `tests/test_sdynpy_oracle.py` can check
-Visual Dynamics' spectral computations against the tool its audience
+Hertzforge's spectral computations against the tool its audience
 already trusts.
 
 ## Why data, and never an import
 
-sdynpy is GPL-3.0, and GPL code cannot live in Visual Dynamics, which
-is MIT, so it is never imported (`AGENTS.md` hard rule 1;
-`tests/test_license_boundary.py` enforces it over the package *and*
-the tests). Running a GPL program privately carries no conditions
+sdynpy is GPL-3.0, and GPL code cannot live in Hertzforge, which is MIT,
+so it is never imported (`tools/check_licenses.py` refuses it over the
+package *and* the tests). Running a GPL program privately carries no conditions
 (GPLv3 §2), and a program's numerical output is not a covered work
 (GPLv3 §0: output is covered only if it constitutes a covered work) —
-so sdynpy runs in the private `visualdynamics-generators` repository,
+so sdynpy runs in a private generators repository,
 where the GPL tools are already used as tools, and only its numbers
 travel here. This is the same shape as the ADF corpus: the writing
 tool's own readings frozen beside the sample files, the deriving tool
 never in the tree.
 
-Regenerate with the interpreter that has sdynpy:
+Regenerate there, with the interpreter that has sdynpy:
 
-    cd ~/visualdynamics-generators
-    ~/.pyenv/versions/3.13.2/bin/python3 generate_sdynpy_oracle.py
+    python generate_sdynpy_oracle.py
 
 The file's `provenance` key records the sdynpy/numpy/scipy versions,
 the seed, and the date it was made.
@@ -33,7 +31,7 @@ the seed, and the date it was made.
 measured in a turned frame, unit shapes about a point off the
 centroid, and mass-normalized shapes with a *diagonal* inertia tensor.
 A coupled tensor is deliberately not frozen — sdynpy takes its
-diagonal unless asked for principal axes, and Visual Dynamics always
+diagonal unless asked for principal axes, and Hertzforge always
 takes the principal axes (`tests/test_rigid.py` proves which is
 orthonormal) — so the two would disagree there by design.
 
@@ -53,7 +51,7 @@ been checked against themselves:
 - `octave.npz` — PSD banding at 1, 3, 6 and 12 bands per octave, real
   and complex, on sdynpy's own band edges (`tests/test_octave_oracle.py`).
   Bands are matched by edge, not label: sdynpy names a band by the
-  arithmetic mean of its edges, Visual Dynamics by the geometric.
+  arithmetic mean of its edges, Hertzforge by the geometric.
 - `beam.npz` — the assembled 30x30 mass and stiffness matrices of a
   small 3D beam frame (`tests/test_beam_oracle.py`). The section
   numbers are handed to sdynpy rather than derived by it, because its
@@ -77,12 +75,12 @@ banding, and the beam element with its assembly.
 random tri-axial blocks over 6 modes with 8 kept, a simply supported
 plate's out-of-plane modes on a 9 x 7 grid with 16 kept, and the same
 plate on a 21 x 15 grid with 12 kept. sdynpy removes one candidate at a
-time; Visual Dynamics removes the same way while no more than four
+time; Hertzforge removes the same way while no more than four
 times the wanted count remain, and must then choose the same sensors
 (`tests/test_instrumentation_oracle.py`; it does, both cases). On the
 large grid it removes a tenth at a time first, so the sets differ, and
 the determinant of the information kept is compared instead: 12.857
-against sdynpy's 12.847 as log det, Visual Dynamics keeping slightly
+against sdynpy's 12.847 as log det, Hertzforge keeping slightly
 more.
 
 Deliberately not covered, with reasons at the implementation sites:

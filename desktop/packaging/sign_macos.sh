@@ -10,20 +10,20 @@
 # 1. NOTARY_APPLE_ID and NOTARY_PASSWORD (an app-specific password) from the
 #    environment, as the desktop workflow fills them from its secrets;
 # 2. a login-keychain item NOTARY_ITEM (default vd-notary-password) holding the
-#    app-specific password with the Apple ID as its account, the item Visual
-#    Dynamics' builds on the same developer's Mac already use; a script reads it
+#    app-specific password with the Apple ID as its account, the item earlier
+#    builds on the same developer's Mac already use; a script reads it
 #    with no prompt while the login keychain is unlocked;
 # 3. the notarytool profile NOTARY_PROFILE (default vd-notary), made once with
 #    `xcrun notarytool store-credentials`. It lives in the data-protection
 #    keychain, which macOS opens only to an unlocked user session, so from a
-#    script it can be unreachable for a while; VD learned that and keeps item 2.
+#    script it can be unreachable for a while, which is why item 2 is kept.
 #
 # The team is NOTARY_TEAM_ID, or else the one the identity's name ends with.
 # Without credentials that answer, the app and image are signed and not
 # notarized, and the script says so; with HERTZFORGE_REQUIRE_NOTARIZED set, as the
 # desktop workflow sets it, the script stops instead.
 #
-# Adapted from the signing half of Visual Dynamics' packaging/build_macos.sh (MIT,
+# Adapted from the signing half of an earlier build script (MIT,
 # Brandon Zwink). What carries over, each learned there: sign inside out, every
 # Mach-O found by content rather than by name (Python's extension modules and the
 # libraries in its wheels have assorted names, and Apple refuses a bundle with one

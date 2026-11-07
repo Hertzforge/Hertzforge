@@ -1,6 +1,6 @@
 /**
-* The MAC matrix as 3-D bars, where both height and color are the value, as Visual Dynamics'
-* `viz/mac_bars.py` draws it. The flat grid shows which pairs match at a glance; the bars show
+* The MAC matrix as 3-D bars, where both height and color are the value. The flat grid shows which
+* pairs match at a glance; the bars show
 * what the grid shows poorly, how much the near matches differ: as heights, a 0.6 next to a 0.9
 * is a visible step. The scale is fixed at 0 to 1 because a MAC is a bounded ratio.
 *

@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * The project tree, as Visual Dynamics' window has it: one row per object in a fixed order by
+	 * The project tree: one row per object in a fixed order by
 	 * kind, each wearing its kind's icon, opening into what it holds. A geometry opens into its
 	 * nodes, coordinate systems, element families with their element groups, solids and mated
 	 * surfaces; a data object into a grid of its records, each cell wearing what that record
@@ -12,7 +12,7 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
-	import { spans, type Span } from './brackets';
+	import { spans } from './brackets';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
@@ -61,7 +61,7 @@
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
-			// Delete deletes, as VD's does: the journal keeps what went
+			// Delete deletes: the journal keeps what went
 			e.preventDefault();
 			void p.removeSelected();
 		}
@@ -98,7 +98,8 @@
 		if (dropOut && (links ?? []).some((g) => g.members.some((m) => dragging?.includes(m)))) return landsBefore(p.summary?.objects ?? [], links, dragging, null);
 		return undefined;
 	});
-	/** A solid being dragged among its siblings (VD's drag in the tree): a subtraction cuts the rest from the first. */
+	/** A solid being dragged among its siblings (the drag in the tree): a subtraction cuts the rest
+	 * from the first. */
 	let solidDrag: { name: string; id: number; within: number | null; ids: number[]; y: number; moved: boolean } | null = null;
 	let solidPlace = $state<{ name: string; within: number | null; before: number | null } | null>(null);
 	let solidDragged = false;
@@ -269,7 +270,7 @@
 	const partPicked = (name: string, kind: string, id: string | number) =>
 		p.selection.part?.name === name && p.selection.part.kind === kind && p.selection.part.id === id;
 	const held = (name: string): ProjectChildren | undefined => p.children[name];
-	/** How many rows and columns a grid shows before it scrolls, as Visual Dynamics' grid does. */
+	/** How many rows and columns a grid shows before it scrolls. */
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
 </script>
 
@@ -527,7 +528,7 @@
 		user-select: none;
 	}
 
-	/* room for the brackets down the left edge, as VD's gutter has */
+	/* room for the brackets down the left edge */
 	.tree.bracketed {
 		padding-left: 12px;
 	}
@@ -736,7 +737,7 @@
 	}
 
 	/* the record grid: rows by DOF, columns by reference or capture, a 14 px icon in every cell;
-	   past Visual Dynamics' limits it scrolls rather than the tree */
+	   past its limits it scrolls rather than the tree */
 	.gridbox {
 		max-height: 320px;
 		max-width: 460px;

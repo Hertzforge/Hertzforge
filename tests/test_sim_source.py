@@ -1,4 +1,4 @@
-"""Simulated data stays labeled (FILE_FORMAT_PLAN.md, section 3).
+"""Simulated data stays labeled.
 
 A Rattlesnake run says what it drove in its `hardware` attribute. What
 it measured is labeled `SIM` or `HARDWARE` from that on import, what a

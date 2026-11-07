@@ -1,13 +1,12 @@
 /**
- * The project tree's icons, drawn as Visual Dynamics draws them (`gui/icons.py`, MIT, Brandon
- * Zwink), stroke for stroke in the same 64-unit box, so the two applications read alike. Shape
+ * The project tree's icons, each in a 64-unit box. Shape
  * carries the meaning: every icon has to work at 16 px and without color vision. An object's icon
  * says what kind of object it is; a record's icon says what that record measures, the kinematic
  * three told apart by Newton's dots; a sub-item's icon is drawn in its parent's color, or gray when
  * the category is empty. Each drawer returns SVG markup for a `viewBox="0 0 64 64"`.
  */
 
-/** Visual Dynamics' object colors, by the kind the summary gives. */
+/** The object colors, by the kind the summary gives. */
 export const KIND_COLORS: Record<string, string> = {
 	geometry: '#1f77b4',
 	time_history: '#2ca02c',
@@ -62,7 +61,7 @@ export const CONTROL_COLOR = '#8b949e';
 /** Amber: units not yet defined. */
 export const BADGE_COLOR = '#e6a23c';
 
-/** The order the tree lists kinds in, Visual Dynamics' `TYPE_ORDER`; a specification sits beside the measurement it is for. */
+/** The order the tree lists kinds in; a specification sits beside the measurement it is for. */
 export const KIND_ORDER = [
 	'geometry',
 	'photos',

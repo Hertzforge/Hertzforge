@@ -229,7 +229,7 @@ export interface Gizmo3D {
 	axes: [number, number, number][];
 	slide: GizmoAct;
 	turn: GizmoAct;
-	/** A drag's length in the view's unit, to meters. */
+	/** A drag's length in the view's unit, to meters; absent where the service takes it in the view's unit. */
 	to_si?: number;
 }
 
@@ -401,7 +401,7 @@ export type ViewKind = View['view'];
 /**
  * The modules on the rail. The analysis is split by what is studied (signals, random, shock, sine,
  * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
- * project type as Visual Dynamics did.
+ * project type.
  */
 export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
@@ -426,6 +426,8 @@ export interface ParamDescriptor {
 	options_from?: 'channels' | `objects:${string}` | `verb:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
+	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
+	length?: boolean;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
 }
@@ -473,7 +475,6 @@ export interface Actions {
 	table: ActionTable;
 }
 
-/** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
 /** A lone shape set's views, shown one at a time. */
 export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
 
@@ -489,7 +490,7 @@ export interface ActionRow {
 	/** `show.*` for a default, an operation's id, or `self.*`. */
 	id: string;
 	verb: string;
-	kind: 'default' | 'reading' | 'act' | 'self';
+	kind: 'default' | 'run' | 'self';
 	ready: boolean;
 	/** Why it cannot run now. */
 	reason?: string;
@@ -515,7 +516,7 @@ export interface ActionTable {
 	columns: ActionColumn[];
 }
 
-/** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
+/** `project.show`: what a selection in the tree shows. */
 export interface Shown {
 	title: string;
 	views: View[];
@@ -527,7 +528,7 @@ export interface Shown {
 		complex: boolean;
 		frequency: boolean;
 		projection: boolean;
-		/** A lone shape set: its three views and where its values are read. */
+		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
 		values_dofs: string[];
 		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
@@ -563,7 +564,7 @@ export interface ShowPrefs {
 	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
 	tone: string | null;
 	sine_reading: 'curves' | 'bars';
-	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
+	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
 	overlay: boolean;
@@ -839,12 +840,6 @@ export interface SessionState {
 	timeout_s: number;
 }
 
-export interface SessionClaimParams {
-	name?: string;
-	/** The lease of a seat this client held, to resume it. */
-	lease?: string;
-}
-
 export interface SessionClaimResult {
 	role: 'controller';
 	lease: string;
@@ -924,8 +919,6 @@ export interface StationList {
 	stations: [SimStation, NiStation];
 	selected: StationSelected;
 }
-
-export type StationSelectParams = { kind: 'sim' } | { kind: 'ni'; devices: string[] };
 
 // --- channel table -------------------------------------------------------------------------
 
@@ -1075,11 +1068,6 @@ export interface RandomConfig {
 	feasibility?: FeasibilityInputs | null;
 }
 
-export interface RandomConfigureParams {
-	config: RandomConfig;
-	dry_run?: boolean;
-}
-
 export interface Grid {
 	fs_hz: number;
 	n_pts: number;
@@ -1125,19 +1113,8 @@ export interface RandomConfigResult {
 
 // --- running -------------------------------------------------------------------------------
 
-export interface RandomArmParams {
-	/** The operator's acknowledgement to arm past a feasibility exceedance; logged verbatim. */
-	override_ack?: string;
-}
-
-export type RandomLevelParams = { delta_db: number } | { to_db: number };
-
 export interface RandomLevelResult {
 	level_db: number;
-}
-
-export interface RandomModeParams {
-	mode: LadderMode;
 }
 
 export type RandomRunState = 'unconfigured' | 'configured' | 'blocked' | 'armed' | 'running' | 'review' | 'stopping' | 'finished';
@@ -1272,8 +1249,6 @@ export interface SubscribePlot {
 	channels?: ChannelSelector;
 	points?: number;
 }
-
-export type RandomSubscribeParams = { rate_hz?: number; plots: SubscribePlot[] } | { default: true };
 
 export interface RandomSubscribeResult {
 	default: boolean;

@@ -1,9 +1,8 @@
-"""Project types: gray slots for what a report of that kind expects.
+"""Project types: what a report of that kind expects.
 
-Setting a project type lists every object the report needs; missing
-ones show as gray placeholders that disappear as the real objects
-arrive, offer to compute themselves where the data allows, and ride
-the project file so a reopened project remembers what it is.
+Setting a project type lists every object the report needs, reads which
+are missing, offers to compute them where the data allows, and rides the
+project file so a reopened project remembers what it is.
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ import pytest
 import hertzforge
 from hertzforge.core.data import Psd, TimeHistory
 from hertzforge.core.report import PROJECT_TYPES, Report, project_expectations
-
-ROLE_REFERENCE = None  # resolved from the module in a fixture
 
 
 def _burst_time():

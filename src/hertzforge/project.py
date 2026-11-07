@@ -16,6 +16,7 @@ that report is made from.
 from __future__ import annotations
 
 import contextlib
+import copy
 import os
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -206,6 +207,11 @@ def remap_links(object_groups: Iterable[ObjectGroup],
     return out
 
 
+class SingleObjectFile(ValueError):
+    """A project file's format holding one object, which `Project.open`
+    cannot open and `Project.import_file` can read."""
+
+
 def retarget(obj: Any, mapping: dict[str, str]) -> None:
     """Point an object's references at renamed objects.
 
@@ -225,9 +231,41 @@ def retarget(obj: Any, mapping: dict[str, str]) -> None:
     if isinstance(obj, Report):
         for block in obj.blocks:
             for key in ('source', 'geometry', 'dofs_source', 'shapes',
-                        'measured'):
+                        'measured', 'floor', 'specification'):
                 if block.get(key) in mapping:
                     block[key] = mapping[block[key]]
+
+
+#: the recipe params that name other objects, by verb
+_PARAMS_NAMING: dict[str, tuple[str, ...]] = {
+    'transform': ('shapes',), 'expand': ('shapes',),
+    'compute_modal_responses': ('shapes',),
+    'extract_sine': ('specification',),
+    'derive_specification': ('sources',),
+    'plan_instrumentation': ('geometry',)}
+
+
+def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
+    """A recipe's name, or a list of names and (name, record) pairs,
+    with renamed objects' new names."""
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, (list, tuple)):
+        return [_renamed(each, mapping) for each in value]
+    return value
+
+
+def _retarget_record(record: dict[str, Any], mapping: Mapping[str, str]) -> None:
+    """Point a provenance record at renamed objects, in place."""
+    if record.get('source') in mapping:
+        record['source'] = mapping[record['source']]
+    params = record.get('params') or {}
+    for key in _PARAMS_NAMING.get(record.get('verb'), ()):
+        if key in params:
+            params[key] = _renamed(params[key], mapping)
+    draft = params.get('draft')
+    if isinstance(draft, dict) and draft.get('sources'):
+        draft['sources'] = _renamed(draft['sources'], mapping)
 
 
 # What each kind of object is called when it is reached by type
@@ -534,6 +572,8 @@ class Project(dict):
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (object_groups or [])]
+        #: what the last Work Up could not compute, (slot, why)
+        self.last_work_up_skipped: list[tuple[str, str]] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -667,6 +707,8 @@ class Project(dict):
             n += 1
             unique = f'{name} ({n})'
         self[unique] = obj
+        # a recipe kept under a removed name is not this object's
+        self.provenance.pop(unique, None)
         if self.active_geometry is None and isinstance(obj, Geometry):
             self.active_geometry = unique
         return unique
@@ -691,7 +733,6 @@ class Project(dict):
         list of str
             The names the copies were added under, in order.
         """
-        import copy
 
         added = []
         for name in names:
@@ -784,6 +825,7 @@ class Project(dict):
                 # imported objects carry follow it
                 for obj in result.values():
                     retarget(obj, mapping)
+            self._adopt_provenance(result.provenance, mapping)
             self.object_groups += remap_links(
                 result.object_groups, mapping,
                 {group['role'] for group in self.object_groups if group['role']})
@@ -812,6 +854,23 @@ class Project(dict):
                 refer(added[0], '')
         self._index_import(local, result, added, checksum)
         return added
+
+    def _adopt_provenance(self, records: Mapping[str, dict[str, Any]],
+                          mapping: Mapping[str, str]) -> None:
+        """Bring an imported project's recipes across under the names its
+        objects took. A record naming something the import did not bring
+        (a removed step) comes only when that name means nothing here, so
+        it is never read as this project's object of the same name."""
+        def free(name: str) -> bool:
+            return (name in mapping or name not in self
+                    and name not in self.unresolved
+                    and name not in self.provenance)
+
+        for name, record in records.items():
+            if free(name) and free(record.get('source')):
+                moved = copy.deepcopy(record)
+                _retarget_record(moved, mapping)
+                self.provenance[mapping.get(name, name)] = moved
 
     def _index_import(self, path: str, result: Any, added: Sequence[str],
                       checksum: tuple[int, str]) -> IndexEntry:
@@ -865,6 +924,19 @@ class Project(dict):
                     (n for n, obj in self.items()
                      if isinstance(obj, Geometry)), None)
         self._prune_links()
+        self._prune_provenance()
+
+    def _prune_provenance(self) -> None:
+        """Forget the recipe of every removed object that nothing left
+        descends through. A later object of that name is not what the
+        recipe made, and a refresh would overwrite it."""
+        kept: set[str] = set()
+        for name in [*self, *self.unresolved]:
+            while name in self.provenance and name not in kept:
+                kept.add(name)
+                name = self.provenance[name].get('source')
+        for name in set(self.provenance) - kept:
+            del self.provenance[name]
 
     def rename(self, old: str, new: str) -> str:
         """Rename an object and change every reference to it.
@@ -905,11 +977,11 @@ class Project(dict):
                                 for member in group['members']]
         for obj in self.values():
             retarget(obj, {old: new})
+        self.provenance.pop(new, None)
         if old in self.provenance:
             self.provenance[new] = self.provenance.pop(old)
         for record in self.provenance.values():
-            if record.get('source') == old:
-                record['source'] = new
+            _retarget_record(record, {old: new})
         self.data_index.rename_object(old, new)
         if old in self.references:
             self.references[new] = self.references.pop(old)
@@ -987,9 +1059,9 @@ class Project(dict):
             raise TypeError(f'{name} has no coordinates to rename')
         obj.rename_dof(old, new, quantity)
         changed = [name]
-        for other in list(self.provenance):
-            if other not in self or not self._descends_from(other, name):
-                continue
+        descended = [other for other in self.provenance
+                     if other in self and self._descends_from(other, name)]
+        for other in descended:
             derived = self[other]
             if not hasattr(derived, 'rename_dof'):
                 continue
@@ -1000,6 +1072,14 @@ class Project(dict):
                 # the channel is not on this one — a modal
                 # transformation carries none of the source's
                 continue
+        # a stated role in a fingerprint names the channel by its old
+        # coordinate, and correcting a coordinate changes no number
+        for other in descended:
+            state = self.provenance[other].get('state')
+            if state and state[0] == 'averaging+roles':
+                state[1]['roles'] = sorted(
+                    [new if dof == old and quantity in (None, kind) else dof, kind, role]
+                    for dof, kind, role in state[1]['roles'])
         return changed
 
     def _descends_from(self, name: str, ancestor: str) -> bool:
@@ -1137,59 +1217,6 @@ class Project(dict):
             # dissolving it is why the group could never be built up one
             # drag at a time.
             if len(kept) > 1 or (kept and group['role'])]
-
-    def relink(self, name: Any, target: Any = None) -> list[str]:
-        """Move one object into the group holding `target`.
-
-        `link` merges the groups of all its arguments, which is right for
-        saying two objects belong together and wrong for moving one
-        object: linking a geometry into the other group would bring its
-        whole group with it. This method takes the object out of its
-        group first, so only it moves. A `target` of None only takes it
-        out.
-
-        The group it joins keeps its role, so an object moved into the
-        Basis becomes part of the Basis. A move that `link` refuses
-        leaves the groups as they were and raises the same error.
-
-        Parameters
-        ----------
-        name : str or object
-            The object to move.
-        target : str or object, optional
-            An object whose group it should join. None removes it
-            from its current group.
-
-        Returns
-        -------
-        list of str
-            The members of the group the object ends up in, or an empty
-            list when `target` is None.
-        """
-        name = self.name_of(name)
-        if target is None:
-            self.unlink(name)
-            return []
-        target = self.name_of(target)
-        if target == name:
-            raise ValueError('an object is already in its own group')
-        members = self.object_group_of(target) or [target]
-        if name in members:
-            return list(members)
-        role = self.role_of(target)
-        # `link` refuses a second geometry or a member the group's
-        # geometry cannot carry, and by then the object has already left
-        # where it was: a refused move must leave the links untouched
-        # rather than half applied.
-        before = [dict(group) for group in self.object_groups]
-        self.unlink(name)
-        try:
-            # `name` last: it joins the group it landed in, and a group
-            # reads in the order its members arrived
-            return self.link(*members, name, role=role)
-        except (ValueError, KeyError):
-            self.object_groups = before
-            raise
 
     def name_object_group(self, member: str, name: str | None) -> list[str]:
         """Name the object group an object belongs to, or remove its name.
@@ -1342,8 +1369,8 @@ class Project(dict):
             'Basis', or None for the other group: the one group that is
             not the Basis, created if there is none yet. When there are
             several groups besides the Basis there is no single other
-            group, and this raises ValueError; use `relink` onto a
-            member of the group meant.
+            group, and this raises ValueError; use `unlink`, then `link`
+            onto a member of the group meant.
 
         Returns
         -------
@@ -1857,27 +1884,6 @@ class Project(dict):
         return next((group for group in self.object_groups
                      if name in group['members']), None)
 
-    def absorb_links(self, groups: Iterable[ObjectGroup]) -> None:
-        """Add the object groups of a project being imported.
-
-        By this point the arriving objects have already been placed in
-        groups one at a time by the project type's rules, without the
-        file's own grouping to go on. The file's groups are added last,
-        and where an object is in two groups the later one is kept, so
-        the file's grouping replaces the earlier placement.
-
-        Parameters
-        ----------
-        groups : iterable of ObjectGroup
-            Object groups from another project, merged into this one's.
-
-        Returns
-        -------
-        None
-        """
-        self.object_groups = list(self.object_groups) + [dict(group) for group in groups]
-        self._prune_links()
-
     def _prune_links(self) -> None:
         """Members that no longer exist go, and so do groups left with
         nothing in them.
@@ -1954,7 +1960,7 @@ class Project(dict):
 
     def selection_verbs(self, *names: Any) -> list[tuple[str, str]]:
         """The processing verbs a selection can act on, each with its
-        one-line summary. This is what the app's bar offers.
+        one-line summary. The action table reads it for a pair.
 
         For one object, these are its own verbs less the ones that need
         a second object (`transform` needs a shape set beside the
@@ -1993,8 +1999,10 @@ class Project(dict):
         return out
 
     def compute_spectra(self, source: Any) -> str:
-        """Compute spectra from a time history's averages, as Compute
-        Spectra in the averaging view does.
+        """Compute the raw spectra of a time history (Compute Spectra):
+        each capture whole, unwindowed and unscaled (a sine of amplitude A
+        on a line reads A*N/2), averaged as a complex mean
+        (`TimeHistory.compute_spectra`). The history's averaging is not read.
 
         Parameters
         ----------
@@ -2011,8 +2019,27 @@ class Project(dict):
         return self._derive(source, self[source].compute_spectra(),
                             f'{source} Spectra', recipe=('compute_spectra', {}))
 
+    def _framed(self, source: str) -> TimeHistory:
+        """The history a density is computed from, its frames set first
+        when it is one capture with none, by the detector `compute_frfs`
+        and `compute_multiple_coherence` use, so a density does not depend
+        on which of them ran first. Unset, it would be the whole record as
+        one frame under a rectangle: a periodogram, two degrees of freedom
+        at every line. Several captures are already their averages, and a
+        target is read whole."""
+        from .core.data import TransientSpecification
+
+        history = self[source]
+        if (history.averaging is None
+                and not isinstance(history, TransientSpecification)
+                and max(history.records_per_channel.values(), default=0) <= 1):
+            history.averaging = history.suggest_averaging()
+        return history
+
     def compute_psds(self, source: Any) -> str:
-        """Compute PSDs from a time history's averages (Compute PSDs).
+        """Compute PSDs from a time history's averages (Compute PSDs). A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -2026,14 +2053,15 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_psds(),
+        return self._derive(source, self._framed(source).compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
 
     def averaging_of(self, name: Any) -> Any:
         """The `Averaging` a computed spectrum was made with, from its
         provenance, or None when it records none (an imported spectrum).
         A spectrum computed from a record with no averaging set was each
-        record whole under a rectangle, and that is what is returned.
+        record whole under a rectangle, and that is what is returned. Compute
+        Spectra reads no averaging, so its spectra record none.
 
         A spectrum does not carry its window, and a tone read off it
         needs one (`Psd.read_tone`): the window sets how far the tone leaks
@@ -2058,7 +2086,7 @@ class Project(dict):
         record = self.provenance.get(self.name_of(name), {})
         state = record.get('state')
         if (record.get('verb') not in ('compute_psds', 'compute_cpsds',
-                                       'compute_spectra', 'compute_frfs',
+                                       'compute_frfs',
                                        'compute_multiple_coherence')
                 or not state or state[0] not in ('averaging',
                                                  'averaging+roles')):
@@ -2885,7 +2913,9 @@ class Project(dict):
     def compute_srs(self, source: Any, *,
                     per_octave: int | None = None,
                     q: float | None = None,
-                    kind: str = 'maximax') -> str:
+                    kind: str = 'maximax',
+                    low: float | None = None,
+                    high: float | None = None) -> str:
         """Compute shock response spectra from a time history's shocks
         (Compute SRS), one curve per channel per event.
 
@@ -2894,7 +2924,10 @@ class Project(dict):
         no averaging set and is not a transient specification. A record
         read as frames already says where its events are (in a transient
         run each playing is one frame), and a specification is one
-        playing by definition.
+        playing by definition. A record filtered in this project takes
+        its events from the recording it was filtered from, which is
+        where they are detected (`detect_shocks`), and its spectrum stops
+        at the low-pass corner it came through (`srs_ceiling`).
 
         Parameters
         ----------
@@ -2908,12 +2941,23 @@ class Project(dict):
         kind : str, default 'maximax'
             Which peak each oscillator reports: 'maximax' (largest
             magnitude of either sign), 'positive' or 'negative'.
+        low, high : float, optional
+            The natural-frequency band, in Hz, to reach a requirement's
+            own. Default to the record's (`TimeHistory.srs_band`) and
+            `srs_ceiling`.
 
         Returns
         -------
         str
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            For a `low` under a quarter cycle of the shortest window, a
+            `high` above the Nyquist frequency, or a `high` above a
+            low-pass the record came through.
         """
         # Detection is the last resort. Set loose on a transient run, whose
         # playings are its averaging, the detector found thirty-one
@@ -2927,17 +2971,108 @@ class Project(dict):
                 and not isinstance(history, TransientSpecification)):
             from .core.shocks import suggest
 
-            history.shocks = suggest(history)
+            recording = self._recording_of(source)
+            # on a filtered record the detector's floor sinks with the
+            # noise taken out, and ordinary noise then clears it: 13
+            # events where the plate's shock file holds 4
+            if not recording.shocks and recording.averaging is None:
+                recording.shocks = suggest(recording)
+            history.shocks = recording.shocks
+        self._check_srs_band(source, low, high)
+        band = {key: float(value) for key, value in (('low', low), ('high', high))
+                if value is not None}
         # the analysis choices are parameters of the act, recorded in
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
-                            history.compute_srs(per_octave=per_octave,
-                                                q=q, kind=kind),
+                            history.compute_srs(
+                                per_octave=per_octave, q=q, kind=kind,
+                                low=band.get('low'),
+                                high=band.get('high', self.srs_ceiling(source))),
                             f'{source} SRS',
                             recipe=('compute_srs',
                                     {'per_octave': per_octave,
-                                     'q': q, 'kind': kind}))
+                                     'q': q, 'kind': kind, **band}))
+
+    def _check_srs_band(self, source: str, low: float | None,
+                        high: float | None) -> None:
+        """Refuse a band a record cannot be read over. An oscillator
+        peaks a quarter cycle after a pulse, so a window holding a quarter
+        cycle of the lowest line reads it true: a 26 ms window on a lone
+        half-sine read 20 Hz as the whole record does, 10 Hz within 0.2 dB
+        and 5 Hz 2 to 3 dB low."""
+        history = self[source]
+        if low is not None:
+            shortest = 1.0 / history.srs_band()[0]
+            floor = 1.0 / (4.0 * shortest)
+            if low < floor:
+                raise ValueError(
+                    f'{source}\'s shortest window, {1e3 * shortest:.4g} ms, reads an SRS '
+                    f'down to {floor:.4g} Hz; {low:g} Hz needs a window of at least '
+                    f'{1e3 / (4.0 * low):.4g} ms')
+        if high is not None:
+            rate = history.sample_rate
+            if high > rate / 2.0:
+                raise ValueError(f'{high:g} Hz is above the Nyquist frequency of '
+                                 f'{source}, {rate / 2.0:g} Hz')
+            corner = self._low_pass_of(source)
+            if corner is not None and high > corner:
+                raise ValueError(
+                    f'{source} is low-passed at {corner:g} Hz, and its SRS stops there; '
+                    'read the band above it from the recording')
+
+    def _recording_of(self, name: str) -> Any:
+        """The record `name` was filtered from, through any number of
+        filters; `name`'s own object when it was not filtered."""
+        seen = set()
+        while name not in seen:
+            seen.add(name)
+            made = self.provenance.get(name) or {}
+            if made.get('verb') != 'filter_data' or made.get('source') not in self:
+                break
+            name = made['source']
+        return self[name]
+
+    def srs_ceiling(self, name: Any) -> float | None:
+        """The highest natural frequency a record's SRS can be read to,
+        in Hz, when a low-pass on its way sets it: the lowest corner of
+        the filters applied in this project on the way to the record, as
+        recorded when each was applied (`_filters_on_the_way` reads the
+        same record). None when no low-pass did, or when the corner is
+        above the top of the record's own band (`TimeHistory.srs_band`).
+
+        The filter is zero phase, so it takes 6 dB at its corner, and a
+        response above it is gone: a 1500 Hz ring read 22 dB low on a
+        record low-passed at 1024 Hz, with no sign of it on the curve.
+
+        Parameters
+        ----------
+        name : str or object
+            The record.
+
+        Returns
+        -------
+        float or None
+        """
+        name = self.name_of(name)
+        corner = self._low_pass_of(name)
+        return corner if corner is not None and corner < self[name].sample_rate / 5.0 else None
+
+    def _low_pass_of(self, name: str) -> float | None:
+        """The lowest low-pass corner on the way to a record, in Hz, or
+        None when it came through none."""
+        corners, seen = [], set()
+        current = name
+        while current and current not in seen:
+            seen.add(current)
+            made = self.provenance.get(current) or {}
+            if made.get('verb') == 'filter_data':
+                state = made.get('state') or (None, None)
+                high = state[1].get('high') if isinstance(state[1], Mapping) else None
+                if high is not None:
+                    corners.append(float(high))
+            current = made.get('source')
+        return min(corners) if corners else None
 
     def detect_shocks(self, source: Any) -> int:
         """Find the events in a time history and mark them on it (Detect
@@ -3069,8 +3204,7 @@ class Project(dict):
         source = self.name_of(source)
         history = self[source]
         if history.truncation is None:
-            raise ValueError('no span set: drag one in the truncate '
-                             'view first')
+            raise ValueError('no span set: Set Truncation sets one')
         return self._derive(source, history.truncate(),
                             f'{source} Truncated',
                             recipe=('truncate_data', {}))
@@ -3133,7 +3267,9 @@ class Project(dict):
 
     def compute_cpsds(self, source: Any) -> str:
         """Compute the full cross-spectral matrix from a time history's
-        averages (Compute CPSDs), every channel against every channel.
+        averages (Compute CPSDs), every channel against every channel. A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -3147,7 +3283,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_cpsds(),
+        return self._derive(source, self._framed(source).compute_cpsds(),
                             f'{source} CPSDs', recipe=('compute_cpsds', {}))
 
     def transform(self, source: Any, shapes: Any, *,
@@ -4518,8 +4654,9 @@ class Project(dict):
         shells only. Parts
         meshed together share nodes where they touch. The solids are
         kept so they can be meshed again, and a part meshed again
-        replaces its earlier mesh: the elements in the element group of
-        its name are deleted, and the group and its material are kept.
+        replaces its earlier mesh: the elements of the element group it
+        was meshed into (`Geometry.group_solids`) are deleted, and the
+        group, its name and its material are kept.
 
         Parameters
         ----------
@@ -4608,14 +4745,12 @@ class Project(dict):
         # kept the legs' bricks. The rigid links on those bricks' nodes,
         # the seams' ties above all, go with them: left in, they would
         # hold the old nodes and point the new mesh at them
-        replaced = [int(e) for e in solids.meshed_elements(geometry, part.group_name)]
+        remeshed = solids.groups_meshed_again(geometry, ids, part)
+        replaced = [int(e) for e in solids.meshed_elements(geometry, remeshed)]
         # and the mated surfaces on them: their nodes are the old mesh's
         # (a union meshed in pieces brings its seams again, in `part`)
         from .core import mates
 
-        names = list(geometry.group_name)
-        remeshed = [int(geometry.group_id[names.index(n)]) for n in part.group_name
-                    if n and n in names]
         dropped = mates.delete(geometry, mates.naming_groups(geometry, remeshed))
         if replaced:
             replaced += [int(e) for e in mesh.links_on(geometry, replaced)]
@@ -4898,6 +5033,14 @@ class Project(dict):
         shapes = model.eigensolution(maximum_frequency=maximum_frequency,
                                      num_modes=num_modes, damping=damping,
                                      progress=progress)
+        if not shapes.num_shapes:
+            lowest = model.eigensolution(num_modes=1).frequency[0]
+            raise ValueError(f'{source} has no mode up to {maximum_frequency:g} Hz; '
+                             f'its lowest is at {lowest:.4g} Hz')
+        if not geometry.units_defined:
+            # coordinates with no unit: these shapes are per the root of no
+            # declared mass, whatever the solve divided by
+            shapes.mass_unit = None
         params = {'maximum_frequency': maximum_frequency,
                   'num_modes': num_modes, 'damping': damping}
         return self._derive(source, shapes, name or f'{source} Modes',
@@ -5282,13 +5425,15 @@ class Project(dict):
         """Fit a modal model to an FRF set, as the fitting screen does.
 
         This runs the screen's loop: confirm the suggested mode, then
-        take the next suggestion, `limit` times. The session's
+        take the next suggestion, up to `limit` times. The session's
         suggestion logic makes every choice (a peak already confirmed is
         not offered again unless a different shape is found there, as
-        for a repeated pair), and the loop adds no check of its own. On
-        the screen the person stops the loop; in a script `limit` does,
-        and the plate demonstration's cap is a worked example of
-        choosing it.
+        for a repeated pair). On the screen the person stops the loop;
+        here it stops when no peak left in the residual holds a tenth of
+        the measurement at its line (`suggest(modes_only=True)`), since
+        the rest is what fitted modes left behind, or at `limit`, and the
+        plate demonstration's cap is a worked example of choosing it.
+        The first suggestion is always taken.
 
         On the screen the zoom does the job of `bounds`: what is on the
         plot is what gets searched. A script has no plot, so it gives
@@ -5334,7 +5479,7 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
-        # The loop adds no second opinion. It used to: a proximity guard
+        # The loop adds no second opinion on where a mode is. It used to: a proximity guard
         # here vetoed any suggestion within 1 Hz of a confirmed mode, the
         # same ridge-trap fix the session has since outgrown, and it
         # silently skipped the second mode of a repeated pair that
@@ -5360,23 +5505,55 @@ class Project(dict):
             coherence = self[self.name_of(coherence)]
         session = ModalFitSession(self[source], records, coherence)
         if at is not None:
-            for pick in at:
-                frequency, damping, *described = pick
-                session.confirm(frequency=float(frequency),
-                                damping=float(damping),
-                                description=(described[0] if described
-                                             else None))
+            _confirm_picks(session, at)
         else:
             low, high = bounds or (float(self[source].abscissa[0]),
                                    float(self[source].abscissa[-1]))
             session.suggest((low, high))
-            for _ in range(limit):
+            for count in range(limit):
                 session.confirm()
-                session.suggest((low, high))
+                if (count + 1 < limit
+                        and session.suggest((low, high), modes_only=True) is None):
+                    break
         for _ in range(int(refine)):
             session.refine_residues()
         return self._derive(source, session.shape_set(),
                             name or f'{source} Modes')
+
+    def fit_replay_line(self, source: str, name: str, session: Any,
+                        coherence: str | None = None) -> str:
+        """The journal line that replays a fit made by hand and published
+        as `name`, and the recipe `refresh` runs it again from: a
+        `fit_modes(at=...)` call, or a comment when no call can make the set
+        (`ModalFitSession.replay`).
+
+        Parameters
+        ----------
+        source : str
+            The FRF set fitted.
+        name : str
+            The shape set the fit was published as.
+        session : ModalFitSession
+            The fit.
+        coherence : str, optional
+            The coherence the fit was weighted by, by name.
+
+        Returns
+        -------
+        str
+            The line, for the journal.
+        """
+        replay = session.replay()
+        args = '' if replay is None else f'at={replay["at"]!r}' + ''.join(
+            f', {key}={value!r}' for key, value in (
+                ('refine', replay['refine'] or None), ('records', replay['records']),
+                ('coherence', coherence)) if value is not None)
+        if replay is None:
+            self.provenance.pop(name, None)
+            return f'# project.fit_modes({source!r}, name={name!r}) — not replayable'
+        self.provenance[name] = {'verb': 'fit_modes', 'source': source, 'state': None,
+                                 'params': {**replay, 'coherence': coherence}}
+        return f'project.fit_modes({source!r}, {args}, name={name!r})'
 
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
@@ -5529,7 +5706,8 @@ class Project(dict):
 
         first, second = self.name_of(first), self.name_of(second)
         if pairs is None or macs is None:
-            matrix = self.comparison_mac(first, second)
+            # a mode of zero on the shared DOFs has no MAC, and is nobody's match
+            matrix = np.nan_to_num(self.comparison_mac(first, second))
             if pairs is None:
                 pairs = [(row, int(np.argmax(matrix[row])))
                          for row in range(matrix.shape[0])
@@ -5635,7 +5813,7 @@ class Project(dict):
 
         Any registered writer can be used: `.unv`, `.exo`, `.npz`,
         `.bdf`, `.afu`/`.ati`/`.ash`, `.xlsx`, `.3mf`, `.stl`,
-        `.vdreport` and the rest of `io.exporters()`.
+        `.hftemplate` and the rest of `io.exporters()`.
 
         Parameters
         ----------
@@ -5647,7 +5825,8 @@ class Project(dict):
             Units to write in. Omitted, the stored (SI) values are
             written as they are.
         **kwargs
-            Passed through to the exporter.
+            Passed through to the exporter. An Exodus file's `geometry`
+            may be the object or its name, as the journal writes it.
 
         Returns
         -------
@@ -5657,6 +5836,8 @@ class Project(dict):
         from .io import export_file
 
         name = self.name_of(name)
+        if isinstance(kwargs.get('geometry'), str):
+            kwargs['geometry'] = self[kwargs['geometry']]
         export_file(self[name], str(path), unit_system=unit_system,
                     **kwargs)
         return str(path)
@@ -5753,7 +5934,7 @@ class Project(dict):
             Random and Sine project makes 'random' and 'sine', one
             report each.) It can also be a saved template, by the name
             it was saved under in the templates folder, or the path of a
-            `.vdreport` file, a report exported on its own
+            `.hftemplate` file, a report exported on its own
             (`io.report_template`).
         name : str, default 'Report'
             What to call the report object.
@@ -5787,8 +5968,7 @@ class Project(dict):
 
             saved = dict(report_template.saved_templates())
             path = pathlib.Path(saved.get(str(template), str(template)))
-            if not (path.name.endswith(report_template.SUFFIX)
-                    and path.is_file()):
+            if not (report_template.is_template_path(path) and path.is_file()):
                 raise ValueError(
                     f'unknown template {template!r}: not a built-in '
                     f'({", ".join([*builders, "empty"])}), a saved '
@@ -5799,7 +5979,14 @@ class Project(dict):
             report.marking = str(marking)
         if marking_color is not None:
             report.marking_color = marking_color
-        return self.add(name, report)
+        added = self.add(name, report)
+        # which template it is goes by this record, not by its title,
+        # which the author can change (`work_up`)
+        self.provenance.pop(added, None)
+        if template in builders:
+            self.provenance[added] = {'verb': 'generate_report', 'source': None,
+                                      'params': {'template': template}}
+        return added
 
     def report_features(self, name: str, *, enable: Sequence[str] = (),
                         disable: Sequence[str] = (),
@@ -5813,7 +6000,7 @@ class Project(dict):
         groups and what each one needs are listed in
         `hertzforge.report.features.FEATURES`, and the presets in
         `PRESETS`. The choice is saved with the report and in a
-        `.vdreport` template.
+        `.hftemplate` template.
 
         Parameters
         ----------
@@ -6414,7 +6601,7 @@ class Project(dict):
         channel table carries each sensor's calibration status on these
         dates: in date, expired before the test, lapsing during it, or
         no date given (`hertzforge.core.calibration`). The dates are
-        kept with the report's channel table blocks, and a `.vdreport`
+        kept with the report's channel table blocks, and a `.hftemplate`
         template leaves them out.
 
         Parameters
@@ -7057,7 +7244,7 @@ class Project(dict):
         Parameters
         ----------
         path : str or os.PathLike
-            The run log (`.hflog`, or a Visual Dynamics `.vdlog`).
+            The run log (`.hflog`, or an older `.vdlog`).
         test : int, optional
             The test, by number; may be left out when the log holds one.
         upto : int, optional
@@ -7239,38 +7426,10 @@ class Project(dict):
 
         identify(self._report(name), **fields)
 
-    # Issuing printed the report as a PDF through Qt WebEngine, which
-    # Hertzforge does not carry; it returns when the desktop app prints the
-    # page (MIGRATION_PLAN.md, phase 4) and calls this sequence again.
-    def _issue(self, report: Report, unit_system: Any, write: Any,
-               file: str) -> None:
-        """Mark `report` issued, render it, hand the page to `write`
-        (which returns the PDF's bytes), and record the issue; on any
-        failure the report is put back as it was. The one sequence the
-        script verb and the window share."""
-        from .report import render_html
-        from .report.identity import (
-            issue_ready,
-            mark_issued,
-            record_issue,
-            unmark,
-        )
-
-        status = issue_ready(report, self, self.object_groups)
-        before = mark_issued(report, status)
-        try:
-            page = render_html(report, self, unit_system,
-                               object_groups=self.object_groups)
-            pdf = write(page)
-        except BaseException:
-            unmark(report, before)
-            raise
-        record_issue(report, page, pdf, file)
-
     def amend_report(self, name: str, changes: Sequence[Mapping[str, str]],
                      *, revision: str, number: str | None = None) -> None:
         """Make an issued report an amendment, to be issued in its turn
-        (`issue_report`).
+        (`report.issue`).
 
         The amendment carries its own revision (and, if given, its own
         number), refers to the revision it amends by number, revision
@@ -7319,16 +7478,22 @@ class Project(dict):
         if 'data_index' in enabled(self._report(name)):
             self.verify_data_index()
 
-    def _export_page(self, name: str, unit_system: Any = None) -> str:
-        """The report rendered for export, refused when it was issued and
-        has changed since (`report.identity.guard`)."""
+    def _report_page(self, name: str, unit_system: Any = None) -> str:
+        """The report as it leaves the project: the one document issued,
+        printed and exported. Light whatever the reader's own theme, as
+        paper is."""
         from .report import render_html
+
+        return render_html(self._report(name), self, unit_system,
+                           object_groups=self.object_groups, theme='light')
+
+    def _export_page(self, name: str, unit_system: Any = None) -> str:
+        """`_report_page`, refused when the report was issued and has
+        changed since (`report.identity.guard`)."""
         from .report.identity import guard
 
-        report = self._report(name)
-        page = render_html(report, self, unit_system,
-                           object_groups=self.object_groups)
-        guard(report, page)
+        page = self._report_page(name, unit_system)
+        guard(self._report(name), page)
         return page
 
     def run_identity(self, name: str) -> Any:
@@ -7599,8 +7764,9 @@ class Project(dict):
         the type's report. A slot the loaded data cannot fill (a
         geometry, the photographs, a specification) is left gray. A
         computation the data refuses (no drive channel for a coherence)
-        is skipped, and the rest still run. Nothing already present is
-        made again, so calling this twice adds nothing the second time.
+        is skipped, with its reason in `last_work_up_skipped`, and the
+        rest still run. Nothing already present is made again, so calling
+        this twice adds nothing the second time.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -7639,6 +7805,7 @@ class Project(dict):
             raise ValueError('the project has no type, so there is nothing '
                              'to work up: name the kind of test')
         added: list[str] = []
+        self.last_work_up_skipped = []
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -7678,6 +7845,25 @@ class Project(dict):
             done = derived(record, 'filter_data')
             return done or make(self.filter_data, record)[0]
 
+        def playings(record, side):
+            # a run against a reference is read a playing to a frame, so
+            # that the two PSDs share their lines: one window over six
+            # playings put the same power on lines six times closer and
+            # read 7.8 dB over the reference at its peak
+            from .core.replication import averaging_for
+
+            target = next(iter(on(side, TransientSpecification)), None)
+            if target is not None and self[record].averaging is None:
+                self[record].averaging = averaging_for(self[record], self[target])
+
+        def settled(record):
+            # the FRFs and the coherence adopt the suggested averaging,
+            # so PSDs made ahead of them on no averaging were one window
+            # over the whole record, and stale as soon as they were made
+            if self[record].averaging is None:
+                with contextlib.suppress(ValueError):
+                    self[record].averaging = self[record].suggest_averaging()
+
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
             # a report from another kind of test does not fill this one's:
@@ -7704,6 +7890,10 @@ class Project(dict):
                         continue
                     record = recorded(side)
                     if record is not None:
+                        if project_type == 'Transient':
+                            playings(record, side)
+                        else:
+                            settled(record)
                         make(self.compute_psds, record)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
@@ -7761,7 +7951,8 @@ class Project(dict):
                         else recorded(side)
                     if record is not None:
                         make(self.compute_srs, record)
-                elif icon == 'TimeHistory' and ordinal > 1:
+                elif (icon == 'TimeHistory' and ordinal > 1
+                      and project_type == 'Shock'):
                     # the shock's motion chain: filtered, then velocity,
                     # then displacement, each from the one before
                     chain = filtered(side)
@@ -7772,22 +7963,29 @@ class Project(dict):
                             make(self.integrate, chain)[0]
                 elif icon == 'Report':
                     # the type's reports in order, each made once: chosen
-                    # by which are already here (by title), not by the
-                    # slot's number, so a random-and-sine project holding
-                    # its sine report gets the random one, not a second
-                    # sine (2026-10-05, two reports for that type)
-                    made = {self[name].title for name in self.names
-                            if isinstance(self[name], Report)}
+                    # by which are already here, not by the slot's number,
+                    # so a random-and-sine project holding its sine report
+                    # gets the random one, not a second sine (2026-10-05,
+                    # two reports for that type). A report's recipe says
+                    # which template made it; one from a file older than
+                    # that goes by its title
+                    reports = [name for name in self.names
+                               if isinstance(self[name], Report)]
+                    built = {(self.provenance.get(name) or {}).get('params', {}).get('template')
+                             for name in reports}
+                    titles = {self[name].title for name in reports}
                     wanted = next(
                         (template for template
                          in PROJECT_TEMPLATES[project_type]
-                         if TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
-                         not in made), None)
+                         if template not in built
+                         and TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
+                         not in titles), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
-            except ValueError:
+            except ValueError as error:
                 # what the data refuses (a coherence with no drive
                 # channel) stays gray; the slots after it still fill
+                self.last_work_up_skipped.append((_label, str(error)))
                 continue
         return added
 
@@ -8101,6 +8299,11 @@ class Project(dict):
         -------
         list of str
             A list holding the name of the sine level set added.
+
+        Raises
+        ------
+        ValueError
+            When none is named and the project does not hold exactly one.
         """
         from dataclasses import replace
 
@@ -8108,8 +8311,14 @@ class Project(dict):
 
         source = self.name_of(source)
         if specification is None:
-            spec = self.sine_sweep_specification
-            spec_name = self.name_of(spec)
+            found = Selection(self).of_type(SineSweepSpecification)
+            if len(found) != 1:
+                raise ValueError(
+                    'no sine sweep specification in the project' if not found else
+                    f'{len(found)} sine sweep specifications in the project, '
+                    f'{" and ".join(repr(name) for name in found)}: name the one to read')
+            spec_name = found[0]
+            spec = self[spec_name]
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]
@@ -8135,7 +8344,7 @@ class Project(dict):
                 recipe: tuple[str, dict[str, Any]] | None = None,
                 link: bool = True) -> str:
         # what a simulated run gives is simulated, however far it is
-        # carried (FILE_FORMAT_PLAN.md, "Simulated data stays labeled")
+        # carried: simulated data stays labeled
         if getattr(obj, 'source', None) is None and getattr(
                 self[source], 'source', None) is not None:
             obj.source = self[source].source
@@ -8153,6 +8362,9 @@ class Project(dict):
             self.provenance[added] = {
                 'verb': verb, 'source': source, 'params': dict(params),
                 'state': self._analysis_state(source, verb, params)}
+            values = self._source_values(source, verb)
+            if values is not None:
+                self.provenance[added]['source_print'] = values
         return added
 
     # ---- staleness: what a change to the analysis settings owes ---------
@@ -8160,8 +8372,7 @@ class Project(dict):
     #: which part of a source each verb reads — the fingerprint follows
     #: the dependency, so changing the shocks never marks a PSD stale
     _VERB_READS: ClassVar[dict[str, str]] = {
-        'compute_spectra': 'averaging', 'compute_psds': 'averaging',
-        'compute_cpsds': 'averaging',
+        'compute_psds': 'averaging', 'compute_cpsds': 'averaging',
         # the two read the channels' roles as well as the framing; the
         # fingerprint stays an 'averaging' one with the roles folded in
         # only when set, so a project saved before roles existed opens
@@ -8194,6 +8405,23 @@ class Project(dict):
         # the pair and the set's damping and modal masses, which a
         # transform never reads and a response does
         'compute_modal_responses': 'pair+model'}
+
+    #: the fingerprints that hold settings only: a verb reading one reads
+    #: the record's values as well, and those are compared on their own
+    #: (`source_print` in the record), so a project saved before they
+    #: were kept still compares its settings and opens with nothing stale
+    _READS_VALUES_TOO: ClassVar[frozenset[str]] = frozenset({
+        'averaging', 'averaging+roles', 'shocks', 'filtering', 'truncation',
+        'sine_extraction'})
+
+    def _source_values(self, source: str, verb: str) -> str | None:
+        """The digest of the source's values when `verb` reads them and
+        its fingerprint does not, otherwise None."""
+        obj = self.get(source)
+        if (obj is None or not hasattr(obj, 'ordinate')
+                or self._VERB_READS.get(verb) not in self._READS_VALUES_TOO):
+            return None
+        return _values_digest(obj)
 
     def _analysis_state(self, source: str, verb: str,
                         params: Mapping[str, Any] | None = None) -> Any:
@@ -8291,12 +8519,14 @@ class Project(dict):
 
     def stale(self) -> dict[str, str]:
         """{derived name: reason} for every derived object whose source's
-        settings have changed since it was computed.
+        settings or values have changed since it was computed.
 
         An object whose source is gone, or whose provenance records no
         state to compare, is not reported.
         """
         out = {}
+        # one source's digest for all that was computed from it
+        values: dict[tuple[str, str], str | None] = {}
         for name, record in self.provenance.items():
             if name not in self or record.get('source') not in self:
                 continue
@@ -8307,6 +8537,12 @@ class Project(dict):
                 continue
             if _state_tuple(now) != _state_tuple(was):
                 out[name] = _state_story(was, now)
+            elif record.get('source_print') is not None:
+                key = (record['source'], record['verb'])
+                if key not in values:
+                    values[key] = self._source_values(*key)
+                if values[key] not in (None, record['source_print']):
+                    out[name] = "its source's values have changed"
         return out
 
     def refresh(self, name: Any) -> str:
@@ -8343,6 +8579,10 @@ class Project(dict):
         rebuilt = _RECOMPUTE[verb](self, source, params)
         self[name] = rebuilt
         record['state'] = self._analysis_state(source, verb, params)
+        record.pop('source_print', None)
+        values = self._source_values(source, verb)
+        if values is not None:
+            record['source_print'] = values
         return name
 
     def refresh_stale(self) -> list[str]:
@@ -8380,7 +8620,7 @@ class Project(dict):
             whole in an attachment (`io.escdf_objects`). Any other
             suffix writes a `.hforge` file, with `.hforge` added when the
             path does not end in it. A `.vdyn` path raises ValueError:
-            Visual Dynamics' files are opened, never written.
+            `.vdyn` files are opened, never written.
         compress : bool, optional
             For a `.hforge` file, write the large arrays with gzip, for
             archiving: a file with quiet stretches shrinks by most of its
@@ -8448,12 +8688,12 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project from a `.hforge`, a Visual Dynamics `.vdyn`, a
+        """Read a project from a `.hforge`, an older `.vdyn`, a
         `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file.
 
         The journal starts over with the one line that opens the file. A
         file holding a single object rather than a project raises
-        ValueError.
+        SingleObjectFile, a ValueError.
         """
         from .io import import_file, load
         from .io.escdf_objects import SUFFIXES
@@ -8469,7 +8709,7 @@ class Project(dict):
                 f'project = hertzforge.Project.open({str(path)!r})']
             loaded.file = os.path.abspath(os.path.expanduser(str(path)))
             return loaded
-        raise ValueError(f'{path} holds a single object, not a project')
+        raise SingleObjectFile(f'{path} holds a single object, not a project')
 
     def _journal_arg(self, value: Any) -> str:
         """One argument as the source text a script would pass.
@@ -8479,10 +8719,14 @@ class Project(dict):
         resolves it to and what a script would say; everything plain
         reprs as itself.
         """
+        from .units import SYSTEMS, UnitSystem
+
         if isinstance(value, os.PathLike):
             return repr(str(value))
+        if isinstance(value, UnitSystem) and SYSTEMS.get(value.name) is value:
+            return f'hertzforge.units.SYSTEMS[{value.name!r}]'
         if isinstance(value, (str, int, float, bool, type(None),
-                              tuple, list, View)):
+                              tuple, list, dict, View)):
             return repr(value)
         try:
             return repr(self.name_of(value))
@@ -8802,6 +9046,38 @@ def _generated_again(source: Any, params: Mapping[str, Any]) -> Any:
     return generate(source, SignalSettings.from_dict(params))
 
 
+#: an array up to this size is digested whole, and a longer one by blocks
+#: spread over it, so a stale check on a run of any size reads a bounded
+#: amount. Every way the core changes a long record reaches the blocks: a
+#: rescale, a recompute, or a change of shape.
+_DIGEST_WHOLE_BYTES = 1 << 24
+_DIGEST_BLOCKS = 256
+
+
+def _values_digest(obj: Any) -> str:
+    """A digest of a data object's abscissa, ordinate and units, the same
+    whether the arrays are in memory or mapped from a saved file. The
+    coordinates are left out: correcting one follows through to what was
+    derived (`Project.rename_dof`) and changes no number."""
+    import hashlib
+
+    digest = hashlib.blake2b(digest_size=16)
+    for array in (obj.abscissa, obj.ordinate):
+        array = np.asarray(array)
+        digest.update(repr(array.shape).encode())
+        flat = np.ascontiguousarray(array).reshape(-1)
+        if flat.nbytes <= _DIGEST_WHOLE_BYTES:
+            digest.update(flat.tobytes())
+            continue
+        block = max(_DIGEST_WHOLE_BYTES // (_DIGEST_BLOCKS * flat.itemsize), 1)
+        for start in np.linspace(0, flat.size - block, _DIGEST_BLOCKS,
+                                 dtype=np.int64):
+            digest.update(flat[start:start + block].tobytes())
+    digest.update(repr((obj.ordinate_dim, obj.ordinate_unit,
+                        obj.reference_unit)).encode())
+    return digest.hexdigest()
+
+
 def _signal_source_digest(obj: Any) -> str:
     """What a generated signal reads from its source, as a digest: a
     spectrum's lines and levels, a sine specification's tones, a channel
@@ -8946,6 +9222,8 @@ def _goes(data, shapes, direction):
     responses appended reads physical, and its modal records expand."""
     from .core.transform import expands, reads_as
 
+    if shapes.is_complex:
+        return False
     if direction == 'modal':
         return expands(data, shapes)
     return reads_as(data, shapes) == direction
@@ -8988,11 +9266,12 @@ def _two_sets_on_two_geometries(project, objects):
 
 
 def _set_and_table(objects):
-    """One real shape set and one channel table, wherever they live."""
+    """One real, scaled shape set and one channel table, wherever they live: what a
+    state-space model takes (`core.state_space`)."""
     sets = [o for o in objects if isinstance(o, ShapeSet)]
     tables = [o for o in objects if isinstance(o, ChannelTable)]
     return (len(objects) == 2 and len(sets) == 1 and len(tables) == 1
-            and not sets[0].is_complex)
+            and not sets[0].is_complex and sets[0].units_defined and not sets[0].unscaled)
 
 
 def _set_and_table_apart(project, objects):
@@ -9097,7 +9376,7 @@ def _solids_take_a_material_alone(geometry: Geometry, groups: Sequence[int]) -> 
 
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
-    'relink', 'name_object_group',
+    'name_object_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
@@ -9138,6 +9417,26 @@ for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))
 
 
+def _confirm_picks(session, picks):
+    """Confirm these (frequency, damping[, description]) in the order given."""
+    for frequency, damping, *described in picks:
+        session.confirm(frequency=float(frequency), damping=float(damping),
+                        description=described[0] if described else None)
+
+
+def _fitted_again(project, source, params):
+    """The modes a hand fit's picks give on the FRF as it stands."""
+    from .core.modal_fit import ModalFitSession
+
+    coherence = params.get('coherence')
+    session = ModalFitSession(project[source], params.get('records'),
+                              None if coherence is None else project[coherence])
+    _confirm_picks(session, params['at'])
+    for _ in range(int(params.get('refine') or 0)):
+        session.refine_residues()
+    return session.shape_set()
+
+
 def _extract_again(project, source, params):
     """The sine levels read again with the history's current setting
     — what `refresh` does for a level set whose smoothing moved."""
@@ -9162,7 +9461,8 @@ _RECOMPUTE = {
         lambda p, s, k: p[s].compute_multiple_coherence(),
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
-        kind=k.get('kind', 'maximax')),
+        kind=k.get('kind', 'maximax'), low=k.get('low'),
+        high=k.get('high', p.srs_ceiling(s))),
     'make_realizable': lambda p, s, k: p[s].made_realizable(
         tolerance=k.get('tolerance'),
         keep_diagonal=k.get('keep_diagonal', True)),
@@ -9170,6 +9470,7 @@ _RECOMPUTE = {
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
+    'fit_modes': lambda p, s, k: _fitted_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
     'resample': lambda p, s, k: p[s].resample(
         k['rate'], anti_alias=k.get('anti_alias', True), order=k.get('order')),
@@ -9367,13 +9668,19 @@ def _named_state(kind, value):
     named = dict(value) if isinstance(value, dict) else dict(zip(spec, value))
     named = {field: named.get(field, default)
              for field, default in spec.items()}
+    # a field the class leaves out of its own equality (who chose an
+    # averaging's start) is not a setting that moved; older fingerprints
+    # do not have it
+    uncompared = [field.name for field in fields(cls) if not field.compare]
     try:
-        return asdict(cls(**named))
+        named = asdict(cls(**named))
     except (TypeError, ValueError):
         # a fingerprint the class refuses outright (recorded by some
         # future format this code predates) compares as recorded —
         # absence of evidence is not staleness
-        return named
+        pass
+    return {field: value for field, value in named.items()
+            if field not in uncompared}
 
 
 def _state_tuple(state):
@@ -9455,6 +9762,8 @@ def _state_story(was, now):
             return 'computed on nodes that have since moved'
         return (f'computed {_summarize_state(was)}; the geometry now '
                 f'says {_summarize_state(now)}')
+    if was[0] == 'shocks' and len(was[1]) == len(now[1]):
+        return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
 
@@ -9697,9 +10006,9 @@ def system_id_run(run: str | os.PathLike, *,
 
 
 class _Ask:
-    """The value that meant "open a dialog and ask me" in Visual Dynamics'
-    app. Kept so a script written for it reads a clear refusal rather
-    than a type error; the Python API opens no dialog.
+    """The value that once meant "open a dialog and ask me". Kept so an
+    older script reads a clear refusal rather than a type error; the Python
+    API opens no dialog.
 
     A sentinel rather than None, because None already means something
     on every one of these keywords: no geometry, no photographs, the
@@ -9716,10 +10025,9 @@ class _Ask:
 #: a path left to be asked for, which the Python API refuses
 ASK = _Ask()
 
-#: what `ASK` answers: it opened a file dialog in Visual Dynamics' Qt app,
-#: and Hertzforge's Python code opens no windows; the shell asks instead
-_NO_DIALOG = ('ASK opens a file dialog, which the Python API cannot do: name '
-              'the {what} (a path, or a list of paths for several runs)')
+#: what `ASK` answers: Python code here opens no windows; the shell asks instead
+_NO_DIALOG = ('the Python API opens no dialog to ask with: name the {what} '
+              '(a path, or a list of paths for several runs)')
 
 
 def _report_path(run: str | os.PathLike,
@@ -9771,7 +10079,7 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
     """What every one-call report function does around its workup.
 
     The run, the batch and the destination, in one place because they
-    are one rule (PRINCIPLES.md, 9): a run left out or `ASK` is refused,
+    are one rule: a run left out or `ASK` is refused,
     several may be given as a list, and `path` may be a folder each
     report lands in under its run's own name.
     """
