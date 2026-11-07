@@ -42,6 +42,14 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
 
+def _holed(points: np.ndarray, dropped: np.ndarray) -> np.ndarray:
+    """For each segment between consecutive `points`, ascending, whether
+    a point in `dropped`, ascending, lies inside it. A log axis has no line
+    through a zero, and nobody wrote one: such a segment is a gap."""
+    return (np.searchsorted(dropped, points[1:], 'left')
+            > np.searchsorted(dropped, points[:-1], 'right'))
+
+
 def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
                     spec_values: ArrayLike) -> np.ndarray:
     """A specification's values at `frequencies`, interpolated log-log.
@@ -51,12 +59,13 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     below the lowest and above the highest remaining point: extending the
     end segments would add a requirement nobody wrote. A dropped point
     between two remaining ones is a gap, NaN up to the remaining points
-    either side of it, as `coverage` counts it. Fewer than two remaining
+    either side of it, as `coverage` counts it, and a point with a gap on
+    both sides is on no segment, so NaN as well. Fewer than two remaining
     points gives NaN everywhere.
     """
     # A dropped interior point used to be bridged by the line across it,
-    # so a curve drew (and `bounds` judged) a requirement over lines that
-    # `coverage` said were not written. One rule now: a gap is a gap.
+    # so a curve drew a requirement over lines that `coverage` said were
+    # not written. One rule now: a gap is a gap.
     frequencies = np.asarray(frequencies, dtype=float)
     spec_frequencies = np.asarray(spec_frequencies, dtype=float)
     spec_values = np.asarray(np.real(spec_values), dtype=float)
@@ -80,12 +89,14 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
         ~usable & np.isfinite(spec_frequencies) & (spec_frequencies > 0.0)]))
     if dropped.size:
         a, b = known_x[:-1], known_x[1:]
-        holed = (np.searchsorted(dropped, b, 'left')
-                 > np.searchsorted(dropped, a, 'right'))
+        holed = _holed(known_x, dropped)
         with np.errstate(divide='ignore', invalid='ignore'):
             at = np.log10(frequencies)
         for lo, hi in zip(a[holed], b[holed]):
             out[(at > lo) & (at < hi)] = np.nan
+        alone = (np.concatenate([[True], holed])
+                 & np.concatenate([holed, [True]]))
+        out[np.isin(at, known_x[alone])] = np.nan
     return out
 
 
@@ -218,9 +229,11 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
     band's area is the cumulative area at its high edge less that at its
     low edge, with the partial segments at the two ends taken from the
     same power law. A thousand bands cost about what one does. Only
-    positive, finite points are used. A band that reaches past them is
-    cut at them, a band wholly outside them is zero, and fewer than two
-    points gives NaN for every band.
+    positive, finite points are used, and a point that is not one is a
+    gap: the segment across it holds nothing, as `coverage` counts it. A
+    band that reaches past the points is cut at them, a band wholly
+    outside them is zero, and fewer than two points, or no segment left
+    between them, gives NaN for every band.
     """
     # vectorized because the comparison is judged cell by cell
     # (2026-09-19), and a thousand cells must cost what one did
@@ -240,6 +253,10 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
     f, w = f[keep], w[keep]
     if f.size < 2:
         return np.full(lows.shape, np.nan)
+    holed = _holed(f, np.sort(frequencies[np.isfinite(frequencies)
+                                          & (frequencies > 0.0) & ~usable]))
+    if holed.all():
+        return np.full(lows.shape, np.nan)
     with np.errstate(divide='ignore', invalid='ignore'):
         n = np.log(w[1:] / w[:-1]) / np.log(f[1:] / f[:-1])
     # the whole of each segment, then the running total at every point
@@ -253,7 +270,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             # form)
             w[:-1] * f[:-1] * ((f[1:] / f[:-1]) ** (n + 1.0) - 1.0)
             / (n + 1.0))
-    cumulative = np.concatenate([[0.0], np.cumsum(whole)])
+    cumulative = np.concatenate([[0.0], np.cumsum(np.where(holed, 0.0, whole))])
 
     def total(x: np.ndarray) -> np.ndarray:
         """The area from the first point to `x`, `x` cut to the curve."""
@@ -265,7 +282,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                 np.abs(nk + 1.0) < 1e-12,
                 w1 * f1 * np.log(x / f1),
                 w1 * f1 * ((x / f1) ** (nk + 1.0) - 1.0) / (nk + 1.0))
-        return cumulative[k] + np.where(x > f1, partial, 0.0)
+        return cumulative[k] + np.where((x > f1) & ~holed[k], partial, 0.0)
 
     out = total(highs) - total(lows)
     return np.where(highs > lows, np.maximum(out, 0.0), 0.0)
@@ -296,15 +313,21 @@ def log_log_area(frequencies: ArrayLike, values: ArrayLike,
 
 def written_band(frequencies: ArrayLike,
                  values: ArrayLike) -> tuple[float, float] | None:
-    """(low, high), the range one written curve covers: its lowest and
-    highest positive, finite points. None when there are fewer than two."""
+    """(low, high), the range one written curve covers: the outer ends of
+    its segments between positive, finite points, a point alone between
+    gaps being on none. None when there is no segment."""
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     usable = (np.isfinite(frequencies) & (frequencies > 0.0)
               & np.isfinite(values) & (values > 0.0))
     if usable.sum() < 2:
         return None
-    return float(frequencies[usable].min()), float(frequencies[usable].max())
+    f = np.sort(frequencies[usable])
+    whole = ~_holed(f, np.sort(frequencies[np.isfinite(frequencies)
+                                           & (frequencies > 0.0) & ~usable]))
+    if not whole.any():
+        return None
+    return float(f[:-1][whole].min()), float(f[1:][whole].max())
 
 
 def coverage(spectrum: Any, record: int = 0) -> list[tuple[float, float]]:

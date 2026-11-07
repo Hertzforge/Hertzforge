@@ -4172,9 +4172,10 @@ class Psd(_Bands, DataArray):
 
         For a density per bin, the outer edges of the written bins, since
         a line covers its whole bin. For a curve between breakpoints, the
-        first and last written points. Octave banding and comparisons use
-        this range, because a controller's target is stored on every FFT
-        line to Nyquist but is only written over part of them.
+        outer ends of its `compliance.coverage`. Octave banding and
+        comparisons use this range, because a controller's target is
+        stored on every FFT line to Nyquist but is only written over part
+        of them.
 
         Parameters
         ----------
@@ -4191,10 +4192,16 @@ class Psd(_Bands, DataArray):
         frequencies = np.asarray(self.abscissa, dtype=float)
         said = self.written(record) & np.isfinite(frequencies)
         if self.interpolation == 'log_log':
-            said &= frequencies > 0.0
-            if not said.any():
+            from .compliance import coverage
+
+            stretches = [stretch
+                         for one in (range(self.num_records) if record is None
+                                     else [int(record)])
+                         for stretch in coverage(self, one)]
+            if not stretches:
                 return None
-            return float(frequencies[said].min()), float(frequencies[said].max())
+            return (min(low for low, _high in stretches),
+                    max(high for _low, high in stretches))
         left, right = self.bin_bounds()
         said &= right > 0.0
         if not said.any():
@@ -4954,11 +4961,11 @@ class Specification(Bounded, Psd):
         (`compliance.log_log_area`) over the part of the band the
         specification covers, divided by the band's width. The limits go
         through the same rule, so a band's warning line has the same
-        relation to its target as at the breakpoints. Cross terms of a
-        breakpoint specification are not power laws (the phase is not),
-        so they are read onto a fine log grid as the authoring sheet
-        reads them (magnitude log-log, phase linear) and integrated
-        there.
+        relation to its target as at the breakpoints, and a point that is
+        not written is a gap in both. Cross terms of a breakpoint
+        specification are not power laws (the phase is not, and a zero is
+        a value), so they are read onto a fine log grid as
+        `compliance.record_at` reads them and integrated there.
 
         The result is a density per band (`interpolation` 'bin', with the
         bands' widths), which a banded measurement is compared against
@@ -4989,7 +4996,7 @@ class Specification(Bounded, Psd):
         # because the comparison integrates it exactly; it does, and a
         # banded specification is still the object a person asks to see
         # and pass on.
-        from .compliance import log_log_area, written_band
+        from .compliance import log_log_area, record_at, written_band
         from .octave import resample
 
         frequencies = np.asarray(self.abscissa, dtype=float)
@@ -4999,7 +5006,15 @@ class Specification(Bounded, Psd):
             # breakpoint to its last — not bins inferred between
             # breakpoints, which put the first band at the midpoint of
             # the first segment and lost everything below it
-            spans = [written_band(frequencies, np.abs(row)) for row in rows]
+            def number_span(row):
+                # a cross term is written wherever it is a number, a zero
+                # included: `compliance.record_at`
+                f = frequencies[np.isfinite(row) & (frequencies > 0.0)]
+                return (float(f.min()), float(f.max())) if f.size > 1 else None
+
+            autos = [autospectrum(self, i) for i in range(len(rows))]
+            spans = [written_band(frequencies, row) if auto else number_span(row)
+                     for row, auto in zip(rows, autos)]
             spans = [span for span in spans if span is not None]
             if not spans:
                 raise ValueError('octave bands need a specification written '
@@ -5025,11 +5040,9 @@ class Specification(Bounded, Psd):
                             / widths[k]
                 return out
 
-            def band_complex(row):
-                from .author import read_at_lines
-
+            def band_complex(i):
                 out = np.full(len(centers), np.nan, dtype=complex)
-                band = written_band(frequencies, np.abs(row))
+                band = number_span(rows[i])
                 if band is None:
                     return out
                 for k in range(len(centers)):
@@ -5037,13 +5050,13 @@ class Specification(Bounded, Psd):
                     hi = min(bounds[k + 1], band[1])
                     if hi > lo:
                         grid = np.geomspace(lo, hi, self._CROSS_POINTS)
-                        values = read_at_lines(frequencies, row, grid)
+                        values = record_at(self, i, grid)
                         out[k] = np.trapezoid(values, grid) / widths[k]
                 return out
 
             banded = np.array([
-                band_complex(row) if np.iscomplexobj(row) and np.any(row.imag)
-                else band_real(np.real(row)) for row in rows])
+                band_real(np.real(rows[i])) if autos[i] else band_complex(i)
+                for i in range(len(rows))])
             limits = {name: np.array([band_real(row) for row in values])
                       for name, values in self.limits.items()}
         else:
