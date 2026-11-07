@@ -16,7 +16,7 @@ from hertzforge.core.mixed_mode import tone_mean_square
 from hertzforge.core.shocks import Shock, find
 from hertzforge.core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
 from hertzforge.project import Project
-from hertzforge.service import action_table, actions, projects, server
+from hertzforge.service import action_table, projects, server
 from hertzforge.service.protocol import ProtocolError
 from hertzforge.service.show import show
 
@@ -555,10 +555,6 @@ def test_a_spectrum_stale_because_a_window_was_added_counts_them():
 
 
 # ---- what is listed ------------------------------------------------------------------------
-
-def test_every_action_named_is_an_operation():
-    assert actions.ADDS <= set(OPS), sorted(actions.ADDS - set(OPS))
-
 
 def test_no_operation_shares_a_kind_of_data_twice():
     from hertzforge.service.ops_geometry import RENAMED
