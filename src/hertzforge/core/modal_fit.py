@@ -185,9 +185,15 @@ class ModalFitSession:
     γ²/(1 - γ²), the inverse of the FRF estimate's relative variance,
     with γ² capped at 0.999 and the weights scaled to a maximum of one.
     A channel with low coherence counts for less, and a response the
-    coherence does not cover has weight one. A suggestion is made when
-    the session is
-    created, so `pending` already holds a frequency and damping.
+    coherence does not cover has weight one. That covers the frequency
+    and damping search, the residues and Refine; a channel's own shape
+    value still comes from that channel, from its better lines, since
+    nothing else measured it. Find Mode reads the residual CMIF with each
+    channel weighted by its median over the lines, because a dip in
+    coherence at a resonance, which leakage gives every channel, must not
+    turn the peak into two shoulders. A suggestion is made when the
+    session is created, so `pending` already holds a frequency and
+    damping.
     """
 
     def __init__(self, frf: Frf, records: Sequence[int] | None = None,
@@ -244,6 +250,11 @@ class ModalFitSession:
         #: capped — a line claiming perfect coherence must not carry
         #: infinite weight into a least squares.
         self.weights: np.ndarray | None = self._coherence_weights(coherence)
+        #: each channel's standing over the whole band, for Find Mode
+        self._trust: np.ndarray | None = (
+            None if self.weights is None
+            else np.sqrt(np.median(self.weights, axis=0)))
+        self._trusted_cmif = None
         #: the residual and its CMIF, held against the mode count. Both
         #: are independent of the cursor, and dragging wants them every
         #: tick.
@@ -412,6 +423,7 @@ class ModalFitSession:
             self._residual = self.matrix - self.synthesis_matrix()
             self._residual_stamp = stamp
             self._cmif = None
+            self._trusted_cmif = None
         residual = self._residual
         assert residual is not None
         return residual
@@ -482,6 +494,18 @@ class ModalFitSession:
             self._cmif = np.linalg.svd(residual, compute_uv=False)[:, 0]
         return self._cmif
 
+    def _search_cmif(self):
+        """The residual CMIF a search reads: the drawn one, or with coherence
+        each channel at its standing over the band, so a noisy channel's
+        lines are not offered as modes."""
+        if self._trust is None:
+            return self._residual_cmif()
+        residual = self.residual_matrix()
+        if self._trusted_cmif is None:
+            self._trusted_cmif = np.linalg.svd(
+                residual * self._trust[None, :, None], compute_uv=False)[:, 0]
+        return self._trusted_cmif
+
     # ---- suggesting where the next mode is ----------------------------------
 
     def searched(self,
@@ -548,7 +572,7 @@ class ModalFitSession:
         # without moving on. Frequency alone cannot tell that ridge from
         # a real neighbor (a repeated pair's second mode was shadowed for
         # exactly that reason), and shape can.
-        s1 = self._residual_cmif()
+        s1 = self._search_cmif()
         low, high = self.searched(within)
         inside = (self.frequencies >= low) & (self.frequencies <= high)
         if not inside.any():
@@ -647,12 +671,13 @@ class ModalFitSession:
             # adopted modes with no shape on these DOFs: nothing to
             # compare, so the frequency exclusion stands
             return False
-        u, s, _vh = np.linalg.svd(self.residual_matrix()[index])
-        measured = float(np.linalg.svd(self.matrix[index],
+        rows = 1.0 if self._trust is None else self._trust[:, None]
+        u, s, _vh = np.linalg.svd(self.residual_matrix()[index] * rows)
+        measured = float(np.linalg.svd(self.matrix[index] * rows,
                                        compute_uv=False)[0])
         if not s[0] >= self.NEIGHBOR_FLOOR * measured:
             return False
-        q, _ = np.linalg.qr(basis)
+        q, _ = np.linalg.qr(basis * rows)
         return float(np.linalg.norm(q.conj().T @ u[:, 0]) ** 2) \
             < self.RIDGE_FRACTION
 
@@ -907,22 +932,16 @@ class ModalFitSession:
         mass-normalized scale.
         """
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
-        residual = self.residual_matrix()
-
-        u, _s, _vh = np.linalg.svd(residual[index])
-        direction = u[:, 0]
-        # the nearest real vector: rotate by half the phase of sum(u^2)
-        direction = np.real(
-            direction * np.exp(-0.5j * np.angle(np.sum(direction ** 2))))
-        norm = np.linalg.norm(direction)
-        direction = direction / norm if norm else direction
 
         band = self._band(index)
         omega = self.omega[band]
         omega_r = 2.0 * np.pi * frequency
         q = ((1j * omega) ** self.power
              / (omega_r ** 2 - omega ** 2 + 2j * damping * omega_r * omega))
-        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        direction = (self._line_direction(index) if self.weights is None
+                     else self._band_direction(index, band, q))
+        projected, root = self._projected(direction, band)
+        q = q * root
         weight = float(np.sum(np.abs(q) ** 2)) or 1.0
         residues = np.real(np.conj(q) @ projected) / weight   # one per ref
 
@@ -957,6 +976,61 @@ class ModalFitSession:
         return {'frequency': frequency, 'damping': damping,
                 'shape': shape, 'description': description,
                 'scaled': scaled}
+
+    @staticmethod
+    def _nearest_real(vector, weights=1.0):
+        """The nearest real unit vector: rotate by half the phase of the
+        (weighted) sum of squares."""
+        direction = np.real(
+            vector * np.exp(-0.5j * np.angle(np.sum(weights * vector ** 2))))
+        norm = np.linalg.norm(direction)
+        return direction / norm if norm else direction
+
+    def _line_direction(self, index):
+        """The shape direction the residual gives at one line. With coherence
+        the references' pattern comes from the channels at their weights, and
+        each channel's value is then its own least squares on that pattern,
+        which no weight on the channel alone can change."""
+        line = self.residual_matrix()[index]
+        if self.weights is None:
+            u, _s, _vh = np.linalg.svd(line)
+            return self._nearest_real(u[:, 0])
+        return self._nearest_real(line @ self._reference_pattern(index))
+
+    def _reference_pattern(self, index):
+        """The references' pattern at a line, the channels at their weights."""
+        line = self.residual_matrix()[index]
+        root = np.sqrt(self.weights[index])[:, None]
+        _u, _s, vh = np.linalg.svd(line * root, full_matrices=False)
+        return vh[0].conj()
+
+    def _band_direction(self, index, band, q):
+        """The shape direction over a band with coherence: each channel's
+        weighted least squares on this mode's SDOF term, so the channel's
+        better lines set its value where one line would carry its noise."""
+        lines = self.weights[band]
+        along = self.residual_matrix()[band] @ self._reference_pattern(index)
+        above = np.sum(lines * np.conj(q)[:, None] * along, axis=0)
+        below = np.sum(lines * (np.abs(q) ** 2)[:, None], axis=0)
+        values = np.divide(above, below, out=np.zeros_like(above),
+                           where=below > 0.0)
+        return self._nearest_real(values, lines.mean(axis=0))
+
+    def _projected(self, direction, band):
+        """The residual over a band projected on a direction, (lines,
+        references), and what the SDOF term is multiplied by to stand in the
+        same least squares. Without coherence these are the plain projection
+        and one. With it, each line's channels count by their weights, and
+        the whitened projection and term give that weighted least squares
+        through the plain formulas."""
+        residual = self.residual_matrix()[band]
+        if self.weights is None:
+            return np.einsum('j,ljk->lk', direction, residual), np.ones(len(residual))
+        lines = self.weights[band]
+        root = np.sqrt(np.sum(lines * direction ** 2, axis=1))
+        projected = np.einsum('lj,ljk->lk', lines * direction, residual)
+        return (np.divide(projected, root[:, None], out=np.zeros_like(projected),
+                          where=root[:, None] > 0.0), root)
 
     def _shape_from(self, direction, residues):
         """(shape over the coordinate, scaled?) from a unit direction
@@ -1265,6 +1339,7 @@ class ModalFitSession:
         # by hand or the plot goes on drawing the unrefined world
         self._residual = None
         self._cmif = None
+        self._trusted_cmif = None
         self.preview = None
         return count
 
@@ -1309,24 +1384,19 @@ class ModalFitSession:
         Returns a cost normalized by the projected residual's own size,
         so 0 is a perfect mode and 1 is having explained nothing.
         """
-        residual = self.residual_matrix()
-        u, _s, _vh = np.linalg.svd(residual[index])
-        direction = np.real(u[:, 0] * np.exp(
-            -0.5j * np.angle(np.sum(u[:, 0] ** 2))))
-        norm = np.linalg.norm(direction)
-        direction = direction / norm if norm else direction
+        direction = self._line_direction(index)
 
         band = self._search_band(index, widest)
         omega = self.omega[band]
-        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        projected, root = self._projected(direction, band)
         total = float(np.sum(np.abs(projected) ** 2)) or 1.0
 
         def cost(frequency: float, damping: float) -> float:
             omega_r = 2.0 * np.pi * frequency
             with np.errstate(divide='ignore', invalid='ignore'):
-                q = ((1j * omega) ** self.power
-                     / (omega_r ** 2 - omega ** 2
-                        + 2j * damping * omega_r * omega))
+                q = root * ((1j * omega) ** self.power
+                            / (omega_r ** 2 - omega ** 2
+                               + 2j * damping * omega_r * omega))
             if not np.all(np.isfinite(q)):
                 return 1.0
             weight = float(np.sum(np.abs(q) ** 2))
@@ -1371,7 +1441,7 @@ class ModalFitSession:
         """
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
         seed = float(seed) if seed else self._half_power(
-            self._residual_cmif(), index)
+            self._search_cmif(), index)
         seed = float(np.clip(seed, 1e-4, 0.5))
         cost = self._residual_cost(index, min(seed * 4.0, 0.5))
         best, span = seed, seed
@@ -1426,7 +1496,7 @@ class ModalFitSession:
         df = float(self.frequencies[1] - self.frequencies[0]
                    if len(self.frequencies) > 1 else 1.0)
         seed = (float(damping) if damping
-                else self._half_power(self._residual_cmif(), index))
+                else self._half_power(self._search_cmif(), index))
         seed = float(np.clip(seed, 1e-4, 0.5))
         widest = min(seed * 4.0, 0.5)
         cost = self._residual_cost(index, widest)
@@ -1505,7 +1575,7 @@ class ModalFitSession:
     def _band(self, index):
         """Frequency lines around a peak worth fitting over: three
         half-power widths, at least five lines, clipped to the data."""
-        s1 = self._residual_cmif()
+        s1 = self._search_cmif()
         zeta = self._half_power(s1, index)
         half_width = 3.0 * zeta * self.frequencies[index]
         df = (self.frequencies[1] - self.frequencies[0]

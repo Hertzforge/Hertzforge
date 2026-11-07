@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from hertzforge import Project
-from hertzforge.core.data import Frf
+from hertzforge.core.data import Frf, MultipleCoherence
 from hertzforge.core.shapes import ShapeSet, synthesize_overlay
 from hertzforge.service import fitting, frames, projects
 from hertzforge.service.action_table import action_table
@@ -405,6 +405,69 @@ def test_a_drive_point_written_with_opposite_signs_is_a_drive_point():
     scale = np.abs(negated.ordinate).max()
     assert np.abs(overlay.ordinate - negated.ordinate).max() < 1e-3 * scale
     assert np.allclose(fit.session.synthesis_records(), overlay.ordinate)
+
+
+def _noisy_channel(seed=1):
+    """Three separated modes with noise on 3Z+, and a coherence that says so."""
+    measured = _frf()
+    rng = np.random.default_rng(seed)
+    measured.ordinate[2] += rng.standard_normal(len(LINES)) + 1j * rng.standard_normal(len(LINES))
+    gamma = np.full((4, len(LINES)), 0.98)
+    gamma[2] = 0.1
+    return _project_of(H=measured, C=MultipleCoherence(LINES, gamma, response_dof=DOFS))
+
+
+def _fitted(project, **more):
+    fit = fitting.start(project, {'frf': 'H', **more})
+    _confirm_all(fit)
+    return fit.session
+
+
+@pytest.mark.parametrize('seed', [1, 2, 3])
+def test_coherence_keeps_a_noisy_channels_lines_from_being_offered_and_fit(seed):
+    project = _noisy_channel(seed)
+    weighted = _fitted(project, coherence='C')
+    found = [mode['frequency'] for mode in weighted.modes]
+    assert found == pytest.approx([20.0, 50.0, 90.0], abs=0.25)
+    shapes = np.array([mode['shape'] for mode in weighted.modes])
+    plain_found = np.array([mode['frequency'] for mode in _fitted(project).modes])
+    off = np.abs(np.array(found) - [20.0, 50.0, 90.0]).max()
+    assert off < 0.1 * np.abs(plain_found - [20.0, 50.0, 90.0]).max(), 'plain it chases the noise'
+    good = [0, 1, 3]
+    assert np.abs(np.abs(shapes[:, good]) - np.abs(PHI[:, good])).max() < 0.02
+
+
+def test_coherence_moves_a_noisy_channels_shape_toward_its_better_lines():
+    measured = _frf()
+    rng = np.random.default_rng(4)
+    bad = np.abs(LINES - 50.0) < 0.6
+    measured.ordinate[2, bad] += (rng.standard_normal(bad.sum())
+                                  + 1j * rng.standard_normal(bad.sum()))
+    gamma = np.full((4, len(LINES)), 0.98)
+    gamma[2, bad] = 0.1
+    project = _project_of(H=measured, C=MultipleCoherence(LINES, gamma, response_dof=DOFS))
+    error = {}
+    for label, more in (('plain', {}), ('weighted', {'coherence': 'C'})):
+        fit = fitting.start(project, {'frf': 'H', **more})
+        fitting.act(fit, 'fit.move', {'frequency': 50.0})
+        fitting.act(fit, 'fit.confirm', {})
+        shape = fit.session.modes[0]['shape']
+        error[label] = abs(abs(shape[2]) - abs(PHI[1, 2]))
+    assert error['weighted'] < 0.5 * error['plain']
+
+
+def test_coherence_leaves_clean_data_where_it_was_and_a_dip_at_a_peak_does_not_split_it():
+    project = _project_of(H=_frf())
+    gamma = np.full((4, len(LINES)), 0.999)
+    for peak in (20.0, 50.0, 90.0):
+        gamma -= 0.09 * np.exp(-((LINES - peak) / 1.0) ** 2)
+    project.add('C', MultipleCoherence(LINES, gamma, response_dof=DOFS))
+    session = _fitted(project, coherence='C')
+    assert [m['frequency'] for m in session.modes] == pytest.approx([20.0, 50.0, 90.0], abs=5e-3)
+    assert [m['damping'] for m in session.modes] == pytest.approx([0.01, 0.02, 0.015], abs=1e-4)
+    shapes = np.array([mode['shape'] for mode in session.modes])
+    assert np.allclose(np.abs(shapes), np.abs(PHI), atol=5e-3)
+    assert not session.shape_set().unscaled
 
 
 def test_a_line_that_is_not_finite_is_left_out_of_the_fit():
