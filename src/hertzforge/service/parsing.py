@@ -27,12 +27,18 @@ def parse_id_runs(text: str, what: str = 'an id') -> list[int]:
 
 
 def parse_picks(text: str, count: int, what: str) -> list[int]:
-    """The 0-based items '1-3, 7' names, numbered from 1 as the shell shows them, each once."""
+    """The 0-based items '1-3, 7' names, numbered from 1 as the shell shows them, each once, in
+    the order typed."""
     picked = list(dict.fromkeys(parse_id_runs(text, f'a {what} number')))
     for number in picked:
         if not 1 <= number <= count:
             raise refused(f'{what}s run from 1 to {count}; {number} is outside them')
     return [number - 1 for number in picked]
+
+
+def parse_optional_picks(text: str, count: int, what: str) -> list[int] | None:
+    """`parse_picks`, with None for a blank `text`, which each caller reads as its own default."""
+    return parse_picks(text, count, what) if text.strip() else None
 
 
 def parse_numbers(text: str, what: str = 'a list of numbers') -> list[float]:

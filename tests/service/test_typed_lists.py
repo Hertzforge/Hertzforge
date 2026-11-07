@@ -6,8 +6,13 @@ from __future__ import annotations
 import pytest
 
 from hertzforge.project import Project
-from hertzforge.service import ops_generate, ops_modal_plan, ops_project, projects
-from hertzforge.service.parsing import parse_id_runs, parse_numbers, parse_picks
+from hertzforge.service import ops_project, projects
+from hertzforge.service.parsing import (
+    parse_id_runs,
+    parse_numbers,
+    parse_optional_picks,
+    parse_picks,
+)
 from hertzforge.service.protocol import ProtocolError
 from hertzforge.service.server import OPERATIONS
 
@@ -60,8 +65,14 @@ def test_picks_count_from_one_and_stay_within_the_count():
 
 def test_records_and_modes_typed_with_a_space_are_two():
     assert ops_project.chosen_records('1 2', 20) == [0, 1]
-    assert ops_modal_plan._picks('1 2', 20, 'mode') == [0, 1]
-    assert ops_generate._picked('1 2', 20, 'mode') == [0, 1]
+    assert parse_optional_picks('1 2', 20, 'mode') == [0, 1]
+    assert parse_optional_picks('  ', 20, 'mode') is None
+
+
+def test_every_list_of_picks_keeps_the_order_typed():
+    assert parse_picks('7, 1-3', 20, 'record') == [6, 0, 1, 2]
+    assert ops_project.chosen_records('7, 1-3', 20) == [6, 0, 1, 2]
+    assert parse_optional_picks('7, 1-3', 20, 'mode') == [6, 0, 1, 2]
 
 
 def test_a_patch_typed_as_the_groups_table_prints_it_is_those_elements():

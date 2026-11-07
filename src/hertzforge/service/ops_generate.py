@@ -33,7 +33,7 @@ from .ops_sine_shock import (
     _trace,
     pulse_edge,
 )
-from .parsing import parse_picks
+from .parsing import parse_optional_picks
 from .protocol import refused
 from .waterfalls import unit_text, waterfall_view
 
@@ -51,12 +51,6 @@ def _core(call: Any) -> Any:
         return call()
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
-
-
-def _picked(text: str, count: int, what: str) -> list[int] | None:
-    """The 0-based items '1-3, 7' names, numbered from 1; None when blank,
-    which is all of them."""
-    return sorted(parse_picks(text, count, what)) if text.strip() else None
 
 
 def _dofs(text: str) -> tuple[str, ...] | None:
@@ -338,8 +332,8 @@ def compute_modal_responses(project: Any, params: dict[str, Any]) -> list[dict]:
 
     name, set_name = params['source'], params['shapes']
     forces, shapes = project[name], project[set_name]
-    modes = _picked(params['modes'], shapes.num_shapes, 'mode')
-    records = _picked(params['records'], forces.num_records, 'record')
+    modes = parse_optional_picks(params['modes'], shapes.num_shapes, 'mode')
+    records = parse_optional_picks(params['records'], forces.num_records, 'record')
     extra: dict[str, Any] = {'quantity': params['response']}
     if modes is not None:
         extra['modes'] = modes

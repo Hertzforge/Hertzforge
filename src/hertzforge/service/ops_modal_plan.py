@@ -26,15 +26,9 @@ from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
-from .parsing import parse_id_runs, parse_picks
+from .parsing import parse_id_runs, parse_optional_picks
 from .protocol import refused
 from .waterfalls import unit_text
-
-
-def _picks(text: str, count: int, what: str) -> list[int] | None:
-    """The 0-based items '1-3, 7' names, numbered from 1; None when
-    `text` is blank."""
-    return parse_picks(text, count, what) if text.strip() else None
 
 
 def _runs(indices: Any) -> str:
@@ -201,7 +195,7 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     source = params['source']
     shapes = project[source]
     geometry_name, geometry = project.geometry_for(source)
-    modes = _picks(params['modes'], shapes.num_shapes, 'mode') or elastic(shapes)
+    modes = parse_optional_picks(params['modes'], shapes.num_shapes, 'mode') or elastic(shapes)
     if not modes:
         raise refused('every mode is a rigid-body mode at 0 Hz: name the modes to measure')
     groups, every_group = _plannable_groups(geometry, params['groups'])
@@ -446,7 +440,7 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     table's geometry, beside what the projection matched."""
     source, table = params['source'], params['table']
     count = len(project[table].dof_strings())
-    rows = _picks(params['rows'], count, 'row')
+    rows = parse_optional_picks(params['rows'], count, 'row')
     try:
         added = project.project_onto_basis(source, onto=table, channels=rows,
                                            tolerance=params['tolerance'] / 100.0)
