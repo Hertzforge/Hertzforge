@@ -2568,6 +2568,18 @@ class TimeHistory(DataArray):
 
         spectra = np.asarray([scipy_fft.rfft(workers=-1, x=groups[key], axis=1)
                               for key in keys])
+        for i in (*drives, *responses):
+            # one sample that is not a number spreads to every line of its
+            # channel, and on through the matrix: H1's inverse failed with
+            # no channel named, H2 and Hv came back all NaN, and a multiple
+            # coherence read 0
+            if not np.isfinite(spectra[i]).all():
+                role = 'reference' if i in drives else 'response'
+                raise ValueError(
+                    f'the {role} channel {keys[i][0]} holds samples that '
+                    'are not finite numbers in the frames read, so its '
+                    'spectrum is not a number at any line; trim the '
+                    'record or move the frames past them')
         averages = spectra.shape[1]
         if averages <= len(drives):
             # Not a poor estimate — no estimate. Fitting a response to
@@ -2675,8 +2687,9 @@ class TimeHistory(DataArray):
         ------
         ValueError
             If `method` is unknown, there are no reference or no response
-            channels, there are no more averages than references, or H2
-            is asked of a multi-reference set that is not square.
+            channels, there are no more averages than references, a channel
+            holds a sample that is not a finite number in the frames read,
+            or H2 is asked of a multi-reference set that is not square.
 
         References
         ----------
@@ -2965,18 +2978,6 @@ class TimeHistory(DataArray):
             self._cross_spectral_frame('partial coherence', references,
                                        averaging)
         order = [*drives, *responses]
-        for i in order:
-            # one sample that is not a number spreads to every line of
-            # its channel, and through the conditioning to every other
-            # channel's partial coherence: refused by name, as the
-            # transmissibility refuses it
-            if not np.isfinite(cross(i, i)).all():
-                role = 'reference' if i in drives else 'response'
-                raise ValueError(
-                    f'the {role} channel {keys[i][0]} holds samples that '
-                    'are not finite numbers in the frames read, so its '
-                    'spectrum is not a number at any line; trim the '
-                    'record or move the frames past them')
         matrix = np.stack([np.stack([cross(i, j) for j in order], axis=-1)
                            for i in order], axis=-2)
         names = channel_labels([keys[i][:2] for i in order])

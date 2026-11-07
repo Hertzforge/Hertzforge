@@ -1993,8 +1993,10 @@ class Project(dict):
         return out
 
     def compute_spectra(self, source: Any) -> str:
-        """Compute spectra from a time history's averages, as Compute
-        Spectra in the averaging view does.
+        """Compute the raw spectra of a time history (Compute Spectra):
+        each capture whole, unwindowed and unscaled (a sine of amplitude A
+        on a line reads A*N/2), averaged as a complex mean
+        (`TimeHistory.compute_spectra`). The history's averaging is not read.
 
         Parameters
         ----------
@@ -2011,8 +2013,27 @@ class Project(dict):
         return self._derive(source, self[source].compute_spectra(),
                             f'{source} Spectra', recipe=('compute_spectra', {}))
 
+    def _framed(self, source: str) -> TimeHistory:
+        """The history a density is computed from, its frames set first
+        when it is one capture with none, by the detector `compute_frfs`
+        and `compute_multiple_coherence` use, so a density does not depend
+        on which of them ran first. Unset, it would be the whole record as
+        one frame under a rectangle: a periodogram, two degrees of freedom
+        at every line. Several captures are already their averages, and a
+        target is read whole."""
+        from .core.data import TransientSpecification
+
+        history = self[source]
+        if (history.averaging is None
+                and not isinstance(history, TransientSpecification)
+                and max(history.records_per_channel.values(), default=0) <= 1):
+            history.averaging = history.suggest_averaging()
+        return history
+
     def compute_psds(self, source: Any) -> str:
-        """Compute PSDs from a time history's averages (Compute PSDs).
+        """Compute PSDs from a time history's averages (Compute PSDs). A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -2026,14 +2047,15 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_psds(),
+        return self._derive(source, self._framed(source).compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
 
     def averaging_of(self, name: Any) -> Any:
         """The `Averaging` a computed spectrum was made with, from its
         provenance, or None when it records none (an imported spectrum).
         A spectrum computed from a record with no averaging set was each
-        record whole under a rectangle, and that is what is returned.
+        record whole under a rectangle, and that is what is returned. Compute
+        Spectra reads no averaging, so its spectra record none.
 
         A spectrum does not carry its window, and a tone read off it
         needs one (`Psd.read_tone`): the window sets how far the tone leaks
@@ -2058,7 +2080,7 @@ class Project(dict):
         record = self.provenance.get(self.name_of(name), {})
         state = record.get('state')
         if (record.get('verb') not in ('compute_psds', 'compute_cpsds',
-                                       'compute_spectra', 'compute_frfs',
+                                       'compute_frfs',
                                        'compute_multiple_coherence')
                 or not state or state[0] not in ('averaging',
                                                  'averaging+roles')):
@@ -3133,7 +3155,9 @@ class Project(dict):
 
     def compute_cpsds(self, source: Any) -> str:
         """Compute the full cross-spectral matrix from a time history's
-        averages (Compute CPSDs), every channel against every channel.
+        averages (Compute CPSDs), every channel against every channel. A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -3147,7 +3171,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_cpsds(),
+        return self._derive(source, self._framed(source).compute_cpsds(),
                             f'{source} CPSDs', recipe=('compute_cpsds', {}))
 
     def transform(self, source: Any, shapes: Any, *,
@@ -8160,8 +8184,7 @@ class Project(dict):
     #: which part of a source each verb reads — the fingerprint follows
     #: the dependency, so changing the shocks never marks a PSD stale
     _VERB_READS: ClassVar[dict[str, str]] = {
-        'compute_spectra': 'averaging', 'compute_psds': 'averaging',
-        'compute_cpsds': 'averaging',
+        'compute_psds': 'averaging', 'compute_cpsds': 'averaging',
         # the two read the channels' roles as well as the framing; the
         # fingerprint stays an 'averaging' one with the roles folded in
         # only when set, so a project saved before roles existed opens

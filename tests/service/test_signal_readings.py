@@ -292,3 +292,98 @@ def test_the_reports_lines_out_chart_says_the_ceiling_is_inside():
     built = _bars_block({'kind': 'bars', 'mode': 'lines', 'caption': 'Lines'}, spec, measured,
                         hertzforge.SI)
     assert built['high'] is None and built['inside_at_ceiling'] is True
+
+
+def _fresh_record(seconds=4.0, rate=1024.0):
+    rng = np.random.default_rng(1)
+    n = int(seconds * rate)
+    return TimeHistory(np.arange(n) / rate, rng.standard_normal((2, n)),
+                       response_dof=['1Z+', '2Z+'], ordinate_dim=['force', 'acceleration'])
+
+
+def test_compute_psds_on_a_fresh_record_is_averaged():
+    project = hertzforge.Project()
+    project.add('Run', _fresh_record())
+    run(project, 'project.compute_psds', history='Run')
+    psd = project['Run PSDs']
+    assert project['Run'].averaging is not None
+    assert project['Run'].averaging.window == 'hann'
+    assert project['Run'].averaging.frames > 1
+    assert psd.statistical_dof[0] > 2.0
+    assert project.averaging_of('Run PSDs') == project['Run'].averaging
+
+
+@pytest.mark.parametrize('first', ['compute_frfs', 'compute_multiple_coherence',
+                                   'compute_cpsds'])
+def test_compute_psds_does_not_depend_on_what_ran_first(first):
+    alone = hertzforge.Project()
+    alone.add('Run', _fresh_record())
+    after = hertzforge.Project()
+    after.add('Run', _fresh_record())
+    getattr(after, first)('Run')
+    a, b = alone[alone.compute_psds('Run')], after[after.compute_psds('Run')]
+    assert a.abscissa == pytest.approx(b.abscissa)
+    assert np.array_equal(a.ordinate, b.ordinate)
+    assert not after.stale()
+
+
+def test_several_captures_stay_their_own_frames():
+    rng = np.random.default_rng(1)
+    n, rate = 1024, 1024.0
+    record = TimeHistory(np.arange(n) / rate, rng.standard_normal((8, n)),
+                         response_dof=['1Z+'] * 8, ordinate_dim=['acceleration'] * 8,
+                         block=[str(k) for k in range(8)])
+    project = hertzforge.Project()
+    project.add('Run', record)
+    psd = project[project.compute_psds('Run')]
+    assert project['Run'].averaging is None
+    assert psd.abscissa[1] == pytest.approx(1.0)
+    assert psd.statistical_dof[0] == pytest.approx(16.0)
+
+
+def _with_a_nan(channel):
+    record = _fresh_record(16.0)
+    ordinate = np.array(record.ordinate)
+    ordinate[channel, 1000] = np.nan
+    record = TimeHistory(record.abscissa, ordinate, response_dof=['1Z+', '2Z+'],
+                         ordinate_dim=['force', 'acceleration'])
+    record.averaging = Averaging(frame_length=1024, overlap=0.5, window='hann').filled(
+        ordinate.shape[1], 1024.0)
+    project = hertzforge.Project()
+    project.add('Run', record)
+    return project
+
+
+@pytest.mark.parametrize(('channel', 'role', 'dof'), [(0, 'reference', '1Z'),
+                                                      (1, 'response', '2Z')])
+@pytest.mark.parametrize('method', ['H1', 'H2', 'Hv'])
+def test_frfs_refuse_a_nan_sample_by_channel(channel, role, dof, method):
+    project = _with_a_nan(channel)
+    with pytest.raises(ProtocolError, match=f'the {role} channel {dof}'):
+        run(project, 'project.compute_frfs', history='Run', method=method)
+
+
+@pytest.mark.parametrize(('channel', 'role', 'dof'), [(0, 'reference', '1Z'),
+                                                      (1, 'response', '2Z')])
+def test_multiple_coherence_refuses_a_nan_sample_by_channel(channel, role, dof):
+    project = _with_a_nan(channel)
+    with pytest.raises(ProtocolError, match=f'the {role} channel {dof}'):
+        run(project, 'project.compute_multiple_coherence', source='Run')
+
+
+def test_compute_spectra_says_it_is_raw_and_claims_no_averaging():
+    n, rate = 16384, 1024.0
+    t = np.arange(n) / rate
+    record = TimeHistory(t, [3.0 * np.sin(2.0 * np.pi * 64.0 * t)], response_dof=['1Z+'],
+                         ordinate_dim=['acceleration'])
+    record.averaging = Averaging(frame_length=1024, overlap=0.5, window='hann').filled(n, rate)
+    project = hertzforge.Project()
+    project.add('Run', record)
+    (view,) = run(project, 'project.compute_spectra', source='Run')
+    assert 'raw FFT' in view['z']['label'] and 'A·N/2' in view['z']['label']
+    name = 'Run Spectra'
+    assert project[name].ordinate.shape == (1, n // 2 + 1), 'the whole record, not its frames'
+    assert project.averaging_of(name) is None
+    project['Run'].averaging = Averaging(frame_length=512, overlap=0.5, window='hann').filled(
+        n, rate)
+    assert name not in project.stale(), 'no change of averaging changes it'

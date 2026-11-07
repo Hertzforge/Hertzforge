@@ -435,6 +435,14 @@ def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     return [_shape_view(project, params['shapes'], params['geometry'])]
 
 
+def compute_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.compute_spectra`, the view saying its numbers are raw: under
+    an axis in the record's units a sine of 3 reads tens of thousands."""
+    views = _verb('compute_spectra')(project, params)
+    views[0]['z']['label'] += ', raw FFT: a sine of amplitude A on a line reads A·N/2'
+    return views
+
+
 def _derives(verb: str, title: str, summary: str, params: tuple = (),
              workspace: Workspace = 'signals', **fixed: Any) -> Operation:
     """A project operation that runs one core verb on an object it
@@ -496,8 +504,13 @@ VERB_OPERATIONS = (
              'The time history at a lower sample rate, a whole division of '
              'its own, through a zero-phase anti-alias filter.',
              (RATE, ANTI_ALIAS)),
-    _derives('compute_spectra', 'Compute Spectra',
-             'Linear spectra from a time history\'s averages.'),
+    Operation(
+        id='project.compute_spectra', title='Compute Spectra', workspace='signals',
+        summary='Raw linear spectra: each capture of a time history transformed whole, with '
+                'no window and no amplitude scaling, and averaged as a complex mean. A sine '
+                'of amplitude A on a line reads A times N over 2; the Amplitude Spectrum '
+                'reads amplitudes. The history\'s averaging is not read.',
+        params=(_source('compute_spectra'),), outputs=('waterfall',), run=compute_spectra),
     _derives('compute_cpsds', 'Compute CPSDs',
              'The cross-spectral matrix of a time history\'s channels, from '
              'its averages.', workspace='random'),
