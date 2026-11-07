@@ -885,7 +885,7 @@ plain words: it never names a protocol method.
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
 | `law_not_checked` | `refused` | `mimo_random.start` or `shock.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
-| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode` and `sim.start` are refused | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, and `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -902,6 +902,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
+| Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
 
 A refusal not listed here is a defect in the service.
 
@@ -1466,8 +1467,9 @@ has `channels: []` and no views.
 `random.log` returns `{"entries":[entry...],"next"}` from `since`, and the `random.log` text
 event carries `{"run_id","entries":[...]}` as entries are written. An entry is
 `{"seq","at_unix","kind","text"}`, `kind` one of `state`, `feasibility`, `override`, `station`,
-`gate`, `level`, `alarm`, `overload`, `trip`, `note`. The log starts at configure and is the
-run's level history and alarm record.
+`gate`, `level`, `alarm`, `overload`, `trip`, `note`, and for classical shock also `pulse` (one
+line per pulse fired) and `law` (the law's calls that were not used). The log starts at configure
+and is the run's level history and alarm record. `shock.log` and its event take the same form.
 
 ### Run Files (Later)
 
@@ -1849,20 +1851,17 @@ and `clear` need control; everything that only reads is open to every connection
 service is shutting down, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`
 are refused `shutting_down`.
 
-**Status.** The control service does not offer these methods yet; this section is the contract
-they are built to.
-
 | Method | Params | From | Result |
 |---|---|---|---|
-| `shock.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}` |
+| `shock.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
 | `shock.config` | `{}` | any | `{"run_id","config","derived","views"}` |
 | `shock.preview` | `{"pulse","standard","fs_hz"}` (`standard` and `fs_hz` optional) | any | `{"derived","views"}` |
 | `shock.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
 | `shock.start` | `{}` | `configured`, `armed` | state |
 | `shock.proceed` | `{}` | `review` | state |
 | `shock.fire` | `{}` | `running`, in `manual` | state |
-| `shock.level` | `{"delta_db"}` or `{"rung"}` | `running` or `review`, in `manual` | `{"level_db"}` |
-| `shock.train` | `{"count","spacing_s"}` | `running`, in `manual` | state |
+| `shock.level` | `{"delta_db"}` (1 or -1) or `{"rung"}` (from 0) | `running` or `review`, in `manual` | `{"level_db"}` |
+| `shock.train` | `{"count","spacing_s"}` (both optional: the configured train) | `running`, in `manual` | state |
 | `shock.burst` | `{}` | `running`, in `manual`, with `gunfire` configured | state |
 | `shock.stop` | `{}` | any | state |
 | `shock.abort` | `{}` | any | state |
@@ -1872,10 +1871,12 @@ they are built to.
 | `shock.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
 | `shock.subscribe` | see "Classical Shock Display" | any | as there |
 | `shock.pulses` | `{"since"}` (optional, default 0) | any | `{"pulses":[row...],"next"}` |
-| `shock.pulse` | `{"index"}` | any | `{"pulse":row,"views"}` |
+| `shock.pulse` | `{"index","points"}` (`points` optional) | any | `{"pulse":row,"views"}` |
 
 "state" in the Result column is the `shock.state` object below. A run is live while it is armed,
-running, holding for review or stopping.
+running, holding for review or stopping. `shock.configure` replaces a run that is not live;
+`shock.reset` configures the present run's configuration again on the present table and station;
+`shock.clear` forgets it (`unconfigured`). A result that carries views travels as a binary frame.
 
 ### Classical Shock Configuration
 
@@ -1894,7 +1895,7 @@ running, holding for review or stopping.
  "identification":{"drive_vrms":0.05,"duration_s":4,"nfft":2048,"band_hz":[5,5000],
                    "min_mean_coherence":0.8,"review":true},
  "control":{"law":{"id":"fd_correct","params":{"beta":0.5}},
-            "band_hz":[5,5000],"coherence_floor":0.9,"tikhonov_floor":0.05,"ref_floor_db":50,
+            "band_hz":[5,5000],"coherence_floor":0.9,"tikhonov_floor":0.01,"ref_floor_db":50,
             "min_band_energy":0.9,"law_budget":0.25,"law_misses":3,"max_pulses":100,
             "max_peak_rise_db":10,"max_bin_rise_db":10,"first_drive_ratio":2,
             "divergence_pulses":3},
@@ -1905,69 +1906,106 @@ running, holding for review or stopping.
                                   "test_article":12},
                 "residual_velocity_ips":0.1,"residual_disp_in":0.001},
  "train":{"count":5,"spacing_s":6},
- "gunfire":{"rounds_per_min":600,"rounds":10},
+ "gunfire":{"rounds_per_min":30,"rounds":3},
  "capture":{"auto_start":false,"run_name":"classical_shock"},
- "metadata":[{"key":"run_number","label":"Run Number","value":""}]}
+ "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `pulse.shape` | (required) | `half_sine`, `haversine`, `terminal_peak_sawtooth`, `initial_peak_sawtooth`, `trapezoid` (with `rise_frac` and `fall_frac`, each a fraction of the duration) or `rectangle` (5% edges) |
-| `pulse.amplitude_g`, `pulse.duration_ms` | (required) | The main pulse's peak, g, and its duration, ms |
+| `title` | empty | The run's name |
+| `pulse.shape` | (required) | `half_sine`, `haversine`, `terminal_peak_sawtooth`, `initial_peak_sawtooth`, `trapezoid` (with `rise_frac` and `fall_frac`, each a fraction of the duration, together at most 1; for no other shape) or `rectangle` (5% edges) |
+| `pulse.amplitude_g`, `pulse.duration_ms` | (required) | The main pulse's peak, g (above 0, at most 10000), and its duration, ms (above 0, at most 1000) |
 | `pulse.polarity` | `positive` | `negative` negates the reference; the pulse is judged on the sign-corrected record |
-| `pulse.compensation` | rectangular, 4 times the duration, symmetric | The pre-pulse and post-pulse that bring the composite to rest: `shape` `half_sine`, `rectangular` or `rounded_rectangular`, each shoulder a multiple of the duration (`post_frac` ignored when `symmetric`). A composite that leaves the standard's quiet window is a warning (`quiet_window_exceeded`), not an error |
-| `standard.name` | `mil_std_810_516` | The tolerance the pulses are judged by: `mil_std_810_516` (amplitude ±15% of peak, velocity change ±10%) or `iec_60068_2_27` (±20% and ±15%) |
+| `pulse.compensation` | `rectangular`, 4, 4, symmetric | The pre-pulse and post-pulse that bring the composite to rest with zero net velocity and displacement: `shape` `half_sine`, `rectangular` or `rounded_rectangular`, `pre_frac` and `post_frac` each a multiple of the duration (above 0, at most 20; `post_frac` ignored when `symmetric`). A composite that leaves the standard's quiet window is a warning (`quiet_window_exceeded`), not an error |
+| `standard.name` | `mil_std_810_516` | The tolerance the pulses are judged by: `mil_std_810_516` (amplitude ±15% of peak, velocity change ±10%) or `iec_60068_2_27` (±20% and ±15%), each with a quiet window 0.4 times the duration either side of the pulse |
 | `standard.tolerance_abort` | `full_level` | `full_level`: a failed pulse below full level alarms, a failed pulse at full level aborts. `every_level`: every failed pulse aborts. An undershoot never aborts; the iteration limit ends a run that does not converge |
-| `standard.overshoot_abort` | twice the amplitude tolerance | A measured peak over `(1 + overshoot_abort)` times the commanded peak aborts at any level (0.30 under MIL-STD-810, 0.40 under IEC 60068-2-27) |
-| `acquisition` | as shown | The rate requested of the station (the run reports the rate it ran at); each pulse's SRS grid and its informational per-band tolerance; whether to compute the pseudo-velocity SRS |
-| `schedule` | as shown | `mode` `auto` or `manual`; the level table, dB, non-decreasing, the last full level; pulses per level (one value for every level, or one per level); the manual start level. `advance` `count` moves to the next level after its pulses; `on_pass` moves only on a passing pulse, and `max_pulses_per_level` pulses at one level without a pass (or failing pulses in a row at one manual level) end the run `not_converged` |
-| `spacing` | as shown | The floors between pulses, seconds: cooling, settling and compute. The time between pulses is at least the largest of them |
-| `identification` | as shown | Band-limited random at `drive_vrms` volts rms for `duration_s`, its peak held under the drive ceiling, estimated in blocks of `nfft` over `band_hz` (the high edge at most 0.4 times the rate by default). A mean in-band coherence under `min_mean_coherence` holds the run. `review` holds for the operator after identification |
-| `control.law` | `{"id":"fd_correct"}` | The control law, by its catalog `id` (see "Control Laws", world `shock_classical`), and values for the parameters its manifest declares |
-| `control` (the rest) | as shown | The correction band; the inverse's trust (`coherence_floor` per bin, the Tikhonov floor as a fraction of the in-band peak gain, the reference's dynamic-range floor `ref_floor_db`, and `min_band_energy`, the fraction of the reference's energy the trusted bins must cover); the law's time budget (a fraction of the minimum time between pulses, `spacing_s` in `derived`) and the unusable calls in a row that stop the run; the run's pulse cap; the per-pulse caps on the drive's peak and on any bin's rise at full level, dB; the first drive's bound (its predicted response peak at most this times the reference's); pulses in a row with the error rising more than 1 dB that end the run `divergence` |
-| `limits.drive_vpk_ceiling` | (required) | The drive ceiling, volts peak. A commanded drive over it is scaled down to it and the action is logged |
-| `limits.drive_vpk_abort` | (required) | The drive abort, volts peak, above the ceiling. A commanded drive over it is refused and the run aborts (`drive_vpk`) |
-| `limits.peak_accel_g` | none | A predicted response peak over it scales the pulse down before it fires |
-| `limits.monitors` | none | Monitored channels by table `index`, each with its unit and peak ceiling; `kind` `predictive` or `between_pulse` |
-| `feasibility` | none | Random's shaker record and moving mass, and the composite's residual velocity and displacement tolerances. Checked at arm; the run's kinematic aborts are the shaker's ratings. Without it, feasibility is not evaluated and the run says so |
-| `train` | one pulse | A train's pulse count and spacing (`shock.train` without params) |
-| `gunfire` | none | A gunfire burst (`shock.burst`): rounds per minute and rounds; the spacing is 60 / rounds per minute |
+| `standard.overshoot_abort` | null: twice the amplitude tolerance | A measured peak over `(1 + overshoot_abort)` times the commanded peak aborts at any level (0.30 under MIL-STD-810, 0.40 under IEC 60068-2-27); above 0, at most 2 |
+| `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run reports the rate it ran at |
+| `acquisition.srs` | 20, 2000, 3, 3 | Each pulse's SRS grid (`f_lo_hz` to `f_hi_hz`, below half the rate, `bands_per_octave` bands an octave, Q 10) and its informational per-band tolerance, dB |
+| `acquisition.pvss` | false | Also compute each pulse's pseudo-velocity SRS |
+| `schedule.mode` | (required) | `auto` walks the levels; `manual` waits for `shock.fire` and `shock.level` |
+| `schedule.levels_db` | (required) | The level table, dB, non-decreasing, from -60 to 12; the last is full level |
+| `schedule.pulses` | (required) | Pulses per level: one count for every level, or one per level (1 to 1000 in `auto`) |
+| `schedule.start_db` | the first level | The level a run starts at, between the first and last levels |
+| `schedule.advance` | `count` | `count` moves to the next level after its pulses; `on_pass` moves only on a passing pulse |
+| `schedule.max_pulses_per_level` | 5 | With `on_pass`, pulses at one level without a pass (in `manual`, failing pulses in a row at one level) before the run ends `not_converged`; 1 to 100 |
+| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, seconds: `cooling_s`, `settling_s` and `compute_s`, each 0 to 3600. The time between pulses (`derived.spacing_s`) is the largest of them, above 0 |
+| `identification.drive_vrms` | 0.05 | Band-limited random at this many volts rms, below the drive ceiling; its peak is held under the drive ceiling |
+| `identification.duration_s`, `nfft` | 4, 2048 | Its length, 0.5 to 120 s, and the block it is estimated in (a power of two, 256 to 65536, at most half the samples) |
+| `identification.band_hz` | 5 to the lesser of 5000 Hz and 0.4 times the rate | The band it excites, below half the rate |
+| `identification.min_mean_coherence` | 0.8 | A mean in-band coherence under it holds the run (`held`) |
+| `identification.review` | true | Hold for the operator after identification (`review`) |
+| `control.law` | `{"id":"fd_correct"}` | The control law, by its catalog `id` (see "Control Laws", world `shock_classical`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest) |
+| `control.band_hz` | as `identification.band_hz` | The correction band, below half the rate |
+| `control.coherence_floor` | 0.9 | Bins identified under this coherence are not trusted (0 to 1) |
+| `control.tikhonov_floor` | 0.01 | The inverse's floor, a fraction of the in-band peak gain (above 0, below 1) |
+| `control.ref_floor_db` | 50 | Bins of the reference more than this far under its in-band peak are not trusted |
+| `control.min_band_energy` | 0.9 | The fraction of the reference's energy the trusted bins must cover, or the run is held before any pulse |
+| `control.law_budget` | 0.25 | One law call's time, a fraction of the time between pulses (`derived.call_budget_s`); above 0, at most 1 |
+| `control.law_misses` | 3 | Unusable calls in a row that end the run `law_fault`; 1 to 100 |
+| `control.max_pulses` | 100 | The run's pulse cap; 1 to 100000 |
+| `control.max_peak_rise_db`, `max_bin_rise_db` | 10, 10 | The most the drive's peak, and any bin of it, may rise from one pulse to the next at full level, dB (above 0, at most 40). With `fd_correct`, `max_bin_rise_db` is at least its `max_db_per_pulse` plus 1 |
+| `control.first_drive_ratio` | 2 | The first drive's predicted response peak is at most this times the reference's (1 to 10) |
+| `control.divergence_pulses` | 3 | Pulses in a row at one level with the error rising more than 1 dB that end the run (`divergence`); 1 to 100 |
+| `limits.drive_vpk_ceiling` | (required) | The drive ceiling, volts peak (above 0, at most 10). A commanded drive over it is scaled down to it and the action is logged |
+| `limits.drive_vpk_abort` | (required) | The drive abort, volts peak, above the ceiling and at most 10. A commanded drive over it is refused and the run aborts (`drive_vpk`) |
+| `limits.peak_accel_g` | null | A predicted response peak over it scales the pulse down before it fires |
+| `limits.monitors` | none | Monitored inputs by table `index`, each with its unit, peak ceiling and `kind` (`predictive` or `between_pulse`) |
+| `feasibility` | null | Random's shaker record and moving mass, and the composite's residual velocity (in/s) and displacement (in) tolerances (default 0.1 and 0.001). Checked at arm; the run's kinematic aborts are the shaker's ratings. Without it, feasibility is not evaluated and the run says so |
+| `train` | one pulse | A train's pulse count (1 to 1000) and spacing, seconds (at least `derived.spacing_s` when more than one); `shock.train` without params fires it |
+| `gunfire` | null | A gunfire burst (`shock.burst`): rounds per minute (its spacing, 60 / rounds per minute, at least `derived.spacing_s`) and rounds (1 to 10000) |
 | `capture`, `metadata` | as shown | Random's |
 
 The control channel is the table's first enabled `control` row; the drive is its first enabled
-`drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field. Its
-content errors are refused `config_invalid` with the items, located by `field`; `dry_run: true`
-checks without replacing anything and needs no control.
+`drive` row. A configuration whose shape is wrong (a missing part, a wrong type, a name that is not
+one of a field's values) is refused `bad_params` naming the field. Its content errors are refused
+`config_invalid` with the items, located by `field`; `dry_run: true` checks without replacing
+anything and needs no control.
 
 **Result.** `state` is the `shock.state` object (`configured`). `derived`:
 
 ```
-{"grid":{"fs_hz":51200,"record_len":16384,"actual":false},
- "reference":{"peak_g":20,"velocity_change_ips":54.1,"displacement_pk_pk_in":...,
-              "main_start":...,"main_len":563},
- "quiet_window":{"worst_frac":0.08,"limit_frac":0.15,"inside":true},
+{"grid":{"fs_hz":51200,"record_len":8192,"actual":false},
+ "reference":{"peak_g":20,"velocity_change_ips":53.9588,"displacement_pk_pk_in":0.687732,
+              "main_start":2534,"main_len":563},
+ "quiet_window":{"worst_frac":0.0795,"limit_frac":0.15,"inside":true},
  "spacing_s":1,"call_budget_s":0.25,
- "feasibility":{"verdict":"not_evaluated","message":"..."}}
+ "feasibility":{"verdict":"pass","message":"The pulse is within the shaker's ratings."}}
 ```
+
+- `grid`: the record every pulse is played and measured as: the composite with the quiet surround
+  on both sides (half the duration, at least 5 ms), padded to a power of two. `actual` is true once
+  the run has armed and the rate is the one the station runs at.
+- `reference`: the composite at full level: its peak, the main pulse's velocity change (the
+  tolerance check's nominal, signed by the polarity), the composite's peak-to-peak displacement,
+  and where the main pulse sits on the record.
+- `quiet_window`: the composite's worst value in the standard's quiet window as a fraction of the
+  peak, against the standard's amplitude tolerance.
+- `spacing_s`: the time between pulse starts; `call_budget_s`: one law call's time.
+- `feasibility`: the composite at full level against the shaker's ratings, before any station.
 
 `views` are the **Pulse** (the reference with its tolerance band), **Velocity** and
 **Displacement** views of the reference at full level, as `shock.preview` gives them.
 `shock.preview` computes the same `derived.reference`, `derived.quiet_window` and views for a
-pulse alone, with no station and no configuration, so a screen draws a pulse without computing
-it.
+pulse alone (`pulse` and `standard` as in a configuration, `fs_hz` default 51200), with no station
+and no configuration, so a screen draws a pulse without computing it.
 
 Item reasons (Classical Shock): errors `out_of_range`, `levels_empty`, `levels_not_ascending`,
-`pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`,
+`pulses_length_mismatch`, `band_above_grid`, `record_too_long` (one pulse's record is as long as
+the controller timeout), `spacing_below_floor` (a train or gunfire spacing below the time between
+pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled input),
 `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`,
 `law_param_invalid`; warnings `quiet_window_exceeded`.
 
 ### Running a Classical Shock Test
 
 - **`shock.arm`** checks feasibility (when given), opens the station, adopts its rate, derives the
-  grid at that rate and passes the arm gate. Nothing is driven. A profile over the shaker's
-  ratings is refused `feasibility_exceeded` and the state becomes `blocked`; `shock.arm` with a
-  non-empty `override_ack` arms past it. An imported law without a passed check for its exact
-  file is refused `law_not_checked` on a hardware station.
+  grid at that rate and passes the arm gate. Nothing is driven. A pulse over the shaker's ratings
+  is refused `feasibility_exceeded` and the state becomes `blocked`; `shock.arm` with a non-empty
+  `override_ack` arms past it (`override_not_needed` when nothing blocks). An imported law without
+  a passed check for its exact file is refused `law_not_checked` on a hardware station. The
+  station's own refusals are Random's (`arm_refused`, `hardware_busy`, ...).
 - **`shock.start`** from `configured` arms first. It runs identification (`phase` `sysid`), then
   holds for review (`review`) or, without a review, goes on as `shock.proceed` does. It answers at
   once.
@@ -1978,36 +2016,39 @@ Item reasons (Classical Shock): errors `out_of_range`, `levels_empty`, `levels_n
   `not_yet` (with `seconds`) before the time between pulses has passed or while a pulse is in
   flight.
 - **`shock.level`** steps ±1 dB (`delta_db`) or goes to a level of the table (`rung`, from 0),
-  between the first and last levels. Refused `wrong_mode` in `auto`, `not_a_rung`, and
-  `drive_ceiling` when the identified drive at the new level would pass the drive abort (with
-  `vpk`, `abort_vpk` and `level_db`).
-- **`shock.train`** fires `count` pulses `spacing_s` apart (at least the floors) and
-  **`shock.burst`** the configured gunfire burst, at the present level, each firing the drive in
-  force with no law call inside it. Every pulse is judged.
+  between the first and last levels, while the run waits between pulses or holds for review.
+  Refused `wrong_mode` in `auto`, `not_a_rung` (a rung the table does not have, or a step past its
+  first or last level), and `drive_ceiling` when the identified drive at the new level would pass
+  the drive abort (with `vpk`, `abort_vpk` and `level_db`).
+- **`shock.train`** fires `count` pulses `spacing_s` apart and **`shock.burst`** the configured
+  gunfire burst, at the present level, each firing the drive in force with no law call inside it.
+  Every pulse is judged. A train's spacing under the time between pulses is refused `bad_params`;
+  `shock.burst` without `gunfire` is refused `wrong_state`; both are refused `wrong_mode` and
+  `not_yet` as `shock.fire` is.
 - **`shock.stop`** ends the run at the next boundary: the pulse in flight finishes and nothing
   more fires (`stopping`, then `operator_stop`). **`shock.abort`** takes the drive down with the
   station's own stop at once (`operator_abort`). The committed output queue is longer than a
   pulse, so an abort governs the next pulse, not the one in flight. Both reach a fire in flight.
-- **When nobody holds control**, firing pauses at once; a claim within `timeout_s` resumes it,
-  and otherwise the run ends `safe_stop`.
+- **When nobody holds control**, firing pauses at once (a train in progress ends at its next
+  pulse); a claim within `timeout_s` resumes it, and otherwise the run ends `safe_stop`.
 
 ### Classical Shock Run State
 
 ```
 {"run_id":"s-0003","state":"running","phase":"waiting","title":"Half-Sine 20 g 11 ms",
  "source":"SIM","station":{"kind":"sim","class":"sim","devices":[]},
- "grid":{"fs_hz":51200,"record_len":16384,"actual":true},"clock":"shared",
+ "grid":{"fs_hz":51200,"record_len":8192,"actual":true},"clock":"shared",
  "mode":"auto","levels_db":[-12,-9,-6,-3,0],"level_db":-6,"rung":2,
  "pulses":{"fired":3,"passed":3,"at_level":0,"of_level":1},"next_pulse_s":0.6,
  "elapsed_s":12.5,"alarm":false,
  "identification":{"drive_vrms":0.05,"drive_vpk":0.21,"coherence_mean":0.998,
                    "min_mean_coherence":0.8,"passed":true},
- "prediction":{"drive_vpk":0.40,"drive_vpk_ceiling":0.5,"drive_vpk_abort":0.8,
-               "response_peak_g":20.1,"velocity_pk_ips":27.3,"displacement_pk_pk_in":0.21},
+ "prediction":{"drive_vpk":0.4,"drive_vpk_ceiling":0.5,"drive_vpk_abort":0.8,
+               "response_peak_g":20.1,"velocity_pk_ips":27.3,"displacement_pk_pk_in":0.69},
  "last_pulse":{row},
  "law":{"id":"fd_correct","name":"frequency-domain correction","version":"0.1.0","sha256":null,
         "misses":0},
- "feasibility":{"verdict":"not_evaluated","message":"..."},"end":null}
+ "feasibility":{"verdict":"pass","message":"..."},"end":null}
 ```
 
 | `state` | `phase` | Meaning |
@@ -2020,10 +2061,20 @@ Item reasons (Classical Shock): errors `out_of_range`, `levels_empty`, `levels_n
 | `stopping` | `stopping` | The pulse in flight finishes; nothing more fires |
 | `finished` | `stopped`, `aborted`, `held` | Ended; `end` says how |
 
-`identification` and `prediction` are null until identification is done. `prediction` is the
-predicted full-level drive peak against the ceiling and the abort, and the predicted response's
-peak and kinematics. `next_pulse_s` is null when no pulse is due. `end` is null until the run
-finishes, then `{"outcome","message","at_s","level_db","pulse","trip"}`.
+- `level_db` is the commanded level (null before the run starts); `rung` its place in
+  `levels_db` (null when a manual step has left the table's levels).
+- `pulses`: `fired` and `passed` over the run; `at_level` pulses fired at this level, and in
+  `auto` `of_level` the pulses the schedule fires here (0 in `manual`).
+- `next_pulse_s`: in `auto`, the seconds until the next pulse fires; in `manual`, until
+  `shock.fire` is accepted (0 once it is); null when no pulse is due.
+- `identification` and `prediction` are null until identification is done. `identification`
+  is the drive it played (rms and peak, volts) and its mean in-band coherence against the hold.
+  `prediction` is the predicted full-level drive peak against the ceiling and the abort, and the
+  predicted response's peak, peak velocity and peak-to-peak displacement.
+- `last_pulse` is the last pulse's row (below); `law` the run's law and its unusable calls in a
+  row now; `feasibility` is null until arm.
+- `end` is null until the run finishes, then `{"outcome","message","at_s","level_db","pulse",
+  "trip"}`: `at_s` from the start, `pulse` the pulse it ended at (null before any).
 
 | `outcome` | How the run ended |
 |---|---|
@@ -2061,9 +2112,13 @@ fired).
 
 ### Classical Shock Pulses
 
-Every pulse fired has a row. `shock.pulses` returns the rows from `since`; `shock.pulse` returns
-one row and its views (the reference at the level fired with its tolerance band, the measured
-pulse, the drive as played, velocity, displacement, SRS).
+Every pulse fired has a row. `shock.pulses` returns the rows from `since` (the row `index`, from
+0) and `next`, the index after the last. `shock.pulse` returns one row and its views: **Pulse**
+(the reference at the level fired with its tolerance band, and the measured pulse), **Drive** (the
+drive as played), **Velocity**, **Displacement** and **SRS**, each time history at most `points`
+points (default 1024, 64 to 8192; a longer one is sent as an envelope, `y` the largest and
+`y_min` the smallest value in each point's interval). The views of the most recent 32 pulses are
+held; an older pulse's are refused `not_found`, its row is still in `shock.pulses`.
 
 ```
 {"index":3,"origin":"ladder","scheduled_db":-3,"commanded_db":-3,"limit_scale":1,
@@ -2074,31 +2129,53 @@ pulse, the drive as played, velocity, displacement, SRS).
  "law":{"used":true,"miss":null,"capped_bins":0,"peak_capped":false,"call_ms":1.4}}
 ```
 
-`origin` is `ladder`, `train` or `gunfire`. `limit_scale` is the drive-limit scale applied (1
-when none). `law` describes the call that produced the drive this pulse played (null for a pulse
-fired in force by a train).
+- `origin` is `ladder`, `train` or `gunfire`; `scheduled_db` the level the schedule asked for and
+  `commanded_db` the level fired (lower when a limit scaled it); `limit_scale` the drive-limit
+  scale applied (1 when none); `drive_vpk` the drive's peak as played, volts.
+- `peak_g`, `peak_ratio` (measured over commanded peak), `error_pct` (RMS error over the judged
+  window, percent of the reference), `velocity_change_ips` and `velocity_change_ratio` (over the
+  nominal), the three `verdicts` and `passed` are the core's judgement; null when the pulse was
+  not measured.
+- `srs` counts the SRS bands within the informational band; `at_s` is seconds from the start.
+- `law` is the call that produced the drive this pulse played (`used` false and `miss` the
+  reason when the drive in force was refired after a miss); null for a pulse fired in force by a
+  train or burst.
 
 ### Classical Shock Display
 
-Event topics: `shock.state` (text, the state object on every change), `shock.log` (text, as
-Random's), `shock.live` (binary, 5 times a second while the run is armed through finished: the
-phase, level, pulse counts, `next_pulse_s` and the fire's progress), `shock.pulse` (binary, to
-every connection once per pulse: the row and the default views) and `shock.data` (binary, per
-subscription, once per pulse and at once on subscribe, so a screen that joins late has the latest
-pulse).
+Event topics:
 
-`shock.subscribe` takes Random's form, `{"rate_hz","plots":[plot...]}` or `{"default":true}`.
+- `shock.state` (text): the state object on every change.
+- `shock.log` (text): new log entries, as Random's.
+- `shock.live` (binary, to every connection, 5 times a second from arm until the run has
+  finished, then once more): `{"run_id","source","state","phase","mode","level_db","rung",
+  "pulses","next_pulse_s","fire"}`, `fire` being `{"done","of"}` (frames of the pulse in flight
+  played, and of the record) or null between pulses.
+- `shock.pulse` (binary, to every connection, once per pulse): `{"run_id","pulse":row,"views"}`
+  with the **Pulse**, **Drive** and **SRS** views at 1024 points.
+- `shock.data` (binary, to one subscribed connection): `shock.live`'s fields and `plots`, once
+  per pulse, once when identification ends, and at once on subscribe (so a screen that joins late
+  has the latest pulse), at most `rate_hz` frames a second.
+
+`shock.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
+default 5; at most 64 plots) or `{"default":true}` (no `shock.data`). A plot is
+`{"id","quantity","points"}`, `points` for the time histories only (default 1024, 64 to 8192).
+The result is `{"default","rate_hz","plots","quantities"}`, every default filled in. In
+`shock.data` each plot comes back as `{"id","quantity","views"}`.
 
 | `quantity` | Views | What they show |
 |---|---|---|
-| `pulse` | one `spectrum` (time) | The reference at the level fired, its tolerance band, the measured pulse, the drive as played |
+| `pulse` | **Pulse**, **Drive** (`spectrum`, time) | The reference at the level fired, its tolerance band and the measured pulse, g; the drive as played, V |
 | `velocity`, `displacement` | one `spectrum` (time) | The measured pulse's and the reference's |
-| `srs` | one `spectrum` | The measured SRS and the reference's, with the informational band |
-| `spectrum` | one `spectrum` | `abs(R)` and `abs(Y)` on the pulse grid |
-| `identification` | two `spectrum`s | `abs(H)` and phase; coherence, with the trusted bins marked |
+| `srs` | one `spectrum` | The measured SRS and the reference's at the level fired, with the informational band |
+| `spectrum` | one `spectrum` | `abs(R)` and `abs(Y)` on the pulse grid, in the correction band |
+| `identification` | **Identification Gain**, **Identification Phase**, **Coherence** (`spectrum`s) | `abs(H)` (control unit per volt) and its phase, degrees; the coherence, the trusted bins and the floor |
 | `law` | one `reading` | The law's reported values on its last call |
 | `readings` | one `reading` | The run's numbers |
 | `pulses` | one `table` | The pulse rows |
+
+A plot of the latest pulse is empty (`views` empty) until a pulse has fired, and
+`identification` until identification has ended.
 
 ## Control Laws
 
@@ -2195,7 +2272,9 @@ full-level pulse passes); a wire with the identified gain scaled +3 dB before in
 measurement noise 30 dB under the response (`pass_by` 4); and a 30 dB notch at 300 Hz with its
 coherence under the floor (`survive`: completed, or ended by the core's own judgement, never over
 the drive ceiling and never an overshoot abort). Every case first asks that every call is
-answered, in time, with zero misses and zero refused outputs. A case's result:
+answered, in time, with zero misses and zero refused outputs. A classical law is named by `id`;
+`params` are checked against its manifest (`law_params_invalid`), and a case that cannot be run at
+all is refused `law_check_unsupported`, naming it. A case's result:
 
 ```
 {"name":"one mode","plant":"one mode, 400 Hz, Q 10","requirement":"pass_by","passed":true,

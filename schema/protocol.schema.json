@@ -805,7 +805,7 @@
                "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
-               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down"]
+               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling"]
     },
     "itemReason": {
       "enum": ["duplicate_index", "no_channel_enabled", "zero_sensitivity", "non_positive_range",
@@ -829,7 +829,7 @@
                "reference_rank_above_drives", "reference_file_unread", "law_unknown",
                "law_wrong_world", "law_shape_not_supported", "law_param_unknown",
                "law_param_invalid", "backend_not_selected", "reference_invalid", "reference_file",
-               "geometry", "transform_rank", "transform_condition", "tolerance"]
+               "geometry", "transform_rank", "transform_condition", "tolerance", "pulses_length_mismatch", "record_too_long", "spacing_below_floor", "quiet_window_exceeded"]
     },
     "reportItem": {
       "type": "object", "required": ["reason", "message"], "additionalProperties": false,
@@ -1522,7 +1522,7 @@
         "seq": {"type": "integer", "minimum": 0},
         "at_unix": {"type": "number"},
         "kind": {"enum": ["state", "feasibility", "override", "station", "gate", "level", "alarm",
-                          "overload", "trip", "note"]},
+                          "overload", "trip", "note", "pulse", "law"]},
         "text": {"type": "string"}
       }
     },
@@ -1990,7 +1990,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "world": {"enum": ["single", "mimo"]},
+        "world": {"enum": ["single", "mimo", "shock_classical"]},
         "builtin": {"type": "boolean"},
         "name": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
@@ -2029,7 +2029,7 @@
     },
     "lawsListParams": {
       "type": "object", "additionalProperties": false,
-      "properties": {"world": {"enum": ["single", "mimo", null]}}
+      "properties": {"world": {"enum": ["single", "mimo", "shock_classical", null]}}
     },
     "lawsListResult": {
       "type": "object", "required": ["laws", "problems"], "additionalProperties": false,
@@ -2095,7 +2095,7 @@
             "passed": {"type": "boolean"},
             "recorded": {"type": "boolean"},
             "tool_version": {"type": "string", "minLength": 1},
-            "cases": {"type": "array", "items": {"$ref": "#/$defs/lawCheckCase"}}
+            "cases": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/lawCheckCase"}, {"$ref": "#/$defs/shockLawCheckCase"}]}}
           }
         }
       }
@@ -2109,7 +2109,7 @@
         "of": {"type": "integer", "minimum": 1},
         "case": {"type": "string", "minLength": 1},
         "state": {"enum": ["running", "done"]},
-        "result": {"oneOf": [{"$ref": "#/$defs/lawCheckCase"}, {"type": "null"}]}
+        "result": {"oneOf": [{"$ref": "#/$defs/lawCheckCase"}, {"$ref": "#/$defs/shockLawCheckCase"}, {"type": "null"}]}
       },
       "if": {"properties": {"state": {"const": "done"}}},
       "then": {"properties": {"result": {"type": "object"}}},
@@ -2350,6 +2350,2548 @@
         "elapsed_s": {"type": ["number", "null"], "minimum": 0},
         "level_db": {"type": ["number", "null"]},
         "plots": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mimoDataPlot"}}
+      }
+    },
+    "shockCompensation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "enum": [
+            "half_sine",
+            "rectangular",
+            "rounded_rectangular"
+          ]
+        },
+        "pre_frac": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "post_frac": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "symmetric": {
+          "type": "boolean"
+        }
+      }
+    },
+    "shockPulse": {
+      "type": "object",
+      "required": [
+        "shape",
+        "amplitude_g",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "enum": [
+            "half_sine",
+            "haversine",
+            "terminal_peak_sawtooth",
+            "initial_peak_sawtooth",
+            "trapezoid",
+            "rectangle"
+          ]
+        },
+        "amplitude_g": {
+          "type": "number"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "polarity": {
+          "enum": [
+            "positive",
+            "negative",
+            null
+          ]
+        },
+        "rise_frac": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fall_frac": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "compensation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockCompensation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "shape": {
+            "const": "trapezoid"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "rise_frac",
+          "fall_frac"
+        ],
+        "properties": {
+          "rise_frac": {
+            "type": "number"
+          },
+          "fall_frac": {
+            "type": "number"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "rise_frac": {
+            "type": "null"
+          },
+          "fall_frac": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    "shockStandard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "mil_std_810_516",
+            "iec_60068_2_27",
+            null
+          ]
+        },
+        "tolerance_abort": {
+          "enum": [
+            "full_level",
+            "every_level",
+            null
+          ]
+        },
+        "overshoot_abort": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "shockConfig": {
+      "type": "object",
+      "required": [
+        "pulse",
+        "schedule",
+        "limits"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pulse": {
+          "$ref": "#/$defs/shockPulse"
+        },
+        "standard": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockStandard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "acquisition": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fs_hz": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "srs": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "f_lo_hz": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "f_hi_hz": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "bands_per_octave": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "band_tol_db": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "pvss": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schedule": {
+          "type": "object",
+          "required": [
+            "mode",
+            "levels_db",
+            "pulses"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "auto",
+                "manual"
+              ]
+            },
+            "levels_db": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "pulses": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "start_db": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "advance": {
+              "enum": [
+                "count",
+                "on_pass",
+                null
+              ]
+            },
+            "max_pulses_per_level": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        },
+        "spacing": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cooling_s": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "settling_s": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "compute_s": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identification": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "drive_vrms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "duration_s": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "nfft": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "band_hz": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "min_mean_coherence": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "review": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "control": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "law": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "params": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "band_hz": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "coherence_floor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "tikhonov_floor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "ref_floor_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "min_band_energy": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "law_budget": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "law_misses": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "max_pulses": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "max_peak_rise_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "max_bin_rise_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "first_drive_ratio": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "divergence_pulses": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "required": [
+            "drive_vpk_ceiling",
+            "drive_vpk_abort"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "drive_vpk_ceiling": {
+              "type": "number"
+            },
+            "drive_vpk_abort": {
+              "type": "number"
+            },
+            "peak_accel_g": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "monitors": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "object",
+                "required": [
+                  "channel",
+                  "unit",
+                  "peak_ceiling",
+                  "kind"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "channel": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "peak_ceiling": {
+                    "type": "number"
+                  },
+                  "kind": {
+                    "enum": [
+                      "predictive",
+                      "between_pulse"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "feasibility": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "shaker",
+                "moving_mass_lb"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "shaker": {
+                  "type": "object"
+                },
+                "moving_mass_lb": {
+                  "type": "object",
+                  "required": [
+                    "armature",
+                    "slip_table",
+                    "drive_adapter",
+                    "fixturing",
+                    "test_article"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "armature": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "slip_table": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "drive_adapter": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "fixturing": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "test_article": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "residual_velocity_ips": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "residual_disp_in": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "train": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "count",
+                "spacing_s"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "spacing_s": {
+                  "type": "number"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gunfire": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "rounds_per_min",
+                "rounds"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "rounds_per_min": {
+                  "type": "number"
+                },
+                "rounds": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capture": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "auto_start": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "run_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "label",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "shockConfigureParams": {
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/shockConfig"
+        },
+        "dry_run": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "shockGrid": {
+      "type": "object",
+      "required": [
+        "fs_hz",
+        "record_len",
+        "actual"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fs_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "record_len": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actual": {
+          "type": "boolean"
+        }
+      }
+    },
+    "shockReferenceFacts": {
+      "type": "object",
+      "required": [
+        "peak_g",
+        "velocity_change_ips",
+        "displacement_pk_pk_in",
+        "main_start",
+        "main_len"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "peak_g": {
+          "type": "number",
+          "minimum": 0
+        },
+        "velocity_change_ips": {
+          "type": "number"
+        },
+        "displacement_pk_pk_in": {
+          "type": "number",
+          "minimum": 0
+        },
+        "main_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "main_len": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "shockQuietWindow": {
+      "type": "object",
+      "required": [
+        "worst_frac",
+        "limit_frac",
+        "inside"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "worst_frac": {
+          "type": "number",
+          "minimum": 0
+        },
+        "limit_frac": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "inside": {
+          "type": "boolean"
+        }
+      }
+    },
+    "shockDerived": {
+      "type": "object",
+      "required": [
+        "grid",
+        "reference",
+        "quiet_window",
+        "spacing_s",
+        "call_budget_s",
+        "feasibility"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "grid": {
+          "$ref": "#/$defs/shockGrid"
+        },
+        "reference": {
+          "$ref": "#/$defs/shockReferenceFacts"
+        },
+        "quiet_window": {
+          "$ref": "#/$defs/shockQuietWindow"
+        },
+        "spacing_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "call_budget_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "feasibility": {
+          "$ref": "#/$defs/feasibilityVerdict"
+        }
+      }
+    },
+    "shockConfigureResult": {
+      "type": "object",
+      "required": [
+        "state",
+        "derived",
+        "warnings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/shockState"
+        },
+        "derived": {
+          "$ref": "#/$defs/shockDerived"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reportItem"
+          }
+        }
+      }
+    },
+    "shockDryRunResult": {
+      "type": "object",
+      "required": [
+        "errors",
+        "warnings",
+        "derived",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reportItem"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reportItem"
+          }
+        },
+        "derived": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockDerived"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockConfigResult": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "config",
+        "derived",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "derived": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockDerived"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockPreviewParams": {
+      "type": "object",
+      "required": [
+        "pulse"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pulse": {
+          "$ref": "#/$defs/shockPulse"
+        },
+        "standard": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockStandard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fs_hz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "shockPreviewResult": {
+      "type": "object",
+      "required": [
+        "derived",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "derived": {
+          "type": "object",
+          "required": [
+            "reference",
+            "quiet_window"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/shockReferenceFacts"
+            },
+            "quiet_window": {
+              "$ref": "#/$defs/shockQuietWindow"
+            }
+          }
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockArmParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "override_ack": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    },
+    "shockLevelParams": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "delta_db"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "delta_db": {
+              "enum": [
+                1,
+                -1
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "rung"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "rung": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "shockLevelResult": {
+      "type": "object",
+      "required": [
+        "level_db"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "level_db": {
+          "type": "number"
+        }
+      }
+    },
+    "shockTrainParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "spacing_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "shockPulsesParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "shockPulseParams": {
+      "type": "object",
+      "required": [
+        "index"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "points": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 64,
+          "maximum": 8192
+        }
+      }
+    },
+    "shockPhase": {
+      "enum": [
+        "idle",
+        "feasibility_blocked",
+        "armed",
+        "sysid",
+        "waiting",
+        "firing",
+        "awaiting_review",
+        "stopping",
+        "stopped",
+        "aborted",
+        "held"
+      ]
+    },
+    "shockLawFaultReason": {
+      "enum": [
+        "error",
+        "panicked",
+        "over_budget",
+        "over_memory",
+        "wrong_length",
+        "non_finite",
+        "undeclared_value",
+        "too_many_values",
+        "peak_rise",
+        "bin_rise",
+        "first_drive"
+      ]
+    },
+    "shockTrip": {
+      "type": "object",
+      "required": [
+        "kind",
+        "pulse",
+        "at_level_db"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "tolerance",
+            "overshoot",
+            "kinematic",
+            "drive_vpk",
+            "accel",
+            "monitor",
+            "divergence",
+            "not_converged",
+            "law_fault"
+          ]
+        },
+        "pulse": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at_level_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "tolerance"
+            },
+            "envelope_pass": {
+              "type": "boolean"
+            },
+            "velocity_change_pass": {
+              "type": "boolean"
+            },
+            "error_pct": {
+              "type": "number"
+            },
+            "worst_deviation_frac": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "envelope_pass",
+            "velocity_change_pass",
+            "error_pct",
+            "worst_deviation_frac"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "overshoot"
+            },
+            "peak_ratio": {
+              "type": "number"
+            },
+            "limit_ratio": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "peak_ratio",
+            "limit_ratio"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "kinematic"
+            },
+            "axis": {
+              "enum": [
+                "velocity",
+                "displacement"
+              ]
+            },
+            "value": {
+              "type": "number"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "predicted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "axis",
+            "value",
+            "limit",
+            "predicted"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "drive_vpk"
+            },
+            "vpk": {
+              "type": "number"
+            },
+            "abort_vpk": {
+              "type": "number"
+            },
+            "predicted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "vpk",
+            "abort_vpk",
+            "predicted"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "accel"
+            },
+            "predicted_g": {
+              "type": "number"
+            },
+            "limit_g": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "predicted_g",
+            "limit_g"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "monitor"
+            },
+            "channel": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "value": {
+              "type": "number"
+            },
+            "limit": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "channel",
+            "value",
+            "limit"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "divergence"
+            },
+            "pulses": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "error_pct": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "pulses",
+            "error_pct"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "not_converged"
+            },
+            "limit": {
+              "enum": [
+                "per_level",
+                "run"
+              ]
+            },
+            "pulses": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "limit",
+            "pulses"
+          ]
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "law_fault"
+            },
+            "reason": {
+              "$ref": "#/$defs/shockLawFaultReason"
+            },
+            "consecutive": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "reason",
+            "consecutive"
+          ]
+        }
+      ]
+    },
+    "shockEnd": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "outcome",
+        "message",
+        "at_s",
+        "level_db",
+        "pulse",
+        "trip"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "completed",
+            "operator_stop",
+            "operator_abort",
+            "safe_stop",
+            "aborted",
+            "not_converged",
+            "held",
+            "law_fault",
+            "fault"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "level_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pulse": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "trip": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockTrip"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "enum": [
+              "aborted",
+              "not_converged",
+              "law_fault"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "trip": {
+            "type": "object"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "trip": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    "shockRow": {
+      "type": "object",
+      "required": [
+        "index",
+        "origin",
+        "scheduled_db",
+        "commanded_db",
+        "limit_scale",
+        "drive_vpk",
+        "peak_g",
+        "peak_ratio",
+        "error_pct",
+        "velocity_change_ips",
+        "velocity_change_ratio",
+        "verdicts",
+        "passed",
+        "srs",
+        "at_s",
+        "law"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "enum": [
+            "ladder",
+            "train",
+            "gunfire"
+          ]
+        },
+        "scheduled_db": {
+          "type": "number"
+        },
+        "commanded_db": {
+          "type": "number"
+        },
+        "limit_scale": {
+          "type": "number",
+          "minimum": 0
+        },
+        "drive_vpk": {
+          "type": "number",
+          "minimum": 0
+        },
+        "peak_g": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peak_ratio": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "error_pct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "velocity_change_ips": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "velocity_change_ratio": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "verdicts": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "envelope",
+                "velocity",
+                "substitution"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "envelope": {
+                  "type": "boolean"
+                },
+                "velocity": {
+                  "type": "boolean"
+                },
+                "substitution": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "passed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "srs": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "bands",
+                "passed_bands"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "bands": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "passed_bands": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "law": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "used",
+                "miss",
+                "capped_bins",
+                "peak_capped",
+                "call_ms"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "used": {
+                  "type": "boolean"
+                },
+                "miss": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/shockLawFaultReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capped_bins": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "peak_capped": {
+                  "type": "boolean"
+                },
+                "call_ms": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "shockCounts": {
+      "type": "object",
+      "required": [
+        "fired",
+        "passed",
+        "at_level",
+        "of_level"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fired": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at_level": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "of_level": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "shockState": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "state",
+        "phase",
+        "title",
+        "source",
+        "station",
+        "grid",
+        "clock",
+        "mode",
+        "levels_db",
+        "level_db",
+        "rung",
+        "pulses",
+        "next_pulse_s",
+        "elapsed_s",
+        "alarm",
+        "identification",
+        "prediction",
+        "last_pulse",
+        "law",
+        "feasibility",
+        "end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/runState"
+        },
+        "phase": {
+          "$ref": "#/$defs/shockPhase"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "station": {
+          "$ref": "#/$defs/stationRef"
+        },
+        "grid": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockGrid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clock": {
+          "enum": [
+            "shared",
+            "independent",
+            "unknown",
+            null
+          ]
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "manual",
+            null
+          ]
+        },
+        "levels_db": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          }
+        },
+        "level_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rung": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "pulses": {
+          "$ref": "#/$defs/shockCounts"
+        },
+        "next_pulse_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "elapsed_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "alarm": {
+          "type": "boolean"
+        },
+        "identification": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "drive_vrms",
+                "drive_vpk",
+                "coherence_mean",
+                "min_mean_coherence",
+                "passed"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "drive_vrms": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "drive_vpk": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "coherence_mean": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "min_mean_coherence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "passed": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prediction": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "drive_vpk",
+                "drive_vpk_ceiling",
+                "drive_vpk_abort",
+                "response_peak_g",
+                "velocity_pk_ips",
+                "displacement_pk_pk_in"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "drive_vpk": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "drive_vpk_ceiling": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "drive_vpk_abort": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "response_peak_g": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "velocity_pk_ips": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "displacement_pk_pk_in": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_pulse": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shockRow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "law": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "version",
+                "sha256",
+                "misses"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "misses": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feasibility": {
+          "$ref": "#/$defs/feasibilityVerdict"
+        },
+        "end": {
+          "$ref": "#/$defs/shockEnd"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "finished"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "end": {
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "end": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "unconfigured"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "run_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "run_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "shockLive": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "source",
+        "state",
+        "phase",
+        "mode",
+        "level_db",
+        "rung",
+        "pulses",
+        "next_pulse_s",
+        "fire"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "state": {
+          "$ref": "#/$defs/runState"
+        },
+        "phase": {
+          "$ref": "#/$defs/shockPhase"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "manual",
+            null
+          ]
+        },
+        "level_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rung": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "pulses": {
+          "$ref": "#/$defs/shockCounts"
+        },
+        "next_pulse_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fire": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "done",
+                "of"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "done": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "of": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "shockPulseEvent": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "pulse",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pulse": {
+          "$ref": "#/$defs/shockRow"
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockPulsesResult": {
+      "type": "object",
+      "required": [
+        "pulses",
+        "next"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pulses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shockRow"
+          }
+        },
+        "next": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "shockPulseResult": {
+      "type": "object",
+      "required": [
+        "pulse",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pulse": {
+          "$ref": "#/$defs/shockRow"
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockQuantity": {
+      "enum": [
+        "pulse",
+        "velocity",
+        "displacement",
+        "srs",
+        "spectrum",
+        "identification",
+        "law",
+        "readings",
+        "pulses"
+      ]
+    },
+    "shockSubscribePlot": {
+      "type": "object",
+      "required": [
+        "id",
+        "quantity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "quantity": {
+          "$ref": "#/$defs/shockQuantity"
+        },
+        "points": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 64,
+          "maximum": 8192
+        }
+      },
+      "if": {
+        "properties": {
+          "quantity": {
+            "enum": [
+              "srs",
+              "spectrum",
+              "identification",
+              "law",
+              "readings",
+              "pulses"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "points": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    "shockSubscribeParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rate_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.5,
+          "maximum": 10
+        },
+        "plots": {
+          "oneOf": [
+            {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/shockSubscribePlot"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "default"
+          ],
+          "properties": {
+            "default": {
+              "const": true
+            },
+            "plots": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "required": [
+            "plots"
+          ],
+          "properties": {
+            "default": {
+              "enum": [
+                false,
+                null
+              ]
+            },
+            "plots": {
+              "type": "array"
+            }
+          }
+        }
+      ]
+    },
+    "shockSubscribeResult": {
+      "type": "object",
+      "required": [
+        "default",
+        "rate_hz",
+        "plots",
+        "quantities"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "boolean"
+        },
+        "rate_hz": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10
+        },
+        "plots": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/shockSubscribePlot"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quantities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shockQuantity"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "default": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "plots": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "plots": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    "shockDataPlot": {
+      "type": "object",
+      "required": [
+        "id",
+        "quantity",
+        "views"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "quantity": {
+          "$ref": "#/$defs/shockQuantity"
+        },
+        "views": {
+          "$ref": "#/$defs/views"
+        }
+      }
+    },
+    "shockData": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "source",
+        "state",
+        "phase",
+        "mode",
+        "level_db",
+        "rung",
+        "pulses",
+        "next_pulse_s",
+        "fire",
+        "plots"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "state": {
+          "$ref": "#/$defs/runState"
+        },
+        "phase": {
+          "$ref": "#/$defs/shockPhase"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "manual",
+            null
+          ]
+        },
+        "level_db": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rung": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "pulses": {
+          "$ref": "#/$defs/shockCounts"
+        },
+        "next_pulse_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fire": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "done",
+                "of"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "done": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "of": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plots": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/shockDataPlot"
+          }
+        }
+      }
+    },
+    "shockLawCheckCase": {
+      "type": "object",
+      "required": [
+        "name",
+        "plant",
+        "requirement",
+        "passed",
+        "detail",
+        "end",
+        "trip",
+        "pulses",
+        "first_pass_pulse",
+        "full_level_pulses",
+        "full_level_passed",
+        "misses",
+        "refused",
+        "capped_bins",
+        "calls",
+        "worst_call_ms",
+        "budget_ms",
+        "max_drive_vpk"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirement": {
+          "enum": [
+            "every_pulse",
+            "pass_by",
+            "survive"
+          ]
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "end": {
+          "enum": [
+            "completed",
+            "operator_stop",
+            "operator_abort",
+            "safe_stop",
+            "aborted",
+            "not_converged",
+            "held",
+            "law_fault",
+            "fault"
+          ]
+        },
+        "trip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pulses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_pass_pulse": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "full_level_pulses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "full_level_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "misses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capped_bins": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "worst_call_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "budget_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_drive_vpk": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     }
   }

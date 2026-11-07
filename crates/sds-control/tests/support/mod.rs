@@ -64,6 +64,9 @@ pub fn options(
         // The protocol tests run MIMO on the simulated driver; the wire runs on the
         // controller's service set their own (tests/mimo_service.rs).
         mimo_driver: Some(server::simulated_mimo_driver(speed)),
+        // Classical shock likewise runs on the simulated engine here; the wire runs
+        // on the controller's service set their own (tests/shock_sim_run.rs).
+        shock_engine: Some(server::simulated_shock_engine()),
     }
 }
 

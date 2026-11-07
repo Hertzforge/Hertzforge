@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 55,
+ "method": "shock.level",
+ "params": {
+  "rung": 4
+ }
+}
