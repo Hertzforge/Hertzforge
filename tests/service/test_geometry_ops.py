@@ -269,7 +269,7 @@ def test_work_up_says_what_the_report_still_lacks():
     state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
     (reading,) = run(state.project, 'project.work_up_sysid')
     said = [(row['label'], row['value']) for row in reading['rows']]
-    assert ('Missing', 'nothing required') in said
+    assert ('Missing', 'nothing required') not in said, 'one stream leaves a required PSD'
     assert ('Optional', 'Geometry') in said and ('Optional', 'Photos') in said
     unbound = state.project['Report'].unbound(state.project,
                                                state.project.object_groups)
