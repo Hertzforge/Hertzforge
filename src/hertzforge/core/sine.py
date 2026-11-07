@@ -463,8 +463,8 @@ class SineTone:
             offset += n
         return out
 
-    def target(self, frequencies: Any,
-               curve: str = 'amplitude') -> np.ndarray:
+    def target(self, frequencies: Any, curve: str = 'amplitude',
+               seconds: Any = None) -> np.ndarray:
         """The specified level at the given frequencies, shape
         (len(frequencies), m).
 
@@ -476,17 +476,31 @@ class SineTone:
         controller follows. Frequencies the tone never sweeps come back
         NaN: nothing is specified there, and zero would read as a
         requirement of zero.
+
+        A sweep up and back passes a frequency twice, maybe at two
+        levels. `seconds`, from the tone's start, says when each line was
+        read, and a line takes the pass nearest that time; without it the
+        later pass answers. A tone that passes each frequency once reads
+        the same either way.
         """
         values = (self.amplitude if curve == 'amplitude'
                   else self.limits.get(curve))
         if values is None:
             raise ValueError(f'{self.name} carries no {curve}')
+        if seconds is not None:
+            seconds = np.asarray(seconds, dtype=np.float64)
         frequencies = np.asarray(frequencies, dtype=np.float64)
         out = np.full((len(frequencies), values.shape[1]), np.nan)
-        for i in range(len(self.segment_rate)):
+        nearest = np.full(len(frequencies), np.inf)
+        for i, (start, length, *_rest) in enumerate(self._segments()):
             f0, f1 = self.frequency[i], self.frequency[i + 1]
             lo, hi = min(f0, f1), max(f0, f1)
             inside = (frequencies >= lo) & (frequencies <= hi)
+            if seconds is not None:
+                away = np.maximum(start - seconds, seconds - (start + length))
+                away = np.maximum(away, 0.0)
+                inside &= away <= nearest
+                nearest[inside] = away[inside]
             if not inside.any():
                 continue
             if self.segment_type[i] == LINEAR:
@@ -701,6 +715,13 @@ class SineLevel(Spectrum):
             None if below_floor is None
             else np.asarray(below_floor, dtype=bool))
         self.drift_hz: float = float(drift_hz)
+
+    def target_on(self, tone: SineTone, curve: str = 'amplitude') -> np.ndarray:
+        """`tone`'s `curve` at each line, on the pass the line was read
+        on (`SineTone.target`), shape (lines, m). A level that kept no
+        clock has only its frequencies to go by."""
+        seconds = None if self.seconds is None else self.seconds - self.onset
+        return tone.target(self.abscissa, curve, seconds=seconds)
 
     @property
     def resolved(self) -> np.ndarray:

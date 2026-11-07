@@ -1701,7 +1701,7 @@ def sine_errors(specification: SineSweepSpecification,
             tone = specification.tone(level.tone)
         except KeyError:
             continue
-        target = tone.target(level.abscissa)
+        target = level.target_on(tone)
         for row, dof in enumerate(level.response_dof):
             try:
                 column = specification.response_dof.index(str(dof))
