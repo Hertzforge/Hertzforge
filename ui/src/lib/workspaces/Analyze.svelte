@@ -128,7 +128,7 @@
 				<div class="svviews" class:several={a.reading.views.length > 1}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
-							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} />
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
 						</div>
 					{/each}
 				</div>

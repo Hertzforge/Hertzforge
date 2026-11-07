@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
 	/** Where the camera stood in each result's view that takes clicks: a click replaces the view, and the view belongs to the person, so the new one opens where they left it. */
 	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
 </script>
@@ -38,6 +39,8 @@
 		Mesh,
 		MeshBasicMaterial,
 		MeshLambertMaterial,
+		Matrix4,
+		Object3D,
 		PerspectiveCamera,
 		Points,
 		PointsMaterial,
@@ -50,6 +53,7 @@
 		type Material
 	} from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
@@ -71,9 +75,69 @@
 		scope?: string;
 		/** Run the view's `pick` operation with these params added: what a click chose. */
 		onpick?: (patch: Record<string, unknown>) => void;
+		/** A gizmo let go: the operation to run, with what the drag adds. */
+		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, scope, onpick }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, scope, onpick, ongizmo }: Props = $props();
+
+	// kept across the view each drag answers with
+	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
+	let handles: TransformControls | null = null;
+	let gizmoAnchor: Object3D | null = null;
+
+	/** Arrows and rings on `view.gizmo`, along its axes. A drag on one axis runs its act on release; the view it answers with redraws them. */
+	function buildGizmo() {
+		const g = view.gizmo;
+		if (!g || !ongizmo || !renderer) return;
+		const anchor = new Object3D();
+		anchor.position.fromArray(g.origin);
+		const [ax, ay, az] = g.axes.map((a) => new Vector3().fromArray(a));
+		anchor.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(ax, ay, az));
+		scene.add(anchor);
+		gizmoAnchor = anchor;
+		const tc = new TransformControls(camera, renderer.domElement);
+		tc.setSpace('local');
+		tc.setMode(gizmoMode);
+		tc.attach(anchor);
+		tc.addEventListener('change', () => (dirty = true));
+		tc.addEventListener('dragging-changed', (e) => {
+			const dragging = Boolean(e.value);
+			controls.enabled = !dragging;
+			if (dragging) return;
+			const axis = (tc.axis ?? '').toLowerCase() as 'x' | 'y' | 'z';
+			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return void resetGizmo();
+			const along = g.axes['xyz'.indexOf(axis)];
+			if (tc.mode === 'translate') {
+				const d = anchor.position.clone().sub(new Vector3().fromArray(g.origin)).dot(new Vector3().fromArray(along));
+				if (Math.abs(d) < 1e-12) return;
+				ongizmo!({ op: g.slide.op, params: g.slide.params }, { ...g.slide.adds?.[axis], [g.slide.values[axis]]: d * (g.to_si ?? 1) });
+			} else {
+				const degrees = ((tc as unknown as { rotationAngle: number }).rotationAngle * 180) / Math.PI;
+				if (Math.abs(degrees) < 1e-9) return;
+				ongizmo!({ op: g.turn.op, params: g.turn.params }, { ...g.turn.adds?.[axis], [g.turn.values[axis]]: degrees });
+			}
+		});
+		scene.add(tc.getHelper());
+		handles = tc;
+	}
+
+	/** A drag that said nothing to run (a plane or the free handle) goes back. */
+	function resetGizmo() {
+		const g = view.gizmo;
+		if (!g || !gizmoAnchor) return;
+		gizmoAnchor.position.fromArray(g.origin);
+		const [ax, ay, az] = g.axes.map((a) => new Vector3().fromArray(a));
+		gizmoAnchor.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(ax, ay, az));
+		dirty = true;
+	}
+
+	function setGizmoMode(mode3: 'translate' | 'rotate') {
+		gizmoMode = mode3;
+		lastGizmoMode = mode3;
+		handles?.setMode(mode3);
+		dirty = true;
+	}
 
 	/** The click the view takes, when it takes one and there is somewhere to send it. */
 	const pick = $derived(onpick ? view.pick : undefined);
@@ -605,13 +669,14 @@
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
-		const pose = view.pick && scope ? poses.get(scope) : undefined;
+		const pose = (view.pick || view.gizmo) && scope ? poses.get(scope) : undefined;
 		if (pose) {
 			camera.position.fromArray(pose.position);
 			camera.up.fromArray(pose.up);
 			controls.target.fromArray(pose.target);
 			controls.update();
 		} else resetView();
+		buildGizmo();
 		applyTheme();
 		loadMode();
 		loadOverlay();
@@ -812,7 +877,10 @@
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
-		if (view.pick && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
+		if ((view.pick || view.gizmo) && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
+		handles?.detach();
+		handles?.getHelper().removeFromParent();
+		handles?.dispose();
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
@@ -1009,6 +1077,14 @@
 	>
 		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
 	</div>
+
+	{#if view.gizmo && ongizmo}
+		<div class="pickbar gizmobar" data-testid="shape3d-gizmo" role="toolbar" aria-label="What the handles do">
+			<button class="btn sm" class:primary={gizmoMode === 'translate'} data-testid="gizmo-move" onclick={() => setGizmoMode('translate')}>Move</button>
+			<button class="btn sm" class:primary={gizmoMode === 'rotate'} data-testid="gizmo-turn" onclick={() => setGizmoMode('rotate')}>Turn</button>
+			<span>Drag an arrow or a ring</span>
+		</div>
+	{/if}
 
 	{#if pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">

@@ -192,6 +192,16 @@
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
+        "gizmo": {
+          "type": "object", "required": ["origin", "axes", "slide", "turn"],
+          "properties": {
+            "origin": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+            "axes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "minItems": 3, "maxItems": 3},
+            "slide": {"type": "object"},
+            "turn": {"type": "object"},
+            "to_si": {"type": "number"}
+          }
+        },
         "pick": {
           "type": "object", "required": ["op", "params", "target", "hint"],
           "properties": {

@@ -42,9 +42,11 @@
 		onpick?: (patch: Record<string, unknown>) => void;
 		/** A spectrum's handle let go at `decibels`. */
 		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
+		/** A gizmo let go: the operation to run, with what the drag adds. */
+		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onspan, onpick, onhandle }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onspan, onpick, onhandle, ongizmo }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -61,7 +63,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: Shape3DPane }}
 		{#key view}
-			<Shape3DPane {view} bind:mode {overlay} {scope} {onpick} />
+			<Shape3DPane {view} bind:mode {overlay} {scope} {onpick} {ongizmo} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>
