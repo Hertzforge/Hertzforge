@@ -211,6 +211,7 @@
             "node": {"$ref": "#/$defs/arrayRef"},
             "direction": {"$ref": "#/$defs/arrayRef"},
             "values": {"$ref": "#/$defs/arrayRef"},
+            "modes": {"$ref": "#/$defs/arrayRef"},
             "peak": {"type": "number", "minimum": 0}
           }
         }

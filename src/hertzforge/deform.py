@@ -719,6 +719,12 @@ class ModalTimeDeflection(Deflection):
         self.num_frames: int = (self._samples.shape[0]
                                 if len(self.rows) else 0)
 
+    @property
+    def fields(self) -> np.ndarray:
+        """Each mode's offsets at the moved nodes, [modes, nodes * 3], for a
+        renderer that sums them itself."""
+        return self._fields
+
     def offsets(self, parameter: float) -> np.ndarray:
         """The offsets at sample index `parameter`."""
         np.dot(self._samples[int(parameter)], self._fields,
