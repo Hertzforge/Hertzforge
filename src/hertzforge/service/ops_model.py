@@ -399,6 +399,10 @@ def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
                          places, out, 'Click a move to leave it out or put it back')]
 
 
+def _kept(params: dict[str, Any]) -> bool:
+    return params['keep']
+
+
 OPERATIONS = (
     Operation(
         id='project.view_geometry', title='View Geometry', workspace='geometry', everywhere=True, summary='A geometry on its own: its nodes and elements.',
@@ -418,7 +422,7 @@ OPERATIONS = (
                 'left in merged into one node; tolerance 0 for the core\'s own.',
         params=(GEOMETRY, GROUPS, TOLERANCE, LEFT_OUT, TOGGLE, MERGE_KEEP),
         outputs=('reading', 'shape3d'),
-        run=merge_coincident_nodes, edits=True),
+        run=merge_coincident_nodes, edits=True, edits_when=_kept),
     Operation(
         id='project.element_groups', title='Element Groups', workspace='model',
         summary='A geometry\'s element groups: each one\'s name, what its elements are, '
@@ -442,7 +446,7 @@ OPERATIONS = (
                 'nearest node of an element group or a second patch.',
         params=(GEOMETRY, ELEMENTS, TIE_TO, TIE_SECOND, TIE_SIDE, TIE_ADD, TIE_DROP, TIE_KEEP),
         outputs=('reading', 'shape3d'), run=tie_elements,
-        edits=True),
+        edits=True, edits_when=_kept),
     Operation(
         id='project.align_meshes', title='Align Meshes', workspace='geometry',
         summary='Where parts meshed apart meet, every move of a coarser node onto a finer '
@@ -450,5 +454,5 @@ OPERATIONS = (
                 'half the coarsest spacing.',
         params=(GEOMETRY, GROUPS, REACH, LEFT_OUT, TOGGLE, ALIGN_KEEP),
         outputs=('reading', 'shape3d'), run=align_meshes,
-        edits=True),
+        edits=True, edits_when=_kept),
 )

@@ -779,3 +779,68 @@ def test_picking_an_element_group_fills_merge_and_delete():
     rows_by_id = {row['id']: row for row in table['table']['columns'][0]['rows']}
     for op in ('project.merge_element_groups', 'project.delete_element_groups'):
         assert rows_by_id[op]['fill']['groups'] == '1'
+
+
+def test_looking_at_a_view_first_operation_leaves_the_project_unmodified(tmp_path):
+    import asyncio
+
+    from .test_projects import _exchange
+
+    block = {'geometry': 'Part', 'width_x': 1.0, 'width_y': 1.0, 'width_z': 1.0}
+    looks = [
+        ('project.merge_coincident_nodes', {'geometry': 'Part'}),
+        ('project.align_meshes', {'geometry': 'Part'}),
+        ('project.tie_elements', {'geometry': 'Part'}),
+        ('project.tie_elements', {'geometry': 'Part', 'add': '1'}),
+        ('project.edit_mate_sides', {'geometry': 'Part', 'mate': 1}),
+        ('project.move_solids', {'geometry': 'Part', 'solids': '1'}),
+        ('project.mesh_solids', {'geometry': 'Part', 'size': 0.5})]
+    acts = [
+        ('project.move_solids', {'geometry': 'Part', 'solids': '1', 'offset_x': 0.5}),
+        ('project.edit_mate_sides', {'geometry': 'Part', 'mate': 1, 'toggle': '1'}),
+        ('project.mesh_solids', {'geometry': 'Part', 'size': 0.5, 'parts_apart': True,
+                                 'keep': True}),
+        ('project.merge_coincident_nodes', {'geometry': 'Part', 'keep': True})]
+    target = str(tmp_path / 'p.hforge')
+    steps = [
+        ('project.new', {}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'm'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': block}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': {**block, 'z': 1.0}}),
+        ('op.run', {'op': 'project.mesh_solids', 'params': {
+            'geometry': 'Part', 'size': 0.5, 'parts_apart': True, 'keep': True}}),
+        ('op.run', {'op': 'project.mate_surfaces', 'params': {'geometry': 'Part', 'keep': True}})]
+    for op, params in looks:
+        steps += [('project.save', {'path': target}),
+                  ('op.run', {'op': op, 'params': params})]
+    for op, params in acts:
+        steps += [('project.save', {'path': target}),
+                  ('op.run', {'op': op, 'params': params})]
+    answers = [got[-1] for got in asyncio.run(_exchange(steps))]
+    start = 6
+    for k, (op, params) in enumerate(looks):
+        answer = answers[start + 2 * k + 1]
+        assert 'error' not in answer, (op, answer)
+        assert not answer['result']['project']['modified'], (op, params)
+    start += 2 * len(looks)
+    for k, (op, params) in enumerate(acts):
+        answer = answers[start + 2 * k + 1]
+        assert 'error' not in answer, (op, answer)
+        assert answer['result']['project']['modified'], (op, params)
+
+
+def test_a_preview_of_an_edit_says_what_would_change():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    responses = asyncio.run(_exchange([
+        ('project.new', {}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'm'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': {'geometry': 'Part'}}),
+        ('op.run', {'op': 'project.edit_solid', 'params': {
+            'geometry': 'Part', 'solid': 1, 'radius': '', 'widths': '2 2 2'}, 'preview': True}),
+        ('op.run', {'op': 'project.edit_solid', 'params': {
+            'geometry': 'Part', 'solid': 1, 'widths': '2 2 2'}})]))
+    preview, real = (got[-1]['result']['views'][0]['rows'][0]['label'] for got in responses[3:])
+    assert (preview, real) == ('Would change', 'Changed')

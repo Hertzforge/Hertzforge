@@ -209,6 +209,10 @@ class Operation:
     #: on a history), so the project has unsaved changes even when no
     #: object was added or removed
     edits: bool = False
+    #: for an operation that answers with a view until told to go ahead: whether these params
+    #: change anything, so looking at the view leaves the project unmodified
+    edits_when: Callable[[dict[str, Any]], bool] | None = field(default=None, repr=False,
+                                                                compare=False)
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False

@@ -1201,7 +1201,8 @@ OPERATIONS = (
         summary='Move parts whole, each with every solid it is made of: turned about the '
                 'middle of their extent, then moved.',
         params=(GEOMETRY, SOLIDS, *OFFSET, *TURN), outputs=('reading', 'shape3d', 'table'),
-        run=move_solids, edits=True),
+        run=move_solids, edits=True,
+        edits_when=lambda params: any(params[p.name] for p in (*OFFSET, *TURN))),
     Operation(
         id='project.copy_solids', title='Copy Solids', workspace='geometry',
         summary='Copy solids, recipe and all, into the same geometry or another; a boolean '
@@ -1244,7 +1245,8 @@ OPERATIONS = (
                 'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
         params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
                 MESH_KEEP),
-        outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True,
+        edits_when=lambda params: params['keep']),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',
         summary='Find where element groups\' surfaces mate; Keep ties each patch, along the '
@@ -1263,7 +1265,8 @@ OPERATIONS = (
         summary='The nodes of one side of a kept set of mated surfaces, by clicking them in '
                 'the view.',
         params=(GEOMETRY, MATE, MATE_SIDE, MATE_NODE), outputs=('reading', 'shape3d'),
-        run=edit_mate_sides, edits=True),
+        run=edit_mate_sides, edits=True,
+        edits_when=lambda params: bool(params['toggle'].strip())),
     Operation(
         id='project.delete_mated_surfaces', title='Delete Mated Surfaces', workspace='geometry', summary='Delete kept sets of mated surfaces, by id.',
         params=(GEOMETRY, MATES), outputs=('reading', 'table'), run=delete_mated_surfaces,

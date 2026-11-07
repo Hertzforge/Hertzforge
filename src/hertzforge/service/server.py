@@ -144,12 +144,16 @@ def _preview_copy(project: Any, name: str) -> Any:
     return scratch
 
 
+#: a reading's labels as a preview says them: nothing has happened yet
+AS_PREVIEW = {'Added': 'Would add', 'Changed': 'Would change'}
+
+
 def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, Any]]:
     """A preview's views in the display units, saying what would be added."""
     for view in views:
         for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
-            if row.get('label') == 'Added':
-                row['label'] = 'Would add'
+            if row.get('label') in AS_PREVIEW:
+                row['label'] = AS_PREVIEW[row['label']]
     display_units.convert(views, units)
     return views
 
@@ -351,7 +355,8 @@ class Connection:
                     await self.service.in_worker(op.run, scratch, values), self.units)}
             before = list(project)
             views = await self.service.in_worker(op.run, project, values)
-            if op.edits or list(project) != before:
+            if (op.edits and (op.edits_when is None or op.edits_when(values))
+                    or list(project) != before):
                 state.modified = True
             display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}
