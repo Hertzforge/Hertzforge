@@ -195,6 +195,14 @@ def _requirement():
                                                abort=(-3.0, 6.0))
 
 
+def test_generate_is_not_offered_on_a_shock_specification():
+    project = Project()
+    project.add('Req', _requirement())
+    assert 'generate_signal' not in projects.verbs_of(project, 'Req')
+    assert 'project.generate_signal' not in offered(project, 'Req')
+    assert 'project.srs_synthesis' in offered(project, 'Req')
+    with pytest.raises(ProtocolError):
+        run(project, 'project.generate_signal', source='Req')
 
 
 @pytest.mark.parametrize('frequency,law,rate', [
