@@ -814,8 +814,9 @@ export class ReportState {
 	html = $state<string | null>(null);
 	busy = $state<string | null>(null);
 	error = $state<string | null>(null);
-	/** Where the last export went. */
+	/** Where the last export went, and what the page left out and the check found. */
 	exported = $state<string | null>(null);
+	exportedNote = $state('');
 	/**
 	 * What an export, a print or an issue is held on before a report leaves the project: the
 	 * sections still owed and the indexed files that do not match; the person says anyway or lets
@@ -851,13 +852,16 @@ export class ReportState {
 		if (!name) return;
 		this.held = null;
 		await this.act('Saving the page', async () => {
-			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[]; note?: string }>(
 				'report.export',
 				{ name, path, ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.path === null) this.held = { act: 'export', path, owed: res.owed, index: res.index };
-			else this.exported = res.path;
+			else {
+				this.exported = res.path;
+				this.exportedNote = res.note ?? '';
+			}
 		});
 	}
 

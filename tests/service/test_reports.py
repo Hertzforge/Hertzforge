@@ -30,7 +30,8 @@ def test_a_report_is_generated_rendered_and_exported(project, tmp_path):
     assert 'http://' not in html.split('<script id="data"')[0].lower(), 'nothing from a network'
     answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'plate')})
     written = answer['path']
-    assert written == str(tmp_path / 'plate.html') and answer == {'path': written, 'owed': [], 'index': []}
+    assert written == str(tmp_path / 'plate.html')
+    assert answer['owed'] == [] and answer['index'] == [] and answer['note'].endswith('unbound blocks left out.')
     assert Path(written).read_text(encoding='utf-8').startswith('<!DOCTYPE html>')
     assert not list(tmp_path.glob('*.partial'))
 
@@ -159,6 +160,12 @@ def test_a_block_is_moved_captioned_repointed_and_removed(edited):
     with pytest.raises(ProtocolError, match='is not something block'):
         reports.operate(project, {'name': name, 'op': 'field', 'at': at, 'field': 'source',
                                   'value': 'Nothing'})
+    for to in (-1, report.num_blocks + 1):
+        with pytest.raises(ProtocolError, match='no place to move'):
+            reports.operate(project, {'name': name, 'op': 'move', 'from': 0, 'to': to})
+    assert reports.operate(project, {'name': name, 'op': 'move', 'from': at,
+                                     'to': report.num_blocks})['selected'] == report.num_blocks - 1
+    at = report.num_blocks - 1
     count = report.num_blocks
     out = reports.operate(project, {'name': name, 'op': 'remove', 'at': at})
     assert report.num_blocks == count - 1 and out['selected'] is None
@@ -242,3 +249,18 @@ def test_a_report_without_identity_is_not_issued(edited):
     project, name = edited
     with pytest.raises(ProtocolError, match='does not have Identity and issue'):
         reports.issue(project, {'name': name, 'step': 'begin'})
+
+
+def test_a_written_export_says_what_it_left_out_and_what_the_check_found(project, tmp_path):
+    name = reports.generate(project, {'template': 'empty', 'name': 'R'})
+    project[name].add({'kind': 'plot', 'source': 'Gone', 'caption': 'x'})
+    project[name].add({'kind': 'plot', 'source': 'Gone too', 'caption': 'y'})
+    answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'a')})
+    assert answer['note'] == '2 unbound blocks left out.'
+    attached = tmp_path / 'settings.txt'
+    attached.write_text('gain 2', encoding='utf-8')
+    project.index_file(attached, 'the settings')
+    project.report_features(name, enable=('data_index',))
+    project[name].remove([0, 1])
+    answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'b')})
+    assert answer['note'].startswith('Checked ') and 'match' in answer['note']

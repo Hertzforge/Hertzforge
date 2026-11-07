@@ -263,6 +263,19 @@ def test_work_up_goes_by_the_module_it_is_run_in(validate):
     assert reading['rows'][0]['value'] == 'nothing to compute'
 
 
+def test_work_up_says_what_the_report_still_lacks():
+    """A report whose optional slots are empty and whose blocks are unbound
+    does not have everything it needs, whatever is required."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
+    (reading,) = run(state.project, 'project.work_up_sysid')
+    said = [(row['label'], row['value']) for row in reading['rows']]
+    assert ('Missing', 'nothing required') in said
+    assert ('Optional', 'Geometry') in said and ('Optional', 'Photos') in said
+    unbound = state.project['Report'].unbound(state.project,
+                                               state.project.object_groups)
+    assert unbound and ('Unbound', f'{len(unbound)} blocks of Report') in said
+
+
 def test_work_up_refuses_an_empty_project():
     with pytest.raises(ProtocolError, match='Nothing is loaded'):
         run(hertzforge.Project(), 'project.work_up_modal')

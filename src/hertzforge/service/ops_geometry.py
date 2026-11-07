@@ -912,12 +912,22 @@ def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- Work Up ------------------------------------------------------------------------
 
 def _still_missing(project: Any) -> list[dict]:
-    still = [label for label, _cls, _icon, _n, optional, _side in project.missing()
-             if not optional]
-    if not still:
-        return [v.row('Missing', 'nothing: everything a report needs is here', None,
-                      'pass')]
-    return [v.row('Missing', label, None, 'warn') for label in still]
+    """What the reports are still without: the slots required, those left
+    optional, and the blocks with nothing to show."""
+    from hertzforge.core.report import Report
+
+    slots = project.missing()
+    rows = [v.row('Missing', label, None, 'warn')
+            for label, _cls, _icon, _n, optional, _side in slots if not optional]
+    rows = rows or [v.row('Missing', 'nothing required', None, 'pass')]
+    rows += [v.row('Optional', label, None, 'info')
+             for label, _cls, _icon, _n, optional, _side in slots if optional]
+    for name, held in project.items():
+        count = len(held.unbound(project, project.object_groups)) if isinstance(held, Report) else 0
+        if count:
+            rows.append(v.row('Unbound', f'{count} block{"s" * (count != 1)} of {name}', None,
+                              'info'))
+    return rows
 
 
 def _place_basis(project: Any, test: str) -> list[str]:

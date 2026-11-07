@@ -191,6 +191,9 @@ def operate(project: Any, name: str, params: Mapping[str, Any]) -> int | None:
         to = params.get('to')
         if isinstance(to, bool) or not isinstance(to, int):
             raise bad_request('report.operate move needs "to", the index to move before')
+        if not 0 <= to <= report.num_blocks:
+            raise refused(f'the report has {report.num_blocks} blocks, so there is no place to '
+                          f'move to at {to}')
         report.move([source], to)
         return to - 1 if to > source else to
     if op in ('title', 'marking', 'marking_color'):

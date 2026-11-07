@@ -647,7 +647,7 @@
     "reportExportResult": {
       "allOf": [{"$ref": "#/$defs/reportHeld"}],
       "type": "object", "required": ["path"],
-      "properties": {"path": {"type": ["string", "null"]}}
+      "properties": {"path": {"type": ["string", "null"]}, "note": {"type": "string"}}
     },
     "reportPrintResult": {
       "allOf": [{"$ref": "#/$defs/reportHeld"}],

@@ -116,6 +116,21 @@ def export_checks(project: Any, name: str) -> dict[str, Any]:
     return {'owed': owed, 'index': astray}
 
 
+def _written_note(project: Any, name: str) -> str:
+    """What a page just written does not say on its face: the blocks left
+    out as unbound, and what the check of the data index found."""
+    from hertzforge.report.data_index import FEATURE as INDEX
+    from hertzforge.report.data_index import checked
+    from hertzforge.report.features import enabled
+
+    report = project[name]
+    count = len(report.unbound(project, project.object_groups))
+    said = [f'{count} unbound block{"s" * (count != 1)} left out.'] if count else []
+    if INDEX in enabled(report) and len(project.data_index):
+        said.append(checked(project.data_index))
+    return ' '.join(said)
+
+
 def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.export`: the page written to `path` (`.html` added when it
     has another suffix); `{'path'}`, the path written. Written beside the
@@ -124,7 +139,9 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
     sections or whose indexed files do not all match is not written unless
     `anyway`; the answer then carries `owed` and `index` and no `path`, for
     the shell to ask "Export anyway?". The page is the one printed and
-    issued, and refused when the report was issued and has changed since."""
+    issued, and refused when the report was issued and has changed since.
+    Written, the answer's `note` says what the page leaves out and what the
+    check found (`_written_note`)."""
     name = _report(project, params, 'report.export')
     path = params.get('path')
     if not isinstance(path, str) or not path.strip():
@@ -148,7 +165,7 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
         if os.path.exists(partial):
             os.remove(partial)
         raise refused(f'could not write {path}: {error.strerror or error}') from None
-    return {'path': path, 'owed': [], 'index': []}
+    return {'path': path, 'owed': [], 'index': [], 'note': _written_note(project, name)}
 
 
 def _selected(params: Mapping[str, Any], method: str) -> int | None:

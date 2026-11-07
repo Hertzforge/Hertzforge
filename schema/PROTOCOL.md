@@ -695,7 +695,7 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 |---|---|---|
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
-| `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index"}` |
+| `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index","note"?}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
 | `report.print` | `{"name","anyway"?}` | `{"html","owed","index"}` |
@@ -714,7 +714,8 @@ indexed file hashed again and those that do not match the checksum indexed. A re
 or whose files have `CHANGED` or are `NOT FOUND` is not written unless `anyway` is true; the
 answer then carries `owed` (the sections' lines) and `index` (`{name, status}` a file) with
 `path` null, and the shell asks "Export anyway?". Written, the answer is the `path` with both
-lists empty. An issued report that has changed since is refused: a change after issue is an
+lists empty and a `note` saying how many unbound blocks the page left out and what the index check
+found ('' when neither applies). An issued report that has changed since is refused: a change after issue is an
 amendment. What is compared leaves out the page's line on the last check of the files and its line
 on the program and the project file, so checking again or saving the project is not a change.
 

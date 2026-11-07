@@ -184,7 +184,7 @@
 						<button class="btn primary sm" type="submit" disabled={!path.trim() || r.busy !== null}>Save</button>
 					</form>
 				{/if}
-				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>.</p>{/if}
+				{#if r.exported}<p class="muted" data-testid="report-saved">Saved to <span class="mono">{r.exported}</span>. {r.exportedNote}</p>{/if}
 				{#if r.held}
 					<div class="ask held" data-testid="report-held" role="alertdialog" aria-label="The report is not ready">
 						{#if r.held.owed.length}
