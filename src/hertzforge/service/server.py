@@ -345,13 +345,15 @@ class Connection:
                 verbs={name: projects.verbs_of(project, name) for name in project})
             if op.id == 'project.save_as' and values['units'] == 'display':
                 values['units'] = self.units
-            if params.get('preview') and op.previews:
+            if params.get('preview') and not op.previews:
+                raise bad_request(f'{op.id} does not preview')
+            if params.get('preview'):
                 scratch = _preview_copy(project, values['geometry'])
                 return {'views': _said_as_preview(
                     await self.service.in_worker(op.run, scratch, values), self.units)}
-            before = list(project)
+            before, journaled = list(project), len(project.journal)
             views = await self.service.in_worker(op.run, project, values)
-            if op.edits or list(project) != before:
+            if op.edits or list(project) != before or len(project.journal) != journaled:
                 state.modified = True
             display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}

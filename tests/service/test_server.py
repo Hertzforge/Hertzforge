@@ -17,8 +17,16 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from hertzforge.service import __main__ as entry
-from hertzforge.service import frames
-from hertzforge.service.server import OPERATIONS, SWITCH_INTERVAL, Service, preload, start
+from hertzforge.service import frames, projects
+from hertzforge.service.protocol import ProtocolError
+from hertzforge.service.server import (
+    OPERATIONS,
+    SWITCH_INTERVAL,
+    Connection,
+    Service,
+    preload,
+    start,
+)
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 
@@ -392,3 +400,44 @@ def test_with_watch_stdin_the_end_of_standard_input_ends_the_service():
         if process.poll() is None:
             process.kill()
             process.wait(timeout=20)
+
+
+def test_the_schema_takes_a_photo_renamed_by_index(validate):
+    validate({'name': 'Photos', 'to': 'Mount', 'index': 0}, 'projectRenameParams')
+
+
+def _connection(path=None):
+    service = Service()
+    connection = Connection(service, None)
+    connection.project = (projects.import_file(None, {'path': str(path)})[0] if path
+                          else projects.new({'title': 't'}))
+    return service, connection
+
+
+def test_a_preview_of_an_operation_that_does_not_preview_is_refused_and_runs_nothing():
+    service, connection = _connection()
+    try:
+        with pytest.raises(ProtocolError, match='does not preview') as error:
+            asyncio.run(connection.project_op(
+                {'op': 'project.new_geometry', 'params': {'name': 'H'}, 'preview': True}))
+        assert error.value.code == 'bad_request'
+        assert 'H' not in connection.project.project and not connection.project.modified
+    finally:
+        service.close()
+
+
+def test_a_run_that_journals_marks_the_project_and_a_reading_does_not():
+    service, connection = _connection(PLATE / 'random.nc4')
+    state = connection.project
+    try:
+        asyncio.run(connection.project_op({'op': 'project.work_up_random', 'params': {}}))
+        assert state.modified
+        state.modified = False
+        asyncio.run(connection.project_op({'op': 'project.plot', 'params': {'data': 'Time History'}}))
+        assert not state.modified
+        # a Work Up with nothing to compute that only says what kind of test this is
+        state.project.project_type = None
+        asyncio.run(connection.project_op({'op': 'project.work_up_random', 'params': {}}))
+        assert state.project.project_type == 'Random Vibration' and state.modified
+    finally:
+        service.close()
