@@ -238,3 +238,27 @@ def test_a_fit_weighted_by_coherence(validate):
     assert out['coherence'] == coherence
     with pytest.raises(ProtocolError, match='is not a coherence'):
         fitting.start(project, {'frf': frf, 'coherence': 'Time History'})
+
+
+def _through_the_server(*requests):
+    """Each (method, params) answered by a `Connection` holding the plate's
+    FRFs, past the parameter check `fitting.start` alone never sees; the fit
+    left and the last answer."""
+    from hertzforge.service import server
+
+    async def main():
+        service = server.Service()
+        connection = server.Connection(service, None)
+        connection.project, _ = projects.import_file(None, {'path': str(PLATE / 'frfs.unv')})
+        answer = None
+        for method, params in requests:
+            answer = await connection.fit_request(method, params)
+        service.close()
+        return connection.fit, answer
+
+    return asyncio.run(main())
+
+
+def test_records_picked_in_the_tree_reach_the_fit_through_the_server():
+    fit, answer = _through_the_server(('fit.start', {'frf': 'FRF', 'records': [0, 1]}))
+    assert fit.session.rows == [0, 1] and answer['fit']['frf'] == 'FRF'

@@ -428,7 +428,7 @@ class Connection:
                 raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'fit.start':
-                _only(params, ('frf', 'shapes', 'coherence'), method)
+                _only(params, ('frf', 'shapes', 'records', 'coherence'), method)
                 self.fit = await call(fitting.start, project, params)
                 return {'fit': await call(self.fit_state, self.fit)}
             if method == 'fit.end':
