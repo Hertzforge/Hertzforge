@@ -194,13 +194,13 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
                      if finite.any() else float(f[len(f) // 2]))
     point = reading.at(frequency)
     unit = None if reading.is_transmissibility else unit_text(reading.dimension)
-    lower = point.lower
-    if lower is not None and np.isfinite(point.upper):
-        band = f'{lower:.4g} to {point.upper:.4g}'
-    elif np.isfinite(point.upper):
-        band = f'up to {point.upper:.4g}'
+    # two numbers and not a sentence: only a number is taken into the display units
+    band = [v.row('Band, low', float(point.lower), unit, 'info')] if point.lower is not None \
+        and np.isfinite(point.upper) else []
+    if np.isfinite(point.upper):
+        band.append(v.row('Band, high', float(point.upper), unit, 'info'))
     else:
-        band = 'none'
+        band = [v.row('Band', 'none', None, 'info')]
     rows = [v.row('Channel', f'{reading.response} over {reading.reference}', None, 'info'),
             v.row('FRF drawn', estimator or 'not recorded', None, 'info'),
             v.row('At', point.frequency, 'Hz', 'info'),
@@ -215,7 +215,7 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
             if np.isfinite(point.coherence) else v.row('Coherence', 'not read', None, 'warn'),
             v.row('Random error', 100.0 * point.error, '%', 'info' if point.small else 'warn')
             if np.isfinite(point.error) else v.row('Random error', 'unbounded', None, 'warn'),
-            v.row('Band', band, unit if band != 'none' else None, 'info'),
+            *band,
             v.row('Averages', f'{reading.frames} frames, {reading.averages:.4g} independent',
                   None, 'info')]
     notes = list(reading.notes)
@@ -295,6 +295,23 @@ def confidence_band(project: Any, params: dict[str, Any]) -> list[dict]:
     return [view, v.reading(f'Confidence of {name}, {channel}', rows)]
 
 
+def _coherence_channel(project: Any, name: str, record: int, reading: Any) -> int:
+    """Where one record of a multiple coherence is among the responses of
+    the reading made from its history. The record names only a DOF, which
+    can hold two quantities: its quantity is that of the history's response
+    channel in the same place, as `compute_multiple_coherence` wrote them."""
+    from hertzforge.core.matrix_checks import channel_labels
+
+    history = project[project.provenance[name]['source']]
+    channels = history.response_channels()
+    dofs = [str(dof) for dof in project[name].response_dof]
+    if [dof for dof, _quantity in channels] != dofs:
+        raise refused(f'{name} reads {dofs[record]}, and the responses of {project.provenance[name]['source']} '
+                      'are not the ones it was computed from; compute it again')
+    labels = channel_labels([*history.reference_channels(), *channels])
+    return reading.responses.index(labels[len(labels) - len(channels) + record])
+
+
 def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.partial_coherence`: which reference explains one response
     once the others are removed, and whether the references were
@@ -312,8 +329,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
         reading = project.read_partial_coherence(name)
     except ValueError as error:
         raise refused(str(error)) from None
-    response = str(coherence.response_dof[record])
-    k = reading.responses.index(response) if response in reading.responses else 0
+    k = _coherence_channel(project, name, record, reading)
     x = np.asarray(reading.frequency, dtype=float)
     references = reading.references
 

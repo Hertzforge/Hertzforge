@@ -197,11 +197,12 @@ def convert(views: list[dict], name: str) -> list[dict]:
         elif kind == 'reading':
             for row in view['rows']:
                 change = _change(row.get('unit'), system)
-                if change is None:
+                # words are in the unit they were written in, and a label
+                # moved without them would say a different number
+                if change is None or isinstance(row['value'], str):
                     continue
                 row['unit'] = change[2]
-                if isinstance(row['value'], float):
-                    row['value'] = float(_values(row['value'], change))
+                row['value'] = float(_values(float(row['value']), change))
         elif kind == 'table':
             _table(view, system)
         elif kind == 'shape3d':
