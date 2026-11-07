@@ -33,6 +33,41 @@ pub const DEFAULT_PULSES_PER_LEVEL: u32 = 1;
 /// The manual step size in dB: the operator nudges `+/- 1 dB`.
 pub const MANUAL_STEP_DB: f64 = 1.0;
 
+/// The default number of pulses at one level without a passing pulse (AUTO
+/// with [`LadderAdvance::OnPass`]), or failing pulses in a row at one MANUAL
+/// level, before a closed-loop run ends as not converged.
+pub const DEFAULT_MAX_PULSES_PER_LEVEL: u32 = 5;
+
+/// When the AUTO ladder moves to the next level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LadderAdvance {
+    /// After the level's pulse count, whatever the pulses' verdicts (the
+    /// open-loop ladder, and SRS).
+    #[default]
+    Count,
+    /// Only on a passing pulse: a level's pulse count counts passing pulses,
+    /// and [`ShockLevelSchedule::max_pulses_per_level`] pulses at one level
+    /// without a pass end the run. For a closed loop, where early pulses are
+    /// how the law learns.
+    OnPass,
+}
+
+impl LadderAdvance {
+    /// True for [`LadderAdvance::Count`], the default.
+    pub fn is_count(&self) -> bool {
+        *self == LadderAdvance::Count
+    }
+}
+
+fn default_max_pulses_per_level() -> u32 {
+    DEFAULT_MAX_PULSES_PER_LEVEL
+}
+
+fn is_default_max_pulses_per_level(n: &u32) -> bool {
+    *n == DEFAULT_MAX_PULSES_PER_LEVEL
+}
+
 /// How the run advances through levels, mirroring Random's `RunMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShockRunMode {
@@ -62,6 +97,20 @@ pub struct ShockLevelSchedule {
     /// Pulses fired per table level in AUTO (one entry per table level, or a single
     /// value applied to every level if length 1). Mirrors Random's `dwell_s`.
     pub pulses_per_level: Vec<u32>,
+    /// When AUTO moves to the next level (default [`LadderAdvance::Count`]).
+    /// Left out of the serialized schedule at its default, so a schedule
+    /// written before it existed reads and writes the same bytes.
+    #[serde(default, skip_serializing_if = "LadderAdvance::is_count")]
+    pub advance: LadderAdvance,
+    /// Pulses at one level without a pass (AUTO, [`LadderAdvance::OnPass`]),
+    /// or failing pulses in a row at one MANUAL level, before a closed-loop
+    /// run ends as not converged (default [`DEFAULT_MAX_PULSES_PER_LEVEL`]).
+    /// Left out of the serialized schedule at its default.
+    #[serde(
+        default = "default_max_pulses_per_level",
+        skip_serializing_if = "is_default_max_pulses_per_level"
+    )]
+    pub max_pulses_per_level: u32,
 }
 
 impl ShockLevelSchedule {
@@ -72,6 +121,8 @@ impl ShockLevelSchedule {
             start_db: DEFAULT_START_LEVEL_DB,
             table_db: DEFAULT_LEVEL_TABLE_DB.to_vec(),
             pulses_per_level: vec![DEFAULT_PULSES_PER_LEVEL],
+            advance: LadderAdvance::Count,
+            max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
         }
     }
 
@@ -82,6 +133,8 @@ impl ShockLevelSchedule {
             start_db: DEFAULT_START_LEVEL_DB,
             table_db: DEFAULT_LEVEL_TABLE_DB.to_vec(),
             pulses_per_level: vec![DEFAULT_PULSES_PER_LEVEL],
+            advance: LadderAdvance::Count,
+            max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
         }
     }
 

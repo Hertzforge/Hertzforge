@@ -60,12 +60,16 @@ pub use law::{
 };
 pub use service::config::{CaptureRules, ClassicalTestConfig, ConfigError, GunfireSpec, MetaField};
 pub use service::firer::{BackendPulseFirer, PulseFirer};
-pub use service::report::{Honesty, PulseRow, ReportData, RunState, Status, TripKind, TripRecord};
+pub use service::report::{
+    ConvergenceLimit, DrivePrediction, HeldReason, Honesty, IdentificationSummary, LawStatus,
+    PulseLawCall, PulseRow, PulseView, ReportData, RunState, Status, ToleranceBand, TripKind,
+    TripRecord,
+};
 pub use service::{ClassicalShockService, ServiceError};
 pub use spec::{
     substitute_amplitude_for_velocity_change, ClassicalPulseSpec, ClassicalShape, SpecError,
 };
 pub use tolerance::{
-    check_tolerance, EnvelopeCheck, SubstitutionCheck, ToleranceParams, ToleranceReport,
-    ToleranceStandard, VelocityChangeCheck,
+    check_tolerance, tolerance_band, EnvelopeCheck, SubstitutionCheck, ToleranceParams,
+    ToleranceReport, ToleranceStandard, VelocityChangeCheck,
 };

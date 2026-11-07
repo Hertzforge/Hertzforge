@@ -2,8 +2,8 @@
 //! ladder tests with shock (N-pulses-per-level) semantics.
 
 use crate::ladder::{
-    LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode, DEFAULT_LEVEL_TABLE_DB,
-    DEFAULT_START_LEVEL_DB,
+    LadderAdvance, LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode,
+    DEFAULT_LEVEL_TABLE_DB, DEFAULT_MAX_PULSES_PER_LEVEL, DEFAULT_START_LEVEL_DB,
 };
 
 #[test]
@@ -41,6 +41,8 @@ fn auto_holds_each_level_for_n_pulses() {
         start_db: -12.0,
         table_db: vec![-12.0, -6.0, 0.0],
         pulses_per_level: vec![3], // 3 pulses per level
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     let mut st = ShockLadderState::new(s).unwrap();
     // Fire 3 at -12 -> still at -12 until the 3rd advances it.
@@ -60,6 +62,8 @@ fn per_level_pulse_counts_can_vary() {
         start_db: -6.0,
         table_db: vec![-6.0, 0.0],
         pulses_per_level: vec![2, 1],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     let mut st = ShockLadderState::new(s).unwrap();
     st.on_pulse_fired();
@@ -126,6 +130,8 @@ fn start_level_off_the_table_is_carried_as_a_manual_offset() {
         start_db: -10.0, // between -12 and -9, nearest is -9
         table_db: vec![-12.0, -9.0, -6.0, 0.0],
         pulses_per_level: vec![1],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     let st = ShockLadderState::new(s).unwrap();
     assert_eq!(st.current_level_db(), -10.0);
@@ -140,6 +146,8 @@ fn schedule_validation_rejects_bad_tables() {
         start_db: 0.0,
         table_db: vec![],
         pulses_per_level: vec![1],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     assert!(matches!(bad.validate(), Err(LadderError::BadSchedule(_))));
 
@@ -149,6 +157,8 @@ fn schedule_validation_rejects_bad_tables() {
         start_db: 0.0,
         table_db: vec![0.0, -3.0],
         pulses_per_level: vec![1],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     assert!(matches!(bad.validate(), Err(LadderError::BadSchedule(_))));
 
@@ -158,6 +168,8 @@ fn schedule_validation_rejects_bad_tables() {
         start_db: -6.0,
         table_db: vec![-6.0, -3.0, 0.0],
         pulses_per_level: vec![1, 2],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     assert!(matches!(bad.validate(), Err(LadderError::BadSchedule(_))));
 
@@ -167,6 +179,8 @@ fn schedule_validation_rejects_bad_tables() {
         start_db: 0.0,
         table_db: vec![0.0],
         pulses_per_level: vec![0],
+        advance: LadderAdvance::Count,
+        max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
     };
     assert!(matches!(bad.validate(), Err(LadderError::BadSchedule(_))));
 }
@@ -179,4 +193,34 @@ fn ladder_round_trips_through_json() {
     let js = serde_json::to_string(&st).unwrap();
     let back: ShockLadderState = serde_json::from_str(&js).unwrap();
     assert_eq!(st, back);
+}
+
+#[test]
+fn the_ladder_gate_defaults_to_count_and_five_and_is_left_out_of_old_records() {
+    let s = ShockLevelSchedule::auto_default();
+    assert_eq!(s.advance, LadderAdvance::Count);
+    assert_eq!(s.max_pulses_per_level, 5);
+    // A schedule at its defaults serializes as it did before the fields existed.
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        !json.contains("advance") && !json.contains("max_pulses_per_level"),
+        "{json}"
+    );
+    // A record written before them reads back with the defaults.
+    let old = r#"{"mode":"Auto","start_db":-12.0,"table_db":[-12.0,0.0],"pulses_per_level":[1]}"#;
+    let back: ShockLevelSchedule = serde_json::from_str(old).unwrap();
+    assert_eq!(back.advance, LadderAdvance::Count);
+    assert_eq!(back.max_pulses_per_level, DEFAULT_MAX_PULSES_PER_LEVEL);
+    // Set, they are written and read back.
+    let gated = ShockLevelSchedule {
+        advance: LadderAdvance::OnPass,
+        max_pulses_per_level: 4,
+        ..s
+    };
+    let json = serde_json::to_string(&gated).unwrap();
+    assert!(json.contains(r#""advance":"on_pass""#), "{json}");
+    assert_eq!(
+        serde_json::from_str::<ShockLevelSchedule>(&json).unwrap(),
+        gated
+    );
 }

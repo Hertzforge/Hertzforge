@@ -69,7 +69,10 @@ pub use drive_limit::{
     DriveMonitorKind, MeasuredPeak, MonitorAction, MonitorEnforcement, PreFireDecision,
 };
 pub use feasibility::{naive_double_sided_compensation, pulse_feasibility, FeasibilityTolerances};
-pub use ladder::{LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode};
+pub use ladder::{
+    LadderAdvance, LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode,
+    DEFAULT_MAX_PULSES_PER_LEVEL,
+};
 pub use law_guard::{
     LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawGuards, LawRecordRing, LawValue,
     MissCounter, MonotonicClock, OutputRule,

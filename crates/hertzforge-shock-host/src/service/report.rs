@@ -10,6 +10,7 @@
 use crate::service::config::{ClassicalTestConfig, MetaField};
 use crate::tolerance::{ToleranceParams, ToleranceReport, ToleranceStandard};
 use hertzforge_shaker_db::FeasibilityReport;
+use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault};
 use hertzforge_shock_common::train::TrainPlan;
 use hertzforge_shock_common::{DrivePath, PathCapabilities};
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,11 @@ use serde::{Deserialize, Serialize};
 /// `FeasibilityBlocked` (hard block until `arm_with_override`) and
 /// `Aborted` from any firing state (tolerance ABORT / kinematic breach /
 /// refused pre-fire).
+///
+/// A closed-loop run (`ClassicalTestConfig::control` set) adds
+/// `Armed -> SysId -> AwaitingReview -> Firing` (identification, then the
+/// review hold when it is on), and two more ends: `Held` (identification held
+/// the run before any pulse) and `NotConverged` (the iteration limit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunState {
     /// No run started.
@@ -38,12 +44,105 @@ pub enum RunState {
     Stopped,
     /// A protection engine tripped; stopped immediately with a trip record.
     Aborted,
+    /// Closed loop: system identification is playing (one fire of band-limited
+    /// random in volts).
+    SysId,
+    /// Closed loop: identification is done and the run holds for the operator
+    /// to review it; nothing fires until `proceed`.
+    AwaitingReview,
+    /// Closed loop: identification held the run before any pulse (its in-band
+    /// coherence was under the floor, or the trusted bins did not cover enough
+    /// of the reference's energy). Terminal; [`Status::held`] says which.
+    Held,
+    /// Closed loop: the iteration limit ended the run (pulses at one level
+    /// without a pass, or the run's pulse cap). Terminal; the trip record is
+    /// [`TripKind::NotConverged`].
+    NotConverged,
 }
 
 impl RunState {
     /// True while pulses can fire (a protection abort can trip).
     pub fn is_running(self) -> bool {
         matches!(self, RunState::Armed | RunState::Firing)
+    }
+
+    /// True once the run has ended: stopped, aborted, held or not converged.
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            RunState::Stopped | RunState::Aborted | RunState::Held | RunState::NotConverged
+        )
+    }
+}
+
+/// Which iteration limit ended a run that did not converge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvergenceLimit {
+    /// `max_pulses_per_level` pulses at one level without a pass (AUTO), or
+    /// failing pulses in a row at one level (MANUAL).
+    PerLevel,
+    /// The run's `max_pulses`.
+    Run,
+}
+
+impl ConvergenceLimit {
+    /// The stable wire name: `per_level` or `run`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConvergenceLimit::PerLevel => "per_level",
+            ConvergenceLimit::Run => "run",
+        }
+    }
+}
+
+/// Why identification held a closed-loop run before any pulse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeldReason {
+    /// The identification's mean in-band coherence was under the floor.
+    LowCoherence {
+        /// The mean in-band coherence measured.
+        mean: f64,
+        /// The floor it had to reach.
+        floor: f64,
+    },
+    /// The bins the core trusts cover less of the reference's energy than the
+    /// run asks for: reference content outside the correctable band.
+    ReferenceOutOfBand {
+        /// The fraction of the reference's energy the trusted bins cover.
+        coverage: f64,
+        /// The fraction asked for (`min_band_energy`).
+        min: f64,
+    },
+}
+
+impl HeldReason {
+    /// The stable name: `low_coherence` or `reference_out_of_band`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HeldReason::LowCoherence { .. } => "low_coherence",
+            HeldReason::ReferenceOutOfBand { .. } => "reference_out_of_band",
+        }
+    }
+}
+
+impl std::fmt::Display for HeldReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HeldReason::LowCoherence { mean, floor } => write!(
+                f,
+                "identification coherence {mean:.3} is under the floor of {floor:.3}; raise \
+                 the identification drive or lengthen it"
+            ),
+            HeldReason::ReferenceOutOfBand { coverage, min } => write!(
+                f,
+                "the trusted bins cover {:.1}% of the reference's energy, under the {:.1}% \
+                 asked for; the pulse has content outside the correctable band",
+                coverage * 100.0,
+                min * 100.0
+            ),
+        }
     }
 }
 
@@ -84,6 +183,11 @@ pub enum TripKind {
         value: f64,
         limit: f64,
         pulse: u64,
+        /// The breach was found on the closed loop's prediction of the next
+        /// pulse, before it fired: nothing was driven for it. `false` for a
+        /// measured breach.
+        #[serde(default)]
+        predicted: bool,
     },
     /// The pre-fire drive-limit check refused to fire (invalid prediction,
     /// Garbage in must not fire a pulse).
@@ -98,6 +202,88 @@ pub enum TripKind {
         /// gave no reason).
         reason: String,
     },
+    /// Closed loop: a measured peak over `(1 + overshoot_abort)` times the
+    /// commanded peak, at any level.
+    Overshoot {
+        /// The pulse that overshot.
+        pulse: u64,
+        /// Measured peak over commanded peak.
+        peak_ratio: f64,
+        /// The ratio that aborts, `1 + overshoot_abort`.
+        limit_ratio: f64,
+    },
+    /// Closed loop: a commanded drive over the drive abort, volts peak. Nothing
+    /// was played for it.
+    DriveVpk {
+        /// The pulse it would have been (the pulses fired so far).
+        pulse: u64,
+        /// The drive's peak, volts.
+        vpk: f64,
+        /// The drive abort, volts peak.
+        abort_vpk: f64,
+        /// Found on the predicted full-level drive at proceed, before any
+        /// pulse; `false` for a drive refused just before it would have played.
+        predicted: bool,
+    },
+    /// Closed loop: the error rose by more than 1 dB on `pulses` pulses in a
+    /// row at one level.
+    Divergence {
+        /// The pulse that completed the run of rises.
+        pulse: u64,
+        /// Pulses in a row with a rising error.
+        pulses: u32,
+        /// That pulse's error, percent of the reference.
+        error_pct: f64,
+    },
+    /// Closed loop: the iteration limit ended the run. The run ends
+    /// [`RunState::NotConverged`].
+    NotConverged {
+        /// Which limit.
+        limit: ConvergenceLimit,
+        /// Pulses counted against it: at the level for
+        /// [`ConvergenceLimit::PerLevel`], in the run for
+        /// [`ConvergenceLimit::Run`].
+        pulses: u64,
+    },
+    /// Closed loop: the control law gave no usable drive `consecutive` times in
+    /// a row, or its seed was refused or could not be built. Nothing more
+    /// fired and the law was not called again.
+    LawFault {
+        /// Why the last call was not used (`fault.reason()` is the wire name).
+        fault: LawFault,
+        /// Unusable calls in a row when the run stopped.
+        consecutive: u32,
+    },
+}
+
+impl TripKind {
+    /// The stable name of the trip's kind: `tolerance`, `kinematic`, `accel`
+    /// (the pre-fire check refused), `operator_abort`, `overshoot`,
+    /// `drive_vpk`, `divergence`, `not_converged` or `law_fault`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            TripKind::Tolerance { .. } => "tolerance",
+            TripKind::Kinematic { .. } => "kinematic",
+            TripKind::PreFireRefused { .. } => "accel",
+            TripKind::OperatorAbort { .. } => "operator_abort",
+            TripKind::Overshoot { .. } => "overshoot",
+            TripKind::DriveVpk { .. } => "drive_vpk",
+            TripKind::Divergence { .. } => "divergence",
+            TripKind::NotConverged { .. } => "not_converged",
+            TripKind::LawFault { .. } => "law_fault",
+        }
+    }
+
+    /// True for a trip found on a prediction before a pulse fired, so nothing
+    /// was driven for it.
+    pub fn predicted(&self) -> bool {
+        match self {
+            TripKind::Kinematic { predicted, .. } | TripKind::DriveVpk { predicted, .. } => {
+                *predicted
+            }
+            _ => false,
+        }
+    }
 }
 
 /// A record of the trip that aborted the run.
@@ -450,6 +636,133 @@ pub struct PulseRow {
     pub srs_bands_total: Option<usize>,
     /// Worst absolute per-band SRS deviation, dB.
     pub srs_worst_dev_db: Option<f64>,
+    /// The commanded drive's peak, volts (the record as played, after every
+    /// limit). On the open loop the drive is the reference in g written as
+    /// volts, so this is its peak in g.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_vpk: Option<f64>,
+    /// RMS error over the standard's judged window, percent of the commanded
+    /// pulse's RMS there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_pct: Option<f64>,
+    /// Measured peak over commanded peak.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_ratio: Option<f64>,
+    /// Measured velocity change over the nominal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity_change_ratio: Option<f64>,
+    /// The law call that produced the drive this pulse played (closed loop
+    /// only; `None` for the open loop and for a pulse fired in force by a
+    /// train).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub law: Option<PulseLawCall>,
+}
+
+/// The law call behind one pulse's drive, as the pulse table shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PulseLawCall {
+    /// The call's output was used. `false`: the pulse refired the drive in
+    /// force after a miss.
+    pub used: bool,
+    /// Why the call was not used.
+    pub miss: Option<LawFault>,
+    /// Drive bins the core's per-pulse cap held back on that output.
+    pub capped_bins: u64,
+    /// The core's per-pulse cap held the drive's peak back.
+    pub peak_capped: bool,
+    /// How long the call took, ms.
+    pub call_ms: f64,
+}
+
+/// One fired pulse's records on one time axis: the record as the station
+/// played and measured it (`fs_hz`, sample 0 the first sample played).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PulseView {
+    /// The pulse number.
+    pub pulse: u64,
+    /// The rate the record was played at, Hz.
+    pub fs_hz: f64,
+    /// The commanded level, dB.
+    pub commanded_db: f64,
+    /// The reference at the level fired: what the pulse aimed for, EU.
+    pub reference: Vec<f64>,
+    /// The measured control channel, EU.
+    pub measured: Vec<f64>,
+    /// The drive as played, volts (g written as volts on the open loop).
+    pub drive: Vec<f64>,
+    /// The standard's tolerance band around the aligned nominal pulse, over
+    /// the judged window only.
+    pub band: ToleranceBand,
+}
+
+/// The tolerance band over the judged window: the nominal main pulse at the
+/// commanded amplitude, plus and minus the standard's amplitude tolerance, and
+/// zero plus and minus it in the quiet windows either side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToleranceBand {
+    /// The record sample the band's first value is at (may be negative when
+    /// the window starts before the record).
+    pub start: i64,
+    /// The main pulse's first sample, as the checker aligned it.
+    pub main_start: i64,
+    /// The main pulse's length, samples.
+    pub main_len: usize,
+    /// The band's lower edge, EU.
+    pub lower: Vec<f64>,
+    /// The band's upper edge, EU.
+    pub upper: Vec<f64>,
+}
+
+/// What system identification found, for the status and the review hold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentificationSummary {
+    /// The identification drive, volts rms.
+    pub drive_vrms: f64,
+    /// Its peak as played, volts.
+    pub drive_vpk: f64,
+    /// Mean in-band coherence.
+    pub coherence_mean: f64,
+    /// The floor it had to reach.
+    pub min_mean_coherence: f64,
+    /// Bins the core trusts on the pulse grid.
+    pub trusted_bins: usize,
+    /// The fraction of the reference's energy the trusted bins cover.
+    pub band_energy: f64,
+    /// Identification let the run go on.
+    pub passed: bool,
+}
+
+/// The core's prediction of the full-level drive and response, made at
+/// proceed from the law's seed and kept up to date after each law call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DrivePrediction {
+    /// The full-level drive's peak, volts.
+    pub drive_vpk: f64,
+    /// The drive ceiling, volts peak.
+    pub drive_vpk_ceiling: f64,
+    /// The drive abort, volts peak.
+    pub drive_vpk_abort: f64,
+    /// The predicted response's peak, EU.
+    pub response_peak_g: f64,
+    /// The predicted response's peak velocity, in/s.
+    pub velocity_pk_ips: f64,
+    /// The predicted response's pk-pk displacement, in.
+    pub displacement_pk_pk_in: f64,
+}
+
+/// The control law a closed-loop run is using, and how its calls are going.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LawStatus {
+    /// The law's identity.
+    pub descriptor: LawDescriptor,
+    /// Unusable calls in a row now.
+    pub misses_in_a_row: u32,
+    /// Unusable calls this run.
+    pub misses: u64,
+    /// Calls this run, the seed included.
+    pub calls: u64,
+    /// The law's values on its last usable call.
+    pub values: Vec<hertzforge_shock_common::law_guard::LawValue>,
 }
 
 /// One drive-limit action recorded for the report.
@@ -585,6 +898,41 @@ pub struct Status {
     /// configured there is no answer - and the UI must show the difference
     /// rather than one number that could be either.
     pub actual_fs_hz: Option<f64>,
+    /// Seconds until the next pulse may fire, as of this snapshot: the rest of
+    /// the time between pulses. `None` when no pulse has fired yet (the first
+    /// does not wait) or the run cannot fire.
+    #[serde(default)]
+    pub next_pulse_s: Option<f64>,
+    /// Pulses that passed their tolerance check.
+    #[serde(default)]
+    pub pulses_passed: u64,
+    /// The last pulse's drive peak, volts.
+    #[serde(default)]
+    pub last_drive_vpk: Option<f64>,
+    /// The last pulse's RMS error, percent.
+    #[serde(default)]
+    pub last_error_pct: Option<f64>,
+    /// The last pulse's envelope verdict.
+    #[serde(default)]
+    pub last_envelope_pass: Option<bool>,
+    /// The last pulse's velocity-change verdict.
+    #[serde(default)]
+    pub last_velocity_change_pass: Option<bool>,
+    /// The last pulse's substitution verdict.
+    #[serde(default)]
+    pub last_substitution_pass: Option<bool>,
+    /// What identification found (closed loop, after identification).
+    #[serde(default)]
+    pub identification: Option<IdentificationSummary>,
+    /// The predicted full-level drive and response (closed loop, from proceed).
+    #[serde(default)]
+    pub prediction: Option<DrivePrediction>,
+    /// The control law and its calls (closed loop, from proceed).
+    #[serde(default)]
+    pub law: Option<LawStatus>,
+    /// Why identification held the run (state [`RunState::Held`]).
+    #[serde(default)]
+    pub held: Option<HeldReason>,
 }
 
 #[cfg(test)]
@@ -600,6 +948,107 @@ mod tests {
         assert!(!RunState::FeasibilityBlocked.is_running());
         assert!(!RunState::Stopped.is_running());
         assert!(!RunState::Aborted.is_running());
+    }
+
+    #[test]
+    fn the_closed_loop_states_are_not_running_and_their_ends_are_terminal() {
+        for s in [RunState::SysId, RunState::AwaitingReview] {
+            assert!(!s.is_running() && !s.is_terminal(), "{s:?}");
+        }
+        for s in [
+            RunState::Stopped,
+            RunState::Aborted,
+            RunState::Held,
+            RunState::NotConverged,
+        ] {
+            assert!(s.is_terminal(), "{s:?}");
+        }
+        assert!(!RunState::Firing.is_terminal());
+    }
+
+    #[test]
+    fn trip_kinds_have_stable_names_and_the_predicted_flag() {
+        use hertzforge_shock_common::law_guard::OutputRule;
+        let cases = [
+            (
+                TripKind::Overshoot {
+                    pulse: 0,
+                    peak_ratio: 1.58,
+                    limit_ratio: 1.3,
+                },
+                "overshoot",
+                false,
+            ),
+            (
+                TripKind::DriveVpk {
+                    pulse: 0,
+                    vpk: 0.4,
+                    abort_vpk: 0.38,
+                    predicted: true,
+                },
+                "drive_vpk",
+                true,
+            ),
+            (
+                TripKind::Kinematic {
+                    quantity: "pk-pk displacement (in)".into(),
+                    value: 1.0,
+                    limit: 0.9,
+                    pulse: 4,
+                    predicted: true,
+                },
+                "kinematic",
+                true,
+            ),
+            (
+                TripKind::Divergence {
+                    pulse: 3,
+                    pulses: 3,
+                    error_pct: 40.0,
+                },
+                "divergence",
+                false,
+            ),
+            (
+                TripKind::NotConverged {
+                    limit: ConvergenceLimit::PerLevel,
+                    pulses: 5,
+                },
+                "not_converged",
+                false,
+            ),
+            (
+                TripKind::LawFault {
+                    fault: LawFault::BadOutput(OutputRule::FirstDrive),
+                    consecutive: 1,
+                },
+                "law_fault",
+                false,
+            ),
+            (
+                TripKind::PreFireRefused { reason: "x".into() },
+                "accel",
+                false,
+            ),
+        ];
+        for (k, name, predicted) in cases {
+            assert_eq!(k.name(), name);
+            assert_eq!(k.predicted(), predicted, "{name}");
+            let back: TripKind = serde_json::from_str(&serde_json::to_string(&k).unwrap()).unwrap();
+            assert_eq!(back, k);
+        }
+        // A kinematic trip written before `predicted` existed reads as measured.
+        let old = r#"{"Kinematic":{"quantity":"q","value":1.0,"limit":0.5,"pulse":2}}"#;
+        assert!(!serde_json::from_str::<TripKind>(old).unwrap().predicted());
+        assert_eq!(ConvergenceLimit::Run.as_str(), "run");
+        assert_eq!(
+            HeldReason::ReferenceOutOfBand {
+                coverage: 0.5,
+                min: 0.9
+            }
+            .as_str(),
+            "reference_out_of_band"
+        );
     }
 
     #[test]
@@ -658,6 +1107,20 @@ mod tests {
             run_clock_s: 3.0,
             requested_fs_hz: 5120.0,
             actual_fs_hz: Some(51_200.0),
+            next_pulse_s: Some(0.6),
+            pulses_passed: 3,
+            last_drive_vpk: Some(0.283),
+            last_error_pct: Some(1.9),
+            last_envelope_pass: Some(true),
+            last_velocity_change_pass: Some(true),
+            last_substitution_pass: Some(true),
+            identification: None,
+            prediction: None,
+            law: None,
+            held: Some(HeldReason::LowCoherence {
+                mean: 0.5,
+                floor: 0.8,
+            }),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Status = serde_json::from_str(&json).unwrap();
