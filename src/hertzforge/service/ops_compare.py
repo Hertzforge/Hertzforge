@@ -1242,19 +1242,19 @@ OPERATIONS = (
                 OUTER, OUTER_LOW, OUTER_HIGH),
         outputs=('spectrum', 'reading'), run=srs_points),
     Operation(
-        id='project.replication_waveforms', title='Waveforms', workspace='shock',
+        id='project.replication_waveforms', title='Waveforms', workspace='transient',
         summary='One channel of a transient run over one playing of the waveform it was '
                 'controlled to, aligned, with its waveform error.',
         params=(HISTORY, REFERENCE, REFERENCE_RECORD, PLAYING), outputs=('spectrum', 'reading'),
         run=replication_waveforms),
     Operation(
-        id='project.waveform_error', title='Waveform Error', workspace='shock',
+        id='project.waveform_error', title='Waveform Error', workspace='transient',
         summary='Every control channel\'s waveform error at every playing of the reference, '
                 'against a ceiling.',
         params=(HISTORY, REFERENCE, WAVEFORM_CEILING), outputs=('reading',),
         run=waveform_error),
     Operation(
-        id='project.replication_segments', title='Segments', workspace='shock',
+        id='project.replication_segments', title='Segments', workspace='transient',
         summary='One channel of a transient run judged segment by segment, each marked '
                 'segment by the rule for its kind, beside the whole-record error.',
         params=(HISTORY, REFERENCE, REFERENCE_RECORD, PLAYING, SEGMENTS, TAPER, BAND_LOW,
