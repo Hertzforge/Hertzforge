@@ -556,10 +556,14 @@ class SpecificationDraft:
         # sheet remembers the spacing so the breakpoints it is edited
         # as can go back onto the same lines
         spacing = uniform_spacing(spec.abscissa)
+        # a few even points of a curve are breakpoints: opened as lines,
+        # the next edit would make them a density per line
+        lines_form = (spacing is not None and len(frequencies) > 2
+                      and (getattr(spec, 'interpolation', 'log_log') != 'log_log'
+                           or len(frequencies) >= spec.LINES_AT_LEAST))
         draft = cls(channels, dims, frequencies, levels, pairs, bands, notes,
                     [source] * len(channels) if source else [],
-                    'lines' if spacing is not None and len(frequencies) > 2
-                    else 'breakpoints', spacing)
+                    'lines' if lines_form else 'breakpoints', spacing)
         # A helper line — a hair before a breakpoint, carrying the left
         # segment's band up to it (`with_band_corners`) — is how the
         # object holds a band step, not a breakpoint anyone wrote. Read
@@ -1632,7 +1636,8 @@ class SpecificationDraft:
         -------
         Specification
             The autospectra and the entered cross terms at the
-            breakpoints, interpolated log-log between them, with the
+            breakpoints, interpolated log-log between them, or a density
+            per line for a sheet on evenly spaced lines, with the
             warning and abort limits on every autospectrum.
         """
         from .data import Specification
@@ -1641,7 +1646,11 @@ class SpecificationDraft:
             raise ValueError('the sheet spans several specifications; write '
                              'it into them, or make one of them alone '
                              '(for_source)')
-        if self.bands_differ():
+        on_lines = self.form == 'lines' and _evenly_spaced(self.frequencies)
+        # on lines a band steps at a line, where a density per bin
+        # already steps, so it needs no helper line (which would also
+        # leave the lines no longer even)
+        if self.bands_differ() and not on_lines:
             cornered = self.with_band_corners()
             if cornered is not self:
                 return cornered.make(comment)
@@ -1686,7 +1695,10 @@ class SpecificationDraft:
             response_dof=resp, reference_dof=refs, ordinate_dim=record_dims,
             comment=comment or 'written as a specification sheet',
             **{key: np.asarray(values) for key, values in limits.items()})
-        spec.interpolation = 'log_log'
+        # a sheet on lines is a density per line however few the lines,
+        # not a curve through them: read as a curve, its part-held end
+        # lines would be points on it and the area would come out wrong
+        spec.interpolation = 'bin' if on_lines else 'log_log'
         spec.band_constraints = self.constraints()
         return spec
 
@@ -1734,6 +1746,13 @@ class SpecificationDraft:
         if len(set(self.sources)) > 1:
             raise ValueError('the sheet spans several specifications; write '
                              'each in with for_source')
+        # one object is read one way: a sheet on lines merged into a curve
+        # would leave its part-held end lines as points on that curve
+        if self.form == 'lines' and getattr(spec, 'interpolation', 'log_log') == 'log_log':
+            raise ValueError(
+                'the sheet is on lines and the specification is a curve at '
+                'breakpoints; open all of its channels to change its form, or '
+                'make a new specification from the sheet')
         old_f = np.asarray(spec.abscissa, dtype=float)
         lines = np.asarray(sorted(set(old_f.tolist()) | set(self.frequencies)))
         inside = (lines >= self.frequencies[0]) & (lines <= self.frequencies[-1])
@@ -1865,7 +1884,7 @@ class SpecificationDraft:
             reference_dof=[spec.reference_dof[i] for i in autos],
             ordinate_dim=[spec.ordinate_dim[i] for i in autos],
             **{key: values[autos] for key, values in spec.limits.items()})
-        preview.interpolation = 'log_log'
+        preview.interpolation = spec.interpolation
         return preview
 
     def as_dict(self) -> dict[str, Any]:
@@ -2154,11 +2173,16 @@ def read_onto_lines(spec: Specification, spacing: float
     lines = draft.to_lines(spacing)
     made = lines.make(f'read onto {float(spacing):g} Hz lines')
     psd = made.as_psd(drop_limits=True)
-    # a density per line, however few the lines: `make` leaves the
-    # reading to `Specification.reading_of`, which calls a short grid
-    # breakpoints, and a breakpoint reading is what this is to end
+    # a density per line, as `make` marks a sheet on lines
     psd.interpolation = 'bin'
     return psd, list(lines.notes)
+
+
+def _evenly_spaced(frequencies: Any) -> bool:
+    """Whether these are two or more lines one spacing apart."""
+    steps = np.diff(np.asarray(frequencies, dtype=float))
+    return bool(steps.size and steps[0] > 0.0
+                and np.all(np.abs(steps - steps[0]) <= 1e-9 * steps[0]))
 
 
 def uniform_spacing(frequencies: Any) -> float | None:

@@ -898,9 +898,13 @@ def test_a_target_with_band_corners_still_opens_as_lines_with_few_runs():
     draft = _shaped().constrained(['1Z+'], uniform=False).with_band(
         'abort', -9.0, 9.0, ['1Z+'], segments=[1])
     made = draft.to_lines(0.5).make()
-    assert len(made.abscissa) == 3981 + 2, 'two helper lines at the corners'
-    assert uniform_spacing(made.abscissa) == 0.5, 'helpers are not lines of the grid'
-    back = SpecificationDraft.from_specification(made)
+    assert len(made.abscissa) == 3981, 'a limit on lines steps at a line'
+    assert made.interpolation == 'bin'
+    # an object written as a curve still holds a step with two helpers
+    helped = draft.to_lines(0.5)._copy(form='breakpoints').make()
+    assert len(helped.abscissa) == 3981 + 2, 'two helper lines at the corners'
+    assert uniform_spacing(helped.abscissa) == 0.5, 'helpers are not lines of the grid'
+    back = SpecificationDraft.from_specification(helped)
     assert back.form == 'lines' and back.spacing == 0.5
     assert len(back.sections(0)) == 3
     assert len(back.band_runs(0, 'abort')) == 3
