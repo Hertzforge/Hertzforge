@@ -42,6 +42,14 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
 
+def _holed(points: np.ndarray, dropped: np.ndarray) -> np.ndarray:
+    """For each segment between consecutive `points`, ascending, whether
+    a point in `dropped`, ascending, lies inside it. A log axis has no line
+    through a zero, and nobody wrote one: such a segment is a gap."""
+    return (np.searchsorted(dropped, points[1:], 'left')
+            > np.searchsorted(dropped, points[:-1], 'right'))
+
+
 def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
                     spec_values: ArrayLike) -> np.ndarray:
     """A specification's values at `frequencies`, interpolated log-log.
@@ -51,12 +59,13 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     below the lowest and above the highest remaining point: extending the
     end segments would add a requirement nobody wrote. A dropped point
     between two remaining ones is a gap, NaN up to the remaining points
-    either side of it, as `coverage` counts it. Fewer than two remaining
+    either side of it, as `coverage` counts it, and a point with a gap on
+    both sides is on no segment, so NaN as well. Fewer than two remaining
     points gives NaN everywhere.
     """
     # A dropped interior point used to be bridged by the line across it,
-    # so a curve drew (and `bounds` judged) a requirement over lines that
-    # `coverage` said were not written. One rule now: a gap is a gap.
+    # so a curve drew a requirement over lines that `coverage` said were
+    # not written. One rule now: a gap is a gap.
     frequencies = np.asarray(frequencies, dtype=float)
     spec_frequencies = np.asarray(spec_frequencies, dtype=float)
     spec_values = np.asarray(np.real(spec_values), dtype=float)
@@ -80,12 +89,14 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
         ~usable & np.isfinite(spec_frequencies) & (spec_frequencies > 0.0)]))
     if dropped.size:
         a, b = known_x[:-1], known_x[1:]
-        holed = (np.searchsorted(dropped, b, 'left')
-                 > np.searchsorted(dropped, a, 'right'))
+        holed = _holed(known_x, dropped)
         with np.errstate(divide='ignore', invalid='ignore'):
             at = np.log10(frequencies)
         for lo, hi in zip(a[holed], b[holed]):
             out[(at > lo) & (at < hi)] = np.nan
+        alone = (np.concatenate([[True], holed])
+                 & np.concatenate([holed, [True]]))
+        out[np.isin(at, known_x[alone])] = np.nan
     return out
 
 
@@ -218,9 +229,11 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
     band's area is the cumulative area at its high edge less that at its
     low edge, with the partial segments at the two ends taken from the
     same power law. A thousand bands cost about what one does. Only
-    positive, finite points are used. A band that reaches past them is
-    cut at them, a band wholly outside them is zero, and fewer than two
-    points gives NaN for every band.
+    positive, finite points are used, and a point that is not one is a
+    gap: the segment across it holds nothing, as `coverage` counts it. A
+    band that reaches past the points is cut at them, a band wholly
+    outside them is zero, and fewer than two points, or no segment left
+    between them, gives NaN for every band.
     """
     # vectorized because the comparison is judged cell by cell
     # (2026-09-19), and a thousand cells must cost what one did
@@ -240,6 +253,10 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
     f, w = f[keep], w[keep]
     if f.size < 2:
         return np.full(lows.shape, np.nan)
+    holed = _holed(f, np.sort(frequencies[np.isfinite(frequencies)
+                                          & (frequencies > 0.0) & ~usable]))
+    if holed.all():
+        return np.full(lows.shape, np.nan)
     with np.errstate(divide='ignore', invalid='ignore'):
         n = np.log(w[1:] / w[:-1]) / np.log(f[1:] / f[:-1])
     # the whole of each segment, then the running total at every point
@@ -253,7 +270,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             # form)
             w[:-1] * f[:-1] * ((f[1:] / f[:-1]) ** (n + 1.0) - 1.0)
             / (n + 1.0))
-    cumulative = np.concatenate([[0.0], np.cumsum(whole)])
+    cumulative = np.concatenate([[0.0], np.cumsum(np.where(holed, 0.0, whole))])
 
     def total(x: np.ndarray) -> np.ndarray:
         """The area from the first point to `x`, `x` cut to the curve."""
@@ -265,7 +282,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                 np.abs(nk + 1.0) < 1e-12,
                 w1 * f1 * np.log(x / f1),
                 w1 * f1 * ((x / f1) ** (nk + 1.0) - 1.0) / (nk + 1.0))
-        return cumulative[k] + np.where(x > f1, partial, 0.0)
+        return cumulative[k] + np.where((x > f1) & ~holed[k], partial, 0.0)
 
     out = total(highs) - total(lows)
     return np.where(highs > lows, np.maximum(out, 0.0), 0.0)
@@ -296,15 +313,21 @@ def log_log_area(frequencies: ArrayLike, values: ArrayLike,
 
 def written_band(frequencies: ArrayLike,
                  values: ArrayLike) -> tuple[float, float] | None:
-    """(low, high), the range one written curve covers: its lowest and
-    highest positive, finite points. None when there are fewer than two."""
+    """(low, high), the range one written curve covers: the outer ends of
+    its segments between positive, finite points, a point alone between
+    gaps being on none. None when there is no segment."""
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     usable = (np.isfinite(frequencies) & (frequencies > 0.0)
               & np.isfinite(values) & (values > 0.0))
     if usable.sum() < 2:
         return None
-    return float(frequencies[usable].min()), float(frequencies[usable].max())
+    f = np.sort(frequencies[usable])
+    whole = ~_holed(f, np.sort(frequencies[np.isfinite(frequencies)
+                                           & (frequencies > 0.0) & ~usable]))
+    if not whole.any():
+        return None
+    return float(f[:-1][whole].min()), float(f[1:][whole].max())
 
 
 def coverage(spectrum: Any, record: int = 0) -> list[tuple[float, float]]:
@@ -637,14 +660,21 @@ def judge(specification: Specification, measured: DataArray,
             'start': start, 'stop': stop, 'scale_db': float(scale_db)}
 
 
+#: how far apart, as a share, two powers can be and be the same: summed
+#: over a cell, a level on a limit lands a few parts in 1e15 either side of
+#: it, and a third of a flat response read out for that
+ON_LIMIT = 1e-12
+
+
 def beyond(held: ArrayLike, asked: ArrayLike, over: bool) -> np.ndarray:
     """Where a measured power is past a limit's: more than an upper
     limit (`over` True), less than a lower one. A power exactly on the
-    limit is inside. The one rule `judge` reads every cell by, and
-    `core.chance` its groups of cells."""
+    limit is inside, to `ON_LIMIT`. The one rule `judge` reads every cell
+    by, and `core.chance` its groups of cells."""
     held, asked = np.asarray(held, dtype=float), np.asarray(asked, dtype=float)
     with np.errstate(invalid='ignore'):
-        return (held > asked) if over else (held < asked)
+        return (held > asked * (1.0 + ON_LIMIT) if over
+                else held < asked * (1.0 - ON_LIMIT))
 
 
 def covered(lines: ArrayLike, low: float, high: float,
@@ -772,23 +802,6 @@ def rms(frequencies: ArrayLike, values: ArrayLike) -> float:
     if good.sum() < 1:
         return float('nan')
     return float(np.sqrt(np.sum(values[good] * widths[good])))
-
-
-def bounds(specification: Specification, record: int, pair: str,
-           frequencies: ArrayLike
-           ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """(lower, upper) of one pair of limits, interpolated log-log onto
-    `frequencies`.
-
-    `pair` is 'warning' or 'abort'. None for a limit the specification
-    does not carry: nothing can be exceeded where nothing was specified.
-    """
-    out = []
-    for edge in (f'{pair}_lower', f'{pair}_upper'):
-        values = specification.limits.get(edge)
-        out.append(None if values is None else log_interpolate(
-            frequencies, specification.abscissa, values[record]))
-    return out[0], out[1]
 
 
 #: how far below a channel's own specification peak a line still
@@ -963,8 +976,12 @@ def read_scale_db(specification: Specification, measured: DataArray,
         if not (hasattr(specification, 'to_octave')
                 and hasattr(measured, 'to_octave')):
             return None
-        specification = specification.to_octave(PER_OCTAVE)
-        measured = measured.to_octave(PER_OCTAVE)
+        try:
+            specification = specification.to_octave(PER_OCTAVE)
+            measured = measured.to_octave(PER_OCTAVE)
+        except ValueError:
+            # nothing to band, such as a one-line spectrum: no level to read
+            return None
     wanted = None if controls is None else {str(c) for c in controls}
     offsets, asked_total, held_total = [], 0.0, 0.0
     for label, spec_index, measured_index in matched_records(
@@ -1267,11 +1284,11 @@ LINES_CHANNELS_FAIL_PERCENT = 20.0
 RMS_CHANNELS_FAIL_PERCENT = 10.0
 
 
-def lines_state(percent: float) -> str:
-    """'over' when more than `LINES_PERCENT` of a channel's band is
-    outside its abort limits, else 'in'. No amount of staying inside is
-    a fault, so there is no 'under'."""
-    return 'over' if float(percent) > LINES_PERCENT else 'in'
+def lines_state(percent: float, ceiling: float = LINES_PERCENT) -> str:
+    """'over' when more than `ceiling` percent of a channel's band is
+    outside its abort limits, else 'in': at the ceiling exactly is in. No
+    amount of staying inside is a fault, so there is no 'under'."""
+    return 'over' if float(percent) > ceiling else 'in'
 
 
 def rms_state(difference_db: float) -> str:
@@ -1413,26 +1430,6 @@ def comparison_note(results: Sequence[Any]) -> str | None:
     return None
 
 
-def outside_fraction(values: Sequence[float], low: float,
-                     high: float | None = None) -> float:
-    """The percentage of these values outside the threshold.
-
-    With `high` None the test is one-sided, values at or above `low`:
-    the lines-out chart has a ceiling and no floor, because staying
-    inside the abort limits is never a fault. Otherwise a value is
-    outside when it is above `high` or below `low`. Values that are not
-    finite are ignored, and none left gives zero.
-    """
-    values = [v for v in values if np.isfinite(v)]
-    if not values:
-        return 0.0
-    if high is None:
-        beyond = sum(1 for v in values if v >= low)
-    else:
-        beyond = sum(1 for v in values if v > high or v < low)
-    return 100.0 * beyond / len(values)
-
-
 def compare_all(specification: Specification, measured: DataArray,
                 spec_records: Sequence[int] | None = None,
                 measured_records: Sequence[int] | None = None,
@@ -1525,6 +1522,50 @@ class SrsError(NamedTuple):
     refused: str | None = None
     #: `RAW_NOTE` when neither side's units are declared, else None
     note: str | None = None
+    #: the part of the requirement the spectrum does not reach
+    #: (`srs_unread`), None when it reaches all of it
+    unread: str | None = None
+
+
+def srs_unread(specification: DataArray, spec_record: int,
+               frequencies: ArrayLike) -> str | None:
+    """The part of a requirement a spectrum does not reach, in words, or
+    None when it reaches all of it.
+
+    A comparison reads a spectrum only at its own lines, so lines it does
+    not have are not a pass, they are not read: a 3 ms half-sine computed
+    from 800 Hz sits inside a 20 to 2000 Hz requirement with every point
+    it has, and over the whole band it fails. A requirement's point within
+    one of the spectrum's line spacings of an end counts as reached, since
+    a spectrum's grid lands near its band's edges and not on them.
+
+    Parameters
+    ----------
+    specification : DataArray
+        The requirement.
+    spec_record : int
+        Which of its records.
+    frequencies : array-like
+        The spectrum's lines that hold a reading, ascending, in Hz.
+
+    Returns
+    -------
+    str or None
+    """
+    written = np.asarray(specification.abscissa, dtype=float)
+    levels = np.real(np.atleast_2d(specification.ordinate)[spec_record])
+    written = written[np.isfinite(levels) & (levels > 0.0)]
+    lines = np.asarray(frequencies, dtype=float)
+    if not (written.size and lines.size):
+        return None
+    below, above = (lines[1] / lines[0], lines[-1] / lines[-2]) if lines.size > 1 else (1.0, 1.0)
+    missed = (written < lines[0] / below) | (written > lines[-1] * above)
+    count = int(missed.sum())
+    if not count:
+        return None
+    return (f'the requirement runs from {written[0]:.4g} to {written[-1]:.4g} Hz and the '
+            f'spectrum from {lines[0]:.4g} to {lines[-1]:.4g} Hz, so {count} of the '
+            f"requirement's {written.size} points were not read")
 
 
 def srs_errors(specification: DataArray, measured: DataArray
@@ -1561,7 +1602,9 @@ def srs_errors(specification: DataArray, measured: DataArray
     `refused` saying why, so the channel shows as not scored instead of
     disappearing or reading 20 dB out. With neither side declared the
     pair is scored and `note` says it was compared as raw numbers. The
-    rule is the one `srs_tolerance` refuses by.
+    rule is the one `srs_tolerance` refuses by. A spectrum that stops
+    short of the requirement is scored over what it reaches, and `unread`
+    says what it does not (`srs_unread`).
     """
     # Why dB: on the airplane run the relative norm passed every channel
     # at 20 % while one of them was 25 dB over, 99.5 % of its norm coming
@@ -1592,7 +1635,9 @@ def srs_errors(specification: DataArray, measured: DataArray
             continue
         out.append(SrsError(dof, block,
                             signed_rms_db(got[good], target[good]),
-                            note=note))
+                            note=note,
+                            unread=srs_unread(specification, j,
+                                              measured.abscissa[got > 0.0])))
     return out
 
 
@@ -1701,7 +1746,7 @@ def sine_errors(specification: SineSweepSpecification,
             tone = specification.tone(level.tone)
         except KeyError:
             continue
-        target = tone.target(level.abscissa)
+        target = level.target_on(tone)
         for row, dof in enumerate(level.response_dof):
             try:
                 column = specification.response_dof.index(str(dof))
@@ -2075,7 +2120,8 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
                   outer: tuple[float, float] | None = None,
                   rule: str = 'share',
                   percent: float = SRS_POINTS_PERCENT,
-                  limits: bool = True) -> dict[str, Any]:
+                  limits: bool = True,
+                  whole_band: bool = True) -> dict[str, Any]:
     """One record of a measured SRS judged point by point against one
     record of the SRS it was required to meet.
 
@@ -2119,6 +2165,12 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
         The rule, as for `srs_points`.
     limits : bool, default True
         Read a band not given from the requirement's limit curves.
+    whole_band : bool, default True
+        Hold a spectrum that stops short of the requirement to it: what
+        passes over the part it reaches is not judged (`passed` None) and
+        'unread' says what was left (`srs_unread`). What fails there still
+        fails. False judges only the lines given, for a caller working on
+        lines of its own choosing.
 
     Returns
     -------
@@ -2174,6 +2226,13 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
                                  measured.ordinate_dim[measured_record])
     if note is not None:
         out['note'] = note
+    if whole_band:
+        unread = srs_unread(specification, spec_record,
+                            frequencies[np.isfinite(got) & (got > 0.0)])
+        if unread is not None:
+            out['unread'] = unread
+            if out['passed']:
+                out['passed'] = None
     return out
 
 

@@ -17,6 +17,13 @@ PLATE = os.path.join(TESTDATA, 'plate')
 FETCH = 'scripts/fetch_testdata.sh'
 
 
+def pytest_runtest_setup(item):
+    """A wall-clock bound says nothing beside other workers on the same cores: run alone, as
+    CI does (`-m timing`), or not at all."""
+    if item.get_closest_marker('timing') and os.environ.get('PYTEST_XDIST_WORKER'):
+        pytest.skip('a timing test runs alone: pytest -m timing')
+
+
 def fixture_path(*parts):
     """A path into testdata/. Not named test* — pytest would collect it.
     Called from a test it skips that test; called at a module's top level

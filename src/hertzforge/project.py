@@ -572,6 +572,8 @@ class Project(dict):
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (object_groups or [])]
+        #: what the last Work Up could not compute, (slot, why)
+        self.last_work_up_skipped: list[tuple[str, str]] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -2032,7 +2034,7 @@ class Project(dict):
 
     def selection_verbs(self, *names: Any) -> list[tuple[str, str]]:
         """The processing verbs a selection can act on, each with its
-        one-line summary. This is what the app's bar offers.
+        one-line summary. The action table reads it for a pair.
 
         For one object, these are its own verbs less the ones that need
         a second object (`transform` needs a shape set beside the
@@ -2071,8 +2073,10 @@ class Project(dict):
         return out
 
     def compute_spectra(self, source: Any) -> str:
-        """Compute spectra from a time history's averages, as Compute
-        Spectra in the averaging view does.
+        """Compute the raw spectra of a time history (Compute Spectra):
+        each capture whole, unwindowed and unscaled (a sine of amplitude A
+        on a line reads A*N/2), averaged as a complex mean
+        (`TimeHistory.compute_spectra`). The history's averaging is not read.
 
         Parameters
         ----------
@@ -2089,8 +2093,27 @@ class Project(dict):
         return self._derive(source, self[source].compute_spectra(),
                             f'{source} Spectra', recipe=('compute_spectra', {}))
 
+    def _framed(self, source: str) -> TimeHistory:
+        """The history a density is computed from, its frames set first
+        when it is one capture with none, by the detector `compute_frfs`
+        and `compute_multiple_coherence` use, so a density does not depend
+        on which of them ran first. Unset, it would be the whole record as
+        one frame under a rectangle: a periodogram, two degrees of freedom
+        at every line. Several captures are already their averages, and a
+        target is read whole."""
+        from .core.data import TransientSpecification
+
+        history = self[source]
+        if (history.averaging is None
+                and not isinstance(history, TransientSpecification)
+                and max(history.records_per_channel.values(), default=0) <= 1):
+            history.averaging = history.suggest_averaging()
+        return history
+
     def compute_psds(self, source: Any) -> str:
-        """Compute PSDs from a time history's averages (Compute PSDs).
+        """Compute PSDs from a time history's averages (Compute PSDs). A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -2104,14 +2127,15 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_psds(),
+        return self._derive(source, self._framed(source).compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
 
     def averaging_of(self, name: Any) -> Any:
         """The `Averaging` a computed spectrum was made with, from its
         provenance, or None when it records none (an imported spectrum).
         A spectrum computed from a record with no averaging set was each
-        record whole under a rectangle, and that is what is returned.
+        record whole under a rectangle, and that is what is returned. Compute
+        Spectra reads no averaging, so its spectra record none.
 
         A spectrum does not carry its window, and a tone read off it
         needs one (`Psd.read_tone`): the window sets how far the tone leaks
@@ -2136,7 +2160,7 @@ class Project(dict):
         record = self.provenance.get(self.name_of(name), {})
         state = record.get('state')
         if (record.get('verb') not in ('compute_psds', 'compute_cpsds',
-                                       'compute_spectra', 'compute_frfs',
+                                       'compute_frfs',
                                        'compute_multiple_coherence')
                 or not state or state[0] not in ('averaging',
                                                  'averaging+roles')):
@@ -2963,7 +2987,9 @@ class Project(dict):
     def compute_srs(self, source: Any, *,
                     per_octave: int | None = None,
                     q: float | None = None,
-                    kind: str = 'maximax') -> str:
+                    kind: str = 'maximax',
+                    low: float | None = None,
+                    high: float | None = None) -> str:
         """Compute shock response spectra from a time history's shocks
         (Compute SRS), one curve per channel per event.
 
@@ -2972,7 +2998,10 @@ class Project(dict):
         no averaging set and is not a transient specification. A record
         read as frames already says where its events are (in a transient
         run each playing is one frame), and a specification is one
-        playing by definition.
+        playing by definition. A record filtered in this project takes
+        its events from the recording it was filtered from, which is
+        where they are detected (`detect_shocks`), and its spectrum stops
+        at the low-pass corner it came through (`srs_ceiling`).
 
         Parameters
         ----------
@@ -2986,12 +3015,23 @@ class Project(dict):
         kind : str, default 'maximax'
             Which peak each oscillator reports: 'maximax' (largest
             magnitude of either sign), 'positive' or 'negative'.
+        low, high : float, optional
+            The natural-frequency band, in Hz, to reach a requirement's
+            own. Default to the record's (`TimeHistory.srs_band`) and
+            `srs_ceiling`.
 
         Returns
         -------
         str
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            For a `low` under a quarter cycle of the shortest window, a
+            `high` above the Nyquist frequency, or a `high` above a
+            low-pass the record came through.
         """
         # Detection is the last resort. Set loose on a transient run, whose
         # playings are its averaging, the detector found thirty-one
@@ -3005,17 +3045,108 @@ class Project(dict):
                 and not isinstance(history, TransientSpecification)):
             from .core.shocks import suggest
 
-            history.shocks = suggest(history)
+            recording = self._recording_of(source)
+            # on a filtered record the detector's floor sinks with the
+            # noise taken out, and ordinary noise then clears it: 13
+            # events where the plate's shock file holds 4
+            if not recording.shocks and recording.averaging is None:
+                recording.shocks = suggest(recording)
+            history.shocks = recording.shocks
+        self._check_srs_band(source, low, high)
+        band = {key: float(value) for key, value in (('low', low), ('high', high))
+                if value is not None}
         # the analysis choices are parameters of the act, recorded in
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
-                            history.compute_srs(per_octave=per_octave,
-                                                q=q, kind=kind),
+                            history.compute_srs(
+                                per_octave=per_octave, q=q, kind=kind,
+                                low=band.get('low'),
+                                high=band.get('high', self.srs_ceiling(source))),
                             f'{source} SRS',
                             recipe=('compute_srs',
                                     {'per_octave': per_octave,
-                                     'q': q, 'kind': kind}))
+                                     'q': q, 'kind': kind, **band}))
+
+    def _check_srs_band(self, source: str, low: float | None,
+                        high: float | None) -> None:
+        """Refuse a band a record cannot be read over. An oscillator
+        peaks a quarter cycle after a pulse, so a window holding a quarter
+        cycle of the lowest line reads it true: a 26 ms window on a lone
+        half-sine read 20 Hz as the whole record does, 10 Hz within 0.2 dB
+        and 5 Hz 2 to 3 dB low."""
+        history = self[source]
+        if low is not None:
+            shortest = 1.0 / history.srs_band()[0]
+            floor = 1.0 / (4.0 * shortest)
+            if low < floor:
+                raise ValueError(
+                    f'{source}\'s shortest window, {1e3 * shortest:.4g} ms, reads an SRS '
+                    f'down to {floor:.4g} Hz; {low:g} Hz needs a window of at least '
+                    f'{1e3 / (4.0 * low):.4g} ms')
+        if high is not None:
+            rate = history.sample_rate
+            if high > rate / 2.0:
+                raise ValueError(f'{high:g} Hz is above the Nyquist frequency of '
+                                 f'{source}, {rate / 2.0:g} Hz')
+            corner = self._low_pass_of(source)
+            if corner is not None and high > corner:
+                raise ValueError(
+                    f'{source} is low-passed at {corner:g} Hz, and its SRS stops there; '
+                    'read the band above it from the recording')
+
+    def _recording_of(self, name: str) -> Any:
+        """The record `name` was filtered from, through any number of
+        filters; `name`'s own object when it was not filtered."""
+        seen = set()
+        while name not in seen:
+            seen.add(name)
+            made = self.provenance.get(name) or {}
+            if made.get('verb') != 'filter_data' or made.get('source') not in self:
+                break
+            name = made['source']
+        return self[name]
+
+    def srs_ceiling(self, name: Any) -> float | None:
+        """The highest natural frequency a record's SRS can be read to,
+        in Hz, when a low-pass on its way sets it: the lowest corner of
+        the filters applied in this project on the way to the record, as
+        recorded when each was applied (`_filters_on_the_way` reads the
+        same record). None when no low-pass did, or when the corner is
+        above the top of the record's own band (`TimeHistory.srs_band`).
+
+        The filter is zero phase, so it takes 6 dB at its corner, and a
+        response above it is gone: a 1500 Hz ring read 22 dB low on a
+        record low-passed at 1024 Hz, with no sign of it on the curve.
+
+        Parameters
+        ----------
+        name : str or object
+            The record.
+
+        Returns
+        -------
+        float or None
+        """
+        name = self.name_of(name)
+        corner = self._low_pass_of(name)
+        return corner if corner is not None and corner < self[name].sample_rate / 5.0 else None
+
+    def _low_pass_of(self, name: str) -> float | None:
+        """The lowest low-pass corner on the way to a record, in Hz, or
+        None when it came through none."""
+        corners, seen = [], set()
+        current = name
+        while current and current not in seen:
+            seen.add(current)
+            made = self.provenance.get(current) or {}
+            if made.get('verb') == 'filter_data':
+                state = made.get('state') or (None, None)
+                high = state[1].get('high') if isinstance(state[1], Mapping) else None
+                if high is not None:
+                    corners.append(float(high))
+            current = made.get('source')
+        return min(corners) if corners else None
 
     def detect_shocks(self, source: Any) -> int:
         """Find the events in a time history and mark them on it (Detect
@@ -3147,8 +3278,7 @@ class Project(dict):
         source = self.name_of(source)
         history = self[source]
         if history.truncation is None:
-            raise ValueError('no span set: drag one in the truncate '
-                             'view first')
+            raise ValueError('no span set: Set Truncation sets one')
         return self._derive(source, history.truncate(),
                             f'{source} Truncated',
                             recipe=('truncate_data', {}))
@@ -3211,7 +3341,9 @@ class Project(dict):
 
     def compute_cpsds(self, source: Any) -> str:
         """Compute the full cross-spectral matrix from a time history's
-        averages (Compute CPSDs), every channel against every channel.
+        averages (Compute CPSDs), every channel against every channel. A
+        history of one capture with no averaging set has its frames
+        detected and stored on it (`_framed`).
 
         Parameters
         ----------
@@ -3225,7 +3357,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_cpsds(),
+        return self._derive(source, self._framed(source).compute_cpsds(),
                             f'{source} CPSDs', recipe=('compute_cpsds', {}))
 
     def transform(self, source: Any, shapes: Any, *,
@@ -4596,8 +4728,9 @@ class Project(dict):
         shells only. Parts
         meshed together share nodes where they touch. The solids are
         kept so they can be meshed again, and a part meshed again
-        replaces its earlier mesh: the elements in the element group of
-        its name are deleted, and the group and its material are kept.
+        replaces its earlier mesh: the elements of the element group it
+        was meshed into (`Geometry.group_solids`) are deleted, and the
+        group, its name and its material are kept.
 
         Parameters
         ----------
@@ -4686,14 +4819,12 @@ class Project(dict):
         # kept the legs' bricks. The rigid links on those bricks' nodes,
         # the seams' ties above all, go with them: left in, they would
         # hold the old nodes and point the new mesh at them
-        replaced = [int(e) for e in solids.meshed_elements(geometry, part.group_name)]
+        remeshed = solids.groups_meshed_again(geometry, ids, part)
+        replaced = [int(e) for e in solids.meshed_elements(geometry, remeshed)]
         # and the mated surfaces on them: their nodes are the old mesh's
         # (a union meshed in pieces brings its seams again, in `part`)
         from .core import mates
 
-        names = list(geometry.group_name)
-        remeshed = [int(geometry.group_id[names.index(n)]) for n in part.group_name
-                    if n and n in names]
         dropped = mates.delete(geometry, mates.naming_groups(geometry, remeshed))
         if replaced:
             replaced += [int(e) for e in mesh.links_on(geometry, replaced)]
@@ -4976,6 +5107,14 @@ class Project(dict):
         shapes = model.eigensolution(maximum_frequency=maximum_frequency,
                                      num_modes=num_modes, damping=damping,
                                      progress=progress)
+        if not shapes.num_shapes:
+            lowest = model.eigensolution(num_modes=1).frequency[0]
+            raise ValueError(f'{source} has no mode up to {maximum_frequency:g} Hz; '
+                             f'its lowest is at {lowest:.4g} Hz')
+        if not geometry.units_defined:
+            # coordinates with no unit: these shapes are per the root of no
+            # declared mass, whatever the solve divided by
+            shapes.mass_unit = None
         params = {'maximum_frequency': maximum_frequency,
                   'num_modes': num_modes, 'damping': damping}
         return self._derive(source, shapes, name or f'{source} Modes',
@@ -5360,13 +5499,15 @@ class Project(dict):
         """Fit a modal model to an FRF set, as the fitting screen does.
 
         This runs the screen's loop: confirm the suggested mode, then
-        take the next suggestion, `limit` times. The session's
+        take the next suggestion, up to `limit` times. The session's
         suggestion logic makes every choice (a peak already confirmed is
         not offered again unless a different shape is found there, as
-        for a repeated pair), and the loop adds no check of its own. On
-        the screen the person stops the loop; in a script `limit` does,
-        and the plate demonstration's cap is a worked example of
-        choosing it.
+        for a repeated pair). On the screen the person stops the loop;
+        here it stops when no peak left in the residual holds a tenth of
+        the measurement at its line (`suggest(modes_only=True)`), since
+        the rest is what fitted modes left behind, or at `limit`, and the
+        plate demonstration's cap is a worked example of choosing it.
+        The first suggestion is always taken.
 
         On the screen the zoom does the job of `bounds`: what is on the
         plot is what gets searched. A script has no plot, so it gives
@@ -5412,7 +5553,7 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
-        # The loop adds no second opinion. It used to: a proximity guard
+        # The loop adds no second opinion on where a mode is. It used to: a proximity guard
         # here vetoed any suggestion within 1 Hz of a confirmed mode, the
         # same ridge-trap fix the session has since outgrown, and it
         # silently skipped the second mode of a repeated pair that
@@ -5438,23 +5579,55 @@ class Project(dict):
             coherence = self[self.name_of(coherence)]
         session = ModalFitSession(self[source], records, coherence)
         if at is not None:
-            for pick in at:
-                frequency, damping, *described = pick
-                session.confirm(frequency=float(frequency),
-                                damping=float(damping),
-                                description=(described[0] if described
-                                             else None))
+            _confirm_picks(session, at)
         else:
             low, high = bounds or (float(self[source].abscissa[0]),
                                    float(self[source].abscissa[-1]))
             session.suggest((low, high))
-            for _ in range(limit):
+            for count in range(limit):
                 session.confirm()
-                session.suggest((low, high))
+                if (count + 1 < limit
+                        and session.suggest((low, high), modes_only=True) is None):
+                    break
         for _ in range(int(refine)):
             session.refine_residues()
         return self._derive(source, session.shape_set(),
                             name or f'{source} Modes')
+
+    def fit_replay_line(self, source: str, name: str, session: Any,
+                        coherence: str | None = None) -> str:
+        """The journal line that replays a fit made by hand and published
+        as `name`, and the recipe `refresh` runs it again from: a
+        `fit_modes(at=...)` call, or a comment when no call can make the set
+        (`ModalFitSession.replay`).
+
+        Parameters
+        ----------
+        source : str
+            The FRF set fitted.
+        name : str
+            The shape set the fit was published as.
+        session : ModalFitSession
+            The fit.
+        coherence : str, optional
+            The coherence the fit was weighted by, by name.
+
+        Returns
+        -------
+        str
+            The line, for the journal.
+        """
+        replay = session.replay()
+        args = '' if replay is None else f'at={replay["at"]!r}' + ''.join(
+            f', {key}={value!r}' for key, value in (
+                ('refine', replay['refine'] or None), ('records', replay['records']),
+                ('coherence', coherence)) if value is not None)
+        if replay is None:
+            self.provenance.pop(name, None)
+            return f'# project.fit_modes({source!r}, name={name!r}) — not replayable'
+        self.provenance[name] = {'verb': 'fit_modes', 'source': source, 'state': None,
+                                 'params': {**replay, 'coherence': coherence}}
+        return f'project.fit_modes({source!r}, {args}, name={name!r})'
 
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
@@ -5607,7 +5780,8 @@ class Project(dict):
 
         first, second = self.name_of(first), self.name_of(second)
         if pairs is None or macs is None:
-            matrix = self.comparison_mac(first, second)
+            # a mode of zero on the shared DOFs has no MAC, and is nobody's match
+            matrix = np.nan_to_num(self.comparison_mac(first, second))
             if pairs is None:
                 pairs = [(row, int(np.argmax(matrix[row])))
                          for row in range(matrix.shape[0])
@@ -5880,7 +6054,14 @@ class Project(dict):
             report.marking = str(marking)
         if marking_color is not None:
             report.marking_color = marking_color
-        return self.add(name, report)
+        added = self.add(name, report)
+        # which template it is goes by this record, not by its title,
+        # which the author can change (`work_up`)
+        self.provenance.pop(added, None)
+        if template in builders:
+            self.provenance[added] = {'verb': 'generate_report', 'source': None,
+                                      'params': {'template': template}}
+        return added
 
     def report_features(self, name: str, *, enable: Sequence[str] = (),
                         disable: Sequence[str] = (),
@@ -7320,38 +7501,10 @@ class Project(dict):
 
         identify(self._report(name), **fields)
 
-    # Issuing printed the report as a PDF through Qt WebEngine, which
-    # Hertzforge does not carry; it returns when the desktop app prints the
-    # page (MIGRATION_PLAN.md, phase 4) and calls this sequence again.
-    def _issue(self, report: Report, unit_system: Any, write: Any,
-               file: str) -> None:
-        """Mark `report` issued, render it, hand the page to `write`
-        (which returns the PDF's bytes), and record the issue; on any
-        failure the report is put back as it was. The one sequence the
-        script verb and the window share."""
-        from .report import render_html
-        from .report.identity import (
-            issue_ready,
-            mark_issued,
-            record_issue,
-            unmark,
-        )
-
-        status = issue_ready(report, self, self.object_groups)
-        before = mark_issued(report, status)
-        try:
-            page = render_html(report, self, unit_system,
-                               object_groups=self.object_groups)
-            pdf = write(page)
-        except BaseException:
-            unmark(report, before)
-            raise
-        record_issue(report, page, pdf, file)
-
     def amend_report(self, name: str, changes: Sequence[Mapping[str, str]],
                      *, revision: str, number: str | None = None) -> None:
         """Make an issued report an amendment, to be issued in its turn
-        (`issue_report`).
+        (`report.issue`).
 
         The amendment carries its own revision (and, if given, its own
         number), refers to the revision it amends by number, revision
@@ -7400,16 +7553,22 @@ class Project(dict):
         if 'data_index' in enabled(self._report(name)):
             self.verify_data_index()
 
-    def _export_page(self, name: str, unit_system: Any = None) -> str:
-        """The report rendered for export, refused when it was issued and
-        has changed since (`report.identity.guard`)."""
+    def _report_page(self, name: str, unit_system: Any = None) -> str:
+        """The report as it leaves the project: the one document issued,
+        printed and exported. Light whatever the reader's own theme, as
+        paper is."""
         from .report import render_html
+
+        return render_html(self._report(name), self, unit_system,
+                           object_groups=self.object_groups, theme='light')
+
+    def _export_page(self, name: str, unit_system: Any = None) -> str:
+        """`_report_page`, refused when the report was issued and has
+        changed since (`report.identity.guard`)."""
         from .report.identity import guard
 
-        report = self._report(name)
-        page = render_html(report, self, unit_system,
-                           object_groups=self.object_groups)
-        guard(report, page)
+        page = self._report_page(name, unit_system)
+        guard(self._report(name), page)
         return page
 
     def run_identity(self, name: str) -> Any:
@@ -7680,8 +7839,9 @@ class Project(dict):
         the type's report. A slot the loaded data cannot fill (a
         geometry, the photographs, a specification) is left gray. A
         computation the data refuses (no drive channel for a coherence)
-        is skipped, and the rest still run. Nothing already present is
-        made again, so calling this twice adds nothing the second time.
+        is skipped, with its reason in `last_work_up_skipped`, and the
+        rest still run. Nothing already present is made again, so calling
+        this twice adds nothing the second time.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -7720,6 +7880,7 @@ class Project(dict):
             raise ValueError('the project has no type, so there is nothing '
                              'to work up: name the kind of test')
         added: list[str] = []
+        self.last_work_up_skipped = []
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -7759,6 +7920,25 @@ class Project(dict):
             done = derived(record, 'filter_data')
             return done or make(self.filter_data, record)[0]
 
+        def playings(record, side):
+            # a run against a reference is read a playing to a frame, so
+            # that the two PSDs share their lines: one window over six
+            # playings put the same power on lines six times closer and
+            # read 7.8 dB over the reference at its peak
+            from .core.replication import averaging_for
+
+            target = next(iter(on(side, TransientSpecification)), None)
+            if target is not None and self[record].averaging is None:
+                self[record].averaging = averaging_for(self[record], self[target])
+
+        def settled(record):
+            # the FRFs and the coherence adopt the suggested averaging,
+            # so PSDs made ahead of them on no averaging were one window
+            # over the whole record, and stale as soon as they were made
+            if self[record].averaging is None:
+                with contextlib.suppress(ValueError):
+                    self[record].averaging = self[record].suggest_averaging()
+
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
             # a report from another kind of test does not fill this one's:
@@ -7785,6 +7965,10 @@ class Project(dict):
                         continue
                     record = recorded(side)
                     if record is not None:
+                        if project_type == 'Transient':
+                            playings(record, side)
+                        else:
+                            settled(record)
                         make(self.compute_psds, record)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
@@ -7842,7 +8026,8 @@ class Project(dict):
                         else recorded(side)
                     if record is not None:
                         make(self.compute_srs, record)
-                elif icon == 'TimeHistory' and ordinal > 1:
+                elif (icon == 'TimeHistory' and ordinal > 1
+                      and project_type == 'Shock'):
                     # the shock's motion chain: filtered, then velocity,
                     # then displacement, each from the one before
                     chain = filtered(side)
@@ -7853,22 +8038,29 @@ class Project(dict):
                             make(self.integrate, chain)[0]
                 elif icon == 'Report':
                     # the type's reports in order, each made once: chosen
-                    # by which are already here (by title), not by the
-                    # slot's number, so a random-and-sine project holding
-                    # its sine report gets the random one, not a second
-                    # sine (2026-10-05, two reports for that type)
-                    made = {self[name].title for name in self.names
-                            if isinstance(self[name], Report)}
+                    # by which are already here, not by the slot's number,
+                    # so a random-and-sine project holding its sine report
+                    # gets the random one, not a second sine (2026-10-05,
+                    # two reports for that type). A report's recipe says
+                    # which template made it; one from a file older than
+                    # that goes by its title
+                    reports = [name for name in self.names
+                               if isinstance(self[name], Report)]
+                    built = {(self.provenance.get(name) or {}).get('params', {}).get('template')
+                             for name in reports}
+                    titles = {self[name].title for name in reports}
                     wanted = next(
                         (template for template
                          in PROJECT_TEMPLATES[project_type]
-                         if TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
-                         not in made), None)
+                         if template not in built
+                         and TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
+                         not in titles), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
-            except ValueError:
+            except ValueError as error:
                 # what the data refuses (a coherence with no drive
                 # channel) stays gray; the slots after it still fill
+                self.last_work_up_skipped.append((_label, str(error)))
                 continue
         return added
 
@@ -8182,6 +8374,11 @@ class Project(dict):
         -------
         list of str
             A list holding the name of the sine level set added.
+
+        Raises
+        ------
+        ValueError
+            When none is named and the project does not hold exactly one.
         """
         from dataclasses import replace
 
@@ -8189,8 +8386,14 @@ class Project(dict):
 
         source = self.name_of(source)
         if specification is None:
-            spec = self.sine_sweep_specification
-            spec_name = self.name_of(spec)
+            found = Selection(self).of_type(SineSweepSpecification)
+            if len(found) != 1:
+                raise ValueError(
+                    'no sine sweep specification in the project' if not found else
+                    f'{len(found)} sine sweep specifications in the project, '
+                    f'{" and ".join(repr(name) for name in found)}: name the one to read')
+            spec_name = found[0]
+            spec = self[spec_name]
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]
@@ -8244,8 +8447,7 @@ class Project(dict):
     #: which part of a source each verb reads — the fingerprint follows
     #: the dependency, so changing the shocks never marks a PSD stale
     _VERB_READS: ClassVar[dict[str, str]] = {
-        'compute_spectra': 'averaging', 'compute_psds': 'averaging',
-        'compute_cpsds': 'averaging',
+        'compute_psds': 'averaging', 'compute_cpsds': 'averaging',
         # the two read the channels' roles as well as the framing; the
         # fingerprint stays an 'averaging' one with the roles folded in
         # only when set, so a project saved before roles existed opens
@@ -9095,6 +9297,8 @@ def _goes(data, shapes, direction):
     responses appended reads physical, and its modal records expand."""
     from .core.transform import expands, reads_as
 
+    if shapes.is_complex:
+        return False
     if direction == 'modal':
         return expands(data, shapes)
     return reads_as(data, shapes) == direction
@@ -9137,11 +9341,12 @@ def _two_sets_on_two_geometries(project, objects):
 
 
 def _set_and_table(objects):
-    """One real shape set and one channel table, wherever they live."""
+    """One real, scaled shape set and one channel table, wherever they live: what a
+    state-space model takes (`core.state_space`)."""
     sets = [o for o in objects if isinstance(o, ShapeSet)]
     tables = [o for o in objects if isinstance(o, ChannelTable)]
     return (len(objects) == 2 and len(sets) == 1 and len(tables) == 1
-            and not sets[0].is_complex)
+            and not sets[0].is_complex and sets[0].units_defined and not sets[0].unscaled)
 
 
 def _set_and_table_apart(project, objects):
@@ -9287,6 +9492,26 @@ for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))
 
 
+def _confirm_picks(session, picks):
+    """Confirm these (frequency, damping[, description]) in the order given."""
+    for frequency, damping, *described in picks:
+        session.confirm(frequency=float(frequency), damping=float(damping),
+                        description=described[0] if described else None)
+
+
+def _fitted_again(project, source, params):
+    """The modes a hand fit's picks give on the FRF as it stands."""
+    from .core.modal_fit import ModalFitSession
+
+    coherence = params.get('coherence')
+    session = ModalFitSession(project[source], params.get('records'),
+                              None if coherence is None else project[coherence])
+    _confirm_picks(session, params['at'])
+    for _ in range(int(params.get('refine') or 0)):
+        session.refine_residues()
+    return session.shape_set()
+
+
 def _extract_again(project, source, params):
     """The sine levels read again with the history's current setting
     — what `refresh` does for a level set whose smoothing moved."""
@@ -9311,7 +9536,8 @@ _RECOMPUTE = {
         lambda p, s, k: p[s].compute_multiple_coherence(),
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
-        kind=k.get('kind', 'maximax')),
+        kind=k.get('kind', 'maximax'), low=k.get('low'),
+        high=k.get('high', p.srs_ceiling(s))),
     'make_realizable': lambda p, s, k: p[s].made_realizable(
         tolerance=k.get('tolerance'),
         keep_diagonal=k.get('keep_diagonal', True)),
@@ -9319,6 +9545,7 @@ _RECOMPUTE = {
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
+    'fit_modes': lambda p, s, k: _fitted_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
     'resample': lambda p, s, k: p[s].resample(
         k['rate'], anti_alias=k.get('anti_alias', True), order=k.get('order')),
@@ -9610,6 +9837,8 @@ def _state_story(was, now):
             return 'computed on nodes that have since moved'
         return (f'computed {_summarize_state(was)}; the geometry now '
                 f'says {_summarize_state(now)}')
+    if was[0] == 'shocks' and len(was[1]) == len(now[1]):
+        return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
 

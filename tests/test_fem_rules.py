@@ -83,3 +83,43 @@ def test_a_distorted_bricks_mass_sits_where_its_material_does():
         assert rows.sum() == pytest.approx(rho * volume, rel=1e-8)
         assert (rows @ xyz[:, axis]).sum() == pytest.approx(rho * moment[axis],
                                                             rel=1e-8)
+
+
+def _tip_mass_rod(density):
+    material = fem.Material('light', youngs_modulus=200e9, density=density, poissons_ratio=0.3)
+    model = fem.Model('tip')
+    for k in range(11):
+        model.add_node(k, k * 0.1, 0.0, 0.0)
+    model.add_chain(range(11), material, fem.Section.rod('rod', 0.01))
+    model.add_mass(10, 5.0, inertia=(0.2, 0.0, 0.0))
+    return model
+
+
+def test_a_lump_on_a_nearly_massless_beam_solves_dense_as_sparse():
+    model = _tip_mass_rod(1e-3)
+    dense = model.eigensolution(num_modes=3, fixed=['0'], solver='dense')
+    sparse = model.eigensolution(num_modes=3, fixed=['0'], solver='sparse')
+    assert dense.frequency == pytest.approx(sparse.frequency, rel=1e-4)
+    assert dense.frequency[2] == pytest.approx(3.0927, abs=1e-3), 'the closed form'
+
+
+def test_a_heavier_beam_stays_on_the_mass_factored_solve():
+    model = _tip_mass_rod(1.0)
+    dense = model.eigensolution(num_modes=3, fixed=['0'], solver='dense')
+    sparse = model.eigensolution(num_modes=3, fixed=['0'], solver='sparse')
+    assert dense.frequency == pytest.approx(sparse.frequency, rel=1e-6)
+
+
+@pytest.mark.parametrize('solver', ['dense', 'sparse'])
+def test_a_roll_no_spring_resists_reads_exactly_zero_on_a_suspended_rod(solver):
+    material = fem.Material('steel', youngs_modulus=200e9, density=7850, poissons_ratio=0.3)
+    model = fem.Model('hung')
+    for k in range(21):
+        model.add_node(k, k * 0.1, 0.0, 0.0)
+    model.add_chain(range(21), material, fem.Section.rod('rod', 0.05))
+    for direction in ('X+', 'Y+', 'Z+'):
+        for node in (0, 20):
+            model.add_spring(f'{node}{direction}', None, 100.0)
+    shapes = model.eigensolution(num_modes=8, solver=solver)
+    assert shapes.frequency[0] == 0.0
+    assert (shapes.frequency[1:6] > 0.3).all(), 'the suspension modes stay where they are'

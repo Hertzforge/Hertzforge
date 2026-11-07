@@ -880,7 +880,7 @@ OPERATIONS = (
                 Param('document', 'Document', 'string', default=''),
                 Param('revision', 'Revision', 'string', default=''),
                 Param('clause', 'Tolerance clause', 'string', default=''),
-                Param('dofs', 'Control channels', 'string', default=''),
+                Param('dofs', 'Control channel', 'string', default=''),
                 Param('low', 'Band, low', 'number', default=0.0, unit='Hz', min=0.0, step=10.0),
                 Param('high', 'Band, high', 'number', default=0.0, unit='Hz', min=0.0,
                       step=10.0),

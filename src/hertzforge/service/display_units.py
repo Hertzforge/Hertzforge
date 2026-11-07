@@ -10,6 +10,10 @@ out of SI by the system's own transform (`UnitSystem.transform`: SI =
 value * scale + offset) and labeled by it. Text the map does not hold, and
 anything without a unit, is left as it is.
 
+A sentence holds its numbers where nothing can find them again, so the
+operation writes it in the system to begin with: the server runs it under
+`running_in`, and it asks `words_system` or `words_in`.
+
 Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
 and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
 `table`'s columns headed "<name> [<SI unit>]", each number in them, except
@@ -25,6 +29,8 @@ its file's own numbers. A `matrix` carries its own words.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from contextvars import ContextVar
 from functools import cache
 from typing import Any
 
@@ -32,6 +38,9 @@ import numpy as np
 
 #: the system every view is computed in: nothing to convert
 DEFAULT = 'm-kg-N-s'
+
+#: the system the operation running now writes its sentences in
+_WORDS: ContextVar[str] = ContextVar('display_units_words', default=DEFAULT)
 
 
 def _start() -> str:
@@ -63,6 +72,7 @@ def _dimensions() -> dict[str, str]:
     simple = [d for d in _DIMENSIONALITY if d != 'dimensionless']
     candidates = list(simple)
     candidates += [f'{d}**2' for d in simple] + [f'{d}**2/frequency' for d in simple]
+    candidates += ['length**3']
     candidates += [f'{d}/frequency' for d in simple]
     candidates += [f'{a}/{b}' for a in simple for b in simple if a != b]
     candidates += [f'{a}*{b}/frequency' for a in simple for b in simple if a != b]
@@ -92,6 +102,30 @@ def _system(name: str) -> Any:
     from hertzforge.units import SYSTEMS
 
     return SYSTEMS[name]
+
+
+def running_in(name: str, call: Callable[..., Any], *args: Any) -> Any:
+    """`call(*args)` with its sentences in the system `name`. Called on the
+    thread `call` runs on, so nothing depends on a context being carried
+    across to a worker."""
+    token = _WORDS.set(name)
+    try:
+        return call(*args)
+    finally:
+        _WORDS.reset(token)
+
+
+def words_system() -> Any:
+    """The `UnitSystem` an operation's sentences are written in; SI, as its
+    numbers are, outside `running_in`."""
+    return _system(_WORDS.get())
+
+
+def words_in(dimension: str) -> tuple[str, float]:
+    """(label, scale) for writing a value in SI of `dimension` in a
+    sentence: the system's label, and what takes the value into it."""
+    system = words_system()
+    return _label(system, dimension) or '', 1.0 / float(system.transform(dimension)[0])
 
 
 def _change(unit: str | None, system: Any) -> tuple[float, float, str] | None:
@@ -147,6 +181,62 @@ def _table(view: dict, system: Any) -> None:
             row[k] = _cell(row[k], change)
 
 
+def length_of(name: str) -> dict[str, Any]:
+    """What the shell labels and converts a typed length by in the system `name`."""
+    system = _system(name)
+    return {'unit': system.label_text('length'), 'to_si': float(system.transform('length')[0])}
+
+
+#: a number in a text of lengths; a piece's id before its colon ('3: 0.01') is not one
+_TYPED = re.compile(r'(\d+\s*:)|([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)')
+
+
+def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
+    """`values` with each `length` param taken from the system `name` to meters. An
+    undefined geometry's numbers are its own, and pass as they are."""
+    if not geometry.units_defined or name == DEFAULT:
+        return values
+    scale = float(_system(name).transform('length')[0])
+
+    def scaled(found: re.Match) -> str:
+        return found.group(1) or repr(float(found.group(2)) * scale)
+
+    out = dict(values)
+    for param in params:
+        if param.length:
+            held = out[param.name]
+            out[param.name] = _TYPED.sub(scaled, held) if isinstance(held, str) else held * scale
+    return out
+
+
+#: a length said in words: '0.2 m', not '0.2 m²' or '1e+06 N/m'
+_SAID = re.compile(r'(?<![\w.])(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?) m\b')
+
+
+def lengths_in_words(text: str, name: str) -> str:
+    """`text` with each length said in meters said in the system `name`."""
+    if name == DEFAULT:
+        return text
+    length = length_of(name)
+    return _SAID.sub(lambda found: f'{float(found.group(1)) / length["to_si"]:.4g} {length["unit"]}',
+                     text)
+
+
+def say_lengths(views: list[dict], name: str) -> None:
+    """The lengths in a reading's words and in a solids table's cells, in the system `name`."""
+    for view in views:
+        if view.get('view') == 'reading':
+            for row in view['rows']:
+                if isinstance(row['value'], str):
+                    row['value'] = lengths_in_words(row['value'], name)
+        elif view.get('view') == 'table':
+            spoken = [k for k, heading in enumerate(view['columns'])
+                      if heading in ('Dimensions', 'Center')]
+            for row in view['rows']:
+                for k in spoken:
+                    row[k] = lengths_in_words(row[k], name)
+
+
 def _shape(view: dict, system: Any) -> None:
     change = _change(view.get('unit'), system)
     if change is not None:
@@ -159,7 +249,8 @@ def _shape(view: dict, system: Any) -> None:
         gizmo = view.get('gizmo')
         if gizmo is not None:
             gizmo['origin'] = [float((v - change[1]) / change[0]) for v in gizmo['origin']]
-            gizmo['to_si'] = change[0]
+            if not gizmo['slide'].get('in_display'):
+                gizmo['to_si'] = change[0]
         pick = view.get('pick')
         if pick is not None and pick.get('target') == 'point':
             pick['to_si'] = [change[0], change[1]]
@@ -197,11 +288,12 @@ def convert(views: list[dict], name: str) -> list[dict]:
         elif kind == 'reading':
             for row in view['rows']:
                 change = _change(row.get('unit'), system)
-                if change is None:
+                # words are in the unit they were written in, and a label
+                # moved without them would say a different number
+                if change is None or isinstance(row['value'], str):
                     continue
                 row['unit'] = change[2]
-                if isinstance(row['value'], float):
-                    row['value'] = float(_values(row['value'], change))
+                row['value'] = float(_values(float(row['value']), change))
         elif kind == 'table':
             _table(view, system)
         elif kind == 'shape3d':

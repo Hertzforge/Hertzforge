@@ -16,9 +16,18 @@ export function copyStyles(from: Document, to: Document): void {
 		}
 		to.head.appendChild(copy);
 	}
-	for (const { name, value } of Array.from(from.documentElement.attributes)) {
-		to.documentElement.setAttribute(name, value);
-	}
+}
+
+/** `to` holds `from`'s attributes, now and as they change (the theme is one); returns the way to stop. */
+export function followAttributes(from: Element, to: Element): () => void {
+	const copy = () => {
+		for (const { name } of Array.from(to.attributes)) if (!from.hasAttribute(name)) to.removeAttribute(name);
+		for (const { name, value } of Array.from(from.attributes)) to.setAttribute(name, value);
+	};
+	copy();
+	const watching = new MutationObserver(copy);
+	watching.observe(from, { attributes: true });
+	return () => watching.disconnect();
 }
 
 /** Open the log's window. False when the window was refused. */
@@ -27,6 +36,7 @@ export function openLogWindow(rl: RunLogState): boolean {
 	if (!w) return false;
 	w.document.title = 'Run Log';
 	copyStyles(document, w.document);
+	const stopFollowing = followAttributes(document.documentElement, w.document.documentElement);
 	w.document.body.style.cssText = 'margin:0;height:100vh;overflow:hidden;background:var(--bg-0, #0b0d10)';
 	const target = w.document.createElement('div');
 	target.style.cssText = 'height:100%;display:flex;flex-direction:column';
@@ -38,6 +48,7 @@ export function openLogWindow(rl: RunLogState): boolean {
 	window.addEventListener('beforeunload', closeWith);
 	w.addEventListener('pagehide', () => {
 		window.removeEventListener('beforeunload', closeWith);
+		stopFollowing();
 		void unmount(panel);
 		rl.windowed = false;
 		rl.closeWindow = null;

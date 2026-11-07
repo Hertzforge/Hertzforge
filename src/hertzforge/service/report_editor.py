@@ -191,6 +191,9 @@ def operate(project: Any, name: str, params: Mapping[str, Any]) -> int | None:
         to = params.get('to')
         if isinstance(to, bool) or not isinstance(to, int):
             raise bad_request('report.operate move needs "to", the index to move before')
+        if not 0 <= to <= report.num_blocks:
+            raise refused(f'the report has {report.num_blocks} blocks, so there is no place to '
+                          f'move to at {to}')
         report.move([source], to)
         return to - 1 if to > source else to
     if op in ('title', 'marking', 'marking_color'):
@@ -319,7 +322,7 @@ def editor(project: Any, name: str, selected: int | None, theme: str | None,
     out['selected'] = selected
     if page:
         labels: list[tuple[str, str]] = []
-        out['html'] = render_html(report, dict(project), units, edit=True, channel_js=CHANNEL_JS,
+        out['html'] = render_html(report, project, units, edit=True, channel_js=CHANNEL_JS,
                                   object_groups=project.object_groups, selected=selected,
                                   labels=labels, theme=theme)
         out['references'] = [[label, caption] for label, caption in labels]

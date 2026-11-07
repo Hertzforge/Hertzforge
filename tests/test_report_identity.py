@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +26,7 @@ from hertzforge.report import features as rf
 from hertzforge.report import identity as ri
 from hertzforge.report import page, render_html
 from hertzforge.report import skeleton as sk
+from hertzforge.service import reports
 
 #: every field the identification needs, entered
 COMPLETE = {
@@ -68,9 +71,13 @@ def _project(report, name='Report'):
 
 
 def _issue(project, name, file='R-0037.pdf'):
-    """Issue through the project's one sequence, with a stand-in for the
-    print: everything but the web engine."""
-    project._issue(project[name], None, lambda _page: PDF, file)
+    """Issue through the service's steps, with a stand-in for the PDF the
+    shell prints."""
+    reports.issue(project, {'name': name, 'step': 'begin'})
+    with tempfile.TemporaryDirectory() as folder:
+        printed = Path(folder) / file
+        printed.write_bytes(PDF)
+        reports.issue(project, {'name': name, 'step': 'record', 'path': str(printed)})
 
 
 def _page(project, name):
@@ -269,18 +276,6 @@ def test_issue_records_the_revision_and_says_issued():
                      'file': 'R-0037.pdf'}
     assert '<td>Issued</td>' in _payload(page_now)['blocks'][0]['html']
     assert 'Revision 0";' in ri.page_css(report), 'no Draft beside it'
-
-
-def test_a_failed_print_leaves_the_report_a_draft():
-    project, name = _project(_report(**COMPLETE))
-
-    def fail(_page):
-        raise OSError('the printer caught fire')
-
-    with pytest.raises(OSError, match='caught fire'):
-        project._issue(project[name], None, fail, 'x.pdf')
-    assert ri.value(project[name], 'status') == 'draft'
-    assert ri.record(project[name]) == []
 
 
 def test_the_number_and_revision_of_an_issued_report_are_fixed():

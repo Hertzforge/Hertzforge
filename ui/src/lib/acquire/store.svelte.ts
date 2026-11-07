@@ -725,10 +725,6 @@ export class AcquireState {
 		}
 	}
 
-	resetSetup() {
-		this.setup = defaultSetup();
-	}
-
 	/** Put the editor back to the setup the service holds. */
 	revertSetup() {
 		const held = this.held;

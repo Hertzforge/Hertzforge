@@ -9,8 +9,10 @@ from typing import Any
 
 import numpy as np
 
+from . import display_units
 from . import views as v
 from .descriptors import Operation, Param
+from .ops_sine_shock import _record
 from .protocol import refused
 from .waterfalls import axes, unit_text
 
@@ -23,12 +25,6 @@ STEP = Param('step_db', 'Next level', 'number', default=6.0, unit='dB', min=0.0,
 MARGIN = Param('margin', 'Margin', 'number', default=0.1, unit='%', min=0.0, max=10.0,
                step=0.05)
 SHOWN = Param('record', 'Channel', 'integer', default=0, min=0, step=1)
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 def _band(value: float, band: tuple[float, float]) -> str:
@@ -74,17 +70,24 @@ def time_statistics(project: Any, params: dict[str, Any]) -> list[dict]:
     except ValueError as error:
         raise refused(str(error)) from None
     unit = unit_text(data.ordinate_dim[record])
+
+    def read(label: str, value: float, row_unit: str | None, status: str) -> dict:
+        # a statistic a record too short cannot give is said in words
+        value = float(value)
+        return (v.row(label, value, row_unit, status) if np.isfinite(value)
+                else v.row(label, 'not read', None, 'warn'))
+
     rows = [
-        v.row('RMS', float(stats.rms), unit, 'info'),
-        v.row('Mean', float(stats.mean), unit,
-              'pass' if abs(stats.mean) <= stats.offset_share * stats.rms else 'warn'),
-        v.row('Peak', float(stats.peak), unit, 'info'),
-        v.row('Crest factor', float(stats.crest), '', _band(stats.crest, stats.crest_band)),
-        v.row('Skewness', float(stats.skewness), '', _band(stats.skewness, stats.skewness_band)),
-        v.row('Kurtosis', float(stats.kurtosis), '', _band(stats.kurtosis, stats.kurtosis_band)),
-        v.row('Frames with kurtosis outside its band', float(stats.frames_outside), '',
-              'pass' if not stats.frames_outside else 'warn'),
-        v.row('Expected largest peak, in sigmas', float(stats.expected_peak), '', 'info'),
+        read('RMS', stats.rms, unit, 'info'),
+        read('Mean', stats.mean, unit,
+             'pass' if abs(stats.mean) <= stats.offset_share * stats.rms else 'warn'),
+        read('Peak', stats.peak, unit, 'info'),
+        read('Crest factor', stats.crest, '', _band(stats.crest, stats.crest_band)),
+        read('Skewness', stats.skewness, '', _band(stats.skewness, stats.skewness_band)),
+        read('Kurtosis', stats.kurtosis, '', _band(stats.kurtosis, stats.kurtosis_band)),
+        read('Frames with kurtosis outside its band', stats.frames_outside, '',
+             'pass' if not stats.frames_outside else 'warn'),
+        read('Expected largest peak, in sigmas', stats.expected_peak, '', 'info'),
         v.row('Reading', stats.describe(), None, 'warn' if stats.flagged else 'pass')]
     return [v.reading(f'Time statistics of {name}, {data.record_label(record)}', rows)]
 
@@ -192,7 +195,9 @@ def overload(project: Any, params: dict[str, Any]) -> list[dict]:
     verdict = ('info' if not check.checked
                else 'fail' if any({'rail', 'beyond'} & set(c.flagged) for c in channels)
                else 'warn' if check.flagged else 'pass')
-    return [_overload_trace(history, shown, f'{name}, {shown.describe(unit or "")}'),
+    said, scale = (display_units.words_in(str(history.ordinate_dim[shown.record]))
+                   if unit else ('', 1.0))
+    return [_overload_trace(history, shown, f'{name}, {shown.describe(said, 1.0 / scale)}'),
             v.reading(f'Headroom of {name}, ranges from {table_name}',
                       headroom + reasons
                       + [v.row('Judgment', check.describe(), None, verdict)]),

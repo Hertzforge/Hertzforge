@@ -1717,6 +1717,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                     phase=sub.variables['spec_phase'][()],
                     segment_type=sub.variables['spec_sweep_type'][()][:n - 1],
                     segment_rate=sub.variables['spec_sweep_rate'][()][:n - 1],
+                    from_file=True,
                     **bands))
             dim = control_dims.pop()
             unit = (control_units.pop()

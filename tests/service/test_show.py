@@ -379,7 +379,7 @@ def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
         project.remove('Set A')
 
 
-def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
+def test_a_lone_shape_set_has_four_views_one_at_a_time(plate, validate):
     project = plate.project
     geometry = project[named(plate, 'geometry')]
     dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]

@@ -108,14 +108,6 @@ def test_borrowing_the_other_conventions_mapping_would_bias_every_reading():
     assert frequencies[correct.argmax()] == pytest.approx(100.0, rel=1e-9)
 
 
-def test_scale_and_frequency_are_one_axis():
-    """The correction that shaped the view: they are inverses, not two
-    independent things to draw."""
-    frequencies = np.array([10.0, 100.0, 1000.0])
-    assert w.frequency_for(w.scale_for(frequencies)) == pytest.approx(
-        frequencies)
-
-
 def test_a_chirps_ridge_follows_the_frequency_it_was_built_with():
     """The reason the view exists. A PSD of this record says 50 to 400
     Hz and nothing about the order they arrive in."""

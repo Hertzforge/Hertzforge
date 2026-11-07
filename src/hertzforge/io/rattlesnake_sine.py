@@ -130,7 +130,8 @@ def load(path: str | os.PathLike,
                 bands[f'{kind}_{curve}'] = values
     tone = SineTone(name or os.path.splitext(os.path.basename(str(path)))[0],
                     start_time, frequency, amplitude,
-                    sweep_type[:n - 1], sweep_rate[:n - 1], phase=phase, **bands)
+                    sweep_type[:n - 1], sweep_rate[:n - 1], phase=phase,
+                    from_file=True, **bands)
     return SineSweepSpecification([tone], response_dof,
                                   ordinate_dim=ordinate_dim,
                                   ordinate_unit=ordinate_unit,

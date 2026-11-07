@@ -51,8 +51,9 @@ export function landsBefore(listed: Listed[], links: ProjectSummary['links'] | u
 	return order.slice(first).find((name) => !moving.includes(name)) ?? null;
 }
 
-/** `ids` with `moving` taken out and put before `before`, or last for null. */
+/** `ids` with `moving` taken out and put before `before`, or last for null; before itself, it stays. */
 export function reordered(ids: number[], moving: number, before: number | null): number[] {
+	if (before === moving) return ids;
 	const rest = ids.filter((id) => id !== moving);
 	const at = before === null ? rest.length : rest.indexOf(before);
 	return [...rest.slice(0, at < 0 ? rest.length : at), moving, ...rest.slice(at < 0 ? rest.length : at)];

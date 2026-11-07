@@ -396,8 +396,8 @@ def _sine(project: Any, spec_name: str | None, levels_name: str | None,
     requirement and limits, and with both objects the Level Error reading
     (`prefs['sine_reading']` 'bars'): each channel's signed RMS deviation
     in dB. The rows under either object are its control DOFs, and picks on
-    them restrict the reading. The stage (frequency across, time receding,
-    amplitude up) is not drawn yet."""
+    them restrict the reading. Without `prefs['flat']` the reading is the
+    stage: frequency across, time receding, amplitude up."""
     from hertzforge.core.compliance import SINE_ERROR_DB
 
     from .ops_sine_shock import sine_dofs, sine_error_rows, sine_lines
@@ -567,7 +567,7 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
     against one reference carries each response's magnitude and phase
     relative to it, an honest complex shape; a whole CPSD has no
     reference chosen and the diagonal is the autos (VD's `_cpsd_column`)."""
-    from hertzforge.core.data import channel_quantities
+    from hertzforge.core.data import autospectrum, channel_quantities
 
     if len(picks) < 2 or data.reference_dof is None or not np.iscomplexobj(data.ordinate):
         return None
@@ -575,7 +575,7 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
     references = {(data.reference_dof[i], quantities[k][1]) for k, i in enumerate(picks)}
     if len(references) != 1:
         return None
-    if all(data.response_dof[i] == data.reference_dof[i] for i in picks):
+    if all(autospectrum(data, i) for i in picks):
         return None
     kinds = [response for response, _reference in quantities]
     wanted = max(set(kinds), key=kinds.count)
@@ -793,7 +793,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
     asks for (`prefs['line']`, Hz), else the loudest. One shape the view
     sweeps, beside the records as curves, the two sharing the frequency
     cursor."""
-    from hertzforge.core.data import Psd
+    from hertzforge.core.data import Psd, autospectrum
     from hertzforge.deform import EnvelopeDeflection, OdsDeflection
 
     prefs = {**PREFS, **(prefs or {})}
@@ -810,8 +810,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
     elif isinstance(data, Psd) and data.reference_dof is not None:
         try:
             dofs, ordinate, used = data.principal_shapes()
-            records = [i for i in range(int(data.num_records))
-                       if data.response_dof[i] == data.reference_dof[i]]
+            records = [i for i in range(int(data.num_records)) if autospectrum(data, i)]
             flavor = f'Principal {used} shape'
         except ValueError as why:
             records, _quantity, notes = _played(data, picks)

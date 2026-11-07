@@ -77,7 +77,8 @@ kit. Services never send pixels and the shell never computes the numbers.
             "x":{"$array":..},"y":{"$array":..},
             "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
  "link":"frequency",
- "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}]}
+ "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}],
+ "handles":[{"series":0,"x":100.0,"decibels":3.0,"label":"...","op":"...","params":{...}}]}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
@@ -94,6 +95,11 @@ discards; a `span` draws its edges alone. `label` is said when the span is hover
 `low` and the new x1 as `high`, and the answer's views take the result's place, as Visual
 Dynamics' averaging and truncation regions are dragged. They are not listed in the legend; the
 result's reading says what they are.
+
+`handles` (optional) are points dragged up and down on the plot, each at `x` on the curve of
+`series`, `decibels` from its target and said as `label`. On release the shell runs `op` with
+`params` and the new `decibels`, and the answer's views take the result's place, as a
+specification's band edges are dragged (`project.set_band_edge`).
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
 a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
@@ -362,6 +368,12 @@ A param with `"setting":"<group>.<field>"` opens on that setting of the object t
 fills it again each time the source changes, so the form shows what the object holds before it is
 changed.
 
+A param with `"length":true` is a length, or a text of lengths (`0, 0, 0.1`, `3: 0.01`), typed in the
+connection's display system: the service takes it to meters before the operation runs, and passes it
+as it is on a geometry whose units are not defined. The descriptor says `m`; the shell shows the
+system's length unit for its `unit` and for `[m]` in its label, none on an undefined geometry, and
+when the system changes it converts what the form holds, which changes nothing in the model.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -392,7 +404,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | Method | Params | Result |
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
-| `op.run` | `{"op","params":{...}}` | `{"views":[view...],"project"}` |
+| `op.run` | `{"op","params":{...},"preview"?}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
@@ -410,16 +422,18 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
-| `units.system` | `{"name"?}` | `{"name","systems"}` |
+| `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"}}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
 Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
-in the param `values` names for that axis, and what `adds` (optional) gives for that axis.
+in the param `values` names for that axis, and what `adds` (optional) gives for that axis. `origin` is
+in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters.
 
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
 `"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
-Nothing reaches the project or its journal. A reading's `Added` row says `Would add`.
+Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
+operation without `previews` is a `bad_request`, and nothing runs.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
@@ -497,18 +511,17 @@ object can be written in, `.hforge` first. The desktop app lists them as the sav
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose
-verb applies to it), every object used and every required object param filled. `reading` rows change how
-the selection is read; `act` rows change the project (the operations named for the project's journaled
-verbs, and the edits). With nothing selected, the first column is the project: the acts that take no object
+verb applies to it), every object used and every required object param filled. With nothing selected, the first column is the project: the acts that take no object
 and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
 when records are picked and the operation takes them).
 
 The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is
 `{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
-for what the selection draws by itself (`id` starting `show.`), `reading` or `act` for an operation (`id`
-is the operation's), and `self` for an act on the selection that is not an operation (`id` starting
-`self.`). A row that cannot run has `ready` false and a `reason` to show. A row without `modules` is
+for what the selection draws by itself (`id` starting `show.`), `run` for an operation (`id` is the
+operation's) or another of a lone shape set's views (`id` starting `show.`), and `self` for an act on the selection that is not an operation (`id` starting
+`self.`). A row that cannot run has `ready` false and a `reason` to show, including one whose operation
+would refuse what the selection holds, as far as that can be told with nothing typed. A row without `modules` is
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, adds the operations on that part, which carry `"part": true`.
@@ -516,12 +529,13 @@ as `project.show` takes it, adds the operations on that part, which carry `"part
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts
 in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
-`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is, and
+`length` gives its length unit and what takes that unit to meters. Each
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
 typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
-not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent. A view already on screen is not converted again; the shell draws it again.
+not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's
@@ -618,22 +632,27 @@ project, and opening or starting another project ends it.
 | `fit.end` | `{}` | `{}` |
 
 `fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
-modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
+modes are adopted as confirmed, on the records whose DOFs the set holds. Records that leave a
+response without a record against some reference are refused, since a missing pair is not a
+measured zero; so is a complex set, or one with no value at any record's DOFs. A set's DOFs the fit
+does not cover are kept when it publishes, and a new mode cannot be confirmed while there are any.
+A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left
-out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and searches the
-damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
+out): the zoom is the search band. `fit.move` puts the cursor at `frequency`, within the measured
+range, and searches the damping there; `fit.damping` holds the damping at a fraction of critical
+(0.0001 to 0.5, as `fit.edit` takes it) until the next suggestion.
 `fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
 and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
 `fit.delete` takes back the confirmed modes at `modes` (indices into `modes`, from 0) and drops
-the preview. `fit.edit` types a confirmed mode's `damping` (a fraction of critical, above 0 and up
-to 1) or `description` into its row, as Visual Dynamics' fit table does; a damping changes the
-synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
+the preview. `fit.edit` types a confirmed mode's `damping` or `description` into its row, as Visual
+Dynamics' fit table does; a damping changes the synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
 `coherence`, the name of a coherence or multiple coherence in the project, `fit.start` weights each
-response at each line by γ²/(1-γ²), as the core does (`ModalFitSession`).
+response at each line by γ²/(1-γ²) in the frequency and damping search, the residues and `fit.refine`,
+and `fit.find` reads the residual CMIF with each response at its median weight (`ModalFitSession`).
 `fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
 "<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
-published. A step the core refuses is refused in its words; a fit whose FRF has left the project
+published. The journal holds the `Project.fit_modes(at=...)` line that replays it. A step the core refuses is refused in its words; a fit whose FRF has left the project
 ends.
 
 `fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.
@@ -696,10 +715,10 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 |---|---|---|
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
-| `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index"}` |
+| `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index","note"?}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
-| `report.print` | `{"name"}` | `{"html"}` |
+| `report.print` | `{"name","anyway"?}` | `{"html","owed","index"}` |
 | `report.issue` | `{"name","step","path"?,"anyway"?}` | `{"html","status"}`, `{"index"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
@@ -707,15 +726,18 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 `transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
-shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
-added when it has another suffix), beside the target first and renamed over it. First it makes
-the checks Visual Dynamics makes before a report leaves the project: with skeleton sections on,
-the sections (a flash report's parts) the report still owes; with the data index on, every
+shell shows it in a sandboxed frame. `report.export` writes the page that is printed and issued,
+light, to `path` (`.html` added when it has another suffix), beside the target first and renamed
+over it. First it makes the checks asked before a report leaves the project: with skeleton sections
+on, the sections (a flash report's parts) the report still owes; with the data index on, every
 indexed file hashed again and those that do not match the checksum indexed. A report that owes
 or whose files have `CHANGED` or are `NOT FOUND` is not written unless `anyway` is true; the
 answer then carries `owed` (the sections' lines) and `index` (`{name, status}` a file) with
 `path` null, and the shell asks "Export anyway?". Written, the answer is the `path` with both
-lists empty.
+lists empty and a `note` saying how many unbound blocks the page left out and what the index check
+found ('' when neither applies). An issued report that has changed since is refused: a change after issue is an
+amendment. What is compared leaves out the page's line on the last check of the files and its line
+on the program and the project file, so checking again or saving the project is not a change.
 
 `report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
 tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
@@ -733,14 +755,17 @@ bindings such as `@basis:ShapeSet` first) and `caption`.
 
 `report.print` gives the reader's page as it is printed: light, its figures drawn at print
 resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
-PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
-changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
-Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
-on, every required field entered, not already issued), makes the data index check `report.export`
-makes (answering `{"index":[...]}` alone, nothing marked, when files are astray and `anyway` is not
-true), marks it issued (or amended), and gives the page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
-issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
-puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+PDF. Its print stylesheet carries the margins the identity rides in. It makes `report.export`'s
+checks first and answers the same way: `html` null with `owed` and `index` until `anyway` is true.
+An issued report that has changed since is refused. `report.issue` is the Issue in three steps
+around that print. `begin` checks the report can be issued (Report Identity on, every required
+field entered, not already issued), makes the data index check `report.export` makes (answering
+`{"index":[...]}` alone when files are astray and `anyway` is not true), and gives the page to
+print, which says issued (or the amendment), and the `status`. The report itself stays a draft, so
+a save in between writes a draft. `record` reads the PDF saved from the page at `path`, marks the
+report and records the issue with the SHA-256 of the PDF and of the page; its `entry` is the
+record's new line. `cancel` forgets the page. A file that holds a status of issued or amended with
+no record behind it opens as a draft. The summary's `settings` for a report carry its `identity` fields
 as text beside its `features`.
 
 `report.operate` applies one of VD's editor operations and answers with the editor at the block it

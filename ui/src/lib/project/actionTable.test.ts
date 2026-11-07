@@ -5,7 +5,7 @@ import { columnsFor, kindWords, moreIn } from './actionTable';
 const row = (verb: string, more: Partial<ActionRow> = {}): ActionRow => ({
 	id: `project.${verb.toLowerCase()}`,
 	verb,
-	kind: 'reading',
+	kind: 'run',
 	ready: true,
 	...more
 });
