@@ -27,6 +27,7 @@ from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
+from .parsing import parse_id_runs
 from .protocol import refused
 
 ANY = 'objects:' + '|'.join(SAVED_KINDS)
@@ -118,22 +119,6 @@ def id_runs_text(ids: Any) -> str:
         start = previous = value
     runs.append((start, previous))
     return ' '.join(str(a) if a == z else f'{a}-{z}' for a, z in runs)
-
-
-def parse_id_runs(text: str) -> list[int]:
-    """'1-3, 7 9-10' as [1, 2, 3, 7, 9, 10]; a run either way round."""
-    found: list[int] = []
-    for part in str(text).replace(',', ' ').split():
-        try:
-            if '-' in part[1:]:
-                head, _, tail = part[1:].partition('-')
-                low, high = sorted((int(part[0] + head), int(tail)))
-                found.extend(range(low, high + 1))
-            else:
-                found.append(int(part))
-        except ValueError:
-            raise refused(f'{part!r} is not an id or a run of ids such as 3-6') from None
-    return found
 
 
 def _group_label(geometry: Any, row: int) -> str:
@@ -500,7 +485,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                     return
             raise ValueError(f'no element group {wanted!r}; add it first')
         else:
-            nodes = [int(part) for part in text.replace(',', ' ').split()]
+            nodes = parse_id_runs(text, 'a node id')
             missing = set(nodes) - set(geometry.node_id.tolist())
             if missing:
                 raise ValueError(f'unknown nodes {sorted(missing)}')

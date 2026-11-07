@@ -26,6 +26,7 @@ from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
+from .parsing import parse_id_runs, parse_picks
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -33,19 +34,7 @@ from .waterfalls import unit_text
 def _picks(text: str, count: int, what: str) -> list[int] | None:
     """The 0-based items '1-3, 7' names, numbered from 1; None when
     `text` is blank."""
-    if not text.strip():
-        return None
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a {what} number or a range such as 3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'{what}s run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return list(dict.fromkeys(out))
+    return parse_picks(text, count, what) if text.strip() else None
 
 
 def _runs(indices: Any) -> str:
@@ -58,13 +47,6 @@ def _runs(indices: Any) -> str:
         else:
             runs.append([n])
     return ', '.join(f'{r[0]}' if len(r) == 1 else f'{r[0]}-{r[-1]}' for r in runs)
-
-
-def _numbers(text: str, what: str) -> set[int]:
-    try:
-        return {int(t) for t in text.replace(',', ' ').split()}
-    except ValueError:
-        raise refused(f'{text!r} is not a list of {what} numbers') from None
 
 
 # ---- Plan Instrumentation ---------------------------------------------------------
@@ -221,7 +203,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     angle = float(params['edge_angle'])
     found = skin(geometry, edge_angle=angle)
     numbers = {s.id for s in found}
-    out, back = (_numbers(params[key], 'surface') for key in ('leave_out', 'put_back'))
+    out, back = (set(parse_id_runs(params[key], 'a surface number'))
+                 for key in ('leave_out', 'put_back'))
     unknown = sorted((out | back) - numbers)
     if unknown:
         raise refused(f'the model has surfaces 1 to {len(found)} at a {angle:g}° edge; '

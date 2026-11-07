@@ -22,6 +22,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .parsing import parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, positive, quantity_of, sig, spec_line
 from .waterfalls import unit_text
@@ -358,13 +359,7 @@ INDIVIDUAL_HIGH = Param('individual_high', 'Channel band, above', 'number', defa
 
 def _numbers(text: str, what: str) -> tuple[float, ...] | None:
     """Numbers typed, separated by commas or spaces; None for none."""
-    parts = [part for part in re.split(r'[,\s;]+', text.strip()) if part]
-    if not parts:
-        return None
-    try:
-        return tuple(float(part) for part in parts)
-    except ValueError:
-        raise refused(f'{text!r} is not {what}') from None
+    return tuple(parse_numbers(text, what)) or None
 
 
 def _band(params: dict[str, Any], key: str) -> str | tuple[float, float]:

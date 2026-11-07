@@ -16,6 +16,7 @@ from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh, places_view
 from .ops_geometry import entity_table
+from .parsing import parse_id_runs
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -68,16 +69,11 @@ def _groups(geometry: Any, text: str) -> list[int]:
     known = [int(g) for g in geometry.groups.ids]
     if not text.strip():
         return known
-    chosen = []
-    for part in text.replace(' ', '').split(','):
-        try:
-            group = int(part)
-        except ValueError:
-            raise refused(f'{part!r} is not an element group number') from None
+    chosen = parse_id_runs(text, 'an element group number')
+    for group in chosen:
         if group not in known:
             raise refused(f'the geometry has element groups {", ".join(map(str, known))}; '
                           f'not {group}')
-        chosen.append(group)
     return chosen
 
 
@@ -200,23 +196,9 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
                          held, places, out, 'Click a place to leave it out or put it back')]
 
 
-def _id_text(ids: Any) -> str:
-    return ', '.join(str(i) for i in ids)
-
-
 def _ids(text: str, what: str) -> list[int]:
-    """The ids '3, 7-9' names, in the order named."""
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        if not part:
-            continue
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not {what} or a range such as 3-6') from None
-        out.extend(range(low, high + 1))
-    return list(dict.fromkeys(out))
+    """The ids '3, 7-9' names, each once, in the order named."""
+    return list(dict.fromkeys(parse_id_runs(text, what)))
 
 
 def element_groups(project: Any, params: dict[str, Any]) -> list[dict]:

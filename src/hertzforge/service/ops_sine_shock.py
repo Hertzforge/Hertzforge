@@ -16,6 +16,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .parsing import parse_numbers
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -777,10 +778,7 @@ LOGGED = Param('logged', 'Draw the record as logged', 'boolean', default=False)
 
 
 def _cutoffs(text: str) -> tuple[float, ...]:
-    try:
-        values = sorted({float(part) for part in text.replace(',', ' ').split()})
-    except ValueError:
-        values = []
+    values = sorted(set(parse_numbers(text, 'a list of cutoffs above zero, in Hz')))
     if not values or values[0] <= 0.0:
         raise refused(f'{text!r} is not a list of cutoffs above zero, in Hz')
     return tuple(values)

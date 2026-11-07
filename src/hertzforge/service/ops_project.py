@@ -16,6 +16,7 @@ from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .mode_pairs import translations
+from .parsing import parse_picks
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
@@ -58,18 +59,7 @@ def chosen_records(text: str, count: int) -> list[int]:
     shows them; the first `FIRST_RECORDS` when `text` is blank."""
     if not text.strip():
         return list(range(min(count, FIRST_RECORDS)))
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a record number or a range such as '
-                          '3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'records run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return list(dict.fromkeys(out))
+    return parse_picks(text, count, 'record')
 
 
 def plot(project: Any, params: dict[str, Any]) -> list[dict]:

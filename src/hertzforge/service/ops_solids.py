@@ -16,6 +16,7 @@ X, then Y, then Z axes.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -24,6 +25,7 @@ import numpy as np
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh, places_view
+from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -77,10 +79,7 @@ def _geometry(project: Any, params: dict[str, Any]) -> tuple[str, Any]:
 
 
 def _numbers(text: str, what: str) -> list[float]:
-    try:
-        return [float(part) for part in text.replace(' ', '').split(',') if part]
-    except ValueError:
-        raise refused(f'{what} is numbers separated by commas, not {text!r}') from None
+    return parse_numbers(text, f'{what}: numbers separated by commas or spaces')
 
 
 def _ids(geometry: Any, text: str, every: list[int] | None = None) -> list[int]:
@@ -94,16 +93,11 @@ def _ids(geometry: Any, text: str, every: list[int] | None = None) -> list[int]:
             raise refused('the geometry has no solids yet; add one first')
         raise refused(f'name the solids by id, as "1, 3"; the geometry has '
                       f'{", ".join(map(str, known))}')
-    chosen = []
-    for part in text.replace(' ', '').split(','):
-        try:
-            number = int(part)
-        except ValueError:
-            raise refused(f'{part!r} is not a solid id') from None
+    chosen = parse_id_runs(text, 'a solid id')
+    for number in chosen:
         if number not in known:
             raise refused(f'the geometry has solids {", ".join(map(str, known)) or "none"}; '
                           f'not {number}')
-        chosen.append(number)
     return chosen
 
 
@@ -411,7 +405,7 @@ def edit_solid(project: Any, params: dict[str, Any]) -> list[dict]:
                 raise refused(f'the {key.replace("_", " ")} is one number')
             changes[key] = values[0]
     if params['counts'].strip():
-        changes['counts'] = [int(c) for c in _numbers(params['counts'], 'the counts')]
+        changes['counts'] = parse_id_runs(params['counts'], 'a whole count')
     if params['name'].strip():
         changes['name'] = params['name'].strip()
     if not changes:
@@ -704,9 +698,7 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
 def _piece_sizes(text: str) -> dict[int, float]:
     """The sizes '3: 0.01, 5: 0.002' names, by piece."""
     out: dict[int, float] = {}
-    for entry in text.replace(' ', '').split(','):
-        if not entry:
-            continue
+    for entry in re.sub(r'\s*:\s*', ':', text).replace(',', ' ').split():
         piece, colon, size = entry.partition(':')
         try:
             out[int(piece)] = float(size)
@@ -864,16 +856,11 @@ def _group_ids(geometry: Any, text: str) -> list[int] | None:
     known = [int(g) for g in geometry.group_id]
     if not text.strip():
         return None
-    chosen = []
-    for part in text.replace(' ', '').split(','):
-        try:
-            group = int(part)
-        except ValueError:
-            raise refused(f'{part!r} is not an element group number') from None
+    chosen = parse_id_runs(text, 'an element group number')
+    for group in chosen:
         if group not in known:
             raise refused(f'the geometry has element groups '
                           f'{", ".join(map(str, known)) or "none"}; not {group}')
-        chosen.append(group)
     return chosen
 
 
@@ -934,7 +921,7 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
          f'{len(p["nodes_a"]):,} on {len(p["nodes_b"]):,}'] for k, p in enumerate(found)])
     if params['keep']:
         if params['patches'].strip():
-            picked = [int(n) for n in _numbers(params['patches'], 'the patches')]
+            picked = parse_id_runs(params['patches'], 'a patch number')
             wrong = [k for k in picked if not 1 <= k <= len(found)]
             if wrong:
                 raise refused(f'{len(found)} patches were found; there is no patch {wrong[0]}')
@@ -1015,7 +1002,7 @@ def delete_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.delete_mated_surfaces`)."""
     name, geometry = _geometry(project, params)
     known = [m.id for m in geometry.mates]
-    ids = [int(i) for i in _numbers(params['mates'], 'the mated surfaces')]
+    ids = parse_id_runs(params['mates'], 'a mated surfaces id')
     if not ids:
         raise refused(f'name the mated surfaces by id; the geometry has '
                       f'{", ".join(map(str, known)) or "none"}')

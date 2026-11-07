@@ -378,13 +378,14 @@ def test_plot_leaves_out_records_of_another_quantity_and_says_so(plate):
 
 
 @pytest.mark.parametrize(('text', 'expected'), [('', list(range(8))), ('2', [1]),
-                                                ('1-3, 3, 7', [0, 1, 2, 6])])
+                                                ('1-3, 3, 7', [0, 1, 2, 6]), ('5-3', [2, 3, 4]),
+                                                ('1 2', [0, 1])])
 def test_records_are_named_from_one(text, expected):
     from hertzforge.service.ops_project import chosen_records
     assert chosen_records(text, 13) == expected
 
 
-@pytest.mark.parametrize('text', ['0', '14', '3-x', '5-2'])
+@pytest.mark.parametrize('text', ['0', '14', '3-x', '1.5'])
 def test_records_outside_the_object_are_refused(text):
     from hertzforge.service.ops_project import chosen_records
     with pytest.raises(ProtocolError) as error:

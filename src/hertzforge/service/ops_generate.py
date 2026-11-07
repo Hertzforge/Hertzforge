@@ -25,6 +25,7 @@ from . import run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_sine_shock import STROKE_RATINGS, _flat, _trace
+from .parsing import parse_picks
 from .protocol import refused
 from .waterfalls import unit_text, waterfall_view
 
@@ -65,19 +66,7 @@ def _core(call: Any) -> Any:
 def _picked(text: str, count: int, what: str) -> list[int] | None:
     """The 0-based items '1-3, 7' names, numbered from 1; None when blank,
     which is all of them."""
-    if not text.strip():
-        return None
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a {what} number or a range such as 3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'{what}s run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return sorted(set(out))
+    return sorted(parse_picks(text, count, what)) if text.strip() else None
 
 
 def _dofs(text: str) -> tuple[str, ...] | None:
