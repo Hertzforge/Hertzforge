@@ -18,6 +18,8 @@
 //! - [`table`]: the channel table and its validation.
 //! - [`random`]: closed-loop Random through the controller's `RandomService`.
 //! - [`mimo`]: MIMO Random: its setup, validation, driver trait and quantities.
+//! - [`shock`]: classical shock: its configuration, the reference pulse, the run
+//!   on the transient-run rails ([`pulse`]) and its views.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -34,6 +36,7 @@ pub mod protocol;
 pub mod random;
 pub mod server;
 pub mod session;
+pub mod shock;
 pub mod sim;
 pub mod station;
 pub mod table;

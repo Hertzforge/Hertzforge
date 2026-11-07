@@ -911,6 +911,427 @@ MIMO_DATA_COH = [0.25, 0.2421875, 0.25, 0.234375]
 MIMO_DATA_HEAT = [0.5, -0.25, 0.125, 0.0, -0.5, 0.25, 0.375, -0.125]
 
 
+# --- classical shock (PROTOCOL.md, "Classical Shock") ---
+#
+# The configuration golden is the contract's example with every field given; its
+# `derived` is what the control service computes for it (the Rust golden test
+# recomputes it). The binary goldens carry short records whose values are exact in
+# binary, laid out as the service's view builders lay them out (each series' x then
+# y, every array numbered in traversal order).
+
+SHOCK_SHAKER = {
+    'name': 'Bench shaker', 'manufacturer': '', 'model': '', 'notes': '',
+    'force_random': None, 'force_sine': {'value': 2000, 'basis': 'Peak'},
+    'force_shock': {'value': 4000, 'basis': 'Peak'},
+    'max_velocity_ips': {'value': 70, 'basis': 'Peak'},
+    'max_displacement_in_pp': {'value': 1, 'basis': 'Peak'},
+    'max_accel_bare_g': {'value': 100, 'basis': 'Peak'},
+    'armature_mass_lb': 45, 'overturning_moment_limit_lbf_in': None, 'custom': [],
+}
+
+SHOCK_CONFIG = {
+    'title': 'Half-Sine 20 g 11 ms',
+    'pulse': {'shape': 'half_sine', 'amplitude_g': 20, 'duration_ms': 11, 'polarity': 'positive',
+              'rise_frac': None, 'fall_frac': None,
+              'compensation': {'shape': 'rectangular', 'pre_frac': 4, 'post_frac': 4,
+                               'symmetric': True}},
+    'standard': {'name': 'mil_std_810_516', 'tolerance_abort': 'full_level',
+                 'overshoot_abort': None},
+    'acquisition': {'fs_hz': 51200,
+                    'srs': {'f_lo_hz': 20, 'f_hi_hz': 2000, 'bands_per_octave': 3,
+                            'band_tol_db': 3},
+                    'pvss': False},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -9, -6, -3, 0], 'pulses': [1, 1, 1, 1, 3],
+                 'start_db': -12, 'advance': 'on_pass', 'max_pulses_per_level': 5},
+    'spacing': {'cooling_s': 1, 'settling_s': 0.5, 'compute_s': 0.25},
+    'identification': {'drive_vrms': 0.05, 'duration_s': 4, 'nfft': 2048, 'band_hz': [5, 5000],
+                       'min_mean_coherence': 0.8, 'review': True},
+    'control': {'law': {'id': 'fd_correct', 'params': {'beta': 0.5}},
+                'band_hz': [5, 5000], 'coherence_floor': 0.9, 'tikhonov_floor': 0.05,
+                'ref_floor_db': 50, 'min_band_energy': 0.9, 'law_budget': 0.25, 'law_misses': 3,
+                'max_pulses': 100, 'max_peak_rise_db': 10, 'max_bin_rise_db': 10,
+                'first_drive_ratio': 2, 'divergence_pulses': 3},
+    'limits': {'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8, 'peak_accel_g': None,
+               'monitors': [{'channel': 2, 'unit': 'A', 'peak_ceiling': 40,
+                             'kind': 'between_pulse'}]},
+    'feasibility': {'shaker': SHOCK_SHAKER,
+                    'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
+                                       'fixturing': 10, 'test_article': 12},
+                    'residual_velocity_ips': 0.1, 'residual_disp_in': 0.001},
+    'train': {'count': 5, 'spacing_s': 6},
+    'gunfire': {'rounds_per_min': 30, 'rounds': 3},
+    'capture': {'auto_start': False, 'run_name': 'classical_shock'},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
+                 {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
+                 {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
+                 {'key': 'operator', 'label': 'Operator', 'value': ''}],
+}
+
+SHOCK_DERIVED = {
+    'grid': {'fs_hz': 51200, 'record_len': 8192, 'actual': False},
+    'reference': {'peak_g': 20, 'velocity_change_ips': 53.9588,
+                  'displacement_pk_pk_in': 0.687732, 'main_start': 2534, 'main_len': 563},
+    'quiet_window': {'worst_frac': 0.0795, 'limit_frac': 0.15, 'inside': True},
+    'spacing_s': 1, 'call_budget_s': 0.25,
+    'feasibility': {'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."},
+}
+
+SHOCK_LAW_REF = {'id': 'fd_correct', 'name': 'frequency-domain correction', 'version': '0.1.0',
+                 'sha256': None, 'misses': 0}
+SHOCK_LEVELS = [-12, -9, -6, -3, 0]
+SHOCK_STATION = {'kind': 'sim', 'class': 'sim', 'devices': []}
+
+
+def _shock_state(**over) -> dict:
+    s = {
+        'run_id': 's-0001', 'state': 'configured', 'phase': 'idle',
+        'title': SHOCK_CONFIG['title'], 'source': 'SIM', 'station': SHOCK_STATION,
+        'grid': SHOCK_DERIVED['grid'], 'clock': None, 'mode': 'auto', 'levels_db': SHOCK_LEVELS,
+        'level_db': None, 'rung': None,
+        'pulses': {'fired': 0, 'passed': 0, 'at_level': 0, 'of_level': 0},
+        'next_pulse_s': None, 'elapsed_s': None, 'alarm': False, 'identification': None,
+        'prediction': None, 'last_pulse': None, 'law': SHOCK_LAW_REF, 'feasibility': None,
+        'end': None,
+    }
+    s.update(over)
+    return s
+
+
+#: The third pulse of the golden run: -6 dB, passed, the law's call used.
+SHOCK_ROW = {
+    'index': 2, 'origin': 'ladder', 'scheduled_db': -6, 'commanded_db': -6, 'limit_scale': 1,
+    'drive_vpk': 0.2, 'peak_g': 9.98, 'peak_ratio': 0.998, 'error_pct': 1.9,
+    'velocity_change_ips': 27.02, 'velocity_change_ratio': 1.0014,
+    'verdicts': {'envelope': True, 'velocity': True, 'substitution': True}, 'passed': True,
+    'srs': {'bands': 21, 'passed_bands': 21}, 'at_s': 9.75,
+    'law': {'used': True, 'miss': None, 'capped_bins': 0, 'peak_capped': False, 'call_ms': 1.4},
+}
+
+SHOCK_RUNNING = _shock_state(
+    run_id='s-0003', state='running', phase='waiting',
+    grid={'fs_hz': 51200, 'record_len': 8192, 'actual': True}, clock='shared',
+    level_db=-6, rung=2, pulses={'fired': 3, 'passed': 3, 'at_level': 1, 'of_level': 1},
+    next_pulse_s=0.6, elapsed_s=12.5,
+    identification={'drive_vrms': 0.05, 'drive_vpk': 0.21, 'coherence_mean': 0.998,
+                    'min_mean_coherence': 0.8, 'passed': True},
+    prediction={'drive_vpk': 0.4, 'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8,
+                'response_peak_g': 20.1, 'velocity_pk_ips': 27.3, 'displacement_pk_pk_in': 0.69},
+    last_pulse=SHOCK_ROW,
+    feasibility={'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."})
+
+#: The live frame mid-fire: a pulse playing at -6 dB.
+SHOCK_LIVE = {
+    'run_id': 's-0003', 'source': 'SIM', 'state': 'running', 'phase': 'firing', 'mode': 'auto',
+    'level_db': -6, 'rung': 2, 'pulses': {'fired': 3, 'passed': 3, 'at_level': 1, 'of_level': 1},
+    'next_pulse_s': None, 'fire': {'done': 2048, 'of': 8192},
+}
+
+#: Eight samples at 1 kHz, the main pulse from the third (t = 0), and the band over six.
+SHOCK_FS = 1000.0
+SHOCK_START = -2
+SHOCK_REF = [0.0, -0.5, 0.0, 7.5, 10.0, 7.5, 0.0, -0.5]
+SHOCK_BAND_START = 1
+SHOCK_BAND_HI = [1.5, 1.5, 9.0, 11.5, 9.0, 1.5]
+SHOCK_BAND_LO = [-1.5, -1.5, 6.0, 8.5, 6.0, -1.5]
+SHOCK_MEASURED = [0.0, -0.25, 0.25, 7.25, 9.75, 7.75, 0.25, -0.5]
+SHOCK_DRIVE = [0.0, -0.0125, 0.0, 0.1875, 0.25, 0.1875, 0.0, -0.0125]
+SHOCK_SRS_F = [100.0, 200.0, 400.0]
+SHOCK_SRS_REF = [12.5, 15.0, 11.0]
+SHOCK_SRS_HI = [17.5, 21.0, 15.5]
+SHOCK_SRS_LO = [9.0, 10.5, 7.75]
+SHOCK_SRS_MEAS = [12.25, 15.5, 10.5]
+SHOCK_ID_F = [100.0, 200.0, 300.0]
+SHOCK_ID_GAIN = [0.5, 1.0, 0.75]
+SHOCK_ID_PHASE = [-10.0, -20.0, -30.0]
+SHOCK_ID_COH = [0.99, 0.5, 0.98]
+SHOCK_ID_TRUSTED = [True, False, True]
+SHOCK_ID_FLOOR = 0.9
+
+
+def _times(start: int, n: int) -> list:
+    return [(start + i) / SHOCK_FS for i in range(n)]
+
+
+class _Arr:
+    """Arrays numbered as the service numbers them: `a0`, `a1`, ... in push order."""
+
+    def __init__(self):
+        self.arrays: dict = {}
+
+    def push(self, values, dtype='f64'):
+        ident = f'a{len(self.arrays)}'
+        self.arrays[ident] = (dtype, [len(values)], list(values))
+        return {'$array': ident}
+
+    def series(self, name, role, x, y):
+        return {'name': name, 'role': role, 'x': self.push(x), 'y': self.push(y)}
+
+
+def _axis(label, unit, scale):
+    return {'label': label, 'unit': unit, 'scale': scale}
+
+
+_TIME = _axis('Time', 's', 'linear')
+_FREQ = _axis('Frequency', 'Hz', 'log')
+
+
+def _spectrum(title, x, y, series, link):
+    return {'view': 'spectrum', 'title': title, 'x': x, 'y': y, 'series': series, 'link': link}
+
+
+def _shock_pulse_view(a: _Arr, measured=True) -> dict:
+    n = len(SHOCK_REF)
+    series = [a.series('Reference', 'reference', _times(SHOCK_START, n), SHOCK_REF)]
+    bt = _times(SHOCK_START + SHOCK_BAND_START, len(SHOCK_BAND_HI))
+    series.append(a.series('Tolerance high', 'tolerance', bt, SHOCK_BAND_HI))
+    series.append(a.series('Tolerance low', 'tolerance', bt, SHOCK_BAND_LO))
+    if measured:
+        series.append(a.series('Measured', 'measured', _times(SHOCK_START, n), SHOCK_MEASURED))
+    return _spectrum('Pulse', _TIME, _axis('Acceleration', 'g', 'linear'), series, 'time')
+
+
+def _shock_drive_view(a: _Arr) -> dict:
+    return _spectrum('Drive', _TIME, _axis('Drive', 'V', 'linear'),
+                     [a.series('Drive', 'drive', _times(SHOCK_START, len(SHOCK_DRIVE)),
+                               SHOCK_DRIVE)], 'time')
+
+
+def _shock_srs_view(a: _Arr) -> dict:
+    return _spectrum('SRS', _axis('Natural frequency', 'Hz', 'log'),
+                     _axis('Peak acceleration', 'g', 'log'),
+                     [a.series('Reference', 'reference', SHOCK_SRS_F, SHOCK_SRS_REF),
+                      a.series('Band high', 'tolerance', SHOCK_SRS_F, SHOCK_SRS_HI),
+                      a.series('Band low', 'tolerance', SHOCK_SRS_F, SHOCK_SRS_LO),
+                      a.series('Measured', 'measured', SHOCK_SRS_F, SHOCK_SRS_MEAS)],
+                     'frequency')
+
+
+def _shock_kinematic_view(a: _Arr, title: str, unit: str, values: list) -> dict:
+    return _spectrum(title, _TIME, _axis(title, unit, 'linear'),
+                     [a.series('Reference', 'reference', _times(SHOCK_START, len(values)),
+                               values)], 'time')
+
+
+def _shock_identification_views(a: _Arr) -> list:
+    gain = _spectrum('Identification Gain', _FREQ, _axis('Gain', 'g/V', 'log'),
+                     [a.series('Gain', 'measured', SHOCK_ID_F, SHOCK_ID_GAIN)], 'frequency')
+    phase = _spectrum('Identification Phase', _FREQ, _axis('Phase', 'deg', 'linear'),
+                      [a.series('Phase', 'measured', SHOCK_ID_F, SHOCK_ID_PHASE)], 'frequency')
+    tx = [f for f, t in zip(SHOCK_ID_F, SHOCK_ID_TRUSTED) if t]
+    ty = [c for c, t in zip(SHOCK_ID_COH, SHOCK_ID_TRUSTED) if t]
+    ends = [SHOCK_ID_F[0], SHOCK_ID_F[-1]]
+    coh = _spectrum('Coherence', _FREQ, _axis('Coherence', None, 'linear'),
+                    [a.series('Coherence', 'measured', SHOCK_ID_F, SHOCK_ID_COH),
+                     a.series('Trusted bins', 'other', tx, ty),
+                     a.series('Floor', 'tolerance', ends, [SHOCK_ID_FLOOR] * 2)], 'frequency')
+    return [gain, phase, coh]
+
+
+SHOCK_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
+    {'label': 'Corrected bins', 'value': 412.0, 'unit': 'bins', 'status': 'info'},
+    {'label': 'Bins at the rise limit', 'value': 3.0, 'unit': 'bins', 'status': 'info'},
+    {'label': 'Drive change', 'value': 0.42, 'unit': 'dB', 'status': 'info'},
+]}
+
+#: The run's reading as the service writes it for the golden state, between pulses.
+SHOCK_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Level', 'value': -6.0, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Pulses fired', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Pulses passed', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Last peak', 'value': 9.98, 'unit': 'g', 'status': 'pass'},
+    {'label': 'Last error', 'value': 1.9, 'unit': '%', 'status': 'info'},
+    {'label': 'Last drive peak', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Next pulse', 'value': 0.6, 'unit': 's', 'status': 'info'},
+]}
+
+SHOCK_PULSES_TABLE = {
+    'view': 'table', 'title': 'Pulses',
+    'columns': ['Pulse', 'Origin', 'Level (dB)', 'Peak (g)', 'Error (%)',
+                'Velocity change (in/s)', 'Envelope', 'Velocity', 'Substitution', 'Passed'],
+    'rows': [['3', 'ladder', '-6', '9.98', '1.9', '27.02', 'pass', 'pass', 'pass', 'pass']],
+}
+
+SHOCK_SUBSCRIBE_PLOTS = [
+    {'id': 'pulse', 'quantity': 'pulse', 'points': 1024},
+    {'id': 'id', 'quantity': 'identification'},
+    {'id': 'law', 'quantity': 'law'},
+    {'id': 'run', 'quantity': 'readings'},
+    {'id': 'table', 'quantity': 'pulses'},
+]
+SHOCK_QUANTITIES = ['pulse', 'velocity', 'displacement', 'srs', 'spectrum', 'identification',
+                    'law', 'readings', 'pulses']
+
+
+def _shock_pulse_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [_shock_pulse_view(a), _shock_drive_view(a), _shock_srs_view(a)]
+    message = {'type': 'event', 'topic': 'shock.pulse', 'seq': 141,
+               'data': {'run_id': 's-0003', 'pulse': SHOCK_ROW, 'views': views}}
+    return message, a.arrays
+
+
+def _shock_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 'pulse', 'quantity': 'pulse', 'views': [_shock_pulse_view(a), _shock_drive_view(a)]},
+        {'id': 'id', 'quantity': 'identification', 'views': _shock_identification_views(a)},
+        {'id': 'law', 'quantity': 'law', 'views': [SHOCK_LAW_READING]},
+        {'id': 'run', 'quantity': 'readings', 'views': [SHOCK_RUN_READING]},
+        {'id': 'table', 'quantity': 'pulses', 'views': [SHOCK_PULSES_TABLE]},
+    ]
+    data = {k: v for k, v in SHOCK_LIVE.items()}
+    data.update({'phase': 'waiting', 'next_pulse_s': 0.6, 'fire': None, 'plots': plots})
+    message = {'type': 'event', 'topic': 'shock.data', 'seq': 142, 'data': data}
+    return message, a.arrays
+
+
+#: The preview of the short record: its facts and its three views.
+SHOCK_PREVIEW_FACTS = {'peak_g': 10, 'velocity_change_ips': 9.6522,
+                       'displacement_pk_pk_in': 0.0123, 'main_start': 2, 'main_len': 3}
+SHOCK_PREVIEW_QUIET = {'worst_frac': 0.05, 'limit_frac': 0.15, 'inside': True}
+SHOCK_PREVIEW_VEL = [0.0, -0.096522, -0.193044, 1.25, 4.6, 7.9, 9.65, 9.6522]
+SHOCK_PREVIEW_DISP = [0.0, 0.0, -0.0001, -0.0002, 0.0026, 0.0089, 0.0123, 0.0122]
+
+
+def _shock_preview_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [_shock_pulse_view(a, measured=False),
+             _shock_kinematic_view(a, 'Velocity', 'in/s', SHOCK_PREVIEW_VEL),
+             _shock_kinematic_view(a, 'Displacement', 'in', SHOCK_PREVIEW_DISP)]
+    message = {'type': 'response', 'id': 53,
+               'result': {'derived': {'reference': SHOCK_PREVIEW_FACTS,
+                                      'quiet_window': SHOCK_PREVIEW_QUIET},
+                          'views': views}}
+    return message, a.arrays
+
+
+#: The built-in classical law's catalog entry, from its own declaration.
+LAW_FD_CORRECT = {
+    'id': 'fd_correct', 'world': 'shock_classical', 'builtin': True,
+    'name': 'frequency-domain correction', 'version': '0.1.0',
+    'author': 'Hertzforge contributors',
+    'summary': 'Starts from the inverse of the identified plant applied to the reference pulse, '
+               'then after each pulse corrects the drive spectrum by a fraction of the inverse '
+               'times the error, on the bins the controller trusts. Each bin\'s growth is '
+               'limited per pulse.',
+    'sha256': None,
+    'check': {'status': 'built_in', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': True, 'message': 'Built in: cleared for hardware.'},
+    'params': [
+        {'key': 'beta', 'label': 'Correction gain',
+         'help': "The fraction of each pulse's error corrected before the next pulse. 1 "
+                 'corrects the whole error at once; smaller values settle more gently when the '
+                 'plant estimate is uncertain.',
+         'kind': 'number', 'unit': '', 'min': 0.05, 'max': 1, 'step': 0.05, 'default': 0.5},
+        {'key': 'max_db_per_pulse', 'label': 'Largest rise per pulse',
+         'help': 'The most any one frequency of the drive may grow from one pulse to the next. '
+                 'A frequency may always fall.',
+         'kind': 'number', 'unit': 'dB', 'min': 1, 'max': 9, 'step': 0.5, 'default': 6},
+        {'key': 'initial_backoff_db', 'label': 'First pulse backoff',
+         'help': 'How far under the predicted drive the first pulse starts. The correction '
+                 'brings the level up over the next pulses.',
+         'kind': 'number', 'unit': 'dB', 'min': 0, 'max': 12, 'step': 1, 'default': 0}],
+    'diagnostics': [
+        {'key': 'corrected_bins', 'label': 'Corrected bins', 'unit': 'bins',
+         'help': 'Bins whose drive the law moved on this call.', 'layout': None},
+        {'key': 'clamped_bins', 'label': 'Bins at the rise limit', 'unit': 'bins',
+         'help': 'Bins whose rise the law held to its largest rise per pulse on this call.',
+         'layout': None},
+        {'key': 'drive_change_db', 'label': 'Drive change', 'unit': 'dB',
+         'help': "The drive's peak against the last drive's, in dB (0 at the seed).",
+         'layout': None}],
+    'shapes': None, 'needs': None,
+}
+
+
+def _shock_case(name, plant, requirement, *, pulses, first, full, full_passed, calls, ms,
+                vpk, end='completed', trip=None, capped=0, passed=True, detail=None):
+    if detail is None:
+        detail = (f'{end}; {pulses} pulses, the first pass at pulse {first}; '
+                  f'{full_passed} of {full} full-level pulses passed; {calls} calls, '
+                  f'slowest {ms} ms of 250 ms')
+    return {'name': name, 'plant': plant, 'requirement': requirement, 'passed': passed,
+            'detail': detail, 'end': end, 'trip': trip, 'pulses': pulses,
+            'first_pass_pulse': first, 'full_level_pulses': full,
+            'full_level_passed': full_passed, 'misses': 0, 'refused': 0, 'capped_bins': capped,
+            'calls': calls, 'worst_call_ms': ms, 'budget_ms': 250, 'max_drive_vpk': vpk}
+
+
+#: `laws.check` on the built-in law: a check is not recorded for a built-in law.
+SHOCK_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'shock-classical-check 1',
+                      'cases': [
+    _shock_case('flat', 'a wire', 'every_pulse', pulses=7, first=1, full=3, full_passed=3,
+                calls=8, ms=1.1, vpk=0.4),
+    _shock_case('one mode', 'one mode, 400 Hz, Q 10', 'pass_by', pulses=8, first=2, full=3,
+                full_passed=3, calls=9, ms=1.2, vpk=0.41),
+    _shock_case('station plant', 'two modes, 200 and 550 Hz, Q 2.5', 'pass_by', pulses=8,
+                first=2, full=3, full_passed=3, calls=9, ms=1.2, vpk=0.47),
+    _shock_case('transport delay', 'one mode, 400 Hz, Q 10, behind 2 ms', 'pass_by', pulses=9,
+                first=3, full=3, full_passed=3, calls=10, ms=1.3, vpk=0.42),
+    _shock_case('identification error', 'a wire, identified gain +3 dB', 'pass_by', pulses=8,
+                first=2, full=3, full_passed=3, calls=9, ms=1.1, vpk=0.4),
+    _shock_case('measurement noise', 'one mode, 400 Hz, Q 10, noise 30 dB under', 'pass_by',
+                pulses=9, first=3, full=3, full_passed=3, calls=10, ms=1.2, vpk=0.41),
+    _shock_case('anti-resonance', 'a 30 dB notch at 300 Hz', 'survive', pulses=7, first=1,
+                full=3, full_passed=3, calls=8, ms=1.2, vpk=0.44, capped=12),
+]}
+
+SHOCK_TEXT_GOLDENS = {
+    'request_shock_configure': {
+        'type': 'request', 'id': 51, 'method': 'shock.configure',
+        'params': {'config': SHOCK_CONFIG},
+    },
+    'response_shock_configure': {
+        'type': 'response', 'id': 51,
+        'result': {'state': _shock_state(), 'derived': SHOCK_DERIVED, 'warnings': []},
+    },
+    'event_shock_state': {
+        'type': 'event', 'topic': 'shock.state', 'seq': 140, 'data': SHOCK_RUNNING,
+    },
+    'request_shock_subscribe': {
+        'type': 'request', 'id': 52, 'method': 'shock.subscribe',
+        'params': {'rate_hz': 2, 'plots': SHOCK_SUBSCRIBE_PLOTS},
+    },
+    'response_shock_subscribe': {
+        'type': 'response', 'id': 52,
+        'result': {'default': False, 'rate_hz': 2, 'plots': SHOCK_SUBSCRIBE_PLOTS,
+                   'quantities': SHOCK_QUANTITIES},
+    },
+    'request_shock_fire': {
+        'type': 'request', 'id': 54, 'method': 'shock.fire', 'params': {},
+    },
+    'request_shock_level': {
+        'type': 'request', 'id': 55, 'method': 'shock.level', 'params': {'rung': 4},
+    },
+    'response_laws_list_shock_classical': {
+        'type': 'response', 'id': 56,
+        'result': {'laws': [LAW_FD_CORRECT], 'problems': []},
+    },
+    'response_laws_check_shock_classical': {
+        'type': 'response', 'id': 57,
+        'result': {'law': LAW_FD_CORRECT, 'report': SHOCK_CHECK_REPORT},
+    },
+    'response_error_shock_config_invalid': {
+        'type': 'response', 'id': 58,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 2 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'out_of_range', 'field': 'limits.drive_vpk_abort',
+                       'message': 'The drive abort is 0.4; it is above the drive ceiling of 0.5 '
+                                  'V and at most 10 V'},
+                      {'reason': 'spacing_below_floor', 'field': 'train.spacing_s',
+                       'message': '0.5 s between pulses is below the floor of 1 s (the largest '
+                                  'of the cooling, settling and compute times).'}],
+                      'warnings': [
+                      {'reason': 'quiet_window_exceeded', 'field': 'pulse.compensation',
+                       'message': "The compensation reaches 24.7% of the peak in the standard's "
+                                  'quiet window, whose tolerance is 15%: the reference itself '
+                                  'would fail the amplitude check there. Longer or rectangular '
+                                  'shoulders sit lower.'}]}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -1026,7 +1447,14 @@ def main() -> None:
         {'type': 'response', 'id': 8,
          'error': {'code': 'not_found', 'message': "No operation named 'random.nope'; catalog.list names the ones that exist."}}) + '\n')
 
-    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS}.items():
+    # classical shock: the live frame (no arrays), a pulse, a subscription's data, a preview
+    write('event_shock_live', {'type': 'event', 'topic': 'shock.live', 'seq': 139,
+                               'data': SHOCK_LIVE}, {})
+    write('event_shock_pulse', *_shock_pulse_build())
+    write('event_shock_data', *_shock_data_build())
+    write('response_shock_preview', *_shock_preview_build())
+
+    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

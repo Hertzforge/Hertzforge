@@ -1,0 +1,31 @@
+{
+ "type": "request",
+ "id": 52,
+ "method": "shock.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "points": 1024
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "table",
+    "quantity": "pulses"
+   }
+  ]
+ }
+}

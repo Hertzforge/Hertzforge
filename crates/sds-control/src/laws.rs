@@ -243,6 +243,83 @@ pub fn law_info(e: &CatalogEntry) -> crate::mimo::setup::LawInfo {
     }
 }
 
+/// The parameters the built-in classical law declares, as the law host's specs.
+pub fn builtin_classical_params() -> Vec<ParamSpec> {
+    hertzforge_shock_law_math::classical::KNOBS
+        .iter()
+        .map(|k| ParamSpec {
+            key: k.key.to_owned(),
+            label: k.label.to_owned(),
+            help: k.help.to_owned(),
+            kind: ParamKind::Number(hertzforge_law_host::NumberSpec {
+                unit: k.unit.to_owned(),
+                min: k.min,
+                max: k.max,
+                step: k.step,
+                default: k.default,
+            }),
+        })
+        .collect()
+}
+
+/// The built-in classical law, `fd_correct`, as a classical configuration's checks
+/// see it.
+pub fn builtin_classical_facts() -> crate::shock::config::LawFacts {
+    use hertzforge_shock_law_math::classical;
+    crate::shock::config::LawFacts {
+        id: classical::ID.to_owned(),
+        name: classical::NAME.to_owned(),
+        version: classical::VERSION.to_owned(),
+        sha256: String::new(),
+        builtin: true,
+        world: Ok(()),
+        params: builtin_classical_params(),
+    }
+}
+
+/// The built-in classical law's catalog entry on the wire: built in, cleared for
+/// hardware, its parameters and the values it reports from its own declaration.
+pub fn builtin_classical_entry_json() -> Value {
+    use hertzforge_shock_law_math::{classical, AUTHOR};
+    json!({
+        "id": classical::ID,
+        "world": "shock_classical",
+        "builtin": true,
+        "name": classical::NAME,
+        "version": classical::VERSION,
+        "author": AUTHOR,
+        "summary": classical::SUMMARY,
+        "sha256": null,
+        "check": {
+            "status": "built_in", "date": null, "tool_version": null, "cases": [],
+            "hardware": true, "message": "Built in: cleared for hardware.",
+        },
+        "params": builtin_classical_params().iter().map(param_json).collect::<Vec<_>>(),
+        "diagnostics": classical::DIAGNOSTICS.iter().map(|d| json!({
+            "key": d.key, "label": d.label, "unit": d.unit, "help": d.help, "layout": null,
+        })).collect::<Vec<_>>(),
+        "shapes": null,
+        "needs": null,
+    })
+}
+
+/// A catalog entry as a classical configuration's checks see it: a Random law is
+/// refused by the test type it is for.
+pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
+    crate::shock::config::LawFacts {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: match e.world {
+            LawWorld::Single => Err("single-output Random"),
+            LawWorld::Mimo => Err("multiple-output Random"),
+        },
+        params: e.manifest.params.clone(),
+    }
+}
+
 /// The law a run names itself by.
 pub fn law_ref(i: &crate::mimo::setup::LawInfo) -> crate::mimo::driver::LawRef {
     crate::mimo::driver::LawRef {

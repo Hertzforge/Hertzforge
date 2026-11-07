@@ -1,0 +1,87 @@
+{
+ "type": "response",
+ "id": 56,
+ "result": {
+  "laws": [
+   {
+    "id": "fd_correct",
+    "world": "shock_classical",
+    "builtin": true,
+    "name": "frequency-domain correction",
+    "version": "0.1.0",
+    "author": "Hertzforge contributors",
+    "summary": "Starts from the inverse of the identified plant applied to the reference pulse, then after each pulse corrects the drive spectrum by a fraction of the inverse times the error, on the bins the controller trusts. Each bin's growth is limited per pulse.",
+    "sha256": null,
+    "check": {
+     "status": "built_in",
+     "date": null,
+     "tool_version": null,
+     "cases": [],
+     "hardware": true,
+     "message": "Built in: cleared for hardware."
+    },
+    "params": [
+     {
+      "key": "beta",
+      "label": "Correction gain",
+      "help": "The fraction of each pulse's error corrected before the next pulse. 1 corrects the whole error at once; smaller values settle more gently when the plant estimate is uncertain.",
+      "kind": "number",
+      "unit": "",
+      "min": 0.05,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.5
+     },
+     {
+      "key": "max_db_per_pulse",
+      "label": "Largest rise per pulse",
+      "help": "The most any one frequency of the drive may grow from one pulse to the next. A frequency may always fall.",
+      "kind": "number",
+      "unit": "dB",
+      "min": 1,
+      "max": 9,
+      "step": 0.5,
+      "default": 6
+     },
+     {
+      "key": "initial_backoff_db",
+      "label": "First pulse backoff",
+      "help": "How far under the predicted drive the first pulse starts. The correction brings the level up over the next pulses.",
+      "kind": "number",
+      "unit": "dB",
+      "min": 0,
+      "max": 12,
+      "step": 1,
+      "default": 0
+     }
+    ],
+    "diagnostics": [
+     {
+      "key": "corrected_bins",
+      "label": "Corrected bins",
+      "unit": "bins",
+      "help": "Bins whose drive the law moved on this call.",
+      "layout": null
+     },
+     {
+      "key": "clamped_bins",
+      "label": "Bins at the rise limit",
+      "unit": "bins",
+      "help": "Bins whose rise the law held to its largest rise per pulse on this call.",
+      "layout": null
+     },
+     {
+      "key": "drive_change_db",
+      "label": "Drive change",
+      "unit": "dB",
+      "help": "The drive's peak against the last drive's, in dB (0 at the seed).",
+      "layout": null
+     }
+    ],
+    "shapes": null,
+    "needs": null
+   }
+  ],
+  "problems": []
+ }
+}

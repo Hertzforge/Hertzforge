@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 54,
+ "method": "shock.fire",
+ "params": {}
+}
