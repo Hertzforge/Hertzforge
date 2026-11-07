@@ -863,7 +863,7 @@ def test_a_scale_given_is_the_scale_used():
                             abort_lower=np.full((1, f.size), 0.5),
                             abort_upper=np.full((1, f.size), 2.0))
     _over, under = compliance.exceedances(limited, low, scale_db=0)
-    assert under.all()
+    assert under[1:-1].all(), 'the end lines hold half a bin of the curve'
     _over, under = compliance.exceedances(limited, low)
     assert not under.any()
 

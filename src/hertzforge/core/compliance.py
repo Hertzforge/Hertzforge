@@ -210,6 +210,88 @@ def record_at(data: Any, record: int, lines: ArrayLike) -> np.ndarray:
     return out
 
 
+def area_on_lines(frequencies: ArrayLike, values: ArrayLike,
+                  lines: ArrayLike) -> np.ndarray:
+    """A curve at breakpoints as a density per line, conserving its area.
+
+    Each line holds the exact area of the curve inside the line's bin,
+    over the bin's whole width, so the lines add up to the curve's area
+    at any spacing. A line whose bin the curve only partly covers holds
+    that part over the whole bin, so it reads below the curve: a curve
+    that ends on a line holds about half its level there. NaN where the
+    bin holds none of the curve. A single line has no bin to fill and
+    takes the curve's value at it.
+    """
+    # Brandon, 2026-11-07: every conversion conserves the area, and this
+    # one used to read the curve at the line's center, which added half
+    # a bin at each end and moved the edge band by up to several dB.
+    lines = np.asarray(lines, dtype=float)
+    if lines.size < 2:
+        return log_interpolate(lines, frequencies, values)
+    from .octave import bin_bounds
+
+    left, right = bin_bounds(lines)
+    held = log_log_areas(frequencies, values, left, right) / (right - left)
+    return np.where((lines > 0.0) & (held > 0.0), held, np.nan)
+
+
+def record_on_lines(data: Any, record: int, lines: ArrayLike) -> np.ndarray:
+    """One record of a specification as a density on `lines`, for what
+    is driven, predicted or compared line by line.
+
+    Lines or bands ('bin') read as `record_at` reads them. Between
+    breakpoints an autospectrum holds its area per bin (`area_on_lines`).
+    A cross term moves with its two autospectra, so the coherence and the
+    phase at each line are the ones written, and a line that holds part
+    of its bin keeps them. `record_at` still reads a curve at a point,
+    for a drawing or a fine integration grid.
+    """
+    from .data import autospectrum
+
+    if getattr(data, 'interpolation', 'bin') != 'log_log':
+        return record_at(data, record, lines)
+    lines = np.asarray(lines, dtype=float)
+    frequencies = np.asarray(data.abscissa, dtype=float)
+    values = np.asarray(data.ordinate)[record]
+    if autospectrum(data, record):
+        return area_on_lines(frequencies, np.real(values), lines)
+    written = np.isfinite(frequencies) & np.isfinite(values)
+    f, v = frequencies[written], values[written]
+    if lines.size < 2 or f.size < 2:
+        return record_at(data, record, lines)
+    from .octave import bin_bounds
+
+    left, right = bin_bounds(lines)
+    at = np.clip(lines, f[0], f[-1])
+    read = cross_term_at(f, v, at)
+    a, b = data.record_pair(record)
+    autos = {str(data.response_dof[i]): i for i in range(data.num_records)
+             if autospectrum(data, i)}
+    if str(a) in autos and str(b) in autos:
+        scale = np.ones(lines.shape)
+        for name in (str(a), str(b)):
+            row = np.real(np.asarray(data.ordinate)[autos[name]])
+            with np.errstate(divide='ignore', invalid='ignore'):
+                scale *= (area_on_lines(frequencies, row, lines)
+                          / log_interpolate(at, frequencies, row))
+        scale = np.sqrt(np.where(np.isfinite(scale), scale, 1.0))
+    else:
+        scale = (np.clip(np.minimum(right, f[-1]) - np.maximum(left, f[0]),
+                         0.0, None) / (right - left))
+    reached = (right > f[0]) & (left < f[-1])
+    return np.where(reached, read * scale, complex(np.nan, np.nan))
+
+
+def _power_rise(ratio: np.ndarray, exponent: np.ndarray) -> np.ndarray:
+    """ratio**exponent - 1, through expm1 where the exponent is small: a
+    slope a hair off -1 otherwise loses the digits a narrow bin's area is
+    the difference of. Elsewhere the plain power, so a flat curve's area
+    is exactly its level times its width."""
+    return np.where(np.abs(exponent) < 1e-3,
+                    np.expm1(exponent * np.log(ratio)),
+                    ratio ** exponent - 1.0)
+
+
 def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                   lows: ArrayLike, highs: ArrayLike) -> np.ndarray:
     """The exact area under the log-log curve through these points, over
@@ -268,7 +350,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             # is bounded by the data where f1**n alone is not (a steep
             # segment of a dense specification overflowed the other
             # form)
-            w[:-1] * f[:-1] * ((f[1:] / f[:-1]) ** (n + 1.0) - 1.0)
+            w[:-1] * f[:-1] * _power_rise(f[1:] / f[:-1], n + 1.0)
             / (n + 1.0))
     cumulative = np.concatenate([[0.0], np.cumsum(np.where(holed, 0.0, whole))])
 
@@ -281,7 +363,7 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
             partial = np.where(
                 np.abs(nk + 1.0) < 1e-12,
                 w1 * f1 * np.log(x / f1),
-                w1 * f1 * ((x / f1) ** (nk + 1.0) - 1.0) / (nk + 1.0))
+                w1 * f1 * _power_rise(x / f1, nk + 1.0) / (nk + 1.0))
         return cumulative[k] + np.where((x > f1) & ~holed[k], partial, 0.0)
 
     out = total(highs) - total(lows)
@@ -509,6 +591,10 @@ def cells(specification: Specification, measured: DataArray,
     that part, both sides integrated over the same range. The same rule
     applies at the ends of the band and in the middle.
 
+    Against a curve at breakpoints, a cell also has 'whole': the line's
+    bin, cut only to the measurement, which `judge` reads a lower limit
+    over.
+
     Parameters
     ----------
     specification, measured : Specification, DataArray
@@ -531,7 +617,8 @@ def cells(specification: Specification, measured: DataArray,
     held = coverage(measured, measured_record)
     if not asked or not held:
         return []
-    if getattr(specification, 'interpolation', 'bin') == 'log_log':
+    breakpoints = getattr(specification, 'interpolation', 'bin') == 'log_log'
+    if breakpoints:
         grid = measured.bin_bounds()
     else:
         sl, sr = specification.bin_bounds()
@@ -546,14 +633,17 @@ def cells(specification: Specification, measured: DataArray,
         pieces = [piece for a, b in _pieces(float(low), float(high), asked)
                   for piece in _pieces(a, b, held)]
         if pieces:
-            out.append({'low': pieces[0][0], 'high': pieces[-1][1],
-                        'pieces': pieces,
-                        'width': float(sum(b - a for a, b in pieces)),
-                        # the bin this cell came from, whole. `width`
-                        # over `span` is how much of one line or one
-                        # band was judged, which is what a share of
-                        # the comparison counts in.
-                        'span': float(high) - float(low)})
+            cell = {'low': pieces[0][0], 'high': pieces[-1][1],
+                    'pieces': pieces,
+                    'width': float(sum(b - a for a, b in pieces)),
+                    # the bin this cell came from, whole. `width`
+                    # over `span` is how much of one line or one
+                    # band was judged, which is what a share of
+                    # the comparison counts in.
+                    'span': float(high) - float(low)}
+            if breakpoints:
+                cell['whole'] = _pieces(float(low), float(high), held)
+            out.append(cell)
     return out
 
 
@@ -622,12 +712,21 @@ def judge(specification: Specification, measured: DataArray,
         scale_db = comparison_scale_db(specification, measured)
     scale = 10.0 ** (float(scale_db) / 10.0)
     found = cells(specification, measured, spec_record, measured_record)
+    # A line's level is a density over its whole bin, and one line cannot
+    # say whether a response stopped where the curve did. Cut to the
+    # curve, a line that holds its bin's share of the curve
+    # (`area_on_lines`) reads low; whole, a response running past the
+    # curve reads high. So an upper limit is read cut, the 2026-09-19
+    # rule, and a lower limit whole (Brandon, 2026-11-07): an end line is
+    # out only if it is out either way.
+    spans = [cell['whole'] if not over and 'whole' in cell else cell['pieces']
+             for cell in found]
     # every piece of every cell at once — one vectorized read of each
     # object — then summed back per cell
-    owner = np.array([k for k, cell in enumerate(found)
-                      for _piece in cell['pieces']], dtype=int)
-    lows = np.array([a for cell in found for a, _b in cell['pieces']])
-    highs = np.array([b for cell in found for _a, b in cell['pieces']])
+    owner = np.array([k for k, span in enumerate(spans)
+                      for _piece in span], dtype=int)
+    lows = np.array([a for span in spans for a, _b in span])
+    highs = np.array([b for span in spans for _a, b in span])
     count = len(found)
     if count:
         wanted = (specification.areas(spec_record, lows, highs) if limit is None
@@ -652,7 +751,7 @@ def judge(specification: Specification, measured: DataArray,
         if inside is None:
             continue
         lines[inside] = True
-        level[inside] = asked[k] / cell['width']
+        level[inside] = asked[k] / sum(b - a for a, b in spans[k])
         start[inside] = np.maximum(left[inside], cell['low'])
         stop[inside] = np.minimum(right[inside], cell['high'])
     return {'cells': found, 'asked': asked, 'held': held, 'out': out,

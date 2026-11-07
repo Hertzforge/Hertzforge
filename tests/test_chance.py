@@ -267,7 +267,9 @@ def test_combining_eight_lines_takes_the_scatter_out():
     db = np.where(np.arange(401) % 2, 2.0, -2.0)
     spec, psd = flat_spec(), lines(db)
     single = compare_chance(spec, psd, scale_db=0)
-    assert single['warning_lines'] == 389
+    # the two low end lines judged over their whole bins hold 3 dB of
+    # the curve's level there, and are inside
+    assert single['warning_lines'] == 387
     result = compare_chance(spec, psd, scale_db=0, combine=8)
     assert result['combine'] == 8
     assert result['lines'] == 49

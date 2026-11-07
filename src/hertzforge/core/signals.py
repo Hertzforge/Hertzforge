@@ -112,15 +112,16 @@ def _quantity(dimension: str) -> str:
 
 
 def _level_at(spectrum: Psd, record: int, lines: np.ndarray) -> np.ndarray:
-    """A record of `spectrum` at `lines`, read as every other reader reads
-    it (`compliance.record_at`), and zero where it is not written."""
+    """A record of `spectrum` as a density on `lines`, read as every other
+    reader reads it (`compliance.record_on_lines`), and zero where it is
+    not written."""
     # This had a reader of its own that dropped every point at zero, so a
     # generated signal bridged a gap in an autospectrum and a zero written
     # in a cross term, which the area, the comparison and the drive
     # prediction read as a gap and as a value.
-    from .compliance import record_at
+    from .compliance import record_on_lines
 
-    out = record_at(spectrum, record, lines)
+    out = record_on_lines(spectrum, record, lines)
     out[np.isnan(out)] = 0.0
     return out
 

@@ -261,8 +261,9 @@ def test_a_line_not_formed_is_not_judged_and_is_noted():
     assert np.isnan(reading.composite.ordinate[0][100:105]).all()
     assert reading.result['lines'] == JUDGED - 5
     dead = reading.channels[1]
-    assert dead.outside_lines == JUDGED
-    assert dead.hidden_lines == JUDGED - 5
+    assert dead.outside_lines == JUDGED - 2, \
+        'each end line holds half its bin of the curve, 4 dB under'
+    assert dead.hidden_lines == JUDGED - 7
     assert ('1Z+ has 5 lines that are not a finite, non-negative density; '
             'the composite is not formed or judged there') in reading.notes
 
@@ -566,7 +567,10 @@ def test_a_band_edge_on_the_reference_is_an_edge(band):
     over = run(1.2, 1.2) if band[1] == 0.0 else run(0.8, 0.8)
     reading = multi_point(reference(), over, channels=[0, 1],
                           individual_band=band, scale_db=0)
-    assert all(c.outside_lines == JUDGED for c in reading.channels)
+    # low by less than the half a bin an end line holds of the curve, so
+    # those two lines are not low
+    expected = JUDGED if band[1] == 0.0 else JUDGED - 2
+    assert all(c.outside_lines == expected for c in reading.channels)
     level = multi_point(reference(), run(1.0, 1.0), channels=[0, 1],
                         individual_band=band, scale_db=0)
     assert all(c.outside_lines == 0 for c in level.channels)
