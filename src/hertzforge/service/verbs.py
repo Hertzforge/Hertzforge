@@ -116,6 +116,8 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'set_averaging': ('signals', 'sysid', 'random', 'modal'),
     'detect_averaging': ('signals', 'sysid', 'random', 'modal'),
     'set_filter': _RECORDED,
+    'filter_data': _RECORDED,
+    'integrate': ('signals', 'shock'),
     'set_truncation': _RECORDED,
     'set_channel_role': (*_RECORDED, 'geometry'),
     'rename_dof': (*_RECORDED, 'geometry'),
