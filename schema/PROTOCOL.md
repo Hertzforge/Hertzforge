@@ -413,6 +413,10 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
 
+**Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
+`"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
+Nothing reaches the project or its journal. A reading's `Added` row says `Would add`.
+
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
 the first line making the project. The shell shows it read-only along the bottom of the window, as

@@ -423,6 +423,33 @@ class AnalyzeState {
 		await this.run();
 	}
 
+	private previewTimer: ReturnType<typeof setTimeout> | null = null;
+	private previewKey = '';
+	private previewSeq = 0;
+
+	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
+	followPreview(): void {
+		const op = this.op;
+		const values = this.currentValues;
+		if (!op?.previews || !this.onProject || Object.keys(this.errors).length) return;
+		const key = `${op.id}\u0000${JSON.stringify(values)}`;
+		if (key === this.previewKey) return;
+		this.previewKey = key;
+		if (this.previewTimer) clearTimeout(this.previewTimer);
+		const seq = ++this.previewSeq;
+		this.previewTimer = setTimeout(async () => {
+			try {
+				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
+				if (seq !== this.previewSeq || this.opId !== op.id) return;
+				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.readingId = op.id;
+				this.runError = null;
+			} catch (err) {
+				if (seq === this.previewSeq && this.opId === op.id) this.runError = message(err);
+			}
+		}, 300);
+	}
+
 	/** A click in the reading's 3-D view: runs the view's operation with what was clicked, and the form holds what it left. */
 	async pickInReading(pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';

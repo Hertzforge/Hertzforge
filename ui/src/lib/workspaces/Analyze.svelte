@@ -69,6 +69,7 @@
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
+	$effect(() => a.followPreview());
 
 	// a stage that reads at a line follows the frequency cursor of the plot beside it
 	$effect(() => {

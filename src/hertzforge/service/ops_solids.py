@@ -1058,14 +1058,14 @@ OPERATIONS = (
         summary='A block, its widths along its own axes, centered and turned; a corner radius '
                 'rounds its four edges along its own Z.',
         params=(GEOMETRY, *CENTER, *WIDTHS, *ANGLES, CORNER, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True, previews=True),
     Operation(
         id='project.add_solid_cylinder', title='Add Cylinder', workspace='geometry',
         summary='A cylinder of a radius about its own Z and a length along it, centered and '
                 'turned; subtracted from a part it makes a hole.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.25, 0.0),
                 _length('length', 'Length', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True, previews=True),
     Operation(
         id='project.add_solid_cone', title='Add Cone', workspace='geometry',
         summary='A cone or frustum along its own Z, a radius at its base and its top (either '
@@ -1073,11 +1073,11 @@ OPERATIONS = (
         params=(GEOMETRY, *CENTER, _length('radius', 'Base radius', 0.5, 0.0),
                 _length('top_radius', 'Top radius', 0.25, 0.0),
                 _length('height', 'Height', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True, previews=True),
     Operation(
         id='project.add_solid_sphere', title='Add Sphere', workspace='geometry', summary='A sphere of a radius about its center.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True, previews=True),
     Operation(
         id='project.add_solid_section', title='Add Section', workspace='geometry',
         summary='A structural section along its own Z. Dimensions in order: I-beam and '
@@ -1088,19 +1088,19 @@ OPERATIONS = (
                                 options=_section_shapes()),
                 Param('dimensions', 'Dimensions [m], in order', 'string', default=''),
                 _length('length', 'Length', 4.0, 0.0), *CENTER, *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True, previews=True),
     Operation(
         id='project.add_solid_plate', title='Add Plate', workspace='geometry',
         summary='A flat rectangle in its own XY plane, centered and turned; it is meshed '
                 'into shells, whose element group takes the thickness.',
         params=(GEOMETRY, *CENTER, *WIDTHS[:2], *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True, previews=True),
     Operation(
         id='project.add_solid_disk', title='Add Disk', workspace='geometry',
         summary='A flat circle in its own XY plane, centered and turned; it is meshed into '
                 'shells, whose element group takes the thickness.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True, previews=True),
     Operation(
         id='project.add_solid_hole', title='Add Hole', workspace='geometry',
         summary='A hole entering at its center and running down its own Z, a depth of 0 '
@@ -1109,14 +1109,14 @@ OPERATIONS = (
                 _length('depth', 'Depth (0 through)', 0.0, 0.0),
                 _length('counterbore_diameter', 'Counterbore diameter (0 none)', 0.0, 0.0),
                 _length('counterbore_depth', 'Counterbore depth', 0.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_hole, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_hole, edits=True, previews=True),
     Operation(
         id='project.edit_solid', title='Edit Solid', workspace='geometry',
         summary='Change a solid after it is made: only the fields typed change, lists as '
                 '"0, 0, 0.1". A boolean it is part of changes with it; Mesh Solids again to '
                 'mesh the change.',
         params=(GEOMETRY, SOLID, *EDIT_FIELDS), outputs=('reading', 'shape3d', 'table'),
-        run=edit_solid, edits=True),
+        run=edit_solid, edits=True, previews=True),
     Operation(
         id='project.move_solids', title='Move Part', workspace='geometry',
         summary='Move parts whole, each with every solid it is made of: turned about the '
