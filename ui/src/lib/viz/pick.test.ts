@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 
 describe('nearestNode', () => {
 	const screen = [0, 0, 10, 0, 100, 100];
@@ -44,5 +44,17 @@ describe('toggledSurface', () => {
 
 	it('writes ids as the service reads them', () => {
 		expect(idList([4, 7, 9])).toBe('4, 7, 9');
+	});
+});
+
+describe('the grid an arrow lands on', () => {
+	it('is a tenth of an inch or a centimeter, in the unit shown', () => {
+		expect(gridStep('in')).toBeCloseTo(0.1);
+		expect(gridStep('ft')).toBeCloseTo(0.1 / 12);
+		expect(gridStep('mm')).toBeCloseTo(10);
+		expect(gridStep('m')).toBeCloseTo(0.01);
+	});
+	it('does not round the numbers of an undefined geometry', () => {
+		expect(gridStep('undefined')).toBeNull();
 	});
 });
