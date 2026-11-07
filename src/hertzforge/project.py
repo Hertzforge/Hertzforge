@@ -2894,7 +2894,10 @@ class Project(dict):
         no averaging set and is not a transient specification. A record
         read as frames already says where its events are (in a transient
         run each playing is one frame), and a specification is one
-        playing by definition.
+        playing by definition. A record filtered in this project takes
+        its events from the recording it was filtered from, which is
+        where they are detected (`detect_shocks`), and its spectrum stops
+        at the low-pass corner it came through (`srs_ceiling`).
 
         Parameters
         ----------
@@ -2927,17 +2930,73 @@ class Project(dict):
                 and not isinstance(history, TransientSpecification)):
             from .core.shocks import suggest
 
-            history.shocks = suggest(history)
+            recording = self._recording_of(source)
+            # on a filtered record the detector's floor sinks with the
+            # noise taken out, and ordinary noise then clears it: 13
+            # events where the plate's shock file holds 4
+            if not recording.shocks and recording.averaging is None:
+                recording.shocks = suggest(recording)
+            history.shocks = recording.shocks
         # the analysis choices are parameters of the act, recorded in
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
                             history.compute_srs(per_octave=per_octave,
-                                                q=q, kind=kind),
+                                                q=q, kind=kind,
+                                                high=self.srs_ceiling(source)),
                             f'{source} SRS',
                             recipe=('compute_srs',
                                     {'per_octave': per_octave,
                                      'q': q, 'kind': kind}))
+
+    def _recording_of(self, name: str) -> Any:
+        """The record `name` was filtered from, through any number of
+        filters; `name`'s own object when it was not filtered."""
+        seen = set()
+        while name not in seen:
+            seen.add(name)
+            made = self.provenance.get(name) or {}
+            if made.get('verb') != 'filter_data' or made.get('source') not in self:
+                break
+            name = made['source']
+        return self[name]
+
+    def srs_ceiling(self, name: Any) -> float | None:
+        """The highest natural frequency a record's SRS can be read to,
+        in Hz, when a low-pass on its way sets it: the lowest corner of
+        the filters applied in this project on the way to the record, as
+        recorded when each was applied (`_filters_on_the_way` reads the
+        same record). None when no low-pass did, or when the corner is
+        above the top of the record's own band (`TimeHistory.srs_band`).
+
+        The filter is zero phase, so it takes 6 dB at its corner, and a
+        response above it is gone: a 1500 Hz ring read 22 dB low on a
+        record low-passed at 1024 Hz, with no sign of it on the curve.
+
+        Parameters
+        ----------
+        name : str or object
+            The record.
+
+        Returns
+        -------
+        float or None
+        """
+        name = self.name_of(name)
+        corners, seen = [], set()
+        current = name
+        while current and current not in seen:
+            seen.add(current)
+            made = self.provenance.get(current) or {}
+            if made.get('verb') == 'filter_data':
+                state = made.get('state') or (None, None)
+                high = state[1].get('high') if isinstance(state[1], Mapping) else None
+                if high is not None:
+                    corners.append(float(high))
+            current = made.get('source')
+        if not corners:
+            return None
+        return min(corners) if min(corners) < self[name].sample_rate / 5.0 else None
 
     def detect_shocks(self, source: Any) -> int:
         """Find the events in a time history and mark them on it (Detect
@@ -9162,7 +9221,7 @@ _RECOMPUTE = {
         lambda p, s, k: p[s].compute_multiple_coherence(),
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
-        kind=k.get('kind', 'maximax')),
+        kind=k.get('kind', 'maximax'), high=p.srs_ceiling(s)),
     'make_realizable': lambda p, s, k: p[s].made_realizable(
         tolerance=k.get('tolerance'),
         keep_diagonal=k.get('keep_diagonal', True)),

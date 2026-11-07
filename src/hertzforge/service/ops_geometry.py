@@ -987,6 +987,21 @@ def _place_basis(project: Any, test: str) -> list[str]:
     return moved
 
 
+def _srs_bands(project: Any, added: list[str]) -> list[dict]:
+    """Where a low-pass stopped an SRS Work Up made, since nothing else in
+    its reading would say the top of the band was left off."""
+    rows = []
+    for name in added:
+        made = project.provenance.get(name) or {}
+        corner = (project.srs_ceiling(made['source']) if made.get('verb') == 'compute_srs'
+                  else None)
+        if corner is not None:
+            rows.append(v.row('SRS band', f'{name} stops at {corner:g} Hz, the low-pass corner '
+                              'of the record it was read from; the filter takes 6 dB at the '
+                              'corner, so the top of the band reads low', None, 'info'))
+    return rows
+
+
 def _work_up(test: str) -> Any:
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
         """Work Up in one module, which says the kind of test: the objects
@@ -1005,6 +1020,7 @@ def _work_up(test: str) -> Any:
                 or [v.row('Added', 'nothing to compute', None, 'info')])
         if moved:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
+        rows += _srs_bands(project, added)
         return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
     return run
 

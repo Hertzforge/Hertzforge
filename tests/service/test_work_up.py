@@ -127,3 +127,89 @@ def test_a_second_run_stays_out_of_a_basis_that_holds_a_run():
     run(project, 'project.work_up_random')
     assert not set(added) & set(project.placed()['Basis'])
     assert set(basis) <= set(project.placed()['Basis'])
+
+
+# ---- Work Up Shock: where the events are found, and how far the SRS runs -------
+
+def test_work_up_shock_finds_the_events_on_the_recording():
+    project = load('shock.nc4')
+    run(project, 'project.work_up_shock')
+    raw, filtered = project['Time History'], project['Time History Filtered']
+    assert len(raw.shocks) == 4
+    assert filtered.shocks == raw.shocks
+    srs = project['Time History Filtered SRS']
+    assert srs.num_records == 7 * 4
+    assert project.stale() == {}
+
+
+def test_apply_filter_then_compute_srs_finds_the_events_on_the_recording():
+    project = load('shock.nc4')
+    run(project, 'project.filter_data', source='Time History')
+    run(project, 'project.compute_srs', source='Time History Filtered')
+    assert len(project['Time History'].shocks) == 4
+    assert project['Time History Filtered'].shocks == project['Time History'].shocks
+    assert project['Time History Filtered SRS'].num_records == 7 * 4
+
+
+def test_compute_srs_takes_marks_set_on_the_recording_after_the_filter():
+    project = load('shock.nc4')
+    run(project, 'project.filter_data', source='Time History')
+    project.detect_shocks('Time History')
+    project.compute_srs('Time History Filtered')
+    assert project['Time History Filtered'].shocks == project['Time History'].shocks
+
+
+def ringdown():
+    fs = 10240.0
+    t = np.arange(int(fs)) / fs
+    tail = np.clip(t - 0.2, 0.0, None)
+    x = np.where(t > 0.2, 100.0 * np.exp(-tail * 200.0) * np.sin(2 * np.pi * 1500.0 * tail), 0.0)
+    return fs, t, x
+
+
+def test_a_filtered_records_srs_stops_at_the_filters_corner(validate):
+    """A ring at 1500 Hz is gone from a record low-passed at 1024 Hz, so its
+    SRS has no business reading a line there 22 dB low."""
+    fs, t, x = ringdown()
+    project = Project()
+    project.add('Time Data', history(t, x))
+    (reading,) = run(project, 'project.work_up_shock')
+    wire_views([reading], validate)
+    corner = fs / 10.0
+    srs = project['Time Data Filtered SRS']
+    assert srs.abscissa[-1] <= corner * 2.0 ** (1 / 24)
+    assert any('1024 Hz' in value for value in values(reading, 'SRS band'))
+    # a refresh recomputes the same band
+    before = np.array(srs.abscissa)
+    project.refresh('Time Data Filtered SRS')
+    assert np.array_equal(project['Time Data Filtered SRS'].abscissa, before)
+
+
+def test_the_plates_srs_agrees_with_the_recording_well_below_the_corner():
+    project = load('shock.nc4')
+    run(project, 'project.work_up_shock')
+    srs = project['Time History Filtered SRS']
+    raw = project['Time History'].compute_srs()
+    assert srs.abscissa[-1] == pytest.approx(project['Time History'].sample_rate / 10.0, rel=0.03)
+    assert srs.num_records == raw.num_records
+    below = srs.abscissa <= srs.abscissa[-1] / 2.0
+    on_raw = np.array([np.interp(srs.abscissa, raw.abscissa, row) for row in raw.ordinate])
+    assert np.abs(20 * np.log10(srs.ordinate / on_raw)[:, below]).max() < 1.0
+
+
+def test_the_recordings_own_srs_still_runs_to_a_fifth_of_the_rate():
+    fs, t, x = ringdown()
+    project = Project()
+    project.add('Time Data', history(t, x))
+    project.compute_srs('Time Data')
+    assert project['Time Data SRS'].abscissa[-1] == pytest.approx(fs / 5.0, rel=0.03)
+
+
+def test_a_high_pass_does_not_cap_the_srs():
+    fs, t, x = ringdown()
+    project = Project()
+    project.add('Time Data', history(t, x))
+    run(project, 'project.set_filter', source='Time Data', kind='high-pass', low=20.0)
+    run(project, 'project.filter_data', source='Time Data')
+    project.compute_srs('Time Data Filtered')
+    assert project['Time Data Filtered SRS'].abscissa[-1] == pytest.approx(fs / 5.0, rel=0.03)
