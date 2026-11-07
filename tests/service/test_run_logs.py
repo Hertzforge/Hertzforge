@@ -7,6 +7,7 @@ import asyncio
 
 import pytest
 
+from hertzforge.core.run_log_model import RunLogModel
 from hertzforge.service import run_logs
 from hertzforge.service.protocol import ProtocolError
 
@@ -255,3 +256,62 @@ def test_the_log_exports_as_text_csv_and_the_machine_log(keeper, tmp_path):
     with pytest.raises(ProtocolError) as error:
         call(keeper, 'runlog.export', path=str(tmp_path / 'x'), view='text')
     assert error.value.code == 'refused'
+
+
+def closed(keeper):
+    opened(keeper)
+    write(keeper, 'close test', reason='done')
+
+
+def test_a_finding_after_a_test_closes_belongs_to_that_test(keeper):
+    closed(keeper)
+    assert write(keeper, 'deviation', fact='late', agreed_by='EF')['log']['status']['test'] is None
+    assert keeper.log.entries[-1].test == 1
+    write(keeper, 'anomaly', fact='later', owner='EF')
+    assert keeper.log.entries[-1].test == 1
+    model = RunLogModel(keeper.log)
+    assert [found.entry.fields['fact'] for found in model.findings(1)] == ['late', 'later']
+
+
+def test_a_finding_after_two_tests_goes_to_the_latest(keeper):
+    closed(keeper)
+    write(keeper, 'open test', test_kind='Random Vibration', title='Y axis random',
+          steps_db='-12, 0', sigma='3', rated_current_peak='60', rail_voltage='120')
+    write(keeper, 'close test', reason='done')
+    write(keeper, 'deviation', fact='late', agreed_by='EF')
+    assert keeper.log.entries[-1].test == 2
+
+
+def test_a_released_test_refuses_a_finding_from_the_form(keeper):
+    closed(keeper)
+    write(keeper, 'release', test='1')
+    held = len(keeper.log.entries)
+    with pytest.raises(ProtocolError, match='test 1 is released'):
+        write(keeper, 'deviation', fact='late', agreed_by='EF')
+    with pytest.raises(ProtocolError, match='test 1 is released'):
+        write(keeper, 'anomaly', fact='later', owner='EF')
+    assert len(keeper.log.entries) == held
+
+
+def test_a_finding_in_a_log_with_no_test_belongs_to_the_log(keeper):
+    write(keeper, 'deviation', fact='before any test', agreed_by='EF')
+    assert keeper.log.entries[-1].test is None
+
+
+def test_a_log_is_started_and_opened_at_a_path_from_home(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    keeper = run_logs.Keeper()
+    assert keeper.new('~/from_home.hflog', 'Home')['log']['title'] == 'Home'
+    keeper.close()
+    assert (tmp_path / 'from_home.hflog').exists()
+    assert keeper.open('~/from_home.hflog')['log']['title'] == 'Home'
+    keeper.close()
+
+
+def test_an_export_of_a_test_the_log_does_not_hold_is_refused(keeper, tmp_path):
+    opened(keeper)
+    with pytest.raises(ProtocolError, match='no test 99; it holds test 1') as refused:
+        call(keeper, 'runlog.export', path=str(tmp_path / 'none.csv'), view='csv', test=99)
+    assert refused.value.code == 'refused'
+    assert not (tmp_path / 'none.csv').exists()
+    assert call(keeper, 'runlog.export', path=str(tmp_path / 'one.csv'), view='csv', test=1)['path']
