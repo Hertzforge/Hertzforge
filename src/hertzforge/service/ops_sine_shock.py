@@ -576,8 +576,8 @@ PEAK = Param('peak', 'Peak, 0 for the record\'s own', 'number', default=0.0, uni
              step=1.0)
 DURATION = Param('duration', 'Duration, 0 for the record\'s own', 'number', default=0.0,
                  min=0.0, unit='s', step=0.0005)
-EDGE = Param('edge', 'Edge, 0 for a twentieth of the duration', 'number', default=0.0, min=0.0,
-             unit='s', step=0.0001)
+EDGE_WORDS = 'Edge, 0 for a twentieth of the duration'
+EDGE = Param('edge', EDGE_WORDS, 'number', default=0.0, min=0.0, unit='s', step=0.0001)
 BAND = Param('band', 'Band', 'number', default=20.0, min=0.1, max=99.0, step=1.0, unit='%')
 DURATION_TOLERANCE = Param('duration_tolerance', 'Duration tolerance', 'number', default=10.0,
                            min=0.1, max=99.0, step=1.0, unit='%')
@@ -595,13 +595,19 @@ OPENING_PULSE = (50.0 * 9.80665, 0.011)
 ENVELOPE_POINTS = 2000
 
 
+def pulse_edge(shape: str, edge: float, duration: float) -> float | None:
+    """The edge of a pulse a param gave: none on a half-sine, and an edge
+    of zero a twentieth of the duration."""
+    return None if shape == 'half-sine' else (edge or 0.05 * duration)
+
+
 def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.pulse_check`: one acceleration channel judged against a
     classical pulse's tolerance envelope and its velocity change
     (`core.classical_pulse.check_pulse`). A peak or duration left at zero
-    is the half-sine the record most resembles, rounded to three figures
-    (`core.classical_pulse.suggest_pulse`), as Visual Dynamics' Pulse
-    Check opens on a record."""
+    is the pulse of the shape asked for that the record most resembles,
+    rounded to three figures (`core.classical_pulse.suggest_pulse`), as
+    Visual Dynamics' Pulse Check opens on a record."""
     import hertzforge as hz
     from hertzforge.core import classical_pulse as pulses
     from hertzforge.drawing.plot.classical_pulse import readout
@@ -618,7 +624,7 @@ def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     if peak == 0.0 or duration == 0.0:
         try:
             near = pulses.suggest_pulse(np.asarray(history.abscissa, dtype=float),
-                                        np.asarray(history.ordinate)[channel])
+                                        np.asarray(history.ordinate)[channel], params['shape'])
             suggested = (float(f'{near.peak:.3g}'), float(f'{near.duration:.3g}'))
         except ValueError:
             suggested = OPENING_PULSE
@@ -627,7 +633,8 @@ def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     shape = params['shape']
     edge = None if shape == 'half-sine' else (params['edge'] or 0.05 * duration)
     try:
-        pulse = pulses.ClassicalPulse(shape, peak, duration, edge)
+        pulse = pulses.ClassicalPulse(shape, peak, duration,
+                                      pulse_edge(shape, params['edge'], duration))
         check = pulses.check_pulse(
             history, pulse, channel, band=params['band'] / 100.0,
             duration_tolerance=params['duration_tolerance'] / 100.0,

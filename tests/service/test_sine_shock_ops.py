@@ -423,6 +423,15 @@ def test_detect_is_refused_on_a_record_a_file_cut_into_captures():
 
 # ---- Pulse Check, Stroke, SRS Synthesis ------------------------------------------------------
 
+@pytest.mark.parametrize('shape,edge', [('sawtooth', 0.0005), ('trapezoid', 0.001)])
+def test_pulse_check_opens_on_the_shape_it_was_asked_for(shape, edge):
+    fs = 50000.0
+    t = np.arange(int(0.3 * fs)) / fs
+    x = classical_pulse.ClassicalPulse(shape, 50 * G, 0.011, edge).at(t - 0.1)
+    project = Project()
+    project.add('R', history(t, x))
+    found = rows_of(reading(run(project, 'project.pulse_check', history='R', shape=shape)))
+    assert found['Pulse']['value'].split(', ')[1] == '11 ms'
 
 
 def _half_sine_project():
@@ -434,6 +443,19 @@ def _half_sine_project():
     return project
 
 
+@pytest.mark.parametrize('shape', ['trapezoid', 'sawtooth'])
+def test_an_edge_of_zero_means_one_thing_in_pulse_check_and_generate(shape):
+    table = ChannelTable({'channel': [1], 'node': ['1'], 'direction': ['X+'], 'unit': ['g'],
+                          'role': ['reference'], 'channel_type': ['acceleration']})
+    project = Project()
+    project.add('Table', table)
+    run(project, 'project.generate_signal', source='Table', kind='pulse', shape=shape, peak=50.0,
+        pulse_duration=0.01, sample_rate=20480.0, duration=0.1, at=0.01)
+    made = project.provenance[project.names[-1]]['params']
+    assert made['edge'] == pytest.approx(0.0005)
+    labels = {next(p for p in OPS[op_id].params if p.name == 'edge').label
+              for op_id in ('project.generate_signal', 'project.pulse_check')}
+    assert labels == {'Edge, 0 for a twentieth of the duration'}
 
 
 
