@@ -158,7 +158,7 @@ def reads_as(data: DataArray, shapes: ShapeSet,
     `'physical'` when any of the data's DOFs is on the set's
     coordinates, `'modal'` when any is one of the set's modal names, and
     None when neither, or when the kind of data does not transform at
-    all.
+    all. An FRF's modal responses make it modal whatever its references.
 
     Parameters
     ----------
@@ -174,16 +174,21 @@ def reads_as(data: DataArray, shapes: ShapeSet,
     str or None
         Which way a transform would go.
     """
+    from .data import Frf
+
     if _cannot(data) is not None:
         return None
     lookup = shapes._dof_lookup()
-    if records is None:
-        dofs = list(data.response_dof) + list(data.reference_dof or [])
-    else:
-        picked = _picked(data, records)
-        dofs = [data.response_dof[i] for i in picked] + (
-            [] if data.reference_dof is None
-            else [data.reference_dof[i] for i in picked])
+    picked = _picked(data, records) if records is not None else range(data.num_records)
+    responses = [data.response_dof[i] for i in picked]
+    references = ([] if data.reference_dof is None
+                  else [data.reference_dof[i] for i in picked])
+    # an FRF goes by its responses: a transform keeps its references physical
+    # when too few resolve the modes, and M1 / 1X+ is modal all the same
+    if (isinstance(data, Frf) and any(_is_modal(dof, shapes) for dof in responses)
+            and not any(_split_sign(dof)[0] in lookup for dof in responses)):
+        return 'modal'
+    dofs = responses + references
     if any(_split_sign(dof)[0] in lookup for dof in dofs):
         return 'physical'
     if any(_is_modal(dof, shapes) for dof in dofs):

@@ -183,6 +183,13 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
                      else 'mass')
 
 
+def _useful_directions(blocks: np.ndarray) -> int:
+    """How many of a sensor's three directions these modes move in: a flat
+    plate's bending modes give each tri-axial one, however many it measures."""
+    energy = np.sum(np.asarray(blocks) ** 2, axis=(0, 2))
+    return max(int(np.count_nonzero(energy > 1e-6 * energy.sum())), 1)
+
+
 def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plan_instrumentation`: accelerometers chosen on a finite
     element model by Effective Independence, tri-axial ones first, as
@@ -234,13 +241,14 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     kept = [s.id for s in offered if (s.id in default or s.id in back) and s.id not in out]
     triaxial, uniaxial = params['triaxial'], params['uniaxial']
     opened = not triaxial and not uniaxial
-    if opened:
-        triaxial = -(-len(modes) // 3) + 1
     distance = float(params['edge_distance'])
     axes = AXES[params['axes']]
     places = candidates(geometry, groups, kept, edge_angle=angle, found=found,
                         edge_distance=distance)
     blocks, measured = local_shapes(shapes, modes, places, geometry)
+    directions = _useful_directions(blocks)
+    if opened:
+        triaxial = -(-len(modes) // directions) + 1
     try:
         placement = effective_independence(blocks, triaxial, uniaxial, axes=axes,
                                            allowed=measured, sources=places.source,
@@ -260,7 +268,9 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Surfaces', f'sensors on {len(kept)} of {len(offered)}', None, 'info'),
             v.row('Sensors', f'{len(placement.triaxial)} tri-axial and '
                   f'{len(placement.uniaxial)} uni-axial'
-                  + (', the tri-axial count a third of the modes, and one' if opened else ''),
+                  + ((', the tri-axial count a third of the modes, and one' if directions == 3
+                      else f', the tri-axial count the modes over the {directions} direction'
+                      f'{"s" * (directions != 1)} they move in, and one') if opened else ''),
                   None, 'info'),
             v.row('Channels', float(plan.channels.num_channels), '', 'info'),
             v.row('Places', f'{plan.geometry.num_nodes} of {len(places.source):,}', None, 'info'),

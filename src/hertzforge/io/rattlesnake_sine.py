@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 
 from ..core.sine import SineSweepSpecification, SineTone
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 # Brandon, 2026-10-02: nine older files, one per sweep, were refused as "an
@@ -39,9 +40,8 @@ def sniff(path: str | os.PathLike) -> bool:
     has, and without the random specification's `f` and `cpsd`, since
     the two formats come from the same controller and are otherwise
     unrelated."""
-    return (npz_has(path, {'frequency', 'amplitude', 'sweep_type', 'sweep_rate'},
-                    allow_pickle=False)
-            and not npz_has(path, _RANDOM_KEYS, allow_pickle=False))
+    return (npz_has(path, {'frequency', 'amplitude', 'sweep_type', 'sweep_rate'})
+            and not npz_has(path, _RANDOM_KEYS))
 
 
 def load(path: str | os.PathLike,
@@ -83,7 +83,7 @@ def load(path: str | os.PathLike,
         not the number of amplitude columns, a band of the wrong shape,
         or a band that differs between the sides of a breakpoint.
     """
-    with np.load(path, allow_pickle=False) as d:
+    with PlainNpz(path) as d:
         frequency = np.asarray(d['frequency'], dtype=float).ravel()
         amplitude = np.asarray(d['amplitude'], dtype=float)
         sweep_type = np.asarray(d['sweep_type']).ravel()
@@ -130,7 +130,8 @@ def load(path: str | os.PathLike,
                 bands[f'{kind}_{curve}'] = values
     tone = SineTone(name or os.path.splitext(os.path.basename(str(path)))[0],
                     start_time, frequency, amplitude,
-                    sweep_type[:n - 1], sweep_rate[:n - 1], phase=phase, **bands)
+                    sweep_type[:n - 1], sweep_rate[:n - 1], phase=phase,
+                    from_file=True, **bands)
     return SineSweepSpecification([tone], response_dof,
                                   ordinate_dim=ordinate_dim,
                                   ordinate_unit=ordinate_unit,
