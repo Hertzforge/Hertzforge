@@ -254,8 +254,8 @@ def test_mated_surfaces_are_found_kept_edited_and_deleted(project, validate):
     assert mates['rows'][0][2] == 'base on lid'
     held = project['Part'].mates[0]
     assert held.normal_stiffness == 2e6 and held.shear_mode == 'rigid'
-    reading, mates = run(project, 'project.edit_mated_surfaces', mate=1, shear='free',
-                         name='seat')
+    reading, mates = run(project, 'project.edit_mated_surfaces', mate=1, normal='rigid',
+                         shear='free', name='seat')
     assert rows(reading)['Saved']['value'] == 'seat (normal rigid, shear free)'
     refused(project, 'project.edit_mated_surfaces', 'holds nothing', mate=1, normal='free',
             shear='free')
@@ -687,3 +687,95 @@ def test_meshing_again_says_the_mated_surfaces_it_deleted(project):
     assert not project['Part'].mates
     said = rows(reading)['Mated surfaces']
     assert '1 on the old mesh' in said['value'] and said['status'] == 'warn'
+
+
+def _mated(project, **held):
+    for z in (0.0, 1.0):
+        run(project, 'project.add_solid_block', z=z, width_x=1, width_y=1, width_z=1)
+    run(project, 'project.mesh_solids', size=0.5, parts_apart=True, keep=True)
+    run(project, 'project.mate_surfaces', keep=True, **held)
+    return project['Part']
+
+
+def test_renaming_a_mated_set_leaves_how_it_is_held(project):
+    geometry = _mated(project, normal='stiffness', normal_stiffness=2e6, shear='free')
+    run(project, 'project.edit_mated_surfaces', mate=1, name='Renamed')
+    held = geometry.mates[0]
+    assert (held.name, held.normal_mode, held.normal_stiffness, held.shear_mode) == (
+        'Renamed', 'stiffness', 2e6, 'free')
+
+
+def test_a_mated_set_changes_only_what_the_form_changes(project):
+    geometry = _mated(project, normal='stiffness', normal_stiffness=2e6, shear='free')
+    run(project, 'project.edit_mated_surfaces', mate=1, normal_stiffness=3e6)
+    assert geometry.mates[0].normal_stiffness == 3e6 and geometry.mates[0].shear_mode == 'free'
+    run(project, 'project.edit_mated_surfaces', mate=1, normal='rigid')
+    assert geometry.mates[0].normal_mode == 'rigid' and geometry.mates[0].normal_stiffness == 0.0
+    run(project, 'project.edit_mated_surfaces', mate=1, shear='stiffness', shear_stiffness=1e5)
+    assert geometry.mates[0].shear_stiffness == 1e5
+    refused(project, 'project.edit_mated_surfaces', 'choose what changes', mate=1)
+    refused(project, 'project.edit_mated_surfaces', 'not 9', mate=9, name='x')
+
+
+def test_a_node_clicked_on_a_mate_side_is_a_node_of_that_side(project):
+    geometry = _mated(project)
+    refused(project, 'project.edit_mate_sides', 'is not an id|is not a node id', mate=1,
+            toggle='abc')
+    held = geometry.mates[0]
+    other = next(int(n) for n in geometry.nodes_in([held.groups[1]])
+                 if int(n) not in geometry.nodes_in([held.groups[0]]))
+    refused(project, 'project.edit_mate_sides', 'is not on', mate=1, side='a', toggle=str(other))
+    assert geometry.mates[0] == held
+    run(project, 'project.edit_mate_sides', mate=1, side='a', toggle=str(held.nodes_a[0]))
+    assert len(geometry.mates[0].nodes_a) == len(held.nodes_a) - 1
+
+
+def test_whole_numbers_are_whole(project):
+    _mated(project)
+    run(project, 'project.pattern_solids', solids='1', count_x=2, spacing_x=3.0)
+    pattern = project['Part'].solids[-1].id
+    refused(project, 'project.edit_solid', 'not a whole count', solid=pattern, counts='2.9,1,1')
+    refused(project, 'project.mate_surfaces', 'not a patch number', patches='1.5', keep=True)
+
+
+def test_two_groups_a_mate_joins_are_not_merged(project):
+    from hertzforge.service.ops_model import OPERATIONS as MODEL
+
+    geometry = _mated(project)
+    (merge,) = [op for op in MODEL if op.id == 'project.merge_element_groups']
+    with pytest.raises(ProtocolError, match='mated surfaces .* join them'):
+        merge.run(project, {'geometry': 'Part', 'groups': '1, 2'})
+    assert len(geometry.group_id) == 2 and geometry.mates[0].groups == (1, 2)
+    project.delete_mated_surfaces('Part', [1])
+    merge.run(project, {'geometry': 'Part', 'groups': '1, 2'})
+    assert len(geometry.group_id) == 1
+
+
+@pytest.mark.parametrize('op', ['project.merge_coincident_nodes', 'project.mate_surfaces'])
+def test_a_geometry_with_no_nodes_is_refused_in_words_and_the_row_is_off(op):
+    from hertzforge.service.ops_model import OPERATIONS as MODEL
+
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    run(project, 'project.add_solid_block')
+    table = projects.actions(state, {'objects': ['Part']})['table']
+    row = next(row for row in table['columns'][0]['rows'] if row['id'] == op)
+    assert not row['ready'] and 'no nodes' in row['reason']
+    by_id = {o.id: o for o in (*OPERATIONS, *MODEL)}
+    values = by_id[op].resolve({}, objects={'Part': 'geometry'})
+    with pytest.raises(ProtocolError, match='has no nodes') as error:
+        by_id[op].run(project, values)
+    assert error.value.code == 'refused'
+
+
+def test_picking_an_element_group_fills_merge_and_delete():
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    run(project, 'project.add_solid_block')
+    run(project, 'project.mesh_solids', size=0.5, keep=True)
+    table = projects.actions(state, {'objects': ['Part'], 'part': {'kind': 'group', 'id': 1}})
+    rows_by_id = {row['id']: row for row in table['table']['columns'][0]['rows']}
+    for op in ('project.merge_element_groups', 'project.delete_element_groups'):
+        assert rows_by_id[op]['fill']['groups'] == '1'

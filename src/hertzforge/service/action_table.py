@@ -84,6 +84,9 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
 }
 
+#: the rows that read a geometry's nodes, off until it has some
+NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
+
 #: an object param that takes this many types takes anything: it says nothing
 #: about what a pair means, so it does not make a column of its own
 _ANY = 8
@@ -267,10 +270,13 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             if refused:
                 rows.append(_op_row(op, refused[0].upper() + refused[1:]))
                 continue
+        if op.id in NEEDS_NODES and not project[fill['geometry']].num_nodes:
+            rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
+            continue
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
-        if where in ('mate', 'solid') and part:
+        if where in ('mate', 'solid', 'group') and part:
             # the one picked in the tree is the one the row acts on
             for held in (where, f'{where}s'):
                 if any(p.name == held for p in op.params):

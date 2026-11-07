@@ -943,6 +943,8 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     at all (`Project.add_mated_surfaces`). The tolerance opens on VD's: a
     quarter of the groups' finest node spacing."""
     name, geometry = _geometry(project, params)
+    if not geometry.num_nodes:
+        raise refused(f'{name} has no nodes to mate: mesh it first')
     groups = _group_ids(geometry, params['groups'])
     tolerance = params['tolerance']
     if not tolerance:
@@ -984,15 +986,44 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
 
 MATE = Param('mate', 'Mated surfaces (id)', 'integer', default=1, min=1, step=1)
 MATE_NAME = Param('name', 'Name (empty keeps it)', 'string', default='')
+KEPT_HOLD = (Option('keep', 'As it is'), *HELD)
+EDIT_NORMAL = Param('normal', 'Normal', 'enum', default='keep', options=KEPT_HOLD)
+EDIT_SHEAR = Param('shear', 'Shear', 'enum', default='keep', options=KEPT_HOLD)
+EDIT_NORMAL_STIFFNESS = Param('normal_stiffness', 'Normal stiffness (0 keeps it)', 'number',
+                              default=0.0, unit='N/m', min=0.0)
+EDIT_SHEAR_STIFFNESS = Param('shear_stiffness', 'Shear stiffness (0 keeps it)', 'number',
+                             default=0.0, unit='N/m', min=0.0)
+
+
+def _hold_changes(params: dict[str, Any], mated: Any) -> dict[str, Any]:
+    """What the form changes of how a set is held, nothing for what it leaves as it is."""
+    changes: dict[str, Any] = {}
+    for side in ('normal', 'shear'):
+        chosen = params[side]
+        typed = params[f'{side}_stiffness']
+        mode = getattr(mated, f'{side}_mode') if chosen == 'keep' else chosen
+        if mode != getattr(mated, f'{side}_mode'):
+            changes[f'{side}_mode'] = mode
+            changes[f'{side}_stiffness'] = typed if mode == 'stiffness' else 0.0
+        elif mode == 'stiffness' and typed and typed != getattr(mated, f'{side}_stiffness'):
+            changes[f'{side}_stiffness'] = typed
+    return changes
 
 
 def edit_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.edit_mated_surfaces`: a kept set's name and how it is held
-    changed (`Project.edit_mated_surfaces`): VD's Save on a set's pane."""
+    changed, only what the form changes (`Project.edit_mated_surfaces`): VD's Save on a
+    set's pane."""
     name, geometry = _geometry(project, params)
-    changes = _held(params)
+    known = {m.id: m for m in geometry.mates}
+    if params['mate'] not in known:
+        raise refused(f'the geometry has mated surfaces '
+                      f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
+    changes = _hold_changes(params, known[params['mate']])
     if params['name'].strip():
         changes['name'] = params['name'].strip()
+    if not changes:
+        raise refused('choose what changes: what is left as it is stays')
     _call(lambda: project.edit_mated_surfaces(name, params['mate'], **changes))
     (mated,) = [m for m in geometry.mates if m.id == params['mate']]
     return [v.reading(f'Mated surfaces of {name}', [
@@ -1018,14 +1049,18 @@ def edit_mate_sides(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
     field, group = (('nodes_a', mated.groups[0]) if params['side'] == 'a'
                     else ('nodes_b', mated.groups[1]))
-    if params['toggle'].strip():
-        node = int(params['toggle'])
+    places = [int(n) for n in geometry.nodes_in([group])]
+    clicked = parse_id_runs(params['toggle'], 'a node id')
+    if clicked:
         held = [int(n) for n in getattr(mated, field)]
-        changed = [n for n in held if n != node] if node in held else [*held, node]
-        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(changed)}))
+        for node in clicked:
+            if node not in held and node not in places:
+                raise refused(f'node {node} is not on {_group_name(geometry, group)}, this '
+                              'side\'s element group')
+            held = [n for n in held if n != node] if node in held else [*held, node]
+        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(held)}))
         (mated,) = [m for m in geometry.mates if m.id == params['mate']]
     held = {int(n) for n in getattr(mated, field)}
-    places = [int(n) for n in geometry.nodes_in([group])]
     return [v.reading(f'{mated.name} on {name}', [
         v.row('Holds', mated.describe(), None, 'info'),
         v.row('First side', float(len(mated.nodes_a)), 'nodes', 'info'),
@@ -1220,7 +1255,8 @@ OPERATIONS = (
     Operation(
         id='project.edit_mated_surfaces', title='Edit Mated Surfaces', workspace='geometry', summary='Change how a kept set of mated surfaces is held, or its '
                                    'name.',
-        params=(GEOMETRY, MATE, NORMAL, NORMAL_STIFFNESS, SHEAR, SHEAR_STIFFNESS, MATE_NAME),
+        params=(GEOMETRY, MATE, EDIT_NORMAL, EDIT_NORMAL_STIFFNESS, EDIT_SHEAR,
+                EDIT_SHEAR_STIFFNESS, MATE_NAME),
         outputs=('reading', 'table'), run=edit_mated_surfaces, edits=True),
     Operation(
         id='project.edit_mate_sides', title='Edit Mate Sides', workspace='geometry',

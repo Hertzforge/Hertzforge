@@ -165,6 +165,8 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.merge_coincident_nodes`), as VD's merge pane does."""
     name = params['geometry']
     geometry = project[name]
+    if not geometry.num_nodes:
+        raise refused(f'{name} has no nodes to merge: mesh it first')
     groups = _groups(geometry, params['groups']) if params['groups'].strip() else None
     tolerance = params['tolerance'] or _core_tolerance(geometry)
     every = geometry.coincident_spots(tolerance, groups)

@@ -2660,6 +2660,10 @@ class Geometry:
         held = [self.group_properties.get(group) for group in ids]
         if any(other != held[0] for other in held[1:]):
             return ('the element groups differ in material, thickness or section')
+        # merged, a set's two sides would be one group, and its tie would be lost
+        joined = [m for m in self.mates if len(set(m.groups)) == 2 and set(m.groups) <= set(ids)]
+        if joined:
+            return f'mated surfaces {joined[0].name} join them: delete the set first'
         return None
 
     def merge_groups(self, group_ids: Ids) -> dict[str, int]:
