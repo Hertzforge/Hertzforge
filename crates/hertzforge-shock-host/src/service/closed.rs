@@ -45,9 +45,14 @@ use serde::{Deserialize, Serialize};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// A bin of the drive spectrum whose last magnitude is under this fraction of
-/// the largest bin's is treated as that small for the per-bin rise cap: a bin
-/// at numerical zero would otherwise refuse any change at all.
-const BIN_RISE_FLOOR_FRACTION: f64 = 1e-3;
+/// the largest bin's (-40 dB) is treated as that small for the per-bin rise
+/// cap. The cap compares the records as they play, after the at-rest taper,
+/// and the taper spreads every bin into its neighbours: near the pulse's own
+/// spectral nulls a bin that carries no drive to speak of can swing by more
+/// than the cap while the law's spectrum moved by a few dB. Measured on the
+/// one-mode check plant, where at -60 dB the core refused the built-in's own
+/// corrections.
+const BIN_RISE_FLOOR_FRACTION: f64 = 1e-2;
 
 /// The identification drive's ends fade in and out over this long, seconds,
 /// so it starts and ends at 0 V.

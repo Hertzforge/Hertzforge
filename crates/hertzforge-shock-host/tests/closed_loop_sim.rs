@@ -270,3 +270,58 @@ fn identification_holds_when_the_trusted_bins_miss_the_reference() {
         Some(HeldReason::ReferenceOutOfBand { coverage, min }) if coverage < min
     ));
 }
+
+/// The bench's pulse (0.4 g, 11 ms half-sine, rectangular shoulders 4 x T)
+/// at 51.2 kHz on a 1 g per volt wire: the predicted full-level drive and
+/// pk-pk displacement the core states at proceed, the numbers the bench's
+/// drive-abort and predicted-kinematics rows are set from.
+#[test]
+fn the_bench_pulse_is_predicted_at_0_4_volts_and_its_stroke_is_stated() {
+    let fs = 51_200.0;
+    let mut spec = spec(ClassicalShape::HalfSine, 11.0);
+    spec.amplitude_g = 0.4;
+    let mut cfg = ClassicalTestConfig::new(spec);
+    cfg.fs_hz = fs;
+    let mut control = ClassicalControl::new(fs, 0.5, 0.8);
+    control.sysid.duration_s = 1.0;
+    control.review_hold = false;
+    cfg.control = Some(control);
+    #[allow(deprecated)]
+    let table = ChannelTable::nonuniform_default_8ch();
+    let backend = SimConfig::new()
+        .resonances(Vec::new())
+        .feedthrough(1.0)
+        .sample_rate_hz(fs)
+        .noise_level(0.0)
+        .shared_clock(true)
+        .build();
+    let firer = BackendPulseFirer::new(
+        backend,
+        table.clone(),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+    )
+    .unwrap();
+    let mut s = ClassicalShockService::new(
+        cfg,
+        table,
+        firer,
+        Some(std::env::temp_dir().join("hertzforge-shock-closed-bench")),
+    )
+    .unwrap();
+    s.assess_feasibility().unwrap();
+    s.arm().unwrap();
+    assert_eq!(s.identify().unwrap(), RunState::Firing);
+    let p = s.status().prediction.unwrap();
+    assert!((p.drive_vpk - 0.4).abs() < 0.004, "{p:?}");
+    // X0: the reference's own stroke is 0.6718 in at 20 g (0.01344 in at
+    // 0.4 g); the prediction is within 3% of it.
+    assert!(
+        (p.displacement_pk_pk_in / 0.013436 - 1.0).abs() < 0.03,
+        "{p:?}"
+    );
+    eprintln!(
+        "bench X0 = {:.5} in pk-pk, drive {:.4} V pk",
+        p.displacement_pk_pk_in, p.drive_vpk
+    );
+    s.stop().unwrap();
+}
