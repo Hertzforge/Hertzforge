@@ -317,3 +317,15 @@ def test_averaging_frames_are_windows_a_frame_long():
     windows = history.srs_windows()
     assert [w.start for w in windows] == pytest.approx([0.5, 1.5, 2.5])
     assert [w.duration for w in windows] == pytest.approx([1.0, 1.0, 1.0])
+
+
+def test_the_threaded_pass_gives_the_serial_numbers_to_the_bit(monkeypatch):
+    rate = 51200.0
+    x = np.random.default_rng(0).standard_normal(200_000)
+    f = srs.octave_frequencies(10.0, 10000.0)
+    monkeypatch.setattr(srs, 'THREADS_FROM', 1)
+    threaded = srs.peaks(x, f, rate)
+    monkeypatch.setattr(srs, 'THREADS_FROM', 10 ** 12)
+    serial = srs.peaks(x, f, rate)
+    assert threaded[0].tobytes() == serial[0].tobytes()
+    assert threaded[1].tobytes() == serial[1].tobytes()

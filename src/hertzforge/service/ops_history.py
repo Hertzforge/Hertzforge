@@ -12,6 +12,8 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .ops_sine_shock import _record
+from .parsing import parse_numbers
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -26,12 +28,6 @@ WINDOW = Param('window', 'Window', 'enum', default='hann',
                    ('blackmanharris', 'Blackman-Harris'))))
 FACTOR = Param('factor', 'Keep every', 'integer', default=2, min=2, step=1, unit='samples')
 FOLD = Param('frequencies', 'Frequencies to fold', 'string', default='', unit='Hz')
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 def kurtosis(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -80,12 +76,15 @@ def amplitude_spectrum(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} has {count} channels; there is no channel {params["record"]}')
     record = params['record'] - 1
     f = np.asarray(spectrum.frequencies, dtype=float)
+    # one axis holds one quantity: the chosen channel's
+    quantity = spectrum.ordinate_dim[record]
+    drawn = [k for k in range(count) if spectrum.ordinate_dim[k] == quantity]
     lines = []
-    for k in range(len(spectrum.response_dof)):
+    for k in drawn:
         y = np.asarray(spectrum.amplitude[k], dtype=float)
         keep = np.isfinite(y) & (y > 0) & (f > 0)
         lines.append(v.series(spectrum.label(k), 'measured', f[keep], y[keep]))
-    unit = unit_text(spectrum.ordinate_dim[record])
+    unit = unit_text(quantity)
     rows = [v.row('Channel', spectrum.label(record), None, 'info')]
     try:
         at, amplitude = spectrum.tallest(record)
@@ -101,9 +100,11 @@ def amplitude_spectrum(project: Any, params: dict[str, Any]) -> list[dict]:
              v.row('Noise bandwidth', float(spectrum.noise_bandwidth), 'lines', 'info'),
              v.row('Scalloping loss', spectrum.scalloping_db, 'dB', 'info'),
              v.row('Frames averaged', float(spectrum.frames[record]), '', 'info')]
-    y_unit = unit if len({spectrum.ordinate_dim[k] for k in range(len(lines))}) == 1 else None
-    view = v.spectrum(f'Amplitude spectrum of {name}', v.axis('Frequency', 'Hz', 'linear'),
-                      v.axis('Amplitude, peak', y_unit, 'log'), lines, link='frequency')
+    title = f'Amplitude spectrum of {name}'
+    if len(drawn) < count:
+        title += f' ({count - len(drawn)} of another quantity left out)'
+    view = v.spectrum(title, v.axis('Frequency', 'Hz', 'linear'),
+                      v.axis('Amplitude, peak', unit, 'log'), lines, link='frequency')
     return [view, v.reading(f'Amplitude of {name}, {spectrum.label(record)}', rows)]
 
 
@@ -119,12 +120,11 @@ def resample_reading(project: Any, params: dict[str, Any]) -> list[dict]:
     name = params['history']
     history = project[name]
     record = _record(history, params['record'], name)
-    rate = float(history.sample_rate) / params['factor']
-    text = params['frequencies'].replace(',', ' ').split()
     try:
-        frequencies = [float(t) for t in text] or None
-    except ValueError:
-        raise refused(f'{params["frequencies"]!r} is not a list of frequencies in Hz') from None
+        rate = float(history.sample_rate) / params['factor']
+    except ValueError as error:
+        raise refused(str(error)) from None
+    frequencies = parse_numbers(params['frequencies'], 'a list of frequencies in Hz') or None
     try:
         reading = read_resample(history, rate, record, frequencies=frequencies)
     except ValueError as error:
@@ -167,9 +167,9 @@ OPERATIONS = (
         params=(HISTORY, LOW, HIGH), outputs=('reading',), run=kurtosis),
     Operation(
         id='project.amplitude_spectrum', title='Amplitude Spectrum', workspace='signals',
-        summary='Every channel\'s spectrum scaled so a sine reads its peak amplitude, on '
-                'the history\'s frames with a window of its own, and the tallest line of '
-                'one channel.',
+        summary='The spectra of the channels of one quantity, scaled so a sine reads its peak '
+                'amplitude, on the history\'s frames with a window of its own, and the tallest '
+                'line of the channel chosen, whose quantity is drawn.',
         params=(HISTORY, WINDOW, RECORD), outputs=('spectrum', 'reading'),
         run=amplitude_spectrum),
     Operation(

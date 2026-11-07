@@ -75,7 +75,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'transform': (_RECORDS, 'No shape set in the project reads it as physical'),
     'expand': (_RECORDS, 'No shape set in the project reads it as modal'),
     'generate_rigid_body_modes': (('geometry',), ''),
-    'generate_signal': (('specification', 'shock_specification', 'transient_specification',
+    'generate_signal': (('specification', 'transient_specification',
                          'sine_sweep_specification', 'psd', 'srs', 'time_history'),
                         'No signal can be made from it'),
     'solve_modes': (('geometry',), 'Its element groups have no properties yet'),
@@ -83,6 +83,9 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
 }
+
+#: the rows that read a geometry's nodes, off until it has some
+NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
 
 #: an object param that takes this many types takes anything: it says nothing
 #: about what a pair means, so it does not make a column of its own
@@ -183,6 +186,11 @@ def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
     return (PAIR_WHY.get(op.id)
             or _why_not(op, [projects.kind_of(project[n]) for n in names])
             or 'It cannot take this selection')
+
+
+#: what a complex set refuses, since real data cannot carry a complex coordinate
+REAL_SETS_ONLY = frozenset({'project.transform', 'project.expand',
+                            'project.compute_modal_responses'})
 
 
 def _rows_of(ops: Iterable[Operation]) -> list[Operation]:
@@ -312,13 +320,26 @@ def _project_rows(project: Any) -> list[dict[str, Any]]:
                  '' if project.stale() else 'Nothing is out of date')]
 
 
-def _fit_rows(kinds: list[str]) -> list[dict[str, Any]]:
+def _fit_refusal(project: Any, names: list[str], records: dict[str, list[int]]) -> str:
+    """Why this FRF, with this shape set when one is chosen, cannot start a fit,
+    in the words `fit.start` would refuse in."""
+    from hertzforge.core.modal_fit import fit_refusal
+    from hertzforge.core.shapes import ShapeSet
+
+    objects = [project[name] for name in names]
+    frf = next(name for name, obj in zip(names, objects) if not isinstance(obj, ShapeSet))
+    shapes = next((obj for obj in objects if isinstance(obj, ShapeSet)), None)
+    # an Edit Fit takes its set's own records, as the shell starts it
+    return fit_refusal(project[frf], None if shapes is not None else records.get(frf) or None, shapes)
+
+
+def _fit_rows(kinds: list[str], reason: str = '') -> list[dict[str, Any]]:
     """The fitting screen's way in, which is not an operation: an FRF to fit by
     hand, or an FRF with the shape set to go on editing."""
     if kinds == ['frf']:
-        return [_row('self.fit', 'Fit by Hand', 'self', modules=['modal'])]
+        return [_row('self.fit', 'Fit by Hand', 'self', reason, modules=['modal'])]
     if sorted(kinds) == ['frf', 'shape_set']:
-        return [_row('self.edit_fit', 'Edit Fit', 'self', modules=['modal'])]
+        return [_row('self.edit_fit', 'Edit Fit', 'self', reason, modules=['modal'])]
     return []
 
 
@@ -332,7 +353,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     rows = [_row(f'show.{verb.lower()}', verb, 'default') for verb in defaults(project, kinds, names)]
     if kinds == ['shape_set']:
         rows += _shape_views(project, names[0])
-    rows += _fit_rows(kinds)
+    if kinds == ['frf'] or sorted(kinds) == ['frf', 'shape_set']:
+        rows += _fit_rows(kinds, _fit_refusal(project, names, records))
     if not chosen:
         rows += _project_rows(project)
     where = verbs.part_key(part)
@@ -355,10 +377,17 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if reason:
             rows.append(_op_row(op, reason))
             continue
+        if op.id in NEEDS_NODES and not project[fill['geometry']].num_nodes:
+            rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
+            continue
+        if op.id in REAL_SETS_ONLY and any(kind == 'shape_set' and project[name].is_complex
+                                           for name, kind in zip(names, kinds)):
+            rows.append(_op_row(op, 'A complex shape set cannot carry real data'))
+            continue
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
-        if where in ('mate', 'solid') and part:
+        if where in ('mate', 'solid', 'group') and part:
             # the one picked in the tree is the one the row acts on
             for held in (where, f'{where}s'):
                 if any(p.name == held for p in op.params):
@@ -400,15 +429,18 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
                                kind, [c[0] for c in present
                                       if verb in defaults(project, joined, [*names, c[0]])]))
         for row in _fit_rows(joined):
-            rows.append(_needs(row, kind, [c[0] for c in present]))
+            rows.append(_needs(row, kind, [c[0] for c in present
+                                           if not _fit_refusal(project, [*names, c[0]], {})]))
         for op in _rows_of(OPERATIONS):
             if op.id in taken or op.id in verbs.PARTS or not _kinds_fit(op, joined):
                 continue
             if _takes_anything(op):
                 continue
-            fills = ((c[0], _fill(op, [*chosen, c])) for c in present)
-            fits = [name for name, fill in fills
-                    if fill is not None and not _will_not_take(project, op, fill)]
+            fills = ((c, _fill(op, [*chosen, c])) for c in present)
+            fits = [c[0] for c, fill in fills
+                    if fill is not None and not _will_not_take(project, op, fill)
+                    and not (op.id in REAL_SETS_ONLY and c[1] == 'shape_set'
+                             and project[c[0]].is_complex)]
             rows.append(_needs(_op_row(op), kind, fits))
         if rows:
             columns.append({'kinds': joined, 'rows': rows})

@@ -32,7 +32,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	TableEdit,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, validateAll, withDisplayLengths, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
@@ -106,7 +106,25 @@ class AnalyzeState {
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		return withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const length = this.app.units.length;
+		if (!length || !op.params.some((p) => p.length)) return params;
+		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
+	}
+
+	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	private undefinedGeometry(op: OperationDescriptor): boolean {
+		const name = this.values[op.id]?.geometry;
+		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+	}
+
+	/** The display system changed: each form holds the same lengths, in the new unit. */
+	lengthsChanged(ratio: number): void {
+		const next = { ...this.values };
+		for (const op of this.app.catalog?.operations ?? []) {
+			if (next[op.id] && op.params.some((p) => p.length) && !this.undefinedGeometry(op)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+		}
+		this.values = next;
 	}
 
 	get params(): ParamDescriptor[] {
@@ -487,7 +505,7 @@ class AnalyzeState {
 	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
@@ -858,14 +876,15 @@ export class ReportState {
 	html = $state<string | null>(null);
 	busy = $state<string | null>(null);
 	error = $state<string | null>(null);
-	/** Where the last export went. */
+	/** Where the last export went, and what the page left out and the check found. */
 	exported = $state<string | null>(null);
+	exportedNote = $state('');
 	/**
-	 * What an export or an issue is held on, as Visual Dynamics asks before a report leaves the
-	 * project: the sections still owed and the indexed files that do not match; the person says
-	 * anyway or lets it be.
+	 * What an export, a print or an issue is held on before a report leaves the project: the
+	 * sections still owed and the indexed files that do not match; the person says anyway or lets
+	 * it be.
 	 */
-	held = $state<{ act: 'export' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
+	held = $state<{ act: 'export' | 'print' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
 	/** The editor's pane for the selection, from the last `report.editor`. */
 	editor = $state.raw<ReportEditor | null>(null);
 	/** How far the page was scrolled, kept across the re-render an edit makes. */
@@ -895,38 +914,48 @@ export class ReportState {
 		if (!name) return;
 		this.held = null;
 		await this.act('Saving the page', async () => {
-			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[]; note?: string }>(
 				'report.export',
 				{ name, path, ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.path === null) this.held = { act: 'export', path, owed: res.owed, index: res.index };
-			else this.exported = res.path;
+			else {
+				this.exported = res.path;
+				this.exportedNote = res.note ?? '';
+			}
 		});
 	}
 
-	/** The held export or issue, done anyway. */
+	/** The held export, print or issue, done anyway. */
 	async anyway(): Promise<void> {
 		const held = this.held;
 		if (!held) return;
 		if (held.act === 'export' && held.path) await this.export(held.path, true);
+		else if (held.act === 'print') await this.print(true);
 		else await this.issue('begin', undefined, true);
 	}
 
 	/** The page being printed, in a frame of its own that asks for the print dialog. */
 	printing = $state<string | null>(null);
-	/** An issue under way: the report is marked issued and its page printed; the PDF is named next. */
+	/** An issue under way: the page that says issued is printed; the PDF is named next, which issues it. */
 	issuing = $state<string | null>(null);
 	/** The last issue recorded. */
 	issued = $state<Record<string, string> | null>(null);
 
 	/** Print the reader's page; the print dialog saves it as a PDF. */
-	async print(): Promise<void> {
+	async print(anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		await this.act('Preparing the page to print', async () => {
-			const res = await this.app.analysis.request<{ html: string }>('report.print', { name }, { timeoutMs: RUN_TIMEOUT_MS });
-			this.printing = res.html;
+			const res = await this.app.analysis.request<{ html: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+				'report.print',
+				{ name, ...(anyway ? { anyway } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.html === null) this.held = { act: 'print', owed: res.owed, index: res.index };
+			else this.printing = res.html;
 		});
 	}
 
@@ -935,7 +964,7 @@ export class ReportState {
 		const name = this.name;
 		if (!name) return;
 		this.held = null;
-		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
+		const doing = { begin: 'Preparing the page to issue', record: 'Recording the issue', cancel: 'Cancelling the issue' }[step];
 		await this.act(doing, async () => {
 			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
@@ -1011,6 +1040,12 @@ export class ReportState {
 	}
 }
 
+/** A unit system's length unit, and what takes it to meters. */
+interface LengthUnit {
+	unit: string;
+	to_si: number;
+}
+
 /** Where the chosen unit system is kept between launches. */
 const UNITS_KEY = 'hertzforge.units';
 
@@ -1022,6 +1057,8 @@ const UNITS_KEY = 'hertzforge.units';
 export class UnitsState {
 	name = $state<string | null>(null);
 	systems = $state<string[]>([]);
+	/** The system's length unit, and what takes it to meters: what a solid's form is typed in. */
+	length = $state.raw<LengthUnit | null>(null);
 
 	constructor(private readonly app: AppState) {}
 
@@ -1037,12 +1074,16 @@ export class UnitsState {
 	async sync(): Promise<void> {
 		const wanted = this.stored();
 		try {
-			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			const res = await this.app.analysis.request<{ name: string; systems: string[]; length?: LengthUnit }>('units.system', {});
 			this.systems = res.systems;
 			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
-				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				const set = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name: wanted });
 				this.name = set.name;
-			} else this.name = res.name;
+				this.length = set.length ?? null;
+			} else {
+				this.name = res.name;
+				this.length = res.length ?? null;
+			}
 		} catch {
 			// an older service without units: its own SI stands
 		}
@@ -1050,8 +1091,11 @@ export class UnitsState {
 
 	async choose(name: string): Promise<void> {
 		if (name === this.name) return;
-		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		const res = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name });
 		this.name = res.name;
+		const before = this.length;
+		this.length = res.length ?? null;
+		if (before && this.length) this.app.analyze.lengthsChanged(before.to_si / this.length.to_si);
 		try {
 			localStorage.setItem(UNITS_KEY, res.name);
 		} catch {

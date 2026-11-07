@@ -216,9 +216,20 @@ fn run_log_query(args: impl Iterator<Item = String>) -> String {
         return String::new();
     };
     match args.get(at + 1).filter(|a| !a.starts_with('-')) {
-        Some(file) => format!("&runlog=1&runlog_file={}", encode(file)),
+        Some(file) => format!("&runlog=1&runlog_file={}", encode(&from_launch(file))),
         None => "&runlog=1".to_string(),
     }
+}
+
+/// `file` whole, from where the app was launched: the service runs in the log directory, so a
+/// relative path means nothing there. A leading `~` is left for the service to expand.
+fn from_launch(file: &str) -> String {
+    if file.starts_with('~') {
+        return file.to_string();
+    }
+    std::path::absolute(file)
+        .map(|whole| whole.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| file.to_string())
 }
 
 /// Percent-encode a query value (the services' addresses).
@@ -404,5 +415,15 @@ mod run_log_tests {
             query(&["--run-log", "/tmp/a b.hflog"]),
             "&runlog=1&runlog_file=%2Ftmp%2Fa%20b.hflog"
         );
+    }
+
+    #[test]
+    fn a_relative_file_is_whole_from_where_the_app_was_launched() {
+        let here = std::env::current_dir().unwrap().join("a.hflog");
+        assert_eq!(
+            query(&["--run-log", "a.hflog"]),
+            format!("&runlog=1&runlog_file={}", super::encode(&here.to_string_lossy()))
+        );
+        assert_eq!(query(&["--run-log", "~/a.hflog"]), "&runlog=1&runlog_file=~%2Fa.hflog");
     }
 }

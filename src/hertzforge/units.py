@@ -18,6 +18,7 @@ as 'length' or 'acceleration', or a compound expression such as
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -1003,3 +1004,13 @@ SYSTEMS = {s.name: s for s in _COHERENT + _IN_G}
 # only: most exports still write the coherent system's in/s**2, since
 # most file formats cannot record "g" as a unit.
 DEFAULT_SYSTEM = SYSTEMS['in-slinch-lbf-s (g)']
+
+
+def signed(value: float, unit: str = '', places: int = 1, missing: str = 'not read') -> str:
+    """A reading with its sign and unit, the minus as the minus sign. What
+    rounds to zero reads +0.0, never -0.0; what is not finite reads
+    `missing`."""
+    if not math.isfinite(value):
+        return missing
+    value = 0.0 if round(value, places) == 0.0 else value
+    return f'{value:+.{places}f}'.replace('-', '\u2212') + (f' {unit}' if unit else '')

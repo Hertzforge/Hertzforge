@@ -62,7 +62,7 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, nodeTravel } from './shape';
-	import { idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -99,6 +99,7 @@
 		const tc = new TransformControls(camera, renderer.domElement);
 		tc.setSpace('local');
 		tc.setMode(gizmoMode);
+		tc.setTranslationSnap(gridStep(view.unit));
 		tc.attach(anchor);
 		tc.addEventListener('change', () => (dirty = true));
 		tc.addEventListener('dragging-changed', (e) => {

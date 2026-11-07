@@ -8,8 +8,7 @@ a run imported through the window, beginning at 1060 s, and the
 averaging reading showed nothing: its frames were drawn at 0 s, off
 the plot, while the panel said "start 0 s" against an axis that began
 at 1060. Every reading in seconds takes the record's first instant
-as its origin, once, in `Averaging.stop`, `frame_bounds` and
-`from_span`; the overlays, the stage's geometry, the dragger, the
+as its origin, once, in `Averaging.stop` and `frame_bounds`; the overlays, the stage's geometry, the dragger, the
 report and the panels hand it over.
 """
 
@@ -17,7 +16,7 @@ import numpy as np
 import pytest
 
 import hertzforge
-from hertzforge.core.averaging import Averaging, from_span
+from hertzforge.core.averaging import Averaging
 from hertzforge.core.shocks import Shock
 
 RATE = 1024.0
@@ -43,16 +42,6 @@ def test_the_averaging_reads_its_seconds_on_the_clock():
     clocked = averaging.frame_bounds(RATE, ORIGIN)
     assert plain[0] == (1.0, 2.0)
     assert clocked == [(a + ORIGIN, b + ORIGIN) for a, b in plain]
-
-
-def test_a_drag_on_the_clock_means_a_start_from_the_beginning():
-    averaging = Averaging(frame_length=1024, overlap=0.0, frames=1)
-    dragged = from_span(averaging, ORIGIN + 2.0, ORIGIN + 5.0, RATE, SAMPLES,
-                        origin=ORIGIN)
-    assert dragged.start == pytest.approx(2.0)
-    assert dragged.frames == 3
-    assert from_span(averaging, 2.0, 5.0, RATE, SAMPLES) == dragged, \
-        'the same drag on a record that begins at zero'
 
 
 def test_the_stage_geometry_is_on_the_clock():

@@ -113,6 +113,16 @@ def overload(project, **given):
     return op.run(project, values)
 
 
+def test_the_overload_trace_title_is_in_the_display_system(ranged):
+    from hertzforge.service import display_units
+
+    (trace, *_rest) = overload(ranged, record=1)
+    assert ' m/s²' in trace['title'], 'with no display system, the words stay in SI'
+    (trace, *_rest) = display_units.running_in(display_units.START,
+                                               lambda: overload(ranged, record=1))
+    assert ' g' in trace['title'] and 'm/s²' not in trace['title']
+
+
 def test_overload_is_offered_only_where_a_linked_table_gives_ranges(ranged):
     assert 'overload_check' in projects.verbs_of(ranged, 'Run')
     assert 'overload_check' not in projects.verbs_of(ranged, 'Unlinked')

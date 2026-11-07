@@ -50,12 +50,8 @@ the comparison is within a stated tolerance, and a difference beyond it
 is a finding for the log keeper, never a refusal.
 
 **One data index.** The log's files go into the project's data index
-through the index's own entry (`DataIndex.add`, the one the import and
-`Project.index_file` use), with the checksum the log recorded, so
-nothing is hashed twice and a report lists them beside every other file
-it rests on (`index_run_log`). The log's own file goes in with each
-test's head hash (`RunLog.head`) in what it holds, which anchors the
-chain inside the file to a record outside it.
+through `Project.index_run_log_files`, which hashes each one and refuses
+a mismatch, and a report lists them beside every other file it rests on.
 """
 
 from __future__ import annotations
@@ -66,17 +62,17 @@ import queue
 import re
 import threading
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, NamedTuple
 
 from . import data_index
-from .data_index import DataIndex, IndexEntry
+from .data_index import IndexEntry
 from .progress import Cancelled
-from .run_log import FORMAT, SUFFIX, VDLOG_SUFFIX, Entry, FileRef, RunLog
+from .run_log import SUFFIX, VDLOG_SUFFIX, Entry, FileRef, RunLog
 
-# One module for watching, describing, accepting and indexing, all on
+# One module for watching, describing and accepting, all on
 # plain values: the front end's worker only runs
 # `ControllerWatch` on its thread and carries the proposals back.
 
@@ -85,11 +81,6 @@ SOURCE = 'run log'
 
 #: the format recorded for a file no importer recognizes
 UNKNOWN = 'unknown'
-
-#: the format a run log is recorded under in the data index, and one
-#: Visual Dynamics started
-LOG_FORMAT = f'Hertzforge run log ({SUFFIX})'
-VDLOG_FORMAT = f'Visual Dynamics run log ({VDLOG_SUFFIX})'
 
 #: seconds a file's size and modification time must stay the same
 #: before it is hashed
@@ -229,16 +220,6 @@ class StreamCheck:
     stream_s: float | None = None
     sample_rate: float | None = None
     counted_s: float | None = None
-
-
-@dataclass(frozen=True)
-class IndexedLog:
-    """What `index_run_log` put into a data index: the log's own entry,
-    each file's entry, and each file not found, with why."""
-
-    log: IndexEntry
-    files: tuple[IndexEntry, ...]
-    missing: tuple[tuple[FileRef, str], ...]
 
 
 def _local_now() -> datetime:
@@ -1054,89 +1035,3 @@ def _heads(log: RunLog, tests: Sequence[int | None]) -> str:
     heads = [f'{"between tests" if test is None else f"test {test}"} head '
              f'{log.head(test)}' for test in tests]
     return '; '.join([title, *heads]) if heads else f'{title}; no test yet'
-
-
-def index_run_log(index: DataIndex, log: RunLog, *,
-                  tests: Iterable[int | None] | None = None,
-                  search: Sequence[str | os.PathLike] = ()) -> IndexedLog:
-    """Put a run log's files, and the log with each test's head hash, into
-    a data index (`Project.data_index`), so a report lists them.
-
-    Each file the log names is entered through the index's own entry
-    (`DataIndex.add`) with the size and SHA-256 the log recorded, so it
-    is not hashed again; the index's check before a report is issued
-    (`DataIndex.verify`) hashes it and says whether it still matches. A
-    file is looked for where it was when it was hashed, then by its name
-    in each folder of `search`, then beside the log; a file found
-    nowhere is listed as missing, since an index entry names a file
-    that is there. The log's own file is entered as a run log holding
-    each test's head (`RunLog.head`), replacing the run log's earlier
-    entry for the same file, since the log grows.
-
-    Parameters
-    ----------
-    index : DataIndex
-        The index, the project's data index in a project.
-    log : RunLog
-        The log.
-    tests : iterable of int or None, optional
-        The tests whose files and heads go in (None for the entries
-        between tests); every test, and the entries between tests, unless
-        given.
-    search : sequence of str or os.PathLike, optional
-        Folders a file is looked for in by its name.
-
-    Returns
-    -------
-    IndexedLog
-        The log's entry, each file's entry, and each file not found.
-
-    Raises
-    ------
-    ControllerFilesError
-        When a test named is not in the log.
-    """
-    from .. import io
-
-    if tests is None:
-        chosen: list[int | None] = list(log.tests())
-        if 'log' in log.chains():
-            chosen.append(None)
-    else:
-        chosen = list(dict.fromkeys(tests))
-        held = log.tests()
-        for test in chosen:
-            if test is not None and test not in held:
-                raise ControllerFilesError(f'the log holds no test {test}')
-    folders = [os.fspath(folder) for folder in search]
-    folders.append(os.path.dirname(os.path.abspath(log.path)))
-    added: list[IndexEntry] = []
-    missing: list[tuple[FileRef, str]] = []
-    done: set[tuple[str, str]] = set()
-    for entry in log.view():
-        if entry.test not in chosen:
-            continue
-        for ref in entry.files:
-            if (ref.name, ref.sha256) in done:
-                continue
-            done.add((ref.name, ref.sha256))
-            path = _found(ref, folders)
-            if path is None:
-                where = f'at {ref.path} or ' if ref.path else ''
-                reason = (f'{ref.name} (entry #{entry.id}) was not found '
-                          f'{where}by its name in {", ".join(folders)}')
-                missing.append((ref, reason))
-                continue
-            size = ref.size if ref.size is not None else os.path.getsize(path)
-            added.append(index.add(
-                path, ref.holds or f'named in the run log, entry #{entry.id}',
-                format=ref.format or io.format_of(path), source=SOURCE,
-                checksum=(size, ref.sha256)))
-    own = os.path.abspath(log.path)
-    index.entries = [item for item in index.entries
-                     if not (item.source == SOURCE and os.path.normcase(
-                         item.path) == os.path.normcase(own))]
-    entry = index.add(own, _heads(log, chosen),
-                      format=LOG_FORMAT if log.header.format == FORMAT else VDLOG_FORMAT,
-                      source=SOURCE)
-    return IndexedLog(entry, tuple(added), tuple(missing))

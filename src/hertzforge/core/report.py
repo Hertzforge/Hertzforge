@@ -642,11 +642,6 @@ def dof_quantities(objects: Mapping[str, Any]) -> list[str]:
     return series_dof_quantities(_whole_project_series(objects))
 
 
-def quantity_dofs(objects: Mapping[str, Any], quantity: str) -> list[str]:
-    """Every DOF in the whole project measured as `quantity`."""
-    return series_quantity_dofs(_whole_project_series(objects), quantity)
-
-
 def dofs_source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) -> list[str]:
     """The data objects a DOFs scene could read its arrows from.
 
