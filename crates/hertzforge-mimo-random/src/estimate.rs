@@ -107,6 +107,78 @@ impl Estimate {
     }
 }
 
+/// The lag search's score at every lag `0..=max_lag`: for each control window `x`
+/// (all of one length `w`), `|sum_t x[t] * drive[t + max_lag - lag]|`, summed over
+/// the controls. `drive` holds the `w + max_lag` drive samples that end with the
+/// window, so lag `L` pairs the window with the drive `L` frames earlier.
+///
+/// Computed as cross-correlations through the workspace FFT, at the power of two
+/// at or above `w + max_lag` (no circular wrap reaches a scored lag). Two controls
+/// share each transform, as the real and imaginary parts of one signal: for real
+/// signals `X[N - m]` is `conj(X[m])`, so `Z[N - m] Y[m]` with `Z = X_a + j X_b`
+/// is `conj(X_a) Y + j conj(X_b) Y`, whose inverse is the two real
+/// cross-correlations side by side. Both identities hold whichever sign the
+/// forward transform uses.
+///
+/// The direct sum this replaced cost `(max_lag + 1) * controls * w` multiply-adds:
+/// 134 million at four controls and the full 4096-frame search, about 150 ms of
+/// host time spent between two segments while a DAQ card's 60 ms output buffer
+/// drained with nothing feeding it. Here it is five transforms of 16 384 points.
+pub fn lag_scores(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> Vec<f64> {
+    let mut acc = vec![0.0f64; max_lag + 1];
+    let w = controls.first().map(|c| c.len()).unwrap_or(0);
+    if w == 0 || drive.len() < w + max_lag {
+        return acc;
+    }
+    let n = fft::next_pow2(w + max_lag);
+    let mut y: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
+    for (d, &v) in y.iter_mut().zip(&drive[..w + max_lag]) {
+        d.0 = v;
+    }
+    fft::fft_in_place(&mut y);
+    let mut z: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
+    let mut prod: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
+    for pair in controls.chunks(2) {
+        z.iter_mut().for_each(|v| *v = (0.0, 0.0));
+        for (d, &v) in z.iter_mut().zip(pair[0].iter().take(w)) {
+            d.0 = v;
+        }
+        if let Some(b) = pair.get(1) {
+            for (d, &v) in z.iter_mut().zip(b.iter().take(w)) {
+                d.1 = v;
+            }
+        }
+        fft::fft_in_place(&mut z);
+        for (m, p) in prod.iter_mut().enumerate() {
+            let a = z[(n - m) % n];
+            let b = y[m];
+            *p = (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
+        }
+        // sum_t x[t] y[t + k] at k = max_lag - lag: control a real, b imaginary.
+        let r = fft::ifft(&prod);
+        for (lag, s) in acc.iter_mut().enumerate() {
+            let v = r[max_lag - lag];
+            *s += v.0.abs();
+            if pair.len() == 2 {
+                *s += v.1.abs();
+            }
+        }
+    }
+    acc
+}
+
+/// The lag of the highest [`lag_scores`] score; the smaller lag on a tie, and 0
+/// when no score is above zero.
+pub fn best_lag(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> usize {
+    let mut best = (0usize, 0.0f64);
+    for (lag, &s) in lag_scores(controls, drive, max_lag).iter().enumerate() {
+        if s > best.1 {
+            best = (lag, s);
+        }
+    }
+    best.0
+}
+
 /// Rows `r` of every line of a matrix stack.
 pub fn rows(m: &MatrixStack, r: Range<usize>) -> MatrixStack {
     let (lines, _, cols) = m.dims();
@@ -366,6 +438,73 @@ mod tests {
     fn noise(n: usize, seed: u64) -> Vec<f64> {
         let mut r = Lcg(seed);
         (0..n).map(|_| r.next()).collect()
+    }
+
+    /// The lag search as it was written before it used the FFT: the direct sum at
+    /// every lag.
+    fn direct_scores(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> Vec<f64> {
+        let w = controls[0].len();
+        (0..=max_lag)
+            .map(|lag| {
+                controls
+                    .iter()
+                    .map(|x| {
+                        (0..w)
+                            .map(|t| x[t] * drive[t + max_lag - lag])
+                            .sum::<f64>()
+                            .abs()
+                    })
+                    .sum()
+            })
+            .collect()
+    }
+
+    /// One to four controls that each see the drive through its own gain and sign,
+    /// `delay` frames late, in noise: the FFT search scores every lag as the direct
+    /// sum does and picks the same lag, the planted one. An odd count leaves one
+    /// control alone in its transform.
+    #[test]
+    fn the_fft_lag_search_scores_every_lag_as_the_direct_sum_does() {
+        for (w, max_lag, delay, seed, n_c) in [
+            (2048usize, 1024usize, 517usize, 1u64, 4usize),
+            (1500, 700, 0, 2, 3),
+            (1024, 1024, 1024, 3, 1),
+            (3000, 333, 211, 4, 2),
+        ] {
+            let drive = noise(w + max_lag, seed);
+            let gains = &[1.0, -0.6, 0.3, 2.0][..n_c];
+            let controls: Vec<Vec<f64>> = gains
+                .iter()
+                .enumerate()
+                .map(|(k, g)| {
+                    let n = noise(w, seed * 10 + k as u64);
+                    (0..w)
+                        .map(|t| g * drive[t + max_lag - delay] + 0.5 * n[t])
+                        .collect()
+                })
+                .collect();
+            let views: Vec<&[f64]> = controls.iter().map(|c| c.as_slice()).collect();
+            let fast = lag_scores(&views, &drive, max_lag);
+            let slow = direct_scores(&views, &drive, max_lag);
+            let peak = slow.iter().cloned().fold(0.0, f64::max);
+            for (lag, (a, b)) in fast.iter().zip(&slow).enumerate() {
+                assert!(
+                    (a - b).abs() <= 1e-9 * peak,
+                    "w {w} lag {lag}: fft {a} direct {b} (peak {peak})"
+                );
+            }
+            assert_eq!(best_lag(&views, &drive, max_lag), delay, "w {w}");
+        }
+    }
+
+    /// No drive, no lag: an all-zero score keeps the search at 0, as before.
+    #[test]
+    fn a_silent_drive_scores_zero_everywhere_and_the_lag_stays_at_zero() {
+        let x = noise(512, 9);
+        let drive = vec![0.0; 512 + 100];
+        let s = lag_scores(&[&x], &drive, 100);
+        assert!(s.iter().all(|&v| v == 0.0));
+        assert_eq!(best_lag(&[&x], &drive, 100), 0);
     }
 
     /// The diagonal equals the workspace's own Welch PSD, and the cross spectrum
