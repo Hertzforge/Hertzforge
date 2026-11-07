@@ -220,13 +220,26 @@ def _project_rows(project: Any) -> list[dict[str, Any]]:
                  '' if project.stale() else 'Nothing is out of date')]
 
 
-def _fit_rows(kinds: list[str]) -> list[dict[str, Any]]:
+def _fit_refusal(project: Any, names: list[str], records: dict[str, list[int]]) -> str:
+    """Why this FRF, with this shape set when one is chosen, cannot start a fit,
+    in the words `fit.start` would refuse in."""
+    from hertzforge.core.modal_fit import fit_refusal
+    from hertzforge.core.shapes import ShapeSet
+
+    objects = [project[name] for name in names]
+    frf = next(name for name, obj in zip(names, objects) if not isinstance(obj, ShapeSet))
+    shapes = next((obj for obj in objects if isinstance(obj, ShapeSet)), None)
+    # an Edit Fit takes its set's own records, as the shell starts it
+    return fit_refusal(project[frf], None if shapes is not None else records.get(frf) or None, shapes)
+
+
+def _fit_rows(kinds: list[str], reason: str = '') -> list[dict[str, Any]]:
     """The fitting screen's way in, which is not an operation: an FRF to fit by
     hand, or an FRF with the shape set to go on editing."""
     if kinds == ['frf']:
-        return [_row('self.fit', 'Fit by Hand', 'self', modules=['modal'])]
+        return [_row('self.fit', 'Fit by Hand', 'self', reason, modules=['modal'])]
     if sorted(kinds) == ['frf', 'shape_set']:
-        return [_row('self.edit_fit', 'Edit Fit', 'self', modules=['modal'])]
+        return [_row('self.edit_fit', 'Edit Fit', 'self', reason, modules=['modal'])]
     return []
 
 
@@ -241,7 +254,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     rows = [_row(f'show.{verb.lower()}', verb, 'default') for verb in defaults(project, kinds, names)]
     if kinds == ['shape_set']:
         rows += _shape_views(project, names[0])
-    rows += _fit_rows(kinds)
+    if kinds == ['frf'] or sorted(kinds) == ['frf', 'shape_set']:
+        rows += _fit_rows(kinds, _fit_refusal(project, names, records))
     if not chosen:
         rows += _project_rows(project)
     where = verbs.part_key(part)
@@ -312,7 +326,8 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
             rows.append(_needs(_row(f'show.{verb.lower()}', verb, 'default', modules=None),
                                kind, [c[0] for c in present]))
         for row in _fit_rows(joined):
-            rows.append(_needs(row, kind, [c[0] for c in present]))
+            rows.append(_needs(row, kind, [c[0] for c in present
+                                           if not _fit_refusal(project, [*names, c[0]], {})]))
         for op in _rows_of(OPERATIONS):
             if op.id in taken or op.id in verbs.PARTS or not _kinds_fit(op, joined):
                 continue

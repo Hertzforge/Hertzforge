@@ -65,9 +65,10 @@ def _number(params: Mapping[str, Any], key: str, method: str) -> float:
 
 def start(project: Any, params: Mapping[str, Any]) -> Fit:
     """`fit.start`: a session on the FRF `frf`, on the `records` picked when
-    given, from the shape set `shapes` when given (Edit Fit)."""
+    given, from the shape set `shapes` when given (Edit Fit), on the records
+    that set holds."""
     from hertzforge.core.data import Frf
-    from hertzforge.core.modal_fit import ModalFitSession
+    from hertzforge.core.modal_fit import ModalFitSession, adoptable_records, fit_refusal
     from hertzforge.core.shapes import ShapeSet
 
     name = params.get('frf')
@@ -92,6 +93,13 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
                                   or kind_of(project[coherence]) not in COHERENCES):
         raise refused(f'{coherence!r} is not a coherence in the project')
     try:
+        if shapes is not None:
+            # a set is edited on the records it says something about: the
+            # rest are not read as a mode shape of zero
+            why = fit_refusal(project[name], records, project[shapes])
+            if why:
+                raise refused(why)
+            records = adoptable_records(project[name], project[shapes], records)
         session = ModalFitSession(project[name], records=records, coherence=None if coherence is None
                                   else project[coherence])
         if shapes is not None:

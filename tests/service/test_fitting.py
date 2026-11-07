@@ -9,7 +9,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from hertzforge import Project
+from hertzforge.core.data import Frf
+from hertzforge.core.shapes import ShapeSet, synthesize_overlay
 from hertzforge.service import fitting, frames, projects
+from hertzforge.service.action_table import action_table
 from hertzforge.service.protocol import ProtocolError
 
 from .test_projects import _exchange
@@ -262,3 +266,152 @@ def _through_the_server(*requests):
 def test_records_picked_in_the_tree_reach_the_fit_through_the_server():
     fit, answer = _through_the_server(('fit.start', {'frf': 'FRF', 'records': [0, 1]}))
     assert fit.session.rows == [0, 1] and answer['fit']['frf'] == 'FRF'
+
+
+PHI = np.array([[1, 1, 1, 1], [1, 0.5, -0.5, -1], [1, -1, -1, 1.0]]) * 0.3
+DOFS = ['1Z+', '2Z+', '3Z+', '4Z+']
+LINES = np.arange(0.0, 200.01, 0.25)
+
+
+def _modes(**more):
+    return ShapeSet([20.0, 50.0, 90.0], [0.01, 0.02, 0.015], DOFS, PHI, mass_unit='kg', **more)
+
+
+def _frf(pairs=None, truth=None, power=2, dim='acceleration/force'):
+    pairs = pairs or [(dof, '1Z+') for dof in DOFS]
+    responses, references = zip(*pairs)
+    values = (truth or _modes()).synthesize_frf(LINES, responses, references, power=power)
+    return Frf(LINES, values, response_dof=list(responses), reference_dof=list(references),
+               ordinate_dim=[dim] * len(pairs))
+
+
+def _row_of(project, objects, row_id, records=None):
+    table = action_table(project, objects, records or {})
+    return next(row for column in table['columns'] for row in column['rows']
+                if row['id'] == row_id)
+
+
+def _project_of(**objects):
+    project = Project()
+    for name, obj in objects.items():
+        project.add(name, obj)
+    return project
+
+
+def _confirm_all(fit, count=3):
+    for _ in range(count):
+        fitting.act(fit, 'fit.find', {})
+        fitting.act(fit, 'fit.fit', {})
+        fitting.act(fit, 'fit.confirm', {})
+
+
+def test_edit_fit_refuses_a_set_sharing_no_dofs_and_leaves_it_alone():
+    other = ShapeSet([30.0], [0.01], ['7Z+', '8Z+'], [[1.0, 2.0]], mass_unit='kg')
+    project = _project_of(H=_frf(), FE=other)
+    row = _row_of(project, ['H', 'FE'], 'self.edit_fit')
+    assert not row['ready'] and 'no value' in row['reason']
+    assert _row_of(project, ['H'], 'self.edit_fit')['candidates'] == []
+    with pytest.raises(ProtocolError, match='no value'):
+        fitting.start(project, {'frf': 'H', 'shapes': 'FE'})
+    assert project['FE'].coordinate == ['7Z+', '8Z+']
+
+
+def test_edit_fit_refuses_a_complex_set_and_says_so_before_it_is_clicked():
+    complex_set = ShapeSet([20.0, 50.0, 90.0], [0.01, 0.02, 0.015], DOFS, PHI * np.exp(0.2j),
+                           modal_mass=[2j, 2j, 2j], mass_unit='kg')
+    project = _project_of(H=_frf(), C=complex_set)
+    row = _row_of(project, ['H', 'C'], 'self.edit_fit')
+    assert not row['ready'] and 'complex' in row['reason']
+    with pytest.raises(ProtocolError, match='complex'):
+        fitting.start(project, {'frf': 'H', 'shapes': 'C'})
+
+
+def test_edit_fit_keeps_the_dofs_it_does_not_fit_and_what_else_the_set_held():
+    extra = np.array([[0.7, 0.1], [0.2, -0.3], [-0.4, 0.5]])
+    big = ShapeSet([20.0, 50.0, 90.0], [0.01, 0.02, 0.015], [*DOFS, '5Z+', '6Z+'],
+                   np.hstack([PHI, extra]), mass_unit='kg', comment=['a', 'b', 'c'],
+                   description=['d1', 'd2', 'd3'], modal_damping=[1j, 2j, 3j])
+    project = _project_of(H=_frf(), Big=big)
+    assert _row_of(project, ['H', 'Big'], 'self.edit_fit')['ready']
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Big'})
+    with pytest.raises(ProtocolError, match='5Z\\+ and 1 more'):
+        fitting.act(fit, 'fit.confirm', {})
+    assert fitting.publish(project, fit, {}) == 'Big'
+    out = project['Big']
+    assert out.coordinate == [*DOFS, '5Z+', '6Z+']
+    assert np.allclose(out.shape_matrix, np.hstack([PHI, extra]))
+    assert out.comment == ['a', 'b', 'c'] and out.description == ['d1', 'd2', 'd3']
+    assert list(out.modal_damping) == [1j, 2j, 3j]
+
+
+def test_a_kept_dof_follows_its_mode_when_the_fit_flips_it():
+    big = ShapeSet([20.0], [0.01], [*DOFS, '5Z+'], [[*PHI[0], 0.7]], mass_unit='kg')
+    project = _project_of(H=_frf(), Big=big)
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Big'})
+    fit.session.modes[0]['shape'] = -2.0 * fit.session.modes[0]['shape']
+    published = fit.session.shape_set()
+    assert np.allclose(published.shape_matrix, [[*(-2.0 * PHI[0]), -1.4]])
+
+
+def test_edit_fit_honors_a_modal_mass():
+    scaled = ShapeSet([20.0, 50.0, 90.0], [0.01, 0.02, 0.015], DOFS, PHI * 2.0,
+                      modal_mass=[4.0, 4.0, 4.0], mass_unit='kg')
+    measured = _frf(truth=scaled)
+    project = _project_of(H=measured, Set=scaled)
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Set'})
+    assert np.abs(fit.session.residual_matrix()).max() < 1e-9 * np.abs(fit.session.matrix).max()
+    fitting.publish(project, fit, {})
+    out = project['Set']
+    assert list(out.modal_mass) == [4.0, 4.0, 4.0]
+    assert np.allclose(out.shape_matrix, PHI * 2.0)
+    assert np.allclose(out.synthesize_frf(LINES, DOFS, ['1Z+'] * 4, power=2), measured.ordinate)
+
+
+def test_edit_fit_works_on_the_records_its_set_holds():
+    part = ShapeSet([20.0, 50.0, 90.0], [0.01, 0.02, 0.015], DOFS[:2], PHI[:, :2], mass_unit='kg')
+    project = _project_of(H=_frf(), Part=part)
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Part'})
+    assert fit.session.rows == [0, 1] and fit.session.coordinate == DOFS[:2]
+    fitting.publish(project, fit, {})
+    assert project['Part'].coordinate == DOFS[:2]
+    assert np.allclose(project['Part'].shape_matrix, PHI[:, :2])
+
+
+def test_an_unmeasured_pair_is_refused_rather_than_fitted_as_a_zero():
+    pairs = [(dof, '1Z+') for dof in DOFS] + [('1Z+', '4Z+'), ('4Z+', '4Z+')]
+    project = _project_of(H=_frf(pairs))
+    row = _row_of(project, ['H'], 'self.fit')
+    assert not row['ready'] and 'measures 2Z+ against 4Z+' in row['reason']
+    with pytest.raises(ProtocolError, match='2Z\\+ against 4Z\\+, and 1 more'):
+        fitting.start(project, {'frf': 'H'})
+    assert _row_of(project, ['H'], 'self.fit', {'H': [0, 1, 2, 3]})['ready']
+    fit = fitting.start(project, {'frf': 'H', 'records': [0, 1, 2, 3]})
+    _confirm_all(fit)
+    shapes = np.array([mode['shape'] for mode in fit.session.modes])
+    assert np.allclose(np.abs(shapes), np.abs(PHI), atol=1e-3)
+
+
+def test_a_drive_point_written_with_opposite_signs_is_a_drive_point():
+    plain = _frf()
+    negated = Frf(LINES, -plain.ordinate, response_dof=DOFS, reference_dof=['1Z-'] * 4,
+                  ordinate_dim=['acceleration/force'] * 4)
+    project = _project_of(H=negated)
+    fit = fitting.start(project, {'frf': 'H'})
+    _confirm_all(fit)
+    published = fit.session.shape_set()
+    assert not published.unscaled and published.coordinate == DOFS
+    assert np.allclose(np.abs(published.shape_matrix), np.abs(PHI), atol=1e-3)
+    overlay = synthesize_overlay(published, negated)
+    scale = np.abs(negated.ordinate).max()
+    assert np.abs(overlay.ordinate - negated.ordinate).max() < 1e-3 * scale
+    assert np.allclose(fit.session.synthesis_records(), overlay.ordinate)
+
+
+def test_a_line_that_is_not_finite_is_left_out_of_the_fit():
+    rigid = ShapeSet([0.0, 20.0, 50.0], [0.0, 0.01, 0.02], DOFS, PHI, mass_unit='kg')
+    project = _project_of(H=_frf(truth=rigid, power=0, dim='length/force'))
+    assert np.isnan(project['H'].ordinate[:, 0]).all()
+    fit = fitting.start(project, {'frf': 'H'})
+    assert fit.session.frequencies[0] == 0.25
+    fitting.act(fit, 'fit.find', {})
+    assert fitting.state(fit)['pending']['frequency'] > 0.0

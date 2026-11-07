@@ -57,12 +57,91 @@ import numpy as np
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import Frf
-    from .shapes import ShapeSet
 
 from ..units import UNKNOWN
 from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
+from .shapes import ShapeSet, _split_sign
 
 _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
+
+
+def _fit_table(frf: Frf, rows: Sequence[int]
+               ) -> tuple[list[str], list[str], list[tuple[int, int, float]]]:
+    """(responses, references, each record's (row, column, sign)) of a fit
+    over these records.
+
+    One row or column per physical DOF: '1Z-' is minus '1Z+', so a reference
+    written 1Z- on a response written 1Z+ is that response's drive point. A
+    DOF goes by the name it was first written with, responses first, and the
+    sign turns each record into those directions.
+    """
+    named: dict[str, tuple[str, float]] = {}
+
+    def place(dof: str, order: dict[str, int]) -> tuple[int, float]:
+        base, sign = _split_sign(dof)
+        name, first = named.setdefault(base, (dof, sign))
+        return order.setdefault(name, len(order)), sign * first
+
+    responses: dict[str, int] = {}
+    references: dict[str, int] = {}
+    down = [place(frf.response_dof[i], responses) for i in rows]
+    across = [place(frf.reference_dof[i], references) for i in rows]
+    return (list(responses), list(references),
+            [(j, k, a * b) for (j, a), (k, b) in zip(down, across)])
+
+
+def _missing_pairs(responses: list[str], references: list[str],
+                   places: list[tuple[int, int, float]]) -> str:
+    """Why these records cannot be fitted together, or '' when every response
+    has a record against every reference. A pair no record holds would stand
+    in the matrix as a measured zero, and the SVD would bend every shape
+    toward it."""
+    held = {(j, k) for j, k, _sign in places}
+    if len(held) == len(responses) * len(references):
+        return ''
+    missing = [(responses[j], references[k]) for j in range(len(responses))
+               for k in range(len(references)) if (j, k) not in held]
+    more = f', and {len(missing) - 1} more' if len(missing) > 1 else ''
+    return (f'no record measures {missing[0][0]} against {missing[0][1]}{more}: a fit needs '
+            'every response against every reference, so pick records that fill that table')
+
+
+def _adoption_refusal(shapes: ShapeSet) -> str:
+    """Why a fit cannot hold this set's modes as they are, or ''."""
+    if shapes.is_complex:
+        return ('it is a complex shape set and a fit holds real normal modes, so its phases '
+                'would be lost; fit a new set instead')
+    if np.iscomplexobj(shapes.modal_mass) or not np.all(shapes.modal_mass > 0.0):
+        return 'its modal masses are not all real and positive, as a fit\'s scaling needs'
+    return ''
+
+
+def adoptable_records(frf: Frf, shapes: ShapeSet,
+                      records: Sequence[int] | None = None) -> list[int]:
+    """The records (of `records` when given) a fit can start from this set
+    on: those whose response and reference it holds. A record it says nothing
+    about is left out of the fit rather than read as a mode shape of zero."""
+    lookup = shapes._dof_lookup()
+    return [i for i in (range(frf.num_records) if records is None else records)
+            if _split_sign(frf.response_dof[i])[0] in lookup
+            and _split_sign(frf.reference_dof[i])[0] in lookup]
+
+
+def fit_refusal(frf: Frf, records: Sequence[int] | None = None,
+                shapes: ShapeSet | None = None) -> str:
+    """Why a fit of these records, from this set when given, cannot start,
+    or '' when it can: what `ModalFitSession` and `adopt` would refuse, for a
+    row to say before anyone asks."""
+    rows = list(range(frf.num_records)) if records is None else list(records)
+    if shapes is not None:
+        why = _adoption_refusal(shapes)
+        if why:
+            return f'Edit Fit cannot take this set: {why}'
+        rows = adoptable_records(frf, shapes, rows)
+        if not rows:
+            return 'The shape set has no value at the DOFs of any record of this FRF'
+    why = _missing_pairs(*_fit_table(frf, rows))
+    return why[0].upper() + why[1:] if why else ''
 
 
 def prominence_window(lines: int) -> int:
@@ -97,7 +176,11 @@ class ModalFitSession:
     """An interactive fit of real normal modes to one FRF set.
 
     `frf` is the measured FRF. `records` picks which of its records
-    take part, all of them when None. `coherence`, when given, weights
+    take part, all of them when None; they must hold every response
+    against every reference (ValueError), because a pair no record holds
+    is not a measured zero. A line where a picked record is not finite
+    (a rigid mode's receptance at 0 Hz) is left out of the session.
+    `coherence`, when given, weights
     each response channel at each line in the least squares by
     γ²/(1 - γ²), the inverse of the FRF estimate's relative variance,
     with γ² capped at 0.999 and the weights scaled to a maximum of one.
@@ -112,12 +195,12 @@ class ModalFitSession:
         self.frf: Frf = frf
         self.rows: list[int] = (list(range(frf.num_records)) if records is None
                      else [int(i) for i in records])
-        self.responses: list[str] = list(dict.fromkeys(
-            frf.response_dof[i] for i in self.rows))
-        self.references: list[str] = list(dict.fromkeys(
-            frf.reference_dof[i] for i in self.rows))
-        self.frequencies: np.ndarray = np.asarray(frf.abscissa, dtype=np.float64)
-        self.omega: np.ndarray = 2.0 * np.pi * self.frequencies
+        self.responses: list[str]
+        self.references: list[str]
+        self.responses, self.references, self._places = _fit_table(frf, self.rows)
+        missing = _missing_pairs(self.responses, self.references, self._places)
+        if missing:
+            raise ValueError(missing)
         # the measured quantity, from the first record that says;
         # accelerance is the modal-test norm when nothing does
         self.power: int = 2
@@ -126,17 +209,24 @@ class ModalFitSession:
             if numerator in _POWERS:
                 self.power = _POWERS[numerator]
                 break
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
-        self.matrix: np.ndarray = np.zeros(
-            (len(self.frequencies), len(self.responses),
-             len(self.references)), dtype=np.complex128)
-        for i in self.rows:
-            self.matrix[:, row[frf.response_dof[i]],
-                        column[frf.reference_dof[i]]] = frf.ordinate[i]
+        lines = np.asarray(frf.abscissa, dtype=np.float64)
+        matrix = np.zeros((len(lines), len(self.responses), len(self.references)),
+                          dtype=np.complex128)
+        for i, (j, k, sign) in zip(self.rows, self._places):
+            matrix[:, j, k] = sign * frf.ordinate[i]
+        finite = np.isfinite(matrix).all(axis=(1, 2))
+        if not finite.any():
+            raise ValueError('every line of these records holds a NaN or an infinity')
+        self.frequencies: np.ndarray = lines[finite]
+        self.omega: np.ndarray = 2.0 * np.pi * self.frequencies
+        self.matrix: np.ndarray = matrix[finite]
         # shapes cover every DOF seen, response or reference
         self.coordinate: list[str] = self.responses + [
-            dof for dof in self.references if dof not in row]
+            dof for dof in self.references if dof not in self.responses]
+        #: a set's DOFs this fit does not cover, kept on its adopted modes
+        self.kept: list[str] = []
+        #: the set adopted, whose declared units its modes answer to
+        self._adopted: ShapeSet | None = None
         #: one dict per confirmed mode: frequency, damping, shape,
         #: description — the published ShapeSet is built from these
         self.modes: list[dict[str, Any]] = []
@@ -182,10 +272,11 @@ class ModalFitSession:
         """
         if coherence is None:
             return None
-        curves = {dof: i for i, dof in enumerate(coherence.response_dof)}
+        curves = {_split_sign(dof)[0]: i for i, dof in enumerate(coherence.response_dof)}
         out = np.ones((len(self.frequencies), len(self.responses)))
         found = False
         for j, dof in enumerate(self.responses):
+            dof = _split_sign(dof)[0]
             if dof not in curves:
                 continue
             found = True
@@ -206,26 +297,53 @@ class ModalFitSession:
         This is how a published fit is edited. A shape set holds the
         frequency, damping, shape and description of each mode, which is
         everything the session keeps for a confirmed mode. Shapes are
-        matched to this session's DOFs by name: a DOF the set does not
-        have gets zero, and the set's DOFs that are not in this FRF are
-        dropped. A shape set does not store the order its modes were
-        confirmed in, so the adopted modes are replayed in frequency
-        order. A new suggestion is made afterward.
+        matched to this session's DOFs by DOF, sign applied. A shape set
+        does not store the order its modes were confirmed in, so the
+        adopted modes are replayed in frequency order. A new suggestion is
+        made afterward.
+
+        What the session cannot hold faithfully raises ValueError rather
+        than be published over: a complex set (the session's modes are real
+        and second order), a modal mass that is not real and positive, and
+        a set with no value at one of this session's DOFs
+        (`adoptable_records` gives the records it can start on). A modal
+        mass other than one is carried as the same residues at unit modal
+        mass and given back in `shape_set`. The set's DOFs this session
+        does not fit are kept, scaled with their mode, and while there are
+        any a new mode cannot be confirmed, since it would have no value
+        there.
         """
-        positions = {dof: k for k, dof in enumerate(shapes.coordinate)}
+        why = _adoption_refusal(shapes)
+        if why:
+            raise ValueError(f'Edit Fit cannot take this set: {why}')
+        lookup = shapes._dof_lookup()
+        split = [_split_sign(dof) for dof in self.coordinate]
+        lacking = [dof for dof, (base, _sign) in zip(self.coordinate, split)
+                   if base not in lookup]
+        if lacking:
+            raise ValueError(f'the shape set has no value at {lacking[0]}'
+                             f'{"" if len(lacking) == 1 else f" or {len(lacking) - 1} more DOFs"}')
+        columns = [lookup[base][0] for base, _sign in split]
+        signs = np.array([lookup[base][1] * sign for base, sign in split])
+        ours = {base for base, _sign in split}
+        kept = [k for k, dof in enumerate(shapes.coordinate)
+                if _split_sign(dof)[0] not in ours]
+        self.kept = [shapes.coordinate[k] for k in kept]
+        self._adopted = shapes
         for m in range(shapes.num_shapes):
-            shape = np.zeros(len(self.coordinate),
-                             dtype=shapes.shape_matrix.dtype)
-            for k, dof in enumerate(self.coordinate):
-                index = positions.get(dof)
-                if index is not None:
-                    shape[k] = shapes.shape_matrix[m, index]
+            mass = float(shapes.modal_mass[m])
+            shape = shapes.shape_matrix[m, columns] * signs / np.sqrt(mass)
             self.modes.append({'frequency': float(shapes.frequency[m]),
                                'damping': float(shapes.damping[m]),
                                'shape': shape,
-                               'scaled': not getattr(shapes, 'unscaled',
-                                                     False),
-                               'description': shapes.description[m]})
+                               'scaled': not shapes.unscaled,
+                               'description': shapes.description[m],
+                               'comment': shapes.comment[m],
+                               'modal_mass': mass,
+                               'modal_damping': (None if shapes.modal_damping is None
+                                                 else shapes.modal_damping[m]),
+                               'adopted': shape.copy(),
+                               'kept': shapes.shape_matrix[m, kept] / np.sqrt(mass)})
             # a published set has lost its confirm order, so an
             # adopted session replays in frequency order — the one
             # canonical reading of a set whose sequence is gone
@@ -356,12 +474,7 @@ class ModalFitSession:
         total = np.zeros_like(self.matrix)
         for mode in modes:
             total += self._mode_term(mode)
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
-        return np.stack([
-            total[:, row[self.frf.response_dof[i]],
-                  column[self.frf.reference_dof[i]]]
-            for i in self.rows])
+        return np.stack([sign * total[:, j, k] for j, k, sign in self._places])
 
     def _residual_cmif(self):
         residual = self.residual_matrix()
@@ -753,8 +866,16 @@ class ModalFitSession:
         same frequency and damping; otherwise the mode is fitted here.
         The modes are kept sorted by frequency, the confirm order is
         recorded in `confirmed`, and the pending description and any
-        held damping are cleared.
+        held damping are cleared. A session keeping DOFs of an adopted set
+        it does not fit raises ValueError, since the new mode would have
+        no value at them.
         """
+        if self.kept:
+            raise ValueError(
+                f'the set also holds {self.kept[0]}'
+                f'{"" if len(self.kept) == 1 else f" and {len(self.kept) - 1} more DOFs"}, '
+                'which this fit does not measure, so a new mode would have no value there; '
+                'fit a new set to add a mode')
         frequency = (self.pending['frequency'] if frequency is None
                      else float(frequency))
         damping = (self.pending['damping'] if damping is None
@@ -1150,13 +1271,8 @@ class ModalFitSession:
     def residual_records(self) -> np.ndarray:
         """The residual in the source FRF's record layout, (records,
         lines). A plot of the residual draws this."""
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
         residual = self.residual_matrix()
-        return np.stack([
-            residual[:, row[self.frf.response_dof[i]],
-                     column[self.frf.reference_dof[i]]]
-            for i in self.rows])
+        return np.stack([sign * residual[:, j, k] for j, k, sign in self._places])
 
     def _search_band(self, index, widest):
         """Lines to search over: three half-power widths of the widest
@@ -1406,20 +1522,41 @@ class ModalFitSession:
         The mass unit is kg when every fit record has a defined
         dimension, and None otherwise, since shapes fitted to raw values
         are raw. The set is marked unscaled when any mode had no drive
-        point to set its scale.
+        point to set its scale. Adopted modes keep what the session does
+        not fit: the set's other DOFs, modal mass, complex damping and
+        comment, and the set's mass unit stands.
         """
-        from .shapes import ShapeSet
-
         # defined, not merely hinted: known_dim falls back to the file's
         # claim, and a hint scales nothing — shapes fitted to raw values
         # are raw, whatever the file said they measured
         known = all(self.frf.ordinate_dim[i] != UNKNOWN for i in self.rows)
+        unit = 'kg' if known else None
+        if self._adopted is not None and known:
+            unit = self._adopted.mass_unit
+        carried = any(mode.get('modal_damping') is not None for mode in self.modes)
         return ShapeSet(
             frequency=[mode['frequency'] for mode in self.modes],
             damping=[mode['damping'] for mode in self.modes],
-            coordinate=self.coordinate,
-            shape_matrix=np.array([mode['shape'] for mode in self.modes]),
+            coordinate=self.coordinate + self.kept,
+            shape_matrix=np.array([self._published_shape(mode) for mode in self.modes]),
             description=[mode['description'] for mode in self.modes],
-            mass_unit='kg' if known else None,
+            comment=[mode.get('comment', '') for mode in self.modes],
+            modal_mass=[mode.get('modal_mass', 1.0) for mode in self.modes],
+            # a mode the source never saw has no estimate of it
+            modal_damping=([mode.get('modal_damping', np.nan) for mode in self.modes]
+                           if carried else None),
+            mass_unit=unit,
             unscaled=any(not mode.get('scaled', True)
                          for mode in self.modes))
+
+    def _published_shape(self, mode: Mapping[str, Any]) -> np.ndarray:
+        """A mode's row in the published set: back at its own modal mass,
+        with the DOFs the fit does not cover moved by what Refine did to the
+        ones it does, so the mode stays one shape, whichever sign it took."""
+        shape = mode['shape']
+        if self.kept:
+            before = mode['adopted']
+            size = float(before @ before)
+            factor = float(shape @ before) / size if size > 0.0 else 1.0
+            shape = np.concatenate([shape, factor * mode['kept']])
+        return shape * np.sqrt(mode.get('modal_mass', 1.0))
