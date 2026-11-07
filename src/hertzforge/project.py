@@ -5725,7 +5725,8 @@ class Project(dict):
             Units to write in. Omitted, the stored (SI) values are
             written as they are.
         **kwargs
-            Passed through to the exporter.
+            Passed through to the exporter. An Exodus file's `geometry`
+            may be the object or its name, as the journal writes it.
 
         Returns
         -------
@@ -5735,6 +5736,8 @@ class Project(dict):
         from .io import export_file
 
         name = self.name_of(name)
+        if isinstance(kwargs.get('geometry'), str):
+            kwargs['geometry'] = self[kwargs['geometry']]
         export_file(self[name], str(path), unit_system=unit_system,
                     **kwargs)
         return str(path)

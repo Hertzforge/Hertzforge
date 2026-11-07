@@ -156,3 +156,21 @@ def test_a_foreign_save_as_keeps_the_script_running(tmp_path, system):
     op.run(project, {**values, 'units': system})
     assert f'hertzforge.units.SYSTEMS[{system!r}]' in project.journal[-1]
     replayed(project)
+
+
+def test_an_exodus_save_as_replays_with_its_geometry(tmp_path):
+    state = opened(fixture_path('plate', 'geometry.npz'), units={'length_unit': 'in'})
+    state, _ = projects.import_file(state, {'path': fixture_path('plate', 'shapes.npy'),
+                                            'units': {'mass_unit': 'slinch'}})
+    project = state.project
+    shapes = next(n for n in project if n != 'Geometry')
+    path = tmp_path / 's.exo'
+    op = OPS['project.save_as']
+    values = op.resolve({'object': shapes, 'format': 'exodus', 'path': str(path), 'units': 'si'},
+                        objects={name: projects.kind_of(obj) for name, obj in project.items()},
+                        verbs={name: projects.verbs_of(project, name) for name in project})
+    op.run(project, values)
+    assert "geometry='Geometry'" in project.journal[-1]
+    path.unlink()
+    replayed(project)
+    assert path.exists()
