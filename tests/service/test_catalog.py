@@ -50,14 +50,20 @@ def test_every_module_has_its_tools_and_the_shared_ones_say_so(catalog):
     modules = set(Workspace.__args__)
     homes = {op['id']: op['workspace'] for op in catalog['operations']}
     assert set(homes.values()) <= modules
-    for module in ('signals', 'random', 'shock', 'sine', 'modal', 'geometry', 'model',
-                   'specify', 'report'):
+    for module in ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal', 'geometry',
+                   'model', 'specify', 'report'):
         assert module in homes.values(), module
     assert homes['project.shocks'] == 'shock' and homes['project.dwell'] == 'sine'
     assert homes['project.add_solid_block'] == 'geometry' and homes['project.mesh_solids'] == 'model'
     offered = {op['id']: op['modules'] for op in catalog['operations']}
     assert all(module in offered['project.save_as'] for module in ('signals', 'shock', 'model'))
-    assert offered['project.set_averaging'] == ['signals', 'random', 'modal']
+    assert offered['project.set_averaging'] == ['signals', 'sysid', 'random', 'modal']
+    assert homes['project.waveform_error'] == 'transient' and homes['project.srs_error'] == 'shock'
+    assert offered['project.compute_frfs'] == ['sysid', 'modal']
+    assert {homes[f'project.work_up_{m}'] for m in ('sysid', 'random', 'shock', 'transient', 'sine',
+                                                    'modal')} == {'sysid', 'random', 'shock',
+                                                                  'transient', 'sine', 'modal'}
+    assert 'project.set_project_type' not in homes and 'project.work_up' not in homes
     assert offered['project.shocks'] == ['shock']
 
 

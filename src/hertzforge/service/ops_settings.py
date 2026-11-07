@@ -61,7 +61,8 @@ CUT_STOP = Param('stop', 'Stop', 'number', default=1.0, unit='s', step=0.1,
 def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
     """The settings an object carries, as the project summary lists them: a
     time history's {'averaging': {...}, 'filtering': {...}, 'truncation':
-    {...}}, each present only when set, and a report's {'features': {key:
+    {...}}, each present only when set, a geometry's {'rigid': {...}}, and a
+    report's {'features': {key:
     on}} for every report feature and its identification fields
     {'identity': {key: text}}. What a `setting` param opens on."""
     from hertzforge.core.report import Report
@@ -74,6 +75,8 @@ def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
         return {'features': {key: key in held for key in FEATURES},
                 'identity': {field.key: _text(value(obj, field.key)) for field in FIELDS}}
     out: dict[str, dict[str, Any]] = {}
+    if hasattr(obj, 'suggest_mass_properties') and obj.num_nodes:
+        out['rigid'] = _rigid_settings(obj.mass_properties or obj.suggest_mass_properties())
     averaging = getattr(obj, 'averaging', None)
     if averaging is not None:
         out['averaging'] = {
@@ -88,6 +91,17 @@ def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
     truncation = getattr(obj, 'truncation', None)
     if truncation is not None:
         out['truncation'] = {'start': truncation.start, 'stop': truncation.stop}
+    return out
+
+
+def _rigid_settings(properties: Any) -> dict[str, Any]:
+    """A geometry's reference point, mass and inertia, as the Rigid Modes form opens on."""
+    # a centroid's last digits are rounding, and the form would show them
+    x, y, z = (float(f'{value:.12g}') for value in properties.point)
+    out: dict[str, Any] = {'x': x, 'y': y, 'z': z, 'normalize': properties.mass is not None}
+    if properties.mass is not None:
+        out['mass'] = properties.mass
+        out.update(zip(('ixx', 'iyy', 'izz', 'ixy', 'ixz', 'iyz'), properties.inertia))
     return out
 
 

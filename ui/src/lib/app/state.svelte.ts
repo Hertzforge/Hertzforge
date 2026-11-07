@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles } from '$lib/project/files';
+import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -15,7 +15,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ActionColumn, ActionRow, Actions, ExportFormat, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -74,6 +74,8 @@ class AnalyzeState {
 	formOpen = $state(false);
 	/** The table's row the open form came from; null when it came from elsewhere. */
 	formRow = $state<ActionRow | null>(null);
+	/** Which of a lone shape set's views a verb asked for; null, the one selecting it shows. */
+	shapeView = $state<ShapeView | null>(null);
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
 	/** A combination's row whose partner is being picked in the tree. */
@@ -177,6 +179,7 @@ class AnalyzeState {
 			this.line = null;
 			this.pair = null;
 			this.picks = [];
+			this.shapeView = null;
 		}
 		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
@@ -197,10 +200,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						animation: this.prefs.animation,
-						mode_table: this.prefs.mode_table,
-						mac: this.prefs.mac,
-						shape_values: this.prefs.shape_values,
+						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
@@ -260,6 +260,14 @@ class AnalyzeState {
 		}
 	}
 
+	/** One of a lone shape set's views takes the frame; null is the one selecting it shows. */
+	private showShapeView(view: ShapeView | null): void {
+		this.shapeView = view;
+		this.pair = null;
+		this.picks = [];
+		void this.showSelection();
+	}
+
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
@@ -272,6 +280,11 @@ class AnalyzeState {
 		}
 		if (row.kind === 'default') {
 			this.endReading();
+			if (this.shapeView) this.showShapeView(null);
+			return;
+		}
+		if (row.id.startsWith('show.')) {
+			this.showShapeView(row.id.slice('show.'.length) as ShapeView);
 			return;
 		}
 		if (row.kind === 'self') {
@@ -674,7 +687,9 @@ export class FitState {
 
 	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}) });
+		// records picked in the tree limit the fit, as in Visual Dynamics; an Edit Fit takes its set's own
+		const records = shapes ? [] : (this.app.project.selection.records[frf] ?? []);
+		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}), ...(records.length ? { records } : {}) });
 	}
 
 	find(): Promise<boolean> {
@@ -989,10 +1004,6 @@ function readPrefs(): ShowPrefs {
 		projection: false,
 		bars: true,
 		overlay: true,
-		animation: true,
-		mode_table: true,
-		mac: true,
-		shape_values: false,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
@@ -1006,7 +1017,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay', 'animation', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
@@ -1271,11 +1282,17 @@ export class ProjectState {
 		return true;
 	}
 
-	paste(): Promise<boolean> {
+	async paste(): Promise<boolean> {
+		// files copied elsewhere since, as VD reads the clipboard: a copy here puts text on it and no file
+		const paths = await pastedFiles();
+		if (paths.length) {
+			await this.openPaths(paths);
+			return true;
+		}
 		const ours = this.copied.filter((n) => this.summary?.objects.some((o) => o.name === n));
 		if (!ours.length) {
 			this.error = this.copied.length ? 'The copied objects are not in this project' : 'Nothing copied to paste';
-			return Promise.resolve(false);
+			return false;
 		}
 		return this.duplicate(ours);
 	}
@@ -1322,6 +1339,13 @@ export class ProjectState {
 		const order = ['reference', 'response', 'monitor'];
 		const next = order[(order.indexOf(role) + 1) % order.length];
 		const ok = await this.act(`Making ${name}'s channel ${index + 1} a ${next}`, 'project.set_channel_role', { source: name, record: index + 1, role: next });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
+		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
 		if (ok) void this.loadChildren(name);
 		return ok;
 	}

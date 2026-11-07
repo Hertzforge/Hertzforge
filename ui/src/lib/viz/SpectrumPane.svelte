@@ -42,11 +42,15 @@
 		onRange?: (low: number, high: number) => void;
 		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
 		marker?: number | null;
+		/** Thin lines at these x values: a reading's crossings beside the marker. */
+		guides?: number[];
+		/** The marker can be dragged: `x` where it is, `fraction` of the way down the plot. `done` on release. */
+		onMarkerDrag?: (x: number, fraction: number, moved: { x: boolean; y: boolean }, done: boolean) => void;
 		/** A handle let go at `decibels`. */
 		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, onhandle, onspan }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, guides = [], onMarkerDrag, onhandle, onspan }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -319,8 +323,20 @@
 		placePlayLine();
 		markerLine = document.createElement('div');
 		markerLine.className = 'marker';
+		if (onMarkerDrag) {
+			const grip = document.createElement('div');
+			grip.className = 'marker-grip';
+			grip.title = 'Drag across to move the cursor, up and down to set the damping';
+			// the line's own drag, not the plot's zoom
+			grip.addEventListener('mousedown', (e) => e.stopPropagation());
+			grip.addEventListener('click', (e) => e.stopPropagation());
+			grip.addEventListener('pointerdown', startMarkerDrag);
+			markerLine.appendChild(grip);
+		}
 		plot.over.appendChild(markerLine);
 		placeMarker();
+		guideEls = [];
+		placeGuides();
 		regionEls = (view.regions ?? []).map((r, k) => {
 			const el = document.createElement('div');
 			el.className = `region ${r.kind}`;
@@ -367,6 +383,58 @@
 		yRange = next;
 		plot.setScale('y', { min: next[0], max: next[1] });
 	}
+
+	function startMarkerDrag(e: PointerEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		const fromX = e.clientX;
+		const fromY = e.clientY;
+		const grip = e.currentTarget as HTMLElement;
+		grip.setPointerCapture?.(e.pointerId);
+		const report = (ev: PointerEvent, done: boolean) => {
+			if (!plot || !markerLine) return;
+			const box = plot.over.getBoundingClientRect();
+			const left = Math.min(box.width, Math.max(0, ev.clientX - box.left));
+			const moved = { x: Math.abs(ev.clientX - fromX) > 3, y: Math.abs(ev.clientY - fromY) > 3 };
+			if (moved.x) markerLine.style.left = `${left}px`;
+			const fraction = Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height));
+			onMarkerDrag?.(plot.posToVal(left, 'x'), fraction, moved, done);
+		};
+		const move = (ev: PointerEvent) => report(ev, false);
+		const up = (ev: PointerEvent) => {
+			grip.removeEventListener('pointermove', move);
+			grip.removeEventListener('pointerup', up);
+			grip.removeEventListener('pointercancel', up);
+			report(ev, true);
+		};
+		grip.addEventListener('pointermove', move);
+		grip.addEventListener('pointerup', up);
+		grip.addEventListener('pointercancel', up);
+	}
+
+	let guideEls: HTMLDivElement[] = [];
+	/** The thin lines at `guides`, in the plot's top layer. */
+	function placeGuides() {
+		if (!plot) return;
+		while (guideEls.length > guides.length) guideEls.pop()!.remove();
+		while (guideEls.length < guides.length) {
+			const el = document.createElement('div');
+			el.className = 'guide';
+			plot.over.appendChild(el);
+			guideEls.push(el);
+		}
+		guides.forEach((x, i) => {
+			const left = plot!.valToPos(x, 'x');
+			const inside = left >= 0 && left <= plot!.over.clientWidth;
+			guideEls[i].style.display = inside ? '' : 'none';
+			if (inside) guideEls[i].style.left = `${left}px`;
+		});
+	}
+
+	$effect(() => {
+		void guides;
+		placeGuides();
+	});
 
 	let handleEls: HTMLDivElement[] = [];
 	/** The series' value nearest `x`, where a handle sits. */
@@ -847,6 +915,26 @@
 
 	.plot :global(.region.drag:hover) {
 		background: var(--region-frame);
+	}
+
+	.plot :global(.marker-grip) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -5px;
+		width: 10px;
+		cursor: move;
+		pointer-events: auto;
+		touch-action: none;
+	}
+
+	.plot :global(.guide) {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 0;
+		border-left: 1px dotted var(--text-3);
+		pointer-events: none;
 	}
 
 	.plot :global(.marker) {

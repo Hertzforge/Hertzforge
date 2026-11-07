@@ -4,7 +4,9 @@
 		| 'simulate'
 		| 'signals'
 		| 'random'
+		| 'sysid'
 		| 'shock'
+		| 'transient'
 		| 'sine'
 		| 'modal'
 		| 'geometry'
@@ -62,6 +64,11 @@
 		<path d="M5.5 13.5l2.5-5 2.5 3.5 2.2-6 2.3 4" />
 	{:else if name === 'shock'}
 		<path d="M2.5 13h4l2-9 2 13 2-7 1.5 3h3.5" />
+	{:else if name === 'sysid'}
+		<path d="M2.5 6.5h3l1.5-3 2 6 1.5-3h2" />
+		<path d="M3 16.5c3 0 4-5 6.5-5s3.500 3 7.500 3" />
+	{:else if name === 'transient'}
+		<path d="M2.500 10h3c1 0 1.300-5 2.500-5s1.500 10 2.800 10 1.400-7.500 2.400-7.500 1 2.500 2 2.500h1.800" />
 	{:else if name === 'sine'}
 		<path d="M2.5 10c1.9-6 3.7-6 5.6 0s3.7 6 5.6 0 2.7-4.5 3.8-3" />
 	{:else if name === 'geometry'}

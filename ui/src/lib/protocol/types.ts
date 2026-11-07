@@ -176,6 +176,8 @@ export interface Motion {
 	direction: Float32Array;
 	/** f32 [D, S]: DOF d at sample k is values[d * S + k]. */
 	values: Float32Array;
+	/** f32 [M, D, 3]: each mode's offset at each moved node; then `values` is [M, S], modal coordinates. */
+	modes?: Float32Array;
 	/** The furthest any node gets, in value_unit. */
 	peak: number;
 }
@@ -232,6 +234,8 @@ export interface Pick3D {
 	count?: number;
 	/** nodes: the param the ids go in. */
 	param?: string;
+	/** nodes: how many of the last `ids` are left out, and drawn dim. */
+	off?: number;
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */
@@ -378,7 +382,7 @@ export type ViewKind = View['view'];
  * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
  * project type as Visual Dynamics did.
  */
-export type Workspace = 'acquire' | 'simulate' | 'signals' | 'random' | 'shock' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 
@@ -449,6 +453,9 @@ export interface Actions {
 }
 
 /** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
+/** A lone shape set's views, shown one at a time. */
+export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
+
 export interface ExportFormat {
 	/** The `format` param's value. */
 	value: string;
@@ -523,12 +530,7 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
-	/** A lone shape set's three views, one always up, and where and in what form its values are read. */
-	/** A lone shape set's modes animated on its geometry; off, that pane is put away and not computed. */
-	animation: boolean;
-	mode_table: boolean;
-	mac: boolean;
-	shape_values: boolean;
+	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';
 	/** DOF arrows and the channel table's sensors over every stage. */

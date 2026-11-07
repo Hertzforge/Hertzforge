@@ -13,7 +13,7 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
 	import { spans, type Span } from './brackets';
-	import { landsBefore, treeOrder } from './order';
+	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 
@@ -98,6 +98,47 @@
 		if (dropOut && (links ?? []).some((g) => g.members.some((m) => dragging?.includes(m)))) return landsBefore(p.summary?.objects ?? [], links, dragging, null);
 		return undefined;
 	});
+	/** A solid being dragged among its siblings (VD's drag in the tree): a subtraction cuts the rest from the first. */
+	let solidDrag: { name: string; id: number; within: number | null; ids: number[]; y: number; moved: boolean } | null = null;
+	let solidPlace = $state<{ name: string; within: number | null; before: number | null } | null>(null);
+	let solidDragged = false;
+	function solidDown(e: PointerEvent, name: string, id: number, within: number | null, ids: number[]) {
+		if (e.button !== 0 || ids.length < 2) return;
+		e.stopPropagation();
+		solidDrag = { name, id, within, ids, y: e.clientY, moved: false };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function solidMove(e: PointerEvent) {
+		const drag = solidDrag;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved && Math.abs(e.clientY - drag.y) < 6) return;
+		drag.moved = true;
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-solid]');
+		if (!row || row.dataset.solidOf !== `${drag.name}|${drag.within ?? ''}`) {
+			solidPlace = null;
+			return;
+		}
+		const over = Number(row.dataset.solid);
+		const box = row.getBoundingClientRect();
+		const after = e.clientY > box.top + box.height / 2;
+		const next = drag.ids[drag.ids.indexOf(over) + 1] ?? null;
+		solidPlace = { name: drag.name, within: drag.within, before: after ? next : over };
+	}
+	function solidUp(e: PointerEvent) {
+		const drag = solidDrag;
+		const place = solidPlace;
+		solidDrag = null;
+		solidPlace = null;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved) return;
+		solidDragged = true;
+		setTimeout(() => (solidDragged = false), 0);
+		if (!place) return;
+		const order = reordered(drag.ids, drag.id, place.before);
+		if (order.some((id, k) => id !== drag.ids[k])) void p.reorderSolids(drag.name, order, drag.within);
+	}
 	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
 	let justDragged = false;
 	function dragDown(e: PointerEvent, o: ProjectObject) {
@@ -232,23 +273,31 @@
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
 </script>
 
-{#snippet solidRows(name: string, solids: SolidRow[], depth: number)}
+{#snippet solidRows(name: string, solids: SolidRow[], depth: number, within: number | null = null)}
 	{#each solids as solid (solid.id)}
 		<div
 			class="sub"
 			class:picked={partPicked(name, 'solid', solid.id)}
+			class:place-solid={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === solid.id}
+			class:place-solid-end={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === null && solid === solids[solids.length - 1]}
 			style="--depth: {depth}"
 			role="treeitem"
 			aria-selected={partPicked(name, 'solid', solid.id)}
 			tabindex="-1"
 			data-testid="solid-{name}-{solid.id}"
-			onclick={() => p.clickPart(name, 'solid', solid.id)}
+			data-solid-of="{name}|{within ?? ''}"
+			data-solid={solid.id}
+			onpointerdown={(e) => solidDown(e, name, solid.id, within, solids.map((x) => x.id))}
+			onpointermove={solidMove}
+			onpointerup={solidUp}
+			onpointercancel={() => { solidDrag = null; solidPlace = null; }}
+			onclick={(e) => { if (solidDragged) { e.stopPropagation(); return; } p.clickPart(name, 'solid', solid.id); }}
 			onkeydown={(e) => e.key === 'Enter' && p.clickPart(name, 'solid', solid.id)}
 		>
 			<Glyph name={solidIcon(solid.kind)} of="child" parent="geometry" size={14} />
 			<span class="label">{solid.label}</span>
 		</div>
-		{#if solid.children.length}{@render solidRows(name, solid.children, depth + 1)}{/if}
+		{#if solid.children.length}{@render solidRows(name, solid.children, depth + 1, solid.id)}{/if}
 	{/each}
 {/snippet}
 
@@ -523,6 +572,28 @@
 	}
 
 	/* where the dragged objects will land */
+	.sub[data-solid] {
+		position: relative;
+		touch-action: none;
+	}
+	.sub.place-solid::before,
+	.sub.place-solid-end::after {
+		content: '';
+		position: absolute;
+		right: 0;
+		left: 0;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+		pointer-events: none;
+	}
+	.sub.place-solid::before {
+		top: -1px;
+	}
+	.sub.place-solid-end::after {
+		bottom: -1px;
+	}
+
 	.row.place::before,
 	.tree.place-end::after {
 		content: '';
