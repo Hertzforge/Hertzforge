@@ -67,7 +67,10 @@ root attributes:
     provenance        JSON: {name: {"verb", "source", "params",
                       "state"}, ...}, how each derived object was
                       computed, with the settings fingerprint the
-                      staleness check compares against
+                      staleness check compares against. Optional key
+                      "source_print", the digest of the source's values
+                      when the fingerprint holds settings only; absent,
+                      only the settings are compared
 
 A project whose data index holds anything also has one dataset at the
 root (absent otherwise):

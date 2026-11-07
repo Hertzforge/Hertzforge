@@ -16,6 +16,7 @@ that report is made from.
 from __future__ import annotations
 
 import contextlib
+import copy
 import os
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -225,9 +226,41 @@ def retarget(obj: Any, mapping: dict[str, str]) -> None:
     if isinstance(obj, Report):
         for block in obj.blocks:
             for key in ('source', 'geometry', 'dofs_source', 'shapes',
-                        'measured'):
+                        'measured', 'floor', 'specification'):
                 if block.get(key) in mapping:
                     block[key] = mapping[block[key]]
+
+
+#: the recipe params that name other objects, by verb
+_PARAMS_NAMING: dict[str, tuple[str, ...]] = {
+    'transform': ('shapes',), 'expand': ('shapes',),
+    'compute_modal_responses': ('shapes',),
+    'extract_sine': ('specification',),
+    'derive_specification': ('sources',),
+    'plan_instrumentation': ('geometry',)}
+
+
+def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
+    """A recipe's name, or a list of names and (name, record) pairs,
+    with renamed objects' new names."""
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, (list, tuple)):
+        return [_renamed(each, mapping) for each in value]
+    return value
+
+
+def _retarget_record(record: dict[str, Any], mapping: Mapping[str, str]) -> None:
+    """Point a provenance record at renamed objects, in place."""
+    if record.get('source') in mapping:
+        record['source'] = mapping[record['source']]
+    params = record.get('params') or {}
+    for key in _PARAMS_NAMING.get(record.get('verb'), ()):
+        if key in params:
+            params[key] = _renamed(params[key], mapping)
+    draft = params.get('draft')
+    if isinstance(draft, dict) and draft.get('sources'):
+        draft['sources'] = _renamed(draft['sources'], mapping)
 
 
 # What each kind of object is called when it is reached by type
@@ -667,6 +700,8 @@ class Project(dict):
             n += 1
             unique = f'{name} ({n})'
         self[unique] = obj
+        # a recipe kept under a removed name is not this object's
+        self.provenance.pop(unique, None)
         if self.active_geometry is None and isinstance(obj, Geometry):
             self.active_geometry = unique
         return unique
@@ -691,7 +726,6 @@ class Project(dict):
         list of str
             The names the copies were added under, in order.
         """
-        import copy
 
         added = []
         for name in names:
@@ -784,6 +818,7 @@ class Project(dict):
                 # imported objects carry follow it
                 for obj in result.values():
                     retarget(obj, mapping)
+            self._adopt_provenance(result.provenance, mapping)
             self.object_groups += remap_links(
                 result.object_groups, mapping,
                 {group['role'] for group in self.object_groups if group['role']})
@@ -812,6 +847,23 @@ class Project(dict):
                 refer(added[0], '')
         self._index_import(local, result, added, checksum)
         return added
+
+    def _adopt_provenance(self, records: Mapping[str, dict[str, Any]],
+                          mapping: Mapping[str, str]) -> None:
+        """Bring an imported project's recipes across under the names its
+        objects took. A record naming something the import did not bring
+        (a removed step) comes only when that name means nothing here, so
+        it is never read as this project's object of the same name."""
+        def free(name: str) -> bool:
+            return (name in mapping or name not in self
+                    and name not in self.unresolved
+                    and name not in self.provenance)
+
+        for name, record in records.items():
+            if free(name) and free(record.get('source')):
+                moved = copy.deepcopy(record)
+                _retarget_record(moved, mapping)
+                self.provenance[mapping.get(name, name)] = moved
 
     def _index_import(self, path: str, result: Any, added: Sequence[str],
                       checksum: tuple[int, str]) -> IndexEntry:
@@ -865,6 +917,19 @@ class Project(dict):
                     (n for n, obj in self.items()
                      if isinstance(obj, Geometry)), None)
         self._prune_links()
+        self._prune_provenance()
+
+    def _prune_provenance(self) -> None:
+        """Forget the recipe of every removed object that nothing left
+        descends through. A later object of that name is not what the
+        recipe made, and a refresh would overwrite it."""
+        kept: set[str] = set()
+        for name in [*self, *self.unresolved]:
+            while name in self.provenance and name not in kept:
+                kept.add(name)
+                name = self.provenance[name].get('source')
+        for name in set(self.provenance) - kept:
+            del self.provenance[name]
 
     def rename(self, old: str, new: str) -> str:
         """Rename an object and change every reference to it.
@@ -905,11 +970,11 @@ class Project(dict):
                                 for member in group['members']]
         for obj in self.values():
             retarget(obj, {old: new})
+        self.provenance.pop(new, None)
         if old in self.provenance:
             self.provenance[new] = self.provenance.pop(old)
         for record in self.provenance.values():
-            if record.get('source') == old:
-                record['source'] = new
+            _retarget_record(record, {old: new})
         self.data_index.rename_object(old, new)
         if old in self.references:
             self.references[new] = self.references.pop(old)
@@ -8153,6 +8218,9 @@ class Project(dict):
             self.provenance[added] = {
                 'verb': verb, 'source': source, 'params': dict(params),
                 'state': self._analysis_state(source, verb, params)}
+            values = self._source_values(source, verb)
+            if values is not None:
+                self.provenance[added]['source_print'] = values
         return added
 
     # ---- staleness: what a change to the analysis settings owes ---------
@@ -8194,6 +8262,23 @@ class Project(dict):
         # the pair and the set's damping and modal masses, which a
         # transform never reads and a response does
         'compute_modal_responses': 'pair+model'}
+
+    #: the fingerprints that hold settings only: a verb reading one reads
+    #: the record's values as well, and those are compared on their own
+    #: (`source_print` in the record), so a project saved before they
+    #: were kept still compares its settings and opens with nothing stale
+    _READS_VALUES_TOO: ClassVar[frozenset[str]] = frozenset({
+        'averaging', 'averaging+roles', 'shocks', 'filtering', 'truncation',
+        'sine_extraction'})
+
+    def _source_values(self, source: str, verb: str) -> str | None:
+        """The digest of the source's values when `verb` reads them and
+        its fingerprint does not, otherwise None."""
+        obj = self.get(source)
+        if (obj is None or not hasattr(obj, 'ordinate')
+                or self._VERB_READS.get(verb) not in self._READS_VALUES_TOO):
+            return None
+        return _values_digest(obj)
 
     def _analysis_state(self, source: str, verb: str,
                         params: Mapping[str, Any] | None = None) -> Any:
@@ -8291,7 +8376,7 @@ class Project(dict):
 
     def stale(self) -> dict[str, str]:
         """{derived name: reason} for every derived object whose source's
-        settings have changed since it was computed.
+        settings or values have changed since it was computed.
 
         An object whose source is gone, or whose provenance records no
         state to compare, is not reported.
@@ -8307,6 +8392,9 @@ class Project(dict):
                 continue
             if _state_tuple(now) != _state_tuple(was):
                 out[name] = _state_story(was, now)
+            elif record.get('source_print') not in (None, self._source_values(
+                    record['source'], record['verb'])):
+                out[name] = "its source's values have changed"
         return out
 
     def refresh(self, name: Any) -> str:
@@ -8343,6 +8431,10 @@ class Project(dict):
         rebuilt = _RECOMPUTE[verb](self, source, params)
         self[name] = rebuilt
         record['state'] = self._analysis_state(source, verb, params)
+        record.pop('source_print', None)
+        values = self._source_values(source, verb)
+        if values is not None:
+            record['source_print'] = values
         return name
 
     def refresh_stale(self) -> list[str]:
@@ -8800,6 +8892,38 @@ def _generated_again(source: Any, params: Mapping[str, Any]) -> Any:
     from .core.signals import SignalSettings, generate
 
     return generate(source, SignalSettings.from_dict(params))
+
+
+#: an array up to this size is digested whole, and a longer one by blocks
+#: spread over it, so a stale check on a run of any size reads a bounded
+#: amount. Every way the core changes a long record reaches the blocks: a
+#: rescale, a recompute, or a change of shape.
+_DIGEST_WHOLE_BYTES = 1 << 24
+_DIGEST_BLOCKS = 256
+
+
+def _values_digest(obj: Any) -> str:
+    """A digest of a data object's abscissa, ordinate and units, the same
+    whether the arrays are in memory or mapped from a saved file. The
+    coordinates are left out: correcting one follows through to what was
+    derived (`Project.rename_dof`) and changes no number."""
+    import hashlib
+
+    digest = hashlib.blake2b(digest_size=16)
+    for array in (obj.abscissa, obj.ordinate):
+        array = np.asarray(array)
+        digest.update(repr(array.shape).encode())
+        flat = np.ascontiguousarray(array).reshape(-1)
+        if flat.nbytes <= _DIGEST_WHOLE_BYTES:
+            digest.update(flat.tobytes())
+            continue
+        block = max(_DIGEST_WHOLE_BYTES // (_DIGEST_BLOCKS * flat.itemsize), 1)
+        for start in np.linspace(0, flat.size - block, _DIGEST_BLOCKS,
+                                 dtype=np.int64):
+            digest.update(flat[start:start + block].tobytes())
+    digest.update(repr((obj.ordinate_dim, obj.ordinate_unit,
+                        obj.reference_unit)).encode())
+    return digest.hexdigest()
 
 
 def _signal_source_digest(obj: Any) -> str:
@@ -9367,13 +9491,19 @@ def _named_state(kind, value):
     named = dict(value) if isinstance(value, dict) else dict(zip(spec, value))
     named = {field: named.get(field, default)
              for field, default in spec.items()}
+    # a field the class leaves out of its own equality (who chose an
+    # averaging's start) is not a setting that moved; older fingerprints
+    # do not have it
+    uncompared = [field.name for field in fields(cls) if not field.compare]
     try:
-        return asdict(cls(**named))
+        named = asdict(cls(**named))
     except (TypeError, ValueError):
         # a fingerprint the class refuses outright (recorded by some
         # future format this code predates) compares as recorded —
         # absence of evidence is not staleness
-        return named
+        pass
+    return {field: value for field, value in named.items()
+            if field not in uncompared}
 
 
 def _state_tuple(state):
