@@ -1,16 +1,15 @@
 # Hertzforge
 
-Hertzforge will be one toolset for structural dynamics testing, from
-acquiring the data to analyzing it. It is being built by merging two
-existing projects: Kevin Cross's data acquisition software, and Visual
-Dynamics, Brandon Zwink's structural dynamics toolset
-(https://visualdynamics.org).
+Hertzforge is one toolset for structural dynamics testing, from acquiring
+the data to analyzing it. It joins Kevin Cross's data acquisition software
+with Brandon Zwink's structural dynamics analysis.
 
-Visual Dynamics' analysis core is in this repository now, under
-`src/hertzforge/`. The `hertzforge` package on PyPI at 0.0.1 predates it and
-installs only a command that prints its version; 0.1.0 is the release that
-carries the core, and the desktop app of the same number is on
-[hertzforge.com](https://hertzforge.com).
+The analysis core is under `src/hertzforge/`. The `hertzforge` package on PyPI
+at 0.0.1 predates it and installs only a command that prints its version;
+0.1.0 is the release that carries the core, and the desktop app of the same
+number is on [hertzforge.com](https://hertzforge.com).
+
+If you used Visual Dynamics, your `.vdyn` projects open here.
 
 ```
 pip install hertzforge
@@ -20,13 +19,13 @@ hertzforge --version
 ## The First Vertical Slice
 
 The rest of this repository is the first slice through every layer of the
-merged toolset, built as the foundation rather than a demo. Its code still
-carries the working name `sds`; renaming it into the `hertzforge` package
-layout is a mechanical change that comes next.
+merged toolset. What still carries the working name `sds` is the
+`crates/sds-control` crate, the protocol id `sds/1` and the shell's saved
+theme setting.
 
 | Path | Language | Owns |
 |---|---|---|
-| `src/hertzforge/` | Python | The `hertzforge` package: the analysis core from Visual Dynamics, its readers and writers, reports, and the `hertzforge` command |
+| `src/hertzforge/` | Python | The `hertzforge` package: the analysis core, its readers and writers, reports, and the `hertzforge` command |
 | `src/hertzforge/service/` | Python | The analysis service: the core behind the protocol, started by `hertzforge serve` |
 | `schema/` | JSON | The protocol (`PROTOCOL.md`, `protocol.schema.json`) and golden frames every codec is tested against |
 | `crates/sds-control/` | Rust | The control service. Runs closed-loop Random on the simulator or on NI-DAQmx hardware, on loopback |
@@ -50,7 +49,7 @@ time, so building and testing need no NI software installed.
   scripting API.
 - TypeScript owns every pixel and no numerics. A view asks a service for a result and draws it.
 - Spectra are plotted the way they are calculated: a density per line is drawn flat across its bin,
-  one df wide, as Visual Dynamics draws it. The service that computed the data says how it is drawn.
+  one df wide. The service that computed the data says how it is drawn.
 - The control loop and abort path never depend on the GUI, the network, or Python.
 - A simulated run is always marked `source: "SIM"` and is never presented as a hardware result.
 - No employer, client, laboratory or partner names anywhere in the tree.

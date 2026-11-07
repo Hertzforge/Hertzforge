@@ -254,7 +254,7 @@ class SpecificationDraft:
                     'the shape set has no mass unit, so its modal '
                     'coordinates have no unit and a specification written '
                     'at them would be in nothing — declare the set\'s mass '
-                    'unit first (Define Units)')
+                    'unit first')
             dims.append(dim)
         return cls.at_dofs([names[k] for k in which], dims)
 
@@ -439,7 +439,7 @@ class SpecificationDraft:
             raise ValueError(
                 f'{len(undeclared)} of its channels ({shown}) have no declared '
                 'units, so the sheet cannot tell what its levels are; declare '
-                'them in the Imported Units pane, then press Edit again')
+                'them, then edit the specification again')
         notes = []
         # a sheet holds positive levels at positive frequencies; a
         # controller's target starts at 0 Hz and rolls off to nothing at

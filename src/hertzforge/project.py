@@ -10028,8 +10028,8 @@ ASK = _Ask()
 
 #: what `ASK` answers: it opened a file dialog in Visual Dynamics' Qt app,
 #: and Hertzforge's Python code opens no windows; the shell asks instead
-_NO_DIALOG = ('ASK opens a file dialog, which the Python API cannot do: name '
-              'the {what} (a path, or a list of paths for several runs)')
+_NO_DIALOG = ('the Python API opens no dialog to ask with: name the {what} '
+              '(a path, or a list of paths for several runs)')
 
 
 def _report_path(run: str | os.PathLike,

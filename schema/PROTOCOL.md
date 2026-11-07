@@ -381,7 +381,7 @@ the person picks one there.
 
 `workspace` is the module the operation belongs to, the rail entry that offers it: `acquire`,
 `simulate`, `signals` (recordings and what is read straight off them), `random`, `shock`, `sine`,
-`modal`, `geometry`, `model`, `specify` or `report`. Visual Dynamics put every analysis under one
+`transient`, `sysid`, `modal`, `geometry`, `model`, `specify` or `report`. Visual Dynamics put every analysis under one
 window and typed the project instead; Hertzforge splits the analysis by what is studied, so a sine
 test is not offered shock tools. The modules share one project, one tree and one way of showing a
 selection; they differ in which operations their action table offers. An operation's `modules`

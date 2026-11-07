@@ -178,7 +178,8 @@ def operate(project: Any, name: str, params: Mapping[str, Any]) -> int | None:
     if op == 'insert':
         kind = params.get('kind')
         if not isinstance(kind, str):
-            raise bad_request('report.operate insert needs "kind", one of the Insert menu\'s')
+            raise bad_request('report.operate insert needs "kind", one of '
+                              + ', '.join(sorted(BLOCK_TEMPLATES)))
         at = params.get('at')
         if at is not None and (isinstance(at, bool) or not isinstance(at, int)):
             raise bad_request('report.operate "at" is a block index')

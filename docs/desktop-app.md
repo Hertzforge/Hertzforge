@@ -21,7 +21,7 @@ is not in it: the example projects are downloads on hertzforge.com (`scripts/mak
 writes them).
 
 The CI workflow `.github/workflows/desktop.yml` builds on every push to the desktop branch and on
-demand: a `.dmg` for macOS on Apple silicon, an NSIS installer (`*-setup.exe`) for Windows x64, and
+demand: a `.dmg` each for macOS on Apple silicon and on Intel, an NSIS installer (`*-setup.exe`) for Windows x64, and
 a `.deb` and an AppImage for Linux x64, as workflow artifacts kept for 14 days. It is not a required
 check.
 
@@ -246,5 +246,5 @@ later app updates from.
   and Linux, which have no menu bar yet, those are buttons in the top bar. They use the native dialogs, and
   files dropped on the window open or import by their paths (`capabilities/main.json` grants the
   main window its events and the two dialogs; the display windows get nothing).
-- Intel Macs and Windows on Arm.
+- Windows on Arm.
 - Updates on Windows and Linux: the updater is wired for the macOS app only.

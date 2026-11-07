@@ -20,7 +20,7 @@ jobs:
         with: {python-version: '3.14'}
       - name: Test
         run: |
-          pip install -q . pytest
+          pip install -q . pytest jsonschema
           pytest -q
       - name: Build
         run: |

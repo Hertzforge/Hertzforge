@@ -123,3 +123,10 @@ def test_the_shock_demo_follows_the_recommended_workflow(builders):
     # the events are marked on the recording and carried forward
     assert project[raw].shocks, 'the recording carries its own events'
     assert tuple(project[filtered].shocks) == tuple(project[raw].shocks)
+
+
+def test_the_generator_saves_every_project_it_builds(builders, tmp_path, monkeypatch):
+    monkeypatch.setattr(builders, 'OUT', tmp_path)
+    builders.main()
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        'modal.hforge', 'random.hforge', 'shock.hforge']

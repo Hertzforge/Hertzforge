@@ -79,6 +79,22 @@ jobs:
           # 2026-11-01; raise it when the number rises, never lower it to pass.
           python -m coverage report --fail-under=90 > /dev/null
 
+  # The guide's mesh table: 11 CPU-minutes here and 17 minutes of a runner, so
+  # weekly and on demand rather than on every pull request.
+  guide:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist
+      - name: Test
+        run: python -m pytest tests/test_demo_shapes.py -q -n auto -m guide
+
   # The analysis service (hertzforge.service) on every platform a desktop
   # build targets, in the package's own environment.
   analysis:
