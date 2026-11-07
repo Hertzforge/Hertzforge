@@ -180,6 +180,13 @@ def test_extract_sine_draws_the_levels_it_added(validate):
     assert np.median(stations(stage)['T level'][2]) == pytest.approx(10.0, rel=1e-3)
 
 
+def test_a_sine_specification_of_undeclared_units_generates_nothing():
+    project = Project()
+    tone = SineTone('T', 0.0, [100.0, 300.0], [[2.0]] * 2, [LINEAR], [50.0])
+    project.add('Un', SineSweepSpecification([tone], ['1Z+']))
+    with pytest.raises(ProtocolError, match='declare its units'):
+        run(project, 'project.generate_signal', source='Un', kind='sine', sample_rate=4096.0)
+    assert project.names == ['Un']
 
 
 def _requirement():
