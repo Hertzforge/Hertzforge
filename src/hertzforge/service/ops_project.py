@@ -164,6 +164,8 @@ KEEP_DIAGONAL = Param('keep_diagonal', 'Keep the diagonal', 'boolean', default=T
 def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.detect_shocks`: mark the shocks found on a time history
     (`Project.detect_shocks`), which Compute SRS then reads."""
+    from .ops_sine_shock import _editable
+
     source = params['source']
     try:
         count = project.detect_shocks(source)
@@ -181,12 +183,13 @@ def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
         added = project.extract_sine(params['source'])
     except ValueError as error:
         raise refused(str(error)) from None
+    from .show import _sine
+
     views = []
     for name in added:
-        view = waterfall_view(name, project[name])
-        view.pop('quantities', None)
-        view.pop('quantity', None)
-        views.append(view)
+        spec = project.provenance[name]['params']['specification']
+        drawn, _notes = _sine(project, spec, name, {}, {})
+        views += drawn
     return views
 
 

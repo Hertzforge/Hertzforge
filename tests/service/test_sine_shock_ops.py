@@ -170,6 +170,14 @@ def _one_tone_project():
     return project
 
 
+def test_extract_sine_draws_the_levels_it_added(validate):
+    project = _one_tone_project()
+    views = run(project, 'project.extract_sine', source='R')
+    assert sorted(project.names) == ['R', 'S', 'Sine Levels']
+    wire_views(views, validate)
+    (stage,) = views
+    assert stage['view'] == 'waterfall'
+    assert np.median(stations(stage)['T level'][2]) == pytest.approx(10.0, rel=1e-3)
 
 
 
