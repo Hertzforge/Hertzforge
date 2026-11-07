@@ -395,15 +395,13 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
     """The MAC of `first`'s modes against `second`'s (`mac`), limited to
     the `row_modes` and `column_modes` picked (indices from 0) when
     given, its axes ticked with those modes' frequencies."""
-    from hertzforge.core.shapes import cross_mac
-
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
         raise refused(f'{first if not rows.num_shapes else second} has no modes')
     try:
-        values = rows.auto_mac() if first == second else cross_mac(rows, columns)
+        values = rows.auto_mac() if first == second else project.comparison_mac(first, second)
     except ValueError as error:
         raise refused(str(error)) from None
     row_modes = list(row_modes) if row_modes else list(range(rows.num_shapes))
@@ -423,7 +421,8 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
 
 def mac(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mac`: the Modal Assurance Criterion of one shape set's
-    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    modes against another's (`Project.comparison_mac`, so across two
+    geometries after projection, as the selection and Match Modes read it),
     or a set against itself. With a geometry the matrix selects the pair it
     shows, the column mode overlaid on the row mode, as Visual Dynamics
     shows two shape sets' MAC."""

@@ -356,6 +356,32 @@ def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate
                                                   plate[other].num_shapes)
 
 
+def test_the_mac_op_reads_as_the_selection_does_for_sets_on_two_geometries():
+    from hertzforge import Project
+    from hertzforge.core import fem
+
+    def beam(ids):
+        model = fem.Model('beam')
+        material = fem.Material('al', youngs_modulus=70e9, density=2700, poissons_ratio=0.3)
+        for k, node in enumerate(ids):
+            model.add_node(node, k * 0.1, 0.0, 0.0)
+        model.add_chain(list(ids), material, fem.Section.rectangle('bar', 0.02, 0.01))
+        model.add_ground(ids[0], True)
+        return model
+
+    ids = list(range(1, 12))
+    project = Project()
+    for name, nodes in (('A', ids), ('Reversed', ids[::-1]), ('Offset', [i + 100 for i in ids])):
+        model = beam(nodes)
+        geometry = project.add(f'{name} Geometry', model.geometry())
+        project.link(geometry, project.add(name, model.eigensolution(num_modes=6, damping=0.01)))
+    for other in ('Reversed', 'Offset'):
+        (matrix, *_) = run(project, 'project.mac', first='A', second=other)
+        values = np.asarray(matrix['values'])
+        assert np.allclose(values, project.comparison_mac('A', other), atol=1e-5)
+        assert np.allclose(np.diag(values), 1.0, atol=1e-5)
+
+
 def test_mac_without_a_geometry_is_the_matrix_alone(plate):
     run(plate, 'project.compute_frfs', method='H1')
     plate.fit_modes('Time History H1 FRFs', bounds=(100.0, 1300.0), limit=3)
