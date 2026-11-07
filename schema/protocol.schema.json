@@ -211,6 +211,7 @@
             "node": {"$ref": "#/$defs/arrayRef"},
             "direction": {"$ref": "#/$defs/arrayRef"},
             "values": {"$ref": "#/$defs/arrayRef"},
+            "modes": {"$ref": "#/$defs/arrayRef"},
             "peak": {"type": "number", "minimum": 0}
           }
         }
@@ -358,7 +359,7 @@
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
       }
     },
-    "workspace": {"enum": ["acquire", "simulate", "signals", "random", "shock", "sine", "modal", "geometry", "model", "specify", "report"]},
+    "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
     "operation": {
       "type": "object", "required": ["id", "title", "workspace", "modules", "params", "outputs"],
       "properties": {
@@ -398,7 +399,8 @@
             "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
             "truncation": {"type": "object", "additionalProperties": {"type": "number"}},
             "features": {"type": "object", "additionalProperties": {"type": "boolean"}},
-            "identity": {"type": "object", "additionalProperties": {"type": "string"}}
+            "identity": {"type": "object", "additionalProperties": {"type": "string"}},
+            "rigid": {"type": "object", "additionalProperties": {"type": ["number", "boolean"]}}
           }
         }
       }

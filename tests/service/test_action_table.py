@@ -221,7 +221,7 @@ def test_a_lone_shape_set_animates_only_on_a_geometry(plate):
     project.add('Shapes', _shapes())
     try:
         kinds = ['shape_set']
-        assert action_table.defaults(project, kinds, []) == ['Table', 'MAC']
+        assert action_table.defaults(project, kinds, []) == ['Table']
     finally:
         project.remove('Shapes')
     assert action_table.defaults(project, ['geometry'], []) == ['Plot']
@@ -253,7 +253,7 @@ def test_adding_a_geometry_to_shape_sets_is_not_offered(plate):
                        if c['kinds'] == ['geometry', 'shape_set']]
         assert not [r for c in with_shapes for r in c['rows'] if r['kind'] == 'default']
         # selected by hand they still draw together
-        assert action_table.defaults(project, ['geometry', 'shape_set'], []) == ['Animate', 'Table']
+        assert action_table.defaults(project, ['geometry', 'shape_set'], []) == ['Animate']
     finally:
         project.remove('Shapes')
         project.remove('Shapes B')
@@ -272,3 +272,17 @@ def test_a_mate_picked_in_the_tree_fills_the_rows_that_act_on_it(plate, validate
     (current, *_rest) = table(plate, 'Part', part=picked, validate=validate)
     assert row(current, 'Edit Sides')['fill']['mate'] == str(found[0])
     assert row(current, 'Delete Mates')['fill']['mates'] == str(found[0])
+
+
+def test_a_lone_shape_sets_views_are_a_verb_each(plate, validate):
+    project = plate.project
+    project.add('Shapes', _shapes())
+    try:
+        first = table(plate, 'Shapes', validate=validate)[0]
+        default = first['rows'][0]
+        assert (default['id'], default['kind'], default['ready']) == ('show.animate', 'default', True)
+        views = [r for r in first['rows'] if r['id'].startswith('show.') and r['kind'] == 'reading']
+        assert [(r['id'], r['verb'], r['ready']) for r in views] == [
+            ('show.table', 'Table', True), ('show.mac', 'MAC', True), ('show.values', 'Values', True)]
+    finally:
+        project.remove('Shapes')

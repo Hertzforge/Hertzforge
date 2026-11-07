@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { landsBefore, treeOrder } from './order';
+import { landsBefore, reordered, treeOrder } from './order';
 
 const listed = (names: [string, string][]) => names.map(([name, kind]) => ({ name, kind, groups: [], verbs: [] }) as never);
 
@@ -75,5 +75,14 @@ describe('where a dragged object lands', () => {
 	it('lands among the loose objects when dragged out of its group, the bottom when last', () => {
 		expect(landsBefore(objects, links, ['Wing Modes'], null)).toBeNull();
 		expect(landsBefore(objects, links, ['Wing'], null)).toBe('Loose');
+	});
+});
+
+describe('a solid dragged among its siblings', () => {
+	it('lands before the row it was let go on, and last on null', () => {
+		expect(reordered([1, 2, 3], 3, 1)).toEqual([3, 1, 2]);
+		expect(reordered([1, 2, 3], 1, 3)).toEqual([2, 1, 3]);
+		expect(reordered([1, 2, 3], 1, null)).toEqual([2, 3, 1]);
+		expect(reordered([1, 2, 3], 2, 3)).toEqual([1, 2, 3]);
 	});
 });

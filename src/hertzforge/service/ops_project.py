@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from hertzforge.core.rigid import INERTIA_TERMS, MassProperties, rigid_body_shapes
+
 from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
@@ -246,13 +248,19 @@ def _shape_view(project: Any, shapes_name: str, geometry_name: str,
     """A shape set's modes on a geometry, each a translation per node:
     all of them, or the `modes` picked (indices from 0), numbered as the
     set numbers them."""
-    shapes, geometry = project[shapes_name], project[geometry_name]
+    return _shapes_drawn(f'{shapes_name} on {geometry_name}', project[shapes_name],
+                         project[geometry_name], modes)
+
+
+def _shapes_drawn(title: str, shapes: Any, geometry: Any,
+                  modes: list[int] | None = None) -> dict:
+    """Modes on a geometry, whether or not the shape set is in the project."""
     rows, triangles, lines = drawn_mesh(geometry)
     picked = list(modes) if modes else list(range(shapes.num_shapes))
     moved = translations(geometry, shapes.coordinate, shapes.shape_matrix[picked], rows)
     modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[i])
              for i, k in enumerate(picked)]
-    return v.shape3d(f'{shapes_name} on {geometry_name}',
+    return v.shape3d(title,
                      'm' if geometry.units_defined else 'undefined',
                      np.asarray(geometry.node_xyz, dtype=float)[rows], modes,
                      triangles=triangles, lines=lines,
@@ -314,10 +322,49 @@ def _added_shapes(project: Any, call: Any) -> list[dict]:
         for k in range(shapes.num_shapes)])]
 
 
+def _point_param(axis: str) -> Param:
+    return Param(axis, f'Reference point {axis.upper()}', 'number', default=0.0, unit='m',
+                 setting=f'rigid.{axis}')
+
+
+def _inertia_param(term: str, default: float) -> Param:
+    return Param(term.lower(), term, 'number', default=default, unit='kg m^2',
+                 setting=f'rigid.{term.lower()}')
+
+
+RIGID_POINT = tuple(_point_param(axis) for axis in 'xyz')
+RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia', 'boolean',
+                        default=False, setting='rigid.normalize')
+RIGID_MASS = Param('mass', 'Mass', 'number', default=1.0, unit='kg', min=0.0,
+                   setting='rigid.mass')
+RIGID_INERTIA = tuple(_inertia_param(term, 1.0 if term[1] == term[2] else 0.0)
+                      for term in INERTIA_TERMS)
+RIGID_KEEP = Param('keep', 'Add the shape set (else the preview)', 'boolean', default=True)
+
+
 def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.generate_rigid_body_modes`: the six rigid-body shapes of a
-    geometry about its reference point (`Project.generate_rigid_body_modes`)."""
-    return _added_shapes(project, lambda: project.generate_rigid_body_modes(params['source']))
+    geometry about a point, and scaled by a mass and inertia about it when
+    asked (`Project.generate_rigid_body_modes`), as VD's Modes pane sets
+    them. Without `keep`, the shapes drawn and nothing added."""
+    name = params['source']
+    geometry = project[name]
+    point = tuple(float(params[axis]) for axis in 'xyz')
+    mass, inertia = None, None
+    if params['normalize']:
+        if not geometry.units_defined:
+            raise refused('Declare the length unit to mass-normalize: an inertia in kg m^2 '
+                          'means nothing against coordinates with no unit')
+        mass = float(params['mass'])
+        inertia = tuple(float(params[term.lower()]) for term in INERTIA_TERMS)
+    if params['keep']:
+        return _added_shapes(project, lambda: project.generate_rigid_body_modes(
+            name, point=point, mass=mass, inertia=inertia))
+    try:
+        shapes = rigid_body_shapes(geometry, MassProperties(point, mass, inertia))
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return [_shapes_drawn(f'Preview of the rigid body modes of {name}', shapes, geometry)]
 
 
 def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -409,8 +456,10 @@ MODAL_VERB_OPERATIONS = (
         id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
         workspace='modal',
         summary='The six rigid-body shapes of a geometry, three translations and '
-                'three rotations about its reference point.',
-        params=(_source('generate_rigid_body_modes', 'Geometry'),),
+                'three rotations about a reference point, mass-normalized by a mass and '
+                'inertia about it when asked.',
+        params=(_source('generate_rigid_body_modes', 'Geometry'), *RIGID_POINT,
+                RIGID_NORMALIZE, RIGID_MASS, *RIGID_INERTIA, RIGID_KEEP),
         outputs=('shape3d', 'reading'), run=rigid_body_modes),
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='model',

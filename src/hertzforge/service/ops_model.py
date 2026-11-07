@@ -33,7 +33,13 @@ THICKNESS = Param('thickness', 'Plate thickness', 'number', default=3.0, unit='m
                   min=0.0, step=0.5)
 GROUPS_TO_MERGE = Param('groups', 'Element groups', 'string', default='')
 ELEMENTS = Param('elements', 'Elements', 'string', default='')
-TIE_TO = Param('to', 'Tie to', 'string', default='')
+TIE_TO = Param('to', 'Tie to: an element group, or a second patch of elements', 'string',
+               default='')
+TIE_SIDE = Param('side', 'Clicks pick', 'enum', default='patch', options=(
+    Option('patch', 'The patch'), Option('second', 'The second patch')))
+TIE_ADD = Param('add', 'Elements clicked in', 'string', default='', in_view=True)
+TIE_DROP = Param('drop', 'Elements clicked out', 'string', default='', in_view=True)
+TIE_KEEP = Param('keep', 'Tie (else pick the elements)', 'boolean', default=False)
 REACH = Param('reach', 'Reach', 'number', default=0.0, unit='mm', min=0.0, step=0.1)
 TOLERANCE = Param('tolerance', 'Tolerance', 'number', default=0.0, unit='m', min=0.0,
                   step=0.0001)
@@ -194,6 +200,10 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
                          held, places, out, 'Click a place to leave it out or put it back')]
 
 
+def _id_text(ids: Any) -> str:
+    return ', '.join(str(i) for i in ids)
+
+
 def _ids(text: str, what: str) -> list[int]:
     """The ids '3, 7-9' names, in the order named."""
     out: list[int] = []
@@ -251,22 +261,98 @@ def delete_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
     return element_groups(project, params)
 
 
+#: past this many elements the view does not offer them one by one
+TIE_CLICKS_MOST = 20_000
+
+
+def _element_faces(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The drawn rows, and each element's own faces as triangles of them with the element's
+    id beside each triangle: a whole solid's faces, shared ones too, so a click finds it."""
+    from hertzforge.drawing.viz.geometry import element_cells
+
+    triangles, owners = [], []
+    for row, element in enumerate(geometry.elem_id):
+        faces, _lines, _points = element_cells(geometry, [row])
+        for group in faces.values():
+            for face in group:
+                for k in range(1, len(face) - 1):
+                    triangles.append((face[0], face[k], face[k + 1]))
+                    owners.append(int(element))
+    corners = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+    used = np.unique(corners)
+    position = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    position[used] = np.arange(used.size)
+    return used, position[corners], np.asarray(owners, dtype=np.int32)
+
+
+def _tie_groups(geometry: Any) -> list[str]:
+    """What a patch can tie to, as VD's menu offers: every group with elements, less those
+    with nothing to tie to, a link or a lumped mass."""
+    out = []
+    for k, group in enumerate(geometry.group_id):
+        held = geometry.group_properties.get(int(group))
+        if (held is not None and held.kind in ('rigid', 'mass', 'spring', 'ground')) \
+                or not geometry.elements_in(int(group)):
+            continue
+        out.append(str(geometry.group_name[k]) or str(int(group)))
+    return out
+
+
 def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.tie_elements`: a patch of a geometry's elements tied
     rigidly to the part under it, each node by a rigid link to the
     nearest node of an element group or a second patch
     (`Project.tie_elements`), as for a bolted joint modeled from the
-    elements its washer covers."""
+    elements its washer covers. Without `keep`, VD's way in: the elements
+    drawn, a click adding one to the patch or the second patch (`side`) or
+    taking it away, and the groups it can tie to listed."""
     name = params['geometry']
     geometry = project[name]
     patch = _ids(params['elements'], 'an element id')
+    target_text = params['to'].strip()
+    names = list(geometry.groups.names)
+    second = (None if target_text in names
+              or (target_text.isdigit() and int(target_text) in geometry.groups.ids)
+              else _ids(target_text, 'an element group or element id'))
+    if params['add'].strip() or params['drop'].strip():
+        added = _ids(params['add'], 'an element id')
+        gone = set(_ids(params['drop'], 'an element id'))
+        if params['side'] == 'second':
+            if second is None:
+                second = []
+            second = [e for e in [*second, *added] if e not in gone]
+            target_text = _id_text(second)
+        else:
+            patch = [e for e in [*patch, *added] if e not in gone]
+    if not params['keep']:
+        groups = _tie_groups(geometry)
+        rows = [v.row('Patch', f'{len(patch)} elements' if patch else 'none yet', None, 'info'),
+                v.row('Tie to', target_text or 'not set', None, 'info'),
+                v.row('Element groups', ', '.join(groups) or 'none', None, 'info')]
+        held = {'geometry': name, 'elements': _id_text(patch), 'to': target_text,
+                'side': params['side'], 'keep': False}
+        out = [v.reading(f'Tie on {name}', rows)]
+        if geometry.elem_id.size > TIE_CLICKS_MOST:
+            rows.append(v.row('Clicks', f'over {TIE_CLICKS_MOST:,} elements: name them in the '
+                              'form', None, 'info'))
+            return out
+        used, triangles, owners = _element_faces(geometry)
+        if not len(triangles):
+            return out
+        kept = (second or []) if params['side'] == 'second' else patch
+        out.append(v.shape3d(
+            f'Elements of {name}', 'm' if geometry.units_defined else 'undefined',
+            np.asarray(geometry.node_xyz, dtype=float)[used], [], triangles=triangles,
+            node_ids=np.asarray(geometry.node_id)[used],
+            pick=v.picking('project.tie_elements', held, 'faces',
+                           'Click an element to add it or take it away', faces=owners,
+                           kept=sorted(kept), out='drop', back='add')))
+        return out
     if not patch:
         raise refused('name the elements of the patch, such as 101-104')
-    target_text = params['to'].strip()
     if not target_text:
         raise refused('name what the patch ties to: an element group, by name or '
                       'number, or a second patch of elements')
-    names = list(geometry.groups.names)
     if target_text in names:
         target: Any = target_text
     else:
@@ -359,7 +445,8 @@ OPERATIONS = (
         id='project.tie_elements', title='Tie', workspace='model',
         summary='A patch of elements tied rigidly to the part under it, each node to the '
                 'nearest node of an element group or a second patch.',
-        params=(GEOMETRY, ELEMENTS, TIE_TO), outputs=('reading',), run=tie_elements,
+        params=(GEOMETRY, ELEMENTS, TIE_TO, TIE_SIDE, TIE_ADD, TIE_DROP, TIE_KEEP),
+        outputs=('reading', 'shape3d'), run=tie_elements,
         edits=True),
     Operation(
         id='project.align_meshes', title='Align Meshes', workspace='geometry',
