@@ -1747,8 +1747,15 @@ class SpecificationDraft:
             raise ValueError('the sheet spans several specifications; write '
                              'each in with for_source')
         # one object is read one way: a sheet on lines merged into a curve
-        # would leave its part-held end lines as points on that curve
-        if self.form == 'lines' and getattr(spec, 'interpolation', 'log_log') == 'log_log':
+        # would leave its part-held end lines as points on that curve. An
+        # object already on the sheet's lines is not refused: targets made
+        # before sheets on lines were marked 'bin' are a curve on lines,
+        # and one channel of them can still be edited.
+        spacing = uniform_spacing(spec.abscissa)
+        if (self.form == 'lines'
+                and getattr(spec, 'interpolation', 'log_log') == 'log_log'
+                and not (spacing is not None and self.spacing is not None
+                         and abs(spacing - self.spacing) <= 1e-9 * self.spacing)):
             raise ValueError(
                 'the sheet is on lines and the specification is a curve at '
                 'breakpoints; open all of its channels to change its form, or '

@@ -402,3 +402,15 @@ def test_a_sheet_on_lines_is_not_merged_into_a_curve():
     assert sheet.written_into(spec).interpolation == 'log_log'
     with pytest.raises(ValueError, match='open all of its channels'):
         sheet.to_lines(1.0).written_into(spec)
+    # a target an earlier version made on these lines, marked a curve:
+    # one channel of it is still edited in place
+    f = np.arange(20.0, 2000.5, 1.0)
+    old = Specification(f, np.full((2, f.size), 0.01), response_dof=['1Z+', '2Z+'],
+                        ordinate_dim=[DIM, DIM])
+    assert old.interpolation == 'log_log'
+    one = SpecificationDraft.from_specification(old, channels=['1Z+'])
+    assert one.form == 'lines'
+    written = one.scaled_db(3.0).written_into(old)
+    assert np.array_equal(written.abscissa, f)
+    assert np.real(written.ordinate[0]) == pytest.approx(0.01 * 10 ** 0.3)
+    assert np.real(written.ordinate[1]) == pytest.approx(0.01)
