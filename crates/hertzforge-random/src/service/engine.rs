@@ -845,7 +845,7 @@ impl PlantLoop {
         let acq = hertzforge_hal::AcquisitionConfig::new(cfg.fs_hz, cfg.block_frames.max(1));
         let actual = backend
             .configure(&table, &acq)
-            .map_err(|e| format!("configure: {e:?}"))?;
+            .map_err(|e| format!("configure: {e}"))?;
 
         // ADOPT WHAT THE DEVICE PROGRAMMED, before anything is derived from `cfg`.
         //
