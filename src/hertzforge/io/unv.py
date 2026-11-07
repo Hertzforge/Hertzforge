@@ -64,7 +64,7 @@ import re
 import numpy as np
 
 from ..core.data import direction_code
-from ..core.geometry import ELEMENT_TYPES, to_global, to_local
+from ..core.geometry import ELEMENT_TYPES, pen_up_runs, to_global, to_local
 from .sniffing import text_head
 
 _FLOAT = re.compile(r'[-+]?\d*\.?\d+(?:[DdEe][-+]?\d+)?')
@@ -347,16 +347,7 @@ def _parse_82(records, tracelines):
         entries.extend(_ints(line))
         if len(entries) >= num_nodes:
             break
-    # 0 = pen up: split into separate polylines
-    run = []
-    for entry in entries[:num_nodes]:
-        if entry == 0:
-            if len(run) >= 2:
-                tracelines.append((tl_id, color, desc, run))
-            run = []
-        else:
-            run.append(entry)
-    if len(run) >= 2:
+    for run in pen_up_runs(entries[:num_nodes]):
         tracelines.append((tl_id, color, desc, run))
 
 

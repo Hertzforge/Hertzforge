@@ -154,6 +154,23 @@ _VOLUME_FAMILIES = {4: 'tetras', 10: 'tetras', 6: 'wedges', 15: 'wedges',
                     32: 'hexes', 5: 'pyramids', 13: 'pyramids'}
 
 
+def pen_up_runs(entries: Sequence[int]) -> list[list[int]]:
+    """The runs of a traceline's node list, in which 0 lifts the pen.
+
+    A file's traceline is one node list in which 0 moves without drawing;
+    a run of fewer than two nodes draws nothing and is left out.
+    """
+    runs, run = [], []
+    for entry in map(int, entries):
+        if entry == 0:
+            runs.append(run)
+            run = []
+        else:
+            run.append(entry)
+    runs.append(run)
+    return [r for r in runs if len(r) >= 2]
+
+
 def element_family(code: int) -> str:
     """Which family a 2412 element code belongs to.
 
