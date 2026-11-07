@@ -79,8 +79,10 @@ class SineTone:
     """One tone: breakpoints, a sweep law, and its own span of time.
 
     Raises ValueError when the shapes disagree, when a segment holds one
-    frequency (a dwell has no sweep time), or when a rate's sign does not
-    match its segment's direction.
+    frequency (a dwell has no sweep time), when a rate's sign does not
+    match its segment's direction, or when a breakpoint is not above
+    0 Hz. `from_file` leaves that last one out, so a file already holding
+    such a tone still opens.
 
     Attributes:
         name: What the controller called it ('Sine Tone 1').
@@ -108,7 +110,8 @@ class SineTone:
                  segment_type: Any, segment_rate: Any,
                  phase: Any = None,
                  warning_lower: Any = None, warning_upper: Any = None,
-                 abort_lower: Any = None, abort_upper: Any = None) -> None:
+                 abort_lower: Any = None, abort_upper: Any = None,
+                 *, from_file: bool = False) -> None:
         self.name: str = str(name)
         self.start_time: float = float(start_time)
         self.frequency: np.ndarray = np.asarray(frequency,
@@ -146,6 +149,11 @@ class SineTone:
                     f'expected {self.amplitude.shape} to match the '
                     'amplitude')
             self.limits[limit] = values
+        if not from_file and not (np.isfinite(self.frequency)
+                                  & (self.frequency > 0.0)).all():
+            raise ValueError(
+                f'{self.name}: a sweep runs above 0 Hz; its breakpoints are '
+                f'{", ".join(f"{f:g}" for f in self.frequency)} Hz')
         self._check_rates()
 
     @classmethod
@@ -635,6 +643,9 @@ class SineSweepSpecification:
                 and self.ordinate_unit == other.ordinate_unit)
 
     def __repr__(self) -> str:
+        if not self.tones:
+            return (f'<SineSweepSpecification: 0 tones, '
+                    f'{len(self.response_dof)} control channels>')
         lo = min(tone.frequency.min() for tone in self.tones)
         hi = max(tone.frequency.max() for tone in self.tones)
         return (f'<SineSweepSpecification: {len(self.tones)} tones, '
@@ -1349,6 +1360,8 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
 
 
 def _control_rows(history, specification):
+    if not specification.tones:
+        raise ValueError('the specification holds no tone')
     history_dofs = list(history.response_dof)
     rows, missing = [], []
     for dof in specification.response_dof:

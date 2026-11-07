@@ -197,10 +197,36 @@ def _requirement():
 
 
 
+@pytest.mark.parametrize('frequency,law,rate', [
+    ([0.0, 100.0], LINEAR, 10.0), ([0.0, 100.0], LOG, 1.0), ([-10.0, 100.0], LINEAR, 10.0),
+    ([100.0, 0.0], LINEAR, -10.0), ([float('nan'), 100.0], LINEAR, 10.0)])
+def test_a_sweep_from_zero_hertz_or_below_is_refused(frequency, law, rate):
+    with pytest.raises(ValueError, match='above 0 Hz'):
+        SineTone('Z', 0.0, frequency, [[1.0]] * 2, [law], [rate])
 
 
+def test_a_file_holding_a_sweep_from_zero_hertz_still_reads():
+    tone = SineTone('Z', 0.0, [0.0, 100.0], [[1.0]] * 2, [LINEAR], [10.0], from_file=True)
+    assert tone.duration() == pytest.approx(10.0)
 
 
+@pytest.mark.parametrize('op_id,given', [
+    ('project.sine_extraction', {'history': 'R', 'specification': 'E'}),
+    ('project.sine_profile', {'specification': 'E'}),
+    ('project.sweep_rate', {'specification': 'E', 'modes': '100 10'}),
+    ('project.extract_sine', {'source': 'R'}),
+    ('project.generate_signal', {'source': 'E', 'kind': 'sine', 'sample_rate': 4096.0}),
+])
+def test_a_specification_with_no_tone_is_refused_in_words(op_id, given):
+    empty = SineSweepSpecification([], ['1Z+'], ordinate_unit='m/s**2')
+    assert '0 tones' in repr(empty)
+    project = Project()
+    t = np.arange(8192) / RATE
+    project.add('R', history(t, np.cos(t), ['1Z+']))
+    project.add('E', empty)
+    with pytest.raises(ProtocolError, match='no tone|0 tones') as refusal:
+        run(project, op_id, **given)
+    assert 'iterable' not in str(refusal.value)
 
 
 # ---- showing a requirement ------------------------------------------------------------------
