@@ -10,14 +10,16 @@ geometry drawn, its meshed elements and its parts' surfaces as the
 kernel tessellates them (`core.solids.shape_triangles`), and the solids
 table VD lists under the geometry in its tree. Solids are named by id
 from that table ("1, 3") where VD picks them in the tree or the view.
-Lengths are typed in meters and angles in degrees about the geometry's
-X, then Y, then Z axes.
+Lengths are typed in the connection's display system, marked `length` here and taken to
+meters by the server before an operation runs, so every operation reads meters; angles are
+in degrees about the geometry's X, then Y, then Z axes.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -35,7 +37,8 @@ PARTS = Param('solids', 'Solids (ids, as "1, 3"; empty for every part)', 'string
 
 
 def _length(name: str, label: str, default: float, low: float | None = None) -> Param:
-    return Param(name, label, 'number', default=default, unit='m', min=low, step=0.01)
+    return Param(name, label, 'number', default=default, unit='m', min=low, step=0.01,
+                 length=True)
 
 
 def _angle(axis: str, prefix: str = 'angle', label: str = 'Angle') -> Param:
@@ -133,35 +136,40 @@ def _in_meters(geometry: Any) -> str:
 
 
 def _dimensions(geometry: Any, item: Any) -> str:
-    """A solid's size as typed, in a few words."""
+    """A solid's size as typed, in a few words, each length with its unit so the server can
+    say it in the display system."""
     from hertzforge.core import solids
 
-    unit = ' m' if geometry.units_defined else ''
+    unit = _in_meters(geometry)
+
+    def size(value: float) -> str:
+        return f'{_f(value)}{unit}'
+
     kind = item.kind
     if kind == 'block':
-        corner = f', corner {_f(item.corner)}' if item.corner else ''
-        return ' × '.join(_f(w) for w in item.widths) + unit + corner
+        corner = f', corner {size(item.corner)}' if item.corner else ''
+        return ' × '.join(size(w) for w in item.widths) + corner
     if kind in ('cylinder', 'sphere', 'disk'):
-        long = f', length {_f(item.length)}' if kind == 'cylinder' else ''
-        return f'radius {_f(item.radius)}{long}{unit}'
+        long = f', length {size(item.length)}' if kind == 'cylinder' else ''
+        return f'radius {size(item.radius)}{long}'
     if kind == 'cone':
-        return (f'base radius {_f(item.radius)}, top radius {_f(solids._top(item))}, '
-                f'height {_f(item.length)}{unit}')
+        return (f'base radius {size(item.radius)}, top radius {size(solids._top(item))}, '
+                f'height {size(item.length)}')
     if kind == 'plate':
-        return ' × '.join(_f(w) for w in item.widths[:2]) + unit
+        return ' × '.join(size(w) for w in item.widths[:2])
     if kind in solids.SECTIONS:
-        named = ', '.join(f'{n} {_f(d)}' for n, d in zip(solids.SECTIONS[kind], item.dimensions,
-                                                          strict=True))
-        return f'{named}, length {_f(item.length)}{unit}'
+        named = ', '.join(f'{n} {size(d)}' for n, d in zip(solids.SECTIONS[kind], item.dimensions,
+                                                            strict=True))
+        return f'{named}, length {size(item.length)}'
     if kind == solids.HOLE:
         diameter, depth, wide, deep = item.dimensions
-        said = f'diameter {_f(diameter)}, ' + (f'depth {_f(depth)}' if depth else 'through')
+        said = f'diameter {size(diameter)}, ' + (f'depth {size(depth)}' if depth else 'through')
         if wide:
-            said += f', counterbore {_f(wide)} across {_f(deep)} deep'
-        return said + unit
+            said += f', counterbore {size(wide)} across {size(deep)} deep'
+        return said
     if kind == solids.PATTERN:
         return (' × '.join(str(c) for c in item.counts) + ', spacing '
-                + ', '.join(_f(w) for w in item.widths) + unit)
+                + ', '.join(size(w) for w in item.widths))
     return ''
 
 
@@ -171,7 +179,7 @@ def _solids_table(name: str, geometry: Any) -> dict:
     from hertzforge.core import solids
 
     used = solids.used_by(geometry)
-    unit = ' m' if geometry.units_defined else ''
+    unit = _in_meters(geometry)
     rows: list[list[str]] = []
 
     def add(item: Any, depth: int) -> None:
@@ -184,7 +192,7 @@ def _solids_table(name: str, geometry: Any) -> dict:
             operation += f', in {used[item.id]}'
         rows.append([str(item.id), '  ' * depth + _label(item), _kind_label(item.kind),
                      _dimensions(geometry, item),
-                     f'({", ".join(_f(c) for c in item.center)}){unit}' if primitive else '',
+                     f'({", ".join(f"{_f(c)}{unit}" for c in item.center)})' if primitive else '',
                      f'({", ".join(_f(a) for a in item.angles)})°'
                      if primitive or item.kind == solids.PATTERN else '',
                      operation])
@@ -384,7 +392,7 @@ KEEP_NOTE = 'empty keeps it'
 
 
 def _field(name: str, label: str) -> Param:
-    return Param(name, f'{label} ({KEEP_NOTE})', 'string', default='')
+    return Param(name, f'{label} ({KEEP_NOTE})', 'string', default='', length='[m]' in label)
 
 
 EDIT_FIELDS = (
@@ -458,7 +466,7 @@ def _solids_gizmo(name: str, geometry: Any, ids: list[int]) -> dict:
     low, high = _extent(geometry, ids)
     held = {'geometry': name, 'solids': ', '.join(map(str, ids))}
     return v.gizmo((np.asarray(low) + np.asarray(high)) / 2.0, np.eye(3),
-                   {'op': 'project.move_solids', 'params': held,
+                   {'op': 'project.move_solids', 'params': held, 'in_display': True,
                     'values': {axis: f'offset_{axis}' for axis in 'xyz'}},
                    {'op': 'project.move_solids', 'params': held,
                     'values': {axis: f'turn_{axis}' for axis in 'xyz'}})
@@ -575,14 +583,14 @@ ELEMENTS = Param('elements', 'Elements', 'enum', default='hexes', options=(
     Option('hexes', 'Hexes'), Option('tetras', 'Tetras'),
     Option('quads', 'Shells (quads)'), Option('triangles', 'Shells (triangles)')))
 SIZE = Param('size', 'Element size (0 for the size it is likely to hold at)', 'number',
-             default=0.0, unit='m', min=0.0, step=0.001)
+             default=0.0, unit='m', min=0.0, step=0.001, length=True)
 APART = Param('apart', 'Keep apart from other groups', 'boolean', default=False)
 PARTS_APART = Param('parts_apart', 'Keep the parts apart from each other', 'boolean',
                     default=False)
 ANYWAY = Param('anyway', 'Mesh even where the fit is likely to fold', 'boolean',
                default=False)
-PIECE_SIZES = Param('sizes', 'A size per piece, as "3: 0.01, 5: 0.002" (hexes)', 'string',
-                    default='')
+PIECE_SIZES = Param('sizes', 'A size per piece [m], as "3: 0.01, 5: 0.002" (hexes)', 'string',
+                    default='', length=True)
 DETECT_SIZES = Param('detect', 'Detect a size for every piece', 'boolean', default=False)
 MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean',
                   default=False)
@@ -880,7 +888,7 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
 GROUPS = Param('groups', 'Element groups (empty for every group of plates or solids)',
                'string', default='')
 MATE_TOLERANCE = Param('tolerance', 'Tolerance (0 for a quarter of the finest spacing)',
-                       'number', default=0.0, unit='m', min=0.0, step=0.0001)
+                       'number', default=0.0, unit='m', min=0.0, step=0.0001, length=True)
 HELD = tuple(Option(mode, label) for mode, label in (
     ('rigid', 'Rigid'), ('stiffness', 'Stiffness'), ('free', 'Free')))
 NORMAL = Param('normal', 'Normal', 'enum', default='rigid', options=HELD)
@@ -1012,8 +1020,7 @@ def _hold_changes(params: dict[str, Any], mated: Any) -> dict[str, Any]:
 
 def edit_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.edit_mated_surfaces`: a kept set's name and how it is held
-    changed, only what the form changes (`Project.edit_mated_surfaces`): VD's Save on a
-    set's pane."""
+    changed, only what the form changes (`Project.edit_mated_surfaces`)."""
     name, geometry = _geometry(project, params)
     known = {m.id: m for m in geometry.mates}
     if params['mate'] not in known:
@@ -1165,7 +1172,8 @@ OPERATIONS = (
                 'round tube outer diameter, wall. Empty for the shape\'s opening ones.',
         params=(GEOMETRY, Param('shape', 'Shape', 'enum', default='I-beam',
                                 options=_section_shapes()),
-                Param('dimensions', 'Dimensions [m], in order', 'string', default=''),
+                Param('dimensions', 'Dimensions [m], in order', 'string', default='',
+                      length=True),
                 _length('length', 'Length', 4.0, 0.0), *CENTER, *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True, previews=True),
     Operation(
@@ -1278,3 +1286,5 @@ OPERATIONS = (
         params=(GEOMETRY, *EYE, *UP), outputs=('reading', 'shape3d'), run=set_view,
         edits=True),
 )
+
+OPERATIONS = tuple(replace(op, says_lengths=True) for op in OPERATIONS)

@@ -229,7 +229,7 @@ export interface Gizmo3D {
 	axes: [number, number, number][];
 	slide: GizmoAct;
 	turn: GizmoAct;
-	/** A drag's length in the view's unit, to meters. */
+	/** A drag's length in the view's unit, to meters; absent where the service takes it in the view's unit. */
 	to_si?: number;
 }
 
@@ -426,6 +426,8 @@ export interface ParamDescriptor {
 	options_from?: 'channels' | `objects:${string}` | `verb:${string}`;
 	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
 	in_view?: boolean;
+	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
+	length?: boolean;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
 }

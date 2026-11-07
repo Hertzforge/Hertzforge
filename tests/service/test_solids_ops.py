@@ -71,8 +71,8 @@ def test_a_block_is_added_drawn_and_listed(project, validate):
     assert view['view'] == 'shape3d' and len(view['triangles']) >= 12
     assert np.ptp(view['nodes'][:, 0]) == pytest.approx(0.1, rel=1e-5)
     assert table['rows'][0][:3] == ['1', 'base', 'Block']
-    assert table['rows'][0][3] == '0.1 × 0.05 × 0.01 m'
-    assert table['rows'][0][4] == '(0.02, 0, 0) m'
+    assert table['rows'][0][3] == '0.1 m × 0.05 m × 0.01 m'
+    assert table['rows'][0][4] == '(0.02 m, 0 m, 0 m)'
     refused(project, 'project.add_solid_block', 'width', width_x=0.0)
 
 
@@ -117,7 +117,7 @@ def test_a_section_opens_on_its_shape_s_dimensions(project):
     outer, wall = 1.0, 0.1
     assert rows(reading)['Volume']['value'] == pytest.approx(
         math.pi / 4 * (outer ** 2 - (outer - 2 * wall) ** 2) * 4.0, rel=2e-3)
-    assert table['rows'][0][3] == 'outer diameter 1, wall 0.1, length 4 m'
+    assert table['rows'][0][3] == 'outer diameter 1 m, wall 0.1 m, length 4 m'
 
 
 def test_a_cylinder_subtracted_from_a_block_leaves_a_hole(project, validate):
@@ -140,7 +140,7 @@ def test_a_solid_is_edited_by_the_fields_typed(project):
     block(project)
     reading, _view, table = run(project, 'project.edit_solid', solid=1,
                                 widths='0.2, 0.05, 0.01', name='wide')
-    assert table['rows'][0][1] == 'wide' and table['rows'][0][3] == '0.2 × 0.05 × 0.01 m'
+    assert table['rows'][0][1] == 'wide' and table['rows'][0][3] == '0.2 m × 0.05 m × 0.01 m'
     assert 'widths' in rows(reading)['Changed']['value']
     refused(project, 'project.edit_solid', 'type what changes', solid=1)
     refused(project, 'project.edit_solid', 'has no radius', solid=1, radius='0.1')
@@ -196,7 +196,7 @@ def test_a_pattern_copies_its_solids(project, validate):
                                count_y=2, spacing_x=0.05, spacing_y=0.04)
     wire_views([reading, view, table], validate)
     assert rows(reading)['Copies']['value'] == 5.0
-    assert table['rows'][0][3] == '3 × 2 × 1, spacing 0.05, 0.04, 0 m'
+    assert table['rows'][0][3] == '3 × 2 × 1, spacing 0.05 m, 0.04 m, 0 m'
     assert np.ptp(view['nodes'][:, 0]) == pytest.approx(0.12, rel=1e-3)
     refused(project, 'project.pattern_solids', 'needs a spacing', solids='2', count_y=2,
             spacing_y=0.0)

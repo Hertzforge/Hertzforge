@@ -173,6 +173,37 @@ export function withSettings(params: ParamDescriptor[], values: ParamValues, sou
 	return out;
 }
 
+/**
+ * The params as the display system shows them: a `length` param in `unit`, for its unit and for
+ * '[m]' in its label; with none, an undefined geometry's numbers, no unit at all.
+ */
+export function withDisplayLengths(params: ParamDescriptor[], unit: string | null): ParamDescriptor[] {
+	return params.map((p) =>
+		p.length ? { ...p, unit: p.unit && unit ? unit : undefined, label: p.label.replace(' [m]', unit ? ` [${unit}]` : '') } : p
+	);
+}
+
+function roundedLength(value: number): number {
+	return Number(value.toPrecision(10));
+}
+
+/**
+ * What a form holds after the display system changed: each `length` param times `ratio`, the old
+ * unit in the new one, so it is the same length; a piece's id before its colon is not a length.
+ */
+export function rescaled(params: ParamDescriptor[], values: ParamValues, ratio: number): ParamValues {
+	const out = { ...values };
+	for (const p of params) {
+		if (!p.length) continue;
+		const held = out[p.name];
+		if (typeof held === 'number' && Number.isFinite(held)) out[p.name] = roundedLength(held * ratio);
+		else if (typeof held === 'string') {
+			out[p.name] = held.replace(/(\d+\s*:)|([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)/gi, (found, piece) => piece ?? String(roundedLength(Number(found) * ratio)));
+		}
+	}
+	return out;
+}
+
 /** Keep values that are still valid after the descriptor or the project's objects change; reset the rest. */
 export function reconcile(params: ParamDescriptor[], previous: ParamValues | undefined): ParamValues {
 	const out = defaultValues(params);
