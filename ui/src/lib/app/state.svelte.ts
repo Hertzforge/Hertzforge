@@ -32,7 +32,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	TableEdit,
 	View,
 	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, validateAll, withDisplayLengths, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
@@ -111,7 +111,25 @@ class AnalyzeState {
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		return withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const length = this.app.units.length;
+		if (!length || !op.params.some((p) => p.length)) return params;
+		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
+	}
+
+	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	private undefinedGeometry(op: OperationDescriptor): boolean {
+		const name = this.values[op.id]?.geometry;
+		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+	}
+
+	/** The display system changed: each form holds the same lengths, in the new unit. */
+	lengthsChanged(ratio: number): void {
+		const next = { ...this.values };
+		for (const op of this.app.catalog?.operations ?? []) {
+			if (next[op.id] && op.params.some((p) => p.length) && !this.undefinedGeometry(op)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+		}
+		this.values = next;
 	}
 
 	get params(): ParamDescriptor[] {
@@ -454,7 +472,7 @@ class AnalyzeState {
 	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
@@ -978,6 +996,12 @@ export class ReportState {
 	}
 }
 
+/** A unit system's length unit, and what takes it to meters. */
+interface LengthUnit {
+	unit: string;
+	to_si: number;
+}
+
 /** Where the chosen unit system is kept between launches. */
 const UNITS_KEY = 'hertzforge.units';
 
@@ -989,6 +1013,8 @@ const UNITS_KEY = 'hertzforge.units';
 export class UnitsState {
 	name = $state<string | null>(null);
 	systems = $state<string[]>([]);
+	/** The system's length unit, and what takes it to meters: what a solid's form is typed in. */
+	length = $state.raw<LengthUnit | null>(null);
 
 	constructor(private readonly app: AppState) {}
 
@@ -1004,12 +1030,16 @@ export class UnitsState {
 	async sync(): Promise<void> {
 		const wanted = this.stored();
 		try {
-			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			const res = await this.app.analysis.request<{ name: string; systems: string[]; length?: LengthUnit }>('units.system', {});
 			this.systems = res.systems;
 			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
-				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				const set = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name: wanted });
 				this.name = set.name;
-			} else this.name = res.name;
+				this.length = set.length ?? null;
+			} else {
+				this.name = res.name;
+				this.length = res.length ?? null;
+			}
 		} catch {
 			// an older service without units: its own SI stands
 		}
@@ -1017,8 +1047,11 @@ export class UnitsState {
 
 	async choose(name: string): Promise<void> {
 		if (name === this.name) return;
-		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		const res = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name });
 		this.name = res.name;
+		const before = this.length;
+		this.length = res.length ?? null;
+		if (before && this.length) this.app.analyze.lengthsChanged(before.to_si / this.length.to_si);
 		try {
 			localStorage.setItem(UNITS_KEY, res.name);
 		} catch {

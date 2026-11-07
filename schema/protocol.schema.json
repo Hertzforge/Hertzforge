@@ -378,7 +378,8 @@
         },
         "options_from": {"type": "string", "pattern": "^(objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
         "in_view": {"type": "boolean"},
-        "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
+        "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"},
+        "length": {"type": "boolean"}
       }
     },
     "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},

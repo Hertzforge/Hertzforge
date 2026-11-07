@@ -49,6 +49,7 @@ from ..core.data import (
     dof_string,
     parse_dof,
 )
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 
@@ -67,9 +68,10 @@ def load(path: str | os.PathLike, ordinate_unit: str | None = None,
     Each record's five comment fields are joined with '; '. Units are
     declared as the module docstring describes; an FRF needs both
     `response_unit` and `reference_unit`, and with only one it imports
-    unit-less. Raises ValueError when the records do not share one abscissa.
+    unit-less. Raises ValueError when the records do not share one abscissa,
+    or the file holds Python objects.
     """
-    with np.load(path, allow_pickle=True) as d:
+    with PlainNpz(path) as d:
         function_type = int(d['function_type'])
         data = d['data']
 

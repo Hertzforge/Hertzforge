@@ -11,6 +11,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Param
+from .ops_sine_shock import _record
 from .protocol import refused
 from .waterfalls import axes, unit_text
 
@@ -23,12 +24,6 @@ STEP = Param('step_db', 'Next level', 'number', default=6.0, unit='dB', min=0.0,
 MARGIN = Param('margin', 'Margin', 'number', default=0.1, unit='%', min=0.0, max=10.0,
                step=0.05)
 SHOWN = Param('record', 'Channel', 'integer', default=0, min=0, step=1)
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 def _band(value: float, band: tuple[float, float]) -> str:

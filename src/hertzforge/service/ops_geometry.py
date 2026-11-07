@@ -17,6 +17,7 @@ planner draws its sensors.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -27,6 +28,7 @@ from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
+from .parsing import parse_id_runs
 from .protocol import refused
 
 ANY = 'objects:' + '|'.join(SAVED_KINDS)
@@ -118,22 +120,6 @@ def id_runs_text(ids: Any) -> str:
         start = previous = value
     runs.append((start, previous))
     return ' '.join(str(a) if a == z else f'{a}-{z}' for a, z in runs)
-
-
-def parse_id_runs(text: str) -> list[int]:
-    """'1-3, 7 9-10' as [1, 2, 3, 7, 9, 10]; a run either way round."""
-    found: list[int] = []
-    for part in str(text).replace(',', ' ').split():
-        try:
-            if '-' in part[1:]:
-                head, _, tail = part[1:].partition('-')
-                low, high = sorted((int(part[0] + head), int(tail)))
-                found.extend(range(low, high + 1))
-            else:
-                found.append(int(part))
-        except ValueError:
-            raise refused(f'{part!r} is not an id or a run of ids such as 3-6') from None
-    return found
 
 
 def _group_label(geometry: Any, row: int) -> str:
@@ -443,6 +429,24 @@ def _whole(text: str, least: int | None = None) -> int:
     return value
 
 
+def _finite(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError('must be a finite number')
+    return value
+
+
+def _check_nodes(code: int, nodes: list[int]) -> None:
+    """An element of this type holds its count of nodes, and more than one place."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    word, count, _render = ELEMENT_TYPES[code]
+    if count and len(nodes) != count:
+        raise ValueError(f'a {word} takes {count} nodes, not {len(nodes)}')
+    if len(nodes) > 1 and len(set(nodes)) == 1:
+        raise ValueError(f'a {word} needs more than one node, not {nodes[0]} over and over')
+
+
 def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> None:
     """One cell of an entity table written, as Visual Dynamics' table
     writes it (`gui.object_tables`): an id that others refer to is
@@ -458,7 +462,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
         if field == 'id':
             geometry.renumber_node(row, _whole(text, 1))
         elif field in ('x', 'y', 'z'):
-            geometry.node_xyz[row, 'xyz'.index(field)] = float(text)
+            geometry.node_xyz[row, 'xyz'.index(field)] = _finite(text)
         else:
             cs = _whole(text)
             if cs not in {int(c) for c in geometry.cs_id}:
@@ -477,10 +481,10 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                 raise ValueError(f'expected one of {sorted(CS_TYPES.values())}')
             geometry.cs_type[row] = codes[0]
         elif field.startswith('origin'):
-            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = float(text)
+            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = _finite(text)
         else:
             angles = list(angles_of(geometry.cs_matrix[row]))
-            angles['xyz'.index(field[-1])] = float(text)
+            angles['xyz'.index(field[-1])] = _finite(text)
             geometry.place_coordinate_system(int(geometry.cs_id[row]), angles=angles)
     elif kind == 'elements':
         if field == 'id':
@@ -490,6 +494,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
             codes = [c for c, (word, _n, _r) in ELEMENT_TYPES.items() if word == wanted]
             if not codes:
                 raise ValueError(f'unknown element type {text!r}')
+            _check_nodes(codes[0], [int(n) for n in geometry.elem_conn[row]])
             geometry.elem_type[row] = codes[0]
         elif field == 'group':
             wanted = text.strip()
@@ -500,10 +505,11 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                     return
             raise ValueError(f'no element group {wanted!r}; add it first')
         else:
-            nodes = [int(part) for part in text.replace(',', ' ').split()]
+            nodes = parse_id_runs(text, 'a node id')
             missing = set(nodes) - set(geometry.node_id.tolist())
             if missing:
                 raise ValueError(f'unknown nodes {sorted(missing)}')
+            _check_nodes(int(geometry.elem_type[row]), nodes)
             geometry.elem_conn[row] = np.asarray(nodes, dtype=np.int64)
     else:
         if field == 'id':
@@ -542,6 +548,7 @@ def _snapshot(geometry: Any) -> dict[str, Any]:
     held['cs_name'] = list(geometry.cs_name)
     held['group_name'] = list(geometry.group_name)
     held['group_properties'] = dict(geometry.group_properties)
+    held['group_solids'] = dict(geometry.group_solids)
     held['elem_conn'] = [np.array(c, copy=True) for c in geometry.elem_conn]
     return held
 
@@ -558,22 +565,31 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
     make it inconsistent: an element given a type of another family than
     its group's, say."""
     name = params['geometry']
+    return _set_at_row(project, name, params['kind'], _row(project[name], params['kind'],
+                                                           params['entity']),
+                       params['field'], params['value'])
+
+
+def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str
+                ) -> list[dict]:
+    """One field of the entity on `row` written; ids may repeat, so the row says which."""
     geometry = project[name]
-    kind, field = params['kind'], params['field']
     if field not in FIELDS[kind]:
         raise refused(f'a {LABELS[kind]} has the fields {", ".join(filter(None, FIELDS[kind]))}; '
                       f'not {field}')
-    entity = params['entity']
-    row = _row(geometry, kind, entity)
+    entity = int(getattr(geometry, ID_ARRAYS[kind])[row])
+    if kind == 'nodes' and field == 'id' and entity in project._data_nodes():
+        raise refused(f'data in the project is measured at node {entity}; delete or rename '
+                      'those channels first')
     held = _snapshot(geometry)
     try:
-        _set_field(geometry, kind, row, field, params['value'])
+        _set_field(geometry, kind, row, field, value)
         geometry.validate()
     except (ValueError, KeyError) as error:
         _restore(geometry, held)
         said = str(error).strip(chr(39))
         if said.startswith(('could not convert', 'invalid literal')):
-            said = f'{params["value"]!r} is not a number'
+            said = f'{value!r} is not a number'
         raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
     return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
 
@@ -588,9 +604,8 @@ def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
     if not 1 <= params['row'] <= len(ids):
         raise refused(f'the {LABELS[kind]} table has {len(ids)} rows; there is no row '
                       f'{params["row"]}')
-    return set_entity(project, {'geometry': params['geometry'], 'kind': kind,
-                                'entity': ids[params['row'] - 1], 'field': params['column'],
-                                'value': params['value']})
+    return _set_at_row(project, params['geometry'], kind, params['row'] - 1, params['column'],
+                       params['value'])
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
@@ -930,21 +945,61 @@ def _still_missing(project: Any) -> list[dict]:
     return rows
 
 
+def _is_a_run(project: Any, members: Any) -> bool:
+    """Whether objects in one group are a test's: they hold a recording,
+    or they hold neither a geometry nor shapes, which make a model of it."""
+    from hertzforge.core.data import TimeHistory, TransientSpecification
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    held = [project[name] for name in members]
+    return (any(isinstance(obj, TimeHistory) and not isinstance(obj, TransientSpecification)
+                for obj in held)
+            or (bool(held) and not any(isinstance(obj, (Geometry, ShapeSet)) for obj in held)))
+
+
+def _place_the_run(project: Any) -> list[str]:
+    """A file's import group into the Basis when the Basis holds no run: a
+    Basis of a geometry alone leaves every other slot looking for its object
+    in a group that has none of them. A second run stays where it is."""
+    basis = project.object_group_with_role('Basis')
+    if basis is not None and _is_a_run(project, basis['members']):
+        return []
+    groups = [group for group in project.object_groups if group is not basis]
+    from hertzforge.core.data import TimeHistory
+
+    run = next((group for group in groups
+                if any(isinstance(project[name], TimeHistory) for name in group['members'])
+                and _is_a_run(project, group['members'])),
+               next((group for group in groups if _is_a_run(project, group['members'])), None))
+    if run is None:
+        return []
+    members = list(run['members'])
+    if basis is None:
+        project.set_role(members[0], 'Basis')
+        return members
+    try:
+        project.link(*basis['members'], *members, role='Basis')
+    except (ValueError, KeyError) as error:
+        return [f'not placed: {str(error).strip(chr(39))}']
+    return members
+
+
 def _place_basis(project: Any, test: str) -> list[str]:
-    """The Basis slots of a kind of test filled from the objects that
-    satisfy them (`core.report.expectation_satisfiers`), each placed in
-    the Basis group (`Project.place`) unless it is already in another
-    group: what Visual Dynamics' window does when a type is set. Returns
-    what was placed, or the core's refusal of a placement."""
+    """The run's group placed in the Basis, then the Basis slots of a kind of
+    test filled from the objects that satisfy them
+    (`core.report.expectation_satisfiers`), each placed in the Basis group
+    (`Project.place`) unless it is already in another group. Returns what
+    was placed, or the core's refusal of a placement."""
     from hertzforge.core.report import expectation_satisfiers
 
+    moved = _place_the_run(project)
     placed = project.sides()
     members = expectation_satisfiers(test, dict(project.items()),
                                      placed).get('Basis', [])
     elsewhere = {name for group in project.object_groups if group['role'] != 'Basis'
                  for name in group['members']}
     here = set(placed.get('Basis', ()))
-    moved = []
     for name in members:
         if name in elsewhere or name in here:
             continue
@@ -954,6 +1009,21 @@ def _place_basis(project: Any, test: str) -> list[str]:
             return [*moved, f'not placed: {str(error).strip(chr(39))}']
         moved.append(name)
     return moved
+
+
+def _srs_bands(project: Any, added: list[str]) -> list[dict]:
+    """Where a low-pass stopped an SRS Work Up made, since nothing else in
+    its reading would say the top of the band was left off."""
+    rows = []
+    for name in added:
+        made = project.provenance.get(name) or {}
+        corner = (project.srs_ceiling(made['source']) if made.get('verb') == 'compute_srs'
+                  else None)
+        if corner is not None:
+            rows.append(v.row('SRS band', f'{name} stops at {corner:g} Hz, the low-pass corner '
+                              'of the record it was read from; the filter takes 6 dB at the '
+                              'corner, so the top of the band reads low', None, 'info'))
+    return rows
 
 
 def _work_up(test: str) -> Any:
@@ -974,6 +1044,9 @@ def _work_up(test: str) -> Any:
                 or [v.row('Added', 'nothing to compute', None, 'info')])
         if moved:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
+        rows += _srs_bands(project, added)
+        rows += [v.row('Not computed', f'{slot}: {why}', None, 'warn')
+                 for slot, why in dict.fromkeys(project.last_work_up_skipped)]
         return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
     return run
 
@@ -987,7 +1060,7 @@ CHANNEL_ROLE = Param('role', 'Role', 'enum', default='response', options=(
     Option('reference', 'Reference: drives the structure'),
     Option('response', 'Response: measured on the structure'),
     Option('monitor', 'Monitor: recorded, not analyzed')))
-RENAMED = ('channel_table', *DATA_KINDS, 'transient_specification', 'shock_specification')
+RENAMED = ('channel_table', *DATA_KINDS)
 RENAME_SOURCE = Param('source', 'Object', 'enum', options_from='objects:' + '|'.join(RENAMED))
 OLD = Param('old', 'DOF', 'string', default='')
 NEW = Param('new', 'New DOF', 'string', default='')

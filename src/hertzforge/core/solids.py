@@ -947,6 +947,14 @@ def _checked(geometry: Any, ids) -> set[int]:
     return ids
 
 
+def _meshes_outlive(geometry: Any, gone: Iterable[int]) -> None:
+    """Solids gone, and their meshes stay: the ids may be taken again, by a solid that must
+    not replace them."""
+    gone = set(gone)
+    geometry.group_solids = {group: tuple(i for i in held if i not in gone)
+                             for group, held in geometry.group_solids.items()}
+
+
 def delete(geometry: Any, ids: Sequence[int]) -> int:
     """Delete solids, each with everything it is made of: a plate with
     holes cut in it is deleted whole, with the cylinders that cut them.
@@ -974,6 +982,7 @@ def delete(geometry: Any, ids: Sequence[int]) -> int:
             going.add(current)
             stack.extend(solid(geometry, current).operands)
     geometry.solids = [s for s in geometry.solids if s.id not in going]
+    _meshes_outlive(geometry, going)
     return len(going)
 
 
@@ -1063,6 +1072,10 @@ def separate(geometry: Any, ids: Sequence[int]) -> int:
                          'with nothing to take apart')
     freed = sum(len(solid(geometry, i).operands) for i in ids)
     geometry.solids = [s for s in geometry.solids if s.id not in ids]
+    # taken apart to be built again: the part remade under its name finds its mesh by that
+    # name, as a table meshed with its legs does with the legs taken off
+    _meshes_outlive(geometry, ids)
+    geometry.group_solids = {group: held for group, held in geometry.group_solids.items() if held}
     return freed
 
 
@@ -2044,15 +2057,15 @@ def _pieces_contain(pieces, points: np.ndarray) -> np.ndarray:
 
 
 def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
-    """A block's, a cylinder's, a cone's or a sphere's extent along the
-    geometry's axes (a cone's as its wider end's cylinder's)."""
+    """A block's, a plate's, a cylinder's, a disk's, a cone's or a sphere's
+    extent along the geometry's axes (a cone's as its wider end's cylinder's)."""
     axes = _frame(item)
     if item.kind == 'sphere':
         center = np.asarray(item.center)
         return center - item.radius, center + item.radius
     if item.kind == 'cone':
         item = replace(item, radius=max(item.radius, _top(item)))
-    if item.kind == 'block':
+    if item.kind in ('block', 'plate'):
         half = np.abs(axes.T) @ (np.asarray(item.widths) / 2.0)
     else:
         along = np.abs(axes[2]) * item.length / 2.0
@@ -2065,7 +2078,7 @@ def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
 def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
     """The solid's extent along the geometry's axes, from its recipe."""
     item = solid(geometry, solid_id)
-    if item.kind in BASIC:
+    if item.kind in BASIC or item.kind in FLAT:
         return _basic_box(item)
     if item.kind in SHAPED:
         boxes = [_basic_box(p) for cut, p in _pieces(geometry, item) if not cut]
@@ -3122,26 +3135,76 @@ def _drop_inside(geometry: Any, part: Any, others) -> int:
     return int(inside.sum())
 
 
-def meshed_elements(geometry: Any, names: Iterable[str]) -> np.ndarray:
+def groups_meshed_again(geometry: Any, ids: Sequence[int], part: Any) -> list[int]:
+    """The element groups of `geometry` that the mesh `part` of the parts `ids` goes into,
+    the one meshed before in them being what it replaces. `part`'s groups are tied here to
+    the solids they were meshed from (`Geometry.group_solids`), so the answer holds through
+    a rename, and two parts of one name keep their own meshes. A group named for several
+    solids, parts of one name meshed together, holds one element group between them; every
+    mesher names a group `piece_name`, which is how a group finds its solids.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids and elements.
+    ids : sequence of int
+        The parts meshed, by id.
+    part : Geometry
+        Their mesh, not yet joined; its `group_solids` is set.
+
+    Returns
+    -------
+    list of int
+
+    Raises
+    ------
+    ValueError
+        A group holds the mesh of another solid as well, which this would delete.
+    """
+    from .mesh import group_home
+
+    # the whole tree, not only the pieces: a boolean takes its first solid's name, and a part
+    # remade from that solid is the part meshed before
+    named: dict[str, list[int]] = {}
+    stack = [int(i) for i in ids]
+    while stack:
+        current = stack.pop()
+        held = named.setdefault(piece_name(geometry, current), [])
+        if current not in held:
+            held.append(current)
+            stack.extend(solid(geometry, current).operands)
+    part.group_solids = {int(g): tuple(sorted(named[name]))
+                         for g, name in zip(part.group_id, part.group_name, strict=True)
+                         if name in named}
+    meshed = {i for held in part.group_solids.values() for i in held}
+    homes = {group_home(geometry, part, k) for k in range(len(part.group_id))} - {None}
+    for group in sorted(homes):
+        others = set(geometry.group_solids.get(group, ())) - meshed
+        if others and len(meshed_elements(geometry, [group])):
+            shown = ', '.join(piece_name(geometry, i) for i in sorted(others))
+            raise ValueError(f'element group {group} also holds the mesh of {shown}: mesh them '
+                             'together, or split the element group first')
+    return sorted(homes)
+
+
+def meshed_elements(geometry: Any, groups: Iterable[int]) -> np.ndarray:
     """The ids of the elements Mesh Solids makes, bricks, tetrahedra
-    and shells, in the element groups named `names`: what meshing
-    those parts again replaces (`Project.mesh_solids`, and the pane's
-    reading before Mesh is pressed).
+    and shells, in these element groups: what meshing those parts again
+    replaces (`Project.mesh_solids`, and the pane's reading before Mesh is
+    pressed).
 
     Parameters
     ----------
     geometry : Geometry
         Whose elements.
-    names : iterable of str
-        The element groups' names; an empty one names none.
+    groups : iterable of int
+        The element groups, by id (`groups_meshed_again`).
 
     Returns
     -------
     numpy.ndarray of int
     """
-    names = {name for name in names if name}
-    wanted = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
-              if name in names]
+    wanted = [int(g) for g in groups]
     mask = (np.isin(np.asarray(geometry.elem_group, dtype=int), wanted)
             & np.isin(np.asarray(geometry.elem_type, dtype=int), MESHED_TYPES))
     return np.asarray(geometry.elem_id, dtype=int)[mask]

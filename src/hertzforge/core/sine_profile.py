@@ -805,6 +805,8 @@ def _tone_column(specification: SineSweepSpecification, tone: str | None,
     if tone is not None and tone not in [t.name for t in specification.tones]:
         raise ValueError(f'the specification holds no tone {tone!r}; it holds '
                          f'{[t.name for t in specification.tones]}')
+    if not specification.tones:
+        raise ValueError('the specification holds no tone')
     chosen = specification.tones[0] if tone is None else specification.tone(tone)
     dofs = [str(dof) for dof in specification.response_dof]
     if channel is not None and str(channel) not in dofs:

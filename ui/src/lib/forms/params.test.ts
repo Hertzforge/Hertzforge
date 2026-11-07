@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
-import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, validate, validateAll, withObjects } from './params';
+import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, rescaled, validate, validateAll, withDisplayLengths, withObjects } from './params';
 
 const tol: ParamDescriptor = { name: 'tolerance_db', label: 'Tolerance', type: 'number', unit: 'dB', default: 3, min: 0.5, max: 6, step: 0.5 };
 const avg: ParamDescriptor = { name: 'averages', label: 'Averages', type: 'integer', default: 64, min: 8, max: 512 };
@@ -171,5 +171,39 @@ describe('setting params', () => {
 		expect(withSettings(params, { source: 'Bare', frame_length: 2048, window: 'hann' }, bare).frame_length).toBe(2048);
 		const odd: ProjectObject = { ...run, settings: { averaging: { frame_length: 1, window: 'bartlett' } } };
 		expect(withSettings(params, { source: 'Run', frame_length: 2048, window: 'hann' }, odd)).toEqual({ source: 'Run', frame_length: 2048, window: 'hann' });
+	});
+});
+
+describe('lengths typed in the display system', () => {
+	const width: ParamDescriptor = { name: 'width_x', label: 'Width along X', type: 'number', unit: 'm', default: 1, length: true };
+	const widths: ParamDescriptor = { name: 'widths', label: 'Widths [m] (empty keeps it)', type: 'string', default: '', length: true };
+	const sizes: ParamDescriptor = { name: 'sizes', label: 'A size per piece [m], as "3: 0.01"', type: 'string', default: '', length: true };
+	const angle: ParamDescriptor = { name: 'angle_x', label: 'Angle', type: 'number', unit: 'deg', default: 0 };
+
+	it('names the display unit, for the unit and in the label', () => {
+		const [w, ws, a] = withDisplayLengths([width, widths, angle], 'in');
+		expect(w.unit).toBe('in');
+		expect(ws.label).toBe('Widths [in] (empty keeps it)');
+		expect(ws.unit).toBeUndefined();
+		expect(a).toBe(angle);
+	});
+
+	it('names no unit on an undefined geometry', () => {
+		const [w, ws] = withDisplayLengths([width, widths], null);
+		expect(w.unit).toBeUndefined();
+		expect(ws.label).toBe('Widths (empty keeps it)');
+	});
+
+	it('keeps the same length when the system changes, a piece id staying what it is', () => {
+		const ratio = 0.0254;
+		const out = rescaled([width, widths, sizes, angle], { width_x: 2, widths: '1, 2 3', sizes: '3: 100, 5: 50', angle_x: 90 }, ratio);
+		expect(out.width_x).toBeCloseTo(0.0508);
+		expect(out.widths).toBe('0.0254, 0.0508 0.0762');
+		expect(out.sizes).toBe('3: 2.54, 5: 1.27');
+		expect(out.angle_x).toBe(90);
+	});
+
+	it('leaves a field left empty empty', () => {
+		expect(rescaled([widths], { widths: '' }, 0.0254).widths).toBe('');
 	});
 });

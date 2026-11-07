@@ -70,6 +70,10 @@ class Param:
     #: `settings` ('averaging.frame_length'); the default when the object
     #: has none
     setting: str | None = None
+    #: a length, or a text of them ('0, 0, 0.1', '3: 0.01'), typed in the connection's display
+    #: system: the service takes it to meters before the operation runs, and the shell shows
+    #: the system's length unit for `unit`, and for '[m]' in the label
+    length: bool = False
 
     def __post_init__(self) -> None:
         source = self.options_from
@@ -120,6 +124,8 @@ class Param:
             out['in_view'] = True
         if self.setting is not None:
             out['setting'] = self.setting
+        if self.length:
+            out['length'] = True
         return out
 
     def check(self, value: Any, choices: Sequence[Any] | None) -> Any:
@@ -209,12 +215,18 @@ class Operation:
     #: on a history), so the project has unsaved changes even when no
     #: object was added or removed
     edits: bool = False
+    #: for an operation that answers with a view until told to go ahead: whether these params
+    #: change anything, so looking at the view leaves the project unmodified
+    edits_when: Callable[[dict[str, Any]], bool] | None = field(default=None, repr=False,
+                                                                compare=False)
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
     #: the form can show this while it is typed: `op.run` with `preview` runs it on a
     #: copy of its geometry, so nothing in the project changes
     previews: bool = False
+    #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
+    says_lengths: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`

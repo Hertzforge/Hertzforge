@@ -362,6 +362,12 @@ A param with `"setting":"<group>.<field>"` opens on that setting of the object t
 fills it again each time the source changes, so the form shows what the object holds before it is
 changed.
 
+A param with `"length":true` is a length, or a text of lengths (`0, 0, 0.1`, `3: 0.01`), typed in the
+connection's display system: the service takes it to meters before the operation runs, and passes it
+as it is on a geometry whose units are not defined. The descriptor says `m`; the shell shows the
+system's length unit for its `unit` and for `[m]` in its label, none on an undefined geometry, and
+when the system changes it converts what the form holds, which changes nothing in the model.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -410,7 +416,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
-| `units.system` | `{"name"?}` | `{"name","systems"}` |
+| `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"}}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -516,7 +522,8 @@ as `project.show` takes it, adds the operations on that part, which carry `"part
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts
 in Visual Dynamics' default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
-`units.system` with `name` (one of `systems`) changes it, and without one says which it is. Each
+`units.system` with `name` (one of `systems`) changes it, and without one says which it is, and
+`length` gives its length unit and what takes that unit to meters. Each
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
@@ -617,22 +624,27 @@ project, and opening or starting another project ends it.
 | `fit.end` | `{}` | `{}` |
 
 `fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
-modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
+modes are adopted as confirmed, on the records whose DOFs the set holds. Records that leave a
+response without a record against some reference are refused, since a missing pair is not a
+measured zero; so is a complex set, or one with no value at any record's DOFs. A set's DOFs the fit
+does not cover are kept when it publishes, and a new mode cannot be confirmed while there are any.
+A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left
-out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and searches the
-damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
+out): the zoom is the search band. `fit.move` puts the cursor at `frequency`, within the measured
+range, and searches the damping there; `fit.damping` holds the damping at a fraction of critical
+(0.0001 to 0.5, as `fit.edit` takes it) until the next suggestion.
 `fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
 and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
 `fit.delete` takes back the confirmed modes at `modes` (indices into `modes`, from 0) and drops
-the preview. `fit.edit` types a confirmed mode's `damping` (a fraction of critical, above 0 and up
-to 1) or `description` into its row, as Visual Dynamics' fit table does; a damping changes the
-synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
+the preview. `fit.edit` types a confirmed mode's `damping` or `description` into its row, as Visual
+Dynamics' fit table does; a damping changes the synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
 `coherence`, the name of a coherence or multiple coherence in the project, `fit.start` weights each
-response at each line by γ²/(1-γ²), as the core does (`ModalFitSession`).
+response at each line by γ²/(1-γ²) in the frequency and damping search, the residues and `fit.refine`,
+and `fit.find` reads the residual CMIF with each response at its median weight (`ModalFitSession`).
 `fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
 "<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
-published. A step the core refuses is refused in its words; a fit whose FRF has left the project
+published. The journal holds the `Project.fit_modes(at=...)` line that replays it. A step the core refuses is refused in its words; a fit whose FRF has left the project
 ends.
 
 `fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.

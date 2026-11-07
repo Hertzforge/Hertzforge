@@ -1194,6 +1194,10 @@ def _show_srs_points(reading, found, us):
     if refused:
         words += ' Not judged: ' + '; '.join(
             f'{dof}, {reason}' for dof, reason in refused) + '.'
+    unread = next((result['unread'] for _dof, _event, result in judged
+                   if result.get('unread')), None)
+    if unread:
+        words += f' Not read: {unread}.'
     criterion = ''
     figures = []
     if judged:

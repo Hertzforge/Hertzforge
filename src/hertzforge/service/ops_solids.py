@@ -10,13 +10,16 @@ geometry drawn, its meshed elements and its parts' surfaces as the
 kernel tessellates them (`core.solids.shape_triangles`), and the solids
 table VD lists under the geometry in its tree. Solids are named by id
 from that table ("1, 3") where VD picks them in the tree or the view.
-Lengths are typed in meters and angles in degrees about the geometry's
-X, then Y, then Z axes.
+Lengths are typed in the connection's display system, marked `length` here and taken to
+meters by the server before an operation runs, so every operation reads meters; angles are
+in degrees about the geometry's X, then Y, then Z axes.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -24,6 +27,7 @@ import numpy as np
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh, places_view
+from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -33,7 +37,8 @@ PARTS = Param('solids', 'Solids (ids, as "1, 3"; empty for every part)', 'string
 
 
 def _length(name: str, label: str, default: float, low: float | None = None) -> Param:
-    return Param(name, label, 'number', default=default, unit='m', min=low, step=0.01)
+    return Param(name, label, 'number', default=default, unit='m', min=low, step=0.01,
+                 length=True)
 
 
 def _angle(axis: str, prefix: str = 'angle', label: str = 'Angle') -> Param:
@@ -77,10 +82,7 @@ def _geometry(project: Any, params: dict[str, Any]) -> tuple[str, Any]:
 
 
 def _numbers(text: str, what: str) -> list[float]:
-    try:
-        return [float(part) for part in text.replace(' ', '').split(',') if part]
-    except ValueError:
-        raise refused(f'{what} is numbers separated by commas, not {text!r}') from None
+    return parse_numbers(text, f'{what}: numbers separated by commas or spaces')
 
 
 def _ids(geometry: Any, text: str, every: list[int] | None = None) -> list[int]:
@@ -94,16 +96,11 @@ def _ids(geometry: Any, text: str, every: list[int] | None = None) -> list[int]:
             raise refused('the geometry has no solids yet; add one first')
         raise refused(f'name the solids by id, as "1, 3"; the geometry has '
                       f'{", ".join(map(str, known))}')
-    chosen = []
-    for part in text.replace(' ', '').split(','):
-        try:
-            number = int(part)
-        except ValueError:
-            raise refused(f'{part!r} is not a solid id') from None
+    chosen = parse_id_runs(text, 'a solid id')
+    for number in chosen:
         if number not in known:
             raise refused(f'the geometry has solids {", ".join(map(str, known)) or "none"}; '
                           f'not {number}')
-        chosen.append(number)
     return chosen
 
 
@@ -128,36 +125,51 @@ def _f(value: float) -> str:
     return f'{float(value):.4g}'
 
 
+def _meters(geometry: Any) -> str | None:
+    """The unit of a length row: an undefined geometry's numbers are the file's own."""
+    return 'm' if geometry.units_defined else None
+
+
+def _in_meters(geometry: Any) -> str:
+    """The same, to follow a length in words."""
+    return ' m' if geometry.units_defined else ''
+
+
 def _dimensions(geometry: Any, item: Any) -> str:
-    """A solid's size as typed, in a few words."""
+    """A solid's size as typed, in a few words, each length with its unit so the server can
+    say it in the display system."""
     from hertzforge.core import solids
 
-    unit = ' m' if geometry.units_defined else ''
+    unit = _in_meters(geometry)
+
+    def size(value: float) -> str:
+        return f'{_f(value)}{unit}'
+
     kind = item.kind
     if kind == 'block':
-        corner = f', corner {_f(item.corner)}' if item.corner else ''
-        return ' × '.join(_f(w) for w in item.widths) + unit + corner
+        corner = f', corner {size(item.corner)}' if item.corner else ''
+        return ' × '.join(size(w) for w in item.widths) + corner
     if kind in ('cylinder', 'sphere', 'disk'):
-        long = f', length {_f(item.length)}' if kind == 'cylinder' else ''
-        return f'radius {_f(item.radius)}{long}{unit}'
+        long = f', length {size(item.length)}' if kind == 'cylinder' else ''
+        return f'radius {size(item.radius)}{long}'
     if kind == 'cone':
-        return (f'base radius {_f(item.radius)}, top radius {_f(solids._top(item))}, '
-                f'height {_f(item.length)}{unit}')
+        return (f'base radius {size(item.radius)}, top radius {size(solids._top(item))}, '
+                f'height {size(item.length)}')
     if kind == 'plate':
-        return ' × '.join(_f(w) for w in item.widths[:2]) + unit
+        return ' × '.join(size(w) for w in item.widths[:2])
     if kind in solids.SECTIONS:
-        named = ', '.join(f'{n} {_f(d)}' for n, d in zip(solids.SECTIONS[kind], item.dimensions,
-                                                          strict=True))
-        return f'{named}, length {_f(item.length)}{unit}'
+        named = ', '.join(f'{n} {size(d)}' for n, d in zip(solids.SECTIONS[kind], item.dimensions,
+                                                            strict=True))
+        return f'{named}, length {size(item.length)}'
     if kind == solids.HOLE:
         diameter, depth, wide, deep = item.dimensions
-        said = f'diameter {_f(diameter)}, ' + (f'depth {_f(depth)}' if depth else 'through')
+        said = f'diameter {size(diameter)}, ' + (f'depth {size(depth)}' if depth else 'through')
         if wide:
-            said += f', counterbore {_f(wide)} across {_f(deep)} deep'
-        return said + unit
+            said += f', counterbore {size(wide)} across {size(deep)} deep'
+        return said
     if kind == solids.PATTERN:
         return (' × '.join(str(c) for c in item.counts) + ', spacing '
-                + ', '.join(_f(w) for w in item.widths) + unit)
+                + ', '.join(size(w) for w in item.widths))
     return ''
 
 
@@ -167,7 +179,7 @@ def _solids_table(name: str, geometry: Any) -> dict:
     from hertzforge.core import solids
 
     used = solids.used_by(geometry)
-    unit = ' m' if geometry.units_defined else ''
+    unit = _in_meters(geometry)
     rows: list[list[str]] = []
 
     def add(item: Any, depth: int) -> None:
@@ -180,7 +192,7 @@ def _solids_table(name: str, geometry: Any) -> dict:
             operation += f', in {used[item.id]}'
         rows.append([str(item.id), '  ' * depth + _label(item), _kind_label(item.kind),
                      _dimensions(geometry, item),
-                     f'({", ".join(_f(c) for c in item.center)}){unit}' if primitive else '',
+                     f'({", ".join(f"{_f(c)}{unit}" for c in item.center)})' if primitive else '',
                      f'({", ".join(_f(a) for a in item.angles)})°'
                      if primitive or item.kind == solids.PATTERN else '',
                      operation])
@@ -380,7 +392,7 @@ KEEP_NOTE = 'empty keeps it'
 
 
 def _field(name: str, label: str) -> Param:
-    return Param(name, f'{label} ({KEEP_NOTE})', 'string', default='')
+    return Param(name, f'{label} ({KEEP_NOTE})', 'string', default='', length='[m]' in label)
 
 
 EDIT_FIELDS = (
@@ -411,7 +423,7 @@ def edit_solid(project: Any, params: dict[str, Any]) -> list[dict]:
                 raise refused(f'the {key.replace("_", " ")} is one number')
             changes[key] = values[0]
     if params['counts'].strip():
-        changes['counts'] = [int(c) for c in _numbers(params['counts'], 'the counts')]
+        changes['counts'] = parse_id_runs(params['counts'], 'a whole count')
     if params['name'].strip():
         changes['name'] = params['name'].strip()
     if not changes:
@@ -454,7 +466,7 @@ def _solids_gizmo(name: str, geometry: Any, ids: list[int]) -> dict:
     low, high = _extent(geometry, ids)
     held = {'geometry': name, 'solids': ', '.join(map(str, ids))}
     return v.gizmo((np.asarray(low) + np.asarray(high)) / 2.0, np.eye(3),
-                   {'op': 'project.move_solids', 'params': held,
+                   {'op': 'project.move_solids', 'params': held, 'in_display': True,
                     'values': {axis: f'offset_{axis}' for axis in 'xyz'}},
                    {'op': 'project.move_solids', 'params': held,
                     'values': {axis: f'turn_{axis}' for axis in 'xyz'}})
@@ -571,14 +583,14 @@ ELEMENTS = Param('elements', 'Elements', 'enum', default='hexes', options=(
     Option('hexes', 'Hexes'), Option('tetras', 'Tetras'),
     Option('quads', 'Shells (quads)'), Option('triangles', 'Shells (triangles)')))
 SIZE = Param('size', 'Element size (0 for the size it is likely to hold at)', 'number',
-             default=0.0, unit='m', min=0.0, step=0.001)
+             default=0.0, unit='m', min=0.0, step=0.001, length=True)
 APART = Param('apart', 'Keep apart from other groups', 'boolean', default=False)
 PARTS_APART = Param('parts_apart', 'Keep the parts apart from each other', 'boolean',
                     default=False)
 ANYWAY = Param('anyway', 'Mesh even where the fit is likely to fold', 'boolean',
                default=False)
-PIECE_SIZES = Param('sizes', 'A size per piece, as "3: 0.01, 5: 0.002" (hexes)', 'string',
-                    default='')
+PIECE_SIZES = Param('sizes', 'A size per piece [m], as "3: 0.01, 5: 0.002" (hexes)', 'string',
+                    default='', length=True)
 DETECT_SIZES = Param('detect', 'Detect a size for every piece', 'boolean', default=False)
 MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean',
                   default=False)
@@ -606,7 +618,8 @@ def _likely_size(geometry: Any, ids: list[int], elements: str) -> float:
     return hexmesh.suggested_size(geometry, ids, elements)
 
 
-def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
+def _fold_check(geometry: Any, ids: list[int], size: float,
+                sizes: dict[int, float] | None = None) -> str:
     """VD's question before a fit is paid for, as words, or '' when the
     bricks are swept or the fit is likely to hold
     (`hexmesh.likely_to_fold` on each fitted piece)."""
@@ -617,7 +630,7 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
         return ''
     except solids.NotAnExtrusion:
         pass
-    for entry in solids.piece_plan(geometry, ids, size):
+    for entry in solids.piece_plan(geometry, ids, size, sizes):
         if entry['method'] != 'overlay':
             continue
         piece = ids if entry['id'] is None else [entry['id']]
@@ -639,8 +652,9 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
                        f'and a fit needs {hexmesh.THROUGH:g}')
         if read['flat']:
             why.append(f'{read["flat"]:,} bricks are flat before any fitting')
-        said = (f'{entry["name"]}: at {entry["size"]:.4g} m the fit is likely to fold: '
-                f'{"; ".join(why)}. {read["suggested"]:.3g} m is likely to hold')
+        unit = _in_meters(geometry)
+        said = (f'{entry["name"]}: at {entry["size"]:.4g}{unit} the fit is likely to fold: '
+                f'{"; ".join(why)}. {read["suggested"]:.3g}{unit} is likely to hold')
         if bricks > solids.MESH_LIMIT or cells > solids.GRID_LIMIT:
             said += (', but that is too many bricks: the part wants a finer size on its '
                      'thin piece than on the rest, which one fit cannot give; Tetras '
@@ -649,9 +663,10 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
     return ''
 
 
-def _made_rows(made: dict, earlier: int) -> list[dict]:
+def _made_rows(geometry: Any, made: dict, earlier: int) -> list[dict]:
     """What a mesh holds, as VD's Mesh Solids pane says it."""
     rows = []
+    unit = _in_meters(geometry)
     method = made.get('method')
     if 'tets' in made:
         rows += [v.row('Ten-node tetrahedra', float(made['tets']), '', 'pass'),
@@ -675,7 +690,7 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
                 how = ('fitted' if piece['method'] == 'overlay' else
                        'swept along its own axis' if piece.get('turned') else
                        f'swept along {"XYZ"[piece["axis"]]}')
-                rows.append(v.row(piece['name'], f'{how} at {piece["size"]:.4g} m, '
+                rows.append(v.row(piece['name'], f'{how} at {piece["size"]:.4g}{unit}, '
                                   f'{piece["bricks"]:,} bricks', None, 'info'))
             rows.append(v.row('Shared at the seams', float(made['seam_shared']), 'nodes',
                               'info'))
@@ -689,12 +704,12 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
                            'warn' if made['poor'] else 'pass'),
                      v.row('Under 0.3', float(made['poor']), '', 'info')]
         else:
-            rows.append(v.row('Method', f'extruded along {"XYZ"[made["axis"]]}', None,
-                              'info'))
+            rows.append(v.row('Method', 'swept along its own axis' if made.get('turned')
+                              else f'extruded along {"XYZ"[made["axis"]]}', None, 'info'))
             if made.get('rounded'):
                 rows.append(v.row('Nodes on circles', float(made['rounded']), '', 'info'))
     if 'shortest' in made:
-        rows.append(v.row('Shortest edge', float(made['shortest']), 'm', 'info'))
+        rows.append(v.row('Shortest edge', float(made['shortest']), _meters(geometry), 'info'))
     if earlier:
         rows.append(v.row('Replaces', f'the {earlier:,} elements meshed before', None,
                           'warn'))
@@ -704,9 +719,7 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
 def _piece_sizes(text: str) -> dict[int, float]:
     """The sizes '3: 0.01, 5: 0.002' names, by piece."""
     out: dict[int, float] = {}
-    for entry in text.replace(' ', '').split(','):
-        if not entry:
-            continue
+    for entry in re.sub(r'\s*:\s*', ':', text).replace(',', ' ').split():
         piece, colon, size = entry.partition(':')
         try:
             out[int(piece)] = float(size)
@@ -721,6 +734,17 @@ def _likely_or_refused(geometry: Any, ids: list[int]) -> float:
     return _call(lambda: _likely_size(geometry, ids, 'hexes'))
 
 
+def _likely_of_piece(geometry: Any, ids: list[int], entry: dict) -> float:
+    """The size a `piece_plan` entry is likely to hold at, read as it is meshed: with what
+    is cut from it."""
+    from hertzforge.core import solids
+
+    if entry['id'] is None:
+        return _likely_or_refused(geometry, ids)
+    with solids.meshed_as(geometry, entry['id'], entry['cuts']) as read_as:
+        return _likely_or_refused(geometry, [read_as])
+
+
 def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, float]) -> dict:
     """How `solids.piece_plan` would mesh the parts, a row a piece, with the size each is
     likely to hold at beside the one it has."""
@@ -729,11 +753,12 @@ def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, f
     rows = []
     for entry in _call(lambda: solids.piece_plan(geometry, ids, size, sizes)):
         piece = entry.get('id')
-        likely = _likely_or_refused(geometry, [piece] if piece is not None else ids)
         rows.append([piece if piece is not None else '', entry.get('name', ''),
-                     entry['method'], float(entry['size']), float(likely),
-                     int(entry['bricks'])])
-    return v.table('Pieces', ['Piece', 'Name', 'Method', 'Size', 'Likely size', 'Bricks'], rows)
+                     entry['method'], float(entry['size']),
+                     float(_likely_of_piece(geometry, ids, entry)), int(entry['bricks'])])
+    unit = ' [m]' if geometry.units_defined else ''
+    return v.table('Pieces', ['Piece', 'Name', 'Method', f'Size{unit}', f'Likely size{unit}',
+                              'Bricks'], rows)
 
 
 def _preview(geometry: Any, ids: list[int], size: float, elements: str,
@@ -774,8 +799,9 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
             return None, [v.row('Bricks', f'about {bricks:,} at this size; Mesh makes '
                                 'them', None, 'info')]
         part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
-    earlier = len(solids.meshed_elements(geometry, part.group_name))
-    return part, _made_rows(made, earlier)
+    earlier = len(solids.meshed_elements(geometry,
+                                         solids.groups_meshed_again(geometry, ids, part)))
+    return part, _made_rows(geometry, made, earlier)
 
 
 def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -800,17 +826,28 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{solids.piece_name(geometry, flat[0])} is flat: a plate or a disk '
                       'is meshed into shells, quads or triangles')
     size = params['size'] or _call(lambda: _likely_size(geometry, ids, elements))
-    fold = (_call(lambda: _fold_check(geometry, ids, size)) if elements == 'hexes'
-            else '')
     sizes = _piece_sizes(params['sizes']) if elements == 'hexes' else {}
-    pieces = _pieces_table(geometry, ids, size, sizes) if elements == 'hexes' else None
-    if params['detect'] and pieces is not None:
-        sizes = {int(entry['id']): _likely_or_refused(geometry, [int(entry['id'])])
-                 for entry in _call(lambda: solids.piece_plan(geometry, ids, size)) if 'id' in entry}
-        pieces = _pieces_table(geometry, ids, size, sizes)
     said = [v.row('Solids', ', '.join(_label(solids.solid(geometry, i)) for i in ids),
                   None, 'info'),
-            v.row('Element size', float(size), 'm', 'info')]
+            v.row('Element size', float(size), _meters(geometry), 'info')]
+    pieces, fold = None, ''
+    if elements == 'hexes':
+        plan = _call(lambda: solids.piece_plan(geometry, ids, size))
+        in_pieces = len(plan) > 1
+        wrong = sorted(set(sizes) - {entry['id'] for entry in plan} if in_pieces else sizes)
+        if wrong:
+            raise refused(f'there is no piece {wrong[0]}: these parts mesh in pieces '
+                          f'{", ".join(str(entry["id"]) for entry in plan)}' if in_pieces else
+                          'these parts mesh as one, at the element size: a size per piece is '
+                          'for a union meshed in pieces')
+        if params['detect'] and in_pieces:
+            sizes = {int(entry['id']): _likely_of_piece(geometry, ids, entry) for entry in plan}
+        elif params['detect']:
+            likely = _likely_of_piece(geometry, ids, plan[0])
+            said.append(v.row('Detect', f'these parts mesh as one, likely to hold at '
+                              f'{likely:.4g}{_in_meters(geometry)}', None, 'info'))
+        pieces = _pieces_table(geometry, ids, size, sizes)
+        fold = _call(lambda: _fold_check(geometry, ids, size, sizes))
     if fold:
         said.append(v.row('Fit', fold, None, 'warn'))
     if not params['keep']:
@@ -829,10 +866,15 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         name, ids, size, apart=params['apart'],
         parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements,
         sizes=sizes or None))
-    rows = _made_rows(found, 0)
+    rows = _made_rows(geometry, found, 0)
     if found['replaced']:
         rows.append(v.row('Replaced', f'the {found["replaced"]:,} elements meshed before',
                           None, 'info'))
+    # a union meshed in pieces brings its seams again
+    lost = found.get('mates_dropped', 0) - found.get('seams', 0)
+    if lost > 0:
+        rows.append(v.row('Mated surfaces', f'{lost} on the old mesh deleted with it: Mate '
+                          'Surfaces again', None, 'warn'))
     rows += [v.row('Nodes added', float(found['added']), '', 'info'),
              v.row('Nodes shared with the geometry', float(found['shared']), '', 'info'),
              v.row('Nodes in all', float(geometry.num_nodes), '', 'info')]
@@ -846,7 +888,7 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
 GROUPS = Param('groups', 'Element groups (empty for every group of plates or solids)',
                'string', default='')
 MATE_TOLERANCE = Param('tolerance', 'Tolerance (0 for a quarter of the finest spacing)',
-                       'number', default=0.0, unit='m', min=0.0, step=0.0001)
+                       'number', default=0.0, unit='m', min=0.0, step=0.0001, length=True)
 HELD = tuple(Option(mode, label) for mode, label in (
     ('rigid', 'Rigid'), ('stiffness', 'Stiffness'), ('free', 'Free')))
 NORMAL = Param('normal', 'Normal', 'enum', default='rigid', options=HELD)
@@ -864,16 +906,11 @@ def _group_ids(geometry: Any, text: str) -> list[int] | None:
     known = [int(g) for g in geometry.group_id]
     if not text.strip():
         return None
-    chosen = []
-    for part in text.replace(' ', '').split(','):
-        try:
-            group = int(part)
-        except ValueError:
-            raise refused(f'{part!r} is not an element group number') from None
+    chosen = parse_id_runs(text, 'an element group number')
+    for group in chosen:
         if group not in known:
             raise refused(f'the geometry has element groups '
                           f'{", ".join(map(str, known)) or "none"}; not {group}')
-        chosen.append(group)
     return chosen
 
 
@@ -914,6 +951,8 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     at all (`Project.add_mated_surfaces`). The tolerance opens on VD's: a
     quarter of the groups' finest node spacing."""
     name, geometry = _geometry(project, params)
+    if not geometry.num_nodes:
+        raise refused(f'{name} has no nodes to mate: mesh it first')
     groups = _group_ids(geometry, params['groups'])
     tolerance = params['tolerance']
     if not tolerance:
@@ -924,8 +963,8 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     found = _call(lambda: project.detect_mated_surfaces(name, groups, tolerance))
     if not found:
         raise refused(f'no surface of these element groups lies on another within '
-                      f'{tolerance:.4g} m')
-    rows = [v.row('Tolerance', float(tolerance), 'm', 'info'),
+                      f'{tolerance:.4g}{_in_meters(geometry)}')
+    rows = [v.row('Tolerance', float(tolerance), _meters(geometry), 'info'),
             v.row('Patches found', float(len(found)), '', 'pass' if found else 'warn')]
     patches = v.table(f'Patches of {name}', ['Patch', 'First side (follows)', 'Second side',
                                              'Nodes'], [
@@ -934,7 +973,7 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
          f'{len(p["nodes_a"]):,} on {len(p["nodes_b"]):,}'] for k, p in enumerate(found)])
     if params['keep']:
         if params['patches'].strip():
-            picked = [int(n) for n in _numbers(params['patches'], 'the patches')]
+            picked = parse_id_runs(params['patches'], 'a patch number')
             wrong = [k for k in picked if not 1 <= k <= len(found)]
             if wrong:
                 raise refused(f'{len(found)} patches were found; there is no patch {wrong[0]}')
@@ -955,15 +994,43 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
 
 MATE = Param('mate', 'Mated surfaces (id)', 'integer', default=1, min=1, step=1)
 MATE_NAME = Param('name', 'Name (empty keeps it)', 'string', default='')
+KEPT_HOLD = (Option('keep', 'As it is'), *HELD)
+EDIT_NORMAL = Param('normal', 'Normal', 'enum', default='keep', options=KEPT_HOLD)
+EDIT_SHEAR = Param('shear', 'Shear', 'enum', default='keep', options=KEPT_HOLD)
+EDIT_NORMAL_STIFFNESS = Param('normal_stiffness', 'Normal stiffness (0 keeps it)', 'number',
+                              default=0.0, unit='N/m', min=0.0)
+EDIT_SHEAR_STIFFNESS = Param('shear_stiffness', 'Shear stiffness (0 keeps it)', 'number',
+                             default=0.0, unit='N/m', min=0.0)
+
+
+def _hold_changes(params: dict[str, Any], mated: Any) -> dict[str, Any]:
+    """What the form changes of how a set is held, nothing for what it leaves as it is."""
+    changes: dict[str, Any] = {}
+    for side in ('normal', 'shear'):
+        chosen = params[side]
+        typed = params[f'{side}_stiffness']
+        mode = getattr(mated, f'{side}_mode') if chosen == 'keep' else chosen
+        if mode != getattr(mated, f'{side}_mode'):
+            changes[f'{side}_mode'] = mode
+            changes[f'{side}_stiffness'] = typed if mode == 'stiffness' else 0.0
+        elif mode == 'stiffness' and typed and typed != getattr(mated, f'{side}_stiffness'):
+            changes[f'{side}_stiffness'] = typed
+    return changes
 
 
 def edit_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.edit_mated_surfaces`: a kept set's name and how it is held
-    changed (`Project.edit_mated_surfaces`): VD's Save on a set's pane."""
+    changed, only what the form changes (`Project.edit_mated_surfaces`)."""
     name, geometry = _geometry(project, params)
-    changes = _held(params)
+    known = {m.id: m for m in geometry.mates}
+    if params['mate'] not in known:
+        raise refused(f'the geometry has mated surfaces '
+                      f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
+    changes = _hold_changes(params, known[params['mate']])
     if params['name'].strip():
         changes['name'] = params['name'].strip()
+    if not changes:
+        raise refused('choose what changes: what is left as it is stays')
     _call(lambda: project.edit_mated_surfaces(name, params['mate'], **changes))
     (mated,) = [m for m in geometry.mates if m.id == params['mate']]
     return [v.reading(f'Mated surfaces of {name}', [
@@ -989,14 +1056,18 @@ def edit_mate_sides(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
     field, group = (('nodes_a', mated.groups[0]) if params['side'] == 'a'
                     else ('nodes_b', mated.groups[1]))
-    if params['toggle'].strip():
-        node = int(params['toggle'])
+    places = [int(n) for n in geometry.nodes_in([group])]
+    clicked = parse_id_runs(params['toggle'], 'a node id')
+    if clicked:
         held = [int(n) for n in getattr(mated, field)]
-        changed = [n for n in held if n != node] if node in held else [*held, node]
-        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(changed)}))
+        for node in clicked:
+            if node not in held and node not in places:
+                raise refused(f'node {node} is not on {_group_name(geometry, group)}, this '
+                              'side\'s element group')
+            held = [n for n in held if n != node] if node in held else [*held, node]
+        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(held)}))
         (mated,) = [m for m in geometry.mates if m.id == params['mate']]
     held = {int(n) for n in getattr(mated, field)}
-    places = [int(n) for n in geometry.nodes_in([group])]
     return [v.reading(f'{mated.name} on {name}', [
         v.row('Holds', mated.describe(), None, 'info'),
         v.row('First side', float(len(mated.nodes_a)), 'nodes', 'info'),
@@ -1015,7 +1086,7 @@ def delete_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.delete_mated_surfaces`)."""
     name, geometry = _geometry(project, params)
     known = [m.id for m in geometry.mates]
-    ids = [int(i) for i in _numbers(params['mates'], 'the mated surfaces')]
+    ids = parse_id_runs(params['mates'], 'a mated surfaces id')
     if not ids:
         raise refused(f'name the mated surfaces by id; the geometry has '
                       f'{", ".join(map(str, known)) or "none"}')
@@ -1101,7 +1172,8 @@ OPERATIONS = (
                 'round tube outer diameter, wall. Empty for the shape\'s opening ones.',
         params=(GEOMETRY, Param('shape', 'Shape', 'enum', default='I-beam',
                                 options=_section_shapes()),
-                Param('dimensions', 'Dimensions [m], in order', 'string', default=''),
+                Param('dimensions', 'Dimensions [m], in order', 'string', default='',
+                      length=True),
                 _length('length', 'Length', 4.0, 0.0), *CENTER, *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True, previews=True),
     Operation(
@@ -1137,7 +1209,8 @@ OPERATIONS = (
         summary='Move parts whole, each with every solid it is made of: turned about the '
                 'middle of their extent, then moved.',
         params=(GEOMETRY, SOLIDS, *OFFSET, *TURN), outputs=('reading', 'shape3d', 'table'),
-        run=move_solids, edits=True),
+        run=move_solids, edits=True,
+        edits_when=lambda params: any(params[p.name] for p in (*OFFSET, *TURN))),
     Operation(
         id='project.copy_solids', title='Copy Solids', workspace='geometry',
         summary='Copy solids, recipe and all, into the same geometry or another; a boolean '
@@ -1180,7 +1253,8 @@ OPERATIONS = (
                 'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
         params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
                 MESH_KEEP),
-        outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True,
+        edits_when=lambda params: params['keep']),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',
         summary='Find where element groups\' surfaces mate; Keep ties each patch, along the '
@@ -1191,14 +1265,16 @@ OPERATIONS = (
     Operation(
         id='project.edit_mated_surfaces', title='Edit Mated Surfaces', workspace='geometry', summary='Change how a kept set of mated surfaces is held, or its '
                                    'name.',
-        params=(GEOMETRY, MATE, NORMAL, NORMAL_STIFFNESS, SHEAR, SHEAR_STIFFNESS, MATE_NAME),
+        params=(GEOMETRY, MATE, EDIT_NORMAL, EDIT_NORMAL_STIFFNESS, EDIT_SHEAR,
+                EDIT_SHEAR_STIFFNESS, MATE_NAME),
         outputs=('reading', 'table'), run=edit_mated_surfaces, edits=True),
     Operation(
         id='project.edit_mate_sides', title='Edit Mate Sides', workspace='geometry',
         summary='The nodes of one side of a kept set of mated surfaces, by clicking them in '
                 'the view.',
         params=(GEOMETRY, MATE, MATE_SIDE, MATE_NODE), outputs=('reading', 'shape3d'),
-        run=edit_mate_sides, edits=True),
+        run=edit_mate_sides, edits=True,
+        edits_when=lambda params: bool(params['toggle'].strip())),
     Operation(
         id='project.delete_mated_surfaces', title='Delete Mated Surfaces', workspace='geometry', summary='Delete kept sets of mated surfaces, by id.',
         params=(GEOMETRY, MATES), outputs=('reading', 'table'), run=delete_mated_surfaces,
@@ -1210,3 +1286,5 @@ OPERATIONS = (
         params=(GEOMETRY, *EYE, *UP), outputs=('reading', 'shape3d'), run=set_view,
         edits=True),
 )
+
+OPERATIONS = tuple(replace(op, says_lengths=True) for op in OPERATIONS)
