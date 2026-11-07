@@ -784,6 +784,11 @@ class Geometry:
         #: definitions the model builder makes links of, kept in step as
         #: nodes and element groups are renumbered, merged or deleted
         self.mates: list = []
+        #: {element group id: the solids Mesh Solids meshed into it}: a part meshed again
+        #: replaces this mesh, whatever the group or the solid has been renamed. An empty
+        #: tuple is a mesh whose solids have gone; a group absent is one from no solid, or
+        #: from a file written before this was kept, and is found by its name
+        self.group_solids: dict[int, tuple[int, ...]] = {}
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -1784,6 +1789,10 @@ class Geometry:
         old = int(self.group_id[row])
         self.group_id[row] = group_id
         self.elem_group[self.elem_group == old] = group_id
+        if old != group_id:
+            for held in (self.group_properties, self.group_solids):
+                if old in held:
+                    held[group_id] = held.pop(old)
         self._mates_follow(groups={old: group_id})
 
     def renumber_coordinate_system(self, row: int, cs_id: int) -> None:
@@ -2614,6 +2623,7 @@ class Geometry:
         self.group_name = [name for name, k in zip(self.group_name, staying) if k]
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
+            self.group_solids.pop(group, None)
         self.group_id = self.group_id[staying]
         self._mates_follow(groups={group: None for group in wanted})
         return {'groups': removed, 'elements': len(doomed),
@@ -2682,8 +2692,13 @@ class Geometry:
         self.elem_group[moved] = into
         keep = ~np.isin(self.group_id, list(others))
         self.group_name = [name for name, k in zip(self.group_name, keep) if k]
+        solids = {s for group in ids for s in self.group_solids.get(group, ())}
+        tied = any(group in self.group_solids for group in ids)
         for group in others:
             self.group_properties.pop(group, None)
+            self.group_solids.pop(group, None)
+        if tied:
+            self.group_solids[into] = tuple(sorted(solids))
         self.group_id = self.group_id[keep]
         self._mates_follow(groups={group: into for group in others})
         return {'into': into, 'groups': len(others),

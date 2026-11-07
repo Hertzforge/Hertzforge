@@ -4518,8 +4518,9 @@ class Project(dict):
         shells only. Parts
         meshed together share nodes where they touch. The solids are
         kept so they can be meshed again, and a part meshed again
-        replaces its earlier mesh: the elements in the element group of
-        its name are deleted, and the group and its material are kept.
+        replaces its earlier mesh: the elements of the element group it
+        was meshed into (`Geometry.group_solids`) are deleted, and the
+        group, its name and its material are kept.
 
         Parameters
         ----------
@@ -4608,14 +4609,12 @@ class Project(dict):
         # kept the legs' bricks. The rigid links on those bricks' nodes,
         # the seams' ties above all, go with them: left in, they would
         # hold the old nodes and point the new mesh at them
-        replaced = [int(e) for e in solids.meshed_elements(geometry, part.group_name)]
+        remeshed = solids.groups_meshed_again(geometry, ids, part)
+        replaced = [int(e) for e in solids.meshed_elements(geometry, remeshed)]
         # and the mated surfaces on them: their nodes are the old mesh's
         # (a union meshed in pieces brings its seams again, in `part`)
         from .core import mates
 
-        names = list(geometry.group_name)
-        remeshed = [int(geometry.group_id[names.index(n)]) for n in part.group_name
-                    if n and n in names]
         dropped = mates.delete(geometry, mates.naming_groups(geometry, remeshed))
         if replaced:
             replaced += [int(e) for e in mesh.links_on(geometry, replaced)]

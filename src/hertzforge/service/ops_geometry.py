@@ -527,6 +527,7 @@ def _snapshot(geometry: Any) -> dict[str, Any]:
     held['cs_name'] = list(geometry.cs_name)
     held['group_name'] = list(geometry.group_name)
     held['group_properties'] = dict(geometry.group_properties)
+    held['group_solids'] = dict(geometry.group_solids)
     held['elem_conn'] = [np.array(c, copy=True) for c in geometry.elem_conn]
     return held
 

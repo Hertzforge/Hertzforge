@@ -8,14 +8,16 @@ import math
 import numpy as np
 import pytest
 
+from hertzforge.core.fem import GroupProperties, material
 from hertzforge.project import Project
 from hertzforge.service import projects
+from hertzforge.service.ops_geometry import OPERATIONS as GEOMETRY_OPERATIONS
 from hertzforge.service.ops_solids import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
 from .conftest import wire_views
 
-OPS = {op.id: op for op in OPERATIONS}
+OPS = {op.id: op for op in (*OPERATIONS, *GEOMETRY_OPERATIONS)}
 
 
 @pytest.fixture
@@ -402,3 +404,118 @@ def test_detect_fills_each_piece_and_the_sizes_reach_the_mesh(monkeypatch):
         run(project, 'project.mesh_solids', solids=str(both), size=0.01, sizes=f'{bar}: 0.005',
             keep=True, anyway=True)
     assert asked['sizes'] == {bar: 0.005}
+
+
+def _meshed_block(project, size=0.5, **given):
+    run(project, 'project.add_solid_block', width_x=1, width_y=1, width_z=1, **given)
+    run(project, 'project.mesh_solids', solids='1', size=size, keep=True)
+    return project['Part']
+
+
+@pytest.mark.parametrize('rename', ['group', 'solid'])
+def test_meshing_again_after_a_rename_replaces_the_mesh(project, rename):
+    geometry = _meshed_block(project)
+    assert len(geometry.elem_id) == 8
+    if rename == 'group':
+        run(project, 'project.set_entity', kind='groups', entity=1, field='name', value='Housing')
+    else:
+        run(project, 'project.edit_solid', solid=1, name='Housing')
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.25)
+    assert 'the 8 elements' in rows(reading)['Replaces']['value']
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.25, keep=True)
+    assert len(geometry.elem_id) == 64, 'the old mesh does not stay beside the new one'
+    assert len(geometry.group_id) == 1
+    assert geometry.group_solids == {1: (1,)}
+    assert rows(reading)['Replaced']['value'] == 'the 8 elements meshed before'
+
+
+def test_a_group_renamed_keeps_its_name_and_material_when_meshed_again(project):
+    geometry = _meshed_block(project)
+    run(project, 'project.set_entity', kind='groups', entity=1, field='name', value='Housing')
+    held = GroupProperties(material('6061-T6'))
+    geometry.group_properties[1] = held
+    run(project, 'project.mesh_solids', size=0.25, keep=True)
+    assert list(geometry.group_name) == ['Housing']
+    assert geometry.group_properties[1] == held
+
+
+def test_two_parts_of_one_name_meshed_in_turn_keep_their_own_meshes(project):
+    geometry = project['Part']
+    for x in (0.0, 5.0):
+        run(project, 'project.add_solid_block', x=x, width_x=1, width_y=1, width_z=1, name='bar')
+    run(project, 'project.mesh_solids', solids='1', size=0.5, keep=True)
+    (reading, *_rest) = run(project, 'project.mesh_solids', solids='2', size=0.5, keep=True)
+    assert 'Replaced' not in rows(reading)
+    assert len(geometry.elem_id) == 16
+    assert geometry.node_xyz[:, 0].min() == -0.5 and geometry.node_xyz[:, 0].max() == 5.5
+    assert geometry.group_solids == {1: (1,), 2: (2,)}
+    (reading, *_rest) = run(project, 'project.mesh_solids', solids='1', size=0.25, keep=True)
+    assert len(geometry.elem_id) == 64 + 8, 'the other part is left alone'
+
+
+def test_two_parts_of_one_name_meshed_together_are_one_group_meshed_together(project):
+    geometry = project['Part']
+    for x in (0.0, 1.0):
+        run(project, 'project.add_solid_block', x=x, width_x=1, width_y=1, width_z=1, name='bar')
+    run(project, 'project.mesh_solids', size=0.5, keep=True)
+    assert list(geometry.group_name) == ['bar'] and geometry.group_solids == {1: (1, 2)}
+    refused(project, 'project.mesh_solids', 'also holds the mesh of bar', solids='1', size=0.25,
+            keep=True)
+    refused(project, 'project.mesh_solids', 'also holds the mesh of bar', solids='1', size=0.25)
+    assert len(geometry.elem_id) == 16
+    run(project, 'project.mesh_solids', size=0.25, keep=True)
+    assert len(geometry.elem_id) == 128
+
+
+def test_a_solid_deleted_leaves_its_mesh_for_a_new_solid_of_its_id(project):
+    geometry = _meshed_block(project)
+    run(project, 'project.delete_solids', solids='1')
+    assert geometry.group_solids == {1: ()}
+    new = run(project, 'project.add_solid_block', x=5.0, width_x=1, width_y=1, width_z=1)
+    assert new and geometry.solids[0].id == 1, 'the id is taken again'
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.5, keep=True)
+    assert 'Replaced' not in rows(reading)
+    assert len(geometry.elem_id) == 16 and len(geometry.group_id) == 2
+
+
+def test_a_mesh_stays_tied_to_its_solid_through_a_save(project, tmp_path):
+    import h5py
+
+    from hertzforge.io import native
+
+    geometry = _meshed_block(project)
+    path = tmp_path / 'part.hforge'
+    native.save(geometry, path)
+    assert native.load(path).group_solids == {1: (1,)}
+    with h5py.File(path, 'r+') as f:
+        holder = next(g for g in f.values() if 'group_solids' in g.attrs)
+        del holder.attrs['group_solids']
+    older = native.load(path)
+    assert older.group_solids == {}, 'a file from before the tie reads back with none'
+    project.add('Older', older)
+    (reading, *_rest) = run(project, 'project.mesh_solids', geometry='Older', size=0.25, keep=True)
+    assert len(older.elem_id) == 64 and rows(reading)['Replaced']
+    assert older.group_solids == {1: (1,)}, 'found by its name, and tied from then on'
+
+
+def test_a_merged_or_renumbered_group_keeps_what_it_was_meshed_from(project):
+    geometry = project['Part']
+    for x in (0.0, 5.0):
+        run(project, 'project.add_solid_block', x=x, width_x=1, width_y=1, width_z=1)
+    run(project, 'project.mesh_solids', size=0.5, keep=True)
+    run(project, 'project.set_entity', kind='groups', entity=2, field='id', value='7')
+    assert geometry.group_solids == {1: (1,), 7: (2,)}
+    geometry.merge_groups([1, 7])
+    assert geometry.group_solids == {1: (1, 2)}
+    geometry.delete_groups([1])
+    assert geometry.group_solids == {}
+
+
+def test_renumbering_a_group_takes_its_properties_with_it(project):
+    geometry = _meshed_block(project)
+    held = GroupProperties(material('6061-T6'))
+    geometry.group_properties[1] = held
+    run(project, 'project.set_entity', kind='groups', entity=1, field='id', value='7')
+    assert geometry.group_properties == {7: held}
+    assert geometry.add_group('new', 1) == 1
+    assert 1 not in geometry.group_properties, 'a later group of the old id inherits nothing'

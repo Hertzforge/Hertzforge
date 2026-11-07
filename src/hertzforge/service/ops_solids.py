@@ -766,7 +766,8 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
             return None, [v.row('Bricks', f'about {bricks:,} at this size; Mesh makes '
                                 'them', None, 'info')]
         part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
-    earlier = len(solids.meshed_elements(geometry, part.group_name))
+    earlier = len(solids.meshed_elements(geometry,
+                                         solids.groups_meshed_again(geometry, ids, part)))
     return part, _made_rows(made, earlier)
 
 
