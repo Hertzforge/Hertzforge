@@ -789,9 +789,10 @@ class DataArray:
         roles = getattr(self, 'roles', None)
         if roles:
             moved = {(old, self.ordinate_dim[i]) for i in rows}
-            self.roles = {((new, identity[1]) if tuple(identity) in moved
-                           else identity): role
-                          for identity, role in roles.items()}
+            renamed = {((new, identity[1]) if tuple(identity) in moved
+                        else identity): role for identity, role in roles.items()}
+            roles.clear()
+            roles.update(renamed)
         for i in rows:
             self.response_dof[i] = new
         for i in columns:

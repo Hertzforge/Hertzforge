@@ -457,7 +457,7 @@ def _parse_dimension_uncached(expression: str) -> list[tuple[str, int]]:
     return parts
 
 
-def article_for(word: str) -> str:
+def _article(word: str) -> str:
     return 'an' if word[:1] in 'aeiou' else 'a'
 
 
@@ -501,13 +501,13 @@ def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]
             raise UnitError(f"Unknown dimension {dimension!r}")
         actual = ureg.Quantity(1.0, unit).dimensionality
         if actual != ureg.get_dimensionality(expected):
-            raise UnitError(f"Unit {unit!r} is not {article_for(dimension)} {dimension} unit "
+            raise UnitError(f"Unit {unit!r} is not {_article(dimension)} {dimension} unit "
                             f"(got {actual})")
         # a rotation and a rate share a dimensionality, and their numbers
         # differ by 2 pi
         if (_angular(quantity) if dimension in ('frequency', 'dimensionless', 'strain')
                 else dimension == 'angular_velocity' and not _angular(quantity)):
-            raise UnitError(f"Unit {unit!r} is not {article_for(dimension)} "
+            raise UnitError(f"Unit {unit!r} is not {_article(dimension)} "
                             f"{dimension} unit: one is built on an angle")
     return scale, zero
 

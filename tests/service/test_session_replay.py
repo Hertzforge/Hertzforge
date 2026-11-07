@@ -27,7 +27,7 @@ def replayed(project):
     script = project.session_script()
     assert 'not replayable' not in script
     space: dict = {}
-    exec(compile(script, 'session', 'exec'), space)
+    exec(compile(script, 'session', 'exec'), space)  # noqa: S102
     return space['project']
 
 

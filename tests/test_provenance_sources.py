@@ -120,7 +120,7 @@ def test_a_saved_project_opens_with_nothing_stale(tmp_path, suffix):
 
 
 def test_a_long_record_mapped_from_its_file_opens_with_nothing_stale(tmp_path, monkeypatch):
-    import hertzforge.io.native as native
+    from hertzforge.io import native
     monkeypatch.setattr(native, 'MAP_FROM_BYTES', 1024)
     monkeypatch.setattr(project_module, '_DIGEST_WHOLE_BYTES', 4096)
     p = hz.Project('p')

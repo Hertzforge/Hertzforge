@@ -8395,6 +8395,8 @@ class Project(dict):
         state to compare, is not reported.
         """
         out = {}
+        # one source's digest for all that was computed from it
+        values: dict[tuple[str, str], str | None] = {}
         for name, record in self.provenance.items():
             if name not in self or record.get('source') not in self:
                 continue
@@ -8405,9 +8407,12 @@ class Project(dict):
                 continue
             if _state_tuple(now) != _state_tuple(was):
                 out[name] = _state_story(was, now)
-            elif record.get('source_print') not in (None, self._source_values(
-                    record['source'], record['verb'])):
-                out[name] = "its source's values have changed"
+            elif record.get('source_print') is not None:
+                key = (record['source'], record['verb'])
+                if key not in values:
+                    values[key] = self._source_values(*key)
+                if values[key] not in (None, record['source_print']):
+                    out[name] = "its source's values have changed"
         return out
 
     def refresh(self, name: Any) -> str:
