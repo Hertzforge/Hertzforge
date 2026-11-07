@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .protocol import bad_request, refused
+from .verbs import modules_of
 
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 #: the module an operation belongs to: the shell's rail entry that offers it.
@@ -223,8 +224,6 @@ class Operation:
                'workspace': self.workspace, 'summary': self.summary,
                'params': [param.to_json() for param in self.params],
                'outputs': list(self.outputs)}
-        from .verbs import modules_of
-
         out['modules'] = list(modules_of(self))
         if self.previews:
             out['previews'] = True
