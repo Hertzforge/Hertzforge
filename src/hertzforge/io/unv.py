@@ -67,7 +67,7 @@ from ..core.data import direction_code
 from ..core.geometry import ELEMENT_TYPES, pen_up_runs, to_global, to_local
 from .sniffing import text_head
 
-_FLOAT = re.compile(r'[-+]?\d*\.?\d+(?:[DdEe][-+]?\d+)?')
+_FLOAT = re.compile(r'[-+]?(?:\d*\.?\d+(?:[DdEe][-+]?\d+)?|nan|inf(?:inity)?)', re.IGNORECASE)
 
 # 2412 FE descriptors with the extra beam-definition record before the nodes
 _BEAM_DESCRIPTORS = {11, 21, 22, 23, 24}
@@ -102,6 +102,16 @@ _58_NAMES = {1: 'time', 4: 'frf', 6: 'coherence', 9: 'psd', 12: 'spectrum',
              24: 'srs', 26: 'multiple_coherence'}
 
 EXTENSIONS = ('.unv', '.uff', '.uf')
+
+
+def _ratio_dim(numerator: str, denominator: str) -> str:
+    """A record's dimension from its two axes. A ratio is only as known as its
+    two halves, and one half unknown leaves the whole record so: the
+    dimension algebra has no part called 'unknown', and one odd record is no
+    reason to refuse the file."""
+    if 'unknown' in (numerator, denominator):
+        return 'unknown'
+    return f'{numerator}/{denominator}'
 
 
 def _floats(line):
@@ -582,11 +592,18 @@ def _parse_58(records, functions, payload=None):
     den_type = _int_slice(records[9], 0, 10)
     if den_type:
         den_dim, den_l, den_f = axis(records[9])
-        ordinate_dim = f'{num_dim}/{den_dim}'
+        ordinate_dim = _ratio_dim(num_dim, den_dim)
         lexp, fexp = num_l - den_l, num_f - den_f
+    elif function_type == 4:
+        # an FRF is a ratio by definition; a record that names no
+        # denominator still is one, and the class holds it to that
+        ordinate_dim = _ratio_dim(num_dim, 'dimensionless')
+        lexp, fexp = num_l, num_f
     else:
         ordinate_dim = num_dim
         lexp, fexp = num_l, num_f
+    if ordinate_dim == 'unknown':
+        lexp, fexp = 0, 0
 
     if payload is None:
         values = []
@@ -1001,19 +1018,52 @@ def _58_axis_record(dimension, label='', units=''):
             f'{label[:20]:<20}{units[:20]:<20}\n')
 
 
-def _58_dataset(data, record, unit_system=None, binary=False):
-    """One function, written as dataset 58 the way this module reads one."""
+def _e13(value: float) -> str:
+    """A value in the record's E13.5 field. A positive one has a column to
+    spare, and the seventh figure is what holds a step such as 1/51200 s."""
+    text = f'{value:13.6E}'
+    return text if len(text) == 13 else f'{value:13.5E}'
+
+
+def _58_values(abscissa, ordinate, complex_data, even):
+    """The lines after a double-precision record's eleventh, in the layouts
+    the format gives its double types: 4E20.12 when the abscissa is even,
+    2(E13.5,E20.12) or E13.5,2E20.12 when every abscissa value is present."""
+    if even:
+        scalars = (np.column_stack((ordinate.real, ordinate.imag)).ravel()
+                   if complex_data else ordinate)
+        scalars = scalars.tolist()
+        return [''.join(f'{v:20.12E}' for v in scalars[start:start + 4]) + '\n'
+                for start in range(0, len(scalars), 4)]
+    if complex_data:
+        return [f'{_e13(x)}{y.real:20.12E}{y.imag:20.12E}\n'
+                for x, y in zip(abscissa.tolist(), ordinate.tolist())]
+    pairs = [f'{_e13(x)}{y:20.12E}'
+             for x, y in zip(abscissa.tolist(), ordinate.tolist())]
+    return [''.join(pairs[start:start + 2]) + '\n'
+            for start in range(0, len(pairs), 2)]
+
+
+def _58_dataset(data, record, abscissa, ordinates, binary=False):
+    """One function, written as dataset 58 the way this module reads one.
+    `abscissa` and `ordinates` are the object's values in the units being
+    written (`exporters.data_values`), converted once for all its records."""
     from ..core.data import parse_dof
 
     response_node, response_direction = parse_dof(data.response_dof[record])
     reference_node, reference_direction = (
         parse_dof(data.reference_dof[record])
         if data.reference_dof is not None else (0, ''))
-    from .exporters import data_values
 
-    abscissa, ordinates = data_values(data, unit_system)
+    abscissa = np.asarray(abscissa, dtype=np.float64)
     ordinate = np.atleast_1d(ordinates[record])
     complex_data = np.iscomplexobj(ordinate)
+    steps = np.diff(abscissa)
+    # an even record's start and step are all the abscissa takes: every value
+    # written in thirteen columns is a value rounded to seven figures. The
+    # binary form holds each abscissa value whole, as doubles
+    even = (not binary and steps.size > 0 and steps[0] > 0
+            and bool(np.allclose(steps, steps[0], rtol=1e-9, atol=0.0)))
 
     lines = [f'{data.record_label(record)[:80]}\n', 'NONE\n', 'NONE\n',
              'NONE\n', 'NONE\n']
@@ -1023,10 +1073,9 @@ def _58_dataset(data, record, unit_system=None, binary=False):
         f'{direction_code(response_direction) if response_direction else 0:4d} '
         f'{"NONE":<10}{reference_node or 0:10d}'
         f'{direction_code(reference_direction) if reference_direction else 0:4d}\n')
-    # written unevenly spaced, with every abscissa value present: an even
-    # record would have to assume a constant step this abscissa may not have
-    lines.append(f'{6 if complex_data else 4:10d}{len(ordinate):10d}{0:10d}'
-                 f'{0.0:13.5E}{0.0:13.5E}{0.0:13.5E}\n')
+    start, step = (float(abscissa[0]), float(steps[0])) if even else (0.0, 0.0)
+    lines.append(f'{6 if complex_data else 4:10d}{len(ordinate):10d}{int(even):10d}'
+                 f'{_e13(start)}{_e13(step)}{0.0:13.5E}\n')
     lines.append(_58_axis_record(data.abscissa_dim))
 
     # dataset 58 names a dimension from a fixed vocabulary. A PSD's
@@ -1046,21 +1095,15 @@ def _58_dataset(data, record, unit_system=None, binary=False):
                  if nameable and denominator else blank)
     lines.append(f'{0:10d}{0:5d}{0:5d}{0:5d}  {"":<20}{"":<20}\n')
 
-    values = []
-    for x, y in zip(abscissa, ordinate):
-        values.append(x)
-        values.extend((y.real, y.imag) if complex_data else (float(y),))
     if binary:
         # float64 because the header two records above declares ordinate
         # type 4 or 6 — the double-precision pair. The two must agree,
         # and the header is the one that says so.
-        header = ''.join(lines)
-        blob = np.asarray(values, dtype='<f8').tobytes()
-        return _binary_block(58, header, blob)
-    per_line = 6
-    for start in range(0, len(values), per_line):
-        lines.append(''.join(f'{v:13.5E}'
-                             for v in values[start:start + per_line]) + '\n')
+        columns = ((abscissa, ordinate.real, ordinate.imag) if complex_data
+                   else (abscissa, ordinate))
+        blob = np.column_stack(columns).astype('<f8').tobytes()
+        return _binary_block(58, ''.join(lines), blob)
+    lines += _58_values(abscissa, ordinate, complex_data, even)
     return _block(58, ''.join(lines))
 
 
@@ -1221,9 +1264,9 @@ def save(obj: Any, path: str | os.PathLike,
 
     `binary` writes the functions as dataset 58b instead of 58: the same
     eleven ASCII header records, then the values as little-endian IEEE
-    754 doubles instead of `13.5E` text. That is 8 bytes a value instead
-    of about 13 characters, and a float read back is exactly the float
-    written, where five decimal places are not. Only the functions
+    754 doubles instead of `20.12E` text. That is 8 bytes a value instead
+    of 20 characters, and a float read back is exactly the float written.
+    Only the functions
     change form; geometry, mode shapes and the units dataset have no
     binary variant and are written as ASCII.
 
@@ -1243,7 +1286,10 @@ def save(obj: Any, path: str | os.PathLike,
     elif isinstance(obj, ShapeSet):
         blocks += _shape_datasets(obj, unit_system)
     else:
-        blocks += [_58_dataset(obj, i, unit_system, binary)
+        from .exporters import data_values
+
+        abscissa, ordinates = data_values(obj, unit_system)
+        blocks += [_58_dataset(obj, i, abscissa, ordinates, binary)
                    for i in range(obj.num_records)]
     # bytes throughout: a 58b block is bytes, the rest are text, and the
     # file is one stream of both
