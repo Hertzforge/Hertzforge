@@ -412,8 +412,10 @@ def _sheet(project: Any, name: str, draft: Any, params: dict[str, Any]) -> Any:
 
 
 def _autos(spec: Any) -> dict[str, int]:
+    from hertzforge.core.data import autospectrum
+
     return {str(spec.response_dof[k]): k for k in range(spec.num_records)
-            if spec.reference_dof is None or spec.reference_dof[k] == spec.response_dof[k]}
+            if autospectrum(spec, k)}
 
 
 def _density_unit(dim: str) -> str | None:

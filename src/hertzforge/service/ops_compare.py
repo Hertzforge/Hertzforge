@@ -479,13 +479,13 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
     as Visual Dynamics' RMS bars of a specification on its own show
     them, with no limit to be out of."""
     from hertzforge.core.compliance import specification_rms
+    from hertzforge.core.data import autospectrum
     from hertzforge.drawing.plot import pair_label
 
     name = params['specification']
     spec = project[name]
     references = spec.reference_dof
-    wanted = [i for i in range(spec.num_records)
-              if references is None or str(references[i]) == str(spec.response_dof[i])]
+    wanted = [i for i in range(spec.num_records) if autospectrum(spec, i)]
     if not wanted:
         raise refused(f'{name} holds no autospectrum, so no channel asks for a level')
     rows, top = [], None

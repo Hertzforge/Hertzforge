@@ -20,12 +20,12 @@ from .ops_specify import (
     BREAKPOINTS,
     CONFIDENCE,
     COVERAGE,
-    K,
     MARGIN,
     OVERSHOOT,
     RMS,
     SIGMA,
     STATISTIC,
+    K,
     limit_settings,
 )
 from .protocol import refused
@@ -676,7 +676,7 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     autospectra of a cross-spectral matrix, drawn as Visual Dynamics'
     Drive points (Autospectra) toggle selects them."""
     import hertzforge as hz
-    from hertzforge.core.data import Psd
+    from hertzforge.core.data import Psd, autospectrum
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
 
     from .waterfalls import axes
@@ -686,8 +686,11 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     what = 'autospectra' if isinstance(data, Psd) else 'drive points'
     if data.reference_dof is None:
         raise refused(f'{name} has no references: every record is an autospectrum')
+    # a drive point of an FRF is a ratio of two quantities at one DOF; in a
+    # density, the same two are a cross term
     records = [i for i in range(data.num_records)
-               if data.response_dof[i] == data.reference_dof[i]]
+               if (autospectrum(data, i) if isinstance(data, Psd)
+                   else data.response_dof[i] == data.reference_dof[i])]
     if not records:
         raise refused(f'{name} has no {what}: no record has its response and reference '
                       'at one DOF')

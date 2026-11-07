@@ -138,3 +138,88 @@ def test_derive_writes_the_envelope_field_limit_shows(settings):
     fit = project.field_limit('Set', **{'max_breakpoints': 12, **settings})
     assert written.abscissa == pytest.approx(fit.frequencies)
     assert np.real(written.ordinate[0]) == pytest.approx(fit.levels)
+
+
+def _drive_point_specification():
+    """Two channels at one DOF and the cross term between them, which names
+    that DOF twice and is not a channel."""
+    levels = np.ones((3, 2))
+    return Specification(np.array([20.0, 500.0]), levels,
+                         response_dof=['1Z+', '1Z+', '1Z+'],
+                         reference_dof=['1Z+', '1Z+', '1Z+'],
+                         ordinate_dim=[DENSITY, 'acceleration*force/frequency',
+                                       'force**2/frequency'])
+
+
+def test_spec_rms_scores_channels_and_not_a_cross_term_at_one_dof():
+    project = hertzforge.Project()
+    project.add('Spec', _drive_point_specification())
+    (reading,) = run(project, 'project.spec_rms', specification='Spec')
+    assert reading['rows'][-1]['value'].startswith('2 channels')
+    assert len(reading['rows']) == 3
+    assert {row['unit'] for row in reading['rows'][:-1]} == {'m/s²', 'N'}
+
+
+def _force_and_acceleration_at_one_dof():
+    rng = np.random.default_rng(4)
+    rate, n = 1024.0, 2 ** 14
+    force = rng.standard_normal(n)
+    record = TimeHistory(np.arange(n) / rate,
+                         np.vstack([force, 2.0 * force + 0.1 * rng.standard_normal(n),
+                                    rng.standard_normal(n)]),
+                         response_dof=['1Z+', '1Z+', '4Z+'],
+                         ordinate_dim=['force', 'acceleration', 'acceleration'])
+    record.averaging = Averaging(frame_length=1024, overlap=0.5, window='hann').filled(n, rate)
+    project = hertzforge.Project()
+    project.add('Run', record)
+    return project
+
+
+def test_drive_points_of_a_density_are_its_autospectra():
+    project = _force_and_acceleration_at_one_dof()
+    name = project.compute_cpsds('Run')
+    (view,) = run(project, 'project.drive_points', data=name)
+    assert '3 of 9 records' in view['title']
+
+
+def test_a_sheet_opens_the_channels_and_not_a_cross_term_at_one_dof():
+    from hertzforge.core.author import SpecificationDraft
+
+    spec = Specification(np.array([20.0, 500.0]), np.ones((3, 2)),
+                         response_dof=['1Z+', '1Z+', '2Z+'],
+                         reference_dof=['1Z+', '1Z+', '2Z+'],
+                         ordinate_dim=[DENSITY, 'acceleration*force/frequency', DENSITY])
+    assert list(SpecificationDraft.from_specification(spec).channels) == ['1Z+', '2Z+']
+
+
+def test_control_channels_skip_a_cross_term_at_one_dof():
+    from hertzforge.core.multi_point import control_channels
+
+    spec = Specification(np.array([20.0, 500.0]), np.ones((2, 2)),
+                         response_dof=['1Z+', '2Z+'], ordinate_dim=[DENSITY, DENSITY])
+    f = np.arange(0.0, 513.0)
+    measured = Psd(f, np.ones((3, 513)), response_dof=['1Z+', '1Z+', '2Z+'],
+                   reference_dof=['1Z+', '1Z+', '2Z+'],
+                   ordinate_dim=['acceleration*force/frequency', DENSITY, DENSITY])
+    assert control_channels(spec, measured, channels=['1Z+', '2Z+']) == [1, 2]
+
+
+def test_a_stage_stands_channels_and_not_a_cross_term_at_one_dof():
+    spec = Specification(np.array([20.0, 500.0]), np.ones((3, 2)),
+                         response_dof=['1Z+', '1Z+', '2Z+'],
+                         reference_dof=['1Z+', '1Z+', '2Z+'],
+                         ordinate_dim=[DENSITY, 'acceleration*force/frequency', DENSITY])
+    project = hertzforge.Project()
+    project.add('Spec', spec)
+    (view,) = run(project, 'project.spec_stage', specification='Spec')
+    assert len(view['stations']) == 2
+
+
+def test_a_column_of_cross_terms_at_one_dof_is_a_reference_column():
+    from hertzforge.service.show import _column
+
+    f = np.arange(0.0, 8.0)
+    data = Psd(f, np.ones((2, 8)) * (1.0 + 1.0j), response_dof=['1Z+', '1Z+'],
+               reference_dof=['1Z+', '1Z+'],
+               ordinate_dim=['acceleration*force/frequency', 'velocity*force/frequency'])
+    assert _column(data, [0, 1]) is not None
