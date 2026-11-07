@@ -458,10 +458,26 @@ def test_an_edge_of_zero_means_one_thing_in_pulse_check_and_generate(shape):
     assert labels == {'Edge, 0 for a twentieth of the duration'}
 
 
+def test_a_force_rating_with_no_moving_mass_says_so():
+    project = _half_sine_project()
+    found = rows_of(reading(run(project, 'project.stroke', history='R', force=30000.0)))
+    assert 'moving mass' in found['Against the rating']['value']
+    assert found['Against the rating']['status'] == 'warn'
+    assert 'moving mass' in found['Verdict']['value']
 
 
+def test_a_force_rating_with_no_moving_mass_is_said_beside_a_judged_rating():
+    project = _half_sine_project()
+    views = run(project, 'project.stroke', history='R', force=30000.0, velocity=100.0)
+    said = [row['value'] for row in reading(views)['rows'] if row['label'] == 'Against the rating']
+    assert any('moving mass' in text for text in said)
+    assert any(' against ' in text for text in said)
 
 
+def test_no_rating_at_all_still_says_no_ratings():
+    project = _half_sine_project()
+    found = rows_of(reading(run(project, 'project.stroke', history='R', moving_mass=45.0)))
+    assert found['Verdict']['value'] == 'no ratings given'
 
 
 def test_a_synthesis_refusal_speaks_in_the_units_of_the_rows():

@@ -728,11 +728,16 @@ def stroke(project: Any, params: dict[str, Any]) -> list[dict]:
     for line in judged:
         rows.append(v.row('Against the rating', line, None,
                           'fail' if 'OVER' in line else 'pass' if 'within' in line else 'info'))
-    if not judged:
+    massless = bool(ratings['force'] and not ratings['moving_mass'])
+    if massless:
+        rows.append(v.row('Against the rating', 'The force rating is not judged: it needs the '
+                          'moving mass.', None, 'warn'))
+    elif not judged:
         rows.append(v.row('Against the rating', 'No ratings given: the reading stands on its '
                           'own.', None, 'info'))
+    unjudged = 'the force rating needs the moving mass' if massless else 'no ratings given'
     rows.append(v.row('Verdict', {True: 'fits', False: 'does not fit',
-                                  None: 'no ratings given'}[reading.fits], None,
+                                  None: unjudged}[reading.fits], None,
                       _verdict(reading.fits)))
     t = reading.time
     t0, t1 = float(t[0]), float(t[-1])
