@@ -351,8 +351,8 @@ def test_a_preview_over_the_socket_leaves_the_project_unmodified():
     assert 'project' not in previewed
     assert previewed['views'][0]['rows'][0]['label'] == 'Would add'
     assert 'Would add' not in str(results[4]['result']['views'][0])
-    assert 'x' in [o['name'] for o in results[3]['result']['project']['objects']], (
-        'an operation with no preview runs for real')
+    assert results[3]['error']['code'] == 'bad_request', 'an operation with no preview runs nothing'
+    assert 'x' not in [o['name'] for o in results[4]['result']['project']['objects']]
 
 
 def _union_in_pieces():

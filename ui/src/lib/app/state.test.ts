@@ -25,7 +25,7 @@ const editSolid = {
 	modules: ['geometry'],
 	previews: true,
 	outputs: ['reading'],
-	params: [geometry, { name: 'length', label: 'Length', type: 'string', default: '' }]
+	params: [geometry, { name: 'solid', label: 'Solid', type: 'integer', default: 1 }, { name: 'length', label: 'Length', type: 'string', default: '' }]
 } as unknown as OperationDescriptor;
 
 const summary = {
@@ -163,6 +163,16 @@ describe('a form that previews', () => {
 		expect(runs.length).toBe(1);
 		expect(a.runError).toBeNull();
 		expect(a.reading).toBeNull();
+	});
+
+	it('nor does the row filling in the part picked in the tree count as typing', async () => {
+		const { a } = make();
+		const picked = { ...row(editSolid), fill: { geometry: 'G', solid: '2' } } as ActionRow;
+		await a.perform(picked, column);
+		expect(a.currentValues.solid).toBe(2);
+		a.followPreview();
+		await rest();
+		expect(a.runError).toBeNull();
 	});
 
 	it('what was typed being refused says why, and takes the last preview down', async () => {

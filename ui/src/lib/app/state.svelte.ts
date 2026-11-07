@@ -444,10 +444,11 @@ class AnalyzeState {
 		this.previewDrawn = null;
 	}
 
-	/** Every field the form asks still holds its default. */
+	/** Every field the form asks, but for what its row filled in, still holds its default. */
 	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
 		const defaults = defaultValues(this.paramsOf(op));
-		return this.formParams.every((p) => values[p.name] === defaults[p.name]);
+		const filled = this.formRow?.fill ?? {};
+		return this.formParams.every((p) => p.name in filled || values[p.name] === defaults[p.name]);
 	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
