@@ -37,7 +37,7 @@ def test_a_report_is_generated_rendered_and_exported(project, tmp_path):
 
 
 def test_an_export_asks_about_owed_sections_and_astray_files_first(project, tmp_path):
-    """VD's `_export_owed` and `_export_index`: with skeleton sections on, a
+    """With skeleton sections on, a
     report that still owes sections is not written until told to anyway;
     with the data index on, the files are hashed again and one changed or
     not found holds the export the same way. An issue makes the index

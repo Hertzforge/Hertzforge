@@ -1,4 +1,4 @@
-"""Reports on the connection's project: Visual Dynamics' report, built from
+"""Reports on the connection's project: the report, built from
 a starter template bound to the project's objects, shown as the page the
 core writes, and saved as a file (`report.*`).
 
@@ -34,7 +34,7 @@ _PENDING: dict[int, tuple[str, str]] = {}
 _PRINTS = ("<script>history.replaceState(null, '', '#print');</script>",
            "<script>addEventListener('load', () => setTimeout(() => print(), 600));</script>")
 
-#: the starter templates, as VD offers them; 'empty' starts blank
+#: the starter templates; 'empty' starts blank
 TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'empty')
 
 THEMES = ('light', 'dark')

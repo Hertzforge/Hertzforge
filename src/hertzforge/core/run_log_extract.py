@@ -179,7 +179,7 @@ def take(path: str | os.PathLike, test: int | None = None,
     Parameters
     ----------
     path : str or os.PathLike
-        The run log (`.hflog`, or a Visual Dynamics `.vdlog`).
+        The run log (`.hflog`, or an older `.vdlog`).
     test : int, optional
         The test, by number. May be left out when the log holds one
         test.

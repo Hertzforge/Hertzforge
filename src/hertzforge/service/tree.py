@@ -1,15 +1,15 @@
 """What an object holds, for the project tree's expansions.
 
-Visual Dynamics' tree opens an object into what it contains, and the
-shell's tree does the same from this answer (`project.children`). A
+The shell's tree opens an object into what it contains from this answer
+(`project.children`). A
 geometry opens into its nodes, its coordinate systems, its elements by
 family with the element groups under each, its solids and its mated
-surfaces (`gui.main_window._build_children`). Every object that holds
-more than one thing opens into a grid, even one column wide
-(`gui.record_grid`): rows are a DOF and a quantity, columns are what
+surfaces. Every object that holds
+more than one thing opens into a grid, even one column wide: rows are a DOF and a
+quantity, columns are what
 tells one record from another (the reference, the capture, or nothing),
-and each cell names its record, whose icon says what it measures
-(`gui.icons.record_icon`). A shape set opens into its modes, a channel
+and each cell names its record, whose icon says what it measures. A shape set opens into
+its modes, a channel
 table into its channels, photographs into their names.
 
 Nothing here is drawn. The icon of a record is a key the shell draws
@@ -53,8 +53,7 @@ def record_icon(data: Any, index: int) -> str:
 
 
 def grid(data: Any) -> dict[str, Any]:
-    """A data object's records as Visual Dynamics' grid plans them
-    (`gui.record_grid.row_keys`, `plan`). A row is a DOF and a quantity:
+    """A data object's records. A row is a DOF and a quantity:
     two channels can sit at one point, but a volt and a newton never share
     a row. When even that cannot tell channels apart (nothing declared, so
     every quantity is unknown) the channel order breaks the tie, and the
@@ -193,7 +192,7 @@ def children(project: Any, name: str) -> dict[str, Any]:
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
     if isinstance(obj, (SineSweepSpecification, SineLevelSet)):
-        # the rows under a sine object are its control DOFs (VD, 2026-09-25:
+        # the rows under a sine object are its control DOFs (2026-09-25:
         # the tones were the rows once, which inverted the rest of the tree)
         from .ops_sine_shock import sine_dofs
 
@@ -212,6 +211,6 @@ def children(project: Any, name: str) -> dict[str, Any]:
 
 def banded(obj: Any) -> bool:
     """Whether a PSD or a specification is on proportional bands, which
-    changes its icon as it changes its shape (`gui.icons.object_icon`)."""
+    changes its icon as it changes its shape."""
     bandwidth = getattr(obj, 'bandwidth', None)
     return bandwidth is not None and not (isinstance(bandwidth, float) and np.isnan(bandwidth))

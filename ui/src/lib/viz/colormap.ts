@@ -1,6 +1,6 @@
 /**
  * Sequential colormap for magnitude: viridis, dark purple through blue and green to yellow, as
- * matplotlib and Visual Dynamics draw it (Brandon, 2026-11-02, over the cividis the shell had).
+ * matplotlib draws it (Brandon, 2026-11-02, over the cividis the shell had).
  * Designed to read the same with red-green color vision deficiency, and monotonic in lightness,
  * so the order of values survives in grayscale too.
  */

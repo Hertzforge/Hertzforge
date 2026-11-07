@@ -2,8 +2,8 @@
  * Check for Updates, in the desktop app: the Tauri updater reads the latest release's manifest
  * (`latest.json`, written by the release workflow), says through the native dialogs whether a
  * newer version is published, and on a yes downloads the signed archive, verifies it against the
- * key built into the app, installs it and relaunches. Only when asked, never at startup, as
- * Visual Dynamics checks. In a browser there is no updater and the command is not offered.
+ * key built into the app, installs it and relaunches. Only when asked, never at startup. In a
+ * browser there is no updater and the command is not offered.
  */
 
 interface Update {

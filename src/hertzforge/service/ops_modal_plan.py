@@ -1,4 +1,4 @@
-"""Planning a modal test and handing its model on: Visual Dynamics'
+"""Planning a modal test and handing its model on:
 Plan Instrumentation, Export State-Space Model, Project onto Basis DOFs
 narrowed to picked channels, and Animate the Projection.
 
@@ -66,7 +66,7 @@ KEEP = Param('keep', 'Keep: add the geometry, channels and shapes', 'boolean', d
 
 def _plannable_groups(geometry: Any, text: str) -> tuple[list[int], bool]:
     """The element groups sensors may go on, and whether that is every
-    group with solids, plates or beams: the groups Visual Dynamics'
+    group with solids, plates or beams: the groups the
     pane lists, all checked when opened."""
     offered = [g for g in (int(g) for g in geometry.groups.ids)
                if _family(geometry, g) in ('volume', 'face', 'line', 'mixed')]
@@ -114,7 +114,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
 
     `surfaces` is (found, offered ids, kept ids, params): the model's
     faces are then its surfaces', and a click on one leaves it out or puts
-    it back, as a click does in Visual Dynamics' pane."""
+    it back, as a click does in the pane."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length
 
     drawn, triangles, lines = drawn_mesh(geometry)
@@ -168,8 +168,7 @@ def _useful_directions(blocks: np.ndarray) -> int:
 
 def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plan_instrumentation`: accelerometers chosen on a finite
-    element model by Effective Independence, tri-axial ones first, as
-    Visual Dynamics' Plan Instrumentation pane previews them: the
+    element model by Effective Independence, tri-axial ones first: the
     model's surfaces (`core.instrumentation.skin`, small ones left out
     by `default_surfaces`), the places on them (`candidates`), the modes
     in each place's directions (`local_shapes`), the choice
@@ -330,7 +329,7 @@ MAXIMUM = Param('maximum', 'Maximum (0 keeps every mode)', 'number', default=0.0
 RIGID = Param('rigid', 'Rigid', 'number', default=1.0, unit='Hz', min=0.01, step=0.5)
 PATH = Param('path', 'File (.npz; blank previews only)', 'string', default='')
 
-#: lines in the preview's FRFs, as Visual Dynamics draws them
+#: lines in the preview's FRFs
 PREVIEW_LINES = 1600
 
 
@@ -339,7 +338,7 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
     channels as the modal state-space model Rattlesnake's state-space
     hardware loads (`core.state_space.state_space_model`), modes at and
     above the maximum frequency left out and those below the rigid
-    frequency moved up to it. The preview is Visual Dynamics': each
+    frequency moved up to it. The preview: each
     drive point's FRF from the model's own matrices, beside the whole
     set's synthesized FRF dashed (`ShapeSet.synthesize_frf`), and the
     pane's rows. Given a file, the model is written there
@@ -419,7 +418,7 @@ OTHER = Param('second', 'Projected', 'enum', options_from='objects:shape_set')
 
 
 def _report_rows(report: dict, units_defined: bool) -> list[dict]:
-    """What a projection matched, as Visual Dynamics' status line says it."""
+    """What a projection matched."""
     unit = 'm' if units_defined else 'model units'
     rows = [v.row('Nodes matched', f'{report["matched"]} of {report["total"]}', None,
                   'pass' if report['matched'] == report['total'] else 'warn'),
@@ -434,8 +433,7 @@ def _report_rows(report: dict, units_defined: bool) -> list[dict]:
 def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_channels`: a shape set sampled at some rows
     of a channel table, by the nearest node and its direction
-    (`Project.project_onto_basis` with `channels`), as Visual Dynamics
-    projects onto rows picked in the table's grid, with the node match
+    (`Project.project_onto_basis` with `channels`), with the node match
     tolerance its dialog asks for. The set is added, drawn on the
     table's geometry, beside what the projection matched."""
     source, table = params['source'], params['table']
@@ -461,7 +459,7 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     (`core.correlate.project_shapes`), their MAC after projection
     (`core.shapes.cross_mac`, as `Project.comparison_mac` reads it), and
     the pair a cell picks drawn on the basis geometry, the projected
-    mode over the basis mode: Visual Dynamics' Animate the Projection.
+    mode over the basis mode: Animate the Projection.
     Nothing is added."""
     from hertzforge.core.correlate import project_shapes
     from hertzforge.core.shapes import cross_mac

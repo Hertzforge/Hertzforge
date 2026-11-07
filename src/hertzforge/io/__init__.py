@@ -5,7 +5,7 @@ is added without changing existing code.
 
 Every object that can be imported can also be saved, though not always
 in the format it came from. `.hforge` (HDF5) is the native format and
-the one Save and Load use, and Visual Dynamics' `.vdyn` files open the
+the one Save and Load use, and older `.vdyn` files open the
 same way; it keeps everything, including units, and so
 does `.mat`, which is the same layout in MATLAB's container. The other
 formats are for exchanging data with other tools, and each loses
@@ -149,7 +149,7 @@ def known_format(path: str | os.PathLike) -> str | None:
     """The name of a file's format when Hertzforge knows it, or
     None.
 
-    Known are a Hertzforge file, a Visual Dynamics file, a document the record carries
+    Known are a Hertzforge file, a `.vdyn` file, a document the record carries
     beside its data, named by its kind from its suffix, and any file an
     importer recognizes, named by that importer's description. A sniffer
     that trips over the file is not its format, so this does not raise
@@ -175,7 +175,7 @@ def known_format(path: str | os.PathLike) -> str | None:
 def format_of(path: str | os.PathLike) -> str:
     """The name of a file's format, as a data index prints it.
 
-    A Hertzforge or Visual Dynamics file is named as one. A document the
+    A `.hforge` or `.vdyn` file is named as one. A document the
     record carries
     beside its data (a settings list, a log, a scanned procedure) is
     named by its kind, from its suffix. Any other file an importer
@@ -348,7 +348,7 @@ register_importer('adf', 'I-DEAS Associated Data File (.afu/.ati/.ash)',
 register_importer('sdynpy_data', 'sdynpy data array (.npz)',
                   sdynpy_data.sniff, sdynpy_data.load)
 register_importer('report_template',
-                  'Visual Dynamics report template (.vdreport)',
+                  'Report template (.hftemplate)',
                   report_template.sniff, report_template.load)
 register_importer('rattlesnake_specification',
                   'Rattlesnake random specification (.npz)',
@@ -434,7 +434,7 @@ register_exporter('rattlesnake_specification',
                   rattlesnake_specification.save)
 # a report on its own is a template: the blocks and their bindings,
 # no values, to be bound afresh in whatever project imports it
-register_exporter('report_template', 'Report template (.vdreport)',
+register_exporter('report_template', 'Report template (.hftemplate)',
                   report_template.SUFFIX, report_template.handles,
                   report_template.save)
 # the project file in MATLAB's container: every object and a whole

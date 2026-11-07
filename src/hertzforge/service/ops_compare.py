@@ -1,5 +1,4 @@
-"""Comparisons of a pair or group of the project's objects, as Visual
-Dynamics reads them when two objects are selected together: a measured PSD
+"""Comparisons of a pair or group of the project's objects: a measured PSD
 against its specification (the spectra, the RMS error and lines out of every
 channel, the lines outside beside what chance puts there, the composite of the
 control channels), a specification's own levels, two densities as signal over
@@ -9,8 +8,7 @@ spectra against their requirement, and a transient run against its reference.
 Every number is the core's: `core.compliance`, `core.chance`,
 `core.multi_point`, `core.snr`, `core.signature`, `core.matrix_comparison`
 and `core.replication`. Each reading adds nothing to the project; Comparison
-Scaling holds a scale on the measurement, as Visual Dynamics' scaling field
-does.
+Scaling holds a scale on the measurement.
 """
 
 from __future__ import annotations
@@ -116,7 +114,7 @@ def _compared(project: Any, params: dict[str, Any]) -> tuple[Any, Any, list, int
 
 def _count_row(values: list[float], beyond: Any, where: str, notes: int,
                note: str | None, counted: str = 'channels') -> dict:
-    """The bar chart's count as Visual Dynamics writes it: how many
+    """The bar chart's count: how many
     channels (or whatever is `counted`) are out, of how many scored, and
     the share. With none scored there is no verdict to give."""
     scored = [value for value in values if np.isfinite(value)]
@@ -139,8 +137,7 @@ def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
     specification and the specification's warning and abort limits, the
     PSD scaled by the comparison's scale, with the channel's numbers
     (`compliance.compare`) and the run's verdict over every channel
-    (`compliance.verdict`), as Visual Dynamics' Spectra reading draws a
-    comparison one channel at a time."""
+    (`compliance.verdict`)."""
     from hertzforge.core import compliance
 
     spec, psd, rows, scale, source = _compared(project, params)
@@ -205,8 +202,7 @@ LINES_CEILING = Param('ceiling', 'Lines outside abort, ceiling', 'number', defau
 def spec_rms_error(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.spec_rms_error`: every channel's RMS against its
     specification's in dB (`compliance.channel_errors`), each judged
-    against a floor and a ceiling, -3 and +3 dB by default: Visual
-    Dynamics' RMS Error bars as a table."""
+    against a floor and a ceiling, -3 and +3 dB by default: the RMS Error bars as a table."""
     from hertzforge.core import compliance
 
     low, high = params['low'], params['high']
@@ -236,7 +232,7 @@ def spec_rms_error(project: Any, params: dict[str, Any]) -> list[dict]:
 def spec_lines_out(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.spec_lines_out`: the share of every channel's lines
     outside its abort limits (`compliance.channel_errors`), each judged
-    against a ceiling, 10 % by default: Visual Dynamics' Lines Out bars
+    against a ceiling, 10 % by default: the Lines Out bars
     as a table."""
     from hertzforge.core import compliance
 
@@ -283,8 +279,7 @@ def spec_chance(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.spec_chance`: one channel's miss from its target in dB
     against each pair of limits, and the lines outside each beside how
     many chance alone puts there at the comparison's degrees of freedom
-    (`chance.compare_chance`), as Visual Dynamics' Chance reading shows
-    them."""
+    (`chance.compare_chance`)."""
     from hertzforge.core.chance import PAIRS, compare_chance, describe_chance
 
     spec_name, name = params['specification'], params['spectrum']
@@ -378,8 +373,7 @@ def spec_composite(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.spec_composite`: the control channels combined as the
     controller held them, the composite against its band and each channel
     against its own (`multi_point.multi_point`, the channels by
-    `multi_point.control_channels`), as Visual Dynamics' Composite reading
-    draws them."""
+    `multi_point.control_channels`)."""
     from hertzforge.core.multi_point import control_channels, multi_point
 
     spec_name, name = params['specification'], params['spectrum']
@@ -456,8 +450,7 @@ def comparison_scale(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.comparison_scale`: hold the decibels a measured PSD is
     scaled by when it is compared with a specification, on it and its
     whole family (`Project.set_comparison_scale`), or with the field
-    blank go back to detecting it (`Project.comparison_scale`), as Visual
-    Dynamics' scaling field does. The data is never changed."""
+    blank go back to detecting it (`Project.comparison_scale`). The data is never changed."""
     spec_name, name = params['specification'], params['spectrum']
     raw = params['scale'].strip().lower().removesuffix('db').strip()
     try:
@@ -477,9 +470,8 @@ def comparison_scale(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.spec_rms`: the RMS level each channel of a specification
-    asks for (`compliance.specification_rms`), one row per autospectrum,
-    as Visual Dynamics' RMS bars of a specification on its own show
-    them, with no limit to be out of."""
+    asks for (`compliance.specification_rms`), one row per autospectrum, with no limit
+    to be out of."""
     from hertzforge.core.compliance import specification_rms
     from hertzforge.core.data import autospectrum
     from hertzforge.drawing.plot import pair_label
@@ -515,7 +507,7 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def _loud_quiet(project: Any, params: dict[str, Any]) -> tuple[tuple[str, Any], tuple[str, Any]]:
     """The two densities, louder first: the signal and the noise, by the
-    rule Visual Dynamics reads the pair by (the higher mean density)."""
+    rule the pair is read by (the higher mean density)."""
     _two(params, 'first', 'second')
     a, b = ((params[key], project[params[key]]) for key in ('first', 'second'))
     level = [float(np.nanmean(np.real(np.asarray(data.ordinate)))) for _n, data in (a, b)]
@@ -525,7 +517,7 @@ def _loud_quiet(project: Any, params: dict[str, Any]) -> tuple[tuple[str, Any], 
 def psd_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.psd_overlay`: two densities drawn over each other, channel
     by channel where they share one (`data.paired_channels`), the louder
-    solid and the quieter dashed: Visual Dynamics' Overlaid reading."""
+    solid and the quieter dashed: the Overlaid reading."""
     from hertzforge.core.data import paired_channels
 
     (loud_name, loud), (quiet_name, quiet) = _loud_quiet(project, params)
@@ -551,8 +543,7 @@ def signal_to_noise(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.signal_to_noise`: the louder density's signal over the
     quieter's noise, line by line and channel by channel, in dB
     (`snr.signal_to_noise`: the louder less the quieter, over the
-    quieter), with the median as Visual Dynamics' Signal to noise reading
-    gives it."""
+    quieter), with the median."""
     from hertzforge.core.snr import signal_to_noise as ratio
 
     (loud_name, loud), (quiet_name, quiet) = _loud_quiet(project, params)
@@ -588,7 +579,7 @@ def rms_signal_to_noise(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.rms_signal_to_noise`: each channel's signal over its
     noise across the whole band, from the area under the two densities
     (`snr.rms_signal_to_noise`), judged against a floor, 10 dB by
-    default: Visual Dynamics' RMS signal to noise bars as a table."""
+    default: the RMS signal to noise bars as a table."""
     from hertzforge.core.snr import AT_FLOOR
     from hertzforge.core.snr import rms_signal_to_noise as rms
 
@@ -649,8 +640,8 @@ def signature(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.signature`: one record of a signature before a test and
     the same record after it, compared mode by mode against frequency and
     amplitude limits (`signature.compare_signatures`), the modes named or
-    the most prominent peaks before (`signature.find_modes`): Visual
-    Dynamics' Signature reading, each mode's window drawn as its two
+    the most prominent peaks before (`signature.find_modes`): the Signature reading,
+    each mode's window drawn as its two
     height limits across its frequency limits."""
     from hertzforge.core.data import Frf
     from hertzforge.core.signature import compare_signatures, find_modes, matching_record
@@ -731,8 +722,7 @@ def matrix_comparison(project: Any, params: dict[str, Any]) -> list[dict]:
     judged whole against its specification
     (`matrix_comparison.compare_matrix`): each level on the diagonal, each
     cross term's coherence above it and phase below it, as the share of
-    their lines out, and every cell's verdict, as Visual Dynamics' Matrix
-    reading gives them."""
+    their lines out, and every cell's verdict."""
     from hertzforge.core.matrix_comparison import compare_matrix
 
     spec_name, name = params['specification'], params['cpsd']
@@ -786,9 +776,7 @@ def _srs_rows(requirement: Any, measured: Any) -> list[Any]:
 def srs_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.srs_spectra`: every event's shock spectrum at one channel
     against the one it had to meet and its limits, with each event's
-    signed RMS deviation in dB (`compliance.srs_errors`), as Visual
-    Dynamics' Spectra reading of a shock comparison shows one channel at
-    a time."""
+    signed RMS deviation in dB (`compliance.srs_errors`)."""
     spec_name, name = params['requirement'], params['srs']
     spec, measured = project[spec_name], project[name]
     if params['record'] > spec.num_records:
@@ -834,7 +822,7 @@ def srs_error(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.srs_error`: every channel's shock spectrum against the
     one it had to meet, one signed RMS deviation in dB across the band
     per channel and event (`compliance.srs_errors`), judged against a
-    floor and a ceiling, -3 and +3 dB by default: Visual Dynamics' SRS
+    floor and a ceiling, -3 and +3 dB by default: the SRS
     Error bars as a table."""
     from hertzforge.core.compliance import comparison_note
 
@@ -897,7 +885,7 @@ def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.srs_points`: one measured shock spectrum judged point by
     point against its requirement's tolerance band under the rule the
     test plan names (`compliance.srs_tolerance`), the bands its own
-    warning and abort limits unless typed: Visual Dynamics' Points Rule
+    warning and abort limits unless typed: the Points Rule
     reading."""
     from hertzforge.core.compliance import (
         log_interpolate,
@@ -1002,8 +990,7 @@ def replication_waveforms(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.replication_waveforms`: one channel of a transient run
     over one playing of the reference it was controlled to, aligned by
     the run's one shift (`replication_segments.aligned_traces`), with its
-    waveform error at that playing (`replication.compare`): Visual
-    Dynamics' Waveforms reading."""
+    waveform error at that playing (`replication.compare`): the Waveforms reading."""
     from hertzforge.core import replication as rep
     from hertzforge.core.replication_segments import aligned_traces
 
@@ -1048,7 +1035,7 @@ def _waveform_row(label: str, row: dict | None, ceiling: float) -> dict:
 def waveform_error(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.waveform_error`: every control channel's waveform error at
     every playing of the reference (`replication.compare`), judged against
-    a ceiling, 20 % by default: Visual Dynamics' Waveform Error bars as a
+    a ceiling, 20 % by default: the Waveform Error bars as a
     table."""
     from hertzforge.core import replication as rep
     from hertzforge.core.compliance import comparison_note
@@ -1124,7 +1111,7 @@ def replication_segments(project: Any, params: dict[str, Any]) -> list[dict]:
     one playing judged segment by segment, each marked segment by the
     rule for its kind (`replication_segments.replication_segments`, which
     calls `judge_segments` on the aligned traces), beside the
-    whole-record waveform error: Visual Dynamics' Segments reading. The
+    whole-record waveform error: the Segments reading. The
     marks are typed, or the ones the reference carries."""
     from hertzforge.core.replication_segments import aligned_traces, as_segments
     from hertzforge.core.replication_segments import replication_segments as judge

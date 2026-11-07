@@ -542,8 +542,8 @@ def test_the_dates_ride_in_the_project_file_but_not_the_template(
     back = io.load(str(tmp_path / 'r.hforge'))
     assert back.blocks[index][rc.START] == '2026-10-24'
     assert back.blocks[index][rc.END] == '2026-10-26'
-    report_template.save(report, tmp_path / 'house.vdreport')
-    house = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    house = report_template.load(tmp_path / 'house.hftemplate')
     assert rc.START not in house.blocks[index]
     assert rc.END not in house.blocks[index]
     assert house.features == ['calibration_in_date']

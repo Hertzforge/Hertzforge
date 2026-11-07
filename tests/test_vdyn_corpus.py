@@ -1,18 +1,13 @@
-"""Frozen .vdyn files from each schema era open forever.
+"""What people bring over from Visual Dynamics keeps reading.
 
-The files under `testdata/vdyn_corpus/` are written by
-`testdata/generate_vdyn_corpus.py` when the schema changes and pinned
-here; whatever the format grows into, these must keep opening with
-their values intact. Until the first public release the freeze is soft
-— the format may drop its past deliberately, deleting and regenerating
-the orphaned era's file (Brandon, 2026-08-23: no released file exists
-to orphan). After release a frozen file is written once and never
-refreshed: the moment one fails, a change has orphaned every project
-saved before it, which is the one regression a public format cannot
-ship.
+The `.vdyn` files under `testdata/vdyn_corpus/`, one per schema, were
+written by Visual Dynamics and are never regenerated; the day one fails, a
+change has orphaned every project saved before it. Its `.vdreport` templates
+and `visualdynamics_project` ESCDF files read too. Nothing writes any of them.
 """
 
 import glob
+import json
 import os
 import shutil
 
@@ -21,7 +16,11 @@ import numpy as np
 import pytest
 from conftest import fixture_path
 
-from hertzforge.io import native
+from hertzforge import io
+from hertzforge.core import run_log
+from hertzforge.core.report import Report
+from hertzforge.io import escdf, escdf_objects, native, report_template
+from hertzforge.project import Project
 
 CORPUS = fixture_path('vdyn_corpus')
 
@@ -169,7 +168,7 @@ def test_a_newer_schema_is_refused_not_half_loaded(tmp_path):
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), newer)
     with h5py.File(newer, 'r+') as f:
         f.attrs['visualdynamics_schema'] = native.VDYN_SCHEMA + 1
-    with pytest.raises(ValueError, match='newer Visual Dynamics'):
+    with pytest.raises(ValueError, match=r'newer version of the \.vdyn format'):
         native.load(newer)
 
 
@@ -180,5 +179,92 @@ def test_a_missing_stamp_is_not_our_file(tmp_path):
     shutil.copy(os.path.join(str(CORPUS), 'schema1.vdyn'), foreign)
     with h5py.File(foreign, 'r+') as f:
         del f.attrs['visualdynamics_schema']
-    with pytest.raises(ValueError, match='not a Hertzforge or Visual Dynamics file'):
+    with pytest.raises(ValueError, match=r'not a \.hforge or \.vdyn file'):
         native.load(foreign)
+
+
+def test_the_identifiers_older_files_carry_are_exact():
+    """Each is what a Visual Dynamics file holds on disk, so none may change."""
+    assert native.VDYN_STAMP == 'visualdynamics_schema'
+    assert run_log.VDLOG_FORMAT == 'visualdynamics-run-log'
+    assert escdf_objects.VDYN_WHOLE == 'visualdynamics.vdyn'
+    assert escdf_objects.OLDER_PROJECT_RECORD == 'visualdynamics_project'
+    assert report_template.OLDER_SUFFIX == '.vdreport'
+    assert report_template.OLDER_MARKER == 'visualdynamics_report_template'
+    assert io.known_format('a.vdyn') == 'Visual Dynamics file (.vdyn)'
+
+
+def test_a_vdyn_is_written_nowhere(tmp_path):
+    project = native.load(os.path.join(str(CORPUS), 'schema3.vdyn'))
+    with pytest.raises(ValueError, match='saves .hforge'):
+        project.save(tmp_path / 'again.vdyn')
+    saved = project.save(tmp_path / 'again')
+    assert str(saved).endswith('.hforge')
+    with h5py.File(saved) as f:
+        assert native.VDYN_STAMP not in f.attrs
+
+
+def _older_template(path):
+    path.write_text(json.dumps({
+        'visualdynamics_report_template': 1, 'title': 'House', 'marking': 'NONE',
+        'blocks': [{'kind': 'text', 'text': 'Scope'}],
+        'identity': {'laboratory': 'A Lab'}}), encoding='utf-8')
+    return path
+
+
+def test_an_older_report_template_reads(tmp_path):
+    path = _older_template(tmp_path / 'house.vdreport')
+    assert report_template.sniff(path)
+    back = report_template.load(path)
+    assert back.title == 'House' and back.marking == 'NONE'
+    assert back.blocks == [{'kind': 'text', 'text': 'Scope'}]
+    assert back.identity == {'laboratory': 'A Lab'}
+    as_json = tmp_path / 'house.json'
+    as_json.write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
+    assert report_template.sniff(as_json), 'recognized by its older marker too'
+    assert io.import_file(path).title == 'House'
+
+
+def test_an_older_template_in_the_folder_is_offered_and_generates(tmp_path, monkeypatch):
+    monkeypatch.setenv('HERTZFORGE_TEMPLATES', str(tmp_path))
+    older = _older_template(tmp_path / 'House.vdreport')
+    assert report_template.saved_templates() == [('House', older)]
+    project = Project('p')
+    assert project[project.generate_report('House')].title == 'House'
+    assert project[project.generate_report(str(older), name='Again')].title == 'House'
+    newer = tmp_path / 'House.hftemplate'
+    report_template.save(Report(title='Newer'), newer)
+    assert report_template.saved_templates() == [('House', newer)], 'the newer one is taken'
+
+
+def test_a_template_is_written_under_its_new_name(tmp_path):
+    assert report_template.SUFFIX == '.hftemplate'
+    assert report_template.MARKER == 'hertzforge_report_template'
+    path = tmp_path / 'house.hftemplate'
+    report_template.save(Report(title='House'), path)
+    data = json.loads(path.read_text(encoding='utf-8'))
+    assert 'hertzforge_report_template' in data
+    assert 'visualdynamics_report_template' not in data
+
+
+def test_an_escdf_project_keeps_its_record_under_either_root_name(tmp_path):
+    project = native.load(os.path.join(str(CORPUS), 'schema3.vdyn'))
+    project.name = 'Moved'
+    path = tmp_path / 'p.h5'
+    project.save(path)
+    file = escdf.read(path)
+    assert 'hertzforge_project' in file.metadata
+    assert 'visualdynamics_project' not in file.metadata
+    newer = Project.open(path)
+    assert newer.name == 'Moved' and 'hertzforge_project' not in newer
+
+    record = file.metadata.pop('hertzforge_project')
+    record.name = 'visualdynamics_project'
+    file.metadata['visualdynamics_project'] = record
+    escdf.write(file, path)
+    older = Project.open(path)
+    assert older.name == 'Moved', 'the name comes from the older record'
+    assert 'visualdynamics_project' not in older
+    assert sorted(older.names) == sorted(newer.names)
+    assert older.object_groups == newer.object_groups
+    assert older.provenance == newer.provenance

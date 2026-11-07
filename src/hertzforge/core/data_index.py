@@ -457,7 +457,7 @@ def file_state(path: str | os.PathLike) -> tuple[int, int]:
 @dataclass(frozen=True)
 class Reference:
     """An object a project holds by reference to another `.hforge` file
-    rather than as a copy (FILE_FORMAT_PLAN.md, section 3).
+    rather than as a copy.
 
     `path` is where the file is (absolute), `object` the object's name
     in it ('' for a file holding a single object) and `kind` the

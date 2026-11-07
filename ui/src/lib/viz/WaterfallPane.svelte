@@ -7,7 +7,7 @@
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
 	 * Waterfall view, drawn with three.js: every record a polyline at its own depth, colored by
-	 * level on the sequential colormap (viridis), the way Visual Dynamics' 3-D data view draws time
+	 * level on the sequential colormap (viridis), the way the 3-D data view draws time
 	 * histories, FRFs and PSDs.
 	 *
 	 * All records are one geometry and one draw call, whatever their number. The raw values go to
@@ -21,14 +21,13 @@
 	 * around it, with each vertex writing its own index as its color; one small draw however many
 	 * points there are, where a search on the CPU would visit every segment.
 	 *
-	 * The same pane draws Visual Dynamics' stages: records standing at named stations (two
+	 * The same pane draws the stages: records standing at named stations (two
 	 * densities paired at each channel, a specification's limits beside its target), drawn in
 	 * their role's color where they are not the measurement, with translucent limit bands, the
 	 * lines past an abort limit as rectangles, and a scalogram as a surface inside the walls of
 	 * its cone of influence. `regions` stand across the whole stage on the floor and the back wall,
 	 * as a spectrum's do behind its curves, and one that drags is moved the way it is on the plot:
-	 * its middle slides it and an edge moves that edge, as Visual Dynamics' shock windows move on
-	 * its stage.
+	 * its middle slides it and an edge moves that edge.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
@@ -760,7 +759,7 @@
 	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
 	const recordAt = (r: number) => `${STAGE.x + 0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
 	const yAt = (t: number) => `${STAGE.x + 0.03},${((t - yRange[0]) / (yRange[1] - yRange[0])) * STAGE.y},0`;
-	/** A path is named where it starts, a little above its first point, as VD labels the sine stage. */
+	/** A path is named where it starts, a little above its first point. */
 	const pathStart = (r: number) => {
 		const p = view.offsets[r];
 		if (p >= view.offsets[r + 1]) return null;

@@ -4,7 +4,7 @@
  * the cursor, and the params a click on a surface changes.
  */
 
-/** How near the cursor a node must be on screen to be picked, in CSS pixels (Visual Dynamics' 12). */
+/** How near the cursor a node must be on screen to be picked, in CSS pixels. */
 export const PICK_REACH = 12;
 
 /**
@@ -70,7 +70,7 @@ export function modelPlane(nodes: ArrayLike<number>, count: number): { point: Ve
 
 /**
  * Where a point clicked along the ray (`origin` + t `direction`) goes when it hits no surface,
- * as Visual Dynamics places one: on the model's plane when it is flat and the ray crosses it,
+ * on the model's plane when it is flat and the ray crosses it,
  * otherwise at the depth of `anchor`, the node nearest the click, so it lands near what was
  * clicked.
  */

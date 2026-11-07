@@ -1,4 +1,4 @@
-"""Visual Dynamics' report features, and the data a report rests on, as
+"""The report features, and the data a report rests on, as
 operations on a report the project holds (made by `report.generate`).
 
 Which optional features a report carries (the Report Features panel,
@@ -10,7 +10,7 @@ data index (`Project.index_file`, `unindex_file`, `verify_data_index`);
 report templates (`io.report_template`); Reports from Runs
 (`run_report`); and run logs brought into the project as extracts
 (`Project.attach_run_log` and its kin). Each calls the project method
-Visual Dynamics' editor or script calls, and shows what VD's pane shows
+the editor or script calls, and shows what the pane shows
 afterwards; the report itself is drawn again by the Report workspace.
 """
 
@@ -141,7 +141,7 @@ STATES = {'met': 'pass', 'not met': 'fail', 'not judged': 'info'}
 
 
 def _requirement_reading(project: Any, report: str, index: int) -> dict:
-    """The requirement block's pane as VD shows it: what it is bound to,
+    """The requirement block's pane: what it is bound to,
     the requirement in words and each criterion's result
     (`report.requirement.read`)."""
     from hertzforge.report.requirement import read, requirement_lines, roles_on
@@ -189,7 +189,7 @@ FINDING_COLUMNS = ('Number', 'Kind', 'Run', 'Channel', 'Band', 'Status', 'Fact',
 
 
 def _register(project: Any, report: str) -> list[dict]:
-    """The findings register as VD's pane lists it, a row per finding with
+    """The findings register, a row per finding with
     the parts it owes and its draft, and the findings a run log offers
     beside it (`report.findings.register`, `log_drafts`)."""
     from hertzforge.core import findings as core
@@ -339,7 +339,7 @@ def _settings(text: str) -> dict[str, Any]:
 
 
 def _check_reading(project: Any, report: str, index: int) -> dict:
-    """A check block's pane as VD shows it: the check, what it reads and
+    """A check block's pane: the check, what it reads and
     its settings, as the block holds them."""
     from hertzforge.report.check_blocks import CHECKS
 
@@ -482,8 +482,7 @@ def _require_runs(project: Any, name: str) -> None:
 
 
 def _runs_table(project: Any, report: str) -> dict:
-    """The runs, a row each, as VD's Runs panel shows them
-    (`report.runs.run_order`): a value the record could not give one way
+    """The runs, a row each: a value the record could not give one way
     says why."""
     from hertzforge.core.runs import level_text
     from hertzforge.report.runs import histories, run_order
@@ -505,7 +504,7 @@ def _runs_table(project: Any, report: str) -> dict:
 def report_run_identity(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.report_run_identity`: the runs a report draws on, a row
     each with its axis, run, level, start and comment, and one field of
-    one run entered (`Project.set_run_identity`), as a cell of VD's Runs
+    one run entered (`Project.set_run_identity`), as a cell of the Runs
     panel is typed in. An empty value goes back to what the record
     shows."""
     name = params['report']
@@ -652,7 +651,7 @@ def verify_data_index(project: Any, params: dict[str, Any]) -> list[dict]:
 def export_report_template(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.export_report_template`: save a report on its own as a
     template another project can load (`io.report_template`, a
-    `.vdreport`), in the templates folder Generate Report looks in when
+    `.hftemplate`), in the templates folder Generate Report looks in when
     no path is given."""
     from pathlib import Path
 
@@ -675,14 +674,14 @@ def export_report_template(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def generate_from_template(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.generate_from_template`: a report built from a saved
-    template, by the name it was saved under or a `.vdreport` path,
+    template, by the name it was saved under or its path,
     bound by role to this project's objects (`Project.generate_report`)."""
     from hertzforge.io.report_template import saved_templates
 
     template = os.path.expanduser(_words(params['template']))
     if not template:
         saved = ', '.join(name for name, _path in saved_templates()) or 'none saved'
-        raise refused(f'name a saved template ({saved}) or a .vdreport file')
+        raise refused(f'name a saved template ({saved}) or a .hftemplate file')
     made = _core(project.generate_report, template, name=_words(params['name']) or 'Report')
     report = project[made]
     rows = [v.row('Report', made, None, 'pass'),
@@ -1069,7 +1068,7 @@ OPERATIONS = (
     Operation(
         id='project.generate_from_template', title='Generate from Saved Template',
         workspace='report',
-        summary='A report built from a saved template, by its name or a .vdreport path, bound '
+        summary='A report built from a saved template, by its name or a .hftemplate path, bound '
                 'by role to this project\'s objects.',
         params=(Param('template', 'Template', 'string', default=''),
                 Param('name', 'Name', 'string', default='Report')),

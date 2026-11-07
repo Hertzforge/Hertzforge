@@ -1,6 +1,6 @@
 """Links and compatibility in the summary: the object groups the tree
 brackets, and the objects that do not fit what they answer to, marked
-red as Visual Dynamics marks them and never refused."""
+red."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 /**
- * The run log in a window of its own, for a second monitor, as Visual Dynamics' dock floats. The
+ * The run log in a window of its own, for a second monitor. The
  * log the service holds is this connection's, so the window is not a second shell: the same panel
  * and the same state, mounted into a blank window with this document's styles and theme.
  */

@@ -56,9 +56,6 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .geometry import Geometry
     from .shapes import ShapeSet
 
-# The virtual point workflow these shapes start is described in Visual Dynamics' PLAN.md,
-# "The virtual point arc".
-
 #: the order the six inertia terms are stated in, and the tensor
 #: entries each one fills. `Ixy` is the product of inertia as a tensor
 #: entry — the negative of the integral ∫xy dm some handbooks tabulate

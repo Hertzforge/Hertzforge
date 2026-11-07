@@ -1,5 +1,5 @@
 """The Run Log window's requests: a log kept while a test runs, written
-form by form as Visual Dynamics' run-log dock writes it."""
+form by form."""
 
 from __future__ import annotations
 
@@ -232,7 +232,7 @@ def test_the_server_keeps_one_log_a_connection_and_releases_it(tmp_path):
 
 
 def test_the_log_exports_as_text_csv_and_the_machine_log(keeper, tmp_path):
-    """`runlog.export`, VD's run-log dock exports: one view of the open log
+    """`runlog.export`: one view of the open log
     written to a path, the whole log or one test, the view's extension
     added; a view that is not one, no log, or a bad test is refused."""
     opened(keeper)

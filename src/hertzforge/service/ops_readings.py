@@ -1,5 +1,5 @@
 """Readings on the connection's project: numbers read off an object and
-judged, as Visual Dynamics' reading panes show them, without adding
+judged, without adding
 anything to the project.
 """
 
@@ -95,7 +95,7 @@ def time_statistics(project: Any, params: dict[str, Any]) -> list[dict]:
 def _overload_trace(history: Any, channel: Any, title: str) -> dict:
     """One channel's trace over the span read, between its range either
     way and, where the range has held, the largest peak scaled to the next
-    level: what Visual Dynamics draws above its headroom bars."""
+    level, drawn above the headroom bars."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
 
@@ -122,8 +122,7 @@ def _overload_trace(history: Any, channel: Any, title: str) -> dict:
 
 
 def _channel_rows(channel: Any, unit: str | None) -> list[dict]:
-    """The numbers for the channel the trace draws, as Visual Dynamics'
-    overload panel lists them."""
+    """The numbers for the channel the trace draws."""
     rows = [v.row('Channel', channel.label, None, 'info')]
     if channel.statistics is None:
         return rows + [v.row('Not read', channel.reason, None, 'warn')]
@@ -153,8 +152,7 @@ def _channel_rows(channel: Any, unit: str | None) -> list[dict]:
 
 def overload(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.overload`: every channel of a time history read against
-    the range its linked channel table gives it (`TimeHistory.overload_check`),
-    as Visual Dynamics' Overload reading shows it: one channel's trace
+    the range its linked channel table gives it (`TimeHistory.overload_check`): one channel's trace
     over its range, the headroom of every channel, that channel's numbers
     and the judgment in words. Channel 0 draws the worst channel."""
     name = params['history']

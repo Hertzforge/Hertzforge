@@ -5813,7 +5813,7 @@ class Project(dict):
 
         Any registered writer can be used: `.unv`, `.exo`, `.npz`,
         `.bdf`, `.afu`/`.ati`/`.ash`, `.xlsx`, `.3mf`, `.stl`,
-        `.vdreport` and the rest of `io.exporters()`.
+        `.hftemplate` and the rest of `io.exporters()`.
 
         Parameters
         ----------
@@ -5934,7 +5934,7 @@ class Project(dict):
             Random and Sine project makes 'random' and 'sine', one
             report each.) It can also be a saved template, by the name
             it was saved under in the templates folder, or the path of a
-            `.vdreport` file, a report exported on its own
+            `.hftemplate` file, a report exported on its own
             (`io.report_template`).
         name : str, default 'Report'
             What to call the report object.
@@ -5968,8 +5968,7 @@ class Project(dict):
 
             saved = dict(report_template.saved_templates())
             path = pathlib.Path(saved.get(str(template), str(template)))
-            if not (path.name.endswith(report_template.SUFFIX)
-                    and path.is_file()):
+            if not (report_template.is_template_path(path) and path.is_file()):
                 raise ValueError(
                     f'unknown template {template!r}: not a built-in '
                     f'({", ".join([*builders, "empty"])}), a saved '
@@ -6001,7 +6000,7 @@ class Project(dict):
         groups and what each one needs are listed in
         `hertzforge.report.features.FEATURES`, and the presets in
         `PRESETS`. The choice is saved with the report and in a
-        `.vdreport` template.
+        `.hftemplate` template.
 
         Parameters
         ----------
@@ -6602,7 +6601,7 @@ class Project(dict):
         channel table carries each sensor's calibration status on these
         dates: in date, expired before the test, lapsing during it, or
         no date given (`hertzforge.core.calibration`). The dates are
-        kept with the report's channel table blocks, and a `.vdreport`
+        kept with the report's channel table blocks, and a `.hftemplate`
         template leaves them out.
 
         Parameters
@@ -7245,7 +7244,7 @@ class Project(dict):
         Parameters
         ----------
         path : str or os.PathLike
-            The run log (`.hflog`, or a Visual Dynamics `.vdlog`).
+            The run log (`.hflog`, or an older `.vdlog`).
         test : int, optional
             The test, by number; may be left out when the log holds one.
         upto : int, optional
@@ -8345,7 +8344,7 @@ class Project(dict):
                 recipe: tuple[str, dict[str, Any]] | None = None,
                 link: bool = True) -> str:
         # what a simulated run gives is simulated, however far it is
-        # carried (FILE_FORMAT_PLAN.md, "Simulated data stays labeled")
+        # carried: simulated data stays labeled
         if getattr(obj, 'source', None) is None and getattr(
                 self[source], 'source', None) is not None:
             obj.source = self[source].source
@@ -8621,7 +8620,7 @@ class Project(dict):
             whole in an attachment (`io.escdf_objects`). Any other
             suffix writes a `.hforge` file, with `.hforge` added when the
             path does not end in it. A `.vdyn` path raises ValueError:
-            Visual Dynamics' files are opened, never written.
+            `.vdyn` files are opened, never written.
         compress : bool, optional
             For a `.hforge` file, write the large arrays with gzip, for
             archiving: a file with quiet stretches shrinks by most of its
@@ -8689,7 +8688,7 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project from a `.hforge`, a Visual Dynamics `.vdyn`, a
+        """Read a project from a `.hforge`, an older `.vdyn`, a
         `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file.
 
         The journal starts over with the one line that opens the file. A
@@ -10007,9 +10006,9 @@ def system_id_run(run: str | os.PathLike, *,
 
 
 class _Ask:
-    """The value that meant "open a dialog and ask me" in Visual Dynamics'
-    app. Kept so a script written for it reads a clear refusal rather
-    than a type error; the Python API opens no dialog.
+    """The value that once meant "open a dialog and ask me". Kept so an
+    older script reads a clear refusal rather than a type error; the Python
+    API opens no dialog.
 
     A sentinel rather than None, because None already means something
     on every one of these keywords: no geometry, no photographs, the
@@ -10026,8 +10025,7 @@ class _Ask:
 #: a path left to be asked for, which the Python API refuses
 ASK = _Ask()
 
-#: what `ASK` answers: it opened a file dialog in Visual Dynamics' Qt app,
-#: and Hertzforge's Python code opens no windows; the shell asks instead
+#: what `ASK` answers: Python code here opens no windows; the shell asks instead
 _NO_DIALOG = ('the Python API opens no dialog to ask with: name the {what} '
               '(a path, or a list of paths for several runs)')
 
@@ -10081,7 +10079,7 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
     """What every one-call report function does around its workup.
 
     The run, the batch and the destination, in one place because they
-    are one rule (PRINCIPLES.md, 9): a run left out or `ASK` is refused,
+    are one rule: a run left out or `ASK` is refused,
     several may be given as a list, and `path` may be a folder each
     report lands in under its run's own name.
     """

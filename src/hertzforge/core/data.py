@@ -5013,7 +5013,7 @@ class Specification(Bounded, Psd):
         # Brandon, 2026-09-18: the specification and the measurement it
         # judges should be convertible alike, so a compliance can be read
         # on bands at both ends. This reverses the earlier reasoning
-        # (Visual Dynamics' PLAN.md, "Octave bands") that a written curve needed no banding
+        # that a written curve needed no banding
         # because the comparison integrates it exactly; it does, and a
         # banded specification is still the object a person asks to see
         # and pass on.

@@ -1,13 +1,12 @@
 """The sine specification on a 3-D stage: frequency across, time receding,
-amplitude up, as Visual Dynamics' `viz/sinespec.py` draws it.
+amplitude up.
 
 A sine sweep specification has three dimensions: each tone is a path
 through time and frequency with an amplitude along it, and its warning
 and abort limits follow the same path above and below. Drawn as
 amplitude against frequency the timing is lost (which tones overlap,
 which cross, which are done before the others begin), so the
-specification's own view is this stage. The numbers are VD's
-`sine_stage_arrays` and `add_sine_stage`; the drawing is the shell's
+specification's own view is this stage. The drawing is the shell's
 waterfall pane with a depth of its own per point (`y_values`).
 """
 
@@ -20,7 +19,7 @@ import numpy as np
 from . import views as v
 from .waterfalls import unit_text
 
-#: about how many points each tone's path is sampled at (VD's LINES)
+#: about how many points each tone's path is sampled at
 LINES = 400
 
 

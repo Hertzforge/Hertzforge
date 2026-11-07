@@ -20,7 +20,7 @@
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
 	 *
-	 * A view with `pick` takes clicks, as Visual Dynamics' Add mode and planning pane do: a press and
+	 * A view with `pick` takes clicks: a press and
 	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
 	 * a drag still turns the view.
 	 */
@@ -162,7 +162,7 @@
 		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
 	}
 
-	/** The gray a geometry is drawn in when nothing moves, as Visual Dynamics draws one undeformed. */
+	/** The gray a geometry is drawn in when nothing moves. */
 	const REST_GRAY = 0.62;
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
@@ -175,13 +175,14 @@
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
-	/** How long Record records: at least six seconds of whole cycles of a mode, as VD saves an animation, or that long of a motion. */
+	/** How long Record records: at least six seconds of whole cycles of a mode, or that long of a
+	 * motion. */
 	const RECORD_S = Math.ceil(6 / CYCLE_S) * CYCLE_S;
 	let recording = $state(false);
 
 	/**
-	 * The animation recorded from the view as it plays and saved as a video, as Visual Dynamics saves
-	 * an animation: MP4 where the web view can write it (Safari's can), WebM otherwise. The
+	 * The animation recorded from the view as it plays and saved as a video: MP4 where the web view
+	 * can write it (Safari's can), WebM otherwise. The
 	 * background is painted in for the recording, since the view is drawn on a clear one.
 	 */
 	async function record() {
@@ -226,9 +227,10 @@
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);
 	let ghost = $state(false);
-	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
+	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
-	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, one edge per axis ticked with values and titled with the unit. */
+	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
+	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);

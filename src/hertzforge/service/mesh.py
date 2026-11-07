@@ -29,7 +29,7 @@ def triangulate(faces: list[list[int]]) -> np.ndarray:
 
 def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(node rows drawn, triangles, lines), the last two indexing the drawn
-    nodes. Faces and lines are VD's own drawing of the elements
+    nodes. Faces and lines are the drawing of the elements
     (`viz.geometry.element_cells`: a face element by its corners, a solid by
     its skin, a line by its two ends). Only nodes a triangle or a line uses
     are sent, so a brick model's interior nodes do not travel; a geometry

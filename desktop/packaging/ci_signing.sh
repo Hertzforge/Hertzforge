@@ -6,7 +6,7 @@
 #
 #     desktop/packaging/ci_signing.sh
 #
-# Adapted from Visual Dynamics' packaging/ci_signing.sh (MIT, Brandon Zwink), the
+# Adapted from an earlier signing script (MIT, Brandon Zwink), the
 # route its notarized releases are signed by. The keychain's own password is random
 # and never leaves this script; the partition list lets codesign use the key without
 # a prompt nobody is there to answer. Apple's Developer ID intermediate goes in

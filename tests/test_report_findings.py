@@ -772,8 +772,8 @@ def test_the_register_rides_in_the_project_file_and_the_template(tmp_path):
     back = io.load(path)
     assert back.blocks == report.blocks and fd.register(back) == \
         fd.register(report)
-    report_template.save(report, tmp_path / 'r.vdreport')
-    again = report_template.load(tmp_path / 'r.vdreport')
+    report_template.save(report, tmp_path / 'r.hftemplate')
+    again = report_template.load(tmp_path / 'r.hftemplate')
     assert fd.register(again) == fd.register(report)
 
 

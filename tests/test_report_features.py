@@ -329,15 +329,15 @@ def test_the_template_carries_the_choice(tmp_path):
 
     report = Report('House', [{'kind': 'text', 'text': '# Results'}],
                     features=list(LIVE))
-    report_template.save(report, tmp_path / 'house.vdreport')
-    assert report_template.load(tmp_path / 'house.vdreport').features == list(LIVE)
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    assert report_template.load(tmp_path / 'house.hftemplate').features == list(LIVE)
 
 
 def test_a_template_with_none_is_the_file_it_always_was(tmp_path):
     from hertzforge.io import report_template
 
     report = Report('House', [{'kind': 'text', 'text': '# Results'}])
-    path = tmp_path / 'house.vdreport'
+    path = tmp_path / 'house.hftemplate'
     report_template.save(report, path)
     expected = json.dumps({report_template.MARKER: 1, 'title': 'House',
                            'marking': 'UNCLASSIFIED', 'marking_color': 'ink',
@@ -349,7 +349,7 @@ def test_a_template_with_none_is_the_file_it_always_was(tmp_path):
 def test_a_template_whose_features_are_not_keys_is_refused(tmp_path):
     from hertzforge.io import report_template
 
-    path = tmp_path / 'bad.vdreport'
+    path = tmp_path / 'bad.hftemplate'
     path.write_text(json.dumps({report_template.MARKER: 1,
                                 'features': 'plot_conventions'}),
                     encoding='utf-8')

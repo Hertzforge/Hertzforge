@@ -65,12 +65,12 @@ def drawable(name: str, role: Any, x: Any, y: Any, positive: bool = False,
 
 
 def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
-    """A curve drawn the way Visual Dynamics draws `data`.
+    """A curve drawn as `data` calls for.
 
-    The shape is VD's own (`plot.drawing_shape`): a density per bin is
-    stepped across its bin, with VD's `plot.bin_edges` (the object's own
+    The shape is `plot.drawing_shape`'s: a density per bin is
+    stepped across its bin, with `plot.bin_edges` (the object's own
     band edges when it has them); a breakpoint law is resampled along its
-    power law with VD's `plot.as_power_law`; anything else is a line.
+    power law with `plot.as_power_law`; anything else is a line.
     `x` and `y` are the lines to draw, already cut to what is shown.
     """
     from hertzforge.drawing.plot import as_power_law, bin_edges, drawing_shape
@@ -253,7 +253,7 @@ def waterfall(title: str, x: dict, z: dict, records: Sequence[str],
 def staged(view: dict[str, Any], stations: Sequence[str], depths: Sequence[int],
            roles: Sequence[str], zones: Sequence[dict] = (), exceed: Sequence[dict] = (),
            walls: Sequence[Any] = (), surface: bool = False) -> dict[str, Any]:
-    """A `waterfall` view turned into one of Visual Dynamics' stages: its
+    """A `waterfall` view turned into one of the stages: its
     records stand at named `stations` (`depths`, one station index a
     record, so two records can share one) and are drawn by `roles` (a
     'measured' record colored by level, any other in its role's color).
@@ -369,7 +369,7 @@ def editing(op: str, params: dict[str, Any], columns: Sequence[str | None],
     offers by key, a shortlist the cell can still be typed past, and how a
     column is edited (`kinds`, by key: 'choice' from its list, 'flag' by a
     check box, 'date' in a date field, 'unit' from a shortlist, 'number'
-    or 'text' typed), as VD's every-table-is-the-same-table widgets."""
+    or 'text' typed)."""
     out = {'op': op, 'params': dict(params), 'columns': list(columns)}
     if choices:
         out['choices'] = {key: list(values) for key, values in choices.items()}

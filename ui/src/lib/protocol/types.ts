@@ -401,7 +401,7 @@ export type ViewKind = View['view'];
 /**
  * The modules on the rail. The analysis is split by what is studied (signals, random, shock, sine,
  * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
- * project type as Visual Dynamics did.
+ * project type.
  */
 export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
@@ -516,7 +516,7 @@ export interface ActionTable {
 	columns: ActionColumn[];
 }
 
-/** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
+/** `project.show`: what a selection in the tree shows. */
 export interface Shown {
 	title: string;
 	views: View[];
@@ -564,7 +564,7 @@ export interface ShowPrefs {
 	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
 	tone: string | null;
 	sine_reading: 'curves' | 'bars';
-	/** A MAC as 3-D bars (VD's default) or the flat grid. The shell's own; not sent. */
+	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
 	overlay: boolean;

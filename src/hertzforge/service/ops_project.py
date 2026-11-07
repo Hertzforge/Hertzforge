@@ -65,8 +65,7 @@ def chosen_records(text: str, count: int) -> list[int]:
 
 def plot(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plot`: chosen records of a data object as curves on one
-    plot, as Visual Dynamics' data pane draws the records picked in the
-    tree. Records of another quantity than the first are left out, since
+    plot. Records of another quantity than the first are left out, since
     they do not share an axis; the view's title says how many."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
@@ -208,7 +207,7 @@ def convert_to_psd(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.convert_to_psd`). One written at breakpoints is read onto
     evenly spaced lines at the spacing given, or the one its sheet
     remembers (`core.author.read_onto_lines`); one on lines converts as it
-    is. Drawn with what Visual Dynamics' Convert pane gives: the
+    is. Drawn with what the Convert pane gives: the
     breakpoints, the range, the lines and the sheet's notes."""
     from hertzforge.core.author import read_onto_lines
 
@@ -354,8 +353,8 @@ RIGID_KEEP = Param('keep', 'Add the shape set (else the preview)', 'boolean', de
 def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.generate_rigid_body_modes`: the six rigid-body shapes of a
     geometry about a point, and scaled by a mass and inertia about it when
-    asked (`Project.generate_rigid_body_modes`), as VD's Modes pane sets
-    them. Without `keep`, the shapes drawn and nothing added."""
+    asked (`Project.generate_rigid_body_modes`). Without `keep`, the shapes drawn and
+    nothing added."""
     name = params['source']
     geometry = project[name]
     point = tuple(float(params[axis]) for axis in 'xyz')
@@ -379,7 +378,7 @@ def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.solve_modes`: the normal modes of a geometry whose element
     groups have properties (`Project.solve_modes`), a number of them or all
-    up to a highest frequency, as Visual Dynamics' Modes pane asks."""
+    up to a highest frequency."""
     top = params['maximum_frequency']
     limit = {'maximum_frequency': top} if top > 0 else {'num_modes': params['num_modes']}
     return _added_shapes(project, lambda: project.solve_modes(
@@ -389,8 +388,7 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
     DOFs, or at a channel table's (`Project.project_onto_basis`), a node
-    matched within a share of the basis model's size, 2 % as Visual
-    Dynamics' dialog opens."""
+    matched within a share of the basis model's size, 2 %."""
     return _added_shapes(project, lambda: project.project_onto_basis(
         params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
 
@@ -433,8 +431,7 @@ def mac(project: Any, params: dict[str, Any]) -> list[dict]:
     modes against another's (`Project.comparison_mac`, so across two
     geometries after projection, as the selection and Match Modes read it),
     or a set against itself. With a geometry the matrix selects the pair it
-    shows, the column mode overlaid on the row mode, as Visual Dynamics
-    shows two shape sets' MAC."""
+    shows, the column mode overlaid on the row mode."""
     return mac_views(project, params['first'], params['second'])
 
 

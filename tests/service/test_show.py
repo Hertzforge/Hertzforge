@@ -1,5 +1,5 @@
-"""What a selection in the tree shows (`project.show`), by Visual
-Dynamics' table of readings: one object by its kind, and the pairs that
+"""What a selection in the tree shows (`project.show`), by the table of readings: one
+object by its kind, and the pairs that
 mean something together."""
 
 from __future__ import annotations
@@ -590,7 +590,7 @@ def swept():
 
 
 def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
-    """VD's sine readings: the stage by default (frequency across, time
+    """The sine readings: the stage by default (frequency across, time
     receding, amplitude up, every point at its own time), the flat plot on
     the bar's Flat: a specification alone draws the tone's requirement with
     its limits, the levels alone the extracted level, and both together the
@@ -646,7 +646,7 @@ def _played_modes():
 
 
 def test_modal_responses_play_on_a_geometry_with_or_without_their_set(validate):
-    """As VD plays them: the geometry and the responses are enough, since the responses name
+    """The geometry and the responses are enough, since the responses name
     the set they came from, and the set can be selected with them."""
     state, shapes = _played_modes()
     project = state.project

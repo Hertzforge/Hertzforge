@@ -1,16 +1,13 @@
-"""Editing a report on the connection's project, as Visual Dynamics' report
-editor does it (`report.editor`, `report.operate`).
+"""Editing a report on the connection's project.
 
 The page is the core's edit page (`render_html(edit=True)`): every block
 tagged with its index, the selected one framed, and a click saying which
-block was clicked. VD's page says so over Qt's web channel; here
-`CHANNEL_JS` stands in for that channel and posts the same message to the
-shell, which frames the page. Every act (insert, move, delete, a field,
-the text, the title and the marking) is on the shell's bar and pane, as
-it is on VD's, and each is one `report.operate` with VD's own operation
-names. Inserting binds the new block to the first object in the project
-it can show, as VD's Insert does (`BLOCK_TEMPLATES`, VD's
-`gui/report_editor.py`).
+block was clicked. The page says so over Qt's web channel, which it was
+written for; `CHANNEL_JS` stands in for that channel and posts the same
+message to the shell, which frames the page. Every act (insert, move, delete, a field,
+the text, the title and the marking) is on the shell's bar and pane, and each is one
+`report.operate`. Inserting binds the new block to the first object in the project
+it can show.
 """
 
 from __future__ import annotations
@@ -39,7 +36,7 @@ addEventListener('scroll', () => {
 });
 """
 
-# VD's Insert menu: Markdown, plus the Result drop-down's options. Each
+# The Insert menu: Markdown, plus the Result drop-down's options. Each
 # template's '_bind' fields are pointed at the first compatible object in
 # the project on insert, so a result appears at once and the pane's
 # drop-downs are there to repoint it.
@@ -75,7 +72,7 @@ BLOCK_TEMPLATES: dict[str, dict[str, Any]] = {
                    '_bind': ('source', 'measured')},
 }
 
-#: the operations `report.operate` takes, VD's editor's names
+#: the operations `report.operate` takes
 OPERATIONS = ('insert', 'remove', 'move', 'field', 'text', 'title', 'marking',
               'marking_color')
 
@@ -84,7 +81,7 @@ FIELDS = ('source', 'geometry', 'shapes', 'channel', 'dofs_source', 'photo', 'me
 
 
 def _template(kind: str) -> dict[str, Any] | None:
-    """The block VD's Insert makes for `kind`, one of the menu's kinds."""
+    """The block Insert makes for `kind`, one of the menu's kinds."""
     if kind.startswith(('time:', 'spectrum:', 'psd:')):
         # Time (Acceleration), Spectra (Force), PSD (...): one per quantity
         # that kind of data holds
@@ -106,8 +103,7 @@ def _template(kind: str) -> dict[str, Any] | None:
 
 def _options(field: str, block: Mapping[str, Any], objects: Mapping[str, Any],
              object_groups: Any = None) -> list[str]:
-    """The project's objects a block's `field` may name, as VD's pane lists
-    them."""
+    """The project's objects a block's `field` may name."""
     from hertzforge.core.report import (
         dofs_source_options,
         measured_options,
@@ -167,7 +163,7 @@ def _index(report: Any, params: Mapping[str, Any], key: str = 'at') -> int:
 
 
 def operate(project: Any, name: str, params: Mapping[str, Any]) -> int | None:
-    """One of VD's editor operations on the report `name`; the block
+    """One of the editor operations on the report `name`; the block
     selected after it, or None for the report itself."""
     report = project[name]
     objects = dict(project)
@@ -242,7 +238,7 @@ def operate(project: Any, name: str, params: Mapping[str, Any]) -> int | None:
 def pane(project: Any, name: str, selected: int | None) -> dict[str, Any]:
     """What the shell's pane shows for the selection: the report's own
     title and marking with nothing selected, a text block's text, or a
-    figure block's sources and caption, each with the options VD's pane
+    figure block's sources and caption, each with the options the pane
     lists."""
     from hertzforge.core.report import insert_options, symbolic_options, takes_shapes
 
@@ -260,7 +256,7 @@ def pane(project: Any, name: str, selected: int | None) -> dict[str, Any]:
                              'mode': block.get('mode') or '', 'fields': []}
     if block.get('kind') == 'text':
         entry['text'] = block.get('text', '')
-        # a skeleton section, a check or a requirement has a pane of its own in VD
+        # a skeleton section, a check or a requirement has a pane of its own
         entry['special'] = next((key for key in ('section', 'check', 'requirement')
                                  if key in block), None)
     else:
@@ -313,7 +309,7 @@ def editor(project: Any, name: str, selected: int | None, theme: str | None,
     it, and the labels a text block may reference (`{{figure:...}}`).
     Without `page` the pane alone, and no labels, since nothing was
     rendered: a click on the page frames the block there, so selecting
-    re-renders nothing, as in Visual Dynamics."""
+    re-renders nothing."""
     from hertzforge.report import render_html
 
     report = project[name]

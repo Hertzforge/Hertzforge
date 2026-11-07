@@ -1,5 +1,5 @@
 /**
- * The tree's order, as Visual Dynamics' `_object_order` gives it: the linked objects first, group
+ * The tree's order: the linked objects first, group
  * by group (the Basis above the others, then the groups as the project lists them), each group's
  * members by kind, then every object in no group, by kind. A group's members sit together, so a
  * link bracket runs down consecutive rows and two brackets never nest (Brandon, 2026-11-04).

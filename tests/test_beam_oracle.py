@@ -4,8 +4,7 @@
 cantilever series in bending, extension and torsion, free-free beams,
 rigid-body modes. This is the second opinion: a small free 3D frame
 assembled by both tools, frozen by `generate_beam_oracle.py` in the
-private generators repository and read here as numbers, never imported
-(`AGENTS.md` hard rule 1).
+private generators repository and read here as numbers, never imported.
 
 Six members along X, Y, Z and two skew diagonals, two materials, a
 rectangle and a tube, and an orientation vector per member — two of

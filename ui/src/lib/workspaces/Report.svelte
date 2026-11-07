@@ -1,9 +1,9 @@
 <script lang="ts">
 	/**
-	 * Report: Visual Dynamics' report on the project, generated from a starter template bound to its
-	 * objects and edited as VD's report editor edits it. The page is the core's edit page in a
+	 * Report: the report on the project, generated from a starter template bound to its
+	 * objects and edited. The page is the core's edit page in a
 	 * sandboxed frame; a click on a block selects it, and every act (insert, move, delete, a source,
-	 * the caption, the text, the title and marking) is on the bar and the pane here, as on VD's. In
+	 * the caption, the text, the title and marking) is on the bar and the pane here. In
 	 * the desktop app Save opens the dialog; in a browser it asks for a path.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
@@ -27,7 +27,7 @@
 		if (!name || !app.project.summary || app.project.selection.objects.includes(name)) return;
 		app.project.clickObject(name, app.project.summary.objects.map((o) => o.name));
 	});
-	// a report operation run on the project gives a reading (as Visual Dynamics' acts do, until
+	// a report operation run on the project gives a reading (as the acts do, until
 	// Back); it shows here, and the page follows what the act changed
 	const a = $derived(app.analyze);
 	$effect(() => {
@@ -67,7 +67,7 @@
 		r.html ? r.html.replace(/<\/body>/i, `<script>addEventListener('load', () => scrollTo(0, ${Math.round(r.scroll)}));<\/script></body>`) : null
 	);
 
-	// typing rests before the page re-renders, as VD's editor waits
+	// typing rests before the page re-renders
 	let text = $state('');
 	let typing: ReturnType<typeof setTimeout> | null = null;
 	$effect(() => {

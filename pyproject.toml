@@ -29,7 +29,7 @@ dependencies = [
     "threadpoolctl",
     # BSD-3-Clause, pure Python: the sparse modal solve's factorization
     # on x86-64 Windows and Linux (`core.sparse_solve.PardisoFactor`), as
-    # Visual Dynamics has it. It brings Intel's oneMKL (`mkl`, `tbb`,
+    # It brings Intel's oneMKL (`mkl`, `tbb`,
     # `tcmlib`: the Intel Simplified Software License; `intel-openmp` and
     # `intel-cmplr-lib-ur`: Intel's developer-tools EULA), proprietary and
     # the one exception to the permissive rule (README, THIRD_PARTY_NOTICES),
@@ -66,7 +66,7 @@ hertzforge = "hertzforge.__main__:main"
 hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE"]
 
 [tool.ruff]
-# The same settings as Visual Dynamics: ruff's own rule set, 100 columns.
+# Ruff's own rule set, 100 columns.
 # One configuration for every Python file in the repository.
 line-length = 100
 # Where this repository's own package lives, so import sorting files it as

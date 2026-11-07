@@ -1,5 +1,4 @@
-//! The macOS save window with a list of file types under the name, as Visual Dynamics'
-//! has. The dialog plugin's save window on macOS merges every type it is given and shows
+//! The macOS save window with a list of file types under the name. The dialog plugin's save window on macOS merges every type it is given and shows
 //! no list, and on any system it does not say which type was chosen, which matters when
 //! two formats share a suffix (a sdynpy data array and a Rattlesnake specification are
 //! both `.npz`).

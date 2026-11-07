@@ -1,7 +1,7 @@
 """A project holds a large object from another `.hforge` by reference.
 
-A project that analyzes a 23 GB run must not hold a second copy of it
-(FILE_FORMAT_PLAN.md, section 3). An object of `REFERENCE_FROM_BYTES` or
+A project that analyzes a 23 GB run must not hold a second copy of it. An object of
+`REFERENCE_FROM_BYTES` or
 more imported from a `.hforge` is saved as a reference to that file, by
 its path relative to the project, its name there, and the file's size
 and SHA-256. These pin what that promises: the project file is small and

@@ -16,8 +16,8 @@ export interface WorkspaceInfo {
 
 /**
  * The rail, in the order a test runs: control first, then the recordings and what each kind of
- * test reads from them, then what is built, then what is written. Visual Dynamics put every
- * analysis under one window and typed the project; here each analysis is a module, so a sine test
+ * test reads from them, then what is built, then what is written. Each analysis is a module, so a
+ * sine test
  * is not offered shock tools (Brandon, 2026-11-04).
  */
 export const WORKSPACES: WorkspaceInfo[] = [

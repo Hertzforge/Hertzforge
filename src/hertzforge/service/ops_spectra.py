@@ -1,5 +1,5 @@
-"""Readings of spectra, FRFs and cross-spectral densities that Visual
-Dynamics shows beside the object they read: a tone at a frequency, the
+"""Readings of spectra, FRFs and cross-spectral densities shown beside the
+object they read: a tone at a frequency, the
 transmissibility behind an FRF, the confidence band of an averaged PSD,
 the partial coherence behind a multiple coherence, what a rigid-body
 transformation leaves, the field limit over a set, the octave bands a
@@ -69,7 +69,7 @@ LOG_FREQUENCY = v.axis('Frequency', 'Hz', 'log')
 
 
 def _shaped(name: str, role: Any, data: Any, record: int) -> dict:
-    """One record of a density drawn as Visual Dynamics draws it, lines
+    """One record of a density drawn, lines
     off the log axis left out."""
     f = np.asarray(data.abscissa, dtype=float)
     y = np.abs(np.asarray(data.ordinate[record]))
@@ -86,13 +86,12 @@ def _amplitude_quantity(dimension: str) -> str | None:
 
 def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.tone_readout`: the tone nearest a frequency read off one
-    record of an autospectrum (`Psd.read_tone`), as Visual Dynamics' Tone
-    Readout shows it: the amplitude and rms, the spike beside the height
+    record of an autospectrum (`Psd.read_tone`): the amplitude and rms, the spike beside the height
     it would have on a line, the floor, the line spacing and the window's
     noise bandwidth. The window is the one the spectrum was averaged with
     (`Project.averaging_of`) unless one is chosen, and Hann, said to be
     assumed, when nothing records one. With no frequency given the
-    reading starts where Visual Dynamics puts its cursor, on the tallest
+    reading starts on the tallest
     line off DC."""
     name = params['spectrum']
     psd = project[name]
@@ -108,7 +107,7 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
     else:
         window, parameter, source = 'hann', None, 'assumed'
     f = np.asarray(psd.abscissa, dtype=float)
-    # blank, or 0 as the shell sends a number left empty: where VD's cursor starts
+    # blank, or 0 as the shell sends a number left empty: where the cursor starts
     frequency = params['frequency']
     if not frequency or not f[0] <= frequency <= f[-1]:
         values = np.abs(np.asarray(psd.ordinate[record]))[1:]
@@ -158,9 +157,8 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.transmissibility`: the ASD-ratio transmissibility behind
     one record of an FRF computed in the project, beside H1 and the band
     H1's random error puts about it (`Project.read_transmissibility`),
-    read at the line nearest a frequency, as Visual Dynamics'
-    Transmissibility reading shows it. With no frequency given the
-    reading starts where Visual Dynamics puts its cursor: the tallest H1
+    read at the line nearest a frequency. With no frequency given the
+    reading starts on the tallest H1
     off DC that the input accounts for at least half of."""
     name = params['frf']
     frf = project[name]
@@ -171,7 +169,7 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     estimator = str(project.provenance.get(name, {}).get('params', {}).get('method', ''))
     f = np.asarray(reading.frequency, dtype=float)
-    # blank, or 0 as the shell sends a number left empty: where VD's cursor starts
+    # blank, or 0 as the shell sends a number left empty: where the cursor starts
     frequency = params['frequency']
     if not frequency or not f[0] <= frequency <= f[-1]:
         values = reading.magnitude[1:]
@@ -303,7 +301,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.partial_coherence`: which reference explains one response
     once the others are removed, and whether the references were
     independent (`Project.read_partial_coherence`), behind a multiple
-    coherence computed in the project. Drawn as Visual Dynamics draws it,
+    coherence computed in the project. Drawn as
     three plots on one frequency axis: the multiple coherence over each
     reference's partial coherence, the coherence between the references,
     and the principal references' powers as shares of the first."""
@@ -392,8 +390,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
 def rigid_body_residual(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.rigid_body_residual`: what a rigid-body transformation
     leaves unexplained of the density it was applied to
-    (`Project.read_transformation`), as Visual Dynamics' Rigid-Body
-    Residual shows it: the measured power at the channels the transform
+    (`Project.read_transformation`): the measured power at the channels the transform
     used, the part the six motions explain and the residual, the
     residual's share against frequency, and the transformation's
     conditioning and the frequency the rigid body holds to."""
@@ -460,8 +457,7 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.field_limit`: the statistical limit over a set of
     measured PSDs or SRSs and the straight-line envelope over it
     (`Project.field_limit`), drawn with the set, the mean in decibels and
-    the envelope raised by the margin, and read out as Visual Dynamics'
-    Field Limit panel reads it. Nothing is added: Derive Specification
+    the envelope raised by the margin, and read out. Nothing is added: Derive Specification
     writes the specification shown. The records are one quantity: blank,
     the largest group of the source's records."""
     from hertzforge.drawing.plot import as_power_law
@@ -533,8 +529,7 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
 def octave_bands(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.octave_bands`: the banded spectrum Compute Octave Bands
     would make (`Psd.to_octave`), previewed as steps over the narrowband
-    record it integrates, with how many bands the spacing gives, as
-    Visual Dynamics' Octave Bands panel previews it before Apply."""
+    record it integrates, with how many bands the spacing gives."""
     name = params['spectrum']
     psd = project[name]
     record = _record(psd, params['record'], name)
@@ -566,8 +561,7 @@ def sine_profile(project: Any, params: dict[str, Any]) -> list[dict]:
     (`core.sine_profile.read_profile`), drawn three ways against
     frequency with the tone's own level as it interpolates its
     breakpoints (`core.sine_profile.interpolated`), and every segment,
-    crossover and maximum read out, as Visual Dynamics' Sine Profile
-    shows it."""
+    crossover and maximum read out."""
     from hertzforge.core.sine_profile import convert, interpolated, read_profile
 
     name = params['specification']
@@ -626,8 +620,7 @@ def cmif(project: Any, params: dict[str, Any]) -> list[dict]:
     outside a fit: the singular values of the response-by-reference
     matrix at every line, a missing pair taken as zero
     (`drawing.plot.cmif_curves`, the matrix of
-    `core.matrix_checks.frf_matrix`), one curve per singular value, as
-    Visual Dynamics' CMIF toggle draws it. Values numerically zero are
+    `core.matrix_checks.frf_matrix`), one curve per singular value. Values numerically zero are
     left out. Records "1-8"; blank for every record."""
     import hertzforge as hz
     from hertzforge.drawing.plot import cmif_curves
@@ -656,8 +649,7 @@ def cmif(project: Any, params: dict[str, Any]) -> list[dict]:
 def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.drive_points`: only the records of an FRF set whose
     response and reference are one DOF, its drive points, or the
-    autospectra of a cross-spectral matrix, drawn as Visual Dynamics'
-    Drive points (Autospectra) toggle selects them."""
+    autospectra of a cross-spectral matrix, drawn."""
     import hertzforge as hz
     from hertzforge.core.data import Psd, autospectrum
     from hertzforge.drawing.viz.waterfall import waterfall_arrays

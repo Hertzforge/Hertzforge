@@ -58,7 +58,7 @@ export function byDate(rows: RunLogRow[], test: number | null): { date: string; 
 }
 
 /**
- * The acts and their keys, as Visual Dynamics binds them: each with Shift and the platform's
+ * The acts and their keys: each with Shift and the platform's
  * command key, so none is taken from a box being typed into.
  */
 export const KEYS: Record<string, string> = {

@@ -437,7 +437,7 @@ def test_a_report_saved_as_a_template_generates_again(project, tmp_path, validat
     (reading,) = run(project, 'project.export_report_template', report='Report',
                      path=str(tmp_path / 'random'))
     wire_views([reading], validate)
-    written = tmp_path / 'random.vdreport'
+    written = tmp_path / 'random.hftemplate'
     assert rows(reading)['Saved']['value'] == str(written) and written.is_file()
     (reading,) = run(project, 'project.generate_from_template', template=str(written),
                      name='Again')
@@ -448,7 +448,7 @@ def test_a_report_saved_as_a_template_generates_again(project, tmp_path, validat
         run(project, 'project.export_report_template', report='Report',
             path=str(tmp_path / 'missing' / 'random'))
     with pytest.raises(ProtocolError, match='unknown template'):
-        run(project, 'project.generate_from_template', template=str(tmp_path / 'none.vdreport'))
+        run(project, 'project.generate_from_template', template=str(tmp_path / 'none.hftemplate'))
 
 
 # ---- reports from runs -----------------------------------------------------------------

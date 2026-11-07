@@ -52,8 +52,8 @@ measurement's noise floor and would double the number of objects for
 something rarely looked at.
 
 The reader does not write `.nc4` files. A `.nc4` records a controller
-run, including hardware settings and environments, that Visual
-Dynamics does not hold, so a file written from here would describe a
+run, including hardware settings and environments, that this
+package does not hold, so a file written from here would describe a
 test that never happened (see docs/export.md). The one exception adds
 nothing of its own: `save_window` copies a run with its streams cut to
 a time window, and every other attribute, dimension and variable as
@@ -104,7 +104,7 @@ READ_SAMPLES = 1 << 19
 #: dialog): a quarter, because the import
 #: holds the stream once and the flat plot then holds a converted copy
 #: of every row it draws beside it, so a stream is twice its size on
-#: the way to the screen (Visual Dynamics' PLAN.md "A long run costs its own size").
+#: the way to the screen.
 LARGE_STREAM_SHARE = 0.25
 
 #: how many points a stream's preview envelope is thinned to — enough

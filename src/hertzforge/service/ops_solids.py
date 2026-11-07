@@ -1,15 +1,13 @@
-"""Solid modeling on the connection's project, as Visual Dynamics' Model
-screen builds a part: a new geometry, the solids it is made of (blocks,
+"""Solid modeling on the connection's project: a new geometry, the solids it is made of (blocks,
 cylinders, cones, spheres, sections, plates, disks and holes), the
 booleans and patterns of them, Mesh Solids, Mate Surfaces and the view a
 geometry opens on.
 
-Each operation runs the `Project` verb VD's panes run (`add_solid_block`,
+Each operation runs the `Project` verb the panes run (`add_solid_block`,
 `combine_solids`, `mesh_solids` and the rest) and answers with the
 geometry drawn, its meshed elements and its parts' surfaces as the
-kernel tessellates them (`core.solids.shape_triangles`), and the solids
-table VD lists under the geometry in its tree. Solids are named by id
-from that table ("1, 3") where VD picks them in the tree or the view.
+kernel tessellates them (`core.solids.shape_triangles`), and a table of the
+solids. Solids are named by id from that table ("1, 3").
 Lengths are typed in the connection's display system, marked `length` here and taken to
 meters by the server before an operation runs, so every operation reads meters; angles are
 in degrees about the geometry's X, then Y, then Z axes.
@@ -59,7 +57,7 @@ def _section_shapes() -> tuple[Option, ...]:
     return tuple(Option(shape, f'{shape[:1].upper()}{shape[1:]}') for shape in SECTIONS)
 
 
-#: a section's dimensions as VD's pane opens on them, in the order
+#: a section's dimensions, in the order
 #: `core.solids.SECTIONS` names them
 SECTION_DEFAULTS = {'I-beam': (1.0, 0.5, 0.1, 0.1), 'channel': (1.0, 0.5, 0.1, 0.1),
                     'tee': (1.0, 1.0, 0.1, 0.1), 'angle': (1.0, 1.0, 0.1),
@@ -72,7 +70,7 @@ def _kind_label(kind: str) -> str:
 
 
 def _label(item: Any) -> str:
-    """A solid as VD's tree names it: its name, or its kind and id."""
+    """A solid: its name, or its kind and id."""
     return item.name.strip() or f'{_kind_label(item.kind)} {item.id}'
 
 
@@ -174,7 +172,7 @@ def _dimensions(geometry: Any, item: Any) -> str:
 
 
 def _solids_table(name: str, geometry: Any) -> dict:
-    """The solids as VD's tree lists them under the geometry: each part,
+    """The solids: each part,
     and under a boolean or a pattern the solids it is made of."""
     from hertzforge.core import solids
 
@@ -209,7 +207,7 @@ def _drawn(title: str, geometry: Any, defined: bool | None = None
            ) -> tuple[dict, list[dict]]:
     """The geometry as a `shape3d`: its elements as `view_geometry` draws
     them, and each part's surface as the kernel tessellates it
-    (`solids.shape_triangles`), which is how VD draws a solid. A part the
+    (`solids.shape_triangles`). A part the
     kernel cannot make is left out and said in a row. `defined` says
     whether its lengths are meters, when it is a mesh not yet joined to
     the geometry it was made from."""
@@ -270,8 +268,7 @@ def new_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def view_solids(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.solids`: a geometry's solids listed as VD's tree lists
-    them, with the geometry drawn; it changes nothing."""
+    """`project.solids`: a geometry's solids listed, with the geometry drawn; it changes nothing."""
     name, geometry = _geometry(project, params)
     return _result(name, geometry, f'Solids of {name}', [_parts_row(geometry)])
 
@@ -287,8 +284,8 @@ def _angles(params: dict[str, Any], prefix: str = 'angle') -> tuple[float, float
 
 
 def _add(project: Any, params: dict[str, Any], make: Callable[[str], int]) -> list[dict]:
-    """Add the solid `make` makes in the picked geometry, and say it as
-    VD's pane does: what it is, and its volume, or a flat one's area."""
+    """Add the solid `make` makes in the picked geometry, and say it: what it is, and
+    its volume, or a flat one's area."""
     from hertzforge.core import solids
 
     name, geometry = _geometry(project, params)
@@ -344,7 +341,7 @@ def add_solid_sphere(project: Any, params: dict[str, Any]) -> list[dict]:
 def add_solid_section(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_solid_section`: a structural section along its own Z
     (`Project.add_solid_section`), its dimensions typed in the order
-    `core.solids.SECTIONS` names them, or VD's opening ones when none are
+    `core.solids.SECTIONS` names them, or the opening ones when none are
     typed."""
     from hertzforge.core.solids import SECTIONS
 
@@ -444,7 +441,7 @@ TURN = tuple(_angle(axis, 'turn', 'Turn') for axis in 'xyz')
 def move_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.move_solids`: parts moved whole, each with every solid it
     is made of, turned about the middle of their extent and then moved
-    (`Project.move_solids`): VD's Move Part, its gizmo's drag typed."""
+    (`Project.move_solids`): Move Part, its gizmo's drag typed."""
     name, geometry = _geometry(project, params)
     ids = _ids(geometry, params['solids'])
     offset = tuple(params[f'offset_{a}'] for a in 'xyz')
@@ -459,7 +456,7 @@ def move_solids(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def _solids_gizmo(name: str, geometry: Any, ids: list[int]) -> dict:
-    """VD's arrows and rings at the middle of the parts' extent, along the model's axes:
+    """The arrows and rings at the middle of the parts' extent, along the model's axes:
     dragging them runs Move Part."""
     from hertzforge.core.tetmesh import _extent
 
@@ -477,7 +474,7 @@ INTO = Param('into', 'Into geometry', 'enum', options_from='objects:geometry')
 
 def copy_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.copy_solids`: solids copied, recipe and all, into the same
-    geometry or another (`Project.copy_solids`): VD's Copy and Paste on
+    geometry or another (`Project.copy_solids`): Copy and Paste on
     solid rows."""
     name, geometry = _geometry(project, params)
     ids = _ids(geometry, params['solids'])
@@ -495,7 +492,7 @@ WITHIN = Param('within', 'Within (a boolean\'s or pattern\'s id; 0 for the parts
 
 def reorder_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.reorder_solids`: the parts, or one boolean's solids, put in
-    a new order, every one of them named (`Project.reorder_solids`): VD's
+    a new order, every one of them named (`Project.reorder_solids`): the
     drag in the tree. A subtraction cuts the rest from the first."""
     name, geometry = _geometry(project, params)
     ids = _ids(geometry, params['solids'])
@@ -534,7 +531,7 @@ def combine_solids(project: Any, params: dict[str, Any]) -> list[dict]:
 def separate_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.separate_solids`: booleans and patterns taken apart, the
     solids they were made of parts again (`Project.separate_solids`):
-    VD's Take Apart."""
+    Take Apart."""
     name, geometry = _geometry(project, params)
     ids = _ids(geometry, params['solids'])
     freed = _call(lambda: project.separate_solids(name, ids))
@@ -595,14 +592,14 @@ DETECT_SIZES = Param('detect', 'Detect a size for every piece', 'boolean', defau
 MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean',
                   default=False)
 
-#: past these VD counts the preview and does not draw it
+#: past these the preview is counted and not drawn
 PREVIEW_BRICKS = 50_000
 PREVIEW_TETS = 5_000
 PREVIEW_FITTED = 1_500
 
 
 def _likely_size(geometry: Any, ids: list[int], elements: str) -> float:
-    """The size VD's pane opens on: an extrusion's half the thinnest
+    """The size the pane opens on: an extrusion's half the thinnest
     feature for bricks, a flat part's across its plane for shells, and
     otherwise `hexmesh.suggested_size`."""
     from hertzforge.core import hexmesh, shells, solids
@@ -620,7 +617,7 @@ def _likely_size(geometry: Any, ids: list[int], elements: str) -> float:
 
 def _fold_check(geometry: Any, ids: list[int], size: float,
                 sizes: dict[int, float] | None = None) -> str:
-    """VD's question before a fit is paid for, as words, or '' when the
+    """The question before a fit is paid for, as words, or '' when the
     bricks are swept or the fit is likely to hold
     (`hexmesh.likely_to_fold` on each fitted piece)."""
     from hertzforge.core import hexmesh, solids
@@ -664,7 +661,7 @@ def _fold_check(geometry: Any, ids: list[int], size: float,
 
 
 def _made_rows(geometry: Any, made: dict, earlier: int) -> list[dict]:
-    """What a mesh holds, as VD's Mesh Solids pane says it."""
+    """What a mesh holds."""
     rows = []
     unit = _in_meters(geometry)
     method = made.get('method')
@@ -764,7 +761,7 @@ def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, f
 def _preview(geometry: Any, ids: list[int], size: float, elements: str,
              parts_apart: bool, sizes: dict[int, float] | None = None) -> tuple[Any, list[dict]]:
     """The mesh Mesh Solids would make, unjoined, and what it holds; or
-    no mesh and its count past VD's preview budgets."""
+    no mesh and its count past the preview budgets."""
     from hertzforge.core import shells, solids, tetmesh
 
     if elements in ('quads', 'triangles'):
@@ -807,13 +804,13 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
 def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mesh_solids`: parts meshed into hexes, tetras or shells at
     an element size, each part an element group (`Project.mesh_solids`).
-    Without `keep` it is VD's live preview: the mesh the core's mesher
+    Without `keep` it is the live preview: the mesh the core's mesher
     makes (`solids.brick_mesh`, `tetmesh.tet_mesh`, `shells.shell_mesh`)
     drawn on its own and said, the project unchanged. A union meshed in
     pieces is listed a row a piece, and each takes its own size, typed or
-    detected, as VD's table does. A fitted brick mesh
+    detected. A fitted brick mesh
     likely to fold (`hexmesh.likely_to_fold`) is said in the preview and
-    made only with `anyway`, where VD asks. The size sets the time: a
+    made only with `anyway`. The size sets the time: a
     fine size on a large part is seconds to minutes."""
     from hertzforge.core import solids
 
@@ -928,7 +925,7 @@ def _held(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mates_table(name: str, geometry: Any) -> dict:
-    """The geometry's Mated Surfaces, as VD lists them under it."""
+    """The geometry's Mated Surfaces."""
     rows = []
     for mated in geometry.mates:
         how = mated.describe()
@@ -948,7 +945,7 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     mate (`Project.detect_mated_surfaces`, `core.mates.detect`), listed;
     with `keep`, each picked patch added to the geometry's Mated Surfaces,
     held along the normal and in the plane rigidly, by a stiffness or not
-    at all (`Project.add_mated_surfaces`). The tolerance opens on VD's: a
+    at all (`Project.add_mated_surfaces`). The tolerance opens on a
     quarter of the groups' finest node spacing."""
     name, geometry = _geometry(project, params)
     if not geometry.num_nodes:
@@ -1046,7 +1043,7 @@ MATE_NODE = Param('toggle', 'Node clicked', 'string', default='', in_view=True)
 def edit_mate_sides(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.edit_mate_sides`: the nodes of a kept set's one side, marked among the nodes
     of that side's group, a click adding one or taking it away
-    (`Project.edit_mated_surfaces`): VD's node clicks on a set's pane. Only that group's
+    (`Project.edit_mated_surfaces`): the node clicks on a set's pane. Only that group's
     nodes are marked, so coincident nodes of the two sides are told apart."""
     name, geometry = _geometry(project, params)
     known = {m.id: m for m in geometry.mates}
@@ -1111,7 +1108,7 @@ def set_view(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_view`: the view a geometry opens on, where the eye is
     seen from the model's center and which way is up (`Project.set_view`
     with a `View`); an eye of 0, 0, 0 returns to the default isometric
-    view. VD captures the view on screen; here it is typed."""
+    view. It is typed."""
     from hertzforge.core.geometry import View
 
     name, geometry = _geometry(project, params)

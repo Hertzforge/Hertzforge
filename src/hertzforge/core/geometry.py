@@ -684,8 +684,7 @@ class Geometry:
             or springs made when a model is built (`core.mates`).
     """
 
-    # No tracelines (2026-09-30): one storage for one drawn idea, Visual Dynamics' PLAN.md
-    # "Geometry by element family".
+    # No tracelines (2026-09-30): one storage for one drawn idea.
     dimension = 'length'
 
     def __init__(self, node_id: Ids, node_xyz: ArrayLike,
@@ -1468,8 +1467,7 @@ class Geometry:
         -------
         bool
         """
-        # the one test, on screen and in every file (Visual Dynamics' PLAN.md "Geometry by
-        # element family")
+        # the one test, on screen and in every file
         group = int(group)
         if group in self.group_properties:
             return False

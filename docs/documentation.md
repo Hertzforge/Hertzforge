@@ -15,7 +15,7 @@ fails CI until every gap it finds is filled.
 - The scripting surface, meaning what `hertzforge.__all__` exports and the public methods of those
   classes, uses NumPy `Parameters` and `Returns` sections, and each parameter has its own entry.
   Everywhere else the docstring is prose: what the function does, and why when the reason is not
-  obvious. These rules came over from Visual Dynamics with the code.
+  obvious.
 
 Public means the name has no leading underscore and its module path has none either (`__init__`
 and `__main__` excepted). The checks read the source with `ast`, so they import nothing and take

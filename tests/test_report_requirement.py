@@ -209,8 +209,8 @@ def test_the_block_goes_after_the_box_and_keeps_through_a_template(
     project, name, index = bound
     report = project[name]
     assert report.blocks[index - 1]['kind'] == 'verdict'
-    report_template.save(report, tmp_path / 'house.vdreport')
-    loaded = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    loaded = report_template.load(tmp_path / 'house.hftemplate')
     assert loaded.blocks[index]['requirement'] == \
         report.blocks[index]['requirement']
 

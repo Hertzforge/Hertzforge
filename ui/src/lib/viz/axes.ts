@@ -1,5 +1,5 @@
 /**
- * The labeled axes about a model, as Visual Dynamics' Plot axes draw them: the box at the
+ * The labeled axes about a model: the box at the
  * model's bounds carries tick marks and values along one edge per axis, the edge on the outside
  * of the box as seen from the camera, with the axis titled by its unit. The pane projects the
  * box's corners to the screen each frame; this places the labels on the picture.

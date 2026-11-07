@@ -1,4 +1,4 @@
-"""Visual Dynamics' tools that generate, convert and predict: a signal made
+"""The tools that generate, convert and predict: a signal made
 from a spectrum, a specification or a channel table; a shock synthesized to
 a shock spectrum; how each mode of a shape set answers a record's forces;
 a sine sweep's rate against the modes it passes; the extreme response and
@@ -6,8 +6,8 @@ fatigue damage spectra of a record; the drives a specification asks for
 through an FRF; the notch a set of limit channels would cut; and the
 conditioning and realizability of a matrix.
 
-Generate Signal, SRS Synthesis and Compute Modal Responses add an object,
-as Visual Dynamics does, and draw what they added; the others are readings
+Generate Signal, SRS Synthesis and Compute Modal Responses add an object, and draw what
+they added; the others are readings
 of objects that exist and add nothing. Every number is the core's:
 `core.signals`, `core.shock_synthesis`, `core.modal_response`,
 `core.sweep_rate`, `core.fatigue`, `core.drive_prediction`,
@@ -98,7 +98,7 @@ DOFS = Param('dofs', 'DOFs, blank for all', 'string', default='')
 def _settings(source: Any, params: dict[str, Any]) -> dict[str, Any]:
     """The `SignalSettings` fields the params give, in SI; the sample
     rate the source suggests (`core.signals.suggested`) when none is
-    given, as Visual Dynamics' pane opens on it."""
+    given."""
     from hertzforge.core.signals import suggested
     from hertzforge.core.sine import SineSweepSpecification
 
@@ -140,7 +140,7 @@ def generate_signal(project: Any, params: dict[str, Any]) -> list[dict]:
     specification (its tone) or a channel table (the random kinds at its
     reference channels to a typed flat band and level, an impulse or a
     classical pulse), added beside its source (`Project.generate_signal`,
-    `core.signals.generate`). Drawn as Visual Dynamics previews it: the
+    `core.signals.generate`). Drawn: the
     random kinds' PSD over the target they were drawn to
     (`signals.target_at`), an impulse's trace and its spectrum
     (`signals.impulse_spectrum`), the others' trace; with the samples, the
@@ -256,8 +256,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.srs_synthesis`: a shock a shaker can play, synthesized to a
     shock specification as a sum of wavelets and read against the shaker's
     shock ratings given (`core.shock_synthesis.synthesize`), added as a
-    time history (`Project.generate_signal` with the kind 'srs'). Drawn as
-    Visual Dynamics draws a synthesis (`plot.shock_synthesis`): the
+    time history (`Project.generate_signal` with the kind 'srs'). Drawn: the
     channel's stroke reading, then its spectrum against the requirement's
     band, with the wavelets, passes, event length and points inside."""
     import hertzforge as hz
@@ -325,8 +324,8 @@ def compute_modal_responses(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.compute_modal_responses`: how each mode of a shape set
     answers the forces in a time history, or a force CPSD, added as an
     object of its own beside the forces (`Project.compute_modal_responses`,
-    `core.modal_response`). Drawn as a waterfall, with the counts Visual
-    Dynamics' pane gives: the modes, the force channels, the samples or
+    `core.modal_response`). Drawn as a waterfall, with the counts the pane gives: the
+    modes, the force channels, the samples or
     lines and the highest mode, and a mode past the record's reach."""
     from hertzforge.core.data import Psd, channel_quantities
 
@@ -381,8 +380,7 @@ CROSSING_POINTS = 60
 
 
 def parse_modes(text: str) -> list[tuple[float, float]]:
-    """'22 40, 180 20' as [(22.0, 40.0), (180.0, 20.0)], as Visual
-    Dynamics' Sweep Rate pane reads its field: pairs of natural frequency
+    """'22 40, 180 20' as [(22.0, 40.0), (180.0, 20.0)]: pairs of natural frequency
     in Hz and Q, the pairs separated by commas or semicolons and the two
     numbers of a pair by spaces or a slash."""
     modes = []
@@ -419,8 +417,7 @@ SWEPT_LEVELS = Param('levels', 'Q read off', 'enum', default='',
 def _swept_q(project: Any, params: dict[str, Any], spec: Any, modes: list) -> list[dict]:
     """With a tracked sine level named, the Q read off it at each mode on
     each of its channels, judged against the rate it was swept at
-    (`core.sweep_rate.read_swept_q`), as Visual Dynamics lists them under
-    the passes when levels of the tone are selected."""
+    (`core.sweep_rate.read_swept_q`)."""
     from hertzforge.core.sweep_rate import read_swept_q
 
     name = params.get('levels') or ''
@@ -454,7 +451,7 @@ def sweep_rate(project: Any, params: dict[str, Any]) -> list[dict]:
     against typed modes (`core.sweep_rate.check_sweep_rate`): its path as
     frequency against time with each mode's half-power band across it,
     each pass through a band marked, too fast where its rate is over the
-    margin times the rule's, and every pass in Visual Dynamics' sweep-rate
+    margin times the rule's, and every pass in the sweep-rate
     table. With a tracked level named, the Q read off it at each mode is
     judged as well (`_swept_q`)."""
     from hertzforge.core.sweep_rate import check_sweep_rate, half_power_band
@@ -547,8 +544,7 @@ def fatigue(project: Any, params: dict[str, Any]) -> list[dict]:
     time history, through a resonator at each natural frequency
     (`core.fatigue.fatigue_spectra`), and with a candidate test, the two
     set against each other on the same natural frequencies
-    (`core.fatigue.compared`), as Visual Dynamics' Fatigue reading draws
-    them (`plot.fatigue`): the ERS, the FDS and the time-compression rule
+    (`core.fatigue.compared`): the ERS, the FDS and the time-compression rule
     with the cap and the exaggeration the test carries."""
     from hertzforge.core.data import TimeHistory
     from hertzforge.core.fatigue import CAP, compared, compression_ratio, fatigue_spectra
@@ -673,8 +669,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.drive_prediction`: the drives a specification asks for at
     its control channels through an FRF's regularized inverse, the
     responses they make and what they ask of the amplifiers and shakers
-    (`core.drive_prediction.predict_drives`), as Visual Dynamics' Drive
-    Prediction draws it (`plot.drive_prediction`): each drive's
+    (`core.drive_prediction.predict_drives`): each drive's
     autospectrum, one channel's predicted response against its target
     with the lines missed shaded, and every quantity against its
     rating."""
@@ -759,8 +754,7 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     its limit profile at full level and the notch the controller would cut
     in the control spectrum to hold it there, predicted from a
     transmissibility from the control channel
-    (`core.limit_prediction.predict_limits`), as Visual Dynamics' Notch
-    Prediction draws it (`plot.limit_prediction`): the control against
+    (`core.limit_prediction.predict_limits`): the control against
     the reference with each notch shaded, each limited channel against its
     profile, and a row a notch."""
     from hertzforge.core.limit_prediction import predict_limits
@@ -825,7 +819,7 @@ AT = Param('frequency', 'At, 0 for the first line flagged', 'number', default=0.
 
 
 def _cursor(frequency: np.ndarray, flagged: np.ndarray, given: float) -> float:
-    """Where Visual Dynamics puts its cursor: the frequency given, else
+    """Where the cursor starts: the frequency given, else
     the first flagged line off DC, else the middle of the span."""
     positive = frequency[frequency > 0.0]
     if given and positive.size and positive[0] <= given <= frequency[-1]:
@@ -848,9 +842,8 @@ def _span_regions(frequency: np.ndarray, flags: np.ndarray, label: str) -> list[
 def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.conditioning`: the singular values and condition number of
     an FRF from several references, or of a CPSD, at every line
-    (`Frf.conditioning`, `Psd.conditioning`: `core.matrix_checks`), as
-    Visual Dynamics' Conditioning reading draws them
-    (`plot.matrix_checks`), and the reading at one line as its pane gives
+    (`Frf.conditioning`, `Psd.conditioning`: `core.matrix_checks`), and the reading at
+    one line as its pane gives
     it at the cursor."""
     from hertzforge.units import UNKNOWN
 
@@ -901,8 +894,7 @@ def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
 def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.realizability`: whether some set of signals has a CPSD,
     line by line, from the eigenvalues of its coherence matrix
-    (`Psd.realizability`: `core.matrix_checks`), as Visual Dynamics'
-    Realizability reading draws it (`plot.matrix_checks`): the smallest
+    (`Psd.realizability`: `core.matrix_checks`): the smallest
     and largest eigenvalue with the failing lines shaded, and for the pair
     the repair moves most, its coherence and phase before and after; and
     the reading at one line as its pane gives it at the cursor. Make

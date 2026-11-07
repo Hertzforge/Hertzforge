@@ -7,10 +7,10 @@
 
 import { logTicks } from './logTicks';
 
-/** At most this many record labels; past it every nth record is named (Visual Dynamics' limit). */
+/** At most this many record labels; past it every nth record is named. */
 export const LABEL_LIMIT = 40;
 
-/** Stage size: abscissa across, records receding, level up. Wide and shallow, as in VD. */
+/** Stage size: abscissa across, records receding, level up. Wide and shallow. */
 export const STAGE = { x: 1.6, y: 0.9, z: 0.5 } as const;
 
 /**

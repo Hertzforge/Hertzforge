@@ -1,5 +1,4 @@
-"""Declaring the units a file did not state, as Visual Dynamics' Imported
-Units pane does: by channel, not by record.
+"""Declaring the units a file did not state: by channel, not by record.
 
 A geometry has one length unit and a shape set one mass unit. A data
 object's records are grouped into channels by (DOF, quantity), since a

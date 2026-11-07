@@ -266,20 +266,19 @@ def test_a_newer_stamp_is_refused(tmp_path):
         import_file(path)
 
 
-def test_a_mat_visual_dynamics_wrote_reads_by_its_stamp(tmp_path):
-    """Visual Dynamics stamped its `.mat` files `visualdynamics_schema`
-    and kept the element groups under their block names, as its `.vdyn`
-    files do; such a file reads with its groups intact."""
+def test_an_older_mat_reads_by_its_stamp(tmp_path):
+    """An older `.mat` carries the `.vdyn` stamp and keeps the element groups
+    under their block names, as `.vdyn` files do; such a file reads with its groups intact."""
     project = native.load(CORPUS)
     geometry = project['Geometry']
-    path = str(tmp_path / 'from_vd.mat')
+    path = str(tmp_path / 'older.mat')
     export_file(geometry, path)
     variables = loadmat(path, squeeze_me=False, struct_as_record=False)
     fields = {name: getattr(variables['geometry'][0, 0], name)
               for name in variables['geometry'][0, 0]._fieldnames}
     renamed = {native.VDYN_NAMES.get(name, name): value
                for name, value in fields.items()}
-    savemat(path, {'visualdynamics_schema': 3, 'geometry': renamed})
+    savemat(path, {native.VDYN_STAMP: 3, 'geometry': renamed})
     back = import_file(path)
     assert back == geometry
     assert back.group_name == geometry.group_name

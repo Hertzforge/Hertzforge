@@ -1,4 +1,4 @@
-"""Fitting modes by hand on the connection's project: Visual Dynamics'
+"""Fitting modes by hand on the connection's project: the
 fitting screen over the protocol (`fit.*`).
 
 One mode at a time, on the residual. Find Mode moves the cursor to the
@@ -161,8 +161,7 @@ def _indices(params: Mapping[str, Any], method: str, count: int) -> list[int]:
 
 
 def delete(session: Any, indices: list[int]) -> None:
-    """`fit.delete`: confirmed modes taken back, as Visual Dynamics' fit
-    table deletes rows: each leaves the modes and the replay list, and the
+    """`fit.delete`: confirmed modes taken back: each leaves the modes and the replay list, and the
     preview, fitted against a residual that is gone, is dropped."""
     for k in sorted(set(indices), reverse=True):
         pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
@@ -187,7 +186,7 @@ def _damping(params: Mapping[str, Any], method: str) -> float:
 
 def edit(session: Any, params: Mapping[str, Any]) -> None:
     """`fit.edit`: a confirmed mode's damping or description typed into its
-    row, as Visual Dynamics' fit table takes them. The replay list follows the
+    row. The replay list follows the
     damping, so taking the mode back or replaying the fit finds it."""
     k = params.get('mode')
     if isinstance(k, bool) or not isinstance(k, int):
@@ -240,7 +239,7 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
 
 def _journal(project: Any, fit: Fit) -> None:
     """The published fit as the line that replays it, settling in place as the
-    fit grows, as Visual Dynamics journals its fit."""
+    fit grows."""
     line = project.fit_replay_line(fit.frf, fit.shapes, fit.session, fit.coherence)
     prefix = f'project.fit_modes({fit.frf!r}, at='
     journal = project.journal
@@ -278,8 +277,7 @@ def state(fit: Fit) -> dict[str, Any]:
 
 def _half_power(fit: Fit) -> dict[str, Any]:
     """The half-power reading of the residual CMIF peak under the cursor
-    (`ModalFitSession.half_power`), as Visual Dynamics shows it beside the
-    fit: the peak's frequency, the two crossings, Q and the damping they
+    (`ModalFitSession.half_power`): the peak's frequency, the two crossings, Q and the damping they
     give, or why it could not be read."""
     try:
         reading = fit.session.half_power(warn=False)
@@ -298,7 +296,7 @@ def _half_power(fit: Fit) -> dict[str, Any]:
 
 def _mac(fit: Fit) -> dict[str, Any] | None:
     """The auto-MAC of the confirmed modes, with the preview's row and
-    column last, as VD shows it beside the fit: how alike the modes'
+    column last: how alike the modes'
     shapes are, which a close pair or a mode split in two shows off the
     diagonal. None for fewer than two."""
     from hertzforge.core.shapes import mac_matrix

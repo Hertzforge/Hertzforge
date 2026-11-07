@@ -1,5 +1,4 @@
-"""The Run Log window's service side: Visual Dynamics' run-log dock
-(`gui/run_log_dock.py`, `gui/run_log_forms.py`) as `runlog.*` requests.
+"""The Run Log window's service side, as `runlog.*` requests.
 
 The log keeper writes the run log while a test runs: the level rows of the
 step-up, the abort and what the first minute owes, the small acts (a note, a
@@ -18,7 +17,7 @@ deviation's hold) comes from `preview`, through the same functions the log
 judges by. Nothing here drives the controller: every check is a reminder.
 
 Beside what is read, the window shows the predictions drawn for the project
-open on the connection, as Visual Dynamics' dock shows the ones its window drew:
+open on the connection:
 the notch Notch Prediction cut (`core.limit_prediction`) beside a notch entry,
 and the drives Drive Prediction asked for (`core.drive_prediction`) beside the
 level row's drive. Each tool hands its prediction over as it draws it (`offer`);
@@ -953,8 +952,8 @@ def _place(seen: Mapping[str, Any], axis: str | None) -> tuple[int | None, str |
 def write(log: RunLog, seen: Mapping[str, Any], name: str, spec: Mapping[str, Any],
           texts: Mapping[str, Any], text: str, when_text: str, taken: datetime,
           author: str, axis: str | None) -> Any:
-    """Write form `name` as typed into `log`, as Visual Dynamics' dock writes
-    it: the event time read from its box against `taken`, every entry
+    """Write form `name` as typed into `log`: the event time read from its box against
+    `taken`, every entry
     checked before any is written. `RunLogError` saying why for anything
     the log refuses."""
     form = Reader(spec, texts)

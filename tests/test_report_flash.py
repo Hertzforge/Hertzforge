@@ -362,8 +362,8 @@ def test_the_typed_parts_round_trip_and_never_reach_a_template(tmp_path):
     project.report_flash(name, **TYPED)
     io.save(project[name], str(tmp_path / 'r.hforge'))
     assert io.load(str(tmp_path / 'r.hforge')).identity == project[name].identity
-    report_template.save(project[name], tmp_path / 'house.vdreport')
-    back = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(project[name], tmp_path / 'house.hftemplate')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert fl.held(back) == {}, "one test's page never passes to the next"
     assert back.features == list(FLASH)
 

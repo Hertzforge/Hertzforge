@@ -32,8 +32,8 @@ safe to read from any thread.
 
 **Format and holdings.** Each file is described as a data index
 describes a file (`data_index.IndexEntry`): its name, where it is, its
-size, its SHA-256, its format and what it holds, read through Visual
-Dynamics' own importers. A Rattlesnake run is read from its dimensions
+size, its SHA-256, its format and what it holds, read through the importers. A Rattlesnake run is read from
+its dimensions
 alone (`rattlesnake.stream_summary`), so a run of any size gives its
 channels, its sample rate and its stream's length without reading the
 stream; another format an importer recognizes is read whole when it is
@@ -307,8 +307,7 @@ def _imported(path: str) -> tuple[list[str], tuple[str, ...]]:
 
 def describe(path: str | os.PathLike, *,
              limit: int = HOLDINGS_LIMIT) -> Description:
-    """What the file at `path` is and holds, read through Visual
-    Dynamics' importers.
+    """What the file at `path` is and holds, read through the importers.
 
     A Rattlesnake run gives its kind, channels, sample rate and time
     stream from its dimensions, whatever its size. Another format an

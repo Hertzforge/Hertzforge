@@ -9,7 +9,7 @@ no other reader looks for.
 
 Checked three ways: against a file sdynpy wrote and sdynpy's own reading
 of it (frozen by `generate_unv_complex_oracle.py` in the private
-generators repository — data, never an import, `AGENTS.md` hard rule 1);
+generators repository — data, never an import);
 by round trip, complex modal A and modal B included; and end to end
 against physics, a non-proportionally damped system's modes written,
 read and synthesized back to the exact inverse of its dynamic stiffness.

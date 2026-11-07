@@ -322,7 +322,7 @@ def tiny_png(color: tuple[int, int, int] = (255, 0, 0), size: tuple[int, int] = 
 def test_a_picture_imports_into_photos_renamed_and_deleted_by_index(tmp_path, validate):
     """A png or jpeg is a photo: it goes into the project's Photos object,
     made on first use; a photo is renamed by index and deleted as a part,
-    each journaled as the call a script would make (VD's photos)."""
+    each journaled as the call a script would make (the photos)."""
     setup = tmp_path / 'setup.png'
     setup.write_bytes(tiny_png())
     closeup = tmp_path / 'closeup.png'
@@ -382,7 +382,7 @@ def test_parts_of_data_are_deleted_and_every_record_is_refused():
 
 
 def test_the_journal_is_the_session_as_python(tmp_path):
-    """`project.journal`, VD's console: the lines that replay the session,
+    """`project.journal`, the console: the lines that replay the session,
     read-only, the project made first."""
     state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
     lines = projects.journal(state, {})['lines']

@@ -21,7 +21,7 @@ from hertzforge.io import report_template
 def templates(tmp_path, monkeypatch):
     """The templates folder, pointed at a scratch directory."""
     folder = tmp_path / 'Report Templates'
-    monkeypatch.setenv('VISUALDYNAMICS_TEMPLATES', str(folder))
+    monkeypatch.setenv('HERTZFORGE_TEMPLATES', str(folder))
     return folder
 
 
@@ -29,7 +29,7 @@ def test_a_report_round_trips_as_a_template(tmp_path):
     report = modal_template({})
     report.marking = 'SECRET'
     report.marking_color = 'red'
-    path = tmp_path / 'house.vdreport'
+    path = tmp_path / 'house.hftemplate'
     report_template.save(report, path)
     data = json.loads(path.read_text(encoding='utf-8'))
     assert data[report_template.MARKER] == 1
@@ -44,7 +44,7 @@ def test_a_report_round_trips_as_a_template(tmp_path):
     other = tmp_path / 'other.json'
     other.write_text('{"blocks": []}', encoding='utf-8')
     assert not report_template.sniff(other)
-    with pytest.raises(ValueError, match='not a Visual Dynamics report template'):
+    with pytest.raises(ValueError, match='not a report template'):
         report_template.load(other)
 
 
@@ -54,10 +54,10 @@ def test_the_project_exports_and_imports_it(project, tmp_path):
         source.add(name, obj)
     made = source.generate_report('modal')
     source[made].blocks[1]['caption'] = 'House caption'
-    path = source.export(made, tmp_path / 'house.vdreport')
-    assert path.endswith('.vdreport')
+    path = source.export(made, tmp_path / 'house.hftemplate')
+    assert path.endswith('.hftemplate')
     assert source.journal[-1] == \
-        f"project.export({made!r}, {str(tmp_path / 'house.vdreport')!r})"
+        f"project.export({made!r}, {str(tmp_path / 'house.hftemplate')!r})"
     # into another project, empty: every bound block is a card to rebind
     target = hertzforge.Project()
     [added] = target.import_file(path)
@@ -81,13 +81,13 @@ def test_generate_report_takes_a_saved_template_by_name_or_path(project,
     assert report_template.saved_templates() == []
     templates.mkdir(parents=True)
     report = Report('House Style', [{'kind': 'text', 'text': '# Ours'}])
-    report_template.save(report, templates / 'House.vdreport')
+    report_template.save(report, templates / 'House.hftemplate')
     assert report_template.saved_templates() == [
-        ('House', templates / 'House.vdreport')]
+        ('House', templates / 'House.hftemplate')]
     by_name = p.generate_report('House', name='From Name')
     assert p[by_name].title == 'House Style'
     assert p[by_name].blocks == report.blocks
-    by_path = p.generate_report(str(templates / 'House.vdreport'),
+    by_path = p.generate_report(str(templates / 'House.hftemplate'),
                                 name='From Path')
     assert p[by_path].blocks == report.blocks
     assert p[by_path] is not p[by_name], 'each generation is its own report'

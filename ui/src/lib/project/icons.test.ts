@@ -72,7 +72,7 @@ describe('every kind the tree lists has a drawing of its own', () => {
 		expect(solidIcon('I-beam')).toBe('solid_section');
 	});
 
-	it('kinds rank in Visual Dynamics’ order, specifications beside their measurements', () => {
+	it('kinds rank in tree order, specifications beside their measurements', () => {
 		expect(kindRank('geometry')).toBeLessThan(kindRank('channel_table'));
 		expect(kindRank('specification') - kindRank('psd')).toBe(1);
 		expect(kindRank('shock_specification') - kindRank('srs')).toBe(1);

@@ -314,7 +314,7 @@ def test_move_part_offers_arrows_and_rings(project, validate):
 
 
 def test_a_form_previews_on_a_copy(validate):
-    """VD's live preview of a solid: nothing reaches the project or its journal."""
+    """The live preview of a solid: nothing reaches the project or its journal."""
     import hertzforge
     from hertzforge.service import display_units, server
 
@@ -371,7 +371,7 @@ def _union_in_pieces():
 
 
 def test_mesh_solids_takes_a_size_per_piece(monkeypatch):
-    """VD's table: a union meshed in pieces lists a row a piece, each takes its own size,
+    """The table: a union meshed in pieces lists a row a piece, each takes its own size,
     and Detect fills every row with the size that piece is likely to hold at. The fit
     itself is the core's test, stood in for here."""
     from hertzforge.service import ops_solids

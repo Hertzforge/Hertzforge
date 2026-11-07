@@ -1,4 +1,4 @@
-"""Visual Dynamics' 3-D stages of two objects together: frequency across,
+"""The 3-D stages of two objects together: frequency across,
 channels receding, level up, as the waterfall stands.
 
 The paired stage draws two densities at each channel they share, the louder

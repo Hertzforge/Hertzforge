@@ -41,8 +41,8 @@ export function withObjects(params: ParamDescriptor[], objects: ProjectObject[])
 
 /**
  * Whether a project tool has something to run on: every param filled from the project's objects
- * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does not is not shown, as Visual Dynamics
- * offers a verb only where it applies.
+ * (after `withObjects`) lists at least one, an optional one (default '') aside. A tool that does
+ * not is not shown.
  */
 export function hasObjectsFor(params: ParamDescriptor[]): boolean {
 	return params.every((p) => !(objectKinds(p).length || objectVerb(p)) || p.default === '' || (p.options ?? []).length > 0);

@@ -2,7 +2,7 @@
  * Files by path. In the desktop app (a Tauri window) the shell gets a dropped file's path and the
  * native dialogs; the service then reads the file where it is, and nothing is uploaded. In a
  * browser, which gives a dropped file's contents but never its path, the project panel takes a
- * typed path instead (OPENING_FILES_PLAN.md, section 1).
+ * typed path instead.
  *
  * Tauri is reached through the globals a Tauri v2 window exposes with `withGlobalTauri`, so the
  * shell needs no Tauri package of its own and runs unchanged in a browser.

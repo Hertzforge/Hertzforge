@@ -100,11 +100,13 @@ SUFFIX = '.h5'
 SUFFIXES = ('.h5', '.hdf5', '.escdf')
 #: the attachment that holds an object whole, in its own layout
 WHOLE = 'hertzforge.hforge'
-#: the same attachment in a file Visual Dynamics wrote, in the `.vdyn`
-#: layout, which the native reader reads by its stamp
+#: the same attachment in an older file, in the `.vdyn` layout, which the
+#: native reader reads by its stamp
 VDYN_WHOLE = 'visualdynamics.vdyn'
 #: the root metadata group carrying what belongs to the project itself
-PROJECT_RECORD = 'visualdynamics_project'
+PROJECT_RECORD = 'hertzforge_project'
+#: the same group in an older file, which is still read
+OLDER_PROJECT_RECORD = 'visualdynamics_project'
 
 #: the standard's data types, by the class written and read
 _DATA_TYPES: dict[type, str] = {
@@ -419,7 +421,7 @@ def to_file(project: Project, created_by: str | None = None,
     Each object is written as the standard's type with the object whole
     in an attachment, and each object group becomes an activity. The
     project's name, object groups, provenance and settings go in a
-    parameter set at the root named `visualdynamics_project`.
+    parameter set at the root named `hertzforge_project`.
 
     Parameters
     ----------
@@ -969,7 +971,8 @@ def from_file(file: escdf.File) -> Project:
     -------
     Project
     """
-    record = file.metadata.get(PROJECT_RECORD)
+    record_name = PROJECT_RECORD if PROJECT_RECORD in file.metadata else OLDER_PROJECT_RECORD
+    record = file.metadata.get(record_name)
     settings: dict[str, Any] = {}
     links_record: list[dict[str, Any]] = []
     provenance: dict[str, Any] = {}
@@ -995,7 +998,7 @@ def from_file(file: escdf.File) -> Project:
             kept.setdefault(name, []).append(own)
 
     for name, dataset in file.metadata.items():
-        if name != PROJECT_RECORD:
+        if name != record_name:
             add(name, dataset)
     for activity in file.activities.values():
         for name, dataset in activity.data.items():

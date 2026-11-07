@@ -1,6 +1,6 @@
 """Physical responses through a shape set to modal responses, and back.
 
-The rules pinned here are the ones PLAN.md's phase 2 states: records
+The rules pinned here: records
 match columns by (DOF, quantity) with the sign honored; motions fit
 (`Φ⁺u`) and forces project (`Φᵀf`); everything else is left out and
 said; the unit rule `[q] = [u]/[Φ]` gives a virtual point's rotations

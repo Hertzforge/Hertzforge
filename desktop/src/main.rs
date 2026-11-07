@@ -209,7 +209,7 @@ fn main_window(app: &AppHandle, query: &str) -> tauri::Result<()> {
 }
 
 /// `--run-log [file]`: the window with the log alone in it, for the keeper's own computer,
-/// as Visual Dynamics launches it. Its own flag, not a file to import.
+/// Its own flag, not a file to import.
 fn run_log_query(args: impl Iterator<Item = String>) -> String {
     let args: Vec<String> = args.collect();
     let Some(at) = args.iter().position(|a| a == "--run-log") else {

@@ -42,7 +42,7 @@
 		if (!app.config.popout && app.analysis.isOpen) void app.units.sync();
 	});
 
-	// `--run-log [file]`: the log alone, for the keeper's own computer, as Visual Dynamics launches it
+	// `--run-log [file]`: the log alone, for the keeper's own computer
 	let logAsked = false;
 	$effect(() => {
 		if (!app.config.runLog || logAsked) return;

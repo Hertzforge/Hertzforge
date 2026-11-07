@@ -7,14 +7,13 @@ the same rule — each line owns half a line spacing either side of it, a
 line straddling a band edge is split by the fraction inside, and the
 band's content is divided by its *full* width — so a band with data
 under it must agree. Frozen by `generate_octave_oracle.py` in the
-private generators repository and read here as numbers, never imported
-(`AGENTS.md` hard rule 1).
+private generators repository and read here as numbers, never imported.
 
 The same edges go into both, sdynpy's own `nth_octave_freqs`, so what is
 compared is the banding alone; the edges themselves are checked against
 sdynpy's in `tests/test_octave.py`. Bands are matched by their edges,
 not their labels: sdynpy names a band by the arithmetic mean of its
-edges and Visual Dynamics by the geometric mean, which is where a
+edges and Hertzforge by the geometric mean, which is where a
 proportional band's center actually is.
 """
 

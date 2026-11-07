@@ -377,26 +377,26 @@ def test_a_template_carries_the_laboratory_and_never_the_issue(tmp_path):
 
     project, name = _project(_report(**COMPLETE, full_only=False))
     _issue(project, name)
-    report_template.save(project[name], tmp_path / 'house.vdreport')
-    saved = json.loads((tmp_path / 'house.vdreport').read_text('utf-8'))
+    report_template.save(project[name], tmp_path / 'house.hftemplate')
+    saved = json.loads((tmp_path / 'house.hftemplate').read_text('utf-8'))
     assert saved['identity'] == {'laboratory': 'Test Lab',
                                  'address': '1 Main Street, Albuquerque',
                                  'full_only': False}
-    back = report_template.load(tmp_path / 'house.vdreport')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert back.identity == saved['identity']
     assert ri.value(back, 'status') == 'draft' and ri.record(back) == []
-    report_template.save(Report('R'), tmp_path / 'plain.vdreport')
-    assert 'identity' not in (tmp_path / 'plain.vdreport').read_text('utf-8')
-    (tmp_path / 'bad.vdreport').write_text(json.dumps(
+    report_template.save(Report('R'), tmp_path / 'plain.hftemplate')
+    assert 'identity' not in (tmp_path / 'plain.hftemplate').read_text('utf-8')
+    (tmp_path / 'bad.hftemplate').write_text(json.dumps(
         {report_template.MARKER: 1, 'identity': ['x']}), 'utf-8')
     with pytest.raises(ValueError, match='identity must be a mapping'):
-        report_template.load(tmp_path / 'bad.vdreport')
+        report_template.load(tmp_path / 'bad.hftemplate')
     # a forged number in a template file does not reach the report
-    (tmp_path / 'forged.vdreport').write_text(json.dumps(
+    (tmp_path / 'forged.hftemplate').write_text(json.dumps(
         {report_template.MARKER: 1, 'identity': {'number': 'R-1',
                                                  'status': 'issued'}}),
         'utf-8')
-    assert report_template.load(tmp_path / 'forged.vdreport').identity == {}
+    assert report_template.load(tmp_path / 'forged.hftemplate').identity == {}
 
 
 def test_the_project_verbs_are_journaled():

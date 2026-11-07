@@ -13,7 +13,7 @@ version = 2
 # This repository's own crates are checked too: each carries `license = "MIT"`.
 private = { ignore = false }
 # The policy: permissive licenses, plus the weak copyleft licenses MPL-2.0 and LGPL,
-# as Visual Dynamics allows them. GPL, AGPL and SSPL are refused by omission; an expression passes only if it can be satisfied from this list, so
+# GPL, AGPL and SSPL are refused by omission; an expression passes only if it can be satisfied from this list, so
 # `MIT OR GPL-3.0-only` passes on its MIT side and `MIT AND GPL-3.0-only` fails. A
 # crate with no license it states is refused.
 allow = [

@@ -320,8 +320,8 @@ def test_binary_functions_beside_ascii_geometry_are_not_dropped(tmp_path):
 
 
 def test_the_binary_form_is_offered_as_its_own_export(tmp_path):
-    """Anything the API can do the Export menu can do (PRINCIPLES.md,
-    4). Choosing by suffix still gets the ASCII form, which is the one
+    """Anything the API can do the Export menu can do. Choosing by suffix still gets the
+    ASCII form, which is the one
     every reader takes."""
     import hertzforge as vd
     from hertzforge.io import exporters

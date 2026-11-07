@@ -28,7 +28,7 @@ import scipy.sparse as sp
 
 #: set to 'superlu' to keep Accelerate and PARDISO out, which is how the
 #: tests run both paths on one machine
-BACKEND_VARIABLE = 'VISUALDYNAMICS_SPARSE_SOLVER'
+BACKEND_VARIABLE = 'HERTZFORGE_SPARSE_SOLVER'
 
 
 def _superlu_only() -> bool:
@@ -349,7 +349,7 @@ class AccelerateFactor:
 # SuperLU's 239 s, and the 608,000-DOF block of 192,000 bricks in 106 s.
 # Its own nested-dissection ordering (METIS) is most of that: the
 # factor had half SuperLU's nonzeros on the block, and fewer on a thin
-# frame as well. PLAN.md, "PARDISO on Windows and Linux".
+# frame as well.
 
 _pardiso: dict[str, Any] = {}
 

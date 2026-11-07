@@ -148,7 +148,7 @@ def _apart():
 
 
 def test_merge_marks_the_places_and_a_click_leaves_one_out(validate):
-    """VD's merge pane: every place is marked before anything merges, and a click on a
+    """The merge pane: every place is marked before anything merges, and a click on a
     place moves it between in and out, dim once it is out."""
     project = _apart()
     before = project['Geometry'].num_nodes

@@ -1,6 +1,5 @@
 """The display unit system: views computed in SI put into the system the
-connection has chosen, as Visual Dynamics' unit selector puts every plot
-and reading into its system."""
+connection has chosen."""
 
 from __future__ import annotations
 

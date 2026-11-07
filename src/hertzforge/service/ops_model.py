@@ -1,8 +1,7 @@
 """The Model workspace's tools on the connection's project: a geometry seen
 on its own, its element groups listed, set, merged, deleted and tied,
 parts meshed apart aligned and their coincident nodes merged, the steps
-between importing a mesh and Solve Modes, as Visual Dynamics' Model
-screen takes them.
+between importing a mesh and Solve Modes.
 """
 
 from __future__ import annotations
@@ -165,7 +164,7 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.merge_coincident_nodes`: every place a geometry's nodes coincide marked, a
     click leaving one out or putting it back, and with `keep` each place still in merged
     into one node, the elements reconnected to the lowest id
-    (`Project.merge_coincident_nodes`), as VD's merge pane does."""
+    (`Project.merge_coincident_nodes`)."""
     name = params['geometry']
     geometry = project[name]
     if not geometry.num_nodes:
@@ -207,8 +206,7 @@ def _ids(text: str, what: str) -> list[int]:
 
 
 def element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.element_groups`: a geometry's element groups as Visual
-    Dynamics' Element Groups table lists them, and takes them typed in place
+    """`project.element_groups`: a geometry's element groups, and takes them typed in place
     (`group_cells`): each group's id, name and elements, and what it is
     made of."""
     name = params['geometry']
@@ -281,7 +279,7 @@ def _element_faces(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def _tie_groups(geometry: Any) -> list[str]:
-    """What a patch can tie to, as VD's menu offers: every group with elements, less those
+    """What a patch can tie to: every group with elements, less those
     with nothing to tie to, a link or a lumped mass."""
     out = []
     for k, group in enumerate(geometry.group_id):
@@ -298,7 +296,7 @@ def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
     rigidly to the part under it, each node by a rigid link to the
     nearest node of an element group or a second patch
     (`Project.tie_elements`), as for a bolted joint modeled from the
-    elements its washer covers. Without `keep`, VD's way in: the elements
+    elements its washer covers. Without `keep`, the way in: the elements
     drawn, a click adding one to the patch or the second patch (`side`) or
     taking it away, and the groups it can tie to listed."""
     name = params['geometry']
@@ -367,7 +365,7 @@ def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
 def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.align_meshes`: every move marked on the node that would move, a click leaving
     one out or putting it back, and with `keep` each one still in made
-    (`Project.align_meshes`), as VD's merge pane does for an alignment."""
+    (`Project.align_meshes`)."""
     name = params['geometry']
     geometry = project[name]
     groups = _groups(geometry, params['groups']) if params['groups'].strip() else None

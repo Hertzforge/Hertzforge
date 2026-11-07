@@ -105,7 +105,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 # Written from the published definitions above. No code was read from
-# sdynpy, rattlesnake or forcefinder (hard rule 1 in AGENTS.md), which
+# sdynpy, rattlesnake or forcefinder, which are GPL, and that
 # matters here because a structural dynamics library is exactly where a
 # wavelet transform would be found. Nor from scipy's, which no longer
 # has one to read: `signal.cwt`, `morlet`, `morlet2` and `ricker` were

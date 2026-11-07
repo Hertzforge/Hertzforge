@@ -56,7 +56,7 @@ class AnalyzeState {
 	runError = $state<string | null>(null);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
-	/** The bar's choices, remembered across launches as VD remembers 3D. */
+	/** The bar's choices, remembered across launches. */
 	prefs = $state<ShowPrefs>(readPrefs());
 	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
 	line = $state<number | null>(null);
@@ -327,7 +327,7 @@ class AnalyzeState {
 		}
 	}
 
-	/** Export in the desktop app: the native save window says where and in which format, as in Visual Dynamics. */
+	/** Export in the desktop app: the native save window says where and in which format. */
 	private async exportObject(row: ActionRow, formats: ExportFormat[]): Promise<void> {
 		this.runError = null;
 		try {
@@ -573,7 +573,7 @@ class AnalyzeState {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
-			// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+			// an act's result joins the tree and is selected; a reading
 			// takes the view until Back
 			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
 			if (added.length) {
@@ -763,7 +763,7 @@ class SimState {
 const FILE_TIMEOUT_MS = 600_000;
 
 /**
- * The mode fit under way on the project (`fit.*`): Visual Dynamics' fitting loop, one mode at a time
+ * The mode fit under way on the project (`fit.*`): the fitting loop, one mode at a time
  * on the residual. The x range on screen is the search band Find Mode reads.
  */
 export class FitState {
@@ -777,7 +777,7 @@ export class FitState {
 
 	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		// records picked in the tree limit the fit, as in Visual Dynamics; an Edit Fit takes its set's own
+		// records picked in the tree limit the fit; an Edit Fit takes its set's own
 		const records = shapes ? [] : (this.app.project.selection.records[frf] ?? []);
 		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}), ...(records.length ? { records } : {}) });
 	}
@@ -867,7 +867,7 @@ export class FitState {
 }
 
 /**
- * The project's reports (`report.*`): Visual Dynamics' report, generated from a starter template and
+ * The project's reports (`report.*`): the report, generated from a starter template and
  * shown as the page the core writes.
  */
 export class ReportState {
@@ -1051,7 +1051,7 @@ const UNITS_KEY = 'hertzforge.units';
 
 /**
  * The display unit system (`units.system`): every plot and reading the analysis service sends is
- * in it, as Visual Dynamics' unit selector puts its window in one. Remembered between launches and
+ * in it. Remembered between launches and
  * told to the service each time it connects; a change draws the results on screen again.
  */
 export class UnitsState {
@@ -1377,7 +1377,7 @@ export class ProjectState {
 		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
 	}
 
-	/** Link the selected objects into one group, as VD's Link does; the group merges any they are in. */
+	/** Link the selected objects into one group; the group merges any they are in. */
 	link(names: string[]): Promise<boolean> {
 		const [first, second, ...more] = names;
 		return this.act(`Linking ${names.join(', ')}`, 'project.link', { first, second, more: more.join(', '), name: '' });
@@ -1387,7 +1387,7 @@ export class ProjectState {
 		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
 	}
 
-	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V), as VD pastes its own objects. */
+	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V). */
 	copied = $state.raw<string[]>([]);
 
 	copySelection(): boolean {
@@ -1404,7 +1404,7 @@ export class ProjectState {
 	}
 
 	async paste(): Promise<boolean> {
-		// files copied elsewhere since, as VD reads the clipboard: a copy here puts text on it and no file
+		// files copied elsewhere since: a copy here puts text on it and no file
 		const paths = await pastedFiles();
 		if (paths.length) {
 			await this.openPaths(paths);
@@ -1419,7 +1419,7 @@ export class ProjectState {
 	}
 
 	/**
-	 * Objects dragged onto `target` join its group and leave their own, as VD's drag moves them;
+	 * Objects dragged onto `target` join its group and leave their own;
 	 * dragged onto nothing (`target` null) they leave their groups.
 	 */
 	async moveInto(names: string[], target: string | null): Promise<boolean> {
@@ -1448,7 +1448,8 @@ export class ProjectState {
 		return this.act(text.trim() ? `Naming the group of ${name}` : `Unnaming the group of ${name}`, 'project.name_object_group', { object: name, name: text });
 	}
 
-	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives from it, as VD's grid does. */
+	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives
+	 * from it. */
 	async renameDof(name: string, old: string, next: string, quantity: string): Promise<boolean> {
 		const ok = await this.act(`Renaming ${old} to ${next}`, 'project.rename_dof', { source: name, old, new: next, measured: quantity });
 		if (ok) void this.loadChildren(name);
@@ -1480,7 +1481,7 @@ export class ProjectState {
 
 	/**
 	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
-	 * co-selected object is context, not a target, as in Visual Dynamics), else the objects.
+	 * co-selected object is context, not a target), else the objects.
 	 */
 	async removeSelected(): Promise<boolean> {
 		const names = [...this.selection.objects];
@@ -1582,7 +1583,7 @@ export class ProjectState {
 const CONSOLE_KEY = 'hertzforge.console.shown';
 
 /**
- * The console: the session as Python along the bottom of the window, as Visual Dynamics' is. It
+ * The console: the session as Python along the bottom of the window. It
  * shows the project's journal, every verb and settings change as the line that replays it,
  * read-only, to be copied into a script; nothing is typed into it (Brandon, 2026-08-30).
  */

@@ -1,4 +1,4 @@
-"""Readings of a time history that Visual Dynamics shows beside its trace:
+"""Readings of a time history shown beside its trace:
 the kurtosis of each channel, the amplitude spectrum, and what taking the
 record to a lower rate does. Each reads the record and adds nothing to the
 project.
@@ -33,7 +33,7 @@ FOLD = Param('frequencies', 'Frequencies to fold', 'string', default='', unit='H
 def kurtosis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.kurtosis`: each channel's kurtosis over the span its
     spectra are read from (`core.kurtosis.channel_kurtosis`), judged
-    against a band, 2 to 4 by default: Visual Dynamics' kurtosis bars.
+    against a band, 2 to 4 by default: the kurtosis bars.
     Every channel shares the reading whatever it measures, since kurtosis
     is dimensionless."""
     from hertzforge.core.kurtosis import analyzed_span, channel_kurtosis
@@ -63,8 +63,7 @@ def amplitude_spectrum(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.amplitude_spectrum`: every channel's amplitude spectrum,
     each line scaled so a sine reads its amplitude
     (`TimeHistory.amplitude_spectrum`), on the history's own frames with
-    this window, and the tallest line of one channel read off it, as
-    Visual Dynamics' Amplitude reading shows them."""
+    this window, and the tallest line of one channel read off it."""
     name = params['history']
     history = project[name]
     try:
@@ -113,8 +112,7 @@ def resample_reading(project: Any, params: dict[str, Any]) -> list[dict]:
     rate does (`core.resample.read_resample`): its autospectrum as
     recorded, decimated bare, low-passed after and filtered first, the
     lines above the alias-free span grayed, and where each frequency
-    above the new Nyquist frequency folds to, as Visual Dynamics'
-    Resample reading shows it."""
+    above the new Nyquist frequency folds to."""
     from hertzforge.core.resample import read_resample
 
     name = params['history']

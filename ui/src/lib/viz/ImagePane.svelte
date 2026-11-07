@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * A photo of the test, drawn from the file's own bytes at its own aspect under its name, as
-	 * Visual Dynamics stacks a Photos object's pictures. The bytes become a blob URL for the page's
+	 * a Photos object's pictures stack. The bytes become a blob URL for the page's
 	 * life and are let go when the pane goes.
 	 */
 	import type { ImageView } from '$lib/protocol/types';

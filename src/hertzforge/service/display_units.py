@@ -1,6 +1,5 @@
 """The display unit system: the views the service sends, drawn in SI by
-every operation, put into the units the connection has chosen, as Visual
-Dynamics' unit selector puts every plot and reading into its system.
+every operation, put into the units the connection has chosen.
 
 A view says its units as text (`waterfalls.unit_text`, SI's label for a
 dimension), so the dimension is found again from that text (`dimension_of`)
@@ -19,7 +18,7 @@ and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
 `table`'s columns headed "<name> [<SI unit>]", each number in them, except
 a column typed into (`edit`), which stays in SI so a value typed means what
 the operation reads. A `shape3d`'s coordinates are put in the system's
-length unit, as Visual Dynamics draws a geometry (`display_points`), and a
+length unit, and a
 measured motion's values in their own; its shapes are a picture and stay as
 they are, and a click that places a point (`pick`) says how to take its
 coordinates back to SI. A geometry whose units are undefined is drawn in
@@ -49,7 +48,7 @@ def _start() -> str:
     return DEFAULT_SYSTEM.name
 
 
-#: the system a connection starts in: Visual Dynamics' default
+#: the system a connection starts in: the default
 START = _start()
 
 

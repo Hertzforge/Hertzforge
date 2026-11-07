@@ -1,9 +1,9 @@
 /** Measured motion played back on a mesh (schema/PROTOCOL.md, `shape3d` `motion`). */
 import type { Motion } from '$lib/protocol/types';
 
-/** Seconds a record takes to play through at normal speed, as in Visual Dynamics. */
+/** Seconds a record takes to play through at normal speed. */
 export const SECONDS_PER_RECORD = 10;
-/** Playback speeds, slowest first; Visual Dynamics' list. */
+/** Playback speeds, slowest first. */
 export const SPEEDS = [0.125, 0.25, 0.5, 1, 2, 4, 8] as const;
 export const NORMAL_SPEED = SPEEDS.indexOf(1);
 

@@ -242,8 +242,8 @@ def test_a_check_block_is_saved_with_the_report_and_its_template(tmp_path):
                                    'duration': 0.011, 'band': 0.15})
     io.save(report, str(tmp_path / 'r.hforge'))
     assert io.load(str(tmp_path / 'r.hforge')).blocks == report.blocks
-    report_template.save(report, tmp_path / 'house.vdreport')
-    back = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert back.blocks == report.blocks and back.features == [cb.FEATURE]
 
 

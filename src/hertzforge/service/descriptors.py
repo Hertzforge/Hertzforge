@@ -18,7 +18,7 @@ from .verbs import modules_of
 
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 #: the module an operation belongs to: the shell's rail entry that offers it.
-#: The analysis modules split what Visual Dynamics put under one window by
+#: The analysis modules split the work by
 #: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
 #: is not offered shock tools; an operation every module needs (Plot
 #: Records, Save As, the averaging settings) says `everywhere`.

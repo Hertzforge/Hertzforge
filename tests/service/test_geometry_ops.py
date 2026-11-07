@@ -111,7 +111,7 @@ def test_elements_are_added_by_family(project, validate):
 
 
 def test_a_click_adds_what_the_table_in_hand_holds(project, validate):
-    """Visual Dynamics' Add mode: the view says what a click adds, and
+    """The Add mode: the view says what a click adds, and
     running that with what was clicked adds it."""
     view, _table = run(project, 'project.view_entities', kind='nodes')
     wire_views([view], validate)

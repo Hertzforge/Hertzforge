@@ -1,8 +1,7 @@
 """An element group's properties as cells of the Element Groups table.
 
 The properties a finite element model needs (`fem.GroupProperties`), one
-column each, as Visual Dynamics' Element Groups table has them
-(`gui.object_tables`): a material, picked from the library or typed
+column each: a material, picked from the library or typed
 number by number; a thickness for plates; a section and an orientation
 for beams, by a shape and its dimensions or by its four numbers; a mass
 for points; a stiffness for points and lines, which makes them springs;

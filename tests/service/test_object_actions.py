@@ -1,5 +1,5 @@
 """Copying an object, recomputing what is stale, and merging objects into
-one, as Visual Dynamics' tree does them."""
+one."""
 
 from __future__ import annotations
 

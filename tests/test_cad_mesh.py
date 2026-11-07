@@ -213,7 +213,7 @@ def test_a_faceless_geometry_is_refused_by_both(tmp_path):
             export_file(lines_only, tmp_path / f'bad{suffix}')
 
 
-def test_visualdynamics_export_speaks_them_too(tmp_path):
+def test_the_project_export_speaks_them_too(tmp_path):
     """Anything the interface can do the API can do — and the other
     way: the top-level export path writes both formats by suffix."""
     project = hertzforge.Project('t')

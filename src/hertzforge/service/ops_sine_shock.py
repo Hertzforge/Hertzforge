@@ -1,11 +1,9 @@
-"""Sine and shock readings of a time history, as Visual Dynamics shows
-them beside the record: the sine extraction's settings and the levels
+"""Sine and shock readings of a time history: the sine extraction's settings and the levels
 against their specification, the distortion, dwell, frequency and
 mixed-mode readouts under them, and the classical pulse, stroke,
 replication fit and scalogram readings of a shock record. Each reads the
 record and adds nothing to the project; the sine extraction's settings
-and the shock windows are stored on the record, as Visual Dynamics'
-views store them.
+and the shock windows are stored on the record.
 """
 
 from __future__ import annotations
@@ -93,8 +91,7 @@ REFINE = Param('refine', 'Follow the clock', 'boolean', default=True)
 
 def sine_extraction(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.sine_extraction`: the settings a sweep's levels are read
-    out of a record with, stored on the record as Visual Dynamics' sine
-    view stores them, and what follows from them: the cycles the
+    out of a record with, stored on the record, and what follows from them: the cycles the
     automatic smoothing chose (`core.sine.suggest_cycles`), the
     smoothing window at the first tone's start and end, the median
     scatter a reading is predicted to have and the share of samples under
@@ -158,8 +155,7 @@ THRESHOLD = Param('threshold', 'Threshold', 'number', default=3.0, min=0.1, step
 def sine_dofs(grouped: Any) -> list[str]:
     """The control DOFs a sine specification or a level set covers, in
     order: the specification's own, or the union of its levels', since a
-    tone the instructions windowed may have been read at fewer DOFs (VD's
-    `record_grid.sine_dofs`)."""
+    tone the instructions windowed may have been read at fewer DOFs."""
     if hasattr(grouped, 'tones'):
         return [str(dof) for dof in grouped.response_dof]
     out: list[str] = []
@@ -241,7 +237,7 @@ def sine_error_rows(spec: Any, levels: list[Any], threshold: float,
 
 def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.level_error`: extracted sine levels against the
-    specification they were controlled to, Visual Dynamics' Sine view.
+    specification they were controlled to, the Sine view.
     The Levels reading draws one tone's levels at each control channel
     over its requirement (`SineSweepSpecification.tone_curve`); the Level
     Error reading is each channel's signed RMS deviation in dB across the
@@ -268,7 +264,7 @@ def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
 def _extracted(project: Any, history: str, specification: str) -> tuple[str, Any]:
     """The sine levels most recently extracted from `history` against
     `specification`, by the project's record of what each object was made
-    from, as Visual Dynamics' readouts find them; refused when there are
+    from; refused when there are
     none, or when they are stale."""
     for name in reversed(list(project.names)):
         made = project.provenance.get(name, {})
@@ -286,8 +282,7 @@ def _extracted(project: Any, history: str, specification: str) -> tuple[str, Any
 def _readout_rows(check: Any, dof: str, label: str, over_words: str, inside_words: str,
                   specified: np.ndarray) -> list[dict]:
     """The rows the distortion and frequency readouts share after the
-    worst line: the lines over, under `label`, and the verdict, as Visual
-    Dynamics words them."""
+    worst line: the lines over, under `label`, and the verdict."""
     row = check.row(dof)
     over = int(check.over[row].sum())
     judged = int(check.judged[row].sum())
@@ -587,7 +582,7 @@ QUIET = Param('quiet', 'Quiet', 'number', default=2.5, min=0.0, max=20.0, step=0
               unit='durations')
 
 #: the pulse the check opens on when the record holds nothing that reads as
-#: one: Visual Dynamics' 50 g, 11 ms half-sine
+#: one: the 50 g, 11 ms half-sine
 OPENING_PULSE = (50.0 * 9.80665, 0.011)
 #: the points the envelope is drawn with across the judged span
 ENVELOPE_POINTS = 2000
@@ -604,8 +599,7 @@ def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     classical pulse's tolerance envelope and its velocity change
     (`core.classical_pulse.check_pulse`). A peak or duration left at zero
     is the pulse of the shape asked for that the record most resembles,
-    rounded to three figures (`core.classical_pulse.suggest_pulse`), as
-    Visual Dynamics' Pulse Check opens on a record."""
+    rounded to three figures (`core.classical_pulse.suggest_pulse`)."""
     import hertzforge as hz
     from hertzforge.core import classical_pulse as pulses
     from hertzforge.drawing.plot.classical_pulse import readout
@@ -771,7 +765,7 @@ def stroke(project: Any, params: dict[str, Any]) -> list[dict]:
             v.reading(f'Stroke of {name}, {dof}', rows)]
 
 
-#: Visual Dynamics' starting shaker: 4000 lbf, 2 in of stroke and 70 in/s
+#: the starting shaker: 4000 lbf, 2 in of stroke and 70 in/s
 #: carrying 150 lb, in SI; a starting point to be overwritten
 FIT_RATINGS = (
     Param('force', 'Force', 'number', default=17792.89, min=0.0, unit='N'),
@@ -799,8 +793,7 @@ def replication_fit(project: Any, params: dict[str, Any]) -> list[dict]:
     candidate high-pass cutoff, each case judged against the ratings; the
     travel at one cutoff is drawn inside the stroke, over the sweep of
     every candidate. The cutoff drawn when none is asked for is the
-    lowest that fits, else the lowest candidate, Visual Dynamics'
-    choice."""
+    lowest that fits, else the lowest candidate."""
     from hertzforge.core.replication_fit import replication_fit as fit_record
     from hertzforge.core.shaker import ShakerRating
 
@@ -891,7 +884,7 @@ def wavelet(project: Any, params: dict[str, Any]) -> list[dict]:
     (`core.wavelet.scalogram_peaks`, as `core.wavelet.reading` does), the
     ridge (`core.wavelet.ridge`) and the largest magnitude, with what of
     the range is cone of influence. The range is clamped to what the
-    record carries, as Visual Dynamics' panel clamps it."""
+    record carries."""
     from hertzforge.core import wavelet as cwt
 
     name = params['history']
@@ -969,8 +962,7 @@ STOP = Param('stop', 'Stop', 'number', default=0.1, unit='s', step=0.001)
 
 
 def _velocity_check(history: Any) -> list[dict]:
-    """The velocity check of the windows on show, as Visual Dynamics' shock
-    panel states it whenever they change (`core.shock_check`): over the
+    """The velocity check of the windows on show: over the
     windows the SRS would be computed from, or waiting when none is marked,
     since a check of the whole record would speak for windows it was not
     read over. A record with no acceleration has nothing to integrate."""
@@ -1006,8 +998,7 @@ def _shocks_reading(name: str, history: Any) -> dict:
 
 
 def _shock_views(name: str, history: Any, params: dict[str, Any]) -> list[dict]:
-    """The shock windows where they can be dragged, as Visual Dynamics shows
-    them on the record and on its 3-D stage: one record with each window a
+    """The shock windows where they can be dragged: one record with each window a
     span (`ops_settings._trace`), the whole history on the stage with the
     same spans (`waterfalls.waterfall_view`), and the windows read. Dragging
     a window's middle slides it and an edge moves that edge, through Shock
@@ -1041,8 +1032,7 @@ def shocks(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def _store_shocks(history: Any, shocks: tuple, rate: float) -> None:
     """The windows on the history, each inside the record and off its
-    neighbors, as Visual Dynamics stores every edit
-    (`core.shocks.held_apart`)."""
+    neighbors."""
     from hertzforge.core.shocks import held_apart
 
     samples = int(np.asarray(history.ordinate).shape[-1])
@@ -1065,7 +1055,7 @@ def _editable(history: Any) -> tuple[tuple, float]:
 
 def set_shock(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_shock`: one shock window typed by its start and stop
-    on the record's clock, as Visual Dynamics' shock table edits one; a
+    on the record's clock; a
     number one past the last adds a window. The window is held inside
     the gap its neighbors leave (`core.shocks.held_apart`)."""
     from hertzforge.core.shocks import Shock, held_apart
@@ -1101,8 +1091,7 @@ REMOVED = Param('shock', 'Shock', 'integer', default=1, min=1, step=1)
 
 
 def remove_shock(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.remove_shock`: one shock window dropped, as Visual
-    Dynamics' Remove drops an event that was never a shock."""
+    """`project.remove_shock`: one shock window dropped."""
     name = params['history']
     history = project[name]
     shocks, _rate = _editable(history)

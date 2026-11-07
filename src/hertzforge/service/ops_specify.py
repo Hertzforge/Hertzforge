@@ -1,6 +1,5 @@
 """The Specify workspace's tools on the connection's project: a test
-specification derived from measured PSDs or SRSs, as Visual Dynamics'
-Derive Specification writes it (`core.field_limit`).
+specification derived from measured PSDs or SRSs.
 """
 
 from __future__ import annotations

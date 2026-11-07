@@ -8,11 +8,11 @@ without reading the source. In the code the layout is defined in
 `hertzforge.io.native`, and `tests/test_hforge_corpus.py` holds the code
 to it with the frozen files in `testdata/hforge_corpus/`.
 
-The layout started as Visual Dynamics' `.vdyn` schema 3, and every
+The layout started as the `.vdyn` schema 3, and every
 object is stored the way `.vdyn` stores it. Three things differ: the
 root stamp, the root attribute that holds the object groups, and the
 names of a geometry's element-group fields. Hertzforge also opens every
-`.vdyn` file and saves it as `.hforge`, so a Visual Dynamics project
+`.vdyn` file and saves it as `.hforge`, so an older project
 moves across by opening it and saving it.
 
 ## The Version Number
@@ -34,7 +34,7 @@ opens it. The reader follows three rules:
 - a stamp newer than the reader knows is refused with a message saying
   the file was written by a newer Hertzforge and to update to open it;
   the file is never half loaded;
-- a file with neither this stamp nor Visual Dynamics' `visualdynamics_schema`
+- a file with neither this stamp nor the `.vdyn` stamp
   is refused as not a Hertzforge file, since every writer stamps;
 - an older stamp always loads.
 
@@ -198,8 +198,7 @@ the project's `data_index`, as every imported file is.
 A `.vdyn` file writes `elem_group`, `group_id`, `group_name` and
 `group_properties` as `elem_block`, `block_id`, `block_name` and
 `block_properties`, and the object groups as `links`. The `.vdyn` reader
-takes care of those, and of the tracelines in files written by Visual
-Dynamics 0.1.0a20 and earlier; none of them appear in a `.hforge` file.
+takes care of those, and of the tracelines in the oldest of those files; none of them appear in a `.hforge` file.
 
 ## `data/`, Every Measurement Class
 
@@ -356,7 +355,7 @@ it was run at (`level`, dB relative to full level, or null).
                       dset log (one UTF-8 string: the snapshot, the
                       run log's own JSON Lines)
 
-One test of a run log (`.hflog`, or a Visual Dynamics `.vdlog`), frozen at
+One test of a run log (`.hflog`, or an older `.vdlog`), frozen at
 entry `upto`: `log` holds the log's header line and the lines of the
 entries kept, exactly as the log file had them, so it reads with the run
 log's own reader for its version and its chains verify. `path` is where

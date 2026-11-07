@@ -46,8 +46,7 @@ OUT = HERE / 'plate_projects'
 def photos(*scenes) -> Photos:
     """Stand-ins for setup photographs: one plain studio-gray PNG per
     (name, geometry) pair, kept as PNG bytes, exactly as imported photos
-    would be. Visual Dynamics rendered each geometry with VTK here;
-    Hertzforge carries no VTK, and until the shell can render headless
+    would be. Hertzforge carries no VTK, and until the shell can render headless
     the picture is a gray card. The workflow these projects test needs a
     photograph in the slot, not what it shows."""
     from common import gray_png
