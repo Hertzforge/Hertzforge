@@ -1293,6 +1293,12 @@ impl MimoRandomService {
     /// window of the record. A lag common to every drive is a pure delay the FRF
     /// absorbs; aligning by it keeps the coherence (an unaligned lag near the
     /// frame length destroys it).
+    ///
+    /// It runs at the seam after the identification's first segment, while the
+    /// station's output buffer drains with nothing feeding it, so it is computed
+    /// through the FFT ([`crate::estimate::lag_scores`]): the direct sum it replaced
+    /// held that seam for about 150 ms at four controls, longer than a DAQ card's
+    /// buffer lasts, and the output stopped.
     fn measure_lag(&self, seg: &SegmentResult, stream0: &[f64]) -> usize {
         let resp = self.responses(seg);
         let len = resp.first().map(|r| r.len()).unwrap_or(0);
@@ -1303,21 +1309,12 @@ impl MimoRandomService {
         let max_lag = MAX_LAG_FRAMES.min(offset).min(len / 2);
         let w = (len / 2).min(8192);
         let start = len - w;
-        let mut best = (0usize, 0.0f64);
-        for lag in 0..=max_lag {
-            let mut acc = 0.0;
-            for r in resp.iter().take(self.n_c.min(4)) {
-                let mut s = 0.0;
-                for t in start..start + w {
-                    s += r[t] * stream0[offset + t - lag];
-                }
-                acc += s.abs();
-            }
-            if acc > best.1 {
-                best = (lag, acc);
-            }
-        }
-        best.0
+        let controls: Vec<&[f64]> = resp
+            .iter()
+            .take(self.n_c.min(4))
+            .map(|r| &r[start..start + w])
+            .collect();
+        crate::estimate::best_lag(&controls, &stream0[offset + start - max_lag..], max_lag)
     }
 
     /// System identification (Q34): uncorrelated random on every drive, stepped
