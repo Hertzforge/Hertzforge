@@ -335,12 +335,14 @@ class AnalyzeState {
 		p.clickObject(name, p.summary?.objects.map((o) => o.name) ?? [], { toggle: true });
 	}
 
-	/** Back from a form to the table. */
+	/** Back from a form to the table; a preview it had drawn goes with it, since nothing ran. */
 	closeForm(): void {
 		this.formOpen = false;
 		this.formRow = null;
 		this.runError = null;
 		this.triedRun = false;
+		this.forgetPreview();
+		this.dropPreview();
 	}
 
 	/** A row chosen in the action table: its tool, with the selection filled into its params. */
@@ -426,26 +428,61 @@ class AnalyzeState {
 	private previewTimer: ReturnType<typeof setTimeout> | null = null;
 	private previewKey = '';
 	private previewSeq = 0;
+	/** The reading that is a preview, while it is the one drawn. */
+	private previewDrawn: AnalyzeState['reading'] = null;
+
+	/** Nothing still to come from a preview asked for. */
+	private stopPreview(): void {
+		if (this.previewTimer) clearTimeout(this.previewTimer);
+		this.previewTimer = null;
+		this.previewSeq++;
+	}
+
+	/** As `stopPreview`, and the same values typed again preview again. */
+	private forgetPreview(): void {
+		this.stopPreview();
+		this.previewKey = '';
+	}
+
+	private dropPreview(): void {
+		if (this.reading && this.reading === this.previewDrawn) this.endReading();
+		this.previewDrawn = null;
+	}
+
+	/** Every field the form asks still holds its default. */
+	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
+		const defaults = defaultValues(this.paramsOf(op));
+		return this.formParams.every((p) => values[p.name] === defaults[p.name]);
+	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
 	followPreview(): void {
+		const open = this.formOpen;
 		const op = this.op;
 		const values = this.currentValues;
-		if (!op?.previews || !this.onProject || Object.keys(this.errors).length) return;
+		if (!open || !op?.previews || !this.onProject || Object.keys(this.errors).length) {
+			this.forgetPreview();
+			return;
+		}
 		const key = `${op.id}\u0000${JSON.stringify(values)}`;
 		if (key === this.previewKey) return;
 		this.previewKey = key;
-		if (this.previewTimer) clearTimeout(this.previewTimer);
-		const seq = ++this.previewSeq;
+		this.stopPreview();
+		const seq = this.previewSeq;
 		this.previewTimer = setTimeout(async () => {
 			try {
 				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
 				if (seq !== this.previewSeq || this.opId !== op.id) return;
 				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.previewDrawn = this.reading;
 				this.readingId = op.id;
 				this.runError = null;
 			} catch (err) {
-				if (seq === this.previewSeq && this.opId === op.id) this.runError = message(err);
+				if (seq !== this.previewSeq || this.opId !== op.id) return;
+				this.dropPreview();
+				// a form that waits for typing is refused as it opens: it has said nothing wrong yet
+				const waiting = err instanceof RequestError && err.code === 'refused' && this.untouched(op, values);
+				this.runError = waiting ? null : message(err);
 			}
 		}, 300);
 	}
@@ -507,6 +544,8 @@ class AnalyzeState {
 		const params = { ...this.currentValues };
 		this.running = true;
 		this.runError = null;
+		// what is typed now is run, so its preview must not land on top of the answer
+		this.stopPreview();
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
