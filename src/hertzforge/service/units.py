@@ -26,6 +26,7 @@ from hertzforge.core.unit_choices import (
     shown_dimension,
     units_for,
 )
+from hertzforge.io.stated_units import unit_problem
 from hertzforge.units import dimension_of, normalize_unit
 
 from .protocol import bad_request, not_found, refused
@@ -143,6 +144,8 @@ def define(project: Any, name: str, given: Any) -> list[int]:
         unit = entry['unit'].strip()
         if dimension_of(normalize_unit(unit)) is None:
             raise refused(f'{unit!r} is not a unit Hertzforge can read')
+        if isinstance(project[name], DataArray) and (problem := unit_problem(unit)):
+            raise refused(f'{unit!r} {problem}')
         named[where] = unit
     obj = project[name]
     try:
