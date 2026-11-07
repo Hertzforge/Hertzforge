@@ -32,6 +32,7 @@ from hertzforge.core.fatigue import (
     CAP,
     Equivalence,
     ResponseSpectra,
+    TimeCompression,
     compared,
     compression_ratio,
     dirlik_damage,
@@ -49,7 +50,6 @@ from hertzforge.core.fatigue import (
     rice_damage,
     rice_moment,
     spectrum_refusal,
-    time_compression,
     turning_points,
 )
 from hertzforge.core.progress import Cancelled
@@ -544,40 +544,42 @@ def test_progress_is_told_and_a_cancel_stops_it():
                         progress=cancel)
 
 
+def _traded(b, time_ratio=None, factor=None, cap=CAP['asd']):
+    if factor is None:
+        return TimeCompression(b, time_ratio, exaggeration(time_ratio, b), cap)
+    return TimeCompression(b, compression_ratio(factor, b), factor, cap)
+
+
 def test_time_compression_matches_the_worked_examples():
     """Tenfold at 7.5 is 1.848 on the ASD, +2.67 dB, 1.36 on the rms;
     at 4 it is 3.16, +5.0 dB. At the cap of 4 on the ASD, 7.5 allows
     181 to 1 and 4 allows 16."""
-    tenfold = time_compression(b=7.5, time_ratio=10.0)
+    tenfold = _traded(7.5, time_ratio=10.0)
     assert tenfold.asd_factor == pytest.approx(1.848, abs=5e-4)
     assert tenfold.decibels == pytest.approx(2.67, abs=5e-3)
     assert tenfold.rms_factor == pytest.approx(1.36, abs=5e-3)
     assert not tenfold.over_cap
-    assert time_compression(b=4.0, time_ratio=10.0).decibels \
+    assert _traded(4.0, time_ratio=10.0).decibels \
         == pytest.approx(5.0, abs=1e-9)
     assert tenfold.at_cap == pytest.approx(181.02, abs=0.01)
-    assert time_compression(b=4.0, factor=4.0).time_ratio == pytest.approx(16)
+    assert _traded(4.0, factor=4.0).time_ratio == pytest.approx(16)
     assert compression_ratio(2.0, 6.0, on='rms') == pytest.approx(64.0)
     assert exaggeration(64.0, 6.0, on='rms') == pytest.approx(2.0)
-    over = time_compression(b=4.0, time_ratio=100.0)
+    over = _traded(4.0, time_ratio=100.0)
     assert over.over_cap and 'over the cap of 4' in over.describe()
     assert 'within the cap' in tenfold.describe()
-    longer = time_compression(b=4.0, factor=0.5)
+    longer = _traded(4.0, factor=0.5)
     assert 'extends time 4 to 1' in longer.describe()
     assert CAP == {'asd': 4.0, 'rms': 2.0}
 
 
-@pytest.mark.parametrize('kwargs,said', [
-    ({'b': 4.0}, 'one of the two'),
-    ({'b': 4.0, 'factor': 2.0, 'time_ratio': 2.0}, 'one of the two'),
-    ({'b': 4.0, 'factor': 0.0}, 'not positive'),
-    ({'b': 4.0, 'time_ratio': -1.0}, 'not positive'),
-    ({'factor': 2.0}, 'exponent b is not given'),
-    ({'b': 4.0, 'factor': 2.0, 'cap': 0.5}, 'below one'),
-])
-def test_a_trade_out_of_sense_is_refused(kwargs, said):
-    with pytest.raises(ValueError, match=said):
-        time_compression(**kwargs)
+def test_a_trade_out_of_sense_is_refused():
+    with pytest.raises(ValueError, match='not positive'):
+        compression_ratio(0.0, 4.0)
+    with pytest.raises(ValueError, match='not positive'):
+        exaggeration(-1.0, 4.0)
+    with pytest.raises(ValueError, match='exponent b is not given'):
+        compression_ratio(2.0, None)
     with pytest.raises(ValueError, match="neither 'asd'"):
         compression_ratio(2.0, 4.0, on='peak')
 
@@ -846,11 +848,11 @@ def test_words_of_a_result_and_a_trade():
     many = psd_spectra(_flat(), b=4.0, duration=5400.0,
                        frequencies=[50.0, 100.0])
     assert '50 to 100 Hz' in many.describe() and '1.5 h' in many.describe()
-    level = time_compression(b=4.0, factor=1.0)
+    level = _traded(4.0, factor=1.0)
     assert level.describe().startswith('compresses time 1 to 1')
-    at_cap = time_compression(b=4.0, factor=4.0)
+    at_cap = _traded(4.0, factor=4.0)
     assert not at_cap.over_cap
-    assert time_compression(b=4.0, factor=2.0, cap=1.0).over_cap
+    assert _traded(4.0, factor=2.0, cap=1.0).over_cap
     with pytest.raises(ValueError, match='not positive'):
         exaggeration(0.0, 4.0)
 

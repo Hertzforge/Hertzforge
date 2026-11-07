@@ -1073,8 +1073,9 @@ def _write_reading(log: RunLog, name: str, values: dict[str, Any], text: str,
                    run: int | None) -> Entry:
     """A readings form written as its kind of entry: a run's entries to the
     current run on the axis, a finding naming an entry to that entry's
-    test, a disposition to its anomaly's; a notch marked planned or not as
-    the header's list has it."""
+    test and one naming none to the test open or else the latest, a
+    disposition to its anomaly's; a notch marked planned or not as the
+    header's list has it."""
     kind = READINGS[name]
     fields = dict(values)
     if name == 'notch':
@@ -1088,6 +1089,12 @@ def _write_reading(log: RunLog, name: str, values: dict[str, Any], text: str,
         # number, when the entry is written
         with contextlib.suppress(KeyError):
             owner = log.current(named).test
+    elif test is None and kind in ('deviation', 'anomaly_opened'):
+        # no test open to runs: the finding is about the test last opened,
+        # which a released test refuses (`admit`), and in a log with no test
+        # yet it is the log's
+        owner = next((found.number for found in reversed(model.tests())
+                      if found.opened is not None), None)
     if kind == 'anomaly_dispositioned':
         owner = next((entry.test for entry in model.entries
                       if entry.kind == 'anomaly_opened'
@@ -1148,6 +1155,7 @@ class Keeper:
     def new(self, path: str, title: str = '', mirror: str | None = None) -> dict[str, Any]:
         """Start a log at `path` and hold it open for writing."""
         self.close()
+        path = os.path.expanduser(path)
         try:
             self.log = RunLog.create(path, title=title, mirror=mirror or None)
         except (RunLogError, OSError) as error:
@@ -1159,6 +1167,7 @@ class Keeper:
         here (another writer holds it, or it is of an older format) opens
         read-only, saying why."""
         self.close()
+        path = os.path.expanduser(path)
         try:
             try:
                 self.log = RunLog.open(path, mirror=mirror or None)
@@ -1182,8 +1191,8 @@ class Keeper:
         """One view of the log written to `path` (`core.run_log_export`):
         'text' (the log as it reads), 'csv' (every entry as stored,
         corrections included) or 'machine' (the trips and machine events for
-        the lab's own log), the whole log ('all') or one test by number, as
-        VD's run-log dock exports; `{'path'}` written."""
+        the lab's own log), the whole log ('all') or one test the log holds
+        by number; `{'path'}` written."""
         from hertzforge.core.run_log import RunLogError
         from hertzforge.core.run_log_export import VIEWS, export
 
@@ -1199,6 +1208,11 @@ class Keeper:
             which = test
         else:
             raise bad_request('runlog.export "test" is a test number, or "all" for the whole log')
+        held = [found.number for found in RunLogModel(self.log).tests()]
+        if which != 'all' and which not in held:
+            holds = (f'test{"s" * (len(held) != 1)} {", ".join(map(str, held))}'
+                     if held else 'no test')
+            raise refused(f'the log has no test {which}; it holds {holds}')
         try:
             written = export(self.log, os.path.expanduser(path.strip()), view, test=which)
         except (RunLogError, OSError) as error:

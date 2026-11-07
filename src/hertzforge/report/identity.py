@@ -18,7 +18,7 @@ writes a report number, a revision, a date or a name of its own: a
 field not yet entered shows as not entered, and the report cannot be
 issued until each one the identification needs is there (`missing`).
 
-A report is a draft until it is issued. Issuing it (`Project.issue_report`)
+A report is a draft until it is issued. Issuing it (`report.issue`)
 records the revision issued, with the SHA-256 of the issued document
 and of its content. From then on the report is not changed under that
 identity: an export whose content differs from what was issued is
@@ -29,7 +29,7 @@ table of what changed (where, what it said, what it now says, and
 why), which is then issued in turn. The original's record is kept.
 
 The paginated issued form is a PDF printed from the same page
-(`report.pdf`); the page numbers are the print engine's own page
+(`report.print`); the page numbers are the print engine's own page
 counters, so page n of N is what the PDF holds.
 """
 
@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -178,9 +179,8 @@ def identify(report: Any, **fields: Any) -> None:
     changes: dict[str, Any] = {}
     for key, given in fields.items():
         if key in _CONTROLLED:
-            raise ValueError(f'{key} is not entered: a report is issued with '
-                             'Project.issue_report and amended with '
-                             'Project.amend_report')
+            raise ValueError(f'{key} is not entered: it changes only by '
+                             'Issue and Amend')
         if key == 'full_only':
             if not isinstance(given, bool):
                 raise TypeError(f'full_only is True or False, not '
@@ -201,7 +201,7 @@ def identify(report: Any, **fields: Any) -> None:
             raise ValueError(
                 f'{BY_KEY[key].label} cannot change: the report was issued '
                 f'as {_name(held)}, and a change after issue is an '
-                'amendment (Project.amend_report)')
+                'amendment: Amend, then Issue')
         changes[key] = given.strip()
     for key, given in changes.items():
         # a blank field, and the statement left on (its default), are
@@ -252,10 +252,25 @@ def end_mark(report: Any) -> str:
     return END_AMENDMENT if _identity(report).get('amends') else END
 
 
+#: the key on a page block that says when it was checked rather than what
+#: the report holds (`report.data_index`): the time of the last check, the
+#: project file as it then stood. Reading the same report later or saving
+#: it moves them, so they stay out of `content_hash`.
+STAMP = 'stamp'
+
+#: such a block in a page's data. A quote inside a JSON string is escaped,
+#: so no text the author types can match or hide in this.
+_STAMPED = re.compile(r'\{"kind": "text", "html": "[^"\\]*(?:\\.[^"\\]*)*", '
+                      f'"{STAMP}": true\\}}')
+
+
 def content_hash(page: str) -> str:
-    """The SHA-256 (hex) of a rendered page: what is compared to tell
-    the issued content from a changed one."""
-    return hashlib.sha256(page.encode('utf-8')).hexdigest()
+    """The SHA-256 (hex) of a rendered page without its stamped blocks and
+    whatever fixed its theme: what is compared to tell the issued content
+    from a changed one."""
+    held = _STAMPED.sub('', page).replace('"theme": "light", "curve_width"',
+                                          '"theme": null, "curve_width"', 1)
+    return hashlib.sha256(held.encode('utf-8')).hexdigest()
 
 
 def _issued_entry(held: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -296,7 +311,7 @@ def guard(report: Any, page: str) -> None:
             f'{_name(held)} was issued on {entry.get("issued") or "its date"} '
             'and has changed since; an issued report is not written again '
             'under its identity. A change after issue is an amendment: '
-            'Project.amend_report, then Project.issue_report.')
+            'Amend, then Issue.')
 
 
 def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
@@ -327,7 +342,7 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
     held = _identity(report)
     if held.get('status', 'draft') != 'draft':
         raise ValueError(f'{_name(held)} is already issued; a change after '
-                         'issue is an amendment (Project.amend_report)')
+                         'issue is an amendment: Amend, then Issue')
     gaps = missing(report)
     if gaps:
         raise ValueError(f'{_name(held)} cannot be issued: '
@@ -359,10 +374,21 @@ def issue_ready(report: Any, objects: Mapping[str, Any] | None = None,
     return 'amended' if held.get('amends') else 'issued'
 
 
+def settled(held: Mapping[str, Any]) -> dict[str, Any]:
+    """An identity read from a file: a status of issued or amended with no
+    record behind it, which an interrupted issue once left, is a draft
+    again, so the report can be issued. The record's own entries are
+    kept."""
+    out = dict(held)
+    if out.get('status', 'draft') != 'draft' and _issued_entry(out) is None:
+        del out['status']
+    return out
+
+
 def mark_issued(report: Any, status: str) -> dict[str, Any]:
-    """Set the status `issue_ready` returned, before the issued page is
-    rendered (the page says it is issued). Returns the identity as it
-    was, for `unmark` if writing the document fails."""
+    """Set the status `issue_ready` returned: around rendering the issued
+    page (the page says it is issued), and when the issue is recorded.
+    Returns the identity as it was, for `unmark`."""
     if status not in ('issued', 'amended'):
         raise ValueError(f'a report is issued as issued or amended, not '
                          f'{status!r}')

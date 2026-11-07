@@ -26,14 +26,14 @@ def _number(value: float, places: int = 2) -> str:
 def _reading(check: Any) -> str:
     """A check's reading as the table gives it: its range, or its one
     value, with its unit."""
-    from ...core.replication_segments import _signed
+    from ...units import signed
 
     if not check.judged:
         return 'nothing to judge'
     if check.judged == 1:
-        return _signed(check.low, check.unit)
-    text = (f'{_signed(check.low, check.unit)} to '
-            f'{_signed(check.high, check.unit)}')
+        return signed(check.low, check.unit, places=2)
+    text = (f'{signed(check.low, check.unit, places=2)} to '
+            f'{signed(check.high, check.unit, places=2)}')
     return text + f'; {check.outside} of {check.judged} outside'
 
 

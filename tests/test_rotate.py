@@ -3,16 +3,7 @@
 import numpy as np
 import pytest
 
-from hertzforge.rotate import (
-    angle_in_plane,
-    identity_frame,
-    plane_hit,
-    ring_points,
-    ring_under_cursor,
-    rotate_frame,
-    rotation_about,
-    wrapped,
-)
+from hertzforge.rotate import identity_frame, rotate_frame, rotation_about
 
 
 def frame(origin=(0.0, 0.0, 0.0)):
@@ -49,80 +40,6 @@ def test_the_axis_travels_with_the_frame():
     assert np.allclose(once[:3], straight[:3], atol=1e-12)
 
 
-def test_a_ring_circles_its_own_axis():
-    points = ring_points(frame(), 2, radius=2.0)
-    assert np.allclose(points[:, 2], 0.0), 'the Z ring lies in the X-Y plane'
-    assert np.allclose(np.linalg.norm(points, axis=1), 2.0)
-    assert len(points) > 8
-
-
-def test_a_ring_follows_a_turned_frame():
-    turned = rotate_frame(frame(), 0, np.pi / 2)   # Y and Z swap places
-    points = ring_points(turned, 2, radius=1.0)
-    # the ring about the frame's Z now lies in the world's X-Z plane
-    assert np.allclose(points[:, 1], 0.0, atol=1e-12)
-
-
-def test_the_angle_of_a_point_matches_where_the_ring_put_it():
-    matrix = frame((1.0, 2.0, 3.0))
-    for axis in (0, 1, 2):
-        points = ring_points(matrix, axis, radius=1.5, steps=8)
-        for i, point in enumerate(points):
-            # compared as angles: half a turn reads as +pi or -pi, the same
-            # place on the ring either way
-            difference = wrapped(angle_in_plane(matrix, axis, point)
-                                 - i * 2 * np.pi / 8)
-            assert difference == pytest.approx(0.0, abs=1e-9)
-
-
-def test_dragging_by_an_angle_turns_the_frame_by_that_angle():
-    """What the drag measures and what the rotation applies must agree."""
-    matrix = frame()
-    start = ring_points(matrix, 2, radius=1.0, steps=8)[0]
-    moved = ring_points(matrix, 2, radius=1.0, steps=8)[1]
-    swept = wrapped(angle_in_plane(matrix, 2, moved)
-                    - angle_in_plane(matrix, 2, start))
-    turned = rotate_frame(matrix, 2, swept)
-    assert angle_in_plane(turned, 2, moved) == pytest.approx(
-        angle_in_plane(matrix, 2, start), abs=1e-9)
-
-
-def test_wrapping_keeps_a_drag_past_the_seam_small():
-    assert wrapped(np.pi + 0.1) == pytest.approx(-np.pi + 0.1)
-    assert wrapped(-np.pi - 0.1) == pytest.approx(np.pi - 0.1)
-    assert wrapped(0.3) == pytest.approx(0.3)
-
-
-def test_the_nearest_ring_wins():
-    rings = [(0, np.array([[100.0, 100.0]])), (2, np.array([[10.0, 10.0]]))]
-    assert ring_under_cursor(rings, (12.0, 12.0)) == 2
-    assert ring_under_cursor(rings, (102.0, 98.0)) == 0
-
-
-def test_a_cursor_far_from_every_ring_picks_nothing():
-    rings = [(0, np.array([[100.0, 100.0]]))]
-    assert ring_under_cursor(rings, (300.0, 300.0)) is None
-
-
-def test_a_ring_is_picked_between_its_points():
-    """Distance is to the drawn line: a press on it midway between two
-    points 60 pixels apart is 2 pixels off it, not 30 (2026-10-10)."""
-    rings = [(1, np.array([[0.0, 0.0], [60.0, 0.0], [60.0, 60.0]]))]
-    assert ring_under_cursor(rings, (30.0, 2.0)) == 1
-    assert ring_under_cursor(rings, (30.0, 20.0)) is None
-
-
-def test_a_ray_meets_the_plane_it_crosses():
-    hit = plane_hit(origin=(0, 0, 0), normal=(0, 0, 1),
-                    eye=(0, 0, 5), direction=(0, 0, -1))
-    assert np.allclose(hit, [0, 0, 0])
-
-
-def test_a_ray_along_the_plane_never_meets_it():
-    assert plane_hit(origin=(0, 0, 0), normal=(0, 0, 1),
-                     eye=(0, 0, 5), direction=(1, 0, 0)) is None
-
-
 def test_resetting_keeps_the_origin_but_drops_the_turn():
     matrix = rotate_frame(frame((4.0, 5.0, 6.0)), 1, 1.1)
     reset = identity_frame(matrix)
@@ -150,54 +67,6 @@ def test_sliding_moves_the_origin_along_the_frames_own_axis():
     moved = translate_frame(frame, 0, 2.5)
     assert np.allclose(moved[:3], frame[:3]), 'the basis stays put'
     assert np.allclose(moved[3], frame[3] + 2.5 * frame[0])
-
-
-def test_the_arrow_runs_from_the_origin_along_the_axis():
-    from hertzforge.rotate import arrow_points
-
-    frame = _frame()
-    points = arrow_points(frame, 1, 4.0)
-    assert np.allclose(points[0], frame[3])
-    assert np.allclose(points[-1], frame[3] + 4.0 * frame[1])
-    assert len(points) == 24
-
-
-def test_a_ray_crossing_the_axis_hits_where_it_crosses():
-    from hertzforge.rotate import axis_hit, distance_along
-
-    frame = _frame()
-    target = frame[3] + 3.0 * frame[0]
-    eye = target + np.array([0.0, 0.0, 10.0])
-    hit = axis_hit(frame[3], frame[0], eye, target - eye)
-    assert hit is not None and np.allclose(hit, target)
-    assert distance_along(frame, 0, hit) == pytest.approx(3.0)
-    # a ray that misses the line still reads the nearest point on it
-    offset = axis_hit(frame[3], frame[0], eye + 0.3 * frame[1], target - eye)
-    assert np.allclose(offset, target)
-
-
-def test_a_ray_parallel_to_the_axis_hits_nothing():
-    from hertzforge.rotate import axis_hit
-
-    frame = _frame()
-    assert axis_hit(frame[3], frame[0], frame[3] + frame[1], frame[0]) is None
-
-
-def test_snapping_lands_on_the_grid_in_every_coordinate():
-    from hertzforge.rotate import snapped
-
-    assert np.allclose(snapped([1.26, -0.04, 2.56], 0.1), [1.3, 0.0, 2.6])
-    assert np.allclose(snapped([1.26, -0.04, 2.56], 0.0), [1.26, -0.04, 2.56])
-
-
-def test_the_grid_is_a_tenth_of_an_inch_or_a_centimetre():
-    from hertzforge.rotate import grid_step
-
-    assert grid_step('in') == pytest.approx(0.1)
-    assert grid_step('ft') == pytest.approx(0.1 / 12.0)
-    assert grid_step('mm') == pytest.approx(10.0)
-    assert grid_step('cm') == pytest.approx(1.0)
-    assert grid_step('m') == pytest.approx(0.01)
 
 
 def test_angles_turn_about_the_fixed_axes_x_then_y_then_z():

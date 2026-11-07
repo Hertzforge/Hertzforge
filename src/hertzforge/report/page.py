@@ -475,7 +475,10 @@ function barsBlock(block) {
     if (under) return v === null || !isFinite(v) || v < block.low_at
       ? 'under' : null;
     if (v === null || !isFinite(v)) return null;
-    if (block.high_at === null) return v >= block.low_at ? 'over' : null;
+    if (block.high_at === null) {
+      const out = block.inside_at_ceiling ? v > block.low_at : v >= block.low_at;
+      return out ? 'over' : null;
+    }
     if (v > block.high_at) return 'over';
     if (v < block.low_at) return 'under';
     return null;

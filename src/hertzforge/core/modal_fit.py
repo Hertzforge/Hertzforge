@@ -57,12 +57,98 @@ import numpy as np
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import Frf
-    from .shapes import ShapeSet
 
 from ..units import UNKNOWN
+from .data import channel_quantities
 from .half_power import HALF_POWER, HalfPower, crossings, read_half_power
+from .shapes import ShapeSet, _split_sign
+
+#: the fraction of critical a mode here can have: what the searches run
+#: over, and what a hand may hold or type
+DAMPING_LIMITS = (1e-4, 0.5)
 
 _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
+#: what a residue that means mass-normalized shapes has over a force
+_MOTIONS = (*_POWERS, 'angle', 'angular_velocity', 'angular_acceleration')
+
+
+def _fit_table(frf: Frf, rows: Sequence[int]
+               ) -> tuple[list[str], list[str], list[tuple[int, int, float]]]:
+    """(responses, references, each record's (row, column, sign)) of a fit
+    over these records.
+
+    One row or column per physical DOF: '1Z-' is minus '1Z+', so a reference
+    written 1Z- on a response written 1Z+ is that response's drive point. A
+    DOF goes by the name it was first written with, responses first, and the
+    sign turns each record into those directions.
+    """
+    named: dict[str, tuple[str, float]] = {}
+
+    def place(dof: str, order: dict[str, int]) -> tuple[int, float]:
+        base, sign = _split_sign(dof)
+        name, first = named.setdefault(base, (dof, sign))
+        return order.setdefault(name, len(order)), sign * first
+
+    responses: dict[str, int] = {}
+    references: dict[str, int] = {}
+    down = [place(frf.response_dof[i], responses) for i in rows]
+    across = [place(frf.reference_dof[i], references) for i in rows]
+    return (list(responses), list(references),
+            [(j, k, a * b) for (j, a), (k, b) in zip(down, across)])
+
+
+def _missing_pairs(responses: list[str], references: list[str],
+                   places: list[tuple[int, int, float]]) -> str:
+    """Why these records cannot be fitted together, or '' when every response
+    has a record against every reference. A pair no record holds would stand
+    in the matrix as a measured zero, and the SVD would bend every shape
+    toward it."""
+    held = {(j, k) for j, k, _sign in places}
+    if len(held) == len(responses) * len(references):
+        return ''
+    missing = [(responses[j], references[k]) for j in range(len(responses))
+               for k in range(len(references)) if (j, k) not in held]
+    more = f', and {len(missing) - 1} more' if len(missing) > 1 else ''
+    return (f'no record measures {missing[0][0]} against {missing[0][1]}{more}: a fit needs '
+            'every response against every reference, so pick records that fill that table')
+
+
+def _adoption_refusal(shapes: ShapeSet) -> str:
+    """Why a fit cannot hold this set's modes as they are, or ''."""
+    if shapes.is_complex:
+        return ('it is a complex shape set and a fit holds real normal modes, so its phases '
+                'would be lost; fit a new set instead')
+    if np.iscomplexobj(shapes.modal_mass) or not np.all(shapes.modal_mass > 0.0):
+        return 'its modal masses are not all real and positive, as a fit\'s scaling needs'
+    return ''
+
+
+def adoptable_records(frf: Frf, shapes: ShapeSet,
+                      records: Sequence[int] | None = None) -> list[int]:
+    """The records (of `records` when given) a fit can start from this set
+    on: those whose response and reference it holds. A record it says nothing
+    about is left out of the fit rather than read as a mode shape of zero."""
+    lookup = shapes._dof_lookup()
+    return [i for i in (range(frf.num_records) if records is None else records)
+            if _split_sign(frf.response_dof[i])[0] in lookup
+            and _split_sign(frf.reference_dof[i])[0] in lookup]
+
+
+def fit_refusal(frf: Frf, records: Sequence[int] | None = None,
+                shapes: ShapeSet | None = None) -> str:
+    """Why a fit of these records, from this set when given, cannot start,
+    or '' when it can: what `ModalFitSession` and `adopt` would refuse, for a
+    row to say before anyone asks."""
+    rows = list(range(frf.num_records)) if records is None else list(records)
+    if shapes is not None:
+        why = _adoption_refusal(shapes)
+        if why:
+            return f'Edit Fit cannot take this set: {why}'
+        rows = adoptable_records(frf, shapes, rows)
+        if not rows:
+            return 'The shape set has no value at the DOFs of any record of this FRF'
+    why = _missing_pairs(*_fit_table(frf, rows))
+    return why[0].upper() + why[1:] if why else ''
 
 
 def prominence_window(lines: int) -> int:
@@ -97,14 +183,24 @@ class ModalFitSession:
     """An interactive fit of real normal modes to one FRF set.
 
     `frf` is the measured FRF. `records` picks which of its records
-    take part, all of them when None. `coherence`, when given, weights
+    take part, all of them when None; they must hold every response
+    against every reference (ValueError), because a pair no record holds
+    is not a measured zero. A line where a picked record is not finite
+    (a rigid mode's receptance at 0 Hz) is left out of the session.
+    `coherence`, when given, weights
     each response channel at each line in the least squares by
     γ²/(1 - γ²), the inverse of the FRF estimate's relative variance,
     with γ² capped at 0.999 and the weights scaled to a maximum of one.
     A channel with low coherence counts for less, and a response the
-    coherence does not cover has weight one. A suggestion is made when
-    the session is
-    created, so `pending` already holds a frequency and damping.
+    coherence does not cover has weight one. That covers the frequency
+    and damping search, the residues and Refine; a channel's own shape
+    value still comes from that channel, from its better lines, since
+    nothing else measured it. Find Mode reads the residual CMIF with each
+    channel weighted by its median over the lines, because a dip in
+    coherence at a resonance, which leakage gives every channel, must not
+    turn the peak into two shoulders. A suggestion is made when the
+    session is created, so `pending` already holds a frequency and
+    damping.
     """
 
     def __init__(self, frf: Frf, records: Sequence[int] | None = None,
@@ -112,12 +208,12 @@ class ModalFitSession:
         self.frf: Frf = frf
         self.rows: list[int] = (list(range(frf.num_records)) if records is None
                      else [int(i) for i in records])
-        self.responses: list[str] = list(dict.fromkeys(
-            frf.response_dof[i] for i in self.rows))
-        self.references: list[str] = list(dict.fromkeys(
-            frf.reference_dof[i] for i in self.rows))
-        self.frequencies: np.ndarray = np.asarray(frf.abscissa, dtype=np.float64)
-        self.omega: np.ndarray = 2.0 * np.pi * self.frequencies
+        self.responses: list[str]
+        self.references: list[str]
+        self.responses, self.references, self._places = _fit_table(frf, self.rows)
+        missing = _missing_pairs(self.responses, self.references, self._places)
+        if missing:
+            raise ValueError(missing)
         # the measured quantity, from the first record that says;
         # accelerance is the modal-test norm when nothing does
         self.power: int = 2
@@ -126,17 +222,24 @@ class ModalFitSession:
             if numerator in _POWERS:
                 self.power = _POWERS[numerator]
                 break
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
-        self.matrix: np.ndarray = np.zeros(
-            (len(self.frequencies), len(self.responses),
-             len(self.references)), dtype=np.complex128)
-        for i in self.rows:
-            self.matrix[:, row[frf.response_dof[i]],
-                        column[frf.reference_dof[i]]] = frf.ordinate[i]
+        lines = np.asarray(frf.abscissa, dtype=np.float64)
+        matrix = np.zeros((len(lines), len(self.responses), len(self.references)),
+                          dtype=np.complex128)
+        for i, (j, k, sign) in zip(self.rows, self._places):
+            matrix[:, j, k] = sign * frf.ordinate[i]
+        finite = np.isfinite(matrix).all(axis=(1, 2))
+        if not finite.any():
+            raise ValueError('every line of these records holds a NaN or an infinity')
+        self.frequencies: np.ndarray = lines[finite]
+        self.omega: np.ndarray = 2.0 * np.pi * self.frequencies
+        self.matrix: np.ndarray = matrix[finite]
         # shapes cover every DOF seen, response or reference
         self.coordinate: list[str] = self.responses + [
-            dof for dof in self.references if dof not in row]
+            dof for dof in self.references if dof not in self.responses]
+        #: a set's DOFs this fit does not cover, kept on its adopted modes
+        self.kept: list[str] = []
+        #: the set adopted, whose declared units its modes answer to
+        self._adopted: ShapeSet | None = None
         #: one dict per confirmed mode: frequency, damping, shape,
         #: description — the published ShapeSet is built from these
         self.modes: list[dict[str, Any]] = []
@@ -154,6 +257,11 @@ class ModalFitSession:
         #: capped — a line claiming perfect coherence must not carry
         #: infinite weight into a least squares.
         self.weights: np.ndarray | None = self._coherence_weights(coherence)
+        #: each channel's standing over the whole band, for Find Mode
+        self._trust: np.ndarray | None = (
+            None if self.weights is None
+            else np.sqrt(np.median(self.weights, axis=0)))
+        self._trusted_cmif = None
         #: the residual and its CMIF, held against the mode count. Both
         #: are independent of the cursor, and dragging wants them every
         #: tick.
@@ -182,10 +290,11 @@ class ModalFitSession:
         """
         if coherence is None:
             return None
-        curves = {dof: i for i, dof in enumerate(coherence.response_dof)}
+        curves = {_split_sign(dof)[0]: i for i, dof in enumerate(coherence.response_dof)}
         out = np.ones((len(self.frequencies), len(self.responses)))
         found = False
         for j, dof in enumerate(self.responses):
+            dof = _split_sign(dof)[0]
             if dof not in curves:
                 continue
             found = True
@@ -206,26 +315,53 @@ class ModalFitSession:
         This is how a published fit is edited. A shape set holds the
         frequency, damping, shape and description of each mode, which is
         everything the session keeps for a confirmed mode. Shapes are
-        matched to this session's DOFs by name: a DOF the set does not
-        have gets zero, and the set's DOFs that are not in this FRF are
-        dropped. A shape set does not store the order its modes were
-        confirmed in, so the adopted modes are replayed in frequency
-        order. A new suggestion is made afterward.
+        matched to this session's DOFs by DOF, sign applied. A shape set
+        does not store the order its modes were confirmed in, so the
+        adopted modes are replayed in frequency order. A new suggestion is
+        made afterward.
+
+        What the session cannot hold faithfully raises ValueError rather
+        than be published over: a complex set (the session's modes are real
+        and second order), a modal mass that is not real and positive, and
+        a set with no value at one of this session's DOFs
+        (`adoptable_records` gives the records it can start on). A modal
+        mass other than one is carried as the same residues at unit modal
+        mass and given back in `shape_set`. The set's DOFs this session
+        does not fit are kept, scaled with their mode, and while there are
+        any a new mode cannot be confirmed, since it would have no value
+        there.
         """
-        positions = {dof: k for k, dof in enumerate(shapes.coordinate)}
+        why = _adoption_refusal(shapes)
+        if why:
+            raise ValueError(f'Edit Fit cannot take this set: {why}')
+        lookup = shapes._dof_lookup()
+        split = [_split_sign(dof) for dof in self.coordinate]
+        lacking = [dof for dof, (base, _sign) in zip(self.coordinate, split)
+                   if base not in lookup]
+        if lacking:
+            raise ValueError(f'the shape set has no value at {lacking[0]}'
+                             f'{"" if len(lacking) == 1 else f" or {len(lacking) - 1} more DOFs"}')
+        columns = [lookup[base][0] for base, _sign in split]
+        signs = np.array([lookup[base][1] * sign for base, sign in split])
+        ours = {base for base, _sign in split}
+        kept = [k for k, dof in enumerate(shapes.coordinate)
+                if _split_sign(dof)[0] not in ours]
+        self.kept = [shapes.coordinate[k] for k in kept]
+        self._adopted = shapes
         for m in range(shapes.num_shapes):
-            shape = np.zeros(len(self.coordinate),
-                             dtype=shapes.shape_matrix.dtype)
-            for k, dof in enumerate(self.coordinate):
-                index = positions.get(dof)
-                if index is not None:
-                    shape[k] = shapes.shape_matrix[m, index]
+            mass = float(shapes.modal_mass[m])
+            shape = shapes.shape_matrix[m, columns] * signs / np.sqrt(mass)
             self.modes.append({'frequency': float(shapes.frequency[m]),
                                'damping': float(shapes.damping[m]),
                                'shape': shape,
-                               'scaled': not getattr(shapes, 'unscaled',
-                                                     False),
-                               'description': shapes.description[m]})
+                               'scaled': not shapes.unscaled,
+                               'description': shapes.description[m],
+                               'comment': shapes.comment[m],
+                               'modal_mass': mass,
+                               'modal_damping': (None if shapes.modal_damping is None
+                                                 else shapes.modal_damping[m]),
+                               'adopted': shape.copy(),
+                               'kept': shapes.shape_matrix[m, kept] / np.sqrt(mass)})
             # a published set has lost its confirm order, so an
             # adopted session replays in frequency order — the one
             # canonical reading of a set whose sequence is gone
@@ -253,18 +389,19 @@ class ModalFitSession:
                             for dof in self.references])
         return q[:, None, None] * residue[None, :, :]
 
-    def _mode_scalars(self, mode):
-        """This mode's frequency response, one complex value per line —
-        the scalar half of `_mode_term`, shared with the factored CMIF
-        so the two paths cannot disagree about what a mode sounds
-        like."""
+    def _mode_scalars(self, mode, omega=None):
+        """This mode's frequency response, one complex value per line, or at
+        `omega` — the scalar half of `_mode_term`, shared with the factored
+        CMIF, the fit and Refine so they cannot disagree about what a mode
+        sounds like."""
+        omega = self.omega if omega is None else omega
         omega_r = 2.0 * np.pi * mode['frequency']
         with np.errstate(divide='ignore', invalid='ignore'):
-            q = ((1j * self.omega) ** self.power
-                 / (omega_r ** 2 - self.omega ** 2
-                    + 2j * mode['damping'] * omega_r * self.omega))
+            q = ((1j * omega) ** self.power
+                 / (omega_r ** 2 - omega ** 2
+                    + 2j * mode['damping'] * omega_r * omega))
         if omega_r == 0.0:
-            q[self.omega == 0.0] = 1.0 if self.power == 2 else 0.0
+            q[omega == 0.0] = 1.0 if self.power == 2 else 0.0
         return q
 
     def synthesis_matrix(self) -> np.ndarray:
@@ -294,6 +431,7 @@ class ModalFitSession:
             self._residual = self.matrix - self.synthesis_matrix()
             self._residual_stamp = stamp
             self._cmif = None
+            self._trusted_cmif = None
         residual = self._residual
         assert residual is not None
         return residual
@@ -356,18 +494,25 @@ class ModalFitSession:
         total = np.zeros_like(self.matrix)
         for mode in modes:
             total += self._mode_term(mode)
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
-        return np.stack([
-            total[:, row[self.frf.response_dof[i]],
-                  column[self.frf.reference_dof[i]]]
-            for i in self.rows])
+        return np.stack([sign * total[:, j, k] for j, k, sign in self._places])
 
     def _residual_cmif(self):
         residual = self.residual_matrix()
         if self._cmif is None:
             self._cmif = np.linalg.svd(residual, compute_uv=False)[:, 0]
         return self._cmif
+
+    def _search_cmif(self):
+        """The residual CMIF a search reads: the drawn one, or with coherence
+        each channel at its standing over the band, so a noisy channel's
+        lines are not offered as modes."""
+        if self._trust is None:
+            return self._residual_cmif()
+        residual = self.residual_matrix()
+        if self._trusted_cmif is None:
+            self._trusted_cmif = np.linalg.svd(
+                residual * self._trust[None, :, None], compute_uv=False)[:, 0]
+        return self._trusted_cmif
 
     # ---- suggesting where the next mode is ----------------------------------
 
@@ -397,10 +542,15 @@ class ModalFitSession:
         # answers rather than an empty one
         return (low, high) if low < high else self.span
 
-    def suggest(self, within: tuple[float, float] | None = None
-                ) -> tuple[float, float]:
+    def suggest(self, within: tuple[float, float] | None = None,
+                modes_only: bool = False) -> tuple[float, float] | None:
         """Move the pending mode to the most prominent residual CMIF peak
         and return its (frequency, damping).
+
+        With `modes_only`, a peak must also hold `NEIGHBOR_FLOOR` of the
+        measurement at its line to be offered, and when none does the
+        pending mode stays and the answer is None: what a loop with no
+        person watching reads as nothing left to fit.
 
         `within` is the plot's view, as for `searched`; without it the
         whole measured range is searched. Peaks are ranked by
@@ -435,7 +585,7 @@ class ModalFitSession:
         # without moving on. Frequency alone cannot tell that ridge from
         # a real neighbor (a repeated pair's second mode was shadowed for
         # exactly that reason), and shape can.
-        s1 = self._residual_cmif()
+        s1 = self._search_cmif()
         low, high = self.searched(within)
         inside = (self.frequencies >= low) & (self.frequencies <= high)
         if not inside.any():
@@ -453,6 +603,14 @@ class ModalFitSession:
                     if inside[i]
                     and s1[i] >= s1[i - 1] and s1[i] >= s1[i + 1]
                     and (free[i] or self._another_mode_at(i))]
+        if modes_only:
+            measured = np.linalg.svd(
+                self.matrix * (1.0 if self._trust is None else self._trust[None, :, None]),
+                compute_uv=False)[:, 0]
+            interior = [i for i in interior
+                        if s1[i] >= self.NEIGHBOR_FLOOR * measured[i]]
+            if not interior:
+                return None
         if interior:
             rank = prominence(s1, interior,
                               prominence_window(int(np.count_nonzero(inside))))
@@ -509,7 +667,8 @@ class ModalFitSession:
         # planted spike and fixed 2026-10-18
         if self.frequencies.size < 2:
             return float(mode['damping'] * mode['frequency'])
-        half_line = 0.5 * float(np.median(np.diff(self.frequencies)))
+        nearest = int(np.argmin(np.abs(self.frequencies - mode['frequency'])))
+        half_line = 0.5 * self._spacing(nearest)
         return max(float(mode['damping'] * mode['frequency']), half_line)
 
     def _another_mode_at(self, index: int) -> bool:
@@ -534,12 +693,13 @@ class ModalFitSession:
             # adopted modes with no shape on these DOFs: nothing to
             # compare, so the frequency exclusion stands
             return False
-        u, s, _vh = np.linalg.svd(self.residual_matrix()[index])
-        measured = float(np.linalg.svd(self.matrix[index],
+        rows = 1.0 if self._trust is None else self._trust[:, None]
+        u, s, _vh = np.linalg.svd(self.residual_matrix()[index] * rows)
+        measured = float(np.linalg.svd(self.matrix[index] * rows,
                                        compute_uv=False)[0])
         if not s[0] >= self.NEIGHBOR_FLOOR * measured:
             return False
-        q, _ = np.linalg.qr(basis)
+        q, _ = np.linalg.qr(basis * rows)
         return float(np.linalg.norm(q.conj().T @ u[:, 0]) ** 2) \
             < self.RIDGE_FRACTION
 
@@ -553,11 +713,15 @@ class ModalFitSession:
         one-dimensional search over a few dozen lines. A caller that
         cannot afford even that, such as a drag that is already running
         behind, passes False and the damping is left as it was. Any
-        preview is dropped.
+        preview is dropped. A frequency outside the measured range raises
+        ValueError: there is nothing there to fit.
         """
         # This used to be free by necessity: the damping estimate meant
         # a full SVD of the residual on every mouse move, until the
         # residual was cached against the modes.
+        if not self.span[0] <= float(frequency) <= self.span[1]:
+            raise ValueError(f'{float(frequency):g} Hz is outside the {self.span[0]:g} to '
+                             f'{self.span[1]:g} Hz these FRFs measure')
         self.pending['frequency'] = float(frequency)
         if damping and not self.pending['overridden']:
             # seeded from the half-power width *at this line*, never
@@ -753,8 +917,16 @@ class ModalFitSession:
         same frequency and damping; otherwise the mode is fitted here.
         The modes are kept sorted by frequency, the confirm order is
         recorded in `confirmed`, and the pending description and any
-        held damping are cleared.
+        held damping are cleared. A session keeping DOFs of an adopted set
+        it does not fit raises ValueError, since the new mode would have
+        no value at them.
         """
+        if self.kept:
+            raise ValueError(
+                f'the set also holds {self.kept[0]}'
+                f'{"" if len(self.kept) == 1 else f" and {len(self.kept) - 1} more DOFs"}, '
+                'which this fit does not measure, so a new mode would have no value there; '
+                'fit a new set to add a mode')
         frequency = (self.pending['frequency'] if frequency is None
                      else float(frequency))
         damping = (self.pending['damping'] if damping is None
@@ -786,22 +958,13 @@ class ModalFitSession:
         mass-normalized scale.
         """
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
-        residual = self.residual_matrix()
-
-        u, _s, _vh = np.linalg.svd(residual[index])
-        direction = u[:, 0]
-        # the nearest real vector: rotate by half the phase of sum(u^2)
-        direction = np.real(
-            direction * np.exp(-0.5j * np.angle(np.sum(direction ** 2))))
-        norm = np.linalg.norm(direction)
-        direction = direction / norm if norm else direction
 
         band = self._band(index)
-        omega = self.omega[band]
-        omega_r = 2.0 * np.pi * frequency
-        q = ((1j * omega) ** self.power
-             / (omega_r ** 2 - omega ** 2 + 2j * damping * omega_r * omega))
-        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        q = self._mode_scalars({'frequency': frequency, 'damping': damping}, self.omega[band])
+        direction = (self._line_direction(index) if self.weights is None
+                     else self._band_direction(index, band, q))
+        projected, root = self._projected(direction, band)
+        q = q * root
         weight = float(np.sum(np.abs(q) ** 2)) or 1.0
         residues = np.real(np.conj(q) @ projected) / weight   # one per ref
 
@@ -821,11 +984,8 @@ class ModalFitSession:
         # only knows what the user meant — so it applies only when the
         # user has said what they mean.
         if pin:
-            omega_line = self.omega[index]
-            with np.errstate(divide='ignore', invalid='ignore'):
-                q_line = ((1j * omega_line) ** self.power
-                          / (omega_r ** 2 - omega_line ** 2
-                             + 2j * damping * omega_r * omega_line))
+            q_line = self._mode_scalars({'frequency': frequency, 'damping': damping},
+                                        self.omega[[index]])[0]
             base = float(np.abs(q_line) * np.linalg.norm(residues))
             target = float(self._residual_cmif()[index])
             if base > 0 and np.isfinite(base) and target > 0:
@@ -836,6 +996,61 @@ class ModalFitSession:
         return {'frequency': frequency, 'damping': damping,
                 'shape': shape, 'description': description,
                 'scaled': scaled}
+
+    @staticmethod
+    def _nearest_real(vector, weights=1.0):
+        """The nearest real unit vector: rotate by half the phase of the
+        (weighted) sum of squares."""
+        direction = np.real(
+            vector * np.exp(-0.5j * np.angle(np.sum(weights * vector ** 2))))
+        norm = np.linalg.norm(direction)
+        return direction / norm if norm else direction
+
+    def _line_direction(self, index):
+        """The shape direction the residual gives at one line. With coherence
+        the references' pattern comes from the channels at their weights, and
+        each channel's value is then its own least squares on that pattern,
+        which no weight on the channel alone can change."""
+        line = self.residual_matrix()[index]
+        if self.weights is None:
+            u, _s, _vh = np.linalg.svd(line)
+            return self._nearest_real(u[:, 0])
+        return self._nearest_real(line @ self._reference_pattern(index))
+
+    def _reference_pattern(self, index):
+        """The references' pattern at a line, the channels at their weights."""
+        line = self.residual_matrix()[index]
+        root = np.sqrt(self.weights[index])[:, None]
+        _u, _s, vh = np.linalg.svd(line * root, full_matrices=False)
+        return vh[0].conj()
+
+    def _band_direction(self, index, band, q):
+        """The shape direction over a band with coherence: each channel's
+        weighted least squares on this mode's SDOF term, so the channel's
+        better lines set its value where one line would carry its noise."""
+        lines = self.weights[band]
+        along = self.residual_matrix()[band] @ self._reference_pattern(index)
+        above = np.sum(lines * np.conj(q)[:, None] * along, axis=0)
+        below = np.sum(lines * (np.abs(q) ** 2)[:, None], axis=0)
+        values = np.divide(above, below, out=np.zeros_like(above),
+                           where=below > 0.0)
+        return self._nearest_real(values, lines.mean(axis=0))
+
+    def _projected(self, direction, band):
+        """The residual over a band projected on a direction, (lines,
+        references), and what the SDOF term is multiplied by to stand in the
+        same least squares. Without coherence these are the plain projection
+        and one. With it, each line's channels count by their weights, and
+        the whitened projection and term give that weighted least squares
+        through the plain formulas."""
+        residual = self.residual_matrix()[band]
+        if self.weights is None:
+            return np.einsum('j,ljk->lk', direction, residual), np.ones(len(residual))
+        lines = self.weights[band]
+        root = np.sqrt(np.sum(lines * direction ** 2, axis=1))
+        projected = np.einsum('lj,ljk->lk', lines * direction, residual)
+        return (np.divide(projected, root[:, None], out=np.zeros_like(projected),
+                          where=root[:, None] > 0.0), root)
 
     def _shape_from(self, direction, residues):
         """(shape over the coordinate, scaled?) from a unit direction
@@ -929,26 +1144,21 @@ class ModalFitSession:
         if not self.modes:
             return 0
         self.refined += 1
-        df = (self.frequencies[1] - self.frequencies[0]
-              if len(self.frequencies) > 1 else 1.0)
-        lines: set[int] = set()
+        bands = []
         for mode in self.modes:
             index = int(np.argmin(np.abs(self.frequencies
                                          - mode['frequency'])))
             half_width = 3.0 * mode['damping'] * mode['frequency']
-            reach = max(round(half_width / df), 2)
-            lines.update(range(max(index - reach, 0),
-                               min(index + reach + 1,
-                                   len(self.frequencies))))
-        chosen = np.array(sorted(lines))
-        omega = self.omega[chosen]
-        terms = []
-        for mode in self.modes:
-            omega_r = 2.0 * np.pi * mode['frequency']
-            terms.append((1j * omega) ** self.power
-                         / (omega_r ** 2 - omega ** 2
-                            + 2j * mode['damping'] * omega_r * omega))
-        basis = np.stack(terms, axis=1)               # (lines, modes)
+            reach = max(round(half_width / self._spacing(index)), 2)
+            bands.append((max(index - reach, 0),
+                          min(index + reach + 1, len(self.frequencies))))
+        chosen = np.array(sorted({line for low, high in bands
+                                  for line in range(low, high)}))
+        # (lines, modes), every mode's own term, the 0 Hz line of a rigid
+        # one included
+        scalars = np.stack([self._mode_scalars(mode) for mode in self.modes],
+                           axis=1)
+        basis = scalars[chosen]
         count = len(self.modes)
         responses, references = len(self.responses), len(self.references)
         # the sequential answer, as residue matrices: the ridge's prior
@@ -983,14 +1193,6 @@ class ModalFitSession:
         # alone came back 1.2 % and 4.0 % off beside a 75 Hz mode
         # (2026-10-11): the pair's residues absorbed the third mode's
         # tail.
-        bands = []
-        for mode in self.modes:
-            index = int(np.argmin(np.abs(self.frequencies
-                                         - mode['frequency'])))
-            half_width = 3.0 * mode['damping'] * mode['frequency']
-            reach = max(round(half_width / df), 2)
-            bands.append((max(index - reach, 0),
-                          min(index + reach + 1, len(self.frequencies))))
         clusters, current = [], [0]
         for r in range(1, count):
             if bands[r][0] <= max(bands[i][1] for i in current):
@@ -1006,16 +1208,7 @@ class ModalFitSession:
                 lo = min(bands[r][0] for r in members)
                 hi = max(bands[r][1] for r in members)
                 lines = chosen[(chosen >= lo) & (chosen < hi)]
-                omega_c = self.omega[lines]
-                columns_c = []
-                for r in members:
-                    omega_r = 2.0 * np.pi * self.modes[r]['frequency']
-                    columns_c.append(
-                        (1j * omega_c) ** self.power
-                        / (omega_r ** 2 - omega_c ** 2
-                           + 2j * self.modes[r]['damping'] * omega_r
-                           * omega_c))
-                basis_c = np.stack(columns_c, axis=1)
+                basis_c = scalars[lines][:, members]
                 n = len(members)
                 sub_prior = prior[members]
                 others = [r for r in range(count) if r not in members]
@@ -1139,24 +1332,29 @@ class ModalFitSession:
         for mode, (shape, scaled) in zip(self.modes, best_shapes):
             mode['shape'] = shape
             mode['scaled'] = scaled
-        # the caches stamp on the mode *count*, which did not change —
-        # the shapes did, so the residual is stale and must be dropped
-        # by hand or the plot goes on drawing the unrefined world
+        # the caches stamp on the frequencies and dampings, which did not
+        # change — the shapes did, so the residual is stale and must be
+        # dropped by hand or the plot goes on drawing the unrefined world
         self._residual = None
         self._cmif = None
+        self._trusted_cmif = None
         self.preview = None
         return count
 
     def residual_records(self) -> np.ndarray:
         """The residual in the source FRF's record layout, (records,
         lines). A plot of the residual draws this."""
-        row = {dof: k for k, dof in enumerate(self.responses)}
-        column = {dof: k for k, dof in enumerate(self.references)}
         residual = self.residual_matrix()
-        return np.stack([
-            residual[:, row[self.frf.response_dof[i]],
-                     column[self.frf.reference_dof[i]]]
-            for i in self.rows])
+        return np.stack([sign * residual[:, j, k] for j, k, sign in self._places])
+
+    def _spacing(self, index: int) -> float:
+        """The line spacing at a line, in Hz, from its two neighbors: a log
+        grid's spacing at one end says nothing of its spacing at the other."""
+        f = self.frequencies
+        if len(f) < 2:
+            return 1.0
+        low, high = max(index - 1, 0), min(index + 1, len(f) - 1)
+        return float(f[high] - f[low]) / (high - low)
 
     def _search_band(self, index, widest):
         """Lines to search over: three half-power widths of the widest
@@ -1167,9 +1365,7 @@ class ModalFitSession:
         at the shoulders that would tell it to.
         """
         half_width = 3.0 * widest * self.frequencies[index]
-        df = (self.frequencies[1] - self.frequencies[0]
-              if len(self.frequencies) > 1 else 1.0)
-        lines = max(round(half_width / df), 2)
+        lines = max(round(half_width / self._spacing(index)), 2)
         return slice(max(index - lines, 0),
                      min(index + lines + 1, len(self.frequencies)))
 
@@ -1193,24 +1389,19 @@ class ModalFitSession:
         Returns a cost normalized by the projected residual's own size,
         so 0 is a perfect mode and 1 is having explained nothing.
         """
-        residual = self.residual_matrix()
-        u, _s, _vh = np.linalg.svd(residual[index])
-        direction = np.real(u[:, 0] * np.exp(
-            -0.5j * np.angle(np.sum(u[:, 0] ** 2))))
-        norm = np.linalg.norm(direction)
-        direction = direction / norm if norm else direction
+        direction = self._line_direction(index)
 
         band = self._search_band(index, widest)
         omega = self.omega[band]
-        projected = np.einsum('j,ljk->lk', direction, residual[band])
+        projected, root = self._projected(direction, band)
         total = float(np.sum(np.abs(projected) ** 2)) or 1.0
 
         def cost(frequency: float, damping: float) -> float:
             omega_r = 2.0 * np.pi * frequency
             with np.errstate(divide='ignore', invalid='ignore'):
-                q = ((1j * omega) ** self.power
-                     / (omega_r ** 2 - omega ** 2
-                        + 2j * damping * omega_r * omega))
+                q = root * ((1j * omega) ** self.power
+                            / (omega_r ** 2 - omega ** 2
+                               + 2j * damping * omega_r * omega))
             if not np.all(np.isfinite(q)):
                 return 1.0
             weight = float(np.sum(np.abs(q) ** 2))
@@ -1255,7 +1446,7 @@ class ModalFitSession:
         """
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
         seed = float(seed) if seed else self._half_power(
-            self._residual_cmif(), index)
+            self._search_cmif(), index)
         seed = float(np.clip(seed, 1e-4, 0.5))
         cost = self._residual_cost(index, min(seed * 4.0, 0.5))
         best, span = seed, seed
@@ -1307,10 +1498,9 @@ class ModalFitSession:
         # times (three left 0.02 %, four 0.001 %) for under a millisecond
         # more per search, against a residual whose SVD costs far more.
         line = float(self.frequencies[index])
-        df = float(self.frequencies[1] - self.frequencies[0]
-                   if len(self.frequencies) > 1 else 1.0)
+        df = self._spacing(index)
         seed = (float(damping) if damping
-                else self._half_power(self._residual_cmif(), index))
+                else self._half_power(self._search_cmif(), index))
         seed = float(np.clip(seed, 1e-4, 0.5))
         widest = min(seed * 4.0, 0.5)
         cost = self._residual_cost(index, widest)
@@ -1359,7 +1549,8 @@ class ModalFitSession:
         completed = 0
         walked = 0
         while completed < passes:
-            frequencies = best[0] + np.linspace(-span_f, span_f, steps)
+            # a frequency cannot be negative, however near 0 Hz the peak
+            frequencies = np.maximum(best[0] + np.linspace(-span_f, span_f, steps), 0.0)
             dampings = np.clip(best[1] + np.linspace(-span_z, span_z, steps),
                                1e-4, 0.5)
             grid = [[cost(f, z) for z in dampings] for f in frequencies]
@@ -1375,7 +1566,7 @@ class ModalFitSession:
             offset_z = (self._vertex(grid[i][j - 1], grid[i][j],
                                      grid[i][j + 1])
                         if 0 < j < steps - 1 else 0.0)
-            best = (float(frequencies[i] + offset_f * step_f),
+            best = (max(float(frequencies[i] + offset_f * step_f), 0.0),
                     float(np.clip(dampings[j] + offset_z * step_z,
                                   1e-4, 0.5)))
             if (i in (0, steps - 1) and walked < 8
@@ -1389,37 +1580,76 @@ class ModalFitSession:
     def _band(self, index):
         """Frequency lines around a peak worth fitting over: three
         half-power widths, at least five lines, clipped to the data."""
-        s1 = self._residual_cmif()
+        s1 = self._search_cmif()
         zeta = self._half_power(s1, index)
         half_width = 3.0 * zeta * self.frequencies[index]
-        df = (self.frequencies[1] - self.frequencies[0]
-              if len(self.frequencies) > 1 else 1.0)
-        lines = max(round(half_width / df), 2)
+        lines = max(round(half_width / self._spacing(index)), 2)
         return slice(max(index - lines, 0),
                      min(index + lines + 1, len(self.frequencies)))
 
     # ---- what the fit is ----------------------------------------------------
 
+    def replay(self) -> dict[str, Any] | None:
+        """What `Project.fit_modes` takes to fit these modes again: `at`,
+        `refine` and `records`. None when no call can: an adopted set's other
+        DOFs or modal mass are not in the FRF."""
+        if self.kept or any(mode.get('modal_mass', 1.0) != 1.0 for mode in self.modes):
+            return None
+        described = {(float(mode['frequency']), float(mode['damping'])): mode['description']
+                     for mode in self.modes}
+        at = [(*pick, described[pick]) if described.get(pick) else pick
+              for pick in self.confirmed]
+        every = self.rows == list(range(self.frf.num_records))
+        return {'at': at, 'refine': self.refined, 'records': None if every else list(self.rows)}
+
     def shape_set(self) -> ShapeSet:
         """The confirmed modes as a ShapeSet, ready for the project.
 
-        The mass unit is kg when every fit record has a defined
-        dimension, and None otherwise, since shapes fitted to raw values
-        are raw. The set is marked unscaled when any mode had no drive
-        point to set its scale.
+        The mass unit is kg when every fit record has a defined dimension
+        of a motion per force, and None otherwise, since shapes fitted to
+        raw values are raw and a residue per volt says nothing of mass. The
+        set is marked unscaled when any mode had no drive point to set its
+        scale, or a record says it is not a motion per force. Adopted modes
+        keep what the session does not fit: the set's other DOFs, modal mass, complex damping and
+        comment, and the set's mass unit stands.
         """
-        from .shapes import ShapeSet
-
         # defined, not merely hinted: known_dim falls back to the file's
         # claim, and a hint scales nothing — shapes fitted to raw values
         # are raw, whatever the file said they measured
         known = all(self.frf.ordinate_dim[i] != UNKNOWN for i in self.rows)
+        # the hint counts here: a file saying volts is a statement about
+        # what the reference was, whether or not its numbers are in SI
+        quantities = [channel_quantities(self.frf.known_dim(i)) for i in self.rows
+                      if self.frf.known_dim(i) != UNKNOWN]
+        per_force = {response in _MOTIONS and reference in ('force', 'moment')
+                     for response, reference in quantities}
+        unit = 'kg' if known and per_force == {True} else None
+        if self._adopted is not None and unit is not None:
+            unit = self._adopted.mass_unit
+        carried = any(mode.get('modal_damping') is not None for mode in self.modes)
         return ShapeSet(
             frequency=[mode['frequency'] for mode in self.modes],
             damping=[mode['damping'] for mode in self.modes],
-            coordinate=self.coordinate,
-            shape_matrix=np.array([mode['shape'] for mode in self.modes]),
+            coordinate=self.coordinate + self.kept,
+            shape_matrix=np.array([self._published_shape(mode) for mode in self.modes]),
             description=[mode['description'] for mode in self.modes],
-            mass_unit='kg' if known else None,
-            unscaled=any(not mode.get('scaled', True)
-                         for mode in self.modes))
+            comment=[mode.get('comment', '') for mode in self.modes],
+            modal_mass=[mode.get('modal_mass', 1.0) for mode in self.modes],
+            # a mode the source never saw has no estimate of it
+            modal_damping=([mode.get('modal_damping', np.nan) for mode in self.modes]
+                           if carried else None),
+            mass_unit=unit,
+            unscaled=(False in per_force
+                      or any(not mode.get('scaled', True) for mode in self.modes)))
+
+    def _published_shape(self, mode: Mapping[str, Any]) -> np.ndarray:
+        """A mode's row in the published set: back at its own modal mass,
+        with the DOFs the fit does not cover moved by what Refine did to the
+        ones it does, so the mode stays one shape, whichever sign it took."""
+        shape = mode['shape']
+        if self.kept:
+            before = mode['adopted']
+            size = float(before @ before)
+            factor = float(shape @ before) / size if size > 0.0 else 1.0
+            shape = np.concatenate([shape, factor * mode['kept']])
+        return shape * np.sqrt(mode.get('modal_mass', 1.0))

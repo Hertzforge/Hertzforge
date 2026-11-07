@@ -135,17 +135,22 @@ def test_adopting_a_shape_set_reconstructs_the_fit(survey):
         np.linalg.norm(fresh.residual_matrix())), 'the same fit, resumed'
 
 
-def test_a_foreign_set_maps_by_dof_name(survey):
+def test_a_foreign_set_maps_by_dof_on_the_records_it_holds(survey):
+    from hertzforge.core.modal_fit import adoptable_records
     from hertzforge.core.shapes import ShapeSet
 
     _truth, frfs = survey
-    session = ModalFitSession(frfs)
-    foreign = ShapeSet([12.0], [0.02], ['99999X+', '101Z+'],
+    foreign = ShapeSet([12.0], [0.02], ['99999X+', '101Z-'],
                        [[7.0, 3.5]])
+    with pytest.raises(ValueError, match='no value at'):
+        ModalFitSession(frfs).adopt(foreign)
+    session = ModalFitSession(frfs, adoptable_records(frfs, foreign))
     session.adopt(foreign)
     mode = session.modes[0]
-    assert mode['shape'][session.coordinate.index('101Z+')] == 3.5
-    assert 7.0 not in mode['shape'], 'a DOF this FRF never measured'
+    assert session.coordinate == ['101Z+']
+    assert mode['shape'][0] == -3.5, 'the sign of the DOF as the set wrote it'
+    assert session.kept == ['99999X+'], 'a DOF this FRF never measured'
+    assert list(session.shape_set().shape_matrix[0]) == [-3.5, 7.0]
 
 
 def test_adopting_rigid_body_modes_survives_a_zero_hertz_line(survey):

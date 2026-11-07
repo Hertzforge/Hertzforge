@@ -1122,6 +1122,8 @@ def srs_caption(srs: Any, records: int | Sequence[int] = 0, *,
                 reason = result.get('refused')
                 if reason is None and not result['points']:
                     reason = _unjudged(values)
+                if reason is None and result['passed'] is None:
+                    reason = result.get('unread')
                 judged = int(result['points'])
                 points.append(PointsCount(
                     str(spectrum.kind), event, judged,

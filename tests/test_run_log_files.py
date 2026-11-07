@@ -1,6 +1,6 @@
 """Controller files: a watched folder's files proposed once they settle,
 accepted into the run log by SHA-256 with their format and holdings,
-compared with the run's counter, and put into the data index.
+compared with the run's counter.
 
 Settling is timed on a clock each test moves, so a file is settled or
 not by value, never by how fast the machine is; only the tests of the
@@ -20,10 +20,9 @@ from conftest import fixture_path
 
 from hertzforge import io
 from hertzforge.core import data_index, run_log_files
-from hertzforge.core.data_index import MATCHES, DataIndex, IndexEntry
+from hertzforge.core.data_index import IndexEntry
 from hertzforge.core.run_log import FileRef, RunLog, RunLogError
 from hertzforge.core.run_log_files import (
-    LOG_FORMAT,
     SOURCE,
     UNKNOWN,
     ControllerFilesError,
@@ -36,7 +35,6 @@ from hertzforge.core.run_log_files import (
     counted_seconds,
     counter_seconds,
     describe,
-    index_run_log,
     place_at,
 )
 
@@ -577,140 +575,6 @@ def test_a_file_ref_carries_format_holdings_and_path(tmp_path):
     log.append('note', author='AB', files=[ref])
     log.close()
     assert RunLog.read(tmp_path / 'b.hflog').entries[0].files == (ref,)
-
-
-def test_the_index_holds_the_logs_files_and_its_head(tmp_path):
-    folder = output(tmp_path)
-    watch, ticks = watch_of(folder)
-    (folder / 'run1.dat').write_bytes(b'abc')
-    proposal, = settled(watch, ticks)
-    index = DataIndex()
-    with new_log(tmp_path) as log:
-        accept(log, proposal, author='AB')
-        log.append('note', author='AB', text='between tests')
-        indexed = index_run_log(index, log)
-        head = log.head(1)
-        between = log.head(None)
-    assert len(index) == 2
-    file_entry, log_entry = index
-    assert indexed.files == (file_entry,) and indexed.log == log_entry
-    assert indexed.missing == ()
-    assert (file_entry.name, file_entry.sha256, file_entry.size) == (
-        'run1.dat', sha(b'abc'), 3)
-    assert file_entry.format == UNKNOWN and file_entry.source == SOURCE
-    assert file_entry.holds == proposal.file.holds
-    assert log_entry.format == LOG_FORMAT and log_entry.source == SOURCE
-    assert log_entry.holds == (f'run log; test 1 head {head}; between tests '
-                               f'head {between}')
-    assert log_entry.sha256 == sha((tmp_path / 'a.hflog').read_bytes())
-    checked = index.verify()
-    assert [entry.status for entry in checked] == [MATCHES, MATCHES]
-
-
-def test_a_visual_dynamics_log_is_indexed_as_one(tmp_path):
-    """The data index names the format a log is in, so a log Visual
-    Dynamics started is recorded as a `.vdlog`, not as a Hertzforge log."""
-    import shutil
-
-    path = tmp_path / 'started.vdlog'
-    shutil.copy(fixture_path('vdlog_corpus', 'v1.vdlog'), path)
-    index = DataIndex()
-    indexed = index_run_log(index, RunLog.read(path))
-    assert indexed.log.format == run_log_files.VDLOG_FORMAT == (
-        'Visual Dynamics run log (.vdlog)')
-    assert LOG_FORMAT == 'Hertzforge run log (.hflog)'
-
-
-def test_the_index_takes_the_logs_checksum_not_a_second_hash(
-        tmp_path, monkeypatch):
-    target = tmp_path / 'kept.dat'
-    target.write_bytes(b'abc')
-    log = RunLog.create(tmp_path / 'a.hflog', who=WHO, title='Article 7')
-    log.append('test_opened', author='AB', test=1)
-    log.append('note', author='AB', test=1, files=[FileRef(
-        'kept.dat', sha(b'abc'), 3, path=str(target))])
-    hashed = []
-    real = data_index.digest
-    monkeypatch.setattr(data_index, 'digest',
-                        lambda path, progress=None: (hashed.append(path),
-                                                     real(path, progress))[1])
-    index = DataIndex()
-    indexed = index_run_log(index, log, tests=[1])
-    assert hashed == [os.path.abspath(log.path)], 'only the log is hashed'
-    assert indexed.log.holds == f'run log, Article 7; test 1 head {log.head(1)}'
-    target.write_bytes(b'abd')
-    assert index.verify()[0].status == 'changed'
-    log.close()
-
-
-def test_a_file_is_found_by_name_and_one_found_nowhere_is_listed(tmp_path):
-    archive = tmp_path / 'archive'
-    archive.mkdir()
-    (archive / 'moved.dat').write_bytes(b'm')
-    (tmp_path / 'beside.dat').write_bytes(b'b')
-    with RunLog.create(tmp_path / 'a.hflog', who=WHO) as log:
-        log.append('test_opened', author='AB', test=1)
-        log.append('note', author='AB', test=1, files=[
-            FileRef('moved.dat', sha(b'm'), 1, path=str(tmp_path / 'gone')),
-            FileRef('beside.dat', sha(b'b')),
-            FileRef('lost.dat', sha(b'l'), 1, path=str(tmp_path / 'lost.dat'))])
-        index = DataIndex()
-        indexed = index_run_log(index, log, search=[archive])
-    assert [e.path for e in indexed.files] == [str(archive / 'moved.dat'),
-                                               str(tmp_path / 'beside.dat')]
-    assert indexed.files[1].size == 1, 'a size not recorded is the file\'s'
-    assert indexed.files[1].holds == 'named in the run log, entry #2'
-    assert indexed.files[1].format == 'DAT file (.dat)'
-    (ref, why), = indexed.missing
-    assert ref.name == 'lost.dat'
-    assert why.startswith(f'lost.dat (entry #2) was not found at '
-                          f'{tmp_path / "lost.dat"} or by its name in '
-                          f'{archive}, {tmp_path}')
-
-
-def test_indexing_again_replaces_the_logs_entry(tmp_path):
-    index = DataIndex()
-    with RunLog.create(tmp_path / 'a.hflog', who=WHO) as log:
-        log.append('test_opened', author='AB', test=1)
-        first = index_run_log(index, log)
-        log.append('note', author='AB', test=1)
-        again = index_run_log(index, log)
-        assert again.log.sha256 != first.log.sha256
-        assert [entry.sha256 for entry in index] == [again.log.sha256]
-        assert again.log.holds.endswith(log.head(1))
-        settings = tmp_path / 'settings.txt'
-        settings.write_text('x')
-        index.add(settings, 'settings list', source='author')
-        index_run_log(index, log)
-        assert [entry.source for entry in index] == ['author', SOURCE]
-
-
-def test_a_test_not_in_the_log_is_refused(tmp_path):
-    with new_log(tmp_path) as log:
-        with pytest.raises(ControllerFilesError, match='holds no test 4'):
-            index_run_log(DataIndex(), log, tests=[4])
-        empty = RunLog.create(tmp_path / 'e.hflog', who=WHO)
-        assert index_run_log(DataIndex(), empty).log.holds == \
-            'run log; no test yet'
-        empty.close()
-
-
-def test_a_reports_data_index_lists_them(tmp_path):
-    import hertzforge
-    from hertzforge import Project
-    from hertzforge.report import render_html
-
-    project = Project('P')
-    name = project.generate_report('modal')
-    with new_log(tmp_path) as log:
-        index_run_log(project.data_index, log)
-        head = log.head(1)
-    project[name].features = ['data_index']
-    html = render_html(project[name], project,
-                       unit_system=hertzforge.SI,
-                       object_groups=project.object_groups)
-    assert f'test 1 head {head}' in html
-    assert 'a.hflog' in html
 
 
 def wait_for(condition, seconds=20.0):
