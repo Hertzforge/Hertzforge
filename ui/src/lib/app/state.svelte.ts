@@ -31,7 +31,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	SimStateResult,
 	TableEdit,
 	View,
-	Workspace, MatrixView } from '$lib/protocol/types';
+	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
@@ -420,6 +420,22 @@ class AnalyzeState {
 		if (!op || !this.reading) return;
 		this.values = { ...this.values, [op.id]: { ...this.currentValues, ...patch } };
 		await this.run();
+	}
+
+	/** A click in the reading's 3-D view: runs the view's operation with what was clicked, and the form holds what it left. */
+	async pickInReading(pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			if (res.project) this.app.project.apply(res.project);
+			this.reading = { title, views: res.views };
+			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
+			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
+				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
+			}
+		} catch (err) {
+			this.runError = message(err);
+		}
 	}
 
 	/**
