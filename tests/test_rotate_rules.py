@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-
 from hertzforge.rotate import angles_of, frame_from_angles
 
 

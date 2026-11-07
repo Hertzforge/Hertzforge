@@ -1072,7 +1072,10 @@ def separate(geometry: Any, ids: Sequence[int]) -> int:
                          'with nothing to take apart')
     freed = sum(len(solid(geometry, i).operands) for i in ids)
     geometry.solids = [s for s in geometry.solids if s.id not in ids]
+    # taken apart to be built again: the part remade under its name finds its mesh by that
+    # name, as a table meshed with its legs does with the legs taken off
     _meshes_outlive(geometry, ids)
+    geometry.group_solids = {group: held for group, held in geometry.group_solids.items() if held}
     return freed
 
 
@@ -3160,10 +3163,17 @@ def groups_meshed_again(geometry: Any, ids: Sequence[int], part: Any) -> list[in
     """
     from .mesh import group_home
 
+    # the whole tree, not only the pieces: a boolean takes its first solid's name, and a part
+    # remade from that solid is the part meshed before
     named: dict[str, list[int]] = {}
-    for i in dict.fromkeys([*(int(i) for i in ids), *pieces(geometry, ids)]):
-        named.setdefault(piece_name(geometry, i), []).append(i)
-    part.group_solids = {int(g): tuple(named[name])
+    stack = [int(i) for i in ids]
+    while stack:
+        current = stack.pop()
+        held = named.setdefault(piece_name(geometry, current), [])
+        if current not in held:
+            held.append(current)
+            stack.extend(solid(geometry, current).operands)
+    part.group_solids = {int(g): tuple(sorted(named[name]))
                          for g, name in zip(part.group_id, part.group_name, strict=True)
                          if name in named}
     meshed = {i for held in part.group_solids.values() for i in held}

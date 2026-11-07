@@ -844,3 +844,18 @@ def test_a_preview_of_an_edit_says_what_would_change():
             'geometry': 'Part', 'solid': 1, 'widths': '2 2 2'}})]))
     preview, real = (got[-1]['result']['views'][0]['rows'][0]['label'] for got in responses[3:])
     assert (preview, real) == ('Would change', 'Changed')
+
+
+def test_a_part_taken_apart_and_remade_under_its_name_replaces_its_mesh(project):
+    geometry = project['Part']
+    run(project, 'project.add_solid_block', width_x=1, width_y=1, width_z=1, name='raw')
+    run(project, 'project.add_solid_cylinder', radius=0.1, length=2.0, name='bore')
+    run(project, 'project.combine_solids', solids='1, 2', operation='subtract', name='plate')
+    run(project, 'project.mesh_solids', solids='3', size=0.25, keep=True)
+    before = len(geometry.elem_id)
+    run(project, 'project.separate_solids', solids='3')
+    assert geometry.group_solids == {}
+    run(project, 'project.combine_solids', solids='1, 2', operation='subtract', name='plate')
+    (reading, *_rest) = run(project, 'project.mesh_solids', solids='3', size=0.25, keep=True)
+    assert rows(reading)['Replaced'] and len(geometry.elem_id) == before
+    assert len(geometry.group_id) == 1
