@@ -28,6 +28,8 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'shape_values',
     # typed into a table
     'set_entity', 'set_entity_cell', 'set_channel_cell', 'describe_mode',
+    # dragged on the plot
+    'set_band_edge',
     # the table's own rows
     'link', 'unlink', 'set_basis', 'name_object_group',
 ))
@@ -87,7 +89,9 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'amend_report': 'Amend', 'new_channel_table': 'New Table', 'add_channels': 'Add Channel',
     'set_sensor_model': 'Sensor Model', 'calibration_check': 'Calibration',
     'create_specification': 'Create Spec', 'edit_specification': 'Edit Spec',
-    'set_breakpoint': 'Breakpoint', 'predict': 'Predict', 'sine_extraction': 'Extract Levels',
+    'set_breakpoint': 'Breakpoint', 'add_breakpoint': 'Add Breakpoint',
+    'remove_breakpoint': 'Remove Breakpoint', 'scale_specification': 'Scale Spec',
+    'specification_areas': 'Areas', 'predict': 'Predict', 'sine_extraction': 'Extract Levels',
     'level_error': 'Level Error', 'sine_distortion': 'Distortion', 'sine_frequency': 'Frequency',
     'dwell': 'Dwell', 'mixed_mode': 'Data Sheet', 'pulse_check': 'Check Pulse', 'stroke': 'Stroke',
     'replication_fit': 'Fit', 'wavelet': 'Wavelet', 'set_shock': 'Mark Shock',

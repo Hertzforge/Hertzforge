@@ -119,6 +119,8 @@ export interface SpectrumView {
 	link?: string;
 	/** Spans of x shaded behind the curves: frames averaged from, or spans cut away. */
 	regions?: Region[];
+	/** Places on a series to drag up and down, which run `op` with `decibels` on release. */
+	handles?: SpectrumHandle[];
 }
 
 /** A span of x shaded behind a spectrum's curves. */
@@ -229,6 +231,16 @@ export interface Gizmo3D {
 	turn: GizmoAct;
 	/** A drag's length in the view's unit, to meters. */
 	to_si?: number;
+}
+
+/** A drag on a `spectrum` view: a place on `series` near `x`, at `decibels` from what it follows. */
+export interface SpectrumHandle {
+	series: number;
+	x: number;
+	decibels: number;
+	label: string;
+	op: string;
+	params: Record<string, unknown>;
 }
 
 /** A click in a `shape3d` view: the operation it runs, and what it sends (schema/PROTOCOL.md). */

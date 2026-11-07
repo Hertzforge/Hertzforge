@@ -273,6 +273,8 @@ FORM = Param('form', 'Form', 'enum', default='keep', options=(
 SPACING = Param('spacing', 'Line spacing (0: the specification\'s own, or a time history\'s)',
                 'number', default=0.0, min=0.0, unit='Hz')
 DRAWN = Param('drawn', 'Bands drawn for channel', 'integer', default=1, min=1, step=1)
+BREAKPOINT_AT = Param('frequency', 'Frequency', 'number', default=100.0, unit='Hz', min=0.0)
+SCALE_DB = Param('decibels', 'Change', 'number', default=0.0, unit='dB', step=1.0)
 SHEET = (BREAKPOINTS, ENTRY, PAIRS, ALL_PAIRS, WARNING, ABORT, SYMMETRIC, UNIFORM, FORM,
          SPACING, DRAWN)
 
@@ -448,6 +450,27 @@ def breakpoint_table(name: str, draft: Any, channels: str = '') -> dict:
     return v.table(title, headers, rows, edit=v.editing('project.set_breakpoint', fixed, keys))
 
 
+def _band_handles(name: str, draft: Any, drawn: int, key: str, series: int,
+                  channels: str) -> list[dict]:
+    """The handles on one band edge, one per run of segments as VD's flat plot has them:
+    each at its run's middle on the edge's `series`, and what letting go runs. A sheet at
+    lines has no segments to move."""
+    if draft.form != 'breakpoints':
+        return []
+    kind, side = key.split('_')
+    edge = draft.band_db(kind, drawn - 1)[0 if side == 'lower' else 1]
+    out = []
+    for run in draft.band_runs(drawn - 1, kind):
+        low, high = float(draft.frequencies[run[0]]), float(draft.frequencies[run[-1] + 1])
+        out.append({'series': series, 'x': float(np.sqrt(low * high)) if low > 0 else high / 2.0,
+                    'decibels': float(edge[run[0]]), 'label': f'{kind} band {side}',
+                    'op': 'project.set_band_edge',
+                    'params': {'specification': name, 'channels': channels, 'kind': kind,
+                               'side': side, 'segments': ', '.join(map(str, run)),
+                               'drawn': drawn}})
+    return out
+
+
 def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
                 channels: str = '') -> list[dict]:
     """The specification drawn (each channel's target, and the drawn
@@ -462,6 +485,7 @@ def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
                       f'{drawn}')
     banded = draft.channels[drawn - 1]
     lines = []
+    handles: list[dict] = []
     for channel in draft.channels:
         r = autos.get(channel)
         if r is None:
@@ -474,11 +498,12 @@ def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
                 if curve is not None:
                     lines.append(v.shaped(f'{channel}: {NAMES[key]}', ROLES[key], spec,
                                           *spec_line(spec, r, np.real(curve[r]))))
+                    handles += _band_handles(name, draft, drawn, key, len(lines) - 1, channels)
     units = {_density_unit(dim) for dim in draft.dims}
     plot = v.spectrum(f'{name}: {draft.num_channels} channel'
                       f'{"s" * (draft.num_channels != 1)}, bands of {banded}', FREQUENCY,
                       v.axis('PSD', units.pop() if len(units) == 1 else None, 'log'), lines,
-                      link='frequency')
+                      link='frequency', handles=handles)
     rows = [v.row('Specification', said, None, 'pass'),
             v.row('Channels', ', '.join(draft.channels), None, 'info'),
             v.row('Form', f'{len(draft.frequencies)} '
@@ -557,6 +582,98 @@ def _write(project: Any, name: str, draft: Any) -> None:
         project.author_specification(name, draft, replace=True)
     except ValueError as error:
         raise refused(f'{name}: {error}') from None
+
+
+def _areas_table(name: str, draft: Any, drawn: int) -> dict:
+    """VD's Areas and running rms: each segment of the drawn channel's breakpoints, its
+    slope, its area, its share of the whole and the rms accumulated to its end."""
+    reading = draft.reading(drawn - 1)
+    whole = reading.total_area or 1.0
+    rows = [[f'{reading.frequencies[k]:g} to {reading.frequencies[k + 1]:g}',
+             f'{reading.slopes[k]:.3g}', f'{reading.areas[k]:.4g}',
+             f'{100.0 * reading.areas[k] / whole:.1f}', f'{reading.running[k]:.4g}']
+            for k in range(len(reading.areas))]
+    return v.table(f'{name}, {draft.channels[drawn - 1]}: areas and running rms',
+                   ['Hz', 'dB/octave', 'Area', 'Share (%)', 'Running rms'], rows)
+
+
+def specification_areas(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.specification_areas`: the Areas and running rms of a channel's breakpoints,
+    written nowhere (`SpecificationDraft.reading`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    if not 1 <= params['drawn'] <= draft.num_channels:
+        raise refused(f'{name} has {draft.num_channels} channels; not {params["drawn"]}')
+    if draft.form != 'breakpoints':
+        raise refused(f'{name} is written at lines; areas are read from breakpoints')
+    return [_areas_table(name, draft, params['drawn'])]
+
+
+def add_breakpoint(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_breakpoint`: a breakpoint at a frequency, its levels read off the power
+    law between its neighbors and the segment's band kept on both halves
+    (`SpecificationDraft.with_breakpoint`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    frequency = float(params['frequency'])
+    if frequency in [float(f) for f in draft.frequencies]:
+        raise refused(f'{name} already has a breakpoint at {frequency:g} Hz')
+    try:
+        draft = draft.with_breakpoint(frequency)
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'], f'{name}, a breakpoint added',
+                       params['channels'])
+
+
+def remove_breakpoint(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.remove_breakpoint`: a breakpoint gone, its neighbors joined
+    (`SpecificationDraft.without_breakpoint`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    frequency = float(params['frequency'])
+    if frequency not in [float(f) for f in draft.frequencies]:
+        raise refused(f'{name} has no breakpoint at {frequency:g} Hz')
+    try:
+        draft = draft.without_breakpoint(frequency)
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'], f'{name}, a breakpoint removed',
+                       params['channels'])
+
+
+def scale_specification(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.scale_specification`: a specification's levels raised or lowered by decibels,
+    on every channel or the ones named (`SpecificationDraft.scaled_db`)."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    try:
+        draft = draft.scaled_db(params['decibels'])
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'],
+                       f'{name}, scaled {params["decibels"]:+g} dB', params['channels'])
+
+
+def set_band_edge(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_band_edge`: one edge of a band, in the segments named, set to a level in
+    decibels from the target (`SpecificationDraft.with_band_edge`), as a drag on VD's flat
+    plot lands: it snaps to the grid, and a symmetric or uniform channel follows."""
+    name = params['specification']
+    draft = _opened(project, name, params['channels'])
+    segments = [int(part) for part in params['segments'].replace(' ', '').split(',') if part]
+    try:
+        draft = draft.with_band_edge(params['kind'], params['side'], segments,
+                                     params['decibels'])
+    except ValueError as error:
+        raise refused(f'{name}: {error}') from None
+    _write(project, name, draft)
+    return _spec_views(project, name, draft, params['drawn'],
+                       f'{name}, {params["kind"]} band {params["side"]} edge set',
+                       params['channels'])
 
 
 def edit_specification(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -782,6 +899,39 @@ OPERATIONS = (
         params=(SPECIFICATION, ROW, Param('column', 'Column', 'string', default='frequency'),
                 VALUE, ENTRY, CHANNELS),
         outputs=('spectrum', 'table', 'reading'), run=set_breakpoint, edits=True),
+    Operation(
+        id='project.specification_areas', title='Areas and Running RMS', workspace='specify',
+        summary='Each segment of a channel\'s breakpoints: its slope, its area, its share of '
+                'the whole and the rms accumulated to its end.',
+        params=(SPECIFICATION, CHANNELS, DRAWN), outputs=('table',), run=specification_areas),
+    Operation(
+        id='project.add_breakpoint', title='Add Breakpoint', workspace='specify',
+        summary='A breakpoint at a frequency, its levels read off the power law between its '
+                'neighbors.',
+        params=(SPECIFICATION, BREAKPOINT_AT, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=add_breakpoint, edits=True),
+    Operation(
+        id='project.remove_breakpoint', title='Remove Breakpoint', workspace='specify',
+        summary='A breakpoint gone, its neighbors joined.',
+        params=(SPECIFICATION, BREAKPOINT_AT, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=remove_breakpoint, edits=True),
+    Operation(
+        id='project.scale_specification', title='Scale Specification', workspace='specify',
+        summary='The levels raised or lowered by decibels, on every channel or the ones named.',
+        params=(SPECIFICATION, SCALE_DB, CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=scale_specification, edits=True),
+    Operation(
+        id='project.set_band_edge', title='Set Band Edge', workspace='specify',
+        summary='One edge of a warning or abort band set to a level in decibels from the '
+                'target. Dragging the band on the plot runs it.',
+        params=(SPECIFICATION, Param('kind', 'Band', 'enum', default='abort', options=(
+            Option('warning', 'Warning'), Option('abort', 'Abort'))),
+            Param('side', 'Edge', 'enum', default='upper', options=(
+                Option('lower', 'Lower'), Option('upper', 'Upper'))),
+            Param('segments', 'Segments, as "0, 1"', 'string', default='0'),
+            Param('decibels', 'Level from the target', 'number', default=6.0, unit='dB'),
+            CHANNELS, DRAWN),
+        outputs=('spectrum', 'table', 'reading'), run=set_band_edge, edits=True),
     Operation(
         id='project.predict', title='Enter Prediction', workspace='report',
         summary='One response channel\'s predicted peaks entered into a predictions object, '
