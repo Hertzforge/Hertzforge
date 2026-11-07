@@ -2,7 +2,7 @@
 //! ladder tests with shock (N-pulses-per-level) semantics.
 
 use crate::ladder::{
-    LadderAdvance, LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode,
+    LadderAdvance, LadderError, LadderTick, ShockLadderState, ShockLevelSchedule, ShockRunMode,
     DEFAULT_LEVEL_TABLE_DB, DEFAULT_MAX_PULSES_PER_LEVEL, DEFAULT_START_LEVEL_DB,
 };
 
@@ -223,4 +223,99 @@ fn the_ladder_gate_defaults_to_count_and_five_and_is_left_out_of_old_records() {
         serde_json::from_str::<ShockLevelSchedule>(&json).unwrap(),
         gated
     );
+}
+
+fn closed(mode: ShockRunMode, advance: LadderAdvance) -> ShockLadderState {
+    ShockLadderState::new(ShockLevelSchedule {
+        mode,
+        start_db: -12.0,
+        table_db: vec![-12.0, -6.0, 0.0],
+        pulses_per_level: vec![1, 1, 2],
+        advance,
+        max_pulses_per_level: 3,
+    })
+    .unwrap()
+}
+
+#[test]
+fn on_pass_advances_only_on_passing_pulses() {
+    let mut st = closed(ShockRunMode::Auto, LadderAdvance::OnPass);
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
+    assert_eq!(st.current_level_db(), -12.0, "two failures do not advance");
+    assert_eq!(st.pulses_without_pass(), 2);
+    assert_eq!(st.on_pulse_judged(true), LadderTick::Advanced);
+    assert_eq!(st.current_level_db(), -6.0);
+    assert_eq!(st.pulses_without_pass(), 0);
+    assert_eq!(st.on_pulse_judged(true), LadderTick::Advanced);
+    // The top level needs two passes; a failure between them does not count
+    // and does not reset the passes already made.
+    assert_eq!(st.on_pulse_judged(true), LadderTick::Held);
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
+    assert_eq!(st.on_pulse_judged(true), LadderTick::Completed);
+    assert!(st.completed());
+}
+
+#[test]
+fn on_pass_ends_at_the_per_level_limit_without_a_pass() {
+    let mut st = closed(ShockRunMode::Auto, LadderAdvance::OnPass);
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
+    assert_eq!(
+        st.on_pulse_judged(false),
+        LadderTick::NotConverged { pulses: 3 },
+        "the third pulse at the level without a pass"
+    );
+    // A pass resets the count.
+    let mut st = closed(ShockRunMode::Auto, LadderAdvance::OnPass);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(true);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(false);
+    assert_eq!(st.on_pulse_judged(true), LadderTick::Advanced);
+}
+
+#[test]
+fn count_advance_keeps_the_open_loop_ladder_and_has_no_per_level_limit() {
+    let mut a = closed(ShockRunMode::Auto, LadderAdvance::Count);
+    let mut b = closed(ShockRunMode::Auto, LadderAdvance::Count);
+    for i in 0..4 {
+        let tick = a.on_pulse_judged(false);
+        b.on_pulse_fired();
+        assert_eq!(a.current_level_db(), b.current_level_db(), "pulse {i}");
+        assert_eq!(a.completed(), b.completed(), "pulse {i}");
+        assert!(
+            !matches!(tick, LadderTick::NotConverged { .. }),
+            "pulse {i}"
+        );
+    }
+    assert!(a.completed());
+}
+
+#[test]
+fn manual_ends_at_the_limit_of_failures_in_a_row_and_a_level_move_starts_again() {
+    let mut st = closed(ShockRunMode::Manual, LadderAdvance::OnPass);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(false);
+    st.step_up();
+    assert_eq!(
+        st.pulses_without_pass(),
+        0,
+        "a level move starts the count again"
+    );
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(true);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(false);
+    assert_eq!(
+        st.on_pulse_judged(false),
+        LadderTick::NotConverged { pulses: 3 }
+    );
+    assert_eq!(st.current_level_db(), -11.0, "MANUAL never moves the level");
+    let mut st = closed(ShockRunMode::Manual, LadderAdvance::Count);
+    st.on_pulse_judged(false);
+    st.on_pulse_judged(false);
+    st.jump_to_level(2).unwrap();
+    assert_eq!(st.on_pulse_judged(false), LadderTick::Held);
 }

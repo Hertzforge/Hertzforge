@@ -57,6 +57,8 @@
 //! capability split is read from `hertzforge_shock_common::PathCapabilities` - the
 //! one source of truth - never re-derived here.
 
+mod closed;
+mod closed_run;
 pub mod config;
 pub mod firer;
 pub mod pacer;
@@ -100,6 +102,8 @@ struct PlayedPulse {
     /// The measured record's sample where the checker aligned the nominal
     /// pulse.
     aligned_start: Option<i64>,
+    /// The scale the pulse was commanded at (level times every limit).
+    scale: f64,
 }
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -160,6 +164,16 @@ pub enum ServiceError {
         frames_committed: usize,
         frames_expected: usize,
     },
+    /// Closed loop: a level move refused because the identified drive at the
+    /// new level would pass the drive abort.
+    DriveCeiling {
+        /// The level asked for, dB.
+        level_db: f64,
+        /// The drive's peak there, volts.
+        vpk: f64,
+        /// The drive abort, volts peak.
+        abort_vpk: f64,
+    },
     /// An invariant this service is supposed to maintain did not hold.
     ///
     /// These were once five `expect()` calls. Each one was true when it
@@ -186,6 +200,15 @@ impl std::fmt::Display for ServiceError {
                 "fire CANCELLED after {frames_done} of {frames_expected} frames; \
                  {} committed frame(s) were still queued at the device",
                 frames_committed.saturating_sub(*frames_done)
+            ),
+            ServiceError::DriveCeiling {
+                level_db,
+                vpk,
+                abort_vpk,
+            } => write!(
+                f,
+                "the drive at {level_db:.1} dB would be {vpk:.3} V pk, over the {abort_vpk:.3} V \
+                 pk drive abort"
             ),
             ServiceError::Internal(s) => write!(f, "internal invariant violated: {s}"),
         }
@@ -319,12 +342,17 @@ pub struct ClassicalShockService<F: PulseFirer> {
 
     // --- the control-law seam ----------------------------------------------
     /// The factory the closed loop builds its law with, after identification.
-    /// `None`: the built-in `fd_correct`. Stored, not yet called: the closed
-    /// loop that calls it is not built, and [`ClassicalShockService::new`]
-    /// refuses a configuration that asks for it.
+    /// `None`: the built-in `fd_correct` at its defaults.
     law_factory: Option<Arc<dyn ClassicalLawFactory>>,
     /// The clock law calls are timed on.
     law_clock: Arc<dyn LawClock>,
+    /// The closed loop's state, built at arm when `cfg.control` is set.
+    closed: Option<closed::ClosedLoop>,
+    /// The factor, dB, the identified gain is scaled by before inversion (the
+    /// law check's identification-error case; 0 otherwise).
+    identification_scale_db: f64,
+    /// Why identification held the run.
+    held: Option<report::HeldReason>,
 }
 
 impl<F: PulseFirer> ClassicalShockService<F> {
@@ -338,10 +366,10 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         data_root: Option<PathBuf>,
     ) -> Result<Self, ServiceError> {
         cfg.validate()?;
-        if cfg.control.is_some() {
+        if cfg.control.is_some() && firer.path().is_delegated() {
             return Err(ServiceError::Config(ConfigError::BadConfig(
-                "closed-loop classical control (identification, the drive in volts and a \
-                 control law) is not built yet; this service runs only the open loop"
+                "closed-loop classical control needs the measured response, and the delegated \
+                 path does not return one"
                     .into(),
             )));
         }
@@ -401,13 +429,14 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             data_root,
             law_factory: None,
             law_clock: Arc::new(MonotonicClock::new()),
+            closed: None,
+            identification_scale_db: 0.0,
+            held: None,
         })
     }
 
     /// Install the factory the closed loop builds its control law with. Without
-    /// one the closed loop uses the built-in `fd_correct`.
-    ///
-    /// Stored only: nothing calls it until the closed loop is built.
+    /// one the closed loop uses the built-in `fd_correct` at its defaults.
     pub fn with_law_factory(mut self, factory: Arc<dyn ClassicalLawFactory>) -> Self {
         self.law_factory = Some(factory);
         self
@@ -733,6 +762,27 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         // rate too short for the standard's +/-0.4 T window on an 11 ms pulse.
         self.quiet_frames = quiet_lead_frames(self.cfg.spec.duration_ms / 1000.0, adopted);
         self.firer.set_quiet_frames(self.quiet_frames);
+        if let Some(control) = &self.cfg.control {
+            // The closed loop's records are the whole grid, quiet margins
+            // included, played as given.
+            control.validate(adopted).map_err(|e| {
+                ServiceError::Config(ConfigError::BadConfig(format!(
+                    "at the adopted rate of {adopted} Hz: {e}"
+                )))
+            })?;
+            let grid = closed::PulseGrid::new(&self.cfg.spec, adopted, control.polarity);
+            self.quiet_frames = 0;
+            self.firer.set_quiet_frames(0);
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "closed loop: the pulse grid is {} samples at {adopted} Hz ({:.1} ms)",
+                    grid.n,
+                    1e3 * grid.n as f64 / adopted
+                ),
+            });
+            self.closed = Some(closed::ClosedLoop::new(grid));
+            self.held = None;
+        }
 
         // A fresh run must not start already cancelled.
         self.cancel.store(false, Ordering::SeqCst);
@@ -784,12 +834,19 @@ impl<F: PulseFirer> ClassicalShockService<F> {
     }
 
     fn manual_step(&mut self, up: bool) -> Result<f64, ServiceError> {
-        if !self.state.is_running() {
+        if !self.level_moves_allowed() {
             return Err(ServiceError::BadState(format!(
                 "step from {:?} (arm first)",
                 self.state
             )));
         }
+        let target = self.current_level_db()
+            + if up {
+                hertzforge_shock_common::ladder::MANUAL_STEP_DB
+            } else {
+                -hertzforge_shock_common::ladder::MANUAL_STEP_DB
+            };
+        self.check_level_move(target)?;
         // Was `.expect("ladder present while running")`: true when it
         // was written, and a panic in a library a daemon hosts.
         let ladder = self.ladder.as_mut().ok_or_else(|| {
@@ -818,11 +875,14 @@ impl<F: PulseFirer> ClassicalShockService<F> {
     /// Jump directly to table level `i`, clearing any manual
     /// offset. Returns the new level dB.
     pub fn jump_to_level(&mut self, i: usize) -> Result<f64, ServiceError> {
-        if !self.state.is_running() {
+        if !self.level_moves_allowed() {
             return Err(ServiceError::BadState(format!(
                 "jump_to_level from {:?} (arm first)",
                 self.state
             )));
+        }
+        if let Some(&target) = self.cfg.schedule.table_db.get(i) {
+            self.check_level_move(target)?;
         }
         // Was `.expect("ladder present while running")`.
         let ladder = self.ladder.as_mut().ok_or_else(|| {
@@ -891,6 +951,11 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 self.state
             )));
         }
+        if self.closed.is_some() && !self.law_seeded() {
+            return Err(ServiceError::BadState(
+                "fire before the control law is seeded (identify and proceed first)".into(),
+            ));
+        }
         if !spacing.is_finite() {
             return Err(ServiceError::BadState(
                 "rate model refuses all spacing (read cadence unsustainable)".into(),
@@ -927,7 +992,15 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 "run_auto requires an AUTO schedule".into(),
             ));
         }
-        if !matches!(self.state, RunState::Armed) {
+        if self.closed.is_some() {
+            // The closed loop runs its schedule once the law is seeded.
+            if !(self.state == RunState::Firing && self.law_seeded()) {
+                return Err(ServiceError::BadState(format!(
+                    "run_auto from {:?} (identify and proceed first)",
+                    self.state
+                )));
+            }
+        } else if !matches!(self.state, RunState::Armed) {
             return Err(ServiceError::BadState(format!(
                 "run_auto from {:?} (arm first)",
                 self.state
@@ -943,8 +1016,11 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 break;
             }
             if !self.fire_next_pulse()? {
-                if self.state == RunState::Aborted {
-                    return Ok(self.state); // aborted inside the pipeline
+                if matches!(
+                    self.state,
+                    RunState::Aborted | RunState::NotConverged | RunState::Held
+                ) {
+                    return Ok(self.state); // ended inside the pipeline
                 }
                 break; // cancelled in a gap; fall through to the clean stop
             }
@@ -1202,6 +1278,9 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         tick_ladder: bool,
         origin: PulseOrigin,
     ) -> Result<bool, ServiceError> {
+        if self.closed.is_some() {
+            return self.fire_one_closed(scheduled_level_db, spacing_s, tick_ladder, origin);
+        }
         if !self.state.is_running() {
             return Err(ServiceError::BadState(format!(
                 "fire from {:?} (arm first)",
@@ -1358,6 +1437,7 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             drive: drive.clone(),
             lead_frames: self.quiet_frames,
             aligned_start: None,
+            scale: total_scale,
         };
 
         match measured {
@@ -1668,8 +1748,13 @@ impl<F: PulseFirer> ClassicalShockService<F> {
     pub fn stop(&mut self) -> Result<(), ServiceError> {
         self.cancel.store(true, Ordering::SeqCst);
         let _ = self.stop_capture_inner();
-        if self.state != RunState::Aborted {
-            if self.state.is_running() {
+        if !matches!(
+            self.state,
+            RunState::Aborted | RunState::Held | RunState::NotConverged
+        ) {
+            if self.state.is_running()
+                || matches!(self.state, RunState::SysId | RunState::AwaitingReview)
+            {
                 let _ = self.firer.stop();
             }
             self.drain_warnings(None);
@@ -1712,7 +1797,10 @@ impl<F: PulseFirer> ClassicalShockService<F> {
 
     /// [`Self::abort`] with the host's reason recorded verbatim in the trip.
     pub fn abort_with_reason(&mut self, reason: &str) -> Result<(), ServiceError> {
-        if self.state == RunState::Aborted {
+        if matches!(
+            self.state,
+            RunState::Aborted | RunState::Held | RunState::NotConverged
+        ) {
             return Ok(());
         }
         self.latch_trip(TripKind::OperatorAbort {
@@ -1837,6 +1925,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             trip: self.trip.clone(),
             metadata: self.cfg.metadata.clone(),
             honesty: Honesty::for_path(path),
+            identification: self.closed.as_ref().and_then(|c| c.summary.clone()),
+            law: self.law_report(),
         }
     }
 
@@ -1885,10 +1975,10 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 .map(|t| t.amplitude_envelope.pass),
             last_velocity_change_pass: self.last_tolerance.as_ref().map(|t| t.velocity_change.pass),
             last_substitution_pass: self.last_tolerance.as_ref().map(|t| t.substitution.pass),
-            identification: None,
-            prediction: None,
-            law: None,
-            held: None,
+            identification: self.closed.as_ref().and_then(|c| c.summary.clone()),
+            prediction: self.prediction(),
+            law: self.law_status(),
+            held: self.held.clone(),
         }
     }
 
@@ -1912,17 +2002,32 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             v
         };
         let drive = place(&p.drive);
-        // The open loop plays the reference itself: the drive in g is what
-        // the pulse aimed for.
-        let reference = drive.clone();
+        let (reference, sign) = match &self.closed {
+            // The closed loop aims for the reference on its grid at the
+            // pulse's scale.
+            Some(c) => (
+                c.grid.reference.iter().map(|v| v * p.scale).collect(),
+                c.grid.sign,
+            ),
+            // The open loop plays the reference itself: the drive in g is
+            // what the pulse aimed for.
+            None => (drive.clone(), 1.0),
+        };
         let mut spec = self.cfg.spec.clone();
         spec.amplitude_g = p.commanded_amplitude_g;
-        let band = crate::tolerance::tolerance_band(
+        let mut band = crate::tolerance::tolerance_band(
             &spec,
             self.fs_hz(),
             self.cfg.standard,
             p.aligned_start.unwrap_or(p.lead_frames as i64),
         );
+        if sign < 0.0 {
+            // A negative pulse is judged sign-corrected; draw its band the
+            // way it points.
+            let lower: Vec<f64> = band.upper.iter().map(|v| -v).collect();
+            band.upper = band.lower.iter().map(|v| -v).collect();
+            band.lower = lower;
+        }
         Some(PulseView {
             pulse,
             fs_hz: self.fs_hz(),
@@ -2165,27 +2270,67 @@ mod tests {
         s
     }
 
+    fn closed_cfg(ceiling: f64, abort: f64) -> ClassicalTestConfig {
+        let mut c = cfg();
+        let mut control = crate::law::ClassicalControl::new(c.fs_hz, ceiling, abort);
+        control.sysid.duration_s = 2.0;
+        c.control = Some(control);
+        c.schedule.advance = hertzforge_shock_common::LadderAdvance::OnPass;
+        c
+    }
+
     #[test]
-    fn closed_loop_control_is_refused_until_the_loop_is_built() {
-        // The seam is a contract only: a configuration that asks for the closed
-        // loop must not quietly run the open loop (the reference in g written as
-        // volts) instead.
+    fn a_closed_loop_run_identifies_holds_for_review_and_drives_in_volts() {
+        // A plant of 40 g per volt: the 20 g pulse needs 0.5 V at full level.
+        // The open loop would have played 20 V.
+        let mut s = svc(closed_cfg(0.6, 0.8), ScriptedFirer::host(40.0));
+        s.assess_feasibility().unwrap();
+        s.arm().unwrap();
+        assert_eq!(s.state(), RunState::Armed);
+        assert_eq!(s.identify().unwrap(), RunState::AwaitingReview);
+        let id = s.status().identification.expect("identified");
+        assert!(id.passed && id.coherence_mean > 0.99, "{id:?}");
+        assert!(
+            id.drive_vpk <= 0.6,
+            "the identification is held under the ceiling"
+        );
+        assert!(s.fire_next_pulse().is_err(), "nothing fires in review");
+        assert_eq!(s.proceed().unwrap(), RunState::Firing);
+        let p = s.status().prediction.expect("predicted");
+        assert!((p.drive_vpk - 0.5).abs() < 0.01, "{p:?}");
+        assert_eq!(s.run_auto(100).unwrap(), RunState::Stopped);
+        let report = s.report_data();
+        assert_eq!(report.pulses.len(), 5);
+        for row in &report.pulses {
+            assert_eq!(row.tolerance_overall, Some(true), "{row:?}");
+            let expect = 0.5 * db_scale(row.scheduled_level_db);
+            assert!(
+                (row.drive_vpk.unwrap() - expect).abs() < 0.01 * expect,
+                "{row:?}"
+            );
+            assert!(row.law.as_ref().is_some_and(|l| l.used), "{row:?}");
+        }
+        let law = report.law.expect("the report's law line");
+        assert!(
+            law.line.contains("frequency-domain correction"),
+            "{}",
+            law.line
+        );
+        assert_eq!((law.calls, law.misses, law.refused), (5, 0, 0));
+    }
+
+    #[test]
+    fn a_closed_loop_run_on_the_delegated_path_is_refused() {
         let mut c = cfg();
         c.control = Some(crate::law::ClassicalControl::new(c.fs_hz, 0.5, 0.8));
         #[allow(deprecated)]
         let r = ClassicalShockService::new(
             c,
             ChannelTable::nonuniform_default_8ch(),
-            ScriptedFirer::host(1.0),
+            ScriptedFirer::delegated_like(),
             Some(std::env::temp_dir().join("hertzforge-shock-host-unit")),
         );
-        match r {
-            Err(ServiceError::Config(ConfigError::BadConfig(m))) => {
-                assert!(m.contains("not built yet"), "{m}")
-            }
-            Err(e) => panic!("refused for the wrong reason: {e}"),
-            Ok(_) => panic!("a closed-loop configuration was accepted"),
-        }
+        assert!(matches!(r, Err(ServiceError::Config(_))));
     }
 
     #[test]

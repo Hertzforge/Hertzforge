@@ -56,7 +56,7 @@ pub mod tolerance;
 // paths compiling.
 pub use law::{
     ClassicalControl, ClassicalLaw, ClassicalLawFactory, ClassicalLawSetup, ClassicalPlant,
-    Polarity, PulseInputs, PulseOutputs, ToleranceAbort, Verdict,
+    FdCorrectFactory, FdCorrectLaw, Polarity, PulseInputs, PulseOutputs, ToleranceAbort, Verdict,
 };
 pub use service::config::{CaptureRules, ClassicalTestConfig, ConfigError, GunfireSpec, MetaField};
 pub use service::firer::{BackendPulseFirer, PulseFirer};

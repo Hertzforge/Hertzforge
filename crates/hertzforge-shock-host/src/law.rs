@@ -35,17 +35,17 @@
 //! - reference and response in the control channel's units (EU), drive in
 //!   volts, the plant in EU per volt.
 //!
-//! # State of this seam
+//! # The built-in law
 //!
-//! The traits, the inputs and outputs and [`ClassicalControl`] are the contract
-//! the closed loop is built against. The service stores a factory
-//! ([`crate::ClassicalShockService::with_law_factory`]) but does not call it
-//! yet, and refuses a configuration that asks for closed-loop control until the
-//! loop is built.
+//! [`FdCorrectFactory`] builds [`FdCorrectLaw`], the native `fd_correct`: a
+//! thin wrapper over `hertzforge_shock_law_math::classical`, the same code its
+//! law file runs. The service uses it with its declared defaults when no
+//! factory is installed ([`crate::ClassicalShockService::with_law_factory`]).
 
 use crate::tolerance::ToleranceStandard;
 use hertzforge_dsp::fft::Cplx;
 use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, LawGuards, LawValue};
+use hertzforge_shock_law_math::classical::{self as fdc, FdCorrect, FdCorrectParams, Step};
 use hertzforge_twr::inverse::InverseConfig;
 use hertzforge_twr::sysid::SysIdConfig;
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,21 @@ pub const DEFAULT_BAND_HI_HZ: f64 = 5000.0;
 pub const DEFAULT_BAND_HI_FRACTION_OF_FS: f64 = 0.4;
 /// Default mean in-band coherence under which identification holds the run.
 pub const DEFAULT_SYSID_MIN_MEAN_COHERENCE: f64 = 0.8;
+/// Default Tikhonov floor of the classical inverse, as a fraction of the
+/// identified plant's in-band peak gain.
+///
+/// Time waveform replication's own default is 0.05. A classical pulse puts most
+/// of its energy well below a test article's first resonance, where the plant's
+/// gain is a small fraction of its in-band peak; at 0.05 the regularization
+/// alone holds those bins low by `|H|^2 / (|H|^2 + eps)`, 23% for a Q 10 mode,
+/// and the built-in law then needs five pulses to pass a mode it identified
+/// perfectly. At 0.01 the same seed lands within 2%. The coherence floor still
+/// leaves out every bin the identification cannot vouch for, and the core's
+/// per-pulse caps and the drive ceiling and abort bound what the inverse can
+/// ask for.
+pub const DEFAULT_TIKHONOV_FLOOR: f64 = 0.01;
+/// Default per-bin coherence floor of the trust mask.
+pub const DEFAULT_COHERENCE_FLOOR: f64 = 0.9;
 /// Default reference dynamic-range floor, dB below the reference spectrum's
 /// in-band peak: bins under it are not trusted.
 pub const DEFAULT_REF_FLOOR_DB: f64 = 50.0;
@@ -203,6 +218,97 @@ pub trait ClassicalLawFactory: Send + Sync {
     fn describe(&self) -> LawDescriptor;
 }
 
+/// The factory for the built-in law, `fd_correct`, with its parameter values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FdCorrectFactory {
+    params: FdCorrectParams,
+}
+
+impl FdCorrectFactory {
+    /// The built-in law with `params`.
+    pub fn new(params: FdCorrectParams) -> Self {
+        FdCorrectFactory { params }
+    }
+
+    /// The parameter values it builds the law with.
+    pub fn params(&self) -> FdCorrectParams {
+        self.params
+    }
+}
+
+impl Default for FdCorrectFactory {
+    /// The declared defaults.
+    fn default() -> Self {
+        FdCorrectFactory::new(FdCorrectParams::default())
+    }
+}
+
+impl ClassicalLawFactory for FdCorrectFactory {
+    fn build(
+        &self,
+        setup: &ClassicalLawSetup<'_>,
+    ) -> Result<Box<dyn ClassicalLaw + Send>, LawFault> {
+        FdCorrect::new(
+            self.params,
+            setup.record_len,
+            setup.reference,
+            setup.plant.inverse,
+            setup.plant.trusted,
+        )
+        .map(|math| Box::new(FdCorrectLaw { math }) as Box<dyn ClassicalLaw + Send>)
+        .map_err(LawFault::Failed)
+    }
+
+    fn describe(&self) -> LawDescriptor {
+        LawDescriptor {
+            id: fdc::ID.into(),
+            name: fdc::NAME.into(),
+            version: fdc::VERSION.into(),
+            sha256: None,
+            params: serde_json::json!({
+                "beta": self.params.beta,
+                "max_db_per_pulse": self.params.max_db_per_pulse,
+                "initial_backoff_db": self.params.initial_backoff_db,
+            }),
+        }
+    }
+}
+
+/// The built-in law, `fd_correct`, as a native law.
+#[derive(Debug, Clone)]
+pub struct FdCorrectLaw {
+    math: FdCorrect,
+}
+
+fn outputs(step: Step) -> PulseOutputs {
+    PulseOutputs {
+        values: step
+            .report
+            .values()
+            .iter()
+            .map(|(k, v)| LawValue::new(*k, *v))
+            .collect(),
+        drive: step.drive,
+    }
+}
+
+impl ClassicalLaw for FdCorrectLaw {
+    fn name(&self) -> &str {
+        fdc::NAME
+    }
+
+    fn seed(&mut self, _inputs: &PulseInputs<'_>) -> Result<PulseOutputs, LawFault> {
+        self.math.seed().map(outputs).map_err(LawFault::Failed)
+    }
+
+    fn iterate(&mut self, inputs: &PulseInputs<'_>) -> Result<PulseOutputs, LawFault> {
+        self.math
+            .iterate(inputs.response)
+            .map(outputs)
+            .map_err(LawFault::Failed)
+    }
+}
+
 /// When a failed tolerance verdict aborts the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -281,9 +387,10 @@ pub struct ClassicalControl {
 impl ClassicalControl {
     /// The defaults at `fs_hz`, with the drive ceiling and abort the run must
     /// state: identification 0.05 V rms for 4 s over 5 Hz to
-    /// min(5 kHz, 0.4 fs), the correction band the same, the inverse's and the
-    /// guards' defaults, review hold on, tolerance failures aborting at full
-    /// level, positive polarity.
+    /// min(5 kHz, 0.4 fs), the correction band the same, a Tikhonov floor of
+    /// [`DEFAULT_TIKHONOV_FLOOR`] and a coherence floor of
+    /// [`DEFAULT_COHERENCE_FLOOR`], the guards' defaults, review hold on,
+    /// tolerance failures aborting at full level, positive polarity.
     pub fn new(fs_hz: f64, drive_vpk_ceiling: f64, drive_vpk_abort: f64) -> Self {
         let band_hi_hz = DEFAULT_BAND_HI_HZ.min(DEFAULT_BAND_HI_FRACTION_OF_FS * fs_hz);
         ClassicalControl {
@@ -297,7 +404,10 @@ impl ClassicalControl {
             },
             band_lo_hz: DEFAULT_BAND_LO_HZ,
             band_hi_hz,
-            inverse: InverseConfig::default(),
+            inverse: InverseConfig {
+                tikhonov_beta_floor: DEFAULT_TIKHONOV_FLOOR,
+                coherence_floor: DEFAULT_COHERENCE_FLOOR,
+            },
             ref_floor_db: DEFAULT_REF_FLOOR_DB,
             min_band_energy: DEFAULT_MIN_BAND_ENERGY,
             review_hold: true,

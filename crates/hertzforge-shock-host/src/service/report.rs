@@ -410,6 +410,36 @@ pub enum EventKind {
     },
     /// A freeform note (an honesty caveat surfaced during the run).
     Note { text: String },
+    /// Closed loop: system identification finished.
+    Identified {
+        /// Mean in-band coherence.
+        coherence_mean: f64,
+        /// The floor it had to reach.
+        min_mean_coherence: f64,
+        /// Bins the core trusts on the pulse grid.
+        trusted_bins: usize,
+        /// The fraction of the reference's energy they cover.
+        band_energy: f64,
+        /// The identification drive's peak as played, volts.
+        drive_vpk: f64,
+    },
+    /// Closed loop: identification held the run before any pulse.
+    Held { reason: HeldReason },
+    /// Closed loop: the control law was called.
+    LawCalled {
+        /// Pulses fired before the call.
+        pulse: u64,
+        /// The seed or an iteration.
+        call: hertzforge_shock_common::law_guard::LawCall,
+        /// The output was used.
+        used: bool,
+        /// Why it was not (the wire name), when it was not.
+        reason: Option<String>,
+        /// What the core said about it, when it was not used.
+        detail: Option<String>,
+        /// How long the call took, ms.
+        call_ms: f64,
+    },
 }
 
 /// The event log: a growing list of timestamped events.
@@ -850,6 +880,46 @@ pub struct ReportData {
     pub metadata: Vec<MetaField>,
     /// The honest limitations.
     pub honesty: Honesty,
+    /// Closed loop: what identification found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identification: Option<IdentificationSummary>,
+    /// Closed loop: the control law's line and its guard counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub law: Option<LawReport>,
+}
+
+/// The report's control-law line and the guard counts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LawReport {
+    /// One line: the law's name, version and short hash.
+    pub line: String,
+    /// The law's identity.
+    pub descriptor: LawDescriptor,
+    /// Calls, the seed included.
+    pub calls: u64,
+    /// Calls whose output was not used.
+    pub misses: u64,
+    /// Calls whose output the core refused (a subset of `misses`).
+    pub refused: u64,
+    /// Drive bins over the per-pulse cap, over the run's refused outputs.
+    pub capped_bins: u64,
+    /// Outputs whose peak was over the per-pulse cap.
+    pub capped_peaks: u64,
+    /// The slowest call, ms.
+    pub worst_call_ms: f64,
+    /// One call's budget, ms.
+    pub budget_ms: f64,
+}
+
+impl LawReport {
+    /// The report's one line for `d`: name, version and the first 12 hex
+    /// digits of a law file's hash ("built in" for a built-in law).
+    pub fn line_for(d: &LawDescriptor) -> String {
+        match &d.sha256 {
+            Some(h) => format!("{} {} ({})", d.name, d.version, &h[..h.len().min(12)]),
+            None => format!("{} {} (built in)", d.name, d.version),
+        }
+    }
 }
 
 /// The one status snapshot the UI polls (the status surface).
