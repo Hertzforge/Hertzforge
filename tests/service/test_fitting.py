@@ -204,7 +204,7 @@ def test_a_modes_damping_and_description_are_typed_into_its_row(project):
     assert mode['damping'] == pytest.approx(0.05) and mode['description'] == 'twist'
     assert not np.allclose(residual, fit.session.residual_matrix()), \
         'the typed damping moves the residual'
-    with pytest.raises(ProtocolError, match='above 0 and up to 1'):
+    with pytest.raises(ProtocolError, match='fraction of critical'):
         fitting.act(fit, 'fit.edit', {'mode': 0, 'damping': 1.5})
     with pytest.raises(ProtocolError, match='"damping" or "description"'):
         fitting.act(fit, 'fit.edit', {'mode': 0})
@@ -405,6 +405,144 @@ def test_a_drive_point_written_with_opposite_signs_is_a_drive_point():
     scale = np.abs(negated.ordinate).max()
     assert np.abs(overlay.ordinate - negated.ordinate).max() < 1e-3 * scale
     assert np.allclose(fit.session.synthesis_records(), overlay.ordinate)
+
+
+def test_fit_modes_stops_when_no_mode_is_left():
+    from hertzforge.service.ops_project import OPERATIONS
+
+    project = _project_of(H=_frf())
+    op = next(op for op in OPERATIONS if op.id == 'project.fit_modes')
+    values = op.resolve({'frf': 'H'}, objects={'H': 'frf'},
+                        verbs={'H': projects.verbs_of(project, 'H')})
+    assert values['count'] == 10
+    op.run(project, values)
+    found = project['H Modes']
+    assert found.frequency == pytest.approx([20.0, 50.0, 90.0], abs=1e-3)
+    assert found.damping == pytest.approx([0.01, 0.02, 0.015], abs=1e-4)
+
+
+@pytest.mark.parametrize('dim', ['acceleration/voltage', 'acceleration/acceleration',
+                                 'force/force'])
+def test_a_fit_not_per_force_is_not_labeled_mass_normalized(dim):
+    project = _project_of(H=_frf(dim=dim))
+    fit = fitting.start(project, {'frf': 'H'})
+    _confirm_all(fit)
+    published = fit.session.shape_set()
+    assert published.unscaled and published.mass_unit is None
+
+
+def test_a_fit_per_force_stays_labeled_mass_normalized():
+    project = _project_of(H=_frf())
+    fit = fitting.start(project, {'frf': 'H'})
+    _confirm_all(fit)
+    published = fit.session.shape_set()
+    assert not published.unscaled and published.mass_unit == 'kg'
+
+
+def test_an_uneven_grid_is_searched_at_its_own_spacing():
+    logs = np.geomspace(1.0, 200.0, 600)
+    values = _modes().synthesize_frf(logs, DOFS, ['1Z+'] * 4, power=2)
+    measured = Frf(logs, values, response_dof=DOFS, reference_dof=['1Z+'] * 4,
+                   ordinate_dim=['acceleration/force'] * 4)
+    fit = fitting.start(_project_of(H=measured), {'frf': 'H'})
+    _confirm_all(fit)
+    found = [mode['frequency'] for mode in fit.session.modes]
+    assert found == pytest.approx([20.0, 50.0, 90.0], abs=5e-3)
+    left = np.abs(fit.session.residual_matrix()).max() / np.abs(fit.session.matrix).max()
+    assert left < 1e-2
+
+
+def test_refine_takes_an_adopted_rigid_mode_on_a_zero_hertz_line():
+    rigid = ShapeSet([0.0, 20.0, 20.6], [0.0, 0.01, 0.01], DOFS, PHI, mass_unit='kg')
+    project = _project_of(H=_frf(truth=rigid), Set=rigid)
+    assert project['H'].abscissa[0] == 0.0
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Set'})
+    fitting.act(fit, 'fit.refine', {})
+    assert all(np.isfinite(mode['shape']).all() for mode in fit.session.modes)
+
+
+@pytest.mark.parametrize('lines', [1, 2])
+def test_too_few_lines_is_a_reading_of_nothing_through_the_server(lines):
+    from hertzforge.service import server
+
+    plain = _frf()
+    short = Frf(LINES[40:40 + lines], plain.ordinate[:, 40:40 + lines], response_dof=DOFS,
+                reference_dof=['1Z+'] * 4, ordinate_dim=['acceleration/force'] * 4)
+
+    async def main():
+        service = server.Service()
+        connection = server.Connection(service, None)
+        connection.project = projects.OpenProject(_project_of(H=short))
+        answer = await connection.fit_request('fit.start', {'frf': 'H'})
+        service.close()
+        return answer
+
+    reading = asyncio.run(main())['fit']['half_power']
+    assert reading['q'] is None and 'three lines' in reading['notes'][0]
+
+
+def test_the_cursor_stays_on_the_data_and_a_search_above_zero():
+    project = _project_of(H=_frf())
+    fit = fitting.start(project, {'frf': 'H'})
+    for outside in (-5.0, 1e6):
+        with pytest.raises(ProtocolError, match='outside the 0 to 200 Hz'):
+            fitting.act(fit, 'fit.move', {'frequency': outside})
+    zeros = Frf(LINES, 0.0 * _frf().ordinate, response_dof=DOFS, reference_dof=['1Z+'] * 4,
+                ordinate_dim=['acceleration/force'] * 4)
+    silent = fitting.start(_project_of(H=zeros), {'frf': 'H'})
+    assert fitting.state(silent)['pending']['frequency'] >= 0.0
+
+
+def test_one_damping_limit_refused_alike_by_the_row_and_the_hold():
+    fit = fitting.start(_project_of(H=_frf()), {'frf': 'H'})
+    _confirm_all(fit, 1)
+    for bad in (-1.0, 3.0, 0.6, 1e-5):
+        with pytest.raises(ProtocolError, match='from 0.0001'):
+            fitting.act(fit, 'fit.damping', {'damping': bad})
+        with pytest.raises(ProtocolError, match='from 0.0001'):
+            fitting.act(fit, 'fit.edit', {'mode': 0, 'damping': bad})
+    fitting.act(fit, 'fit.damping', {'damping': 0.5})
+    assert fit.session.pending['damping'] == 0.5
+
+
+def test_a_typed_damping_keeps_the_replay_list_in_step():
+    fit = fitting.start(_project_of(H=_frf()), {'frf': 'H'})
+    _confirm_all(fit, 3)
+    fitting.act(fit, 'fit.edit', {'mode': 1, 'damping': 0.03})
+    assert sorted(fit.session.confirmed)[1][1] == 0.03
+    fitting.act(fit, 'fit.delete', {'modes': [1]})
+    assert len(fit.session.modes) == len(fit.session.confirmed) == 2
+
+
+def test_a_published_fit_journals_the_line_that_replays_it():
+    project = _project_of(H=_frf())
+    project.journal.clear()
+    fit = fitting.start(project, {'frf': 'H'})
+    _confirm_all(fit, 2)
+    assert fitting.publish(project, fit, {'name': 'Modes'}) == 'Modes'
+    _confirm_all(fit, 1)
+    fitting.act(fit, 'fit.refine', {})
+    fitting.publish(project, fit, {})
+    assert len(project.journal) == 1, 'the line settles as the fit grows'
+    line = project.journal[0]
+    assert line.startswith("project.fit_modes('H', at=[") and "name='Modes'" in line
+    published = project['Modes']
+    again = _project_of(H=_frf())
+    exec(line, {'project': again})
+    assert np.allclose(again['Modes'].shape_matrix, published.shape_matrix)
+    assert project.provenance['Modes']['verb'] == 'fit_modes'
+    project.refresh('Modes')
+    assert np.allclose(project['Modes'].shape_matrix, published.shape_matrix)
+
+
+def test_an_edit_no_call_can_make_journals_that_it_cannot_replay():
+    big = ShapeSet([20.0], [0.01], [*DOFS, '5Z+'], [[*PHI[0], 0.7]], mass_unit='kg')
+    project = _project_of(H=_frf(), Big=big)
+    project.journal.clear()
+    fit = fitting.start(project, {'frf': 'H', 'shapes': 'Big'})
+    fitting.publish(project, fit, {})
+    assert project.journal[-1].startswith('#') and 'not replayable' in project.journal[-1]
+    assert 'Big' not in project.provenance
 
 
 def _noisy_channel(seed=1):

@@ -123,7 +123,7 @@ def act(fit: Fit, method: str, params: Mapping[str, Any]) -> None:
         elif method == 'fit.move':
             session.move_to(_number(params, 'frequency', method))
         elif method == 'fit.damping':
-            session.override_damping(_number(params, 'damping', method))
+            session.override_damping(_damping(params, method))
         elif method == 'fit.fit':
             session.fit_pending()
         elif method == 'fit.confirm':
@@ -172,10 +172,23 @@ def delete(session: Any, indices: list[int]) -> None:
     session.preview = None
 
 
+def _damping(params: Mapping[str, Any], method: str) -> float:
+    """The fraction of critical `params` gives, within what a fit's modes can
+    have (`modal_fit.DAMPING_LIMITS`), or refused in those words."""
+    from hertzforge.core.modal_fit import DAMPING_LIMITS
+
+    value = _number(params, 'damping', method)
+    low, high = DAMPING_LIMITS
+    if not low <= value <= high:
+        raise refused(f'damping is a fraction of critical, from {low:g} ({low * 100:g} %) '
+                      f'to {high:g} ({high * 100:g} %); not {value:g}')
+    return value
+
+
 def edit(session: Any, params: Mapping[str, Any]) -> None:
-    """`fit.edit`: a confirmed mode's damping (a fraction of critical,
-    above 0 and up to 1) or description typed into its row, as Visual
-    Dynamics' fit table takes them."""
+    """`fit.edit`: a confirmed mode's damping or description typed into its
+    row, as Visual Dynamics' fit table takes them. The replay list follows the
+    damping, so taking the mode back or replaying the fit finds it."""
     k = params.get('mode')
     if isinstance(k, bool) or not isinstance(k, int):
         raise bad_request('fit.edit needs "mode", a mode index from 0')
@@ -184,9 +197,10 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
     if damping is None and description is None:
         raise bad_request('fit.edit needs "damping" or "description"')
     if damping is not None:
-        value = _number(params, 'damping', 'fit.edit')
-        if not 0.0 < value <= 1.0:
-            raise refused('damping is a fraction of critical, above 0 and up to 1 (100 %)')
+        value = _damping(params, 'fit.edit')
+        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        if pick in session.confirmed:
+            session.confirmed[session.confirmed.index(pick)] = (pick[0], value)
         session.modes[k]['damping'] = value
     if description is not None:
         if not isinstance(description, str):
@@ -205,19 +219,35 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
         shapes.source = project[fit.frf].source
     if fit.shapes is not None and fit.shapes in project:
         project[fit.shapes] = shapes
+        _journal(project, fit)
         return fit.shapes
     name = params.get('name') or f'{fit.frf} Modes'
     if not isinstance(name, str) or not name.strip():
         raise bad_request('fit.publish "name" is a name')
-    added = project.add(name.strip(), shapes)
-    # in the FRF's group, as the core's own fit is (`Project.fit_modes`), so
-    # it animates on that group's geometry
-    try:
-        project.link(fit.frf, added)
-    except ValueError:
-        pass
+    # the fit is the record of this stretch, as `_journal` writes it
+    with project.journal_as(None):
+        added = project.add(name.strip(), shapes)
+        # in the FRF's group, as the core's own fit is (`Project.fit_modes`), so
+        # it animates on that group's geometry
+        try:
+            project.link(fit.frf, added)
+        except ValueError:
+            pass
     fit.shapes = added
+    _journal(project, fit)
     return added
+
+
+def _journal(project: Any, fit: Fit) -> None:
+    """The published fit as the line that replays it, settling in place as the
+    fit grows, as Visual Dynamics journals its fit."""
+    line = project.fit_replay_line(fit.frf, fit.shapes, fit.session, fit.coherence)
+    prefix = f'project.fit_modes({fit.frf!r}, at='
+    journal = project.journal
+    if journal and journal[-1].startswith(prefix) and journal[-1].endswith(f'name={fit.shapes!r})'):
+        journal[-1] = line
+    else:
+        journal.append(line)
 
 
 def state(fit: Fit) -> dict[str, Any]:
@@ -251,7 +281,12 @@ def _half_power(fit: Fit) -> dict[str, Any]:
     (`ModalFitSession.half_power`), as Visual Dynamics shows it beside the
     fit: the peak's frequency, the two crossings, Q and the damping they
     give, or why it could not be read."""
-    reading = fit.session.half_power(warn=False)
+    try:
+        reading = fit.session.half_power(warn=False)
+    except ValueError as error:
+        # too few lines to hold a peak is a reading of nothing, not a failure
+        return {'frequency': float(fit.session.pending['frequency']), 'low': None, 'high': None,
+                'q': None, 'damping': None, 'notes': [str(error)]}
 
     def number(value: Any) -> float | None:
         return None if value is None or not np.isfinite(value) else float(value)

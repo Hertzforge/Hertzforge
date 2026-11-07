@@ -5282,13 +5282,15 @@ class Project(dict):
         """Fit a modal model to an FRF set, as the fitting screen does.
 
         This runs the screen's loop: confirm the suggested mode, then
-        take the next suggestion, `limit` times. The session's
+        take the next suggestion, up to `limit` times. The session's
         suggestion logic makes every choice (a peak already confirmed is
         not offered again unless a different shape is found there, as
-        for a repeated pair), and the loop adds no check of its own. On
-        the screen the person stops the loop; in a script `limit` does,
-        and the plate demonstration's cap is a worked example of
-        choosing it.
+        for a repeated pair). On the screen the person stops the loop;
+        here it stops when no peak left in the residual holds a tenth of
+        the measurement at its line (`suggest(modes_only=True)`), since
+        the rest is what fitted modes left behind, or at `limit`, and the
+        plate demonstration's cap is a worked example of choosing it.
+        The first suggestion is always taken.
 
         On the screen the zoom does the job of `bounds`: what is on the
         plot is what gets searched. A script has no plot, so it gives
@@ -5334,7 +5336,7 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
-        # The loop adds no second opinion. It used to: a proximity guard
+        # The loop adds no second opinion on where a mode is. It used to: a proximity guard
         # here vetoed any suggestion within 1 Hz of a confirmed mode, the
         # same ridge-trap fix the session has since outgrown, and it
         # silently skipped the second mode of a repeated pair that
@@ -5360,23 +5362,38 @@ class Project(dict):
             coherence = self[self.name_of(coherence)]
         session = ModalFitSession(self[source], records, coherence)
         if at is not None:
-            for pick in at:
-                frequency, damping, *described = pick
-                session.confirm(frequency=float(frequency),
-                                damping=float(damping),
-                                description=(described[0] if described
-                                             else None))
+            _confirm_picks(session, at)
         else:
             low, high = bounds or (float(self[source].abscissa[0]),
                                    float(self[source].abscissa[-1]))
             session.suggest((low, high))
-            for _ in range(limit):
+            for count in range(limit):
                 session.confirm()
-                session.suggest((low, high))
+                if (count + 1 < limit
+                        and session.suggest((low, high), modes_only=True) is None):
+                    break
         for _ in range(int(refine)):
             session.refine_residues()
         return self._derive(source, session.shape_set(),
                             name or f'{source} Modes')
+
+    def fit_replay_line(self, source: str, name: str, session: Any,
+                        coherence: str | None = None) -> str:
+        """The journal line that replays a fit made by hand and published
+        as `name`, and the recipe `refresh` runs it again from: a
+        `fit_modes(at=...)` call, or a comment when no call can make the set
+        (`ModalFitSession.replay`)."""
+        replay = session.replay()
+        args = '' if replay is None else f'at={replay["at"]!r}' + ''.join(
+            f', {key}={value!r}' for key, value in (
+                ('refine', replay['refine'] or None), ('records', replay['records']),
+                ('coherence', coherence)) if value is not None)
+        if replay is None:
+            self.provenance.pop(name, None)
+            return f'# project.fit_modes({source!r}, name={name!r}) — not replayable'
+        self.provenance[name] = {'verb': 'fit_modes', 'source': source, 'state': None,
+                                 'params': {**replay, 'coherence': coherence}}
+        return f'project.fit_modes({source!r}, {args}, name={name!r})'
 
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
@@ -9138,6 +9155,26 @@ for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))
 
 
+def _confirm_picks(session, picks):
+    """Confirm these (frequency, damping[, description]) in the order given."""
+    for frequency, damping, *described in picks:
+        session.confirm(frequency=float(frequency), damping=float(damping),
+                        description=described[0] if described else None)
+
+
+def _fitted_again(project, source, params):
+    """The modes a hand fit's picks give on the FRF as it stands."""
+    from .core.modal_fit import ModalFitSession
+
+    coherence = params.get('coherence')
+    session = ModalFitSession(project[source], params.get('records'),
+                              None if coherence is None else project[coherence])
+    _confirm_picks(session, params['at'])
+    for _ in range(int(params.get('refine') or 0)):
+        session.refine_residues()
+    return session.shape_set()
+
+
 def _extract_again(project, source, params):
     """The sine levels read again with the history's current setting
     — what `refresh` does for a level set whose smoothing moved."""
@@ -9170,6 +9207,7 @@ _RECOMPUTE = {
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
+    'fit_modes': lambda p, s, k: _fitted_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
     'resample': lambda p, s, k: p[s].resample(
         k['rate'], anti_alias=k.get('anti_alias', True), order=k.get('order')),
