@@ -23,6 +23,7 @@ import numpy as np
 
 from ..core.data import direction_code, dof_string, parse_dof
 from ..core.shapes import ShapeSet
+from .plain_numpy import npy_dtype, read_npy
 
 EXTENSIONS = ('.npy',)
 
@@ -33,14 +34,14 @@ def sniff(path: str | os.PathLike) -> bool:
     """True for a `.npy` holding a structured array with at least the fields
     `frequency`, `damping`, `coordinate` and `shape_matrix`.
 
-    The array is loaded to read its field names, and a file that fails to
-    load is not this format.
+    Only the file's header is read, which names the fields, and a file
+    without one is not this format.
     """
     if not str(path).endswith(EXTENSIONS):
         return False
     try:
-        array = np.load(path, allow_pickle=True)
-        return array.dtype.names is not None and _FIELDS <= set(array.dtype.names)
+        names = npy_dtype(path).names
+        return names is not None and _FIELDS <= set(names)
     except Exception:  # noqa: BLE001 - sniffers must not raise on foreign files
         return False
 
@@ -51,9 +52,10 @@ def load(path: str | os.PathLike, mass_unit: str | None = None) -> ShapeSet:
     `modal_mass` may be absent from the file, and each mode's five comment
     fields are joined with '; '. `mass_unit` declares the mass the shapes
     were normalized against; without it they import unit-less. Raises
-    ValueError for a file with no modes or with modes over differing DOFs.
+    ValueError for a file with no modes, with modes over differing DOFs,
+    or holding Python objects.
     """
-    array = np.load(path, allow_pickle=True).reshape(-1)
+    array = read_npy(path).reshape(-1)
     if array.size == 0:
         raise ValueError(f'{path} contains no modes')
 
@@ -137,4 +139,4 @@ def save(shapes: ShapeSet, path: str | os.PathLike, unit_system: UnitSystem | No
     for i in range(shapes.num_shapes):
         described = str(shapes.description[i]).strip()
         records['comment1'][i] = (described or str(shapes.comment[i]))[:80]
-    np.save(path, records, allow_pickle=True)
+    np.save(path, records, allow_pickle=False)
