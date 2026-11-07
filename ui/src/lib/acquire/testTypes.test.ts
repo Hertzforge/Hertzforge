@@ -8,6 +8,7 @@ import { createControlServer } from '$lib/protocol/mock/control';
 import { mockSocketFactory, type MockServer } from '$lib/protocol/mock/socket';
 import { defaultSetup } from './setup';
 import { AcquireState } from './store.svelte';
+import type { RandomState } from '$lib/protocol/types';
 import { liveTestOf, TEST_GROUPS, TEST_TYPES, TestTypeView, typesIn, type LiveTest, type TestType } from './testTypes.svelte';
 
 const until = async (cond: () => boolean, ms = 8000) => {
@@ -160,6 +161,17 @@ describe('the chooser', () => {
 		expect(liveTestOf({ run: null, syncError: 'refused' }, 'open')).toBeNull();
 		expect(liveTestOf({ run: null, syncError: null }, 'retrying')).toBeNull();
 		expect(liveTestOf({ run: null, syncError: null }, 'incompatible')).toBeNull();
+	});
+
+	it('reads a live classical shock run, and waits for its store to answer too', () => {
+		const random = { run: { state: 'configured' } as RandomState, syncError: null };
+		const mimo = { status: { state: 'unconfigured' as const }, syncError: null };
+		expect(liveTestOf(random, 'open', mimo, { status: { state: 'review' }, syncError: null })).toBe('shock');
+		expect(liveTestOf(random, 'open', mimo, { status: { state: 'stopping' }, syncError: null })).toBe('shock');
+		expect(liveTestOf(random, 'open', mimo, { status: { state: 'finished' }, syncError: null })).toBeNull();
+		// the shock store has not answered yet: whether a run is live is not known
+		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: null })).toBeUndefined();
+		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: 'refused' })).toBeNull();
 	});
 });
 

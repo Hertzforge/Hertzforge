@@ -6,13 +6,10 @@
 	 * budgets the core holds the law to. Every field starts at the service's default with its unit
 	 * and says in a line what it does. The law is fixed once the run starts.
 	 */
-	import ParamForm from '$lib/forms/ParamForm.svelte';
-	import type { ParamValues } from '$lib/forms/params';
-	import type { LawEntry, LawParam } from '$lib/protocol/mimo';
-	import Findings from '../Findings.svelte';
+	import LawPanel from '../law/LawPanel.svelte';
 	import NumberField from '../NumberField.svelte';
 	import { N_PTS_OPTIONS } from '../setup';
-	import { defaultMimoSetup, lawParamDescriptor, lawParamError, type MimoDraft } from './mimoSetup';
+	import { defaultMimoSetup } from './mimoSetup';
 	import type { MimoState } from './mimoStore.svelte';
 
 	interface Props {
@@ -30,38 +27,14 @@
 	const shape = $derived(mimo.check && mimo.checkedKey === mimo.key ? mimo.check.shape.shape : null);
 	const DEF = defaultMimoSetup();
 
-	let importPath = $state('');
-	let importOpen = $state(false);
-
-	const descriptors = $derived((law?.params ?? []).map(lawParamDescriptor).filter((p) => p !== null));
-	const extras = $derived((law?.params ?? []).filter((p) => p.kind === 'per_channel' || p.kind === 'curve'));
 	const errs = (k: string) => E[k] ?? [];
 	const warns = (k: string) => W[k] ?? [];
 
-	const CHECK_WORDS: Record<LawEntry['check']['status'], string> = {
-		built_in: 'Built in',
-		passed: 'Check passed',
-		unchecked: 'Not checked',
-		failed: 'Check failed',
-		unreadable: 'Check record unreadable'
-	};
 	const SHAPE_WORDS: Record<string, string> = {
 		square: 'as many controls as drives',
 		more_controls_than_drives: 'more controls than drives',
 		fewer_controls_than_drives: 'fewer controls than drives'
 	};
-
-	function short(hash: string | null): string {
-		return hash ? `${hash.slice(0, 12)}...${hash.slice(-6)}` : 'Built in';
-	}
-
-	async function doImport() {
-		if (!importPath.trim()) return;
-		if (await mimo.importLaw(importPath)) {
-			importPath = '';
-			importOpen = false;
-		}
-	}
 
 	type Section = 'estimation' | 'identification' | 'control';
 	interface Spec {
@@ -114,16 +87,6 @@
 		d.frf_blend = base.frf_blend;
 	}
 
-	function perChannel(p: LawParam): number[] {
-		const v = d.law.params[p.key];
-		return Array.isArray(v) ? (v as number[]) : [];
-	}
-
-	function curve(p: LawParam): [number, number][] {
-		const v = d.law.params[p.key];
-		return Array.isArray(v) ? (v as [number, number][]) : [];
-	}
-
 	const defOf = (s: Section, key: string) => (DEF[s] as unknown as Record<string, number>)[key];
 </script>
 
@@ -136,109 +99,30 @@
 {/snippet}
 
 <div class="cols">
-	<section class="aq-panel" aria-labelledby="law-title" data-testid="law-panel">
-		<div class="aq-head">
-			<h2 id="law-title">Control Law</h2>
-			<span class="aq-sub">Fixed once the run starts; it can be changed at the prediction, before engaging.</span>
-			<span class="aq-spacer"></span>
-			<button class="btn sm" disabled={locked} aria-expanded={importOpen} onclick={() => (importOpen = !importOpen)} data-testid="law-import-open">Import Law</button>
-		</div>
-
-		{#if importOpen}
-			<div class="import" data-testid="law-import">
-				<label for="law-path" class="lbl">Law file (.wasm)</label>
-				<input id="law-path" class="field mono" bind:value={importPath} placeholder="Full path on the computer that runs the test" disabled={locked} />
-				<button class="btn sm primary" disabled={locked || !importPath.trim() || mimo.busy !== null} onclick={doImport}>{mimo.busy === 'Import Law' ? 'Importing' : 'Import'}</button>
-				<p class="aq-muted aq-small">The law is checked when it is imported and copied into the program's data folder under its hash. An imported law runs on the simulator at once; it drives hardware only once its check has passed.</p>
-			</div>
-		{/if}
-
-		{#if laws.length}
-			<div class="laws" role="radiogroup" aria-label="Control law" data-testid="law-list">
-				{#each laws as l (l.id)}
-					{@const on = d.law.id === l.id}
-					<button type="button" role="radio" class="law" class:on aria-checked={on} disabled={locked} onclick={() => mimo.chooseLaw(l.id)} data-testid="law-{l.builtin ? l.id : 'imported'}">
-						<span class="dot" aria-hidden="true">{#if on}<svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" stroke-width="1.4" /><circle cx="6" cy="6" r="2.6" fill="currentColor" /></svg>{:else}<svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" stroke-width="1.2" /></svg>{/if}</span>
-						<span class="name">{l.name}</span>
-						<span class="ver num">{l.version}</span>
-						<span class="kind">{l.builtin ? 'Built in' : 'Imported'}</span>
-						<span class="sum">{l.summary}</span>
-					</button>
-				{/each}
-			</div>
-		{:else}
-			<p class="aq-muted aq-small">{mimo.connected ? 'Reading the law catalog.' : 'The law catalog is read from the control service once it is connected.'}</p>
-		{/if}
-		{#if mimo.lawProblems.length}
-			<Findings items={mimo.lawProblems.map((p) => ({ level: 'warning' as const, message: `${p.file}: ${p.reason}` }))} />
-		{/if}
-		<Findings items={errs('law.id').map((message) => ({ level: 'error' as const, message }))} testid="law-findings" />
-
-		{#if law}
-			<div class="details" data-testid="law-details">
-				<h3>{law.name} <span class="num aq-muted">{law.version}</span></h3>
-				<p class="aq-small summary">{law.summary}</p>
-				<dl class="facts">
-					<div><dt>Author</dt><dd>{law.author}</dd></div>
-					<div><dt>File hash</dt><dd class="num mono" title={law.sha256 ?? undefined}>{short(law.sha256)}</dd></div>
-					<div>
-						<dt>Check</dt>
-						<dd class="check {law.check.status}">
-							{#if law.check.status === 'failed' || law.check.status === 'unreadable'}
-								<svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /></svg>
-							{:else if law.check.status === 'unchecked'}
-								<svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true"><path d="M7 1.6l5.6 10H1.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
-							{:else}
-								<svg viewBox="0 0 14 14" width="11" height="11" aria-hidden="true"><path d="M2.5 7.3l2.8 2.8 6-6.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							{/if}
-							{CHECK_WORDS[law.check.status]}
-						</dd>
-					</div>
-					<div><dt>Hardware</dt><dd>{law.check.hardware ? 'May drive hardware' : 'Simulator only'}</dd></div>
-					<div class="wide"><dt>Supports</dt><dd>{(law.shapes ?? []).map((s) => SHAPE_WORDS[s] ?? s).join('; ') || '-'}</dd></div>
-				</dl>
-				<p class="aq-small aq-muted">{law.check.message}</p>
-				{#if admitted && !admitted.admitted}
-					<p class="aq-notice warn aq-small" role="alert">This law does not admit this test{shape ? ` (${SHAPE_WORDS[shape]})` : ''}; the check above says why.</p>
-				{/if}
-			</div>
-
-			{#if law.params.length}
-				<div class="aq-group params" data-testid="law-params">
-					<h3>Parameters</h3>
-					<ParamForm params={descriptors} values={d.law.params as ParamValues} showAllErrors layout="stack" disabled={locked} idPrefix="law" testidPrefix="law-param" />
-					{#each extras as p (p.key)}
-						<div class="extra">
-							<span class="lbl">{p.label}{#if 'unit' in p && p.unit} ({p.unit}){/if}</span>
-							<p class="aq-muted aq-small">{p.help}</p>
-							{#if p.kind === 'per_channel'}
-								<div class="aq-fields">
-									{#each mimo.labels as l, i (i)}
-										<NumberField id="law-{p.key}-{i}" label="{p.label}, {l}" unit={p.unit} step={p.step} min={p.min} max={p.max} value={perChannel(p)[i]} onchange={(v) => (perChannel(p)[i] = v ?? NaN)} disabled={locked} />
-									{/each}
-								</div>
-							{:else if p.kind === 'curve'}
-								<div class="pts">
-									{#each curve(p) as pt, k (k)}
-										<div class="pt">
-											<NumberField id="law-{p.key}-{k}-f" label="Point {k + 1} frequency" compact unit="Hz" bind:value={pt[0]} disabled={locked} />
-											<NumberField id="law-{p.key}-{k}-v" label="Point {k + 1} value" compact unit={p.unit} bind:value={pt[1]} disabled={locked} />
-											<button class="aq-icon-btn" aria-label="Remove point {k + 1}" disabled={locked || curve(p).length <= 1} onclick={() => curve(p).splice(k, 1)}>
-												<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
-											</button>
-										</div>
-									{/each}
-									<button class="btn sm ghost" disabled={locked} onclick={() => curve(p).push([(curve(p).at(-1)?.[0] ?? 100) * 2, curve(p).at(-1)?.[1] ?? 0])}>Add Point</button>
-								</div>
-							{/if}
-							{#if lawParamError(p, d.law.params[p.key])}<Findings items={[{ level: 'error', message: lawParamError(p, d.law.params[p.key]) ?? '' }]} />{/if}
-						</div>
-					{/each}
-					<Findings items={Object.entries(E).filter(([k]) => k.startsWith('law.params.')).flatMap(([, v]) => v).map((message) => ({ level: 'error' as const, message }))} />
-				</div>
+	<LawPanel
+		{laws}
+		{law}
+		chosenId={d.law.id}
+		values={d.law.params}
+		subtitle="Fixed once the run starts; it can be changed at the prediction, before engaging."
+		{locked}
+		connected={mimo.connected}
+		busy={mimo.busy}
+		problems={mimo.lawProblems}
+		errors={E}
+		channelLabels={mimo.labels}
+		onchoose={(id) => mimo.chooseLaw(id)}
+		onimport={(path) => mimo.importLaw(path)}
+	>
+		{#snippet facts(l)}
+			<div class="wide"><dt>Supports</dt><dd>{(l.shapes ?? []).map((s) => SHAPE_WORDS[s] ?? s).join('; ') || '-'}</dd></div>
+		{/snippet}
+		{#snippet notice()}
+			{#if admitted && !admitted.admitted}
+				<p class="aq-notice warn aq-small" role="alert">This law does not admit this test{shape ? ` (${SHAPE_WORDS[shape]})` : ''}; the check above says why.</p>
 			{/if}
-		{/if}
-	</section>
+		{/snippet}
+	</LawPanel>
 
 	<section class="aq-panel" aria-labelledby="loop-title" data-testid="loop-panel">
 		<div class="aq-head">
@@ -329,162 +213,6 @@
 		font-size: var(--text-xs);
 		font-weight: var(--weight-medium);
 		color: var(--text-2);
-	}
-
-	.mono {
-		font-family: var(--font-mono);
-	}
-
-	.import {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto;
-		align-items: center;
-		gap: var(--sp-2) var(--sp-3);
-		margin-bottom: var(--sp-3);
-		padding: var(--sp-3);
-		background: var(--bg-2);
-		border: 1px solid var(--line-1);
-		border-radius: var(--radius-md);
-	}
-
-	.import p {
-		grid-column: 1 / -1;
-		margin: 0;
-	}
-
-	.laws {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.law {
-		display: grid;
-		grid-template-columns: 16px auto auto 1fr;
-		grid-template-areas: 'dot name ver kind' '. sum sum sum';
-		align-items: baseline;
-		gap: 2px var(--sp-2);
-		padding: 8px 10px;
-		text-align: left;
-		color: var(--text-1);
-		background: var(--bg-0);
-		border: 1px solid var(--line-1);
-		border-radius: var(--radius-md);
-	}
-
-	.law:hover:not(:disabled) {
-		background: var(--bg-2);
-	}
-
-	.law.on {
-		background: var(--blue-weak);
-		border: 1.5px solid var(--blue-line);
-	}
-
-	.law .dot {
-		grid-area: dot;
-		align-self: center;
-		display: inline-flex;
-		color: var(--blue-2);
-	}
-
-	.law .name {
-		grid-area: name;
-		font-weight: var(--weight-strong);
-	}
-
-	.law .ver {
-		grid-area: ver;
-		font-size: var(--text-xs);
-		color: var(--text-3);
-	}
-
-	.law .kind {
-		grid-area: kind;
-		justify-self: end;
-		font-size: var(--text-2xs);
-		color: var(--text-3);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.law .sum {
-		grid-area: sum;
-		font-size: var(--text-xs);
-		color: var(--text-2);
-	}
-
-	.details {
-		margin-top: var(--sp-4);
-		padding-top: var(--sp-3);
-		border-top: 1px solid var(--line-1);
-	}
-
-	.details h3 {
-		font-size: var(--text-sm);
-		font-weight: var(--weight-strong);
-	}
-
-	.summary {
-		margin: 4px 0 var(--sp-2);
-		color: var(--text-2);
-	}
-
-	.facts {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--sp-2) var(--sp-3);
-		margin: 0 0 var(--sp-2);
-	}
-
-	.facts .wide {
-		grid-column: 1 / -1;
-	}
-
-	.facts dt {
-		font-size: var(--text-2xs);
-		color: var(--text-3);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.facts dd {
-		margin: 0;
-		font-size: var(--text-sm);
-	}
-
-	.check {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-	}
-
-	.check.failed,
-	.check.unreadable {
-		font-weight: var(--weight-strong);
-		color: var(--amber-1);
-	}
-
-	.params {
-		margin-top: var(--sp-4);
-		padding-top: var(--sp-3);
-		border-top: 1px solid var(--line-1);
-	}
-
-	.extra {
-		margin-top: var(--sp-3);
-	}
-
-	.pts {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-
-	.pt {
-		display: flex;
-		align-items: center;
-		gap: 4px;
 	}
 
 	.frf {

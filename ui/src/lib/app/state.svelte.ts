@@ -11,6 +11,8 @@ import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modif
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
+import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
+import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -1567,6 +1569,10 @@ export class AppState {
 	readonly display: DisplayState;
 	/** The MIMO Random run's views: its pages and this window's subscription. */
 	readonly mimoViews: MimoViewsState;
+	/** Classical shock's setup and run; the station and table are the Acquire store's. */
+	readonly shock: ShockStore;
+	/** The classical shock run's pages and this window's subscription. */
+	readonly shockViews: ShockViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -1587,6 +1593,7 @@ export class AppState {
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			testType: 'random',
@@ -1601,6 +1608,12 @@ export class AppState {
 			showing: () => mimoPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_random' && this.mimo.step === 'run'),
 			page: mimoPopout ? config.page : null,
 			windowIndex: mimoPopout ? 1 : 0
+		});
+		const shockPopout = config.popout && config.popoutTest === 'shock';
+		this.shockViews = new ShockViewsState(this.control, {
+			setupTitle: () => this.shock.status?.title ?? (config.popout ? null : this.shock.setup.title),
+			showing: () => shockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'shock' && this.shock.step === 'run'),
+			page: shockPopout ? config.page : null
 		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
@@ -1627,11 +1640,11 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
-		if (test === 'mimo_random') q.set('test', 'mimo_random');
+		if (test !== 'random') q.set('test', test);
 		else q.delete('test');
 		this.windows += 1;
 		const w = window.open(`${location.pathname}?${q.toString()}#acquire`, `hertzforge-display-${Date.now()}-${this.windows}`, 'popup,width=1280,height=820');
@@ -1642,6 +1655,7 @@ export class AppState {
 	startDisplayWindow(): void {
 		this.workspace = 'acquire';
 		const mimo = this.config.popoutTest === 'mimo_random';
+		const shock = this.config.popoutTest === 'shock';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -1651,15 +1665,21 @@ export class AppState {
 					if (this.control.status === 'open') void this.mimo.sync();
 				});
 			}
+			if (shock) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.shock.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
+		else if (shock) this.shockViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -1682,6 +1702,8 @@ export class AppState {
 		if (onRandom || this.acquire.isLive) return this.acquire.source;
 		const onMimo = this.workspace === 'acquire' && this.tests.screen === 'mimo_random';
 		if (onMimo || this.mimo.isLive) return this.mimo.source;
+		const onShock = this.workspace === 'acquire' && this.tests.screen === 'shock';
+		if (onShock || this.shock.isLive) return this.shock.source;
 		return null;
 	}
 
@@ -1713,6 +1735,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.mimo.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.shock.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -1720,9 +1745,11 @@ export class AppState {
 
 		this.acquire.watch();
 		this.mimo.watch();
+		this.shock.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
+		this.shockViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

@@ -1376,7 +1376,8 @@ export interface RandomData extends RandomLiveHead {
 	plots: DataPlot[];
 }
 
-export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note';
+/** `pulse` and `law` are classical shock's: a line per pulse fired, and the law's calls that were not used. */
+export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law';
 
 export interface LogEntry {
 	seq: number;
