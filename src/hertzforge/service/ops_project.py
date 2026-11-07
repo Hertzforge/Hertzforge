@@ -168,6 +168,7 @@ def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
     from .ops_sine_shock import _editable
 
     source = params['source']
+    _editable(project[source])
     try:
         count = project.detect_shocks(source)
     except ValueError as error:

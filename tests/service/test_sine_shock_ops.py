@@ -409,6 +409,16 @@ def test_a_window_too_short_for_a_spectrum_is_refused_by_its_length():
     assert 'octave band' not in str(refusal.value)
 
 
+def test_detect_is_refused_on_a_record_a_file_cut_into_captures():
+    t, y = _pulse()
+    captured = history(t, np.vstack([y, 2.0 * y, y]), ['1X+', '1X+', '2X+'])
+    captured.averaging = Averaging(frame_length=len(t), overlap=0.0, window='boxcar', frames=1)
+    assert captured.split_into_frames
+    project = Project()
+    project.add('H', captured)
+    with pytest.raises(ProtocolError, match='settled'):
+        run(project, 'project.detect_shocks', source='H')
+    assert not project['H'].shocks
 
 
 # ---- Pulse Check, Stroke, SRS Synthesis ------------------------------------------------------
