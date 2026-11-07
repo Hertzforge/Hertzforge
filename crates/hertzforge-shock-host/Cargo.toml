@@ -59,6 +59,13 @@ hertzforge-channel-table = { path = "../hertzforge-channel-table" }
 hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
 # Per-pulse capture sink + the Snapshot envelope for the service.
 hertzforge-capture = { path = "../hertzforge-capture" }
+# The closed loop's identification (band-limited random, Welch H and coherence),
+# the regularized inverse on the record grid and its trust mask: time waveform
+# replication's pure modules (`sysid`, `grid`, `inverse`, `law`). Its own
+# dependencies are ones this crate already has.
+hertzforge-twr = { path = "../hertzforge-twr" }
+# The built-in classical law's math (`fd_correct`), shared with its law file.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

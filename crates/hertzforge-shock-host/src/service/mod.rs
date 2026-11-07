@@ -62,6 +62,7 @@ pub mod firer;
 pub mod pacer;
 pub mod report;
 
+use crate::law::ClassicalLawFactory;
 use crate::spec::ClassicalPulseSpec;
 use crate::tolerance::{check_tolerance, ToleranceReport};
 use config::{ClassicalTestConfig, ConfigError};
@@ -71,6 +72,7 @@ use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_dsp::shock::CompensatedPulse;
 use hertzforge_dsp::srs::{octave_freqs, srs_analyze, OctaveFraction};
 use hertzforge_shaker_db::{FeasibilityReport, Verdict};
+use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use hertzforge_shock_common::pulse_store::{build_snapshot, capture_pulse, DEFAULT_SRS_Q};
 use hertzforge_shock_common::train::TrainPlan;
 use hertzforge_shock_common::{
@@ -280,6 +282,15 @@ pub struct ClassicalShockService<F: PulseFirer> {
     // --- capture -----------------------------------------------------------
     capture: Option<CaptureSink>,
     data_root: PathBuf,
+
+    // --- the control-law seam ----------------------------------------------
+    /// The factory the closed loop builds its law with, after identification.
+    /// `None`: the built-in `fd_correct`. Stored, not yet called: the closed
+    /// loop that calls it is not built, and [`ClassicalShockService::new`]
+    /// refuses a configuration that asks for it.
+    law_factory: Option<Arc<dyn ClassicalLawFactory>>,
+    /// The clock law calls are timed on.
+    law_clock: Arc<dyn LawClock>,
 }
 
 impl<F: PulseFirer> ClassicalShockService<F> {
@@ -293,6 +304,13 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         data_root: Option<PathBuf>,
     ) -> Result<Self, ServiceError> {
         cfg.validate()?;
+        if cfg.control.is_some() {
+            return Err(ServiceError::Config(ConfigError::BadConfig(
+                "closed-loop classical control (identification, the drive in volts and a \
+                 control law) is not built yet; this service runs only the open loop"
+                    .into(),
+            )));
+        }
         table.validate().map_err(|e| {
             ServiceError::Config(ConfigError::BadConfig(format!("channel table: {e}")))
         })?;
@@ -343,7 +361,25 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             trip: None,
             capture: None,
             data_root,
+            law_factory: None,
+            law_clock: Arc::new(MonotonicClock::new()),
         })
+    }
+
+    /// Install the factory the closed loop builds its control law with. Without
+    /// one the closed loop uses the built-in `fd_correct`.
+    ///
+    /// Stored only: nothing calls it until the closed loop is built.
+    pub fn with_law_factory(mut self, factory: Arc<dyn ClassicalLawFactory>) -> Self {
+        self.law_factory = Some(factory);
+        self
+    }
+
+    /// Install the clock law calls are timed on (a test clock makes a law
+    /// "slow" deterministically).
+    pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
     }
 
     /// Install the HOST's cancel flag before the run starts. Without
@@ -1982,6 +2018,60 @@ mod tests {
         // controls that prove the SHIPPING default is the real clock.
         s.set_pacer(Box::new(pacer::VirtualPacer::new(0.010)));
         s
+    }
+
+    #[test]
+    fn closed_loop_control_is_refused_until_the_loop_is_built() {
+        // The seam is a contract only: a configuration that asks for the closed
+        // loop must not quietly run the open loop (the reference in g written as
+        // volts) instead.
+        let mut c = cfg();
+        c.control = Some(crate::law::ClassicalControl::new(c.fs_hz, 0.5, 0.8));
+        #[allow(deprecated)]
+        let r = ClassicalShockService::new(
+            c,
+            ChannelTable::nonuniform_default_8ch(),
+            ScriptedFirer::host(1.0),
+            Some(std::env::temp_dir().join("hertzforge-shock-host-unit")),
+        );
+        match r {
+            Err(ServiceError::Config(ConfigError::BadConfig(m))) => {
+                assert!(m.contains("not built yet"), "{m}")
+            }
+            Err(e) => panic!("refused for the wrong reason: {e}"),
+            Ok(_) => panic!("a closed-loop configuration was accepted"),
+        }
+    }
+
+    #[test]
+    fn a_law_factory_and_clock_are_stored_without_changing_the_open_loop() {
+        use crate::law::{ClassicalLaw, ClassicalLawFactory, ClassicalLawSetup};
+        use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault};
+        struct Never;
+        impl ClassicalLawFactory for Never {
+            fn build(
+                &self,
+                _: &ClassicalLawSetup<'_>,
+            ) -> Result<Box<dyn ClassicalLaw + Send>, LawFault> {
+                Err(LawFault::Failed("never built".into()))
+            }
+            fn describe(&self) -> LawDescriptor {
+                LawDescriptor {
+                    id: "never".into(),
+                    name: "never".into(),
+                    version: "0".into(),
+                    sha256: None,
+                    params: serde_json::json!({}),
+                }
+            }
+        }
+        let mut s = svc(cfg(), ScriptedFirer::host(1.0))
+            .with_law_factory(Arc::new(Never))
+            .with_law_clock(Arc::new(MonotonicClock::new()));
+        assert!(s.law_factory.is_some());
+        s.assess_feasibility().unwrap();
+        s.arm().unwrap();
+        assert!(s.fire_next_pulse().unwrap(), "the open loop still fires");
     }
 
     #[test]

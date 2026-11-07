@@ -1332,8 +1332,28 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-shaker-db",
  "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
+ "hertzforge-twr",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "hertzforge-shock-law-math"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-dsp",
+]
+
+[[package]]
+name = "hertzforge-shock-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-hal",
+ "hertzforge-random-laws",
+ "hertzforge-shock-common",
+ "hertzforge-shock-host",
+ "hertzforge-shock-law-math",
 ]
 
 [[package]]

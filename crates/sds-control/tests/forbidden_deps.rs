@@ -63,6 +63,22 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // reference files (sha2 and zip, both MIT) and names no backend.
     "hertzforge-mimo-random",
     "hertzforge-reference",
+    // Classical shock behind the wire's `shock.*` methods, reviewed 2026-11-07: the
+    // classical run service (`hertzforge-shock-host`), the pulse run infrastructure it
+    // shares with SRS (`hertzforge-shock-common`) and time waveform replication's
+    // identification and inverse (`hertzforge-twr`, whose pure modules the closed loop
+    // uses) reach hardware only through the station backend the control service hands
+    // them, and hold the Sim, if at all, only as a dev-dependency. All three are MIT and
+    // name no backend in their `[dependencies]`.
+    "hertzforge-shock-common",
+    "hertzforge-shock-host",
+    "hertzforge-twr",
+    // The classical shock laws, reviewed 2026-11-07, as the Random law crates were:
+    // the built-in law's math (`hertzforge-shock-law-math`, on `hertzforge-dsp` alone)
+    // and the choice and check of a law (`hertzforge-shock-laws`, which runs a check
+    // case on the backend it is handed and names none). Written here, so on LAW_CRATES.
+    "hertzforge-shock-law-math",
+    "hertzforge-shock-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -134,7 +150,9 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// (see REVIEWED_CONTROLLER_CRATES), never a guest crate. The
 /// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
 /// reviewed the same way: pure math on the stacks, no backend, synthetic plants
-/// in its tests.
+/// in its tests. So was the classical shock set (2026-11-07): the built-in law's
+/// math, the choice and check of a law, the `shock-fdc` law file and the
+/// `shock-misbehave` host fixture.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
@@ -147,11 +165,15 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-ratio",
     "hertzforge-law-ratio-math",
     "hertzforge-law-sdk",
+    "hertzforge-law-shock-fdc",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
+    "hertzforge-shock-law-math",
+    "hertzforge-shock-laws",
     "law-fixture-bad-manifest",
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
+    "law-fixture-shock-misbehave",
 ];
 
 struct Package {

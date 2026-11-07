@@ -10,6 +10,10 @@
 //!   [`path::PathCapabilities`] so services and the UI grey features
 //!   from ONE source of truth, and the [`path::ReferenceForPath`] hard invariant that
 //!   a delegated-path reference download is the UNCOMPENSATED pulse.
+//! - [`law_guard`] - the guards every shock control law runs under, classical and
+//!   SRS alike: [`law_guard::LawGuards`] (call budget, misses, the run's pulse
+//!   cap), [`law_guard::LawClock`], [`law_guard::LawFault`],
+//!   [`law_guard::MissCounter`] and [`law_guard::LawRecordRing`].
 //! - [`control_law`] - the event-driven [`control_law::ShockControlLaw`] seam and
 //!   the trivial [`control_law::PerBandGainLaw`] default (the classic SRS per-band
 //!   ratio iteration). NOT the frozen plugin ABI.
@@ -51,6 +55,7 @@ pub mod control_law;
 pub mod drive_limit;
 pub mod feasibility;
 pub mod ladder;
+pub mod law_guard;
 pub mod path;
 pub mod pulse_store;
 pub mod train;
@@ -65,6 +70,10 @@ pub use drive_limit::{
 };
 pub use feasibility::{naive_double_sided_compensation, pulse_feasibility, FeasibilityTolerances};
 pub use ladder::{LadderError, ShockLadderState, ShockLevelSchedule, ShockRunMode};
+pub use law_guard::{
+    LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawGuards, LawRecordRing, LawValue,
+    MissCounter, MonotonicClock, OutputRule,
+};
 pub use path::{DrivePath, PathCapabilities, ReferenceForPath, UncompensatedReference};
 pub use pulse_store::{PulseRecord, PulseStore, ShockSnapshotPayload};
 pub use train::{gunfire_spacing, RateModel, Spacing, TrainError, TrainSpec};

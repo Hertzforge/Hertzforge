@@ -30,7 +30,12 @@ hertzforge-reference = { path = "crates/hertzforge-reference" }
 hertzforge-sdm = { path = "crates/hertzforge-sdm" }
 hertzforge-law-host = { path = "crates/hertzforge-law-host" }
 hertzforge-shaker-db = { path = "crates/hertzforge-shaker-db" }
+hertzforge-shock-common = { path = "crates/hertzforge-shock-common" }
+hertzforge-shock-host = { path = "crates/hertzforge-shock-host" }
+hertzforge-shock-law-math = { path = "crates/hertzforge-shock-law-math" }
+hertzforge-shock-laws = { path = "crates/hertzforge-shock-laws" }
 hertzforge-station = { path = "crates/hertzforge-station" }
+hertzforge-twr = { path = "crates/hertzforge-twr" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }
