@@ -454,7 +454,7 @@ class AnalyzeState {
 	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
