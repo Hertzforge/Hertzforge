@@ -962,6 +962,30 @@ START = Param('start', 'Start', 'number', default=0.0, unit='s', step=0.001)
 STOP = Param('stop', 'Stop', 'number', default=0.1, unit='s', step=0.001)
 
 
+def _velocity_check(history: Any) -> list[dict]:
+    """The velocity check of the windows on show, as Visual Dynamics' shock
+    panel states it whenever they change (`core.shock_check`): over the
+    windows the SRS would be computed from, or waiting when none is marked,
+    since a check of the whole record would speak for windows it was not
+    read over. A record with no acceleration has nothing to integrate."""
+    from hertzforge.core.shock_check import check_shock, summarize
+
+    if not any(history.known_dim(i) == 'acceleration' for i in range(history.num_records)):
+        return []
+    if not history.shocks and history.averaging is None:
+        return [v.row('Velocity check', 'No shocks are marked, so the velocity check waits for '
+                      'them. Detect marks them, and so does Compute SRS before it computes.',
+                      None, 'info')]
+    try:
+        checks = check_shock(history)
+    except ValueError as error:
+        return [v.row('Velocity check', f'The velocity check cannot be read: {error}.', None,
+                      'warn')]
+    status = 'warn' if any(check.flagged for check in checks) else 'pass'
+    return [v.row('Velocity check', line, None, status)
+            for line in summarize(checks).splitlines()]
+
+
 def _shocks_reading(name: str, history: Any) -> dict:
     origin = float(history.abscissa[0])
     shocks = tuple(history.shocks or ())
@@ -972,7 +996,7 @@ def _shocks_reading(name: str, history: Any) -> dict:
     rows.append(v.row('Shocks', f'{len(shocks)} shock{"s" * (len(shocks) != 1)}, '
                       f'{covered:.3f} s of record analyzed. One spectrum per channel per '
                       'shock.' if shocks else 'No shocks marked.', None, 'info'))
-    return v.reading(f'Shocks on {name}', rows)
+    return v.reading(f'Shocks on {name}', rows + _velocity_check(history))
 
 
 def _shock_views(name: str, history: Any, params: dict[str, Any]) -> list[dict]:

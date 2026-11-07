@@ -277,16 +277,62 @@ def _check(views):
     return [row for row in reading(views)['rows'] if row['label'] == 'Velocity check']
 
 
+def test_shocks_read_a_velocity_that_returns_to_rest():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    project['H'].shocks = (Shock(0.4, 0.5),)
+    (row,) = _check(run(project, 'project.shocks', history='H'))
+    assert row['status'] == 'pass'
+    assert row['value'] == 'Velocity returns to rest on every channel.'
 
 
+def test_shocks_say_when_a_zero_shift_keeps_the_velocity_moving():
+    t, y = _pulse(offset=4.0 * G)
+    project = Project()
+    project.add('H', history(t, y))
+    project['H'].shocks = (Shock(0.4, 0.5),)
+    first, *rest = _check(run(project, 'project.shocks', history='H'))
+    assert first['status'] == 'warn'
+    assert first['value'] == '1 of 1 do not return to rest.'
+    assert 'still changing' in rest[0]['value']
 
 
+def test_the_velocity_check_follows_a_window_as_it_is_set():
+    t, y = _pulse(offset=4.0 * G)
+    project = Project()
+    project.add('H', history(t, y))
+    run(project, 'project.set_shock', history='H', shock=1, start=0.4, stop=0.9)
+    first, *_rest = _check(run(project, 'project.shocks', history='H'))
+    assert first['status'] == 'warn'
+    (shifted,) = _check(run(project, 'project.set_shock', history='H', shock=1, start=0.1,
+                            stop=0.4))
+    assert shifted['status'] == 'pass'
 
 
+def test_the_velocity_check_waits_for_the_windows_it_speaks_for():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    (row,) = _check(run(project, 'project.shocks', history='H'))
+    assert 'waits' in row['value'] and row['status'] == 'info'
 
 
+def test_a_record_with_no_acceleration_has_no_velocity_check():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y, unit='N', dim='force'))
+    assert not _check(run(project, 'project.shocks', history='H'))
 
 
+def test_the_velocity_check_says_when_a_window_cannot_be_read():
+    t, y = _pulse()
+    y[int(0.45 * RATE)] = np.nan
+    project = Project()
+    project.add('H', history(t, y))
+    project['H'].shocks = (Shock(0.4, 0.5),)
+    (row,) = _check(run(project, 'project.shocks', history='H'))
+    assert row['status'] == 'warn' and 'cannot be read' in row['value']
 
 
 # ---- a sample that is not a number ----------------------------------------------------------
