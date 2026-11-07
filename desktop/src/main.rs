@@ -166,9 +166,10 @@ fn startup(app: AppHandle) {
         return;
     }
     let query = format!(
-        "?analysis={}&control={}",
+        "?analysis={}&control={}{}",
         encode(&services.analysis.url()),
-        encode(&services.control.url())
+        encode(&services.control.url()),
+        run_log_query(std::env::args().skip(1))
     );
     if let Err(e) = main_window(&app, &query) {
         fail(&app, &format!("The window could not be opened: {e}"));
@@ -208,6 +209,19 @@ fn main_window(app: &AppHandle, query: &str) -> tauri::Result<()> {
 }
 
 /// Percent-encode a query value (the services' addresses).
+/// `--run-log [file]`: the window with the log alone in it, for the keeper's own computer,
+/// as Visual Dynamics launches it. Its own flag, not a file to import.
+fn run_log_query(args: impl Iterator<Item = String>) -> String {
+    let args: Vec<String> = args.collect();
+    let Some(at) = args.iter().position(|a| a == "--run-log") else {
+        return String::new();
+    };
+    match args.get(at + 1).filter(|a| !a.starts_with('-')) {
+        Some(file) => format!("&runlog=1&runlog_file={}", encode(file)),
+        None => "&runlog=1".to_string(),
+    }
+}
+
 fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -369,6 +383,26 @@ mod tests {
         assert_eq!(
             encode("ws://127.0.0.1:61234/"),
             "ws%3A%2F%2F127.0.0.1%3A61234%2F"
+        );
+    }
+}
+
+#[cfg(test)]
+mod run_log_tests {
+    use super::run_log_query;
+
+    fn query(args: &[&str]) -> String {
+        run_log_query(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn the_flag_asks_for_the_log_alone_and_takes_a_file() {
+        assert_eq!(query(&[]), "");
+        assert_eq!(query(&["--run-log"]), "&runlog=1");
+        assert_eq!(query(&["--run-log", "--other"]), "&runlog=1");
+        assert_eq!(
+            query(&["--run-log", "/tmp/a b.hflog"]),
+            "&runlog=1&runlog_file=%2Ftmp%2Fa%20b.hflog"
         );
     }
 }
