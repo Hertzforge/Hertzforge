@@ -248,8 +248,9 @@ def spec_lines_out(project: Any, params: dict[str, Any]) -> list[dict]:
             found.append(v.row(label, notes[k], None, 'warn'))
         else:
             found.append(v.row(label, _db(percent), '%',
-                               'fail' if percent >= ceiling else 'pass'))
-    found.append(_count_row([p for _l, _e, p in errors], lambda p: p >= ceiling,
+                               _status(compliance.lines_state(percent, ceiling))))
+    found.append(_count_row([p for _l, _e, p in errors],
+                            lambda p: compliance.lines_state(p, ceiling) == 'over',
                             f'over {ceiling:g}%', len(notes), compliance.comparison_note(rows)))
     found.append(_scale_row(scale, source))
     return [v.reading(f'Lines out of {params["spectrum"]} against {params["specification"]}',

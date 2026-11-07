@@ -660,14 +660,21 @@ def judge(specification: Specification, measured: DataArray,
             'start': start, 'stop': stop, 'scale_db': float(scale_db)}
 
 
+#: how far apart, as a share, two powers can be and be the same: summed
+#: over a cell, a level on a limit lands a few parts in 1e15 either side of
+#: it, and a third of a flat response read out for that
+ON_LIMIT = 1e-12
+
+
 def beyond(held: ArrayLike, asked: ArrayLike, over: bool) -> np.ndarray:
     """Where a measured power is past a limit's: more than an upper
     limit (`over` True), less than a lower one. A power exactly on the
-    limit is inside. The one rule `judge` reads every cell by, and
-    `core.chance` its groups of cells."""
+    limit is inside, to `ON_LIMIT`. The one rule `judge` reads every cell
+    by, and `core.chance` its groups of cells."""
     held, asked = np.asarray(held, dtype=float), np.asarray(asked, dtype=float)
     with np.errstate(invalid='ignore'):
-        return (held > asked) if over else (held < asked)
+        return (held > asked * (1.0 + ON_LIMIT) if over
+                else held < asked * (1.0 - ON_LIMIT))
 
 
 def covered(lines: ArrayLike, low: float, high: float,
@@ -1290,11 +1297,11 @@ LINES_CHANNELS_FAIL_PERCENT = 20.0
 RMS_CHANNELS_FAIL_PERCENT = 10.0
 
 
-def lines_state(percent: float) -> str:
-    """'over' when more than `LINES_PERCENT` of a channel's band is
-    outside its abort limits, else 'in'. No amount of staying inside is
-    a fault, so there is no 'under'."""
-    return 'over' if float(percent) > LINES_PERCENT else 'in'
+def lines_state(percent: float, ceiling: float = LINES_PERCENT) -> str:
+    """'over' when more than `ceiling` percent of a channel's band is
+    outside its abort limits, else 'in': at the ceiling exactly is in. No
+    amount of staying inside is a fault, so there is no 'under'."""
+    return 'over' if float(percent) > ceiling else 'in'
 
 
 def rms_state(difference_db: float) -> str:

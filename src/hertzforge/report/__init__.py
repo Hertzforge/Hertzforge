@@ -3466,6 +3466,8 @@ def _bars_block(block, specification, measured, us):
         'notes': [reasons.get(i) for i in range(len(rows))],
         'low': LINES_PERCENT if lines else -ERROR_DB,
         'high': None if lines else ERROR_DB,
+        # `compliance.lines_state`: at the ceiling exactly is in
+        'inside_at_ceiling': lines,
         # a share of a band cannot be negative, so the axis does not
         # pretend it might be; an error in dB runs both ways and gets
         # whatever the data needs

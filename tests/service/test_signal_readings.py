@@ -223,3 +223,72 @@ def test_a_column_of_cross_terms_at_one_dof_is_a_reference_column():
                reference_dof=['1Z+', '1Z+'],
                ordinate_dim=['acceleration*force/frequency', 'velocity*force/frequency'])
     assert _column(data, [0, 1]) is not None
+
+
+def _flat_target(warning_db=3.0, abort_db=6.0):
+    level = np.array([[1e-2, 1e-2]])
+    return Specification(np.array([20.0, 2000.0]), level, response_dof=['1Z+'],
+                         ordinate_dim=[DENSITY],
+                         warning_lower=level * 10.0 ** (-warning_db / 10.0),
+                         warning_upper=level * 10.0 ** (warning_db / 10.0),
+                         abort_lower=level * 10.0 ** (-abort_db / 10.0),
+                         abort_upper=level * 10.0 ** (abort_db / 10.0))
+
+
+@pytest.mark.parametrize('offset_db', [6.0, -6.0, 3.0, -3.0])
+def test_a_power_exactly_on_a_limit_is_inside(offset_db):
+    f = np.arange(0.0, 2049.0)
+    measured = Psd(f, np.full((1, f.size), 1e-2 * 10.0 ** (offset_db / 10.0)),
+                   response_dof=['1Z+'], ordinate_dim=[DENSITY])
+    project = hertzforge.Project()
+    measured.scale_db = 0
+    project.add('Spec', _flat_target())
+    project.add('Run', measured)
+    found = rows(run(project, 'project.spec_spectra', specification='Spec', spectrum='Run'))
+    assert found['Lines outside abort (at most 10 %)']['value'] == 0.0
+    if abs(offset_db) == 3.0:
+        assert found['Lines outside warning']['value'] == 0.0
+
+
+def test_a_power_past_a_limit_by_a_little_is_outside():
+    from hertzforge.core import compliance
+
+    f = np.arange(0.0, 2049.0)
+    measured = Psd(f, np.full((1, f.size), 1e-2 * 10.0 ** (6.001 / 10.0)),
+                   response_dof=['1Z+'], ordinate_dim=[DENSITY])
+    assert compliance.compare(_flat_target(), measured, scale_db=0)['abort_percent'] == 100.0
+
+
+@pytest.mark.parametrize(('out', 'status'), [(20, 'pass'), (21, 'fail')])
+def test_lines_out_at_the_ceiling_reads_the_same_both_ways(out, status):
+    f = np.arange(0.0, 201.0)
+    levels = np.full((1, 201), 1e-2)
+    levels[0, 1:out + 1] = 1.0
+    spec = Specification(np.array([0.5, 200.5]), np.array([[1e-2, 1e-2]]),
+                         response_dof=['1Z+'], ordinate_dim=[DENSITY],
+                         abort_lower=np.array([[2.5e-3] * 2]),
+                         abort_upper=np.array([[4e-2] * 2]))
+    project = hertzforge.Project()
+    project.add('Spec', spec)
+    measured = Psd(f, levels, response_dof=['1Z+'], ordinate_dim=[DENSITY])
+    measured.scale_db = 0
+    project.add('Run', measured)
+    spectra = rows(run(project, 'project.spec_spectra', specification='Spec', spectrum='Run'))
+    lines_out = rows(run(project, 'project.spec_lines_out', specification='Spec', spectrum='Run'))
+    assert spectra['Lines outside abort (at most 10 %)']['status'] == status
+    assert lines_out['1Z+']['status'] == status
+    assert lines_out['Channels out']['status'] == status
+
+
+def test_the_reports_lines_out_chart_says_the_ceiling_is_inside():
+    from hertzforge.report import _bars_block
+
+    f = np.arange(0.0, 201.0)
+    measured = Psd(f, np.full((1, 201), 1e-2), response_dof=['1Z+'], ordinate_dim=[DENSITY])
+    spec = Specification(np.array([0.5, 200.5]), np.array([[1e-2, 1e-2]]),
+                         response_dof=['1Z+'], ordinate_dim=[DENSITY],
+                         abort_lower=np.array([[2.5e-3] * 2]),
+                         abort_upper=np.array([[4e-2] * 2]))
+    built = _bars_block({'kind': 'bars', 'mode': 'lines', 'caption': 'Lines'}, spec, measured,
+                        hertzforge.SI)
+    assert built['high'] is None and built['inside_at_ceiling'] is True
