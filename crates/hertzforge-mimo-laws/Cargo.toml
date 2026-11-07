@@ -1,0 +1,24 @@
+[package]
+name = "hertzforge-mimo-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+description = "The built-in multiple-output Random control laws, native and as law files from one source"
+
+# The four built-in MIMO Random laws (and the trivial zero law that proves the
+# chain), each written once against the MIMO law boundary of `hertzforge-sdm`.
+# The controller runs them natively; `laws/mimo-*` build each into a law file
+# through the `law-file` feature, which adds the SDK glue. Pure Rust, no system
+# access: it builds for `wasm32-wasip2`.
+[features]
+law-file = ["dep:hertzforge-law-sdk"]
+
+[dependencies]
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+hertzforge-law-sdk = { path = "../hertzforge-law-sdk", optional = true }
+
+[dev-dependencies]
+# The parity tests run each law as a law file through the host and natively,
+# over the same synthetic run, and compare the drives.
+hertzforge-law-host = { path = "../hertzforge-law-host" }

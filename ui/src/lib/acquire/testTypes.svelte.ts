@@ -14,8 +14,8 @@
 
 import { untrack } from 'svelte';
 import type { ConnectionStatus } from '$lib/protocol/client.svelte';
-import type { RandomState } from '$lib/protocol/types';
-import { isLive } from './actions';
+import type { RandomRunState, RandomState } from '$lib/protocol/types';
+import { isLive, LIVE_STATES } from './actions';
 
 export type TestTypeId =
 	| 'random'
@@ -63,7 +63,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'srs', group: 'single', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: false },
 	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: false },
 	{ id: 'explorer', group: 'single', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: false },
-	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: false },
+	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: true },
 	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: false },
 	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: false },
 	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
@@ -83,12 +83,19 @@ export type AcquireView = 'chooser' | TestTypeId;
 export type LiveTest = TestTypeId | null | undefined;
 
 /**
- * Which test type holds a live run, from the Random store and its connection. Before the first
- * read the answer is not known yet; a service that cannot be reached, or that refused the read,
- * has nothing live to show.
+ * Which test type holds a live run, from the Random and MIMO Random stores and their
+ * connection. Before the first read the answer is not known yet; a service that cannot be
+ * reached, or that refused the read, has nothing live to show.
  */
-export function liveTestOf(acq: { run: RandomState | null; syncError: string | null }, status: ConnectionStatus): LiveTest {
-	if (acq.run !== null) return isLive(acq.run) ? 'random' : null;
+export function liveTestOf(
+	acq: { run: RandomState | null; syncError: string | null },
+	status: ConnectionStatus,
+	mimo?: { status: { state: RandomRunState } | null; syncError: string | null }
+): LiveTest {
+	if (acq.run !== null && isLive(acq.run)) return 'random';
+	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
+	// Both run reads have answered (or MIMO's could not be read): nothing is live.
+	if (acq.run !== null && (!mimo || mimo.status !== null || mimo.syncError !== null)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

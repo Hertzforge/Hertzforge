@@ -1,0 +1,14 @@
+{
+ "type": "request",
+ "id": 43,
+ "method": "mimo_random.reference.import",
+ "params": {
+  "path": "/home/operator/references/qualification.mat",
+  "grid": {
+   "fs_hz": 2048,
+   "n_pts": 256
+  },
+  "unit": "g",
+  "repair": false
+ }
+}

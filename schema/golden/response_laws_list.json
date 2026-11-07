@@ -1,0 +1,148 @@
+{
+ "type": "response",
+ "id": 35,
+ "result": {
+  "laws": [
+   {
+    "id": "pinv_closed",
+    "world": "mimo",
+    "builtin": true,
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "author": "Hertzforge",
+    "summary": "Starts from the regularized pseudo-inverse drive, then each loop corrects a lower-triangular factor of the reference from the measured error (Smallwood's coupling-matrix correction), autospectra first in channel order, each factor diagonal and each drive PSD held to a per-loop limit, the sources held to the plant's rank. Every drive is positive semi-definite by construction.",
+    "sha256": null,
+    "check": {
+     "status": "built_in",
+     "date": null,
+     "tool_version": null,
+     "cases": [],
+     "hardware": true,
+     "message": "Built in: cleared for hardware."
+    },
+    "params": [
+     {
+      "key": "regularization",
+      "label": "Regularization",
+      "help": "How the inverse of the plant treats weak directions. Truncated drops singular values below the amount times the largest; Tikhonov damps every one with the amount times the largest as the damping; none inverts every singular value above the numerical floor.",
+      "kind": "choice",
+      "options": [
+       "truncated",
+       "tikhonov",
+       "none"
+      ],
+      "default": "truncated"
+     },
+     {
+      "key": "regularization_amount",
+      "label": "Regularization amount",
+      "help": "Relative to the largest singular value on each line. For truncation, 1e-3 keeps the inverse's condition number under 1,000. Ignored with no regularization.",
+      "kind": "number",
+      "unit": "",
+      "min": 0,
+      "max": 1,
+      "step": 0.0001,
+      "default": 0.001
+     },
+     {
+      "key": "convergence",
+      "label": "Convergence factor",
+      "help": "The fraction of each loop's correction applied. 1 applies it whole; smaller values converge more slowly and average estimation noise.",
+      "kind": "number",
+      "unit": "",
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.5
+     },
+     {
+      "key": "cap_up_db",
+      "label": "Largest rise per loop",
+      "help": "The most any drive's PSD, or any factor diagonal's square, may rise in one loop. Never looser than the controller's own cap.",
+      "kind": "number",
+      "unit": "dB",
+      "min": 0.1,
+      "max": 3.5,
+      "step": 0.1,
+      "default": 3.5
+     },
+     {
+      "key": "cap_down_db",
+      "label": "Largest fall per loop",
+      "help": "The most any drive's PSD, or any factor diagonal's square, may fall in one loop. Never looser than the controller's own cap.",
+      "kind": "number",
+      "unit": "dB",
+      "min": 0.1,
+      "max": 6,
+      "step": 0.1,
+      "default": 6
+     },
+     {
+      "key": "rank_tolerance",
+      "label": "Rank tolerance",
+      "help": "Singular values of the plant above this fraction of the largest count toward its rank. The reference factor keeps no more independent sources than the rank.",
+      "kind": "number",
+      "unit": "",
+      "min": 0,
+      "max": 0.1,
+      "step": 1e-06,
+      "default": 1e-06
+     },
+     {
+      "key": "weighting",
+      "label": "Error weighting",
+      "help": "How the least-squares inverse weighs each control's error when there are more controls than drives: equally, or relative to its reference PSD so a quiet control counts as much as a loud one. No effect on a square plant.",
+      "kind": "choice",
+      "options": [
+       "none",
+       "reference"
+      ],
+      "default": "none"
+     }
+    ],
+    "diagnostics": [
+     {
+      "key": "condition",
+      "label": "Condition number",
+      "unit": "",
+      "help": "Largest over smallest singular value of the plant on each line (weighted when the law weights). 0 out of band; 1e300 on a singular line.",
+      "layout": "per_line"
+     },
+     {
+      "key": "kept",
+      "label": "Singular values kept",
+      "unit": "",
+      "help": "How many singular values of the plant the inverse used on each line.",
+      "layout": "per_line"
+     },
+     {
+      "key": "correction_db",
+      "label": "Largest drive change",
+      "unit": "dB",
+      "help": "The largest change of any drive's PSD on any line from the law's previous drive. 0 at the seed.",
+      "layout": "scalar"
+     },
+     {
+      "key": "clamped",
+      "label": "Clamped factor diagonals",
+      "unit": "",
+      "help": "Diagonal elements of the reference factor whose correction this loop was held to the per-loop limit, over all lines.",
+      "layout": "scalar"
+     }
+    ],
+    "shapes": [
+     "square",
+     "more_controls_than_drives",
+     "fewer_controls_than_drives"
+    ],
+    "needs": []
+   }
+  ],
+  "problems": [
+   {
+    "file": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.wasm",
+    "reason": "its contents have the SHA-256 fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210, not the one it is named by"
+   }
+  ]
+ }
+}

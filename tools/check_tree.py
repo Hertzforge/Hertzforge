@@ -57,6 +57,22 @@ NAMES = frozenset({
     '5bd79a8938028958', '3e4d26effdc5f34d', 'fce9f2383131cd07',
 })
 
+#: The credit places (paths from the root): where the source of a borrowed
+#: concept is credited, as thanks and provenance, never as an affiliation.
+CREDIT_FILES = frozenset({'ACKNOWLEDGMENTS.md', 'site/public/credits.html'})
+
+#: Names in NAMES that a credit place may hold, as a source credit only: one
+#: laboratory, credited as the author of the documentation whose concepts are
+#: credited. Anywhere else it is blocked as before.
+CREDITED = frozenset({'4a654a97330bd592'})
+
+#: A credit line that also speaks of hardware would read as a hardware or
+#: affiliation claim, so a credited name on such a line is still blocked.
+HARDWARE_WORDS = frozenset({
+    'hardware', 'backend', 'backends', 'station', 'stations', 'chassis', 'driver', 'drivers',
+    'frontend', 'frontends', 'daq', 'controls', 'controlling', 'drives', 'driving',
+})
+
 #: Licenses a shipped or build-time npm package may carry.
 ALLOWED_LICENSES = frozenset({
     'MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', '0BSD', 'Zlib',
@@ -128,24 +144,33 @@ def _text(path: pathlib.Path) -> str | None:
 def check_names(files: Iterable[pathlib.Path], root: pathlib.Path = ROOT,
                 names: frozenset[str] = NAMES,
                 notices: frozenset[str] = NOTICES,
-                references: frozenset[str] = REFERENCES) -> list[str]:
+                references: frozenset[str] = REFERENCES,
+                credited: frozenset[str] = CREDITED,
+                credit_files: frozenset[str] = CREDIT_FILES) -> list[str]:
     """Every line where a run of one to three words hashes to a listed name,
     once the listed references are taken out of it. The finding gives the
-    place, never the word."""
+    place, never the word. In a credit file (`credit_files`), a name in
+    `credited` is allowed on a line with no hardware word; every other listed
+    name is blocked there as anywhere."""
     found = []
     for path in files:
-        if path.name in SKIPPED or path.relative_to(root).as_posix() in notices:
+        rel = path.relative_to(root).as_posix()
+        if path.name in SKIPPED or rel in notices:
             continue
         text = _text(path)
         if text is None:
             continue
+        credit = rel in credit_files
         # the path itself is part of the tree too
         lines = [str(path.relative_to(root)), *text.splitlines()]
         for number, line in enumerate(lines):
             words = _WORD.findall(without_references(line, references).lower())
             runs = (' '.join(words[i:i + size]) for size in (1, 2, 3)
                     for i in range(len(words) - size + 1))
-            if any(phrase_hash(run) in names for run in runs):
+            hits = {phrase_hash(run) for run in runs} & names
+            if credit and number > 0 and not HARDWARE_WORDS.intersection(words):
+                hits -= credited
+            if hits:
                 where = 'its path' if number == 0 else f'line {number}'
                 found.append(f'{path.relative_to(root)}: {where} names a listed '
                              'organization')

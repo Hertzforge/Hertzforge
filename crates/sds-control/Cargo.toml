@@ -22,7 +22,23 @@ hertzforge-hal.workspace = true
 hertzforge-hal-sim.workspace = true
 hertzforge-module-abi.workspace = true
 hertzforge-random.workspace = true
+# The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+# choice. Reviewed 2026-11-03: it names no backend; its tests use the Sim as a fixture.
+hertzforge-random-laws.workspace = true
+# The law catalog's manifest types (parameters, MIMO shapes and diagnostics).
+hertzforge-law-host.workspace = true
+# Packed spectral matrix stacks and their per-line checks (ranks, eigenvalues).
+hertzforge-sdm.workspace = true
 hertzforge-shaker-db.workspace = true
+# The MIMO Random run service behind the wire's driver trait (src/mimo/adapter.rs).
+# Reviewed 2026-11-03: it reaches hardware only through the station backend it is
+# handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
+# The native reference file a MIMO setup names by path and hash, and the builders
+# and readers behind `mimo_random.reference.*` (breakpoints, rigid body, import,
+# validation), so the shell never repeats their math. Reviewed 2026-11-03: file
+# reading, validation and pure computation; it names no backend.
+hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-station.workspace = true
 serde_json.workspace = true
 # `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).

@@ -104,6 +104,12 @@ export interface Series {
 	shape?: SeriesShape;
 	/** Bin edges for `steps`: one more than there are y values, ascending. */
 	edges?: NumericArray;
+	/**
+	 * Present when the service decimated the series to the plot's width: each point stands for
+	 * an interval of the original lines, `y` its largest value and `y_min` its smallest. Drawn as
+	 * the band between them.
+	 */
+	y_min?: NumericArray;
 	/** Index of the series this one follows: a model's prediction of that measurement. */
 	follows?: number;
 }
@@ -326,6 +332,41 @@ export interface MatrixView {
 	matched?: [number, number][];
 }
 
+/** Rows of values against frequency, such as MIMO Random's error per control (`heatmap`). */
+export interface HeatmapView {
+	view: 'heatmap';
+	title: string;
+	rows: { label: string; ticks: string[] };
+	x: Axis;
+	/** f64 [C]: the frequency of each column. */
+	x_values: Float64Array;
+	/** f32 [R, C], row-major. */
+	values: Float32Array;
+	value: { label: string; unit: string | null };
+	/** Each row's alarm and abort bands, `[below, above]` dB: the color breaks. */
+	row_bands: { alarm_db: [number, number]; abort_db: [number, number] }[];
+}
+
+/** A packed Hermitian block: per line, the upper triangle row by row. */
+export interface PackedArrays {
+	/** f64 [L, P], P = n (n + 1) / 2. */
+	re: Float64Array;
+	im: Float64Array;
+}
+
+/** A block of a spectral density matrix, such as MIMO Random's grid window (`sdm`). */
+export interface SdmView {
+	view: 'sdm';
+	title: string;
+	channels: string[];
+	packing: 'upper';
+	unit: string;
+	x: Axis;
+	x_values: Float64Array;
+	measured: PackedArrays | null;
+	reference: PackedArrays | null;
+}
+
 /** Rows of text under column headings, such as a mode table. */
 export interface TableView {
 	view: 'table';
@@ -359,7 +400,7 @@ export interface ImageView {
 	bytes: Uint8Array;
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | TableView | ImageView;
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView | ImageView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------
@@ -724,6 +765,18 @@ export type RefusalReason =
 	| 'table_invalid'
 	| 'config_invalid'
 	| 'shaker_record_invalid'
+	// MIMO Random and the law catalog
+	| 'setup_invalid'
+	| 'gate_failed'
+	| 'prediction_exceeded'
+	| 'law_import_failed'
+	| 'catalog_unavailable'
+	| 'law_unknown'
+	| 'law_params_invalid'
+	| 'law_check_unsupported'
+	| 'law_check_running'
+	| 'law_check_not_recorded'
+	| 'law_not_checked'
 	| 'shutting_down';
 
 export type ItemReason =
@@ -766,7 +819,34 @@ export type ItemReason =
 	| 'weights_sum_not_positive'
 	| 'limit_unknown_channel'
 	| 'limit_rows_not_ascending'
-	| 'out_of_range';
+	| 'out_of_range'
+	// MIMO Random setup
+	| 'control_unknown_channel'
+	| 'drive_unknown_channel'
+	| 'duplicate_channel'
+	| 'no_drive_channel'
+	| 'transform_shape'
+	| 'transform_rank_deficient'
+	| 'transform_ill_conditioned'
+	| 'reference_shape'
+	| 'reference_too_large_inline'
+	| 'reference_not_hermitian'
+	| 'reference_not_psd'
+	| 'reference_repaired'
+	| 'reference_rank_above_drives'
+	| 'reference_file_unread'
+	| 'law_unknown'
+	| 'law_wrong_world'
+	| 'law_shape_not_supported'
+	| 'law_param_unknown'
+	| 'law_param_invalid'
+	| 'backend_not_selected'
+	| 'reference_invalid'
+	| 'reference_file'
+	| 'geometry'
+	| 'transform_rank'
+	| 'transform_condition'
+	| 'tolerance';
 
 /** One validation finding, located by whichever of `channel`, `row` and `field` applies. */
 export interface ReportItem {

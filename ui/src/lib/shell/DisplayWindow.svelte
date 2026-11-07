@@ -9,6 +9,8 @@
 	import '$lib/acquire/acquire.css';
 	import RunBar from '$lib/acquire/RunBar.svelte';
 	import RunView from '$lib/acquire/RunView.svelte';
+	import MimoRunView from '$lib/acquire/mimo/views/MimoRunView.svelte';
+	import { runBandsOf, runGeometryOf } from '$lib/acquire/mimo/runFrame';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { theme } from '$lib/theme/theme.svelte';
 	import ConnectionPill from './ConnectionPill.svelte';
@@ -19,8 +21,13 @@
 	}
 	let { app }: Props = $props();
 
+	const mimoRun = $derived(app.config.popoutTest === 'mimo_random');
+	const mimo = $derived(app.mimo);
+	const views = $derived(app.mimoViews);
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
+	const testName = $derived(mimoRun ? 'MIMO Random' : 'Random');
+	const pageName = $derived(mimoRun ? views.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
@@ -32,7 +39,12 @@
 
 	function onKey(e: KeyboardEvent) {
 		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === '.' || e.code === 'Period')) {
-			if (acq.actions.abort.enabled) {
+			if (mimoRun) {
+				if (mimo.actions.abort.enabled) {
+					e.preventDefault();
+					void mimo.abort();
+				}
+			} else if (acq.actions.abort.enabled) {
 				e.preventDefault();
 				void acq.abort();
 			}
@@ -41,7 +53,7 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
-<svelte:head><title>{display.page.name} | Random | Hertzforge</title></svelte:head>
+<svelte:head><title>{pageName} | {testName} | Hertzforge</title></svelte:head>
 
 <div class="window" data-testid="display-window">
 	<header class="bar">
@@ -52,9 +64,9 @@
 			</svg>
 			<span class="name">Hertzforge</span>
 			<span class="sep" aria-hidden="true">/</span>
-			<span>Random</span>
+			<span>{testName}</span>
 			<span class="sep" aria-hidden="true">/</span>
-			<span class="page" data-testid="display-window-page">{display.page.name}</span>
+			<span class="page" data-testid="display-window-page">{pageName}</span>
 		</div>
 		<div class="right">
 			<ConnectionPill client={app.control} label="Control" testid="conn-control" />
@@ -64,10 +76,14 @@
 		</div>
 	</header>
 	<div class="top">
-		<RunBar {acq} onoverride={() => {}} {abortKeys} compact />
+		<RunBar acq={mimoRun ? mimo : acq} onoverride={() => {}} {abortKeys} compact />
 	</div>
 	<div class="body">
-		<RunView {acq} {display} compact onpopout={(id) => app.openDisplayWindow(id)} />
+		{#if mimoRun}
+			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
+		{:else}
+			<RunView {acq} {display} compact onpopout={(id) => app.openDisplayWindow(id)} />
+		{/if}
 	</div>
 </div>
 
