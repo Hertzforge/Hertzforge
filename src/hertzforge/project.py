@@ -2887,7 +2887,9 @@ class Project(dict):
     def compute_srs(self, source: Any, *,
                     per_octave: int | None = None,
                     q: float | None = None,
-                    kind: str = 'maximax') -> str:
+                    kind: str = 'maximax',
+                    low: float | None = None,
+                    high: float | None = None) -> str:
         """Compute shock response spectra from a time history's shocks
         (Compute SRS), one curve per channel per event.
 
@@ -2913,12 +2915,23 @@ class Project(dict):
         kind : str, default 'maximax'
             Which peak each oscillator reports: 'maximax' (largest
             magnitude of either sign), 'positive' or 'negative'.
+        low, high : float, optional
+            The natural-frequency band, in Hz, to reach a requirement's
+            own. Default to the record's (`TimeHistory.srs_band`) and
+            `srs_ceiling`.
 
         Returns
         -------
         str
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            For a `low` under a quarter cycle of the shortest window, a
+            `high` above the Nyquist frequency, or a `high` above a
+            low-pass the record came through.
         """
         # Detection is the last resort. Set loose on a transient run, whose
         # playings are its averaging, the detector found thirty-one
@@ -2939,17 +2952,48 @@ class Project(dict):
             if not recording.shocks and recording.averaging is None:
                 recording.shocks = suggest(recording)
             history.shocks = recording.shocks
+        self._check_srs_band(source, low, high)
+        band = {key: float(value) for key, value in (('low', low), ('high', high))
+                if value is not None}
         # the analysis choices are parameters of the act, recorded in
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
-                            history.compute_srs(per_octave=per_octave,
-                                                q=q, kind=kind,
-                                                high=self.srs_ceiling(source)),
+                            history.compute_srs(
+                                per_octave=per_octave, q=q, kind=kind,
+                                low=band.get('low'),
+                                high=band.get('high', self.srs_ceiling(source))),
                             f'{source} SRS',
                             recipe=('compute_srs',
                                     {'per_octave': per_octave,
-                                     'q': q, 'kind': kind}))
+                                     'q': q, 'kind': kind, **band}))
+
+    def _check_srs_band(self, source: str, low: float | None,
+                        high: float | None) -> None:
+        """Refuse a band a record cannot be read over. An oscillator
+        peaks a quarter cycle after a pulse, so a window holding a quarter
+        cycle of the lowest line reads it true: a 26 ms window on a lone
+        half-sine read 20 Hz as the whole record does, 10 Hz within 0.2 dB
+        and 5 Hz 2 to 3 dB low."""
+        history = self[source]
+        if low is not None:
+            shortest = 1.0 / history.srs_band()[0]
+            floor = 1.0 / (4.0 * shortest)
+            if low < floor:
+                raise ValueError(
+                    f'{source}\'s shortest window, {1e3 * shortest:.4g} ms, reads an SRS '
+                    f'down to {floor:.4g} Hz; {low:g} Hz needs a window of at least '
+                    f'{1e3 / (4.0 * low):.4g} ms')
+        if high is not None:
+            rate = history.sample_rate
+            if high > rate / 2.0:
+                raise ValueError(f'{high:g} Hz is above the Nyquist frequency of '
+                                 f'{source}, {rate / 2.0:g} Hz')
+            corner = self._low_pass_of(source)
+            if corner is not None and high > corner:
+                raise ValueError(
+                    f'{source} is low-passed at {corner:g} Hz, and its SRS stops there; '
+                    'read the band above it from the recording')
 
     def _recording_of(self, name: str) -> Any:
         """The record `name` was filtered from, through any number of
@@ -2985,6 +3029,12 @@ class Project(dict):
         float or None
         """
         name = self.name_of(name)
+        corner = self._low_pass_of(name)
+        return corner if corner is not None and corner < self[name].sample_rate / 5.0 else None
+
+    def _low_pass_of(self, name: str) -> float | None:
+        """The lowest low-pass corner on the way to a record, in Hz, or
+        None when it came through none."""
         corners, seen = [], set()
         current = name
         while current and current not in seen:
@@ -2996,9 +3046,7 @@ class Project(dict):
                 if high is not None:
                     corners.append(float(high))
             current = made.get('source')
-        if not corners:
-            return None
-        return min(corners) if min(corners) < self[name].sample_rate / 5.0 else None
+        return min(corners) if corners else None
 
     def detect_shocks(self, source: Any) -> int:
         """Find the events in a time history and mark them on it (Detect
@@ -9274,7 +9322,8 @@ _RECOMPUTE = {
         lambda p, s, k: p[s].compute_multiple_coherence(),
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
-        kind=k.get('kind', 'maximax'), high=p.srs_ceiling(s)),
+        kind=k.get('kind', 'maximax'), low=k.get('low'),
+        high=k.get('high', p.srs_ceiling(s))),
     'make_realizable': lambda p, s, k: p[s].made_realizable(
         tolerance=k.get('tolerance'),
         keep_diagonal=k.get('keep_diagonal', True)),

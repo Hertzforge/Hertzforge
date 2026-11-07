@@ -132,6 +132,10 @@ def _source(verb: str, label: str = 'Source') -> Param:
     return Param('source', label, 'enum', options_from='verb:' + verb)
 
 
+def _zero_is_unset(value: float) -> float | None:
+    return float(value) or None
+
+
 def _verb(verb: str, **fixed: Any) -> Any:
     """An operation's run that calls the core verb on `source` with the
     other params as its keywords, and draws what it added. A param named
@@ -154,6 +158,10 @@ Q = Param('q', 'Q', 'number', default=10.0, min=0.5, step=1.0)
 SRS_KIND = Param('kind', 'Peak', 'enum', default='maximax', options=(
     Option('maximax', 'Maximax'), Option('positive', 'Positive'),
     Option('negative', 'Negative')))
+SRS_LOW = Param('low', 'Lowest line, 0 for the record\'s band', 'number', default=0.0,
+                unit='Hz', min=0.0, step=10.0)
+SRS_HIGH = Param('high', 'Highest line, 0 for the record\'s band', 'number', default=0.0,
+                 unit='Hz', min=0.0, step=100.0)
 BANDS = Param('per_octave', 'Bands per octave', 'enum', default=6, options=tuple(
     Option(n, label) for n, label in ((1, 'Full octave'), (3, 'Third octave'),
                                       (6, 'Sixth octave'), (12, 'Twelfth octave'),
@@ -508,8 +516,10 @@ VERB_OPERATIONS = (
              'its averages.', workspace='random'),
     _derives('compute_srs', 'Compute SRS',
              'Shock response spectra, one curve per channel per shock marked '
-             'on the history (detected first when none is marked).',
-             (SRS_PER_OCTAVE, Q, SRS_KIND), workspace='shock'),
+             'on the history (detected first when none is marked), over its own band '
+             'or the one asked for.',
+             (SRS_PER_OCTAVE, Q, SRS_KIND, SRS_LOW, SRS_HIGH), workspace='shock',
+             low=_zero_is_unset, high=_zero_is_unset),
     _derives('compute_multiple_coherence', 'Compute Multiple Coherence',
              'How much of each response the references explain, frequency by '
              'frequency.', workspace='random'),

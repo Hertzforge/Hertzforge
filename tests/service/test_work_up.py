@@ -501,3 +501,69 @@ def test_a_record_too_short_to_frame_still_gets_its_psds():
     project.add('Short', history(t, np.array([1.0, -1.0, 2.0, -2.0])))
     project.work_up('Random Vibration')
     assert 'Short PSDs' in project
+
+
+# ---- Compute SRS over the requirement's band -----------------------------------
+
+def lone_pulse():
+    t, x = half_sine()
+    project = Project()
+    project.add('R', history(t, x))
+    project.add('Req', requirement())
+    return project
+
+
+def test_a_lone_pulse_is_judged_once_the_op_widens_its_band(validate):
+    """A requirement the pulse meets exactly, from 20 Hz: its default band stops
+    at 37.9 Hz and is not judged, and the band asked for passes."""
+    project = lone_pulse()
+    whole = project['R'].compute_srs(shocks=(Shock(0.0, 1.0),), low=20.0, high=2000.0)
+    project.remove('Req')
+    project.add('Req', ShockSpecification.from_breakpoints(
+        whole.abscissa, whole.ordinate[0], '1X+', ordinate_unit='m/s**2',
+        warning=(-1.5, 3.0), abort=(-3.0, 6.0)))
+    run(project, 'project.compute_srs', source='R')
+    _plot, narrow = run(project, 'project.srs_points', srs='R SRS', requirement='Req')
+    assert row_of(narrow, 'Verdict')['value'] == 'not judged'
+    assert project['R SRS'].abscissa[0] == pytest.approx(37.9, abs=0.1)
+    project.remove('R SRS')
+    views = run(project, 'project.compute_srs', source='R', low=20.0, high=2000.0)
+    wire_views(views, validate)
+    _plot, wide = run(project, 'project.srs_points', srs='R SRS', requirement='Req')
+    assert row_of(wide, 'Verdict')['value'] == 'passes'
+    assert 'Not read' not in [row['label'] for row in wide['rows']]
+    assert project['R SRS'].abscissa[0] == pytest.approx(20.0)
+    # what the marked window reads at 20 Hz is what the whole record reads
+    assert project['R SRS'].ordinate[0][0] == pytest.approx(whole.ordinate[0][0], rel=1e-3)
+
+
+def test_a_band_asked_for_survives_a_refresh_and_a_save(tmp_path):
+    project = lone_pulse()
+    project.compute_srs('R', low=20.0, high=2000.0)
+    before = np.array(project['R SRS'].abscissa)
+    project.refresh('R SRS')
+    assert np.array_equal(project['R SRS'].abscissa, before)
+    back = Project.open(project.save(tmp_path / 'band.hforge'))
+    back.refresh('R SRS')
+    assert np.array_equal(back['R SRS'].abscissa, before)
+
+
+def test_zero_leaves_the_records_own_band():
+    project = lone_pulse()
+    run(project, 'project.compute_srs', source='R', low=0.0, high=0.0)
+    assert project['R SRS'].abscissa[-1] == pytest.approx(project['R'].sample_rate / 5.0, rel=0.03)
+    assert 'low' not in project.provenance['R SRS']['params']
+
+
+def test_compute_srs_refuses_a_band_the_record_cannot_read():
+    project = lone_pulse()
+    project.detect_shocks('R')
+    with pytest.raises(ProtocolError, match='needs a window of at least'):
+        run(project, 'project.compute_srs', source='R', low=2.0)
+    with pytest.raises(ProtocolError, match='Nyquist'):
+        run(project, 'project.compute_srs', source='R', high=project['R'].sample_rate)
+    run(project, 'project.filter_data', source='R')
+    corner = project['R'].filtering.high
+    with pytest.raises(ProtocolError, match='low-passed'):
+        run(project, 'project.compute_srs', source='R Filtered', high=corner * 1.5)
+    assert 'R SRS' not in project and 'R Filtered SRS' not in project
