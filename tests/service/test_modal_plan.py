@@ -60,7 +60,7 @@ def test_a_flat_plate_opens_on_enough_sensors_to_tell_its_modes_apart():
     material = fem.Material('al', youngs_modulus=70e9, density=2700, poissons_ratio=0.3)
     columns, rows = 12, 8
     model = fem.Model('plate')
-    node = lambda i, j: i * (rows + 1) + j + 1  # noqa: E731
+    node = lambda i, j: i * (rows + 1) + j + 1
     for i in range(columns + 1):
         for j in range(rows + 1):
             model.add_node(node(i, j), i * 0.6 / columns, j * 0.4 / rows, 0.0)

@@ -528,7 +528,7 @@ def test_a_published_fit_journals_the_line_that_replays_it():
     assert line.startswith("project.fit_modes('H', at=[") and "name='Modes'" in line
     published = project['Modes']
     again = _project_of(H=_frf())
-    exec(line, {'project': again})
+    exec(line, {'project': again})  # noqa: S102
     assert np.allclose(again['Modes'].shape_matrix, published.shape_matrix)
     assert project.provenance['Modes']['verb'] == 'fit_modes'
     project.refresh('Modes')
