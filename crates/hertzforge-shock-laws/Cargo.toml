@@ -22,3 +22,18 @@ hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
 hertzforge-random-laws = { path = "../hertzforge-random-laws" }
 # The abstract backend a check case runs on.
 hertzforge-hal = { path = "../hertzforge-hal" }
+# Classical law files: the `shock-classical` world and its contained instance.
+hertzforge-law-host = { path = "../hertzforge-law-host" }
+# A check case's run: the pulse's compensation, the channel table its station is
+# configured with, the station class its arm gate is given.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+serde_json = "1"
+
+[dev-dependencies]
+# TEST FIXTURE ONLY: the check cases and the native-against-file parity run on the
+# Sim plant. On deny.toml's hertzforge-hal-sim wrapper list for that reason.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+# The notch check case's FRF plant is a matrix stack.
+hertzforge-sdm = { path = "../hertzforge-sdm" }

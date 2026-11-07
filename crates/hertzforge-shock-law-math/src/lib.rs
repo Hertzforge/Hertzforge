@@ -26,6 +26,7 @@
 #![warn(missing_docs)]
 
 pub mod classical;
+pub mod spectrum;
 
 /// A complex value as `(re, im)`, the workspace's own representation.
 pub use hertzforge_dsp::fft::Cplx;

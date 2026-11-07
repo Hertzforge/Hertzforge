@@ -10,7 +10,7 @@ use hertzforge_law_host::{law_file_sha256, HostConfig, LawHost, Param, ParamValu
 use hertzforge_random::HinvConfig;
 use hertzforge_random_laws::{
     may_arm_on_hardware, ArmRefusal, BuiltinLaw, CatalogError, CheckCase, CheckRecord, CheckStatus,
-    ChoiceError, LawCatalog, LawChoice, DEFAULT_LAW_ID, LAWS_DIR,
+    ChoiceError, LawCatalog, LawChoice, LawWorld, DEFAULT_LAW_ID, LAWS_DIR,
 };
 use std::path::Path;
 
@@ -407,4 +407,53 @@ fn serde_json_text(r: &CheckRecord) -> String {
         r.passed,
         cases.join(",")
     )
+}
+
+#[test]
+fn classical_shock_laws_have_their_own_list_the_built_in_first() {
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-classical-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut cat = open(&root);
+    let list = cat.shock_classical_entries();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "fd_correct");
+    assert_eq!(list[0].world, LawWorld::ShockClassical);
+    assert_eq!(
+        list[0].manifest,
+        hertzforge_random_laws::classical_builtin_manifest()
+    );
+    assert_eq!(
+        cat.entry("fd_correct").unwrap().world,
+        LawWorld::ShockClassical
+    );
+    assert_eq!(LawWorld::ShockClassical.as_str(), "shock_classical");
+
+    // An imported classical law file lists with the classical laws only.
+    let entry = cat
+        .import(&law_file("hertzforge_law_shock_fdc"))
+        .expect("the classical law file imports");
+    assert_eq!(entry.world, LawWorld::ShockClassical);
+    let ids = |v: Vec<hertzforge_random_laws::CatalogEntry>| -> Vec<String> {
+        v.into_iter().map(|e| e.id).collect()
+    };
+    assert_eq!(
+        ids(cat.shock_classical_entries()),
+        ["fd_correct".to_string(), entry.id.clone()]
+    );
+    assert!(!ids(cat.entries()).contains(&entry.id));
+    assert!(!ids(cat.mimo_entries()).contains(&entry.id));
+    assert!(cat.classical_law(&entry.id).is_some());
+    // A Random choice of it is refused by its world.
+    let mut cfg = ladder_cfg();
+    assert!(matches!(
+        cat.resolve(&LawChoice::new(entry.id.clone(), Vec::new()), &mut cfg),
+        Err(ChoiceError::WrongTestType {
+            law_is_for: "classical shock",
+            ..
+        })
+    ));
+    let _ = std::fs::remove_dir_all(root);
 }

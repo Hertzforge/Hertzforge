@@ -1,9 +1,10 @@
-//! The control-law host: loads a Random control law compiled to a
-//! WebAssembly component (the `random-single` or the `random-mimo` world of
+//! The control-law host: loads a control law compiled to a WebAssembly
+//! component (the `random-single`, `random-mimo` or `shock-classical` world of
 //! `hertzforge:control-law@0.1.0`, in `wit/control-law/`) and runs it
-//! contained. [`LawHost::load`] loads a single-output law,
-//! [`LawHost::load_mimo`] a multiple-output one, and [`LawHost::load_any`]
-//! whichever the file is.
+//! contained. [`LawHost::load`] loads a single-output Random law,
+//! [`LawHost::load_mimo`] a multiple-output one,
+//! [`LawHost::load_classical`] a classical shock law, and
+//! [`LawHost::load_any`] whichever the file is.
 //!
 //! # What the host guarantees
 //!
@@ -73,15 +74,20 @@ mod error;
 mod host;
 pub mod mimo;
 mod sandbox;
+pub mod shock_classical;
 mod ticker;
 mod types;
 pub mod validate;
 
-pub use error::MimoOutputRule;
+pub use error::{ClassicalOutputRule, MimoOutputRule};
 pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
 pub use mimo::{
     DiagnosticKind, DiagnosticLayout, LoadedMimoLaw, MimoLawInstance, MimoManifest, WasmMimoLaw,
+};
+pub use shock_classical::{
+    ClassicalInputs, ClassicalLawInstance, ClassicalOutputs, ClassicalPlant, ClassicalSetup,
+    ClassicalVerdict, LoadedClassicalLaw, MAX_CLASSICAL_VALUES,
 };
 pub use types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, GuestOutput, IntegerSpec,
@@ -95,3 +101,5 @@ pub const INTERFACE: &str = "hertzforge:control-law@0.1.0";
 pub const WORLD: &str = "random-single";
 /// The world a multiple-output law file implements.
 pub const MIMO_WORLD: &str = "random-mimo";
+/// The world a classical shock law file implements.
+pub const CLASSICAL_WORLD: &str = "shock-classical";

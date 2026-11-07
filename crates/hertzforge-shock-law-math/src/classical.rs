@@ -17,6 +17,7 @@
 //! This module is the law's declaration and its arithmetic and nothing else.
 //! The controller's native law and the law file `laws/shock-fdc` both wrap it.
 
+use crate::spectrum::{irfft_half, mul, rfft_half};
 use crate::{Cplx, DiagnosticDecl, NumberParam};
 
 /// The law's catalog id.
@@ -169,24 +170,25 @@ pub struct Step {
 }
 
 /// The law's state for one run.
-// The seed and the correction read the reference, the inverse, the trusted
-// bins and the drive spectrum; until they are written nothing does.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FdCorrect {
     params: FdCorrectParams,
     record_len: usize,
-    reference: Vec<f64>,
+    /// The reference's spectrum `R`.
+    reference: Vec<Cplx>,
     inverse: Vec<Cplx>,
     trusted: Vec<bool>,
-    /// The law's own drive spectrum `D`, kept between calls.
+    /// The law's own drive spectrum `D`, kept between calls; empty before the
+    /// seed.
     drive_spectrum: Vec<Cplx>,
+    /// The last drive's peak, volts (0 before the seed).
+    last_peak: f64,
 }
 
 impl FdCorrect {
     /// Build the law for a run: the full-level `reference` record
-    /// (`record_len` samples), and the core's regularized `inverse` and
-    /// `trusted` bins on the grid (`record_len / 2 + 1` each).
+    /// (`record_len` samples, a power of two), and the core's regularized
+    /// `inverse` and `trusted` bins on the grid (`record_len / 2 + 1` each).
     pub fn new(
         params: FdCorrectParams,
         record_len: usize,
@@ -195,8 +197,10 @@ impl FdCorrect {
         trusted: &[bool],
     ) -> Result<Self, String> {
         let bins = record_len / 2 + 1;
-        if record_len < 2 {
-            return Err(format!("a record of {record_len} samples is too short"));
+        if record_len < 2 || !record_len.is_power_of_two() {
+            return Err(format!(
+                "a record of {record_len} samples is not a pulse grid (a power of two)"
+            ));
         }
         if reference.len() != record_len {
             return Err(format!(
@@ -211,13 +215,24 @@ impl FdCorrect {
                 trusted.len()
             ));
         }
+        for (key, v) in [
+            ("beta", params.beta),
+            ("max_db_per_pulse", params.max_db_per_pulse),
+            ("initial_backoff_db", params.initial_backoff_db),
+        ] {
+            let p = KNOBS.iter().find(|p| p.key == key).expect("declared");
+            if !v.is_finite() || v < p.min || v > p.max {
+                return Err(format!("{key} is {v}; it runs from {} to {}", p.min, p.max));
+            }
+        }
         Ok(FdCorrect {
             params,
             record_len,
-            reference: reference.to_vec(),
+            reference: rfft_half(reference)?,
             inverse: inverse.to_vec(),
             trusted: trusted.to_vec(),
             drive_spectrum: Vec::new(),
+            last_peak: 0.0,
         })
     }
 
@@ -231,13 +246,47 @@ impl FdCorrect {
         self.record_len
     }
 
-    /// The first drive, before any pulse has fired.
+    /// The law's drive spectrum `D` (empty before the seed).
+    pub fn drive_spectrum(&self) -> &[Cplx] {
+        &self.drive_spectrum
+    }
+
+    /// The first drive, before any pulse has fired: `D0 = G R` on the trusted
+    /// bins, zero elsewhere, then scaled down by `initial_backoff_db`.
     pub fn seed(&mut self) -> Result<Step, String> {
-        Err("the frequency-domain correction law is not built yet".into())
+        let scale = 10f64.powf(-self.params.initial_backoff_db / 20.0);
+        let mut corrected = 0usize;
+        self.drive_spectrum = self
+            .reference
+            .iter()
+            .zip(&self.inverse)
+            .zip(&self.trusted)
+            .map(|((&r, &g), &t)| {
+                if t {
+                    corrected += 1;
+                    let d = mul(r, g);
+                    (d.0 * scale, d.1 * scale)
+                } else {
+                    (0.0, 0.0)
+                }
+            })
+            .collect();
+        let drive = irfft_half(&self.drive_spectrum, self.record_len)?;
+        self.last_peak = peak(&drive);
+        Ok(Step {
+            drive,
+            report: StepReport {
+                corrected_bins: corrected,
+                clamped_bins: 0,
+                drive_change_db: 0.0,
+            },
+        })
     }
 
     /// The next drive, from the last pulse's `response` referred to full level
-    /// (`record_len` samples).
+    /// (`record_len` samples): `D += beta G (R - Y)` on the trusted bins, each
+    /// bin's magnitude allowed to grow by at most `max_db_per_pulse` (shrinking
+    /// is always allowed).
     pub fn iterate(&mut self, response: &[f64]) -> Result<Step, String> {
         if response.len() != self.record_len {
             return Err(format!(
@@ -246,8 +295,65 @@ impl FdCorrect {
                 self.record_len
             ));
         }
-        Err("the frequency-domain correction law is not built yet".into())
+        if self.drive_spectrum.is_empty() {
+            return Err("the law was asked for a correction before its seed".into());
+        }
+        if response.iter().any(|v| !v.is_finite()) {
+            return Err("the response holds a value that is not a finite number".into());
+        }
+        let y = rfft_half(response)?;
+        let beta = self.params.beta;
+        let grow = 10f64.powf(self.params.max_db_per_pulse / 20.0);
+        let (mut corrected, mut clamped) = (0usize, 0usize);
+        // Indexed, as time waveform replication's loop is: five arrays move
+        // together bin by bin and the index is the clearest name for that.
+        #[allow(clippy::needless_range_loop)]
+        for k in 0..self.drive_spectrum.len() {
+            if !self.trusted[k] {
+                continue;
+            }
+            // The same arithmetic, in the same order, as time waveform
+            // replication's correction.
+            let (er, ei) = (self.reference[k].0 - y[k].0, self.reference[k].1 - y[k].1);
+            let (gr, gi) = self.inverse[k];
+            let dr = beta * (er * gr - ei * gi);
+            let di = beta * (er * gi + ei * gr);
+            let old = self.drive_spectrum[k];
+            let old_mag = (old.0 * old.0 + old.1 * old.1).sqrt();
+            let mut new = (old.0 + dr, old.1 + di);
+            let new_mag = (new.0 * new.0 + new.1 * new.1).sqrt();
+            let cap = old_mag.max(1e-15) * grow;
+            if new_mag > cap {
+                let s = cap / new_mag;
+                new = (new.0 * s, new.1 * s);
+                clamped += 1;
+            }
+            if new != old {
+                corrected += 1;
+            }
+            self.drive_spectrum[k] = new;
+        }
+        let drive = irfft_half(&self.drive_spectrum, self.record_len)?;
+        let p = peak(&drive);
+        let drive_change_db = if self.last_peak > 0.0 && p > 0.0 {
+            20.0 * (p / self.last_peak).log10()
+        } else {
+            0.0
+        };
+        self.last_peak = p;
+        Ok(Step {
+            drive,
+            report: StepReport {
+                corrected_bins: corrected,
+                clamped_bins: clamped,
+                drive_change_db,
+            },
+        })
     }
+}
+
+fn peak(x: &[f64]) -> f64 {
+    x.iter().fold(0.0f64, |m, v| m.max(v.abs()))
 }
 
 #[cfg(test)]
@@ -278,15 +384,135 @@ mod tests {
     }
 
     #[test]
-    fn new_refuses_mismatched_lengths_and_the_unbuilt_calls_say_so() {
+    fn new_refuses_mismatched_lengths_and_out_of_range_values() {
         let r = vec![0.0; 8];
         let g = vec![(1.0, 0.0); 5];
         let t = vec![true; 5];
         assert!(FdCorrect::new(FdCorrectParams::default(), 8, &r[..7], &g, &t).is_err());
         assert!(FdCorrect::new(FdCorrectParams::default(), 8, &r, &g[..4], &t).is_err());
+        assert!(FdCorrect::new(FdCorrectParams::default(), 6, &r[..6], &g[..4], &t[..4]).is_err());
+        let bad = FdCorrectParams {
+            beta: 2.0,
+            ..FdCorrectParams::default()
+        };
+        assert!(FdCorrect::new(bad, 8, &r, &g, &t)
+            .unwrap_err()
+            .contains("beta"));
         let mut law = FdCorrect::new(FdCorrectParams::default(), 8, &r, &g, &t).unwrap();
-        assert!(law.seed().unwrap_err().contains("not built"));
+        assert!(law.iterate(&r).unwrap_err().contains("before its seed"));
+        law.seed().unwrap();
         assert!(law.iterate(&r[..3]).unwrap_err().contains("samples"));
+        let mut nan = r.clone();
+        nan[2] = f64::NAN;
+        assert!(law.iterate(&nan).unwrap_err().contains("finite"));
+    }
+
+    /// A unity plant whose inverse is exact: the seed is the reference, and
+    /// each pulse halves the error at beta 0.5.
+    #[test]
+    fn on_a_unity_plant_the_seed_is_the_reference_and_each_pulse_halves_the_error() {
+        let n = 64;
+        let reference: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                if (0.25..0.5).contains(&t) {
+                    (std::f64::consts::PI * (t - 0.25) / 0.25).sin()
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let bins = n / 2 + 1;
+        let g = vec![(1.0, 0.0); bins];
+        let t = vec![true; bins];
+        let mut law = FdCorrect::new(FdCorrectParams::default(), n, &reference, &g, &t).unwrap();
+        let seed = law.seed().unwrap();
+        let err = |d: &[f64]| {
+            d.iter()
+                .zip(&reference)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max)
+        };
+        assert!(err(&seed.drive) < 1e-12);
+        assert_eq!(seed.report.corrected_bins, bins);
+        // The plant measures 0.8 of the drive: each pulse removes half the
+        // remaining 20% shortfall.
+        let mut drive = seed.drive;
+        let mut short = 0.2;
+        for _ in 0..3 {
+            let response: Vec<f64> = drive.iter().map(|v| 0.8 * v).collect();
+            let next = law.iterate(&response).unwrap();
+            short *= 1.0 - 0.5 * 0.8;
+            let gain = peak(&next.drive) / peak(&reference) * 0.8;
+            assert!((1.0 - gain - short).abs() < 1e-9, "{gain} {short}");
+            assert!(next.report.drive_change_db > 0.0);
+            drive = next.drive;
+        }
+    }
+
+    #[test]
+    fn the_backoff_scales_the_seed_and_untrusted_bins_stay_at_zero() {
+        let n = 32;
+        let reference: Vec<f64> = (0..n).map(|i| ((i as f64) * 0.7).sin()).collect();
+        let bins = n / 2 + 1;
+        let g = vec![(0.5, 0.25); bins];
+        let mut t = vec![true; bins];
+        t[3] = false;
+        let p = FdCorrectParams {
+            initial_backoff_db: 6.0,
+            ..FdCorrectParams::default()
+        };
+        let mut backed = FdCorrect::new(p, n, &reference, &g, &t).unwrap();
+        let mut full = FdCorrect::new(FdCorrectParams::default(), n, &reference, &g, &t).unwrap();
+        let (a, b) = (backed.seed().unwrap(), full.seed().unwrap());
+        let ratio = peak(&a.drive) / peak(&b.drive);
+        assert!((ratio - 10f64.powf(-6.0 / 20.0)).abs() < 1e-12, "{ratio}");
+        assert_eq!(backed.drive_spectrum()[3], (0.0, 0.0));
+        let zeros = vec![0.0; n];
+        backed.iterate(&zeros).unwrap();
+        assert_eq!(
+            backed.drive_spectrum()[3],
+            (0.0, 0.0),
+            "a held bin never moves"
+        );
+    }
+
+    #[test]
+    fn a_bin_rises_at_most_its_clamp_per_pulse_and_may_always_fall() {
+        let n = 16;
+        let mut reference = vec![0.0; n];
+        reference[4] = 1.0;
+        let bins = n / 2 + 1;
+        let g = vec![(1e-3, 0.0); bins];
+        let t = vec![true; bins];
+        let p = FdCorrectParams {
+            beta: 1.0,
+            ..FdCorrectParams::default()
+        };
+        let mags = |l: &FdCorrect| -> Vec<f64> {
+            l.drive_spectrum()
+                .iter()
+                .map(|&c| crate::spectrum::abs(c))
+                .collect()
+        };
+        // A zero response asks each bin to double (6.02 dB): over the 6 dB
+        // clamp, so every bin with reference content is held to 6 dB.
+        let mut law = FdCorrect::new(p, n, &reference, &g, &t).unwrap();
+        law.seed().unwrap();
+        let before = mags(&law);
+        let step = law.iterate(&vec![0.0; n]).unwrap();
+        assert_eq!(step.report.clamped_bins, bins);
+        let cap = 10f64.powf(6.0 / 20.0);
+        for (a, b) in mags(&law).iter().zip(&before) {
+            assert!((a / b - cap).abs() < 1e-12, "{a} {b}");
+        }
+        // A response twice the reference shrinks every bin, unclamped.
+        let over: Vec<f64> = reference.iter().map(|v| 2.0 * v).collect();
+        let before = mags(&law);
+        let step = law.iterate(&over).unwrap();
+        assert_eq!(step.report.clamped_bins, 0);
+        assert!(mags(&law).iter().zip(&before).all(|(a, b)| a < b));
+        assert!(step.report.drive_change_db < 0.0);
     }
 
     #[test]
