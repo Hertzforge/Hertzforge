@@ -701,8 +701,8 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 			return;
 		}
 		addLog('note', `seeded ${r.law.name} ${r.law.version}`);
-		setPhase(r, 'running', 'waiting');
 		r.nextAt = r.mode === 'auto' ? r.t + r.derived.spacing_s : null;
+		setPhase(r, 'running', 'waiting');
 	}
 
 	function vpkAt(r: Run, levelDb: number): number {
@@ -796,8 +796,8 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 		}
 		if (r.queue && r.queue.left > 0) {
 			r.queue.left -= 1;
-			setPhase(r, 'running', 'waiting');
 			r.nextAt = r.t + r.queue.spacing;
+			setPhase(r, 'running', 'waiting');
 			return;
 		}
 		r.queue = null;
@@ -819,15 +819,15 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 				r.passedAtLevel = 0;
 				addLog('level', `level ${r.levelDb} dB`);
 			}
-			setPhase(r, 'running', 'waiting');
 			r.nextAt = r.t + r.derived.spacing_s;
+			setPhase(r, 'running', 'waiting');
 		} else {
 			if (onPass && r.failsInRow >= maxPer) {
 				end(r, 'not_converged', 'stopped', { kind: 'not_converged', pulse: row.index + 1, at_level_db: r.levelDb, limit: 'per_level', pulses: r.failsInRow });
 				return;
 			}
-			setPhase(r, 'running', 'waiting');
 			r.nextAt = r.t + r.derived.spacing_s;
+			setPhase(r, 'running', 'waiting');
 		}
 	}
 

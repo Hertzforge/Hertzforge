@@ -58,7 +58,7 @@
 		{#if status?.mode}<span class="mode">{status.mode === 'auto' ? 'Automatic' : 'Manual'}</span>{/if}
 	</div>
 
-	{#if coming}<p class="coming num" data-testid="shock-pulse-words">{coming}</p>{/if}
+	{#if coming}<p class="coming" data-testid="shock-pulse-words">{coming}</p>{/if}
 	{#if next}<p class="next" data-testid="shock-next-pulse">{next}</p>{/if}
 
 	{#if lastWords}
