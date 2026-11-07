@@ -1164,7 +1164,7 @@ def load_sine_specification(group: h5py.Group) -> SineSweepSpecification:
             frequency=sub['frequency'][()],
             amplitude=sub['amplitude'][()], phase=sub['phase'][()],
             segment_type=sub['segment_type'][()],
-            segment_rate=sub['segment_rate'][()], **limits))
+            segment_rate=sub['segment_rate'][()], from_file=True, **limits))
     return SineSweepSpecification(
         tones=tones, response_dof=_read_strings(group, 'response_dof'),
         ordinate_dim=str(group.attrs['ordinate_dim']),

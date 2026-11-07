@@ -12,6 +12,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .ops_sine_shock import _record
 from .parsing import parse_numbers
 from .protocol import refused
 from .waterfalls import unit_text
@@ -27,12 +28,6 @@ WINDOW = Param('window', 'Window', 'enum', default='hann',
                    ('blackmanharris', 'Blackman-Harris'))))
 FACTOR = Param('factor', 'Keep every', 'integer', default=2, min=2, step=1, unit='samples')
 FOLD = Param('frequencies', 'Frequencies to fold', 'string', default='', unit='Hz')
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 def kurtosis(project: Any, params: dict[str, Any]) -> list[dict]:

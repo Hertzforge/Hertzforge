@@ -156,7 +156,8 @@ def _core_tolerance(geometry: Any) -> float:
 
 
 def _id_text(ids: set[int] | list[int]) -> str:
-    return ', '.join(str(i) for i in sorted(ids))
+    """Ids as `_ids` reads them: a list in the order named, a set in order."""
+    return ', '.join(str(i) for i in (sorted(ids) if isinstance(ids, set) else ids))
 
 
 def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:

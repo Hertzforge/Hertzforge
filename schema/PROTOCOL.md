@@ -624,22 +624,27 @@ project, and opening or starting another project ends it.
 | `fit.end` | `{}` | `{}` |
 
 `fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
-modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
+modes are adopted as confirmed, on the records whose DOFs the set holds. Records that leave a
+response without a record against some reference are refused, since a missing pair is not a
+measured zero; so is a complex set, or one with no value at any record's DOFs. A set's DOFs the fit
+does not cover are kept when it publishes, and a new mode cannot be confirmed while there are any.
+A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left
-out): the zoom is the search band. `fit.move` puts the cursor at `frequency` and searches the
-damping there; `fit.damping` holds the damping at a fraction of critical until the next suggestion.
+out): the zoom is the search band. `fit.move` puts the cursor at `frequency`, within the measured
+range, and searches the damping there; `fit.damping` holds the damping at a fraction of critical
+(0.0001 to 0.5, as `fit.edit` takes it) until the next suggestion.
 `fit.fit` fits the pending mode without adding it (the preview), so its synthesis can be judged,
 and `fit.confirm` adds it. `fit.refine` fits every confirmed mode's residues again, together.
 `fit.delete` takes back the confirmed modes at `modes` (indices into `modes`, from 0) and drops
-the preview. `fit.edit` types a confirmed mode's `damping` (a fraction of critical, above 0 and up
-to 1) or `description` into its row, as Visual Dynamics' fit table does; a damping changes the
-synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
+the preview. `fit.edit` types a confirmed mode's `damping` or `description` into its row, as Visual
+Dynamics' fit table does; a damping changes the synthesis and the residual. `fit.residual` draws the residual's own CMIF in the view, or stops. With
 `coherence`, the name of a coherence or multiple coherence in the project, `fit.start` weights each
-response at each line by γ²/(1-γ²), as the core does (`ModalFitSession`).
+response at each line by γ²/(1-γ²) in the frequency and damping search, the residues and `fit.refine`,
+and `fit.find` reads the residual CMIF with each response at its median weight (`ModalFitSession`).
 `fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
 "<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
-published. A step the core refuses is refused in its words; a fit whose FRF has left the project
+published. The journal holds the `Project.fit_modes(at=...)` line that replays it. A step the core refuses is refused in its words; a fit whose FRF has left the project
 ends.
 
 `fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.

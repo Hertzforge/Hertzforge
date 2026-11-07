@@ -1525,6 +1525,50 @@ class SrsError(NamedTuple):
     refused: str | None = None
     #: `RAW_NOTE` when neither side's units are declared, else None
     note: str | None = None
+    #: the part of the requirement the spectrum does not reach
+    #: (`srs_unread`), None when it reaches all of it
+    unread: str | None = None
+
+
+def srs_unread(specification: DataArray, spec_record: int,
+               frequencies: ArrayLike) -> str | None:
+    """The part of a requirement a spectrum does not reach, in words, or
+    None when it reaches all of it.
+
+    A comparison reads a spectrum only at its own lines, so lines it does
+    not have are not a pass, they are not read: a 3 ms half-sine computed
+    from 800 Hz sits inside a 20 to 2000 Hz requirement with every point
+    it has, and over the whole band it fails. A requirement's point within
+    one of the spectrum's line spacings of an end counts as reached, since
+    a spectrum's grid lands near its band's edges and not on them.
+
+    Parameters
+    ----------
+    specification : DataArray
+        The requirement.
+    spec_record : int
+        Which of its records.
+    frequencies : array-like
+        The spectrum's lines that hold a reading, ascending, in Hz.
+
+    Returns
+    -------
+    str or None
+    """
+    written = np.asarray(specification.abscissa, dtype=float)
+    levels = np.real(np.atleast_2d(specification.ordinate)[spec_record])
+    written = written[np.isfinite(levels) & (levels > 0.0)]
+    lines = np.asarray(frequencies, dtype=float)
+    if not (written.size and lines.size):
+        return None
+    below, above = (lines[1] / lines[0], lines[-1] / lines[-2]) if lines.size > 1 else (1.0, 1.0)
+    missed = (written < lines[0] / below) | (written > lines[-1] * above)
+    count = int(missed.sum())
+    if not count:
+        return None
+    return (f'the requirement runs from {written[0]:.4g} to {written[-1]:.4g} Hz and the '
+            f'spectrum from {lines[0]:.4g} to {lines[-1]:.4g} Hz, so {count} of the '
+            f"requirement's {written.size} points were not read")
 
 
 def srs_errors(specification: DataArray, measured: DataArray
@@ -1561,7 +1605,9 @@ def srs_errors(specification: DataArray, measured: DataArray
     `refused` saying why, so the channel shows as not scored instead of
     disappearing or reading 20 dB out. With neither side declared the
     pair is scored and `note` says it was compared as raw numbers. The
-    rule is the one `srs_tolerance` refuses by.
+    rule is the one `srs_tolerance` refuses by. A spectrum that stops
+    short of the requirement is scored over what it reaches, and `unread`
+    says what it does not (`srs_unread`).
     """
     # Why dB: on the airplane run the relative norm passed every channel
     # at 20 % while one of them was 25 dB over, 99.5 % of its norm coming
@@ -1592,7 +1638,9 @@ def srs_errors(specification: DataArray, measured: DataArray
             continue
         out.append(SrsError(dof, block,
                             signed_rms_db(got[good], target[good]),
-                            note=note))
+                            note=note,
+                            unread=srs_unread(specification, j,
+                                              measured.abscissa[got > 0.0])))
     return out
 
 
@@ -1701,7 +1749,7 @@ def sine_errors(specification: SineSweepSpecification,
             tone = specification.tone(level.tone)
         except KeyError:
             continue
-        target = tone.target(level.abscissa)
+        target = level.target_on(tone)
         for row, dof in enumerate(level.response_dof):
             try:
                 column = specification.response_dof.index(str(dof))
@@ -2075,7 +2123,8 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
                   outer: tuple[float, float] | None = None,
                   rule: str = 'share',
                   percent: float = SRS_POINTS_PERCENT,
-                  limits: bool = True) -> dict[str, Any]:
+                  limits: bool = True,
+                  whole_band: bool = True) -> dict[str, Any]:
     """One record of a measured SRS judged point by point against one
     record of the SRS it was required to meet.
 
@@ -2119,6 +2168,12 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
         The rule, as for `srs_points`.
     limits : bool, default True
         Read a band not given from the requirement's limit curves.
+    whole_band : bool, default True
+        Hold a spectrum that stops short of the requirement to it: what
+        passes over the part it reaches is not judged (`passed` None) and
+        'unread' says what was left (`srs_unread`). What fails there still
+        fails. False judges only the lines given, for a caller working on
+        lines of its own choosing.
 
     Returns
     -------
@@ -2174,6 +2229,13 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
                                  measured.ordinate_dim[measured_record])
     if note is not None:
         out['note'] = note
+    if whole_band:
+        unread = srs_unread(specification, spec_record,
+                            frequencies[np.isfinite(got) & (got > 0.0)])
+        if unread is not None:
+            out['unread'] = unread
+            if out['passed']:
+                out['passed'] = None
     return out
 
 
