@@ -1006,7 +1006,6 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.generate_signal', title='Generate Signal', workspace='signals',
-        accepts='project',
         summary='A signal made from a spectrum, a sine specification or a channel table\'s '
                 'reference channels, added beside its source: random, burst random, '
                 'periodic random, an impulse, a classical pulse or a sine. Only the settings '
@@ -1017,7 +1016,6 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=generate_signal),
     Operation(
         id='project.srs_synthesis', title='SRS Synthesis', workspace='shock',
-        accepts='project',
         summary='A shock a shaker can play, synthesized as a sum of wavelets to meet a shock '
                 'specification and read against the shaker\'s ratings, added as a time '
                 'history.',
@@ -1025,20 +1023,20 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=srs_synthesis),
     Operation(
         id='project.compute_modal_responses', title='Compute Modal Responses',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='How each mode of a shape set answers the forces in a time history or a '
                 'force CPSD, added as an object of its own, one record per mode.',
         params=(FORCES, SHAPES, QUANTITY, MODES, FORCE_RECORDS),
         outputs=('waterfall', 'reading'), run=compute_modal_responses),
     Operation(
-        id='project.sweep_rate', title='Sweep Rate', workspace='sine', accepts='project',
+        id='project.sweep_rate', title='Sweep Rate', workspace='sine',
         summary='One tone of a sine specification against typed modes, each a frequency and '
                 'a Q: every pass through a mode\'s half-power band, and whether it is swept '
                 'too fast for the mode to build.',
         params=(SWEEP, SWEEP_TONE, SWEEP_MODES, MARGIN, SWEPT_LEVELS),
         outputs=('spectrum', 'table', 'reading'), run=sweep_rate),
     Operation(
-        id='project.fatigue', title='Fatigue', workspace='specify', accepts='project',
+        id='project.fatigue', title='Fatigue', workspace='specify',
         summary='The extreme response and fatigue damage spectra of one acceleration record, '
                 'and with a candidate test, the margin, factor and duration that cover the '
                 'record at every natural frequency.',
@@ -1047,7 +1045,6 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=fatigue),
     Operation(
         id='project.drive_prediction', title='Drive Prediction', workspace='specify',
-        accepts='project',
         summary='The drives a specification asks for through an FRF\'s regularized inverse, '
                 'the response they make, and what they ask of the amplifiers and shakers.',
         params=(PLANT, TARGET, INVERSE, TOLERANCE, WEIGHT, RUN, DRIVE_LIMIT,
@@ -1055,7 +1052,6 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=drive_prediction),
     Operation(
         id='project.notch_prediction', title='Notch Prediction', workspace='specify',
-        accepts='project',
         summary='Where each limit channel would exceed its profile at full level, from a '
                 'transmissibility from the control channel, and the notch the controller '
                 'would cut in the control to hold it there.',
@@ -1063,13 +1059,11 @@ OPERATIONS = (
         outputs=('spectrum', 'table', 'reading'), run=notch_prediction),
     Operation(
         id='project.conditioning', title='Conditioning', workspace='modal',
-        accepts='project',
         summary='The singular values and condition number of an FRF from several references '
                 'or of a CPSD at every line, read at one frequency.',
         params=(MATRIX, AT), outputs=('spectrum', 'reading'), run=conditioning),
     Operation(
         id='project.realizability', title='Realizability', workspace='random',
-        accepts='project',
         summary='Whether any set of signals has a CPSD, line by line, from the eigenvalues of '
                 'its coherence matrix, read at one frequency.',
         params=(CPSD, AT), outputs=('spectrum', 'reading'), run=realizability),

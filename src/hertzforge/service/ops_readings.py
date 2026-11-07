@@ -201,20 +201,19 @@ def overload(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.rms_check', title='RMS Check', workspace='signals', accepts='project',
+        id='project.rms_check', title='RMS Check', workspace='signals',
         summary='One record of an autospectrum against the time history it came '
                 'from: the RMS from the area under the spectrum beside the record\'s '
                 'own, and the gap in dB.',
         params=(SPECTRUM, RECORD), outputs=('reading',), run=rms_check),
     Operation(
         id='project.time_statistics', title='Time Statistics', workspace='signals',
-        accepts='project',
         summary='One channel\'s statistics in the time domain, each judged against '
                 'its band: the moments, the crest factor and the kurtosis frame by '
                 'frame.',
         params=(HISTORY, RECORD), outputs=('reading',), run=time_statistics),
     Operation(
-        id='project.overload', title='Overload', workspace='signals', accepts='project',
+        id='project.overload', title='Overload', workspace='signals',
         summary='Each channel of a time history against the range its linked channel '
                 'table gives it: the headroom over its largest peak, its samples on '
                 'the rail, and that peak at the next level of the test. Channel 0 '

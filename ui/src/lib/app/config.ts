@@ -20,6 +20,10 @@ export interface ShellConfig {
 	 * window to place on another monitor. It observes the run with its own subscription.
 	 */
 	popout: boolean;
+	/** `?runlog=1`: the log alone fills the window (`--run-log` on the desktop app). */
+	runLog: boolean;
+	/** `?runlog_file=<path>`: the log to open there. */
+	runLogFile: string | null;
 	page: string | null;
 	/** `&test=mimo_random`: the pop-out shows a MIMO Random run's page; otherwise Random's. */
 	popoutTest: 'random' | 'mimo_random';
@@ -57,6 +61,8 @@ export function readConfig(search: string): ShellConfig {
 		controlUrl: wsUrl(q.get('control'), DEFAULT_CONTROL_URL),
 		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
 		popout: q.get('popout') === '1',
+		runLog: q.get('runlog') === '1',
+		runLogFile: q.get('runlog_file'),
 		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
 		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : 'random',
 		mockControl: {

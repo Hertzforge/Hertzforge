@@ -75,6 +75,18 @@ def test_a_connection_starts_in_vds_system_and_chooses_another(validate):
     assert wrong['error']['code'] == 'bad_request'
 
 
+def test_export_writes_in_the_connections_system(tmp_path):
+    path = tmp_path / 'plate.unv'
+    responses = asyncio.run(_exchange([
+        ('units.system', {}),
+        ('project.import', {'path': str(PLATE / 'geometry.unv'), 'units': {'length_unit': 'mm'}}),
+        ('op.run', {'op': 'project.save_as', 'params': {
+            'object': 'Geometry', 'format': 'unv', 'path': str(path)}}),
+    ]))
+    rows = {r['label']: r for r in responses[-1][-1]['result']['views'][0]['rows']}
+    assert rows['Units']['value'] == 'in-slinch-lbf-s'
+
+
 def test_a_tables_unit_columns_are_converted_but_not_the_ones_typed_into():
     view = v.table('Nodes', ['Node', 'X [m]', 'Y [m]', 'Note [m]'],
                    [['1', '0.0254', '0.0508', 'here']],

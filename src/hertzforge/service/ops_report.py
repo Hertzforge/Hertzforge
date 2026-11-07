@@ -867,14 +867,12 @@ def amend_report(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.report_features', title='Report Features', workspace='report',
-        accepts='project',
         summary='Which optional features a report carries, from a preset or switched one by '
                 'one; a feature that cannot be switched on says what it waits on.',
         params=(SOURCE, _preset_param(), *_feature_params()), outputs=('reading',),
         run=report_features, edits=True),
     Operation(
         id='project.report_requirement', title='Test Requirement', workspace='report',
-        accepts='project',
         summary='Bind a test requirement to a run, one control band about the specification, '
                 'and read each criterion met, not met or not judged. An edge, tolerance or '
                 'duration left at 0 is the specification\'s own or not part of it.',
@@ -899,7 +897,7 @@ OPERATIONS = (
                       min=0.0, step=10.0)),
         outputs=('reading',), run=report_requirement, edits=True),
     Operation(
-        id='project.report_finding', title='Finding', workspace='report', accepts='project',
+        id='project.report_finding', title='Finding', workspace='report',
         summary='Enter a deviation, anomaly or nonconformance in the findings register, change '
                 'one by its number, or take it out. A field left empty is left as it is.',
         params=(REPORT, NUMBER,
@@ -919,7 +917,7 @@ OPERATIONS = (
         outputs=('table',), run=report_finding, edits=True),
     Operation(
         id='project.draft_finding_fact', title='Draft Fact from a Measurement',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='Offer a finding a draft of its fact read off a measured PSD against a '
                 'specification\'s limits; the channel left empty is the finding\'s own.',
         params=(REPORT, NUMBER, MEASURED_PSD, SPECIFICATION,
@@ -929,7 +927,7 @@ OPERATIONS = (
         outputs=('reading', 'table'), run=draft_finding_fact, edits=True),
     Operation(
         id='project.draft_finding_from_requirement', title='Draft Fact from the Requirement',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='Offer a finding the fact a row of the requirement\'s result table reads: a '
                 'notch the plan does not name, or a cross-axis channel over its limit.',
         params=(REPORT, NUMBER, MEASURED_PSD, SPECIFICATION,
@@ -937,14 +935,13 @@ OPERATIONS = (
         outputs=('reading', 'table'), run=draft_finding_from_requirement, edits=True),
     Operation(
         id='project.draft_findings_from_run_log', title='Draft Findings from the Run Log',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='Offer the report the deviations and anomalies a run log extract holds, as '
                 'drafts beside the register, entered only when accepted.',
         params=(REPORT, RUN_LOG), outputs=('reading', 'table'),
         run=draft_findings_from_run_log, edits=True),
     Operation(
         id='project.accept_finding', title='Accept or Discard a Draft', workspace='report',
-        accepts='project',
         summary='Accept a drafted fact, as offered or as edited here, or discard it: a fact '
                 'drafted on a finding, or a finding the run log offered.',
         params=(REPORT, NUMBER,
@@ -956,7 +953,6 @@ OPERATIONS = (
         outputs=('table',), run=accept_finding, edits=True),
     Operation(
         id='project.report_check_block', title='Check Block', workspace='report',
-        accepts='project',
         summary='Give the report a check of its own: what it reads (empty for its default '
                 'binding) and its settings, typed name=value.',
         params=(REPORT,
@@ -968,11 +964,11 @@ OPERATIONS = (
                 Param('settings', 'Settings', 'string', default='')),
         outputs=('reading',), run=report_check_block, edits=True),
     Operation(
-        id='project.report_check', title='Report Check', workspace='report', accepts='project',
+        id='project.report_check', title='Report Check', workspace='report',
         summary='What the report still owes before it is issued, a line per section.',
         params=(REPORT,), outputs=('reading',), run=report_check),
     Operation(
-        id='project.report_test_date', title='Test Dates', workspace='report', accepts='project',
+        id='project.report_test_date', title='Test Dates', workspace='report',
         summary='The first and last day of the test, YYYY-MM-DD, and each sensor\'s '
                 'calibration judged against them. An empty first day clears them.',
         params=(REPORT, Param('start', 'Test date', 'string', default=''),
@@ -980,7 +976,6 @@ OPERATIONS = (
         outputs=('reading',), run=report_test_date, edits=True),
     Operation(
         id='project.report_calibration', title='Calibration Status', workspace='report',
-        accepts='project',
         summary='Each sensor\'s calibration on the test dates, and the equipment list offered '
                 'to the Setup and Method section, put at its end when asked.',
         params=(REPORT, Param('insert', 'Insert into Setup and Method', 'boolean',
@@ -988,7 +983,7 @@ OPERATIONS = (
         outputs=('reading', 'table'), run=report_calibration, edits=True),
     Operation(
         id='project.report_prediction', title='Responses Against Prediction',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='Add a block reading a response against predictions, and show each predicted '
                 'peak against the measured one. The level is dB relative to full level.',
         params=(REPORT,
@@ -999,7 +994,7 @@ OPERATIONS = (
                 Param('caption', 'Caption', 'string', default='')),
         outputs=('table', 'reading'), run=report_prediction, edits=True),
     Operation(
-        id='project.report_run_identity', title='Runs', workspace='report', accepts='project',
+        id='project.report_run_identity', title='Runs', workspace='report',
         summary='The runs the report draws on, a row each, and one field of one run entered; '
                 'an empty value goes back to what the record shows.',
         params=(REPORT, Param('history', 'Run', 'enum', options_from='objects:time_history'),
@@ -1011,13 +1006,12 @@ OPERATIONS = (
         outputs=('table',), run=report_run_identity, edits=True),
     Operation(
         id='project.report_runs', title='Results for Every Run', workspace='report',
-        accepts='project',
         summary='Repeat the report\'s Results for every run it does not draw on yet, bound to '
                 'that run\'s own objects.',
         params=(REPORT,), outputs=('reading', 'table'), run=report_runs, edits=True),
     Operation(
         id='project.report_chronology', title='Draft Chronology from the Runs',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='Draft the chronology of the runs, each with its time at level and the '
                 'interruptions on its running RMS, and offer it to the Chronology section.',
         params=(REPORT,
@@ -1030,13 +1024,12 @@ OPERATIONS = (
         outputs=('table', 'reading'), run=report_chronology, edits=True),
     Operation(
         id='project.accept_chronology', title='Accept Chronology', workspace='report',
-        accepts='project',
         summary='Make the drafted chronology the Chronology section, as drafted or as edited '
                 'here.',
         params=(REPORT, Param('text', 'As edited', 'string', default='')),
         outputs=('table', 'reading'), run=accept_chronology, edits=True),
     Operation(
-        id='project.report_flash', title='Flash Report', workspace='report', accepts='project',
+        id='project.report_flash', title='Flash Report', workspace='report',
         summary='The parts of the flash report only the author can write, and what its page '
                 'still owes. A part left empty is left as it is.',
         params=(REPORT, Param('condition', 'Condition on release', 'string', default=''),
@@ -1048,7 +1041,7 @@ OPERATIONS = (
                                Option('take_back', 'Take back')))),
         outputs=('reading',), run=report_flash, edits=True),
     Operation(
-        id='project.index_file', title='Attach File', workspace='report', accepts='project',
+        id='project.index_file', title='Attach File', workspace='report',
         summary='Add a file on the service\'s machine to the data index, hashed now: a '
                 'document sent with the report, or a file it names.',
         params=(Param('path', 'File', 'string', default=''),
@@ -1059,26 +1052,23 @@ OPERATIONS = (
         outputs=('table',), run=index_file, edits=True),
     Operation(
         id='project.unindex_file', title='Remove from Index', workspace='report',
-        accepts='project',
         summary='Take a file out of the data index, by the name the index prints.',
         params=(Param('file', 'File', 'string', default=''),),
         outputs=('table',), run=unindex_file, edits=True),
     Operation(
         id='project.verify_data_index', title='Verify Data Index', workspace='report',
-        accepts='project',
         summary='Hash every indexed file again: it matches, has changed, or is not found. '
                 'Folders to look in, one per line, for a file that has moved.',
         params=(SEARCH,), outputs=('reading', 'table'), run=verify_data_index, edits=True),
     Operation(
         id='project.export_report_template', title='Save Report Template', workspace='report',
-        accepts='project',
         summary='Save a report on its own as a template another project can generate from, '
                 'in the templates folder when no path is given.',
         params=(REPORT, Param('path', 'Path', 'string', default='')),
         outputs=('reading',), run=export_report_template),
     Operation(
         id='project.generate_from_template', title='Generate from Saved Template',
-        workspace='report', accepts='project',
+        workspace='report',
         summary='A report built from a saved template, by its name or a .vdreport path, bound '
                 'by role to this project\'s objects.',
         params=(Param('template', 'Template', 'string', default=''),
@@ -1086,7 +1076,6 @@ OPERATIONS = (
         outputs=('reading',), run=generate_from_template),
     Operation(
         id='project.reports_from_runs', title='Reports from Runs', workspace='report',
-        accepts='project',
         summary='Write the report each controller run\'s type calls for, beside the run or '
                 'into a folder; the open project is not changed. Last left at 0 reads the '
                 'whole run.',
@@ -1099,7 +1088,6 @@ OPERATIONS = (
         outputs=('table',), run=reports_from_runs),
     Operation(
         id='project.attach_run_log', title='Attach Run Log', workspace='report',
-        accepts='project',
         summary='Bring one test of a run log into the project, frozen at an entry. A test or '
                 'entry left at 0 is the log\'s one test or its last entry.',
         params=(Param('path', 'Run log', 'string', default=''),
@@ -1109,26 +1097,22 @@ OPERATIONS = (
         outputs=('reading',), run=attach_run_log),
     Operation(
         id='project.refresh_run_log', title='Refresh Run Log', workspace='report',
-        accepts='project',
         summary='Take an extract again from its log, to the newest entry or to the entry '
                 'given.',
         params=(RUN_LOG, Param('upto', 'To entry', 'integer', default=0, min=0, step=1)),
         outputs=('reading',), run=refresh_run_log, edits=True),
     Operation(
         id='project.detach_run_log', title='Detach Run Log', workspace='report',
-        accepts='project',
         summary='Take a run log extract out of the project.',
         params=(RUN_LOG,), outputs=('reading',), run=detach_run_log),
     Operation(
         id='project.index_run_log_files', title='Index Run Log Files', workspace='report',
-        accepts='project',
         summary='Add the files a run log names to the data index, each checked against the '
                 'checksum the log records.',
         params=(RUN_LOG, SEARCH), outputs=('reading', 'table'), run=index_run_log_files,
         edits=True),
     Operation(
         id='project.report_identity', title='Report Identity', workspace='report',
-        accepts='project',
         summary='The report\'s number, revision, laboratory, customer, dates and who '
                 'authorized it, carried in its margins while Report Identity is on; what '
                 'is still to enter before it is issued.',
@@ -1136,7 +1120,6 @@ OPERATIONS = (
         edits=True),
     Operation(
         id='project.amend_report', title='Amend Report', workspace='report',
-        accepts='project',
         summary='An issued report amended: where the change is, what it said, what it says '
                 'now and why, under a new revision.',
         params=(SOURCE, Param('where', 'Where', 'string', default=''),

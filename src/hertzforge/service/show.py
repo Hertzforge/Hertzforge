@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import _mesh
+from .mesh import drawn_mesh
 from .protocol import ProtocolError, refused
 
 #: how the shell numbers records when it asks an operation for some
@@ -84,7 +84,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'mode_table': True, 'mac': True, 'shape_values': False,
+         'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
@@ -112,6 +112,11 @@ def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | No
 
 #: past this many shape values the table is not offered (VD's limit)
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
+
+#: a lone shape set's own DOFs are marked with arrows up to this many: a
+#: measured set has a few dozen, a finite element set hundreds of thousands,
+#: and an arrow on every node of a mesh says nothing
+ARROW_DOF_LIMIT = 2_000
 
 #: where a shape set's values are read: every DOF, or a channel choice of the
 #: table in its group (VD's `_VALUES_CHOICES`)
@@ -174,7 +179,7 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 ) -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
     table's channels, a force or a drive pointing in, else a lone shape
-    set's DOFs."""
+    set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
 
@@ -185,7 +190,9 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
-        return [str(dof) for dof in project[objects[0]].coordinate], []
+        dofs = project[objects[0]].coordinate
+        if len(dofs) <= ARROW_DOF_LIMIT:
+            return [str(dof) for dof in dofs], []
     return [], []
 
 
@@ -270,35 +277,57 @@ def _alone(project: Any, name: str, picks: list[int],
     if isinstance(obj, Geometry):
         return _run(project, 'project.view_geometry', geometry=name), []
     if isinstance(obj, ShapeSet):
-        # a lone set's three views, each on or off, one always up (VD's
-        # `_shape_views`): the mode list, the auto-MAC beside it since how
-        # distinct the modes are is part of reading the list, and the
-        # values themselves; on its geometry the modes animate above them
+        # a lone set's views, one at a time, its verb in the action table
+        # choosing: on its geometry the modes animate, unless the shell asks
+        # for the mode list, the auto-MAC or the values. The auto-MAC brings
+        # the stage its squares animate, which the shell draws once one is
+        # picked. Modes picked in the tree limit every view to those modes.
+        from .ops_project import _shape_view, mac_views
+
         prefs = {**PREFS, **(prefs or {})}
         geometry = _geometry_for(project, name)
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < obj.num_shapes})
         count = int(obj.num_shapes) * len(obj.coordinate)
-        fits = count <= SHAPE_VALUES_CELL_LIMIT
-        up = {'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
-              'values': bool(prefs['shape_values']) and fits}
-        if not any(up.values()):
-            up['table'] = True
+        notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} modes picked'] if picked else []
+        frame = prefs['shape_view'] or 'animate'
+        if frame == 'animate' and geometry is None:
+            frame = 'table'
+        if frame == 'values' and count > SHAPE_VALUES_CELL_LIMIT:
+            notes.append(f'{count:,} shape values, too many for a table')
+            frame = 'table'
         views: list[dict] = []
-        notes = [f'mode {picks[0] + 1} picked' if len(picks) == 1 else
-                 f'{len(picks)} modes picked'] if picks else []
-        if geometry is not None:
-            views += _run(project, 'project.mode_shapes', shapes=name, geometry=geometry)
-        if up['table']:
-            views += _run(project, 'project.table', object=name)
-        if up['mac']:
-            views += [view for view in _run(project, 'project.mac', first=name, second=name)
-                      if view['view'] == 'matrix']
-        if up['values']:
+        if frame == 'animate':
+            views.append(_shape_view(project, name, geometry, picked or None))
+        if frame == 'mac':
+            paired = mac_views(project, name, name, picked or None, picked or None)
+            selected = next((view for view in paired if view['view'] == 'shape3d'), None)
+            if selected is not None:
+                # a square picked animates its row mode with its column mode overlaid;
+                # the shell leaves the overlay off on the diagonal
+                stage = _shape_view(project, name, geometry, picked or None)
+                stage['overlays'] = selected['overlays']
+                stage['overlay_phase'] = selected['overlay_phase']
+                views.append(stage)
+            views += [view for view in paired if view['view'] == 'matrix']
+        if frame == 'table':
+            (table,) = _run(project, 'project.table', object=name)
+            if picked and len(table['rows']) == obj.num_shapes:
+                table['rows'] = [table['rows'][k] for k in picked]
+                if 'edit' in table:
+                    table['edit']['rows'] = [k + 1 for k in picked]
+            views.append(table)
+        if frame == 'values':
             table, said = _values_view(project, name, obj, prefs)
             notes += said
             if table is not None:
+                if picked and len(table['columns']) == obj.num_shapes + 1:
+                    keep = [0] + [k + 1 for k in picked]
+                    table['columns'] = [table['columns'][i] for i in keep]
+                    table['rows'] = [[row[i] for i in keep] for row in table['rows']]
+                elif picked and len(table['rows']) == obj.num_shapes:
+                    table['rows'] = [table['rows'][k] for k in picked]
                 views.append(table)
-        if prefs['shape_values'] and not fits:
-            notes.append(f'{count:,} shape values, too many for a table')
         return views, notes
     if isinstance(obj, ChannelTable):
         # the table itself, typed into, with the Control column of the
@@ -567,13 +596,13 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
          prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """Two shape sets: their MAC, each axis ticked by its own frequencies,
     and on a geometry the stage the matrix selects a pair on, the column
-    mode overlaid on the row mode (`ops_modal_run.paired`). Sets on two
+    mode overlaid on the row mode (`mode_pairs.paired`). Sets on two
     geometries compare after projection onto the first's DOFs
     (`Project.comparison_mac`), and `prefs['projection']` animates the
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
     as `matched`, as VD's red checker."""
-    from .ops_modal_run import paired
+    from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
@@ -613,7 +642,7 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
 def _drawn_rows(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The mesh as the shape view draws it, and each geometry node's drawn
     index (-1 when it is not drawn)."""
-    drawn_rows, triangles, lines = _mesh(geometry)
+    drawn_rows, triangles, lines = drawn_mesh(geometry)
     drawn = np.full(geometry.num_nodes, -1, dtype=np.int64)
     drawn[drawn_rows] = np.arange(drawn_rows.size)
     return drawn_rows, triangles, lines, drawn
@@ -632,6 +661,82 @@ def _played(data: Any, picks: list[int]) -> tuple[list[int], str, list[str]]:
     if repeated:
         notes.append(repeated.lstrip(' —'))
     return records, quantity, notes
+
+
+def _three_played(project: Any, objects: list[str], records: dict[str, list[int]]
+                  ) -> tuple[list[dict], list[str]] | None:
+    """A geometry, a shape set and modal coordinates selected together: the coordinates
+    played through that set. None for any other three."""
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    def only(cls: Any) -> str | None:
+        found = [name for name in objects if isinstance(project[name], cls)]
+        return found[0] if len(found) == 1 else None
+
+    geometry, shapes, history = only(Geometry), only(ShapeSet), only(TimeHistory)
+    if not (geometry and shapes and history):
+        return None
+    return _modal_motion(project, geometry, history, records.get(history, []), shapes)
+
+
+def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[int],
+                  shapes_name: str | None = None) -> tuple[list[dict], list[str]] | None:
+    """Modal coordinates played on a geometry through their shape set, as Visual Dynamics
+    plays them: the set selected with them, or the one they came from
+    (`Project.modal_basis`). Each frame is the modes' shapes scaled by their values at that
+    sample and summed, by the shell, so the physical response is never formed
+    (`deform.modal_deflection`). None when the records are not modal coordinates."""
+    from hertzforge.core.validate import modal_coordinate
+    from hertzforge.deform import modal_deflection
+
+    from .waterfalls import unit_text
+
+    geometry, data = project[geometry_name], project[data_name]
+    records, quantity, notes = _played(data, picks)
+    modal = [i for i in records if modal_coordinate(data.response_dof[i]) is not None]
+    if not modal:
+        return None
+    basis = shapes_name or project.modal_basis(data_name, modal)
+    if basis is None:
+        said = (f'{data_name}: its records are modal coordinates; select their shape set too, '
+                'to play them')
+        return [], [said]
+    try:
+        deflection = modal_deflection(geometry, project[basis], data, modal)
+    except ValueError as error:
+        return [], [f'{data_name}: {error}']
+    drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
+    shown = drawn[deflection.rows] >= 0
+    if not shown.any():
+        return [], [f'{basis} has no DOF on {geometry_name}']
+    played = [i for i in modal if modal_coordinate(data.response_dof[i]) <= project[basis].num_shapes]
+    fields = deflection.fields.reshape(len(played), -1, 3)[:, shown, :]
+    values = np.asarray(data.ordinate)[played].real
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    # the modal factors cancel: a mass-normalized shape times its coordinate is the motion
+    dim = data.known_dim(played[0]).removeprefix('modal_')
+    title = f'{data_name} on {geometry_name}'
+    plot = v.spectrum(title, v.axis('Time', 's', 'linear'),
+                      v.axis(f'Modal {quantity}', unit_text(data.known_dim(played[0])) or None,
+                             'linear'),
+                      [v.series(data.record_label(i), 'measured', abscissa, values[d])
+                       for d, i in enumerate(played)], link='time')
+    stage = v.shape3d(
+        title, 'm' if geometry.units_defined else 'undefined',
+        np.asarray(geometry.node_xyz, dtype=float)[drawn_rows], [], triangles=triangles,
+        lines=lines, node_ids=np.asarray(geometry.node_id)[drawn_rows], link='time',
+        motion={'label': 'Time', 'unit': 's', 'start': float(abscissa[0]),
+                'step': float(abscissa[1] - abscissa[0]) if abscissa.size > 1 else 0.0,
+                'quantity': dim.capitalize(), 'value_unit': unit_text(dim) or '',
+                'node': drawn[deflection.rows[shown]].astype(np.uint32),
+                'direction': np.empty((0, 3), dtype=np.float32),
+                'modes': np.ascontiguousarray(fields, np.float32),
+                'values': np.ascontiguousarray(values, np.float32),
+                'peak': deflection.peak_magnitude})
+    notes.append(f'{len(played)} mode shapes of {basis} scaled by the record and summed')
+    return [stage, plot], notes
 
 
 def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
@@ -764,7 +869,7 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
     ids = []
     for name in (first, second):
         geometry = project[name]
-        rows, triangles, lines = _mesh(geometry)
+        rows, triangles, lines = drawn_mesh(geometry)
         views.append((np.asarray(geometry.node_xyz, dtype=float)[rows], triangles, lines,
                       geometry.units_defined))
         ids.append(np.asarray(geometry.node_id)[rows])
@@ -818,12 +923,12 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         obj = project[other]
         picks = records.get(other, [])
         if isinstance(obj, ShapeSet):
-            views = _run(project, 'project.mode_shapes', shapes=other, geometry=geometry)
-            return views + _run(project, 'project.table', object=other), []
+            return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
         if isinstance(obj, ChannelTable):
             return _run(project, 'project.dof_arrows', source=other), []
         if isinstance(obj, TimeHistory):
-            return _motion(project, geometry, other, picks)
+            return (_modal_motion(project, geometry, other, picks)
+                    or _motion(project, geometry, other, picks))
         if _is_data(obj):
             abscissa = getattr(obj, 'abscissa_dim', '')
             if isinstance(obj, Psd) or (abscissa == 'frequency'
@@ -1003,6 +1108,8 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
+        elif len(objects) == 3 and (played := _three_played(project, objects, records)):
+            views, notes = played
         elif len(objects) == 3:
             compared = _compared(project, objects, prefs)
             if compared is not None:

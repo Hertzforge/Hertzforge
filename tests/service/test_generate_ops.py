@@ -20,7 +20,7 @@ from hertzforge.service.ops_generate import OPERATIONS
 from hertzforge.service.ops_project import OPERATIONS as PROJECT_OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in (*OPERATIONS, *PROJECT_OPERATIONS)}

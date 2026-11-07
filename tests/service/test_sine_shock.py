@@ -24,7 +24,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_sine_shock import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS}
@@ -333,7 +333,7 @@ def test_a_shock_window_is_typed_added_and_removed():
 def test_the_shock_windows_drag_on_the_record_and_on_its_stage(validate):
     """Visual Dynamics' shock windows: spans on the record and on the 3-D
     stage, each dragged to move it through Shock Window."""
-    from .test_ops import wire_views
+    from .conftest import wire_views
 
     state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
     project = state.project

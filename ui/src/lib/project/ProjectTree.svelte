@@ -13,7 +13,7 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
 	import { spans, type Span } from './brackets';
-	import { treeOrder } from './order';
+	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 
@@ -39,22 +39,142 @@
 		return { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey };
 	}
 
+	/** Picking the object a combination in the action table needs: the tree answers that, and nothing else. */
+	const picking = $derived(app.analyze.picking);
+	function pick(o: ProjectObject): boolean {
+		if (!picking) return false;
+		if (picking.row.candidates?.includes(o.name)) app.analyze.join(o.name, picking.row);
+		return true;
+	}
+
 	function rowClick(e: MouseEvent, o: ProjectObject) {
-		if (p.renaming === o.name) return;
+		if (p.renaming === o.name || justDragged || pick(o)) return;
 		p.clickObject(o.name, order, mods(e));
 	}
 
 	function rowKey(e: KeyboardEvent, o: ProjectObject) {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
+			if (pick(o)) return;
 			p.clickObject(o.name, order, { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey });
 		} else if (e.key === 'ArrowRight' && OPENS.has(o.kind) && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
+			// Delete deletes, as VD's does: the journal keeps what went
 			e.preventDefault();
-			p.confirming = true;
+			void p.removeSelected();
 		}
+	}
+
+	/** Cmd-C copies the selected objects, Cmd-V pastes them as copies; typing in a field is left alone. */
+	function treeKey(e: KeyboardEvent) {
+		const target = e.target as HTMLElement | null;
+		if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+		const cmd = isMac ? e.metaKey : e.ctrlKey;
+		if (!cmd || e.altKey || e.shiftKey) return;
+		if (e.key === 'c' || e.key === 'C') {
+			if (p.copySelection()) e.preventDefault();
+		} else if (e.key === 'v' || e.key === 'V') {
+			e.preventDefault();
+			void p.paste();
+		}
+	}
+
+	/**
+	 * A row dragged with the pointer: past a few pixels it carries the selection it is in (or itself),
+	 * the row under the pointer lights as the drop target, and letting go there moves the dragged
+	 * objects into that object's group; letting go on the tree's empty part takes them out of theirs.
+	 * The pointer, not HTML5 drag and drop, since the desktop window takes native drags for files.
+	 */
+	let dragging = $state<string[] | null>(null);
+	let dropOn = $state<string | null>(null);
+	let dropOut = $state(false);
+	/** The row the bar sits above, where the dragged objects will land: null at the bottom, undefined when letting go moves nothing. */
+	const place = $derived.by(() => {
+		if (!dragging) return undefined;
+		const links = p.summary?.links;
+		if (dropOn) return landsBefore(p.summary?.objects ?? [], links, dragging, dropOn);
+		if (dropOut && (links ?? []).some((g) => g.members.some((m) => dragging?.includes(m)))) return landsBefore(p.summary?.objects ?? [], links, dragging, null);
+		return undefined;
+	});
+	/** A solid being dragged among its siblings (VD's drag in the tree): a subtraction cuts the rest from the first. */
+	let solidDrag: { name: string; id: number; within: number | null; ids: number[]; y: number; moved: boolean } | null = null;
+	let solidPlace = $state<{ name: string; within: number | null; before: number | null } | null>(null);
+	let solidDragged = false;
+	function solidDown(e: PointerEvent, name: string, id: number, within: number | null, ids: number[]) {
+		if (e.button !== 0 || ids.length < 2) return;
+		e.stopPropagation();
+		solidDrag = { name, id, within, ids, y: e.clientY, moved: false };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function solidMove(e: PointerEvent) {
+		const drag = solidDrag;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved && Math.abs(e.clientY - drag.y) < 6) return;
+		drag.moved = true;
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-solid]');
+		if (!row || row.dataset.solidOf !== `${drag.name}|${drag.within ?? ''}`) {
+			solidPlace = null;
+			return;
+		}
+		const over = Number(row.dataset.solid);
+		const box = row.getBoundingClientRect();
+		const after = e.clientY > box.top + box.height / 2;
+		const next = drag.ids[drag.ids.indexOf(over) + 1] ?? null;
+		solidPlace = { name: drag.name, within: drag.within, before: after ? next : over };
+	}
+	function solidUp(e: PointerEvent) {
+		const drag = solidDrag;
+		const place = solidPlace;
+		solidDrag = null;
+		solidPlace = null;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved) return;
+		solidDragged = true;
+		setTimeout(() => (solidDragged = false), 0);
+		if (!place) return;
+		const order = reordered(drag.ids, drag.id, place.before);
+		if (order.some((id, k) => id !== drag.ids[k])) void p.reorderSolids(drag.name, order, drag.within);
+	}
+	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
+	let justDragged = false;
+	function dragDown(e: PointerEvent, o: ProjectObject) {
+		if (e.button !== 0 || p.renaming === o.name) return;
+		dragFrom = { name: o.name, x: e.clientX, y: e.clientY, id: e.pointerId };
+	}
+	function dragMove(e: PointerEvent) {
+		if (!dragFrom) return;
+		if (!dragging) {
+			if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < 6) return;
+			dragging = p.isSelected(dragFrom.name) ? [...p.selection.objects] : [dragFrom.name];
+			(e.currentTarget as HTMLElement).setPointerCapture?.(dragFrom.id);
+		}
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
+		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
+		dropOn = name && !dragging.includes(name) ? name : null;
+		dropOut = !name && overBlank(e);
+	}
+	/** Whether the pointer is on the panel's blank space, from the tree's top down, where letting go takes the dragged objects out of their groups. */
+	function overBlank(e: PointerEvent): boolean {
+		if (!treeBox || e.clientY < treeBox.getBoundingClientRect().top) return false;
+		return (treeBox.closest('aside') ?? treeBox).contains(document.elementFromPoint(e.clientX, e.clientY));
+	}
+	function dragUp(e: PointerEvent) {
+		const moving = dragging;
+		const target = dropOn;
+		const inside = overBlank(e);
+		dragging = null;
+		dropOn = null;
+		dropOut = false;
+		dragFrom = null;
+		if (!moving) return;
+		justDragged = true;
+		setTimeout(() => (justDragged = false), 0);
+		if (target) void p.moveInto(moving, target);
+		else if (inside) void p.moveInto(moving, null);
 	}
 
 	/** A DOF label in a grid being typed over: the object and the row, and the text. */
@@ -153,27 +273,36 @@
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
 </script>
 
-{#snippet solidRows(name: string, solids: SolidRow[], depth: number)}
+{#snippet solidRows(name: string, solids: SolidRow[], depth: number, within: number | null = null)}
 	{#each solids as solid (solid.id)}
 		<div
 			class="sub"
 			class:picked={partPicked(name, 'solid', solid.id)}
+			class:place-solid={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === solid.id}
+			class:place-solid-end={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === null && solid === solids[solids.length - 1]}
 			style="--depth: {depth}"
 			role="treeitem"
 			aria-selected={partPicked(name, 'solid', solid.id)}
 			tabindex="-1"
 			data-testid="solid-{name}-{solid.id}"
-			onclick={() => p.clickPart(name, 'solid', solid.id)}
+			data-solid-of="{name}|{within ?? ''}"
+			data-solid={solid.id}
+			onpointerdown={(e) => solidDown(e, name, solid.id, within, solids.map((x) => x.id))}
+			onpointermove={solidMove}
+			onpointerup={solidUp}
+			onpointercancel={() => { solidDrag = null; solidPlace = null; }}
+			onclick={(e) => { if (solidDragged) { e.stopPropagation(); return; } p.clickPart(name, 'solid', solid.id); }}
 			onkeydown={(e) => e.key === 'Enter' && p.clickPart(name, 'solid', solid.id)}
 		>
 			<Glyph name={solidIcon(solid.kind)} of="child" parent="geometry" size={14} />
 			<span class="label">{solid.label}</span>
 		</div>
-		{#if solid.children.length}{@render solidRows(name, solid.children, depth + 1)}{/if}
+		{#if solid.children.length}{@render solidRows(name, solid.children, depth + 1, solid.id)}{/if}
 	{/each}
 {/snippet}
 
-<div class="tree" class:bracketed={painted.length > 0} role="tree" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
+<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
 	{#if painted.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
@@ -198,7 +327,7 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if OPENS.has(o.kind)}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -384,6 +513,13 @@
 </div>
 
 <style>
+	.tree.picking .row:not(.candidate) {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.tree.picking .row.candidate {
+		box-shadow: inset 2px 0 0 var(--accent);
+	}
 	.tree {
 		position: relative;
 		margin-top: var(--sp-2);
@@ -413,6 +549,7 @@
 	}
 
 	.row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 5px;
@@ -428,6 +565,57 @@
 	.row.on {
 		background: var(--blue-weak);
 		box-shadow: inset 0 0 0 1px var(--blue-line);
+	}
+
+	.row.drop {
+		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+
+	/* where the dragged objects will land */
+	.sub[data-solid] {
+		position: relative;
+		touch-action: none;
+	}
+	.sub.place-solid::before,
+	.sub.place-solid-end::after {
+		content: '';
+		position: absolute;
+		right: 0;
+		left: 0;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+		pointer-events: none;
+	}
+	.sub.place-solid::before {
+		top: -1px;
+	}
+	.sub.place-solid-end::after {
+		bottom: -1px;
+	}
+
+	.row.place::before,
+	.tree.place-end::after {
+		content: '';
+		position: absolute;
+		right: 0;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+		pointer-events: none;
+	}
+	.row.place::before {
+		top: -1px;
+		left: 0;
+	}
+	.tree.place-end::after {
+		bottom: -3px;
+		left: 12px;
+	}
+
+	.tree.dragging {
+		cursor: grabbing;
+		user-select: none;
 	}
 
 	.row:focus-visible,

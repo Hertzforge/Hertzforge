@@ -156,6 +156,10 @@ def _shape(view: dict, system: Any) -> None:
         if marks is not None:
             # the arrows and sensors over the model, in its coordinates
             marks['nodes'] = np.asarray(_values(marks['nodes'], change), dtype=np.float32)
+        gizmo = view.get('gizmo')
+        if gizmo is not None:
+            gizmo['origin'] = [float((v - change[1]) / change[0]) for v in gizmo['origin']]
+            gizmo['to_si'] = change[0]
         pick = view.get('pick')
         if pick is not None and pick.get('target') == 'point':
             pick['to_si'] = [change[0], change[1]]

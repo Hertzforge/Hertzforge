@@ -7,9 +7,10 @@ Dynamics, Brandon Zwink's structural dynamics toolset
 (https://visualdynamics.org).
 
 Visual Dynamics' analysis core is in this repository now, under
-`src/hertzforge/`. The `hertzforge` package on PyPI (0.0.1) predates it and
-installs only a command that prints its version; the next release carries
-the core.
+`src/hertzforge/`. The `hertzforge` package on PyPI at 0.0.1 predates it and
+installs only a command that prints its version; 0.1.0 is the release that
+carries the core, and the desktop app of the same number is on
+[hertzforge.com](https://hertzforge.com).
 
 ```
 pip install hertzforge
@@ -68,9 +69,10 @@ scripts/dev.sh
 ```
 
 The first line installs the package with the analysis service into the active
-environment, the second fetches the plate data its demonstration datasets read.
+environment, the second fetches the plate test data the tests read (and
+`scripts/make_examples.py` turns into the example projects on hertzforge.com).
 `scripts/dev.sh` then starts the analysis service on 8791, the control service on 8792 and the shell on
-http://127.0.0.1:5191/. `?mock=1` runs the shell alone on synthetic data.
+http://127.0.0.1:5191/. `?mock=1` runs the shell alone, its control side on synthetic data.
 
 The desktop app (`desktop/`) carries the shell, both services and its own Python, so it needs
 nothing else installed. `desktop/packaging/build.sh` builds it and its installers;

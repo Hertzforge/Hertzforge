@@ -13,7 +13,7 @@ from hertzforge.project import Project
 from hertzforge.service import ops_geometry, ops_model, ops_project, ops_solids, projects
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 OPS = {op.id: op for module in (ops_geometry, ops_model, ops_project, ops_solids)
        for op in module.OPERATIONS}

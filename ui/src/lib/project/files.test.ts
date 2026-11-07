@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { baseName, chooseFiles, hasNativeFiles, isProjectFile, listenForDrops } from './files';
+import { baseName, chooseFiles, chooseObjectFile, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops } from './files';
 
 const g = globalThis as Record<string, unknown>;
 
@@ -80,5 +80,45 @@ describe('in a browser', () => {
 		stop();
 		drop(['Files']);
 		expect(got).toEqual([null]);
+	});
+});
+
+describe('the save window for an object', () => {
+	const formats = [
+		{ value: 'hforge', label: 'Hertzforge object (.hforge)', suffix: '.hforge' },
+		{ value: 'unv', label: 'Universal file (.unv)', suffix: '.unv' },
+		{ value: 'unv_binary', label: 'Universal file, binary 58b (.unv)', suffix: '.unv' },
+		{ value: 'photos', label: 'Photographs (a folder of images)', suffix: '' }
+	];
+
+	it('takes the format from the suffix, the first of two sharing it, or else the first of all', () => {
+		expect(formatForPath('/a/b.UNV', formats)).toBe('unv');
+		expect(formatForPath('/a/b.hforge', formats)).toBe('hforge');
+		expect(formatForPath('/a/b', formats)).toBe('hforge');
+	});
+
+	it('names the file for the object without the characters a path gives a meaning to', () => {
+		expect(fileNameOf('Run 3/a:b\\c')).toBe('Run 3-a-b-c');
+	});
+
+	it('lists the formats that have a suffix as the file types where the plugin draws the window', async () => {
+		const save = vi.fn(async () => '/a/plate.unv');
+		g.__TAURI__ = { dialog: { save } };
+		await expect(chooseObjectFile('Plate', formats)).resolves.toEqual({ path: '/a/plate.unv', format: 'unv' });
+		expect(save).toHaveBeenCalledWith({
+			title: 'Export Plate',
+			defaultPath: 'Plate.hforge',
+			filters: [
+				{ name: 'Hertzforge object (.hforge)', extensions: ['hforge'] },
+				{ name: 'Universal file (.unv)', extensions: ['unv'] },
+				{ name: 'Universal file, binary 58b (.unv)', extensions: ['unv'] }
+			]
+		});
+	});
+
+	it('answers null when cancelled and when there is no native window', async () => {
+		await expect(chooseObjectFile('Plate', formats)).resolves.toBeNull();
+		g.__TAURI__ = { dialog: { save: vi.fn(async () => null) } };
+		await expect(chooseObjectFile('Plate', formats)).resolves.toBeNull();
 	});
 });

@@ -65,8 +65,7 @@ cat > "$STAGE/tauri.stage.json" <<JSON
   "bundle": {
     "externalBin": ["$S/bin/sds-control"],
     "resources": {
-      "$S/resources/python/": "python/",
-      "$S/resources/testdata/": "testdata/"
+      "$S/resources/python/": "python/"
     }
   }
 }

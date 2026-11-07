@@ -56,6 +56,18 @@ def mac_matrix(shapes: ArrayLike,
     return np.abs(cross) ** 2 / np.outer(own, theirs)
 
 
+def shared_columns(a: ShapeSet, b: ShapeSet) -> tuple[list[int], list[int]]:
+    """The columns of `a.shape_matrix` and of `b.shape_matrix` that hold
+    the DOFs both sets have, in `a`'s order: ([a's columns], [b's
+    columns]), both empty when the sets share no DOFs. Two dictionaries,
+    so a set of 400,000 DOFs takes a fraction of a second, where
+    `list.index` per DOF took longer than anyone waits."""
+    positions = {dof: i for i, dof in enumerate(b.coordinate)}
+    ours = [i for i, dof in enumerate(a.coordinate) if dof in positions]
+    theirs = [positions[a.coordinate[i]] for i in ours]
+    return ours, theirs
+
+
 def cross_mac(a: ShapeSet, b: ShapeSet) -> np.ndarray:
     """MAC between two shape sets, on the DOFs they share.
 
@@ -64,12 +76,9 @@ def cross_mac(a: ShapeSet, b: ShapeSet) -> np.ndarray:
     comparison. Rows are `a`'s modes and columns are `b`'s. Raises
     ValueError when the sets share no DOFs.
     """
-    positions = {dof: i for i, dof in enumerate(b.coordinate)}
-    shared = [dof for dof in a.coordinate if dof in positions]
-    if not shared:
+    ours, theirs = shared_columns(a, b)
+    if not ours:
         raise ValueError('the shape sets share no DOFs')
-    ours = [a.coordinate.index(dof) for dof in shared]
-    theirs = [positions[dof] for dof in shared]
     return mac_matrix(a.shape_matrix[:, ours], b.shape_matrix[:, theirs])
 
 
@@ -86,16 +95,28 @@ def alignment_factor(a: ShapeSet, i: int, b: ShapeSet,
     projection) and has to be applied to a third (the dense set the
     projection was made from).
     """
-    positions = {dof: k for k, dof in enumerate(b.coordinate)}
-    shared = [dof for dof in a.coordinate if dof in positions]
-    if not shared:
+    ours, theirs = shared_columns(a, b)
+    if not ours:
         return 1.0
-    ours = a.shape_matrix[i, [a.coordinate.index(dof) for dof in shared]]
-    theirs = b.shape_matrix[j, [positions[dof] for dof in shared]]
-    inner = np.vdot(ours, theirs)
+    inner = np.vdot(a.shape_matrix[i, ours], b.shape_matrix[j, theirs])
     if inner == 0:
         return 1.0
     return np.exp(-1j * np.angle(inner))
+
+
+def alignment_phases(a: ShapeSet, rows: Any, b: ShapeSet,
+                     columns: Any) -> np.ndarray:
+    """`np.angle(alignment_factor(a, i, b, j))` for every `i` in `rows`
+    and `j` in `columns`, as one [len(rows), len(columns)] array: the
+    inner products of all the pairs at once, so a MAC's grid of overlays
+    costs one matrix product instead of a DOF lookup per pair."""
+    rows, columns = list(rows), list(columns)
+    ours, theirs = shared_columns(a, b)
+    if not ours or not rows or not columns:
+        return np.zeros((len(rows), len(columns)))
+    inner = np.conj(a.shape_matrix[np.ix_(rows, ours)]) @ b.shape_matrix[np.ix_(columns, theirs)].T
+    factor = np.where(inner == 0, 1.0, np.exp(-1j * np.angle(inner)))
+    return np.angle(factor)
 
 
 def apply_alignment(shape: np.ndarray, factor: complex) -> np.ndarray:
@@ -366,12 +387,11 @@ def scale_ratios(a: ShapeSet, b: ShapeSet,
     """
     if pairs is None:
         pairs = [(i, i) for i in range(min(a.num_shapes, b.num_shapes))]
-    positions = {dof: i for i, dof in enumerate(b.coordinate)}
-    shared = [dof for dof in a.coordinate if dof in positions]
-    if not shared:
+    ours, theirs = shared_columns(a, b)
+    if not ours:
         return [None] * len(list(pairs))
-    ours = a.shape_matrix[:, [a.coordinate.index(dof) for dof in shared]]
-    theirs = b.shape_matrix[:, [positions[dof] for dof in shared]]
+    ours = a.shape_matrix[:, ours]
+    theirs = b.shape_matrix[:, theirs]
     out: list[float | None] = []
     for row, column in pairs:
         if not (0 <= row < len(ours) and 0 <= column < len(theirs)):
@@ -511,6 +531,25 @@ class ShapeSet:
             si_factor(self.mass_unit, 'mass')  # validates
         self._sort_by_frequency()
 
+
+    def set_description(self, mode: int, text: str) -> None:
+        """Write free text against one mode, as the mode table's
+        Description column takes it.
+
+        Parameters
+        ----------
+        mode : int
+            The mode, from 0.
+        text : str
+            The description; stripped, and blank clears it.
+
+        Returns
+        -------
+        None
+        """
+        if not 0 <= int(mode) < self.num_shapes:
+            raise IndexError(f'mode {int(mode) + 1} of {self.num_shapes}')
+        self.description[int(mode)] = str(text).strip()
     def _sort_by_frequency(self) -> None:
         """Modes in ascending frequency, always.
 

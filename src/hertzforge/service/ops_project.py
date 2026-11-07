@@ -1,7 +1,6 @@
-"""Operations on the connection's own project (`accepts: "project"`):
-each param that names an object lists the project's objects of the kinds
-it takes (`options_from: "objects:<kind>"`), and each operation is one of
-the core's verbs. A verb that adds an object returns a view of what it
+"""Operations on the connection's own project: each param that names an
+object lists the project's objects of the kinds it takes (`options_from:
+"objects:<kind>"`), and each operation is one of the core's verbs. A verb that adds an object returns a view of what it
 added; the server returns the project's summary beside the views.
 """
 
@@ -11,10 +10,12 @@ from typing import Any
 
 import numpy as np
 
+from hertzforge.core.rigid import INERTIA_TERMS, MassProperties, rigid_body_shapes
+
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param, Workspace
-from .ops_modal_run import _translations
+from .mesh import drawn_mesh
+from .mode_pairs import translations
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
@@ -242,15 +243,24 @@ def _geometry(project: Any) -> str | None:
                  if isinstance(obj, Geometry)), None)
 
 
-def _shape_view(project: Any, shapes_name: str, geometry_name: str) -> dict:
-    """A shape set's modes on a geometry, each a translation per node."""
-    shapes, geometry = project[shapes_name], project[geometry_name]
-    rows, triangles, lines = _mesh(geometry)
-    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]),
-                    _translations(geometry, shapes.coordinate,
-                                  shapes.shape_matrix[k], rows))
-             for k in range(shapes.num_shapes)]
-    return v.shape3d(f'{shapes_name} on {geometry_name}',
+def _shape_view(project: Any, shapes_name: str, geometry_name: str,
+                modes: list[int] | None = None) -> dict:
+    """A shape set's modes on a geometry, each a translation per node:
+    all of them, or the `modes` picked (indices from 0), numbered as the
+    set numbers them."""
+    return _shapes_drawn(f'{shapes_name} on {geometry_name}', project[shapes_name],
+                         project[geometry_name], modes)
+
+
+def _shapes_drawn(title: str, shapes: Any, geometry: Any,
+                  modes: list[int] | None = None) -> dict:
+    """Modes on a geometry, whether or not the shape set is in the project."""
+    rows, triangles, lines = drawn_mesh(geometry)
+    picked = list(modes) if modes else list(range(shapes.num_shapes))
+    moved = translations(geometry, shapes.coordinate, shapes.shape_matrix[picked], rows)
+    modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[i])
+             for i, k in enumerate(picked)]
+    return v.shape3d(title,
                      'm' if geometry.units_defined else 'undefined',
                      np.asarray(geometry.node_xyz, dtype=float)[rows], modes,
                      triangles=triangles, lines=lines,
@@ -312,10 +322,49 @@ def _added_shapes(project: Any, call: Any) -> list[dict]:
         for k in range(shapes.num_shapes)])]
 
 
+def _point_param(axis: str) -> Param:
+    return Param(axis, f'Reference point {axis.upper()}', 'number', default=0.0, unit='m',
+                 setting=f'rigid.{axis}')
+
+
+def _inertia_param(term: str, default: float) -> Param:
+    return Param(term.lower(), term, 'number', default=default, unit='kg m^2',
+                 setting=f'rigid.{term.lower()}')
+
+
+RIGID_POINT = tuple(_point_param(axis) for axis in 'xyz')
+RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia', 'boolean',
+                        default=False, setting='rigid.normalize')
+RIGID_MASS = Param('mass', 'Mass', 'number', default=1.0, unit='kg', min=0.0,
+                   setting='rigid.mass')
+RIGID_INERTIA = tuple(_inertia_param(term, 1.0 if term[1] == term[2] else 0.0)
+                      for term in INERTIA_TERMS)
+RIGID_KEEP = Param('keep', 'Add the shape set (else the preview)', 'boolean', default=True)
+
+
 def rigid_body_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.generate_rigid_body_modes`: the six rigid-body shapes of a
-    geometry about its reference point (`Project.generate_rigid_body_modes`)."""
-    return _added_shapes(project, lambda: project.generate_rigid_body_modes(params['source']))
+    geometry about a point, and scaled by a mass and inertia about it when
+    asked (`Project.generate_rigid_body_modes`), as VD's Modes pane sets
+    them. Without `keep`, the shapes drawn and nothing added."""
+    name = params['source']
+    geometry = project[name]
+    point = tuple(float(params[axis]) for axis in 'xyz')
+    mass, inertia = None, None
+    if params['normalize']:
+        if not geometry.units_defined:
+            raise refused('Declare the length unit to mass-normalize: an inertia in kg m^2 '
+                          'means nothing against coordinates with no unit')
+        mass = float(params['mass'])
+        inertia = tuple(float(params[term.lower()]) for term in INERTIA_TERMS)
+    if params['keep']:
+        return _added_shapes(project, lambda: project.generate_rigid_body_modes(
+            name, point=point, mass=mass, inertia=inertia))
+    try:
+        shapes = rigid_body_shapes(geometry, MassProperties(point, mass, inertia))
+    except ValueError as error:
+        raise refused(str(error)) from None
+    return [_shapes_drawn(f'Preview of the rigid body modes of {name}', shapes, geometry)]
 
 
 def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -341,17 +390,15 @@ FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
 SECOND = Param('second', 'Columns', 'enum', options_from='objects:shape_set')
 
 
-def mac(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.mac`: the Modal Assurance Criterion of one shape set's
-    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
-    or a set against itself. With a geometry the matrix selects the pair it
-    shows, the column mode overlaid on the row mode, as Visual Dynamics
-    shows two shape sets' MAC."""
+def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None = None,
+              column_modes: list[int] | None = None) -> list[dict]:
+    """The MAC of `first`'s modes against `second`'s (`mac`), limited to
+    the `row_modes` and `column_modes` picked (indices from 0) when
+    given, its axes ticked with those modes' frequencies."""
     from hertzforge.core.shapes import cross_mac
 
-    from .ops_modal_run import paired
+    from .mode_pairs import paired
 
-    first, second = params['first'], params['second']
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
         raise refused(f'{first if not rows.num_shapes else second} has no modes')
@@ -359,16 +406,28 @@ def mac(project: Any, params: dict[str, Any]) -> list[dict]:
         values = rows.auto_mac() if first == second else cross_mac(rows, columns)
     except ValueError as error:
         raise refused(str(error)) from None
+    row_modes = list(row_modes) if row_modes else list(range(rows.num_shapes))
+    column_modes = list(column_modes) if column_modes else list(range(columns.num_shapes))
+    values = np.asarray(values)[np.ix_(row_modes, column_modes)]
 
-    def axis(name: str, shapes: Any) -> dict:
-        return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
+    def axis(name: str, shapes: Any, modes: list[int]) -> dict:
+        return {'label': name, 'ticks': [f'{shapes.frequency[k]:.1f} Hz' for k in modes]}
 
     title = f'Auto-MAC of {first}' if first == second else f'MAC of {first} Against {second}'
-    matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
-                      (0.0, 1.0))
+    matrix = v.matrix(title, axis(first, rows, row_modes), axis(second, columns, column_modes),
+                      values, 'MAC', (0.0, 1.0))
     geometry = _geometry(project)
-    return paired(None if geometry is None else project[geometry], matrix, rows,
-                  range(rows.num_shapes), columns, range(columns.num_shapes))
+    return paired(None if geometry is None else project[geometry], matrix, rows, row_modes,
+                  columns, column_modes)
+
+
+def mac(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.mac`: the Modal Assurance Criterion of one shape set's
+    modes against another's, on the DOFs both have (`core.shapes.cross_mac`),
+    or a set against itself. With a geometry the matrix selects the pair it
+    shows, the column mode overlaid on the row mode, as Visual Dynamics
+    shows two shape sets' MAC."""
+    return mac_views(project, params['first'], params['second'])
 
 
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -380,8 +439,7 @@ def _derives(verb: str, title: str, summary: str, params: tuple = (),
              workspace: Workspace = 'signals', **fixed: Any) -> Operation:
     """A project operation that runs one core verb on an object it
     applies to and draws what it added, offered in the module `workspace`."""
-    return Operation(id=f'project.{verb}', title=title, workspace=workspace,
-                     accepts='project', summary=summary,
+    return Operation(id=f'project.{verb}', title=title, workspace=workspace, summary=summary,
                      params=(_source(verb), *params), outputs=('waterfall',),
                      run=_verb(verb, **fixed))
 
@@ -396,14 +454,15 @@ MODAL_VERB_OPERATIONS = (
              'through, at every DOF it covers.', (PARTNER,), workspace='modal'),
     Operation(
         id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='The six rigid-body shapes of a geometry, three translations and '
-                'three rotations about its reference point.',
-        params=(_source('generate_rigid_body_modes', 'Geometry'),),
+                'three rotations about a reference point, mass-normalized by a mass and '
+                'inertia about it when asked.',
+        params=(_source('generate_rigid_body_modes', 'Geometry'), *RIGID_POINT,
+                RIGID_NORMALIZE, RIGID_MASS, *RIGID_INERTIA, RIGID_KEEP),
         outputs=('shape3d', 'reading'), run=rigid_body_modes),
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='model',
-        accepts='project',
         summary='The normal modes of a geometry whose element groups have properties: a '
                 'number of them, or all up to a highest frequency. Free-free unless a '
                 'group of points is ground; the damping is given to every mode.',
@@ -411,7 +470,7 @@ MODAL_VERB_OPERATIONS = (
         outputs=('shape3d', 'reading'), run=solve_modes),
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
-        workspace='modal', accepts='project',
+        workspace='modal',
         summary='A shape set sampled at another set\'s DOFs, or at a channel '
                 'table\'s sensors, by the nearest node and its direction.',
         params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
@@ -459,7 +518,6 @@ VERB_OPERATIONS = (
              'A PSD read as a requirement, which a test is controlled to.', workspace='random'),
     Operation(
         id='project.convert_to_psd', title='Convert to PSD', workspace='random',
-        accepts='project',
         summary='A specification read as a PSD, its limits left out; one written at '
                 'breakpoints is read onto lines at a spacing, 0 for the one its sheet '
                 'remembers.',
@@ -467,13 +525,11 @@ VERB_OPERATIONS = (
         run=convert_to_psd, edits=True),
     Operation(
         id='project.detect_shocks', title='Detect Shocks', workspace='shock',
-        accepts='project',
         summary='Mark the shocks in a time history, which Compute SRS reads.',
         params=(_source('detect_shocks'),), outputs=('reading',),
         run=detect_shocks, edits=True),
     Operation(
         id='project.extract_sine', title='Extract Sine', workspace='sine',
-        accepts='project',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
         params=(_source('extract_sine'),), outputs=('waterfall',),
@@ -484,43 +540,37 @@ VERB_OPERATIONS = (
 OPERATIONS = (
     Operation(
         id='project.waterfall', title='Waterfall', workspace='signals', everywhere=True,
-        accepts='project',
         summary='Any data object with every record at its own depth, colored '
                 'by level; an FRF as magnitude, a part or phase.',
         params=(DATA, COMPONENT, PAGE, QUANTITY), outputs=('waterfall',),
         run=waterfall),
     Operation(
         id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
-        accepts='project',
         summary='Chosen records of any data object as curves on one plot, '
                 'numbered from 1 as "1-3, 7"; the first eight when none are named.',
         params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',
-        accepts='project',
         summary='PSDs from a time history\'s averages, added to the project.',
         params=(HISTORY,), outputs=('waterfall',), run=compute_psds),
     Operation(
         id='project.compute_frfs', title='Compute FRFs', workspace='modal',
-        accepts='project',
         summary='FRFs from a time history, one for each response and drive, '
                 'added to the project.',
         params=(FRF_HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
     Operation(
         id='project.fit_modes', title='Fit Modes', workspace='modal',
-        accepts='project',
         summary='Modes fitted to an FRF set within a band, added to the '
                 'project as a shape set and drawn on its geometry.',
         params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
         run=fit_modes),
     Operation(
-        id='project.mac', title='MAC', workspace='modal', accepts='project',
+        id='project.mac', title='MAC', workspace='modal',
         summary='One shape set\'s modes against another\'s, or a set against '
                 'itself; with a geometry, a cell shows that pair overlaid.',
         params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
     Operation(
         id='project.mode_shapes', title='Mode Shapes', workspace='modal',
-        accepts='project',
         summary='A shape set\'s modes on a geometry, one translation per node.',
         params=(SHAPES, GEOMETRY), outputs=('shape3d',), run=mode_shapes),
     *VERB_OPERATIONS,

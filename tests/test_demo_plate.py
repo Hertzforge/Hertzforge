@@ -1,6 +1,6 @@
 """The demonstration plate, held to its drawing and to the book.
 
-Unlike the drone this is *not* marked slow: the plate exists to be
+Unlike the Frame-Wing this is *not* marked slow: the plate exists to be
 the fast article, and these run on every gate. The frequencies here
 are the model's own frozen truth — the element itself is held to the
 classical tables in `tests/test_fem.py`; what this file pins is that

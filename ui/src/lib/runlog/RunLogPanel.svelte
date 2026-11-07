@@ -19,8 +19,10 @@
 
 	interface Props {
 		rl: RunLogState;
+		/** Put the log in a window of its own; the panel in that window has no such button. */
+		onownwindow?: () => void;
 	}
-	let { rl }: Props = $props();
+	let { rl, onownwindow }: Props = $props();
 
 	const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 	const native = hasNativeFiles();
@@ -180,6 +182,7 @@
 			{/if}
 			<button class="btn ghost sm" data-testid="runlog-export" disabled={!log} onclick={exportLog} title="Write the chosen view of the log to a file">Export</button>
 			<button class="btn ghost sm" data-testid="runlog-alone" onclick={() => (rl.alone = !rl.alone)} title="Show the workspace beside the log, or the log alone">{rl.alone ? 'Whole Window' : 'Log Only'}</button>
+			{#if onownwindow}<button class="btn ghost sm" data-testid="runlog-own-window" onclick={onownwindow} title="Open the run log in a window of its own, for a second monitor">Own Window</button>{/if}
 			<button class="btn ghost sm" onclick={() => rl.toggle()} title="Put the run log away; the log stays open">Hide</button>
 		</div>
 		{#if log?.status.test != null}

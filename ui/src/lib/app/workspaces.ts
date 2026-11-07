@@ -8,7 +8,7 @@ export interface WorkspaceInfo {
 	/** One line for the palette and the rail's tooltip. */
 	summary: string;
 	/**
-	 * A study: the shared host (the project tree, the selection shown, the Actions frame) with this
+	 * A study: the shared host (the project tree, the selection shown, the action table) with this
 	 * module's operations. The others have screens of their own.
 	 */
 	study?: boolean;
@@ -24,8 +24,10 @@ export const WORKSPACES: WorkspaceInfo[] = [
 	{ id: 'acquire', title: 'Acquire & Control', rail: 'Acquire & Control', summary: 'Closed-loop Random control on the simulator or NI hardware.' },
 	{ id: 'simulate', title: 'Simulate', rail: 'Simulate', summary: 'Run the control loop against a simulated system.' },
 	{ id: 'signals', title: 'Signals', rail: 'Signals', study: true, summary: 'Recordings: averaging, filtering, truncation, statistics, spectra and what is read straight off them.' },
+	{ id: 'sysid', title: 'System ID', rail: 'System ID', study: true, summary: 'A noise floor and an excitation read into PSDs, FRFs and coherence for a controller to use.' },
 	{ id: 'random', title: 'Random', rail: 'Random', study: true, summary: 'PSDs and cross-spectral matrices against their specification, coherence, control checks.' },
-	{ id: 'shock', title: 'Shock', rail: 'Shock', study: true, summary: 'Shock response spectra, pulses, synthesis and replication.' },
+	{ id: 'shock', title: 'Shock', rail: 'Shock', study: true, summary: 'Shock response spectra, pulses and synthesis.' },
+	{ id: 'transient', title: 'Transient', rail: 'Transient', study: true, summary: 'A waveform replicated on a shaker: whether it fits, its waveform error, its segments.' },
 	{ id: 'sine', title: 'Sine', rail: 'Sine', study: true, summary: 'Sine sweeps and dwells: extracted levels, distortion, frequency, sweep rate.' },
 	{ id: 'modal', title: 'Modal', rail: 'Modal', study: true, summary: 'FRFs fitted to modes, shape sets compared, matched and projected.' },
 	{ id: 'geometry', title: 'Geometry', rail: 'Geometry', study: true, summary: 'Nodes, coordinate systems, elements and solids; sensors and channel tables on them.' },
@@ -45,7 +47,7 @@ export function isWorkspace(value: string): value is Workspace {
 	return WORKSPACES.some((w) => w.id === value);
 }
 
-/** The module an operation is offered in, or every study when it says `everywhere`. */
-export function offeredIn(op: { workspace: Workspace; everywhere?: boolean }, workspace: Workspace): boolean {
-	return op.workspace === workspace || (Boolean(op.everywhere) && STUDIES.has(workspace));
+/** Whether a module offers an operation or a table row; a row with no list is offered in every module. */
+export function offeredIn(op: { modules?: Workspace[] }, workspace: Workspace): boolean {
+	return !op.modules || op.modules.includes(workspace);
 }

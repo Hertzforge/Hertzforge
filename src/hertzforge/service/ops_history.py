@@ -161,13 +161,12 @@ def resample_reading(project: Any, params: dict[str, Any]) -> list[dict]:
 
 OPERATIONS = (
     Operation(
-        id='project.kurtosis', title='Kurtosis', workspace='signals', accepts='project',
+        id='project.kurtosis', title='Kurtosis', workspace='signals',
         summary='Each channel\'s kurtosis over the span its spectra are read from, judged '
                 'against a band: a Gaussian record reads 3.',
         params=(HISTORY, LOW, HIGH), outputs=('reading',), run=kurtosis),
     Operation(
         id='project.amplitude_spectrum', title='Amplitude Spectrum', workspace='signals',
-        accepts='project',
         summary='Every channel\'s spectrum scaled so a sine reads its peak amplitude, on '
                 'the history\'s frames with a window of its own, and the tallest line of '
                 'one channel.',
@@ -175,7 +174,6 @@ OPERATIONS = (
         run=amplitude_spectrum),
     Operation(
         id='project.resample_reading', title='Resample Reading', workspace='signals',
-        accepts='project',
         summary='What taking one channel to a lower rate does: its spectrum as recorded, '
                 'decimated bare, low-passed after and filtered first, and where content '
                 'above the new Nyquist frequency folds to.',

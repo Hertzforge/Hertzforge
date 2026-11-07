@@ -21,13 +21,12 @@ it belongs to. Nodes with no data do not move.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike
-
-from .core.data import parse_dof
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .core.data import DataArray
@@ -160,33 +159,43 @@ def dof_directions(geometry: Geometry, dofs: Sequence[str]
     unit vector each DOF displaces along, and `used` is a mask over
     `dofs` of the ones kept. Rotational DOFs, DOFs that do not parse,
     and DOFs on nodes the geometry does not have are dropped.
+
+    The strings are parsed in one pass of a regular expression over all
+    of them (the rule of `core.data.parse_dof`: the leading digits are
+    the node, the rest the direction), so a set of 400,000 DOFs takes a
+    fraction of a second; parsed one at a time it took two seconds, and
+    a mode shape view parses the set once per mode.
     """
-    rows, directions, used = [], [], np.zeros(len(dofs), dtype=bool)
+    used = np.zeros(len(dofs), dtype=bool)
+    if not len(dofs):
+        return np.empty(0, dtype=np.int64), np.empty((0, 3)), used
+    parsed = _DOF.findall('\n'.join(str(dof).strip() for dof in dofs))
+    nodes = np.array([node for node, _ in parsed], dtype=object)
+    rest = np.array([direction for _, direction in parsed], dtype=object)
+    first = np.array([(d[:1] or ' ').upper() for d in rest])
+    axis = np.array([AXES.get(f, -1) for f in first], dtype=np.int64)
     known = {int(node): row for row, node in enumerate(geometry.node_id)}
+    row = np.array([known.get(int(n), -1) if n else -1 for n in nodes], dtype=np.int64)
+    used[:] = (axis >= 0) & (row >= 0)
+    if not used.any():
+        return np.empty(0, dtype=np.int64), np.empty((0, 3)), used
+    rows = row[used]
+    sign = np.where([d.endswith('-') for d in rest[used]], -1.0, 1.0)
+    directions = np.zeros((len(rows), 3))
+    directions[np.arange(len(rows)), axis[used]] = sign
     cs_rotation = _cs_rotations(geometry)
+    if cs_rotation:
+        node_cs = np.asarray(geometry.node_disp_cs, dtype=np.int64)[rows]
+        for cs_id, rotation in cs_rotation.items():
+            turned = node_cs == cs_id
+            if turned.any():
+                directions[turned] = directions[turned] @ rotation
+    return rows, directions, used
 
-    for i, dof in enumerate(dofs):
-        node, direction = parse_dof(dof)
-        if node is None or not direction:
-            continue
-        axis = AXES.get(direction[0].upper())
-        if axis is None:          # rotational (RX/RY/RZ) or unrecognized
-            continue
-        row = known.get(int(node))
-        if row is None:           # the geometry does not define this node
-            continue
-        vector = np.zeros(3)
-        vector[axis] = -1.0 if direction.endswith('-') else 1.0
-        rotation = cs_rotation.get(int(geometry.node_disp_cs[row]))
-        if rotation is not None:
-            vector = vector @ rotation
-        rows.append(row)
-        directions.append(vector)
-        used[i] = True
 
-    if not rows:
-        return (np.empty(0, dtype=np.int64), np.empty((0, 3)), used)
-    return np.asarray(rows, dtype=np.int64), np.asarray(directions), used
+#: one DOF string per line: its leading digits (the node, which may be
+#: absent) and the rest (the direction)
+_DOF = re.compile(r'^(\d*)(.*)$', re.MULTILINE)
 
 
 def _cs_rotations(geometry: Geometry) -> dict[int, np.ndarray]:
@@ -709,6 +718,12 @@ class ModalTimeDeflection(Deflection):
         self._buffer = np.zeros((len(self.rows), 3))
         self.num_frames: int = (self._samples.shape[0]
                                 if len(self.rows) else 0)
+
+    @property
+    def fields(self) -> np.ndarray:
+        """Each mode's offsets at the moved nodes, [modes, nodes * 3], for a
+        renderer that sums them itself."""
+        return self._fields
 
     def offsets(self, parameter: float) -> np.ndarray:
         """The offsets at sample index `parameter`."""

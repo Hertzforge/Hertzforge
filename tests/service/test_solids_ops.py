@@ -13,7 +13,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_solids import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 OPS = {op.id: op for op in OPERATIONS}
 
@@ -50,7 +50,7 @@ def block(project, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model')
 
 
 def test_a_new_geometry_is_empty_and_records_its_unit(project, validate):
@@ -155,7 +155,6 @@ def test_parts_are_moved_and_turned_whole(project):
     assert solids.solid(part, 1).center[2] == pytest.approx(0.5)
     assert solids.solid(part, 2).center[2] == pytest.approx(0.5)
     assert rows(reading)['Moved']['value'].startswith('3: 2 solids')
-    refused(project, 'project.move_solids', 'how far', solids='3')
 
 
 def test_solids_are_copied_into_another_geometry(project):
@@ -258,6 +257,19 @@ def test_mated_surfaces_are_found_kept_edited_and_deleted(project, validate):
     assert rows(reading)['Saved']['value'] == 'seat (normal rigid, shear free)'
     refused(project, 'project.edit_mated_surfaces', 'holds nothing', mate=1, normal='free',
             shear='free')
+    first = project['Part'].mates[0]
+    reading, view = run(project, 'project.edit_mate_sides', mate=1)
+    held = view['pick']
+    assert held['ids'][:len(first.nodes_a)] != [] and held['count'] == 1
+    on = len(held['ids']) - held['off']
+    assert on == len(first.nodes_a), 'the side held is what shows as in'
+    node = held['ids'][0]
+    reading, view = run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
+    assert node not in project['Part'].mates[0].nodes_a
+    assert view['pick']['off'] == held['off'] + 1
+    run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
+    assert node in project['Part'].mates[0].nodes_a, 'a second click puts it back'
+    refused(project, 'project.edit_mate_sides', 'not 9', mate=9)
     refused(project, 'project.mate_surfaces', 'not 9', groups='9')
     refused(project, 'project.delete_mated_surfaces', 'not 4', mates='4')
     reading, mates = run(project, 'project.delete_mated_surfaces', mates='1')
@@ -281,3 +293,112 @@ def test_the_solids_are_listed(project, validate):
     reading, view, table = run(project, 'project.solids')
     wire_views([reading, view, table], validate)
     assert rows(reading)['Parts']['value'] == 1.0 and table['rows'][0][0] == '1'
+
+
+def test_move_part_offers_arrows_and_rings(project, validate):
+    moved = run(project, 'project.add_solid_block', x=0.5)
+    wire_views(moved, validate)
+    ids = str(project['Part'].solids[-1].id)
+    views = run(project, 'project.move_solids', solids=ids)
+    wire_views(views, validate)
+    gizmo = next(view for view in views if view['view'] == 'shape3d')['gizmo']
+    assert gizmo['origin'] == pytest.approx([0.5, 0.0, 0.0])
+    assert gizmo['slide']['values']['x'] == 'offset_x'
+    assert gizmo['turn']['values']['z'] == 'turn_z'
+    run(project, gizmo['slide']['op'], **gizmo['slide']['params'], offset_x=0.25)
+    views = run(project, 'project.move_solids', solids=ids)
+    gizmo = next(view for view in views if view['view'] == 'shape3d')['gizmo']
+    assert gizmo['origin'] == pytest.approx([0.75, 0.0, 0.0]), 'the handles follow'
+
+
+def test_a_form_previews_on_a_copy(validate):
+    """VD's live preview of a solid: nothing reaches the project or its journal."""
+    import hertzforge
+    from hertzforge.service import display_units, server
+
+    project = hertzforge.Project('p')
+    name = project.new_geometry('Part', unit='m')
+    project.add_solid_block(name, (0, 0, 0), (1, 1, 1))
+    held = len(project[name].solids)
+    journal = list(project.journal)
+    scratch = server._preview_copy(project, name)
+    assert next(o for o in server.OPERATIONS if o.id == 'project.add_solid_block').previews
+    views = server._said_as_preview(run(scratch, 'project.add_solid_block', x=2.0),
+                                    display_units.DEFAULT)
+    wire_views(views, validate)
+    assert views[0]['rows'][0]['label'] == 'Would add'
+    assert len(scratch[name].solids) == held + 1
+    assert len(project[name].solids) == held and project.journal == journal
+
+
+def test_a_preview_over_the_socket_leaves_the_project_unmodified():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    block = {'geometry': 'Part', 'x': 2.0, 'y': 0.0, 'z': 0.0, 'width_x': 1.0, 'width_y': 1.0,
+             'width_z': 1.0, 'angle_x': 0.0, 'angle_y': 0.0, 'angle_z': 0.0, 'corner': 0.0,
+             'name': ''}
+    responses = asyncio.run(_exchange([
+        ('project.new', {}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'm'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': block, 'preview': True}),
+        ('op.run', {'op': 'project.new_channel_table', 'params': {'name': 'x'}, 'preview': True}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': block}),
+    ]))
+    results = [got[-1] for got in responses]
+    previewed = results[2]['result']
+    assert 'project' not in previewed
+    assert previewed['views'][0]['rows'][0]['label'] == 'Would add'
+    assert 'Would add' not in str(results[4]['result']['views'][0])
+    assert 'x' in [o['name'] for o in results[3]['result']['project']['objects']], (
+        'an operation with no preview runs for real')
+
+
+def _union_in_pieces():
+    """A slab with a tilted hole, which is fitted, and a bar swept on top of it: two pieces."""
+    import hertzforge
+
+    project = hertzforge.Project('p')
+    name = project.new_geometry('Part', unit='in')
+    block = project.add_solid_block(name, (0, 0, 0), (4, 2, 1), name='slab', unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 0.6, 3.0, angles=(30, 0, 0), unit='in')
+    cut = project.combine_solids(name, 'subtract', [block, tilted], 'slab')
+    bar = project.add_solid_block(name, (1.5, 0, 1.0), (1, 2, 1), name='bar', unit='in')
+    return project, project.combine_solids(name, 'union', [cut, bar], 'both'), cut, bar
+
+
+def test_mesh_solids_takes_a_size_per_piece(monkeypatch):
+    """VD's table: a union meshed in pieces lists a row a piece, each takes its own size,
+    and Detect fills every row with the size that piece is likely to hold at. The fit
+    itself is the core's test, stood in for here."""
+    from hertzforge.service import ops_solids
+
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    project, both, cut, bar = _union_in_pieces()
+    params = {'solids': str(both), 'size': 0.01}
+    views = run(project, 'project.mesh_solids', **params)
+    pieces = next(view for view in views if view.get('title') == 'Pieces')
+    assert {int(row[0]) for row in pieces['rows']} == {cut, bar}
+    assert all(float(row[3]) == 0.01 for row in pieces['rows'])
+    views = run(project, 'project.mesh_solids', sizes=f'{bar}: 0.005', **params)
+    pieces = next(view for view in views if view.get('title') == 'Pieces')
+    assert {int(row[0]): float(row[3]) for row in pieces['rows']} == {cut: 0.01, bar: 0.005}
+    refused(project, 'project.mesh_solids', 'a piece and', sizes='3', **params)
+    refused(project, 'project.mesh_solids', 'a piece and', sizes='3: 0', **params)
+
+
+def test_detect_fills_each_piece_and_the_sizes_reach_the_mesh(monkeypatch):
+    project, both, cut, bar = _union_in_pieces()
+    asked = {}
+    monkeypatch.setattr(project, 'mesh_solids', lambda *_a, **kw: asked.update(kw) or {
+        'nodes': 0, 'elements': 0, 'replaced': 0, 'groups': []})
+    with pytest.raises((KeyError, TypeError)):
+        run(project, 'project.mesh_solids', solids=str(both), size=0.01, detect=True, keep=True,
+            anyway=True)
+    likely = asked['sizes']
+    assert set(likely) == {cut, bar} and all(size > 0 for size in likely.values())
+    with pytest.raises((KeyError, TypeError)):
+        run(project, 'project.mesh_solids', solids=str(both), size=0.01, sizes=f'{bar}: 0.005',
+            keep=True, anyway=True)
+    assert asked['sizes'] == {bar: 0.005}

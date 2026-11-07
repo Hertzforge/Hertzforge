@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hertzforge</title>
-<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset. Coming soon.">
+<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://hertzforge.com/">
 <meta property="og:site_name" content="Hertzforge">
@@ -59,6 +59,18 @@
     box-shadow: 0 0 48px rgba(22, 143, 255, 0.16), 0 24px 64px rgba(0, 0, 0, 0.7);
   }
   .demo figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 0.9em; }
+  .examples { margin: 2.6em auto 0; max-width: 760px; text-align: left; }
+  .examples h2 { font-size: 1.1rem; margin: 0 0 0.3em; color: var(--fg); }
+  .examples > p { font-size: 0.95rem; }
+  .examples ul { list-style: none; padding: 0; margin: 0.9em 0 0; display: grid; gap: 0.55em; }
+  .examples li {
+    display: grid; grid-template-columns: 1fr auto; gap: 0.2em 1em; align-items: baseline;
+    padding: 0.6em 0.9em; border: 1px solid rgba(22, 143, 255, 0.25); border-radius: 8px;
+    background: rgba(22, 143, 255, 0.05);
+  }
+  .examples li span { grid-column: 1 / -1; color: var(--muted); font-size: 0.9rem; }
+  .examples a { font-weight: 600; text-decoration: none; }
+  .examples .size { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
   .soon { color: var(--fg); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.9rem; margin-top: 2.2em; }
   .credits { font-size: 0.85rem; margin-top: 1.6em; }
   .credits a { color: var(--muted); }
@@ -89,11 +101,48 @@
     </video>
     <figcaption>The first working prototype, October 2026.</figcaption>
   </figure>
-  <p class="soon">Coming soon</p>
+  <section class="examples download" aria-labelledby="download-title">
+    <h2 id="download-title">Download</h2>
+    <p>The desktop app for macOS, signed and notarized. <span id="dl-release">The latest release</span> is on <a href="https://github.com/Hertzforge/Hertzforge/releases/latest">GitHub</a> with its notes and checksums.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-AppleSilicon.dmg">Hertzforge for Apple silicon</a><em class="size" data-asset="Hertzforge-macOS-AppleSilicon.dmg"></em>
+        <span>M1 and later. Open the disk image and drag Hertzforge to Applications.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-Intel.dmg">Hertzforge for Intel Macs</a><em class="size" data-asset="Hertzforge-macOS-Intel.dmg"></em>
+        <span>macOS 11 or later.</span></li>
+    </ul>
+  </section>
+  <section class="examples" aria-labelledby="examples-title">
+    <h2 id="examples-title">Example projects</h2>
+    <p>Hertzforge project files (<code>.hforge</code>) to open with File &rsaquo; Open or drop on the window. Every number in them was computed by Hertzforge itself.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-random-run.hforge">Plate random run</a><em class="size">9.8 MB</em>
+        <span>A random vibration controller run on a free plate: eight control channels against a specification with warning and abort limits, four force channels, and the PSDs, 1/6-octave PSDs and multiple coherence the controller computed.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-modal-run.hforge">Plate modal run</a><em class="size">4.0 MB</em>
+        <span>A modal survey of the same plate on a simulated plant: FRFs of eleven responses to two references, their multiple coherence and the time captures, with the survey geometry.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/free-plate.hforge">Free plate model</a><em class="size">0.3 MB</em>
+        <span>A free square plate of 144 shell elements and its 30 lowest normal modes, six of them rigid.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/frame-wing.hforge">Frame-Wing</a><em class="size">170 MB</em>
+        <span>The round-robin frame and its two wings as five models of solid bricks: the frame, each wing alone, and the frame with each wing screwed across two uprights (65,585 nodes with the thick one), every model with its modes to 1500 Hz. The large case.</span></li>
+    </ul>
+  </section>
   <p><a href="https://github.com/Hertzforge/Hertzforge">GitHub</a></p>
   <p class="credits"><a href="credits.html">Credits</a></p>
 </main>
 <script>
+  // The download links go through releases/latest, so they need no change per release; the
+  // version, date and sizes come from GitHub when the visitor's browser can reach it.
+  fetch('https://api.github.com/repos/Hertzforge/Hertzforge/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((release) => {
+      if (!release || !release.tag_name) return;
+      const when = release.published_at ? new Date(release.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+      document.getElementById('dl-release').textContent = `Version ${release.tag_name.replace(/^v/, '')}${when ? `, ${when},` : ''}`;
+      for (const el of document.querySelectorAll('em.size[data-asset]')) {
+        const asset = (release.assets || []).find((a) => a.name === el.dataset.asset);
+        if (asset) el.textContent = `${(asset.size / 1e6).toFixed(0)} MB`;
+      }
+    })
+    .catch(() => {});
   // Respect reduced motion: no autoplay, and give the visitor the controls instead.
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const demo = document.getElementById('demo');

@@ -12,12 +12,13 @@ development.
 | The window | the app's executable (`hertzforge`) | Tauri 2; the shell from `ui/build`, served from inside the app |
 | The control service | `sds-control`, beside the executable | the release build of `crates/sds-control` |
 | The analysis service's Python | `python/` in the app's resources | CPython 3.13 from python-build-standalone, with the `hertzforge` package and its dependencies installed as published wheels |
-| The demonstration data | `testdata/plate/` in the resources | the plate runs and models the catalog's datasets read (`scripts/fetch_testdata.sh`) |
 | License texts | `LICENSE`, `THIRD_PARTY_NOTICES.md` in the resources | |
 
 Built on an Apple silicon Mac (November 2, 2026): the app is 541 MB and its disk image 168 MB. The
 Python runtime is 471 MB of that, mostly the solid-modeling kernel's wheel (225 MB), SciPy (66 MB),
-pandas (37 MB) and netCDF4 (27 MB); the plate data is 55 MB.
+pandas (37 MB) and netCDF4 (27 MB). The 55 MB of plate test data the app carried until November 5
+is not in it: the example projects are downloads on hertzforge.com (`scripts/make_examples.py`
+writes them).
 
 The CI workflow `.github/workflows/desktop.yml` builds on every push to the desktop branch and on
 demand: a `.dmg` for macOS on Apple silicon, an NSIS installer (`*-setup.exe`) for Windows x64, and
@@ -185,12 +186,15 @@ through its test ids, and answers the quit question, which nothing can click:
 
 ```bash
 CARGO_TARGET_DIR=<a build folder> desktop/packaging/build.sh --e2e --bundles app
+python scripts/make_examples.py <a folder> --only plate-random-run free-plate
 HERTZFORGE_E2E_SCRIPT=desktop/packaging/e2e/random_run.js HERTZFORGE_E2E_ANSWER=stop \
+  HERTZFORGE_E2E_FILES="<a folder>/plate-random-run.hforge:<a folder>/free-plate.hforge" \
   "<a build folder>/release/bundle/macos/Hertzforge.app/Contents/MacOS/hertzforge"
 ```
 
 `desktop/packaging/e2e/random_run.js` checks both services connected and nothing loaded from the
-network; opens a dataset and runs a tool in Random and solves a model in Modal; runs Random on the
+network; drops the two example projects on the window (`HERTZFORGE_E2E_FILES`, separated as PATH
+is) and shows the run's PSDs in Random and the model's modes in Modal; runs Random on the
 simulator to completion from Acquire & Control; opens a display page in a window of its own; then
 starts a second run and quits while it drives. Each step is written to the app's log, and the control
 service's log says how the run ended. `desktop/packaging/e2e/drop_files.js` checks that the shell
@@ -198,13 +202,49 @@ sees Tauri's API and that a drop on the window (sent as the `tauri://drag-drop` 
 emits for one) reaches the analysis service by its path. Build the app again without `--e2e` before
 handing it on.
 
+## Releasing
+
+A release is a tag. Set the version in `pyproject.toml`, `src/hertzforge/__init__.py`,
+`desktop/tauri.conf.json`, `desktop/package.json` and the workspace `Cargo.toml` to the same number,
+merge, then tag that commit `v<version>` and push the tag. The desktop workflow builds, signs and
+notarizes both Mac images, renames them `Hertzforge-macOS-AppleSilicon.dmg` and
+`Hertzforge-macOS-Intel.dmg`, and drafts the release with them, their `SHA256SUMS` and, when the
+updater key is set, the update archives and `latest.json`. Publishing the draft is a person's click;
+it starts `release.yml`, which publishes the Python package to PyPI. The site's Download section
+links the images through `releases/latest/download/<name>`, which GitHub answers with the newest
+published release's asset of that name, so the page needs no change per release; its script fills
+the version, date and sizes from the GitHub API when the visitor's browser can reach it.
+
+## Updates
+
+Check for Updates, in the shell's command palette, asks the Tauri updater: it reads the latest
+release's `latest.json`, says through a native dialog whether a newer version is published, and on
+Install downloads that release's `Hertzforge-macOS-<Arch>.app.tar.gz`, verifies it against the
+public key in `desktop/tauri.conf.json` (`plugins.updater.pubkey`), replaces the app and relaunches.
+Only when asked, never at startup, as Visual Dynamics checks. The archive is the signed, stapled app
+the same run notarized, tarred after signing and signed again with the updater's key by
+`tauri signer sign`; `desktop/packaging/updater_manifest.py` writes the manifest beside it.
+
+The updater's key pair is made once by the maintainer, from their own terminal, and no agent handles
+the private half:
+
+```bash
+npm --prefix desktop exec -- tauri signer generate -w ~/.tauri/hertzforge.key
+```
+
+The public key it prints goes in `desktop/tauri.conf.json` as `plugins.updater.pubkey`; the private
+key's file contents and its password go in the `release` environment as
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Until they are set, a release
+carries images and no update archive, and Check for Updates says no update is published. An app can
+only update to a release made after its own, so the first release with the key set is the one every
+later app updates from.
+
 ## Not Done Yet
 
-- Signing, as above; notarization has not been tried.
 - The Windows and Linux installers are built by CI and have not been installed and run.
-- File menu items and the `.hforge` file association: the macOS menu has the standard application,
-  Edit, View and Window menus only. The Open, Import and Save buttons use the native dialogs, and
+- The `.hforge` file association. On macOS the File menu has Open, Import, Save and Save As; on Windows
+  and Linux, which have no menu bar yet, those are buttons in the top bar. They use the native dialogs, and
   files dropped on the window open or import by their paths (`capabilities/main.json` grants the
   main window its events and the two dialogs; the display windows get nothing).
 - Intel Macs and Windows on Arm.
-- Updates: there is no updater.
+- Updates on Windows and Linux: the updater is wired for the macOS app only.

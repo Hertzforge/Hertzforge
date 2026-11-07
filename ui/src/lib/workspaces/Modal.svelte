@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Modal: the study of FRFs and shape sets, in the shared host, with the fitting screen in its
-	 * place while a fit is open. A fit begins from the Actions frame (an FRF alone, or an FRF with
+	 * place while a fit is open. A fit begins from the action table (an FRF alone, or an FRF with
 	 * the shape set to edit) and ends from its own bar.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';

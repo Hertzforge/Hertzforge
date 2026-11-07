@@ -83,7 +83,7 @@ def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
 
 def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
              link: str | None = None,
-             regions: Sequence[dict] = ()) -> dict[str, Any]:
+             regions: Sequence[dict] = (), handles: Sequence[dict] = ()) -> dict[str, Any]:
     """A `spectrum` view of `lines` on the axes `x` and `y`. Panes with
     the same `link` share a cursor position on x; `regions` are shaded
     behind the curves."""
@@ -93,6 +93,8 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
         out['link'] = link
     if regions:
         out['regions'] = list(regions)
+    if handles:
+        out['handles'] = list(handles)
     return out
 
 
@@ -153,6 +155,16 @@ def row(label: str, value: float | str, unit: str | None,
 def reading(title: str, rows: Sequence[dict]) -> dict[str, Any]:
     """A `reading` view: a titled table of `row`s."""
     return {'view': 'reading', 'title': title, 'rows': list(rows)}
+
+
+def gizmo(origin: Sequence[float], axes: Sequence[Sequence[float]], slide: dict[str, Any],
+          turn: dict[str, Any]) -> dict[str, Any]:
+    """Arrows and rings at `origin`, along the three `axes`, to drag in a `shape3d` view:
+    letting go runs `slide` or `turn`, each {'op', 'params', 'values', 'adds'}: `values` names
+    the param a drag along an axis goes in, in meters or degrees, and `adds` (optional) the
+    other params that axis adds."""
+    return {'origin': [float(v) for v in origin], 'axes': [[float(v) for v in row] for row in axes],
+            'slide': slide, 'turn': turn}
 
 
 def shape3d(title: str, unit: str, nodes: np.ndarray,
