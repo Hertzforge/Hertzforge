@@ -534,8 +534,24 @@ def test_waveform_error_counts_readings_when_there_are_many_events():
     assert found['Readings out']['value'].startswith('0 of 6 readings ')
 
 
+def test_a_spectrum_stale_because_a_window_moved_says_so():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    run(project, 'project.set_shock', history='H', shock=1, start=0.4, stop=0.9)
+    made = project.compute_srs('H')
+    run(project, 'project.set_shock', history='H', shock=1, start=0.45, stop=0.9)
+    assert project.stale()[made] == 'computed before its shock windows moved'
 
 
+def test_a_spectrum_stale_because_a_window_was_added_counts_them():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    run(project, 'project.set_shock', history='H', shock=1, start=0.4, stop=0.9)
+    made = project.compute_srs('H')
+    run(project, 'project.set_shock', history='H', shock=2, start=1.0, stop=1.5)
+    assert project.stale()[made] == 'computed with 1 window; the recording now says 2 windows'
 
 
 # ---- what is listed ------------------------------------------------------------------------

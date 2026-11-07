@@ -9455,6 +9455,8 @@ def _state_story(was, now):
             return 'computed on nodes that have since moved'
         return (f'computed {_summarize_state(was)}; the geometry now '
                 f'says {_summarize_state(now)}')
+    if was[0] == 'shocks' and len(was[1]) == len(now[1]):
+        return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
 
