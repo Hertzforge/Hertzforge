@@ -427,3 +427,38 @@ def test_a_run_with_a_lead_in_and_a_stop_is_still_read():
     reading = read_record({'h': history(t, x)}, 'h')
     assert reading.not_read == ''
     assert reading.at_level_s == pytest.approx(14.0, abs=0.6)
+
+
+# ---- reports ------------------------------------------------------------------
+
+def test_a_retitled_report_is_not_made_again():
+    project = load('random.nc4')
+    run(project, 'project.work_up_random')
+    project['Report'].title = 'My test report'
+    (reading,) = run(project, 'project.work_up_random')
+    assert values(reading, 'Added') == ['nothing to compute']
+    assert sum(isinstance(obj, Report) for obj in project.values()) == 1
+
+
+def test_a_retitled_report_survives_a_save(tmp_path):
+    project = load('random.nc4')
+    run(project, 'project.work_up_random')
+    project['Report'].title = 'My test report'
+    path = project.save(tmp_path / 'retitled.hforge')
+    back = Project.open(path)
+    assert back.work_up('Random Vibration') == []
+
+
+def test_an_older_files_report_still_counts_by_its_title():
+    project = load('random.nc4')
+    run(project, 'project.work_up_random')
+    del project.provenance['Report']
+    assert project.work_up('Random Vibration') == []
+
+
+def test_each_kind_still_makes_its_own_report_after_a_retitle():
+    project = load('random.nc4')
+    run(project, 'project.work_up_random')
+    project['Report'].title = 'Mine'
+    run(project, 'project.work_up_transient')
+    assert sum(isinstance(obj, Report) for obj in project.values()) == 2

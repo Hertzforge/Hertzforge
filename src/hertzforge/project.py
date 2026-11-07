@@ -5860,7 +5860,14 @@ class Project(dict):
             report.marking = str(marking)
         if marking_color is not None:
             report.marking_color = marking_color
-        return self.add(name, report)
+        added = self.add(name, report)
+        # which template it is goes by this record, not by its title,
+        # which the author can change (`work_up`)
+        self.provenance.pop(added, None)
+        if template in builders:
+            self.provenance[added] = {'verb': 'generate_report', 'source': None,
+                                      'params': {'template': template}}
+        return added
 
     def report_features(self, name: str, *, enable: Sequence[str] = (),
                         disable: Sequence[str] = (),
@@ -7848,17 +7855,23 @@ class Project(dict):
                             make(self.integrate, chain)[0]
                 elif icon == 'Report':
                     # the type's reports in order, each made once: chosen
-                    # by which are already here (by title), not by the
-                    # slot's number, so a random-and-sine project holding
-                    # its sine report gets the random one, not a second
-                    # sine (2026-10-05, two reports for that type)
-                    made = {self[name].title for name in self.names
-                            if isinstance(self[name], Report)}
+                    # by which are already here, not by the slot's number,
+                    # so a random-and-sine project holding its sine report
+                    # gets the random one, not a second sine (2026-10-05,
+                    # two reports for that type). A report's recipe says
+                    # which template made it; one from a file older than
+                    # that goes by its title
+                    reports = [name for name in self.names
+                               if isinstance(self[name], Report)]
+                    built = {(self.provenance.get(name) or {}).get('params', {}).get('template')
+                             for name in reports}
+                    titles = {self[name].title for name in reports}
                     wanted = next(
                         (template for template
                          in PROJECT_TEMPLATES[project_type]
-                         if TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
-                         not in made), None)
+                         if template not in built
+                         and TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
+                         not in titles), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
             except ValueError as error:
