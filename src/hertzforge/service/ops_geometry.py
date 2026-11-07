@@ -290,6 +290,8 @@ def add_node(project: Any, params: dict[str, Any]) -> list[dict]:
                                  disp_cs=moved)
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_call(name, 'add_node', (params['x'], params['y'], params['z']),
+                        node_id=int(node), def_cs=placed, disp_cs=moved)
     return _shown(name, geometry, 'nodes', f'added node {node}')
 
 
@@ -320,6 +322,10 @@ def add_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
             cs_id=_optional_id(params['id']), name=params['name'], cs_type=code)
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_call(name, 'add_coordinate_system',
+                        origin=(params['x'], params['y'], params['z']),
+                        rotation=np.asarray(frame[:3]).tolist(), cs_id=int(cs),
+                        name=params['name'], cs_type=code)
     return _shown(name, geometry, 'coordinate_systems', f'added coordinate system {cs}')
 
 
@@ -380,10 +386,13 @@ def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
         if ELEMENT_TYPES[code or FAMILY_ADD_TYPES[family][0]][2] == 'line':
             held = geometry.add_beams(nodes, group=group,
                                       elem_type=code or FAMILY_ADD_TYPES[family][0])
+            project.record_call(name, 'add_beams', nodes, group=group,
+                                elem_type=code or FAMILY_ADD_TYPES[family][0])
             said = (f'added {len(nodes) - 1} element{"s" * (len(nodes) != 2)} through '
                     f'{len(nodes)} nodes in element group {held}')
         else:
             row = geometry.add_element(nodes, elem_type=code, group=group)
+            project.record_call(name, 'add_element', nodes, elem_type=code, group=group)
             said = (f'added {ELEMENT_TYPES[int(geometry.elem_type[row])][0]} element '
                     f'{int(geometry.elem_id[row])}')
     except ValueError as error:
@@ -405,6 +414,7 @@ def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
         group = geometry.add_group(params['name'], _optional_id(params['id']))
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_call(name, 'add_group', params['name'], int(group))
     return _shown(name, geometry, 'groups', f'added element group {group}')
 
 
@@ -689,6 +699,8 @@ def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]
     cs, matrix = _frame(geometry, params['cs'])
     turned = rotate_frame(matrix, 'xyz'.index(params['axis']), np.radians(params['angle']))
     geometry.place_coordinate_system(cs, angles=angles_of(turned))
+    project.record_call(name, 'place_coordinate_system', cs,
+                        angles=[float(a) for a in angles_of(turned)])
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
                               f'turned {cs} {params["angle"]:+g}° about its '
                               f'{params["axis"].upper()}'), name, geometry, cs)
@@ -707,6 +719,8 @@ def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     cs, matrix = _frame(geometry, params['cs'])
     moved = translate_frame(matrix, 'xyz'.index(params['axis']), params['distance'])
     geometry.place_coordinate_system(cs, origin=moved[3])
+    project.record_call(name, 'place_coordinate_system', cs,
+                        origin=[float(x) for x in moved[3]])
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
                               f'moved {cs} {params["distance"]:+g} along its '
                               f'{params["axis"].upper()}'), name, geometry, cs)
@@ -721,7 +735,9 @@ def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
     name = params['geometry']
     geometry = project[name]
     cs, matrix = _frame(geometry, params['cs'])
-    geometry.place_coordinate_system(cs, angles=angles_of(identity_frame(matrix)))
+    angles = [float(a) for a in angles_of(identity_frame(matrix))]
+    geometry.place_coordinate_system(cs, angles=angles)
+    project.record_call(name, 'place_coordinate_system', cs, angles=angles)
     return _shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset')
 
 
@@ -1134,8 +1150,10 @@ def set_control(project: Any, params: dict[str, Any]) -> list[dict]:
     try:
         if environment is None:
             table.set_cell('control', row, params['control'])
+            project.record_call(name, 'set_cell', 'control', row, params['control'])
         else:
             table.set_control(environment, row, params['control'])
+            project.record_call(name, 'set_control', environment, row, params['control'])
     except ValueError as error:
         raise refused(str(error)) from None
     return channel_table_view(project, {**params, 'form': 'channels'})

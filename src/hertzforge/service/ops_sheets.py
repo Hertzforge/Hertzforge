@@ -180,6 +180,7 @@ def _set_cell(project: Any, name: str, number: int, key: str, text: str) -> list
             table.set_cell(key, row, text)
         except (ValueError, KeyError) as error:
             raise refused(str(error).strip('"')) from None
+        project.record_call(name, 'set_cell', key, row, text)
     channel = table.frame.loc[row, 'channel']
     stored = _cell(table, row, key)
     rows = [v.row('Set', f'{title_of(key)} of channel {channel}: {stored or "blank"}', None,

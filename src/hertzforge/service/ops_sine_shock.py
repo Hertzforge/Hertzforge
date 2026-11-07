@@ -114,6 +114,7 @@ def sine_extraction(project: Any, params: dict[str, Any]) -> list[dict]:
     except ValueError as error:
         raise refused(str(error)) from None
     history.sine_extraction = replace(setting, chosen=cycles if automatic else None)
+    project.record_setting(name, 'sine_extraction', history.sine_extraction)
     rows = [v.row('Smoothing', history.sine_extraction.describe(), None, 'info')]
     if automatic:
         rows.append(v.row('Cycles used', cycles, 'cycles', 'info'))
@@ -1059,6 +1060,7 @@ def set_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         edited = tuple(sorted((*shocks, moved), key=lambda shock: shock.start))
         index = edited.index(moved)
     _store_shocks(history, held_apart(edited, moved=index), rate)
+    project.record_setting(name, 'shocks', history.shocks)
     return _shock_views(name, history, params)
 
 
@@ -1076,6 +1078,7 @@ def remove_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} has {len(shocks)} shock{"s" * (len(shocks) != 1)}; there is '
                       f'no shock {number}')
     history.shocks = tuple(shock for k, shock in enumerate(shocks) if k != number - 1)
+    project.record_setting(name, 'shocks', history.shocks)
     return _shock_views(name, history, params)
 
 

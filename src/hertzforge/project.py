@@ -8579,10 +8579,14 @@ class Project(dict):
         resolves it to and what a script would say; everything plain
         reprs as itself.
         """
+        from .units import SYSTEMS, UnitSystem
+
         if isinstance(value, os.PathLike):
             return repr(str(value))
+        if isinstance(value, UnitSystem) and SYSTEMS.get(value.name) is value:
+            return f'hertzforge.units.SYSTEMS[{value.name!r}]'
         if isinstance(value, (str, int, float, bool, type(None),
-                              tuple, list, View)):
+                              tuple, list, dict, View)):
             return repr(value)
         try:
             return repr(self.name_of(value))

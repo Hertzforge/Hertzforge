@@ -1260,6 +1260,11 @@ class DataArray:
                                     else unit_system.from_si(source, dim))
             yield start, start + len(chunk), block
 
+    #: units named for channels whose records cannot convert yet, by
+    #: (table, channel) (`service.units`). A session's, never saved: nothing
+    #: has been converted while one waits
+    pending_units: dict[tuple[str, str], str] | None = None
+
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return NotImplemented

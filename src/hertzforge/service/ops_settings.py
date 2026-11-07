@@ -212,6 +212,7 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'not {averaging.frames}')
     record = _shown(history, name, params)
     history.averaging = averaging
+    project.record_setting(name, 'averaging', averaging)
     return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
@@ -227,6 +228,7 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         history.averaging = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_setting(name, 'averaging', history.averaging)
     return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
@@ -253,6 +255,7 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
     except ValueError as error:
         raise refused(str(error)) from None
     history.filtering = filtering
+    project.record_setting(name, 'filtering', filtering)
     # the preview is what Apply Filter will make of this record: the same
     # design, zero phase
     from scipy.signal import sosfiltfilt
@@ -284,6 +287,7 @@ def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
         history.truncation = Truncation(start, stop)
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_setting(name, 'truncation', history.truncation)
     cut = [v.region(a, b, 'cut', label) for a, b, label in (
         (first, start, f'Cut, {first:g} to {start:g} s'),
         (stop, last, f'Cut, {stop:g} to {last:g} s')) if b > a]

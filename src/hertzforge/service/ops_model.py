@@ -137,6 +137,7 @@ def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
             raise refused(f'group {group} holds {family or "no"} elements; give it one '
                           'kind of element first')
     geometry.group_properties = {**geometry.group_properties, **set_now}
+    project.record_setting(name, 'group_properties', geometry.group_properties)
     return [_properties_reading(name, geometry)]
 
 

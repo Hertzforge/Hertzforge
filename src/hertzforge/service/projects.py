@@ -540,8 +540,7 @@ def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[i
 
     state = _open(state, 'project.define_units')
     name = _name(params, 'name', 'project.define_units')
-    with state.project.journal_as(None):
-        converted = declared.define(state.project, name, params.get('units'))
+    converted = declared.define(state.project, name, params.get('units'))
     state.modified = True
     return converted
 
@@ -560,4 +559,5 @@ def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
                       'not a geometry')
     if state.project.active_geometry != name:
         state.project.active_geometry = name
+        state.project.journal.append(f'project.active_geometry = {name!r}')
         state.modified = True
