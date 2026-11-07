@@ -499,10 +499,10 @@ def test_a_record_of_events_is_not_read_as_a_run_at_level():
     history = rr.histories(project)[0]
     found = rr.chronology(project)
     assert found.rows[0].reading.not_read.startswith(
-        'a transient record is not one run at level')
+        'a record of events is not one run at level')
     text = rr.draft(found)
     assert f'|  |  |  |  | {history} | not read | not read |  |' in text
-    assert f'- {history}: a transient record is not one run at level' in text
+    assert f'- {history}: a record of events is not one run at level' in text
 
 
 def test_the_results_are_grouped_by_run_in_the_order_they_were_run(two_runs):

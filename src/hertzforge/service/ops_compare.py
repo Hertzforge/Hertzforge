@@ -824,6 +824,10 @@ def srs_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
         label = row.dof if row.event is None else f'{row.dof}, {row.event}'
         rows.append(v.row(label, f'not scored: {row.refused}', None, 'warn') if row.refused
                     else v.row(label, _db(row.db), 'dB', 'info'))
+    unread = next((row.unread for row in _srs_rows(spec, measured)
+                   if row.dof == dof and row.unread), None)
+    if unread:
+        rows.append(v.row('Not read', unread, None, 'warn'))
     return [plot, v.reading(f'{dof}: {name} against {spec_name}', rows)]
 
 
@@ -852,11 +856,18 @@ def srs_error(project: Any, params: dict[str, Any]) -> list[dict]:
             values.append(float('nan'))
             continue
         values.append(row.db)
+        inside = 'warn' if row.unread else 'pass'
         rows.append(v.row(label, _db(row.db), 'dB',
-                          'pass' if low <= row.db <= high else 'fail'))
-    rows.append(_count_row(values, lambda db: db > high or db < low,
-                           f'outside {low:g} to {high:g} dB', notes, comparison_note(found),
-                           'readings' if len(events) > 1 else 'channels'))
+                          inside if low <= row.db <= high else 'fail'))
+    count = _count_row(values, lambda db: db > high or db < low,
+                       f'outside {low:g} to {high:g} dB', notes, comparison_note(found),
+                       'readings' if len(events) > 1 else 'channels')
+    unread = next((row.unread for row in found if row.unread), None)
+    if unread and count['status'] == 'pass':
+        count['status'] = 'warn'
+    rows.append(count)
+    if unread:
+        rows.append(v.row('Not read', unread, None, 'warn'))
     return [v.reading(f'SRS error of {name} against {spec_name}', rows)]
 
 
@@ -958,6 +969,8 @@ def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
                  v.row('Worst at', sig(result['worst_frequency']), 'Hz', 'info')]
     if result.get('note'):
         rows.append(v.row('Note', str(result['note']), None, 'warn'))
+    if result.get('unread'):
+        rows.append(v.row('Not read', result['unread'], None, 'warn'))
     return [plot, v.reading(f'Points rule: {where}', rows)]
 
 

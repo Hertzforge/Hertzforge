@@ -349,7 +349,8 @@ def _judged(specification: Any, record: int, dof: str, points: np.ndarray,
     srs = Srs(points, spectrum[None, :], response_dof=[dof],
               ordinate_dim=['acceleration'], q=specification.q,
               kind=specification.kind)
-    return srs_tolerance(specification, srs, record, 0, percent=100.0)
+    return srs_tolerance(specification, srs, record, 0, percent=100.0,
+                         whole_band=False)
 
 
 def _band(contribution: np.ndarray, points: np.ndarray, limit: float,
