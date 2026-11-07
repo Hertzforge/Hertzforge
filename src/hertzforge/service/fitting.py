@@ -64,8 +64,8 @@ def _number(params: Mapping[str, Any], key: str, method: str) -> float:
 
 
 def start(project: Any, params: Mapping[str, Any]) -> Fit:
-    """`fit.start`: a session on the FRF `frf`, from the shape set `shapes`
-    when given (Edit Fit)."""
+    """`fit.start`: a session on the FRF `frf`, on the `records` picked when
+    given, from the shape set `shapes` when given (Edit Fit)."""
     from hertzforge.core.data import Frf
     from hertzforge.core.modal_fit import ModalFitSession
     from hertzforge.core.shapes import ShapeSet
@@ -81,12 +81,18 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
     if shapes is not None and (not isinstance(shapes, str) or shapes not in project
                                or not isinstance(project[shapes], ShapeSet)):
         raise refused(f'{shapes!r} is not a shape set in the project')
+    records = params.get('records') or None
+    if records is not None and (
+            not isinstance(records, list)
+            or not all(isinstance(r, int) and 0 <= r < project[name].num_records for r in records)):
+        raise refused(f'{name} has records 0 to {project[name].num_records - 1}; '
+                      f'not {records!r}')
     coherence = params.get('coherence')
     if coherence is not None and (not isinstance(coherence, str) or coherence not in project
                                   or kind_of(project[coherence]) not in COHERENCES):
         raise refused(f'{coherence!r} is not a coherence in the project')
     try:
-        session = ModalFitSession(project[name], coherence=None if coherence is None
+        session = ModalFitSession(project[name], records=records, coherence=None if coherence is None
                                   else project[coherence])
         if shapes is not None:
             session.adopt(project[shapes])

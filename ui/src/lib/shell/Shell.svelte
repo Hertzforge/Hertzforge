@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { openLogWindow } from '$lib/runlog/ownWindow';
 	/** The shell frame: top bar, workspace rail, the active workspace, and the command palette. */
 	import { onMount } from 'svelte';
 	import { getApp } from '$lib/app/state.svelte';
@@ -39,6 +40,21 @@
 	// each time the analysis service connects it is told the display units chosen before
 	$effect(() => {
 		if (!app.config.popout && app.analysis.isOpen) void app.units.sync();
+	});
+
+	// `--run-log [file]`: the log alone, for the keeper's own computer, as Visual Dynamics launches it
+	let logAsked = false;
+	$effect(() => {
+		if (!app.config.runLog || logAsked) return;
+		logAsked = true;
+		app.runLog.shown = true;
+		app.runLog.alone = true;
+	});
+	let logOpened = false;
+	$effect(() => {
+		if (!app.config.runLogFile || logOpened || !app.analysis.isOpen) return;
+		logOpened = true;
+		void app.runLog.openLog(app.config.runLogFile);
 	});
 
 	// a log opened before the service reconnected is shown again as the service holds it
@@ -103,9 +119,9 @@
 {:else}
 <div class="shell">
 	<TopBar {app} />
-	<div class="body" class:collapsed={app.railCollapsed} class:logged={app.runLog.shown} class:alone={app.runLog.shown && app.runLog.alone} style:--runlog-width="{app.runLog.width}px">
+	<div class="body" class:collapsed={app.railCollapsed} class:logged={app.runLog.shown && !app.runLog.windowed} class:alone={app.runLog.shown && !app.runLog.windowed && app.runLog.alone} style:--runlog-width="{app.runLog.width}px">
 		{#if !app.railCollapsed}<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
-		<div class="workspace" hidden={app.runLog.shown && app.runLog.alone}>
+		<div class="workspace" hidden={app.runLog.shown && !app.runLog.windowed && app.runLog.alone}>
 			<div class="ws">
 			{#if app.workspace === 'acquire'}
 				<Acquire {app} />
@@ -121,13 +137,13 @@
 			</div>
 			{#if app.project.summary}<Console console={app.console} />{/if}
 		</div>
-		{#if app.runLog.shown}
+		{#if app.runLog.shown && !app.runLog.windowed}
 			<div class="logside">
 				{#if !app.runLog.alone}
 					<!-- svelte-ignore a11y_no_static_element_interactions (a pointer handle; the width is kept between launches) -->
 					<div class="edge" title="Drag to size the run log" onpointerdown={resizeLog}></div>
 				{/if}
-				<RunLogPanel rl={app.runLog} />
+				<RunLogPanel rl={app.runLog} onownwindow={() => { app.runLog.message = openLogWindow(app.runLog) ? '' : 'The window was refused; allow pop-ups for the shell'; }} />
 			</div>
 		{/if}
 	</div>
@@ -183,6 +199,10 @@
 		z-index: 2;
 		width: 6px;
 		cursor: col-resize;
+	}
+
+	.workspace[hidden] {
+		display: none;
 	}
 
 	.workspace {

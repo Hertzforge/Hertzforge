@@ -21,8 +21,8 @@ ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 #: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
 #: is not offered shock tools; an operation every module needs (Plot
 #: Records, Save As, the averaging settings) says `everywhere`.
-Workspace = Literal['acquire', 'simulate', 'signals', 'random', 'shock', 'sine',
-                    'modal', 'geometry', 'model', 'specify', 'report']
+Workspace = Literal['acquire', 'simulate', 'signals', 'sysid', 'random', 'shock', 'transient',
+                    'sine', 'modal', 'geometry', 'model', 'specify', 'report']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it

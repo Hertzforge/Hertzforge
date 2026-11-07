@@ -71,6 +71,15 @@ def test_publishing_adds_a_shape_set_and_edit_fit_replaces_it(project):
     assert project[name].num_shapes == 3 and list(project).count(name) == 1
 
 
+def test_records_picked_limit_the_fit(project):
+    every = fitting.start(project, {'frf': 'FRF'})
+    picked = fitting.start(project, {'frf': 'FRF', 'records': [0, 1]})
+    assert picked.session.rows == [0, 1]
+    assert len(every.session.rows) > 2
+    with pytest.raises(ProtocolError, match='not \\[1000000\\]'):
+        fitting.start(project, {'frf': 'FRF', 'records': [1000000]})
+
+
 def test_refusals_are_in_the_cores_words_or_name_the_problem(project):
     from hertzforge.core.data import TimeHistory
 

@@ -562,6 +562,9 @@ PARTS_APART = Param('parts_apart', 'Keep the parts apart from each other', 'bool
                     default=False)
 ANYWAY = Param('anyway', 'Mesh even where the fit is likely to fold', 'boolean',
                default=False)
+PIECE_SIZES = Param('sizes', 'A size per piece, as "3: 0.01, 5: 0.002" (hexes)', 'string',
+                    default='')
+DETECT_SIZES = Param('detect', 'Detect a size for every piece', 'boolean', default=False)
 MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean',
                   default=False)
 
@@ -683,8 +686,43 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
     return rows
 
 
+def _piece_sizes(text: str) -> dict[int, float]:
+    """The sizes '3: 0.01, 5: 0.002' names, by piece."""
+    out: dict[int, float] = {}
+    for entry in text.replace(' ', '').split(','):
+        if not entry:
+            continue
+        piece, colon, size = entry.partition(':')
+        try:
+            out[int(piece)] = float(size)
+        except ValueError:
+            raise refused(f'{entry!r} is not a piece and its size, such as 3: 0.01') from None
+        if not colon or out[int(piece)] <= 0.0:
+            raise refused(f'{entry!r} is not a piece and a size above 0, such as 3: 0.01')
+    return out
+
+
+def _likely_or_refused(geometry: Any, ids: list[int]) -> float:
+    return _call(lambda: _likely_size(geometry, ids, 'hexes'))
+
+
+def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, float]) -> dict:
+    """How `solids.piece_plan` would mesh the parts, a row a piece, with the size each is
+    likely to hold at beside the one it has."""
+    from hertzforge.core import solids
+
+    rows = []
+    for entry in _call(lambda: solids.piece_plan(geometry, ids, size, sizes)):
+        piece = entry.get('id')
+        likely = _likely_or_refused(geometry, [piece] if piece is not None else ids)
+        rows.append([piece if piece is not None else '', entry.get('name', ''),
+                     entry['method'], float(entry['size']), float(likely),
+                     int(entry['bricks'])])
+    return v.table('Pieces', ['Piece', 'Name', 'Method', 'Size', 'Likely size', 'Bricks'], rows)
+
+
 def _preview(geometry: Any, ids: list[int], size: float, elements: str,
-             parts_apart: bool) -> tuple[Any, list[dict]]:
+             parts_apart: bool, sizes: dict[int, float] | None = None) -> tuple[Any, list[dict]]:
     """The mesh Mesh Solids would make, unjoined, and what it holds; or
     no mesh and its count past VD's preview budgets."""
     from hertzforge.core import shells, solids, tetmesh
@@ -713,14 +751,14 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
                                 'makes them', None, 'info')]
         part, made = tetmesh.tet_mesh(geometry, ids, size)
     else:
-        plan = solids.piece_plan(geometry, ids, size)
+        plan = solids.piece_plan(geometry, ids, size, sizes)
         bricks = sum(entry['bricks'] for entry in plan)
         budget = (PREVIEW_FITTED if any(e['method'] == 'overlay' for e in plan)
                   else PREVIEW_BRICKS)
         if bricks > budget:
             return None, [v.row('Bricks', f'about {bricks:,} at this size; Mesh makes '
                                 'them', None, 'info')]
-        part, made = solids.brick_mesh(geometry, ids, size, parts_apart)
+        part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
     earlier = len(solids.meshed_elements(geometry, part.group_name))
     return part, _made_rows(made, earlier)
 
@@ -730,7 +768,9 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     an element size, each part an element group (`Project.mesh_solids`).
     Without `keep` it is VD's live preview: the mesh the core's mesher
     makes (`solids.brick_mesh`, `tetmesh.tet_mesh`, `shells.shell_mesh`)
-    drawn on its own and said, the project unchanged. A fitted brick mesh
+    drawn on its own and said, the project unchanged. A union meshed in
+    pieces is listed a row a piece, and each takes its own size, typed or
+    detected, as VD's table does. A fitted brick mesh
     likely to fold (`hexmesh.likely_to_fold`) is said in the preview and
     made only with `anyway`, where VD asks. The size sets the time: a
     fine size on a large part is seconds to minutes."""
@@ -747,6 +787,12 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     size = params['size'] or _call(lambda: _likely_size(geometry, ids, elements))
     fold = (_call(lambda: _fold_check(geometry, ids, size)) if elements == 'hexes'
             else '')
+    sizes = _piece_sizes(params['sizes']) if elements == 'hexes' else {}
+    pieces = _pieces_table(geometry, ids, size, sizes) if elements == 'hexes' else None
+    if params['detect'] and pieces is not None:
+        sizes = {int(entry['id']): _likely_or_refused(geometry, [int(entry['id'])])
+                 for entry in _call(lambda: solids.piece_plan(geometry, ids, size)) if 'id' in entry}
+        pieces = _pieces_table(geometry, ids, size, sizes)
     said = [v.row('Solids', ', '.join(_label(solids.solid(geometry, i)) for i in ids),
                   None, 'info'),
             v.row('Element size', float(size), 'm', 'info')]
@@ -754,8 +800,10 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         said.append(v.row('Fit', fold, None, 'warn'))
     if not params['keep']:
         part, rows = _call(lambda: _preview(geometry, ids, size, elements,
-                                            params['parts_apart']))
+                                            params['parts_apart'], sizes))
         out = [v.reading(f'Mesh Solids preview of {name}', said + rows)]
+        if pieces is not None and len(pieces['rows']) > 1:
+            out.append(pieces)
         if part is not None:
             out.append(_drawn(f'Mesh preview of {name}', part,
                               geometry.units_defined)[0])
@@ -764,7 +812,8 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{fold}. Mesh at the size suggested, or ask to mesh anyway')
     found = _call(lambda: project.mesh_solids(
         name, ids, size, apart=params['apart'],
-        parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements))
+        parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements,
+        sizes=sizes or None))
     rows = _made_rows(found, 0)
     if found['replaced']:
         rows.append(v.row('Replaced', f'the {found["replaced"]:,} elements meshed before',
@@ -1078,7 +1127,8 @@ OPERATIONS = (
         id='project.mesh_solids', title='Mesh Solids', workspace='model',
         summary='Mesh parts into hexes, tetras or shells, each part an element group; the '
                 'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
-        params=(GEOMETRY, PARTS, ELEMENTS, SIZE, APART, PARTS_APART, ANYWAY, MESH_KEEP),
+        params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
+                MESH_KEEP),
         outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',

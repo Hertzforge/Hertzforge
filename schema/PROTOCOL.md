@@ -160,7 +160,9 @@ the result's place:
         "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
         "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
         "kept":[1,3],                  faces: the surfaces in use now
-        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+        "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
+        "off":2}                       nodes: marked places, shown through the model; this many of
+                                       the last `ids` are left out and drawn dim
 ```
 
 A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
@@ -179,6 +181,10 @@ how each measured DOF moves, sample by sample.
           "values":{"$array":.. f32 [D,S]},      DOF d at sample k
           "peak":130.4}                          the furthest any node gets, in value_unit
 ```
+
+With `modes` (f32 [M,D,3]), `values` is instead [M,S], modal coordinates: `node` lists the D nodes
+that move, `direction` is empty, and sample k's offset at node d is the sum over modes of
+`modes[m, d] * values[m, k]`, so the physical response never has to be formed or sent.
 
 At sample k each node is offset by the sum over its DOFs of `direction * values[d, k]`, scaled
 so that `peak` is the amplitude the person chose. Sending each DOF's samples rather than a frame
@@ -466,9 +472,9 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the second set projected onto the
-first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's four
-views are `prefs.animation` (its modes on its geometry), `prefs.mode_table`, `prefs.mac` and
-`prefs.shape_values` (one always up; `offers.shapes`), each a pane the shell can put away, the
+first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set shows
+one view at a time, named by `prefs.shape_view` (`offers.shapes`): `animate` (its modes on its geometry,
+and the default), `table`, `mac` (with the stage its squares animate) or `values`, the
 values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in
 `offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
@@ -575,7 +581,9 @@ linked channel table describes a time history; `verb:` params are filled from th
 a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A geometry's are `rigid`: the
+reference point `x`, `y`, `z` in meters, `normalize`, and with it `mass` and the inertia terms
+`ixx`, `iyy`, `izz`, `ixy`, `ixz`, `iyz`. A report's `settings` are
 `features` (each report feature's key, true where it is on) and `identity` (each identification
 field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
@@ -591,7 +599,7 @@ project, and opening or starting another project ends it.
 
 | Method | Params | Result |
 |---|---|---|
-| `fit.start` | `{"frf","shapes"?,"coherence"?}` | `{"fit"}` |
+| `fit.start` | `{"frf","shapes"?,"coherence"?,"records"?}` | `{"fit"}` |
 | `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
 | `fit.move` | `{"frequency"}` | `{"fit"}` |
 | `fit.damping` | `{"damping"}` | `{"fit"}` |
@@ -604,7 +612,7 @@ project, and opening or starting another project ends it.
 | `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
 | `fit.end` | `{}` | `{}` |
 
-`fit.start` fits the FRF `frf`, or, with `shapes`, edits that shape set's fit (Edit Fit): its
+`fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
 modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left

@@ -128,6 +128,18 @@ export async function chooseReportPath(title: string): Promise<string | null> {
 	return dialog.save({ title: 'Save Report', defaultPath: `${title}.html`, filters: [{ name: 'Web page', extensions: ['html'] }] });
 }
 
+/** The paths of files on the clipboard, in the desktop app on a Mac; none anywhere else. */
+export async function pastedFiles(): Promise<string[]> {
+	const t = tauri();
+	if (!t?.core || !t.dialog) return [];
+	try {
+		return await t.core.invoke<string[]>('pasted_files', {});
+	} catch {
+		// no such command off a Mac
+		return [];
+	}
+}
+
 /**
  * Call `onPaths` with the paths of files dropped on the window. In a browser a drop has no paths,
  * so `onPaths` gets null and the caller says to use the desktop app or type the path; the drop is
