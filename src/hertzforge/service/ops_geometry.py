@@ -17,6 +17,7 @@ planner draws its sensors.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -428,6 +429,24 @@ def _whole(text: str, least: int | None = None) -> int:
     return value
 
 
+def _finite(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError('must be a finite number')
+    return value
+
+
+def _check_nodes(code: int, nodes: list[int]) -> None:
+    """An element of this type holds its count of nodes, and more than one place."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    word, count, _render = ELEMENT_TYPES[code]
+    if count and len(nodes) != count:
+        raise ValueError(f'a {word} takes {count} nodes, not {len(nodes)}')
+    if len(nodes) > 1 and len(set(nodes)) == 1:
+        raise ValueError(f'a {word} needs more than one node, not {nodes[0]} over and over')
+
+
 def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> None:
     """One cell of an entity table written, as Visual Dynamics' table
     writes it (`gui.object_tables`): an id that others refer to is
@@ -443,7 +462,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
         if field == 'id':
             geometry.renumber_node(row, _whole(text, 1))
         elif field in ('x', 'y', 'z'):
-            geometry.node_xyz[row, 'xyz'.index(field)] = float(text)
+            geometry.node_xyz[row, 'xyz'.index(field)] = _finite(text)
         else:
             cs = _whole(text)
             if cs not in {int(c) for c in geometry.cs_id}:
@@ -462,10 +481,10 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                 raise ValueError(f'expected one of {sorted(CS_TYPES.values())}')
             geometry.cs_type[row] = codes[0]
         elif field.startswith('origin'):
-            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = float(text)
+            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = _finite(text)
         else:
             angles = list(angles_of(geometry.cs_matrix[row]))
-            angles['xyz'.index(field[-1])] = float(text)
+            angles['xyz'.index(field[-1])] = _finite(text)
             geometry.place_coordinate_system(int(geometry.cs_id[row]), angles=angles)
     elif kind == 'elements':
         if field == 'id':
@@ -475,6 +494,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
             codes = [c for c, (word, _n, _r) in ELEMENT_TYPES.items() if word == wanted]
             if not codes:
                 raise ValueError(f'unknown element type {text!r}')
+            _check_nodes(codes[0], [int(n) for n in geometry.elem_conn[row]])
             geometry.elem_type[row] = codes[0]
         elif field == 'group':
             wanted = text.strip()
@@ -489,6 +509,7 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
             missing = set(nodes) - set(geometry.node_id.tolist())
             if missing:
                 raise ValueError(f'unknown nodes {sorted(missing)}')
+            _check_nodes(int(geometry.elem_type[row]), nodes)
             geometry.elem_conn[row] = np.asarray(nodes, dtype=np.int64)
     else:
         if field == 'id':
@@ -544,22 +565,31 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
     make it inconsistent: an element given a type of another family than
     its group's, say."""
     name = params['geometry']
+    return _set_at_row(project, name, params['kind'], _row(project[name], params['kind'],
+                                                           params['entity']),
+                       params['field'], params['value'])
+
+
+def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str
+                ) -> list[dict]:
+    """One field of the entity on `row` written; ids may repeat, so the row says which."""
     geometry = project[name]
-    kind, field = params['kind'], params['field']
     if field not in FIELDS[kind]:
         raise refused(f'a {LABELS[kind]} has the fields {", ".join(filter(None, FIELDS[kind]))}; '
                       f'not {field}')
-    entity = params['entity']
-    row = _row(geometry, kind, entity)
+    entity = int(getattr(geometry, ID_ARRAYS[kind])[row])
+    if kind == 'nodes' and field == 'id' and entity in project._data_nodes():
+        raise refused(f'data in the project is measured at node {entity}; delete or rename '
+                      'those channels first')
     held = _snapshot(geometry)
     try:
-        _set_field(geometry, kind, row, field, params['value'])
+        _set_field(geometry, kind, row, field, value)
         geometry.validate()
     except (ValueError, KeyError) as error:
         _restore(geometry, held)
         said = str(error).strip(chr(39))
         if said.startswith(('could not convert', 'invalid literal')):
-            said = f'{params["value"]!r} is not a number'
+            said = f'{value!r} is not a number'
         raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
     return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
 
@@ -574,9 +604,8 @@ def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
     if not 1 <= params['row'] <= len(ids):
         raise refused(f'the {LABELS[kind]} table has {len(ids)} rows; there is no row '
                       f'{params["row"]}')
-    return set_entity(project, {'geometry': params['geometry'], 'kind': kind,
-                                'entity': ids[params['row'] - 1], 'field': params['column'],
-                                'value': params['value']})
+    return _set_at_row(project, params['geometry'], kind, params['row'] - 1, params['column'],
+                       params['value'])
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
