@@ -213,3 +213,73 @@ def test_a_high_pass_does_not_cap_the_srs():
     run(project, 'project.filter_data', source='Time Data')
     project.compute_srs('Time Data Filtered')
     assert project['Time Data Filtered SRS'].abscissa[-1] == pytest.approx(fs / 5.0, rel=0.03)
+
+
+# ---- an SRS over part of its requirement's band --------------------------------
+
+def requirement():
+    return ShockSpecification.from_breakpoints(
+        [20.0, 2000.0], [50.0, 50.0], '1X+', ordinate_unit='g',
+        warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+
+
+def partial_project():
+    t, x = half_sine()
+    project = Project()
+    project.add('R', history(t, x))
+    project.add('Req', requirement())
+    project.add('Partial', project['R'].compute_srs(low=800.0, high=2000.0, per_octave=12))
+    return project
+
+
+def test_points_rule_does_not_pass_a_spectrum_that_misses_the_band(validate):
+    project = partial_project()
+    plot, reading = run(project, 'project.srs_points', srs='Partial', requirement='Req')
+    wire_views([plot, reading], validate)
+    verdict = row_of(reading, 'Verdict')
+    assert verdict['value'] == 'not judged' and verdict['status'] == 'warn'
+    said = row_of(reading, 'Not read')
+    assert said['status'] == 'warn' and '20' in said['value'] and '800' in said['value']
+
+
+def test_a_failing_spectrum_still_fails_when_it_misses_the_band():
+    project = partial_project()
+    project['Partial'].ordinate *= 0.1
+    _plot, reading = run(project, 'project.srs_points', srs='Partial', requirement='Req')
+    assert row_of(reading, 'Verdict')['value'] == 'fails'
+    assert 'Not read' in [row['label'] for row in reading['rows']]
+
+
+def test_the_error_reading_says_what_it_did_not_read(validate):
+    project = partial_project()
+    (reading,) = run(project, 'project.srs_error', srs='Partial', requirement='Req')
+    wire_views([reading], validate)
+    channel = row_of(reading, '1X+')
+    assert channel['status'] == 'warn', 'inside the band, but only over part of it'
+    assert row_of(reading, 'Channels out')['status'] == 'warn'
+    assert '800' in row_of(reading, 'Not read')['value']
+
+
+def test_a_spectrum_over_the_whole_band_is_judged_as_before():
+    t, x = half_sine(peak=1.0)
+    requirement_ = requirement()
+    whole = history(t, x).compute_srs(low=20.0, high=2000.0, per_octave=12)
+    whole.ordinate[:] = 50 * G
+    result = srs_tolerance(requirement_, whole)
+    assert result['passed'] is True and 'unread' not in result
+    assert srs_errors(requirement_, whole)[0].unread is None
+    # a line short of each end, as a grid lands, is the whole band
+    near = history(t, x).compute_srs(low=21.0, high=1900.0, per_octave=12)
+    near.ordinate[:] = 50 * G
+    assert srs_tolerance(requirement_, near)['passed'] is True
+
+
+def test_the_report_says_a_partial_spectrum_was_not_judged():
+    project = partial_project()
+    found = {'source': project['Req'], 'measured': project['Partial']}
+    shown = _show_srs_points(_read_srs_points(found, {}), found, DEFAULT_SYSTEM)
+    assert 'not judged' in shown.rows[0][-1]
+    assert '800' in shown.words
+    caption = srs_caption(project['Partial'], specification=project['Req'])
+    text = caption.points[0].text()
+    assert 'not judged' in text and '800' in text
