@@ -7741,6 +7741,17 @@ class Project(dict):
             done = derived(record, 'filter_data')
             return done or make(self.filter_data, record)[0]
 
+        def playings(record, side):
+            # a run against a reference is read a playing to a frame, so
+            # that the two PSDs share their lines: one window over six
+            # playings put the same power on lines six times closer and
+            # read 7.8 dB over the reference at its peak
+            from .core.replication import averaging_for
+
+            target = next(iter(on(side, TransientSpecification)), None)
+            if target is not None and self[record].averaging is None:
+                self[record].averaging = averaging_for(self[record], self[target])
+
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
             # a report from another kind of test does not fill this one's:
@@ -7767,6 +7778,8 @@ class Project(dict):
                         continue
                     record = recorded(side)
                     if record is not None:
+                        if project_type == 'Transient':
+                            playings(record, side)
                         make(self.compute_psds, record)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its

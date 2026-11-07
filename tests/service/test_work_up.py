@@ -346,3 +346,42 @@ def test_every_module_with_set_filter_can_apply_it():
     applied = verbs.modules_of(OPS['project.filter_data'])
     assert set(verbs.modules_of(OPS['project.set_filter'])) <= set(applied)
     assert 'shock' in verbs.modules_of(OPS['project.integrate'])
+
+
+# ---- Work Up Transient: the run on the reference's frames ----------------------
+
+def transient_project():
+    fs = 4096.0
+    t = np.arange(4096) / fs
+    wave = np.exp(-((t - 0.5) / 0.1) ** 2) * (10 * np.sin(2 * np.pi * 50 * t)
+                                              + 5 * np.sin(2 * np.pi * 200 * t))
+    reference = TransientSpecification(t, wave[None], response_dof=['1X+'],
+                                       ordinate_dim=['acceleration'],
+                                       ordinate_unit=['m/s**2'])
+    played = np.tile(wave, 6)
+    project = Project()
+    project.add('Run', history(np.arange(played.size) / fs, played))
+    project.add('Ref', reference)
+    return project
+
+
+@pytest.mark.parametrize('with_geometry', [False, True])
+def test_work_up_transient_reads_the_run_on_the_references_frames(with_geometry):
+    project = transient_project()
+    if with_geometry:
+        project.import_file(str(PLATE / 'geometry.unv'), length_unit='mm')
+    run(project, 'project.work_up_transient')
+    assert project['Run'].averaging.frame_length == 4096
+    assert project['Run'].averaging.frames == 6
+    ref, measured = project['Ref PSDs'], project['Run PSDs']
+    assert np.array_equal(ref.abscissa, measured.abscissa)
+    i = int(np.argmax(np.real(ref.ordinate[0])))
+    assert np.real(measured.ordinate[0][i]) == pytest.approx(np.real(ref.ordinate[0][i]), rel=1e-6)
+
+
+def test_work_up_transient_keeps_an_averaging_already_set():
+    project = transient_project()
+    project['Run'].averaging = project['Run'].suggest_averaging(frame_length=1024)
+    held = project['Run'].averaging
+    run(project, 'project.work_up_transient')
+    assert project['Run'].averaging == held
