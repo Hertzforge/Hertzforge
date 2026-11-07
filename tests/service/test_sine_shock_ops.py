@@ -346,10 +346,38 @@ def _three_shocks():
     return t, x
 
 
+def test_one_nan_stops_detection_with_its_sample_named():
+    t, x = _three_shocks()
+    x[100] = np.nan
+    project = Project()
+    project.add('R', history(t, x))
+    with pytest.raises(ValueError, match=r'1X\+ holds 1 sample .*index 100'):
+        find(project['R'])
+    with pytest.raises(ProtocolError, match='index 100'):
+        run(project, 'project.detect_shocks', source='R')
 
 
+def test_compute_srs_refuses_a_nan_in_a_window_and_adds_nothing():
+    t, x = _three_shocks()
+    x[100] = np.nan
+    project = Project()
+    project.add('R', history(t, x))
+    with pytest.raises(ProtocolError, match='index 100'):
+        run(project, 'project.compute_srs', source='R')
+    assert project.names == ['R']
+    project['R'].shocks = (Shock(0.0, 0.1),)
+    with pytest.raises(ProtocolError, match='index 100'):
+        run(project, 'project.compute_srs', source='R')
 
 
+def test_a_nan_outside_the_shock_windows_does_not_stop_the_spectrum():
+    t, x = _three_shocks()
+    x[100] = np.nan
+    project = Project()
+    project.add('R', history(t, x))
+    project['R'].shocks = (Shock(0.4, 0.5),)
+    run(project, 'project.compute_srs', source='R')
+    assert np.isfinite(project['R SRS'].ordinate).all()
 
 
 # ---- a window past the record ---------------------------------------------------------------
