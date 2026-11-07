@@ -534,6 +534,8 @@ class Project(dict):
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (object_groups or [])]
+        #: what the last Work Up could not compute, (slot, why)
+        self.last_work_up_skipped: list[tuple[str, str]] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -7658,8 +7660,9 @@ class Project(dict):
         the type's report. A slot the loaded data cannot fill (a
         geometry, the photographs, a specification) is left gray. A
         computation the data refuses (no drive channel for a coherence)
-        is skipped, and the rest still run. Nothing already present is
-        made again, so calling this twice adds nothing the second time.
+        is skipped, with its reason in `last_work_up_skipped`, and the
+        rest still run. Nothing already present is made again, so calling
+        this twice adds nothing the second time.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -7698,6 +7701,7 @@ class Project(dict):
             raise ValueError('the project has no type, so there is nothing '
                              'to work up: name the kind of test')
         added: list[str] = []
+        self.last_work_up_skipped = []
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -7844,9 +7848,10 @@ class Project(dict):
                          not in made), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
-            except ValueError:
+            except ValueError as error:
                 # what the data refuses (a coherence with no drive
                 # channel) stays gray; the slots after it still fill
+                self.last_work_up_skipped.append((_label, str(error)))
                 continue
         return added
 
@@ -8160,6 +8165,11 @@ class Project(dict):
         -------
         list of str
             A list holding the name of the sine level set added.
+
+        Raises
+        ------
+        ValueError
+            When none is named and the project does not hold exactly one.
         """
         from dataclasses import replace
 
@@ -8167,8 +8177,14 @@ class Project(dict):
 
         source = self.name_of(source)
         if specification is None:
-            spec = self.sine_sweep_specification
-            spec_name = self.name_of(spec)
+            found = Selection(self).of_type(SineSweepSpecification)
+            if len(found) != 1:
+                raise ValueError(
+                    'no sine sweep specification in the project' if not found else
+                    f'{len(found)} sine sweep specifications in the project, '
+                    f'{" and ".join(repr(name) for name in found)}: name the one to read')
+            spec_name = found[0]
+            spec = self[spec_name]
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]

@@ -129,6 +129,61 @@ def test_a_second_run_stays_out_of_a_basis_that_holds_a_run():
     assert set(basis) <= set(project.placed()['Basis'])
 
 
+# ---- Work Up Sine with no specification, or two --------------------------------
+
+def test_a_sine_work_up_with_no_specification_leaves_its_slots_gray(validate):
+    project = load('random.nc4')
+    (reading,) = run(project, 'project.work_up_sine')
+    wire_views([reading], validate)
+    assert values(reading, 'Added') == ['Report']
+    assert {'Sine Sweep Specification', 'Sine Level Set'} <= set(values(reading, 'Missing'))
+    assert any('no sine sweep specification' in value for value in values(reading, 'Not computed'))
+
+
+def test_a_sine_work_up_with_two_specifications_says_it_cannot_pick():
+    project = load('random.nc4')
+    tone = SineTone('Up', 0.5, [100.0, 500.0], [[2.0]] * 2, [0], [100.0])
+    for name in ('A', 'B'):
+        project.add(name, SineSweepSpecification([tone], ['101Z+'], ordinate_unit='m/s**2'))
+    (reading,) = run(project, 'project.work_up_sine')
+    assert values(reading, 'Added') == ['Report']
+    assert 'Sine Level Set' in values(reading, 'Missing')
+    said = ' '.join(values(reading, 'Not computed'))
+    assert "'A'" in said and "'B'" in said and 'Use .' not in said
+
+
+def test_extract_sine_refuses_in_words_and_can_be_told_which(monkeypatch):
+    project = load('random.nc4')
+    with pytest.raises(ProtocolError, match='applies to none'):
+        run(project, 'project.extract_sine')
+    with pytest.raises(ProtocolError, match='no sine sweep specification'):
+        OPS['project.extract_sine'].run(project, {'source': 'Time History', 'specification': ''})
+    tone = SineTone('Up', 0.5, [100.0, 500.0], [[2.0]] * 2, [0], [100.0])
+    for name in ('A', 'B'):
+        project.add(name, SineSweepSpecification([tone], ['101Z+'], ordinate_unit='m/s**2'))
+    before = list(project)
+    with pytest.raises(ProtocolError, match="2 sine sweep specifications"):
+        run(project, 'project.extract_sine', source='Time History')
+    assert list(project) == before
+    monkeypatch.setattr('hertzforge.service.ops_project.waterfall_view',
+                        lambda name, obj: {'title': name}, raising=False)
+    run(project, 'project.extract_sine', source='Time History', specification='B')
+    assert project.provenance['Sine Levels']['params']['specification'] == 'B'
+
+
+def test_a_failed_slot_says_why_on_any_module(validate):
+    """A record with no references has no coherence to compute: the slot stays
+    gray with its reason, and the slots after it fill."""
+    t = np.arange(4096) / 4096.0
+    noise = np.random.default_rng(1).standard_normal((1, t.size))
+    project = Project()
+    project.add('Time History', history(t, noise))
+    (reading,) = run(project, 'project.work_up_random')
+    wire_views([reading], validate)
+    assert values(reading, 'Added')[-1] == 'Report'
+    assert any('Multiple Coherence' in value for value in values(reading, 'Not computed'))
+
+
 # ---- Work Up Shock: where the events are found, and how far the SRS runs -------
 
 def test_work_up_shock_finds_the_events_on_the_recording():

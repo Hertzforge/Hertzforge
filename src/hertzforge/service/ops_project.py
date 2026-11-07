@@ -173,12 +173,17 @@ def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
         v.row('Shocks marked', float(count), '', 'info')])]
 
 
+SINE_SPECIFICATION = Param('specification', 'Specification', 'enum', default='',
+                           options_from='objects:sine_sweep_specification')
+
+
 def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.extract_sine`: the levels of each tone of the project's
-    sine specification found in a time history (`Project.extract_sine`),
-    one sine-level set added per tone."""
+    """`project.extract_sine`: the levels of each tone of a sine
+    specification found in a time history (`Project.extract_sine`), one
+    sine-level set added per tone. The project's one specification when
+    none is picked."""
     try:
-        added = project.extract_sine(params['source'])
+        added = project.extract_sine(params['source'], params['specification'] or None)
     except ValueError as error:
         raise refused(str(error)) from None
     views = []
@@ -532,7 +537,7 @@ VERB_OPERATIONS = (
         id='project.extract_sine', title='Extract Sine', workspace='sine',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
-        params=(_source('extract_sine'),), outputs=('waterfall',),
+        params=(_source('extract_sine'), SINE_SPECIFICATION), outputs=('waterfall',),
         run=extract_sine),
 )
 
