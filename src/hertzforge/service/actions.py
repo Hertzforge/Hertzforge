@@ -24,7 +24,8 @@ from .descriptors import Operation, Param
 #: journaled verb
 ADDS = frozenset((
     'project.add_matches', 'project.compute_psds', 'project.compute_frfs', 'project.fit_modes',
-    'project.create_specification', 'project.edit_specification', 'project.set_breakpoint',
+    'project.create_specification', 'project.edit_specification', 'project.add_breakpoint',
+    'project.remove_breakpoint', 'project.scale_specification', 'project.set_breakpoint',
     'project.new_channel_table', 'project.new_geometry', 'project.add_channels',
     'project.add_node', 'project.add_coordinate_system', 'project.add_element',
     'project.add_element_group', 'project.delete_entities', 'project.set_entity',
