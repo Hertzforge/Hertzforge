@@ -464,6 +464,18 @@ def test_an_edge_of_zero_means_one_thing_in_pulse_check_and_generate(shape):
 
 
 
+def test_a_synthesis_refusal_speaks_in_the_units_of_the_rows():
+    spec = ShockSpecification.from_breakpoints([50.0, 400.0, 2000.0], [20.0, 100.0, 100.0], '1Z+',
+                                               ordinate_unit='g', per_octave=6,
+                                               warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+    project = Project()
+    project.add('Req', spec)
+    with pytest.raises(ProtocolError, match=r'against 100 N') as refusal:
+        run(project, 'project.srs_synthesis', requirement='Req', force=100.0, moving_mass=45.0)
+    assert 'lbf' not in str(refusal.value)
+    with pytest.raises(ProtocolError, match=r'against 0\.01 m/s') as refusal:
+        run(project, 'project.srs_synthesis', requirement='Req', velocity=0.01)
+    assert 'in/s' not in str(refusal.value)
 
 
 # ---- counts and stale reasons ----------------------------------------------------------------

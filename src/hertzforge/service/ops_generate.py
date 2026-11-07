@@ -316,7 +316,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
     made = _core(lambda: synthesize(spec, sample_rate=rate,
                                     rating=SignalSettings(**settings).rating(),
                                     half_cycles=params['half_cycles'],
-                                    dofs=settings['dofs']))
+                                    dofs=settings['dofs'], unit_system=hz.SI))
     if params['record'] > len(made.channels):
         raise refused(f'the synthesis has {len(made.channels)} channels; there is no channel '
                       f'{params["record"]}')

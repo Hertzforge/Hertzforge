@@ -368,7 +368,7 @@ def _band(contribution: np.ndarray, points: np.ndarray, limit: float,
 
 
 def _refusal(dof: str, closest: dict[str, Any], tried: Sequence[int],
-             rate: float) -> str:
+             rate: float, unit_system: Any = None) -> str:
     """Why no attempt fits: the limit the closest one runs out of, what
     the reading says of it, and the band whose wavelets take it there.
 
@@ -404,13 +404,13 @@ def _refusal(dof: str, closest: dict[str, Any], tried: Sequence[int],
     if limit == 'force':
         allowed = rating.force / rating.moving_mass
         band = _band(contribution, points, allowed, upward=False)
-        words = next(line for line in reading.describe()
+        words = next(line for line in reading.describe(unit_system)
                      if line.startswith('Force'))
     else:
         allowed = rating.room if limit == 'stroke' else rating.velocity
         band = _band(rating.relative(contribution), points, allowed,
                      upward=True)
-        lines = reading.describe()
+        lines = reading.describe(unit_system)
         words = (lines[0] if limit == 'stroke' else
                  next(line for line in lines
                       if line.startswith('Peak velocity')))
@@ -423,8 +423,8 @@ def _refusal(dof: str, closest: dict[str, Any], tried: Sequence[int],
 
 
 def _channel(specification: Any, record: int, rate: float,
-             rating: ShakerRating, half_cycles: int, ticker: Any
-             ) -> tuple[np.ndarray, dict[str, Any]]:
+             rating: ShakerRating, half_cycles: int, ticker: Any,
+             unit_system: Any = None) -> tuple[np.ndarray, dict[str, Any]]:
     """One channel synthesized: the record and how it was reached, or a
     refusal."""
     from .data import TimeHistory
@@ -497,7 +497,7 @@ def _channel(specification: Any, record: int, rate: float,
     if attempts:
         closest = min(attempts, key=lambda a: max(
             v for v in a['reading'].shares().values() if v is not None))
-        raise ValueError(_refusal(dof, closest, counts, rate))
+        raise ValueError(_refusal(dof, closest, counts, rate, unit_system))
     raise ValueError(
         f'{dof}: no synthesis of {_counted(counts)} meets the requirement '
         f'in {MAX_PASSES} passes; the closest ({unmet["half_cycles"]} half '
@@ -516,8 +516,8 @@ def synthesize(specification: ShockSpecification, *, sample_rate: float,
                rating: ShakerRating | None = None,
                half_cycles: int = HALF_CYCLES,
                dofs: Sequence[str] | None = None,
-               progress: Callable[[int, int], None] | None = None
-               ) -> ShockSynthesis:
+               progress: Callable[[int, int], None] | None = None,
+               unit_system: Any = None) -> ShockSynthesis:
     """A shock a shaker can play, whose spectrum meets `specification`.
 
         made = synthesize(spec, sample_rate=20480.0,
@@ -554,6 +554,9 @@ def synthesize(specification: ShockSpecification, *, sample_rate: float,
     progress : callable, optional
         Called with ``(done, total)`` a pass at a time, the total raised
         as each attempt begins; the app's progress bar uses it.
+    unit_system : UnitSystem, optional
+        What a refusal's numbers are in; `units.DEFAULT_SYSTEM` when
+        omitted.
 
     Returns
     -------
@@ -624,7 +627,8 @@ def synthesize(specification: ShockSpecification, *, sample_rate: float,
                              f'{dimension}')
         record = held[0]
         records.append(record)
-        row, a = _channel(specification, record, rate, rating, first, ticker)
+        row, a = _channel(specification, record, rate, rating, first, ticker,
+                          unit_system)
         rows.append(row)
         channels.append(SynthesizedChannel(
             dof=dof, points=a['points'], target=a['target'],
