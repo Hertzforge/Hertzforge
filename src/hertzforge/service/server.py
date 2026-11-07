@@ -308,7 +308,8 @@ class Connection:
             return await call(projects.actions, self.project, params)
         if method == 'project.show':
             _only(params, ('objects', 'records', 'part', 'prefs'), method)
-            shown = await call(projects.show, self.project, params)
+            shown = await call(display_units.running_in, self.units, projects.show, self.project,
+                               params)
             display_units.convert(shown['views'], self.units)
             return shown
         if method == 'project.define_units':
@@ -348,9 +349,11 @@ class Connection:
             if params.get('preview') and op.previews:
                 scratch = _preview_copy(project, values['geometry'])
                 return {'views': _said_as_preview(
-                    await self.service.in_worker(op.run, scratch, values), self.units)}
+                    await self.service.in_worker(display_units.running_in, self.units, op.run,
+                                                 scratch, values), self.units)}
             before = list(project)
-            views = await self.service.in_worker(op.run, project, values)
+            views = await self.service.in_worker(display_units.running_in, self.units, op.run,
+                                                 project, values)
             if op.edits or list(project) != before:
                 state.modified = True
             display_units.convert(views, self.units)

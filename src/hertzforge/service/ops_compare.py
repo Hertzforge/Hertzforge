@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 
+from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .protocol import refused
@@ -106,7 +107,7 @@ def _compared(project: Any, params: dict[str, Any]) -> tuple[Any, Any, list, int
     spec_name, name = params['specification'], params['spectrum']
     spec, psd = project[spec_name], project[name]
     scale, source = _scale(project, spec_name, name)
-    rows = compare_all(spec, psd, scale_db=scale)
+    rows = _refusing(compare_all, spec, psd, scale_db=scale)
     if not rows:
         raise refused(f'{name} and {spec_name} have no channel in common to compare')
     return spec, psd, rows, scale, source
@@ -492,18 +493,20 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
     rows, top = [], None
     for i in wanted:
         level = float(specification_rms(spec, i))
-        unit = unit_text(quantity_of(str(spec.ordinate_dim[i])))
+        quantity = quantity_of(str(spec.ordinate_dim[i]))
+        unit = unit_text(quantity)
         label = pair_label((str(spec.response_dof[i]),
                             str(spec.response_dof[i] if references is None else references[i])))
         if np.isfinite(level):
             rows.append(v.row(label, sig(level), unit, 'info'))
             if top is None or level > top[0]:
-                top = (level, label, unit)
+                top = (level, label, quantity if unit else None)
         else:
             rows.append(v.row(label, 'not read', None, 'warn'))
     count = f'{len(wanted)} channel{"s" * (len(wanted) != 1)}'
     if top is not None:
-        count += f' — {top[1]} highest at {top[0]:.4g} {top[2] or ""}'.rstrip()
+        said, scale = display_units.words_in(top[2]) if top[2] else ('', 1.0)
+        count += f' — {top[1]} highest at {top[0] * scale:.4g} {said}'.rstrip()
     rows.append(v.row('Channels', count, None, 'info'))
     return [v.reading(f'RMS levels of {name}', rows)]
 

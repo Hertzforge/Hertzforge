@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import COMPONENT
@@ -95,13 +96,11 @@ def _notes(notes: Any, status: str = 'info') -> list[dict]:
     return [v.row('Note', note[0].upper() + note[1:], None, status) for note in notes if note]
 
 
-def _amplitude_unit(dimension: str) -> str | None:
+def _amplitude_quantity(dimension: str) -> str | None:
     from hertzforge.core.data import channel_quantities
     from hertzforge.units import UNKNOWN
 
-    if dimension == UNKNOWN:
-        return None
-    return unit_text(channel_quantities(dimension)[0])
+    return None if dimension == UNKNOWN else channel_quantities(dimension)[0]
 
 
 def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -141,7 +140,9 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
     except ValueError as error:
         raise refused(str(error)) from None
     channel = str(psd.response_dof[record])
-    unit = _amplitude_unit(str(psd.ordinate_dim[record]))
+    quantity = _amplitude_quantity(str(psd.ordinate_dim[record]))
+    unit = None if quantity is None else unit_text(quantity)
+    said = display_units.words_in(quantity) if unit else ('', 1.0)
     density = unit_text(str(psd.ordinate_dim[record]))
     window_name = reading.window if chosen == 'averaged' else chosen
     rows = [v.row('Window from', f'{source} ({window_name})', None, 'info'),
@@ -157,7 +158,7 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Bandwidth', float(reading.noise_bandwidth), 'lines', 'info'),
             v.row('Off its line', abs(float(reading.offset)), 'of a line',
                   'warn' if reading.between_lines else 'info')]
-    rows += _notes(reading.notes_in(unit or '', 1.0), 'warn')
+    rows += _notes(reading.notes_in(*said), 'warn')
     lines = [_shaped(psd.record_label(record), 'measured', psd, record)]
     floor = max(float(reading.floor), 0.0)
     top = floor + float(reading.height)
@@ -166,7 +167,7 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
         lines += [v.series('Tone, spike above the floor', 'other',
                            [reading.frequency] * 2, [floor, top]),
                   v.series('Floor taken away', 'reference', [low, high], [floor, floor])]
-    title = f'Tone readout of {name}, {channel}: ' + reading.describe(unit or '')
+    title = f'Tone readout of {name}, {channel}: ' + reading.describe(*said)
     view = v.spectrum(title, FREQUENCY, v.axis('PSD', density, 'log'), lines,
                       link='frequency')
     return [view, v.reading(f'Tone Readout, {channel}', rows)]
@@ -241,8 +242,9 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
                       lower_edge, positive=True),
               _finite(f'H1 + 1 random error, {reading.averages:.4g} averages', 'tolerance', f,
                       upper_edge, positive=True)]
+    said = display_units.words_in(reading.dimension) if unit else ('', 1.0)
     title = (f'{reading.title}, {reading.response} over {reading.reference}: '
-             + point.describe(unit or ''))
+             + point.describe(*said))
     view = v.spectrum(title, FREQUENCY, v.axis('FRF magnitude', unit, 'log'), lines,
                       link='frequency')
     return [view, v.reading(f'{reading.title} of {name}', rows)]

@@ -387,3 +387,185 @@ def test_compute_spectra_says_it_is_raw_and_claims_no_averaging():
     project['Run'].averaging = Averaging(frame_length=512, overlap=0.5, window='hann').filled(
         n, rate)
     assert name not in project.stale(), 'no change of averaging changes it'
+
+
+def test_the_amplitude_axis_is_the_chosen_channels_quantity_and_unit():
+    project = _force_and_response()
+    views = run(project, 'project.amplitude_spectrum', history='Run', record=2)
+    assert views[0]['y']['unit'] == 'm/s²'
+    assert [line['name'] for line in views[0]['series']] == ['2Z+']
+    assert '1 of another quantity left out' in views[0]['title']
+    peak_si = float(np.max(views[0]['series'][0]['y']))
+    tallest_si = rows(views)['Tallest line']['value']
+    display_units.convert(views, display_units.START)
+    assert views[0]['y']['unit'] == 'g'
+    assert float(np.max(views[0]['series'][0]['y'])) == pytest.approx(peak_si / G)
+    assert rows(views)['Tallest line']['value'] == pytest.approx(tallest_si / G)
+
+
+def _sheet_specification():
+    return Specification(np.array([20.0, 100.0, 1000.0]), np.array([[1.0, 1.0, 1.0]]),
+                         response_dof=['1Z+'], ordinate_dim=[DENSITY])
+
+
+def test_the_areas_table_converts_with_the_sheet():
+    project = hertzforge.Project()
+    project.add('Spec', _sheet_specification())
+    (table,) = run(project, 'project.specification_areas', specification='Spec')
+    assert table['columns'][2] == 'Area [(m/s²)²]'
+    assert table['columns'][4] == 'Running rms [m/s²]'
+    assert float(table['rows'][-1][4]) == pytest.approx(np.sqrt(980.0), rel=1e-3)
+    display_units.convert([table], display_units.START)
+    assert table['columns'][2] == 'Area [g²]'
+    assert table['columns'][4] == 'Running rms [g]'
+    assert float(table['rows'][-1][4]) == pytest.approx(np.sqrt(980.0) / G, rel=1e-3)
+    assert float(table['rows'][0][2]) == pytest.approx(80.0 / G ** 2, rel=1e-3)
+
+
+def shown(project, op_id, **given):
+    """The views as the server sends them in the application's default
+    system: words written in it while the operation runs, numbers after."""
+    views = display_units.running_in(display_units.START, OPS[op_id].run, project,
+                                     _values(project, op_id, given))
+    return display_units.convert(views, display_units.START)
+
+
+def test_a_tones_words_are_in_the_display_system():
+    rate, n = 1024.0, 32768
+    t = np.arange(n) / rate
+    noise = 0.01 * np.random.default_rng(1).standard_normal(n)
+    record = TimeHistory(t, [2.0 * np.sin(2.0 * np.pi * 101.0 * t) + noise],
+                         response_dof=['1Z+'], ordinate_dim='acceleration')
+    record.averaging = Averaging(frame_length=1024, frames=31)
+    project = hertzforge.Project()
+    project.add('Run', record)
+    name = project.compute_psds('Run')
+    views = shown(project, 'project.tone_readout', spectrum=name)
+    found = rows(views)
+    assert found['Tone']['unit'] == 'g'
+    assert f"{found['Tone']['value']:.3g} g peak" in views[0]['title']
+    assert 'm/s²' not in views[0]['title'] and 'g²/Hz' in views[0]['title']
+    si = run(project, 'project.tone_readout', spectrum=name)
+    assert 'm/s² peak' in si[0]['title'], 'with no display system, the words stay in SI'
+
+
+def test_the_transmissibility_title_is_in_the_display_system():
+    project = _force_and_response()
+    frf = project.compute_frfs('Run', 'H1')
+    views = shown(project, 'project.transmissibility', frf=frf, frequency=200.0)
+    found = rows(views)
+    assert f"H1 {found['H1']['value']:.4g} g/lbf" in views[0]['title']
+    assert '(m/s²)/N' not in views[0]['title']
+
+
+def test_spec_rms_says_its_highest_in_the_display_system():
+    project = hertzforge.Project()
+    project.add('Spec', _sheet_specification())
+    (reading,) = shown(project, 'project.spec_rms', specification='Spec')
+    first, last = reading['rows'][0], reading['rows'][-1]
+    assert first['unit'] == 'g'
+    assert last['value'].endswith(f"highest at {first['value']:.4g} g")
+
+
+def _plant_and_target():
+    f = np.arange(0.0, 1025.0)
+    project = hertzforge.Project()
+    project.add('Plant', hertzforge.Frf(f, np.full((1, 1025), 2.0 + 0.0j), response_dof=['1Z+'],
+                                        reference_dof=['9Z+'],
+                                        ordinate_dim=['acceleration/force']))
+    project.add('Spec', Specification(np.array([20.0, 1000.0]), np.array([[1.0, 1.0]]),
+                                      response_dof=['1Z+'], ordinate_dim=[DENSITY]))
+    return project
+
+
+def test_drive_prediction_says_its_demands_in_the_display_system():
+    project = _plant_and_target()
+    views = shown(project, 'project.drive_prediction', specification='Spec', frf='Plant')
+    words = ' '.join(str(row['value']) for view in views if view.get('view') == 'reading'
+                     for row in view['rows'])
+    assert ' lbf' in words, words
+    assert ' N' not in words, words
+
+
+def test_a_connection_writes_its_words_in_the_system_it_chose():
+    import asyncio
+    from pathlib import Path
+
+    from .test_projects import _exchange
+
+    plate = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
+    tone = ('op.run', {'op': 'project.tone_readout', 'params': {
+        'spectrum': 'Time History PSDs'}})
+    responses = asyncio.run(_exchange([
+        ('project.import', {'path': str(plate / 'random.nc4')}),
+        ('op.run', {'op': 'project.compute_psds', 'params': {}}),
+        tone,
+        ('units.system', {'name': display_units.DEFAULT}),
+        tone,
+    ]))
+    title = [got[-1]['result']['views'][0]['title'] for got in (responses[2], responses[4])]
+    assert ' g peak' in title[0] and 'm/s²' not in title[0]
+    assert 'm/s² peak' in title[1]
+
+
+def test_an_uneven_or_one_sample_history_is_refused_by_the_settings_and_readings():
+    a = np.random.default_rng(3).standard_normal((1, 64))
+    even = np.arange(64) / 64.0
+    project = hertzforge.Project()
+    project.add('Uneven', TimeHistory(np.cumsum(np.random.default_rng(1).random(64)), a,
+                                      response_dof=['1Z+'], ordinate_dim=['acceleration']))
+    project.add('One', TimeHistory(even[:1], a[:, :1], response_dof=['1Z+'],
+                                   ordinate_dim=['acceleration']))
+    for source in ('Uneven', 'One'):
+        with pytest.raises(ProtocolError, match='sample'):
+            run(project, 'project.set_averaging', source=source)
+        with pytest.raises(ProtocolError, match='sample'):
+            run(project, 'project.set_filter', source=source, high=100.0)
+        with pytest.raises(ProtocolError, match='sample'):
+            run(project, 'project.resample_reading', history=source)
+
+
+def test_time_statistics_of_two_samples_says_what_it_could_not_read():
+    t = np.arange(2) / 1024.0
+    project = hertzforge.Project()
+    project.add('Two', TimeHistory(t, [[1.0, -1.0]], response_dof=['1Z+'],
+                                   ordinate_dim=['acceleration']))
+    found = rows(run(project, 'project.time_statistics', history='Two'))
+    assert found['Expected largest peak, in sigmas']['value'] == 'not read'
+    assert found['Expected largest peak, in sigmas']['status'] == 'warn'
+    assert isinstance(found['RMS']['value'], float)
+
+
+def _one_line_psd():
+    return Psd(np.zeros(1), np.ones((1, 1)), response_dof=['1Z+'], ordinate_dim=[DENSITY])
+
+
+@pytest.mark.parametrize('op_id', ['project.spec_spectra', 'project.spec_rms_error',
+                                   'project.spec_lines_out', 'project.spec_chance',
+                                   'project.comparison_scale'])
+def test_a_one_line_psd_is_not_a_failure_inside_the_comparison(op_id):
+    project = hertzforge.Project()
+    project.add('Spec', _flat_target())
+    project.add('Run', _one_line_psd())
+    try:
+        run(project, op_id, specification='Spec', spectrum='Run')
+    except ProtocolError:
+        pass
+
+
+def test_a_scale_cannot_be_read_from_a_spectrum_that_cannot_be_banded():
+    from hertzforge.core import compliance
+
+    assert compliance.read_scale_db(_flat_target(), _one_line_psd()) is None
+
+
+@pytest.mark.parametrize('levels', [([20.0], [[1e-3]]), ([20.0, 500.0], [[0.0, 0.0]])],
+                         ids=['one point', 'all zero'])
+def test_a_matrix_comparison_against_nothing_written_is_refused(levels):
+    at, level = levels
+    project = _force_and_acceleration_at_one_dof()
+    project.add('Spec', Specification(np.array(at), np.array(level), response_dof=['4Z+'],
+                                      ordinate_dim=[DENSITY]))
+    cpsd = project.compute_cpsds('Run')
+    with pytest.raises(ProtocolError):
+        run(project, 'project.matrix_comparison', specification='Spec', cpsd=cpsd)

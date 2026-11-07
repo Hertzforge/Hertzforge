@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from . import run_logs
+from . import display_units, run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_sine_shock import STROKE_RATINGS, _flat, _trace
@@ -734,7 +734,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     rated = [d for d in drives if d.share is not None]
     lead = (max(rated, key=lambda d: d.share) if rated
             else max(drives, key=lambda d: d.peak) if drives else None)
-    top = v.spectrum(_sentence(lead.describe(_si())) if lead else 'Drives', FREQUENCY,
+    top = v.spectrum(_sentence(lead.describe(display_units.words_system())) if lead else 'Drives', FREQUENCY,
                      v.axis('Drive PSD', drive_unit, 'log'),
                      [_positive(f'drive at {label}', 'drive', f, prediction.drive_asd(j))
                       for j, label in enumerate(prediction.drives)], link='frequency')
@@ -762,25 +762,19 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         limited = [d for d in prediction.demands
                    if d.kind == 'response' and d.channel == label]
         if limited:
-            words = limited[0].describe(_si())
+            words = limited[0].describe(display_units.words_system())
     middle = v.spectrum(_sentence(words), FREQUENCY,
                         v.axis('PSD', unit_text(f'{quantity}**2/frequency'), 'log'), lines,
                         link='frequency', regions=regions)
-    lines_said = prediction.describe(_si())
+    lines_said = prediction.describe(display_units.words_system())
     rows = [v.row('Verdict', _sentence(lines_said[0]), None,
                   {True: 'pass', False: 'fail', None: 'info'}[prediction.fits])]
     for demand in prediction.demands:
         status = 'info' if demand.share is None else 'fail' if demand.exceeds else 'pass'
-        words = demand.describe(_si()).removeprefix(f'{demand.name}: ')
+        words = demand.describe(display_units.words_system()).removeprefix(f'{demand.name}: ')
         rows.append(v.row(_sentence(demand.name), words, None, status))
     rows += _notes(lines_said[1 + len(prediction.demands):])
     return [top, middle, v.reading(f'Drive prediction: {spec_name} through {frf_name}', rows)]
-
-
-def _si() -> Any:
-    import hertzforge as hz
-
-    return hz.SI
 
 
 # ---- Notch Prediction ---------------------------------------------------------------
@@ -831,24 +825,24 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         if channel.profile is not None:
             curves.append(_positive(f'{channel.label} limit profile', 'limit', f,
                                     channel.profile))
-        views.append(v.spectrum(_sentence(channel.describe(f, _si())), FREQUENCY,
+        views.append(v.spectrum(_sentence(channel.describe(f, display_units.words_system())), FREQUENCY,
                                 v.axis('PSD', channel_unit, 'log'), curves, link='frequency'))
-    table = prediction.table(_si())
+    table = prediction.table(display_units.words_system())
     if table:
         views.append(v.table(f'Notches in {prediction.control_label}',
                              ('Band [Hz]', 'Depth [dB]', 'Control left', 'Channels',
                               'Tolerance'),
                              [(r['band'], r['depth'], r['level'], r['channels'],
                                r['tolerance']) for r in table]))
-    said = prediction.describe(_si())
+    said = prediction.describe(display_units.words_system())
     verdict = prediction.within_tolerance
     rows = [v.row('Verdict', _sentence(said[0]), None,
                   {True: 'pass', False: 'fail', None: 'info'}[verdict])]
     for notch in prediction.notches:
         rows.append(v.row(f'Notch at {notch.frequency:.4g} Hz', _sentence(notch.describe(
-            prediction.dimension, prediction.tolerance, _si())), None,
+            prediction.dimension, prediction.tolerance, display_units.words_system())), None,
             'fail' if notch.outside else 'warn' if notch.outside is None else 'pass'))
-    rows += [v.row(c.label, _sentence(c.describe(f, _si())), None, 'info')
+    rows += [v.row(c.label, _sentence(c.describe(f, display_units.words_system())), None, 'info')
              for c in prediction.channels]
     rows += _notes(said[1 + len(prediction.notches) + len(prediction.channels):])
     return [*views, v.reading(f'Notch prediction: {spec_name} through {frf_name}', rows)]

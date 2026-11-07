@@ -993,8 +993,12 @@ def read_scale_db(specification: Specification, measured: DataArray,
         if not (hasattr(specification, 'to_octave')
                 and hasattr(measured, 'to_octave')):
             return None
-        specification = specification.to_octave(PER_OCTAVE)
-        measured = measured.to_octave(PER_OCTAVE)
+        try:
+            specification = specification.to_octave(PER_OCTAVE)
+            measured = measured.to_octave(PER_OCTAVE)
+        except ValueError:
+            # nothing to band, such as a one-line spectrum: no level to read
+            return None
     wanted = None if controls is None else {str(c) for c in controls}
     offsets, asked_total, held_total = [], 0.0, 0.0
     for label, spec_index, measured_index in matched_records(

@@ -10,6 +10,10 @@ out of SI by the system's own transform (`UnitSystem.transform`: SI =
 value * scale + offset) and labeled by it. Text the map does not hold, and
 anything without a unit, is left as it is.
 
+A sentence holds its numbers where nothing can find them again, so the
+operation writes it in the system to begin with: the server runs it under
+`running_in`, and it asks `words_system` or `words_in`.
+
 Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
 and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
 `table`'s columns headed "<name> [<SI unit>]", each number in them, except
@@ -25,6 +29,8 @@ its file's own numbers. A `matrix` carries its own words.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from contextvars import ContextVar
 from functools import cache
 from typing import Any
 
@@ -32,6 +38,9 @@ import numpy as np
 
 #: the system every view is computed in: nothing to convert
 DEFAULT = 'm-kg-N-s'
+
+#: the system the operation running now writes its sentences in
+_WORDS: ContextVar[str] = ContextVar('display_units_words', default=DEFAULT)
 
 
 def _start() -> str:
@@ -92,6 +101,30 @@ def _system(name: str) -> Any:
     from hertzforge.units import SYSTEMS
 
     return SYSTEMS[name]
+
+
+def running_in(name: str, call: Callable[..., Any], *args: Any) -> Any:
+    """`call(*args)` with its sentences in the system `name`. Called on the
+    thread `call` runs on, so nothing depends on a context being carried
+    across to a worker."""
+    token = _WORDS.set(name)
+    try:
+        return call(*args)
+    finally:
+        _WORDS.reset(token)
+
+
+def words_system() -> Any:
+    """The `UnitSystem` an operation's sentences are written in; SI, as its
+    numbers are, outside `running_in`."""
+    return _system(_WORDS.get())
+
+
+def words_in(dimension: str) -> tuple[str, float]:
+    """(label, scale) for writing a value in SI of `dimension` in a
+    sentence: the system's label, and what takes the value into it."""
+    system = words_system()
+    return _label(system, dimension) or '', 1.0 / float(system.transform(dimension)[0])
 
 
 def _change(unit: str | None, system: Any) -> tuple[float, float, str] | None:

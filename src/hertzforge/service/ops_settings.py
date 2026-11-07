@@ -112,7 +112,10 @@ def _text(held: Any) -> str:
 
 
 def _rate(history: Any) -> float:
-    return float(history.sample_rate)
+    try:
+        return float(history.sample_rate)
+    except ValueError as error:
+        raise refused(str(error)) from None
 
 
 def _shown(history: Any, name: str, params: dict[str, Any]) -> int:

@@ -595,8 +595,10 @@ def _areas_table(name: str, draft: Any, drawn: int) -> dict:
              f'{reading.slopes[k]:.3g}', f'{reading.areas[k]:.4g}',
              f'{100.0 * reading.areas[k] / whole:.1f}', f'{reading.running[k]:.4g}']
             for k in range(len(reading.areas))]
+    quantity = draft.dims[drawn - 1]
     return v.table(f'{name}, {draft.channels[drawn - 1]}: areas and running rms',
-                   ['Hz', 'dB/octave', 'Area', 'Share (%)', 'Running rms'], rows)
+                   ['Hz', 'dB/octave', f'Area [{unit_text(f"{quantity}**2")}]', 'Share (%)',
+                    f'Running rms [{unit_text(quantity)}]'], rows)
 
 
 def specification_areas(project: Any, params: dict[str, Any]) -> list[dict]:

@@ -161,6 +161,9 @@ def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
         upper = (widths + np.sqrt(widths * widths
                                   + 4.0 * centers * centers)) / 2.0
         return upper - widths, upper
+    if centers.size < 2:
+        raise ValueError('a spectrum of fewer than two lines has no line '
+                         'spacing, so its lines have no bins')
     spacing = np.gradient(centers)
     return centers - spacing / 2.0, centers + spacing / 2.0
 
