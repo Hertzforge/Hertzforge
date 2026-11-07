@@ -113,18 +113,23 @@ def _compared(project: Any, params: dict[str, Any]) -> tuple[Any, Any, list, int
 
 
 def _count_row(values: list[float], beyond: Any, where: str, notes: int,
-               note: str | None) -> dict:
+               note: str | None, counted: str = 'channels') -> dict:
     """The bar chart's count as Visual Dynamics writes it: how many
-    channels are out, of how many scored, and the share."""
+    channels (or whatever is `counted`) are out, of how many scored, and
+    the share. With none scored there is no verdict to give."""
     scored = [value for value in values if np.isfinite(value)]
     out = sum(1 for value in scored if beyond(value))
-    share = 100.0 * out / len(scored) if scored else 0.0
-    text = f'{out} of {len(values) - notes} channels {where} — {share:.0f}%'
+    if scored:
+        text = f'{out} of {len(values) - notes} {counted} {where} — '
+        text += f'{100.0 * out / len(scored):.0f}%'
+    else:
+        text = f'no {counted} scored'
     if notes:
         text += f'; {notes} not scored'
     if note:
         text += f'; {note}'
-    return v.row('Channels out', text, None, 'fail' if out else 'pass')
+    status = 'warn' if not scored else 'fail' if out else 'pass'
+    return v.row(f'{counted.capitalize()} out', text, None, status)
 
 
 def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -850,7 +855,8 @@ def srs_error(project: Any, params: dict[str, Any]) -> list[dict]:
         rows.append(v.row(label, _db(row.db), 'dB',
                           'pass' if low <= row.db <= high else 'fail'))
     rows.append(_count_row(values, lambda db: db > high or db < low,
-                           f'outside {low:g} to {high:g} dB', notes, comparison_note(found)))
+                           f'outside {low:g} to {high:g} dB', notes, comparison_note(found),
+                           'readings' if len(events) > 1 else 'channels'))
     return [v.reading(f'SRS error of {name} against {spec_name}', rows)]
 
 
@@ -1052,7 +1058,7 @@ def waveform_error(project: Any, params: dict[str, Any]) -> list[dict]:
         values.append(value)
         notes += bool(row.get('refused') or row.get('zero_target'))
     rows.append(_count_row(values, lambda value: value >= ceiling, f'over {ceiling:g}%', notes,
-                           comparison_note(found)))
+                           comparison_note(found), 'readings' if many else 'channels'))
     lag = rep.lag_of(run, reference)
     rows.append(v.row('Aligned', float(lag), 'samples', 'info'))
     return [v.reading(f'Waveform error of {run_name} against {ref_name}', rows)]

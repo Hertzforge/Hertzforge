@@ -504,10 +504,34 @@ def _srs_against_requirement(q=25.0):
     return project, project.compute_srs('H', q=q)
 
 
+def test_a_count_with_no_channel_scored_is_no_pass():
+    project, made = _srs_against_requirement()
+    found = rows_of(reading(run(project, 'project.srs_error', srs=made, requirement='Req')))
+    assert found['Channels out']['status'] == 'warn'
+    assert found['Channels out']['value'].startswith('no channels scored; 1 not scored')
 
 
+def test_a_scored_count_still_judges():
+    project, made = _srs_against_requirement(q=10.0)
+    found = rows_of(reading(run(project, 'project.srs_error', srs=made, requirement='Req')))
+    assert found['Channels out']['status'] in ('pass', 'fail')
+    assert ' of 1 channels ' in found['Channels out']['value']
 
 
+def test_waveform_error_counts_readings_when_there_are_many_events():
+    fs, n, playings = 4096.0, 4096, 6
+    t = np.arange(n) / fs
+    y = np.exp(-(((t - 0.5) / 0.1) ** 2)) * (10.0 * np.sin(2 * np.pi * 50.0 * t)
+                                             + 5.0 * np.sin(2 * np.pi * 200.0 * t))
+    project = Project()
+    project.add('Run', history(np.arange(n * playings) / fs, np.tile(y, playings)))
+    project.add('Ref', TransientSpecification(t, y[None], response_dof=['1X+'],
+                                              ordinate_dim=['acceleration'],
+                                              ordinate_unit=['m/s**2']))
+    found = rows_of(reading(run(project, 'project.waveform_error', history='Run',
+                                reference='Ref')))
+    assert 'Channels out' not in found
+    assert found['Readings out']['value'].startswith('0 of 6 readings ')
 
 
 
