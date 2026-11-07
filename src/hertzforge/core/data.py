@@ -5319,10 +5319,6 @@ class TransientSpecification(TimeHistory):
         return ShockSpecification
 
 
-# Both kinds of coherence, for the places that care that a thing is a bounded
-# ratio rather than which kind it is
-COHERENCE_TYPES = (Coherence, MultipleCoherence)
-
 DATA_CLASSES = {cls.function_type: cls
                 for cls in (TimeHistory, Spectrum, Frf, Psd, Srs,
                             Coherence, MultipleCoherence)}

@@ -39,8 +39,7 @@ Ids = Sequence[int] | NDArray[np.integer]
 #: interchange vocabulary — UFF writes `101RX+`, and so does everything
 #: that reads a UFF — so a class would have to be unwrapped at every
 #: boundary. The rules live here instead, once, and the objects call
-#: them: `Dof` says what a string means, `dofs()` says what is allowed.
-Dof = str
+#: them: `dofs()` says what is allowed.
 
 
 def ids(values: ArrayLike, label: str, unique: bool = False) -> IdArray:

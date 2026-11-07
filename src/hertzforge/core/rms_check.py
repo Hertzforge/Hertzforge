@@ -170,15 +170,6 @@ class RmsCheck:
         return _gap(self.spectrum_rms, self.framed_rms)
 
     @property
-    def window_gap_db(self) -> float | None:
-        """The frames' rms over the record's, in dB: how much of the gap
-        the window's weighting of the samples accounts for. None when
-        the frames are not known."""
-        if self.framed_rms is None:
-            return None
-        return _gap(self.framed_rms, self.time_rms)
-
-    @property
     def passed(self) -> bool:
         """Whether the gap is within the threshold. False when there is
         no gap to judge (a record of zeros, a spectrum with no lines)."""

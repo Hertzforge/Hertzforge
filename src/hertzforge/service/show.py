@@ -383,11 +383,6 @@ def _alone(project: Any, name: str, picks: list[int],
     return [], [f'{name} ({_kind(obj).replace("_", " ")}) has no view of its own here yet']
 
 
-#: the sine readings a specification with its levels offers: the curves, or
-#: one signed number per tone per channel
-SINE_READINGS = ('curves', 'bars')
-
-
 def _sine(project: Any, spec_name: str | None, levels_name: str | None,
           records: dict[str, list[int]], prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """A sine specification, extracted levels, or both together, as VD's

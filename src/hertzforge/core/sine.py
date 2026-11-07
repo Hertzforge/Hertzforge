@@ -1073,11 +1073,6 @@ class SineExtraction:
         """Whether the smoothing is chosen from the data."""
         return self.cycles is None
 
-    def effective_cycles(self) -> float | None:
-        """The smoothing that applies: the one set, else the one the
-        automatic chose, else None until an extraction has run."""
-        return self.cycles if self.cycles is not None else self.chosen
-
     def describe(self) -> str:
         """One line for a status bar."""
         if self.cycles is not None:

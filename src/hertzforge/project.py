@@ -1218,59 +1218,6 @@ class Project(dict):
             # drag at a time.
             if len(kept) > 1 or (kept and group['role'])]
 
-    def relink(self, name: Any, target: Any = None) -> list[str]:
-        """Move one object into the group holding `target`.
-
-        `link` merges the groups of all its arguments, which is right for
-        saying two objects belong together and wrong for moving one
-        object: linking a geometry into the other group would bring its
-        whole group with it. This method takes the object out of its
-        group first, so only it moves. A `target` of None only takes it
-        out.
-
-        The group it joins keeps its role, so an object moved into the
-        Basis becomes part of the Basis. A move that `link` refuses
-        leaves the groups as they were and raises the same error.
-
-        Parameters
-        ----------
-        name : str or object
-            The object to move.
-        target : str or object, optional
-            An object whose group it should join. None removes it
-            from its current group.
-
-        Returns
-        -------
-        list of str
-            The members of the group the object ends up in, or an empty
-            list when `target` is None.
-        """
-        name = self.name_of(name)
-        if target is None:
-            self.unlink(name)
-            return []
-        target = self.name_of(target)
-        if target == name:
-            raise ValueError('an object is already in its own group')
-        members = self.object_group_of(target) or [target]
-        if name in members:
-            return list(members)
-        role = self.role_of(target)
-        # `link` refuses a second geometry or a member the group's
-        # geometry cannot carry, and by then the object has already left
-        # where it was: a refused move must leave the links untouched
-        # rather than half applied.
-        before = [dict(group) for group in self.object_groups]
-        self.unlink(name)
-        try:
-            # `name` last: it joins the group it landed in, and a group
-            # reads in the order its members arrived
-            return self.link(*members, name, role=role)
-        except (ValueError, KeyError):
-            self.object_groups = before
-            raise
-
     def name_object_group(self, member: str, name: str | None) -> list[str]:
         """Name the object group an object belongs to, or remove its name.
 
@@ -1422,8 +1369,8 @@ class Project(dict):
             'Basis', or None for the other group: the one group that is
             not the Basis, created if there is none yet. When there are
             several groups besides the Basis there is no single other
-            group, and this raises ValueError; use `relink` onto a
-            member of the group meant.
+            group, and this raises ValueError; use `unlink`, then `link`
+            onto a member of the group meant.
 
         Returns
         -------
@@ -1936,27 +1883,6 @@ class Project(dict):
     def _group(self, name: str) -> ObjectGroup | None:
         return next((group for group in self.object_groups
                      if name in group['members']), None)
-
-    def absorb_links(self, groups: Iterable[ObjectGroup]) -> None:
-        """Add the object groups of a project being imported.
-
-        By this point the arriving objects have already been placed in
-        groups one at a time by the project type's rules, without the
-        file's own grouping to go on. The file's groups are added last,
-        and where an object is in two groups the later one is kept, so
-        the file's grouping replaces the earlier placement.
-
-        Parameters
-        ----------
-        groups : iterable of ObjectGroup
-            Object groups from another project, merged into this one's.
-
-        Returns
-        -------
-        None
-        """
-        self.object_groups = list(self.object_groups) + [dict(group) for group in groups]
-        self._prune_links()
 
     def _prune_links(self) -> None:
         """Members that no longer exist go, and so do groups left with
@@ -9451,7 +9377,7 @@ def _solids_take_a_material_alone(geometry: Geometry, groups: Sequence[int]) -> 
 
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
-    'relink', 'name_object_group',
+    'name_object_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',

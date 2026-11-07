@@ -1341,12 +1341,6 @@ class ModalFitSession:
         self.preview = None
         return count
 
-    def residual_records(self) -> np.ndarray:
-        """The residual in the source FRF's record layout, (records,
-        lines). A plot of the residual draws this."""
-        residual = self.residual_matrix()
-        return np.stack([sign * residual[:, j, k] for j, k, sign in self._places])
-
     def _spacing(self, index: int) -> float:
         """The line spacing at a line, in Hz, from its two neighbors: a log
         grid's spacing at one end says nothing of its spacing at the other."""

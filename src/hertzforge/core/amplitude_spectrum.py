@@ -353,23 +353,6 @@ def _frames_text(count: int) -> str:
     return '1 frame' if count == 1 else f'{count} frames'
 
 
-def channel_row(history: Any, record: int) -> int:
-    """The row of an amplitude spectrum of `history` that record
-    `record` is averaged into.
-
-    A row is a channel (`TimeHistory.channel_key`), in the order its
-    first record comes, so a history with one record per channel has
-    its rows in record order, and every capture of a channel saved as
-    captures maps to that channel's one row.
-    """
-    keys: list = []
-    for i in range(len(history.response_dof)):
-        key = history.channel_key(i)
-        if key not in keys:
-            keys.append(key)
-    return keys.index(history.channel_key(record))
-
-
 def amplitude_spectrum(history: Any, averaging: Any = None, *,
                        window: Any = 'hann',
                        parameter: float | None = None) -> AmplitudeSpectrum:
