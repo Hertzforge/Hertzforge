@@ -43,13 +43,21 @@
 	});
 
 	const one = (q: string): View[] => views.plotViews(shockPlotId(page, q));
-	const fallback = (kind: 'pulse' | 'srs'): SpectrumView | null => pulseViewOf(shock.lastViews, kind);
 
+	/**
+	 * The page's views with the picked pulses laid over its Pulse (or SRS) view; the others (the
+	 * Drive view beside the Pulse) as the service sent them. Before this window's first frame, the
+	 * last pulse event's views stand in.
+	 */
 	function overlaid(kind: 'pulse' | 'srs'): View[] {
-		const got = one(kind);
-		const base = (got.find((v) => v.view === 'spectrum') as SpectrumView | undefined) ?? fallback(kind);
-		const v = withOverlay(base, shock.overlaid, kind);
-		return v ? [v] : [];
+		let got = one(kind);
+		if (!got.length) {
+			const base = pulseViewOf(shock.lastViews, kind);
+			const drive = kind === 'pulse' ? shock.lastViews.find((v) => v.view === 'spectrum' && /^drive\b/i.test(v.title)) : undefined;
+			got = [base, drive].filter((v): v is SpectrumView => !!v);
+		}
+		const target = pulseViewOf(got, kind);
+		return got.map((v) => (v === target ? (withOverlay(target, shock.overlaid, kind) ?? v) : v));
 	}
 
 	function startRename() {
@@ -158,7 +166,7 @@
 			<p class="aq-small aq-muted help">{SHOCK_PAGE_HELP[page.kind]}</p>
 			{#key page.id}
 				{#if page.kind === 'pulse'}
-					{@render draw(overlaid('pulse'), 320, 'The pulse is drawn once one has fired.')}
+					{@render draw(overlaid('pulse'), 260, 'The pulse is drawn once one has fired.')}
 				{:else if page.kind === 'srs'}
 					{@render draw(overlaid('srs'), 320, "The pulse's SRS is drawn once one has fired.")}
 				{:else if page.kind === 'kinematics'}

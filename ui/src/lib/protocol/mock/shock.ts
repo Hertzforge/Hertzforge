@@ -199,7 +199,7 @@ function integrate(t_ms: Float64Array, y: Float64Array, k: number): Float64Array
 
 const timeAxis = { label: 'Time', unit: 'ms', scale: 'linear' as const };
 
-function pulseView(p: ShockPulse, fs: number, standard: ShockStandard | undefined, scale: number, measured?: { a: Float64Array; drive: Float64Array }): SpectrumView {
+function pulseView(p: ShockPulse, fs: number, standard: ShockStandard | undefined, scale: number, measured?: Float64Array): SpectrumView {
 	const c = composite(p, fs, scale);
 	const tol = STANDARD_TOL[standard?.name ?? 'mil_std_810_516'];
 	const peak = p.amplitude_g * scale;
@@ -219,11 +219,12 @@ function pulseView(p: ShockPulse, fs: number, standard: ShockStandard | undefine
 		{ name: 'Upper tolerance', role: 'tolerance', x: c.t_ms, y: upper },
 		{ name: 'Lower tolerance', role: 'tolerance', x: c.t_ms, y: lower }
 	];
-	if (measured) {
-		series.push({ name: 'Measured', role: 'measured', x: c.t_ms, y: measured.a });
-		series.push({ name: 'Drive played', role: 'drive', x: c.t_ms, y: measured.drive });
-	}
+	if (measured) series.push({ name: 'Measured', role: 'measured', x: c.t_ms, y: measured });
 	return { view: 'spectrum', title: 'Pulse', x: timeAxis, y: { label: 'Acceleration', unit: 'g', scale: 'linear' }, series, link: 'time' };
+}
+
+function driveView(t_ms: Float64Array, drive: Float64Array): SpectrumView {
+	return { view: 'spectrum', title: 'Drive', x: timeAxis, y: { label: 'Drive', unit: 'V', scale: 'linear' }, series: [{ name: 'Drive played', role: 'drive', x: t_ms, y: drive }], link: 'time' };
 }
 
 function kinematicViews(p: ShockPulse, fs: number, scale: number, measured?: Float64Array): SpectrumView[] {
@@ -305,27 +306,37 @@ function plantMag(f: number): number {
 	return 0.6 * mode(200, 2.5) + 0.4 * mode(550, 2.5);
 }
 
-function identificationViews(band: [number, number], coherence: number): SpectrumView[] {
+function identificationViews(band: [number, number], coherence: number, floor: number): SpectrumView[] {
 	const n = 200;
 	const f = new Float64Array(n);
 	const mag = new Float64Array(n);
+	const ph = new Float64Array(n);
 	const coh = new Float64Array(n);
+	const trusted = new Float64Array(n);
+	const fl = new Float64Array(n).fill(floor);
 	for (let i = 0; i < n; i++) {
 		const fr = 5 * (8000 / 5) ** (i / (n - 1));
 		f[i] = fr;
 		mag[i] = plantMag(fr) * 40;
+		ph[i] = -180 * (Math.atan(fr / 200) + Math.atan(fr / 550)) / Math.PI;
 		const inBand = fr >= band[0] && fr <= band[1];
 		coh[i] = inBand ? Math.min(0.999, coherence + 0.04 * Math.sin(i / 7)) : 0.3;
+		trusted[i] = inBand && coh[i] >= floor ? 1 : 0;
 	}
+	const freq = { label: 'Frequency', unit: 'Hz', scale: 'log' as const };
 	return [
-		{ view: 'spectrum', title: 'System', x: { label: 'Frequency', unit: 'Hz', scale: 'log' }, y: { label: '|H|', unit: 'g/V', scale: 'log' }, series: [{ name: '|H|', role: 'measured', x: f, y: mag }], link: 'frequency' },
+		{ view: 'spectrum', title: 'Identification Gain', x: freq, y: { label: '|H|', unit: 'g/V', scale: 'log' }, series: [{ name: '|H|', role: 'measured', x: f, y: mag }], link: 'frequency' },
+		{ view: 'spectrum', title: 'Identification Phase', x: freq, y: { label: 'Phase', unit: 'deg', scale: 'linear' }, series: [{ name: 'Phase', role: 'measured', x: f, y: ph }], link: 'frequency' },
 		{
 			view: 'spectrum',
 			title: 'Coherence',
-			x: { label: 'Frequency', unit: 'Hz', scale: 'log' },
+			x: freq,
 			y: { label: 'Coherence', unit: null, scale: 'linear' },
-			series: [{ name: 'Coherence', role: 'measured', x: f, y: coh }],
-			regions: [{ x0: band[0], x1: band[1], kind: 'span', label: 'Trusted lines' }],
+			series: [
+				{ name: 'Coherence', role: 'measured', x: f, y: coh },
+				{ name: 'Trusted bins', role: 'other', x: f, y: trusted },
+				{ name: 'Floor', role: 'limit', x: f, y: fl }
+			],
 			link: 'frequency'
 		}
 	];
@@ -475,7 +486,7 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 			level_db: r.levelDb,
 			rung: r.levels.findIndex((l) => Math.abs(l - r.levelDb) < 1e-9) >= 0 ? r.levels.findIndex((l) => Math.abs(l - r.levelDb) < 1e-9) : null,
 			pulses: { fired: r.rows.length, passed: r.rows.filter((x) => x.passed).length, at_level: r.firedAtLevel, of_level: r.pulsesPer[r.rung] ?? 1 },
-			next_pulse_s: r.nextAt === null || r.phase !== 'waiting' ? null : round(Math.max(0, r.nextAt - r.t), 2),
+			next_pulse_s: r.phase !== 'waiting' ? null : r.nextAt === null ? (r.mode === 'manual' ? 0 : null) : round(Math.max(0, r.nextAt - r.t), 2),
 			elapsed_s: started ? round(r.t, 2) : null,
 			alarm: r.alarm,
 			identification: r.identification,
@@ -545,6 +556,11 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 			}
 		}
 		const spacing = Math.max(config.spacing?.cooling_s ?? 1, config.spacing?.settling_s ?? 0.5, config.spacing?.compute_s ?? 0.25);
+		if (config.train && config.train.count > 1 && config.train.spacing_s < spacing) errors.push(item('spacing_below_floor', `A train's pulses are at least the time between pulses apart, ${spacing} s.`, 'config.train.spacing_s'));
+		if (config.gunfire && 60 / config.gunfire.rounds_per_min < spacing) errors.push(item('spacing_below_floor', `Rounds ${round(60 / config.gunfire.rounds_per_min, 3)} s apart are closer than the time between pulses, ${spacing} s.`, 'config.gunfire.rounds_per_min'));
+		(config.limits.monitors ?? []).forEach((m, i) => {
+			if (!rows.some((r) => r.enabled && r.index === m.channel && r.role !== 'drive')) errors.push(item('limit_unknown_channel', `Channel ${m.channel} is not an enabled input of the channel table.`, `config.limits.monitors[${i}].channel`));
+		});
 		const facts = referenceFacts(p, fs);
 		const qw = quietWindow(p, config.standard, facts.shoulder);
 		if (!qw.inside) warnings.push(item('quiet_window_exceeded', `The compensation leaves the standard's quiet window: its worst deviation is ${round(qw.worst_frac * 100, 1)}% of the peak, over ${round(qw.limit_frac * 100, 0)}%.`, 'config.pulse.compensation'));
@@ -747,15 +763,15 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 			drive[i] = (c.a[i] / (p.amplitude_g || 1)) * vpkAt(r, r.levelDb) * pend.limitScale;
 		}
 		const srs = r.config.acquisition?.srs ?? {};
-		const views: View[] = [
-			pulseView(p, fs, r.config.standard, scale, { a: measured, drive }),
-			...kinematicViews(p, fs, scale, measured),
-			srsView(p, scale, srs.band_tol_db ?? 3, [srs.f_lo_hz ?? 20, srs.f_hi_hz ?? 2000], ratio)
-		];
-		r.lastViews = views;
+		const pulse = pulseView(p, fs, r.config.standard, scale, measured);
+		const dv = driveView(c.t_ms, drive);
+		const srsV = srsView(p, scale, srs.band_tol_db ?? 3, [srs.f_lo_hz ?? 20, srs.f_hi_hz ?? 2000], ratio);
+		// The event carries the Pulse, Drive and SRS views; `shock.pulse` adds the kinematics.
+		const views: View[] = [pulse, dv, srsV];
+		r.lastViews = [pulse, dv, ...kinematicViews(p, fs, scale, measured), srsV];
 		r.views = views;
-		pulseViews.set(row.index, views);
-		addLog(passed ? 'level' : 'alarm', `pulse ${row.index + 1} at ${r.levelDb} dB: peak ${row.peak_g} g, ${passed ? 'pass' : `fail (${errPct}%)`}`);
+		pulseViews.set(row.index, r.lastViews);
+		addLog('pulse', `pulse ${row.index + 1} at ${r.levelDb} dB: peak ${row.peak_g} g, ${passed ? 'pass' : `fail (${errPct}%)`}`);
 		for (const c2 of host.connections()) c2.emit('shock.pulse', { run_id: r.id, pulse: row, views } as unknown as Record<string, unknown>);
 		// the law closes most of the error each pulse
 		if (pend.origin === 'ladder') r.error *= 0.3;
@@ -916,22 +932,22 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 		const p = r.config.pulse;
 		const fs = r.derived.grid.fs_hz;
 		const scale = 10 ** (r.levelDb / 20);
-		const last = r.lastViews;
+		const last = (title: string) => r.lastViews.filter((v) => v.view === 'spectrum' && v.title === title);
 		switch (q) {
 			case 'pulse':
-				return last.length ? [last[0]] : [pulseView(p, fs, r.config.standard, scale)];
+				return r.lastViews.length ? [...last('Pulse'), ...last('Drive')] : [pulseView(p, fs, r.config.standard, scale)];
 			case 'velocity':
-				return last.length ? [last[1]] : [kinematicViews(p, fs, scale)[0]];
+				return r.lastViews.length ? last('Velocity') : [kinematicViews(p, fs, scale)[0]];
 			case 'displacement':
-				return last.length ? [last[2]] : [kinematicViews(p, fs, scale)[1]];
+				return r.lastViews.length ? last('Displacement') : [kinematicViews(p, fs, scale)[1]];
 			case 'srs': {
 				const srs = r.config.acquisition?.srs ?? {};
-				return last.length ? [last[3]] : [srsView(p, scale, srs.band_tol_db ?? 3, [srs.f_lo_hz ?? 20, srs.f_hi_hz ?? 2000])];
+				return r.lastViews.length ? last('SRS') : [srsView(p, scale, srs.band_tol_db ?? 3, [srs.f_lo_hz ?? 20, srs.f_hi_hz ?? 2000])];
 			}
 			case 'spectrum':
 				return [spectrumView(p, scale, r.rows.at(-1)?.peak_ratio ?? 1)];
 			case 'identification':
-				return r.identification ? identificationViews(r.config.control?.band_hz ?? [5, 5000], 0.97) : [];
+				return r.identification ? identificationViews(r.config.control?.band_hz ?? [5, 5000], 0.97, r.config.control?.coherence_floor ?? 0.9) : [];
 			case 'law':
 				return [lawReading(r)];
 			case 'readings':

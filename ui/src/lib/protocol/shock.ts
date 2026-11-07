@@ -447,6 +447,8 @@ export interface ShockPulsesResult {
 
 export interface ShockPulseParams {
 	index: number;
+	/** The width the views are decimated to; the service's default when left out. */
+	points?: number;
 }
 
 export interface ShockPulseResult {

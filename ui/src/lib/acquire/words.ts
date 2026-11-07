@@ -214,7 +214,9 @@ export const LOG_WORDS: Record<LogKind, string> = {
 	alarm: 'Alarm',
 	overload: 'Overload',
 	trip: 'Trip',
-	note: 'Note'
+	note: 'Note',
+	pulse: 'Pulse',
+	law: 'Control Law'
 };
 
 // ---------------------------------------------------------------------------------------------

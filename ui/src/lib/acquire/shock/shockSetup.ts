@@ -187,7 +187,7 @@ export function defaultShockSetup(): ShockDraft {
 			residual_disp_in: 0.001
 		},
 		train: { count: 5, spacing_s: 6 },
-		gunfire: { enabled: false, rounds_per_min: 600, rounds: 10 },
+		gunfire: { enabled: false, rounds_per_min: 30, rounds: 3 },
 		capture: { auto_start: false, run_name: 'classical_shock' },
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
@@ -398,6 +398,7 @@ export const SHOCK_SECTIONS: { id: ShockSection; label: string }[] = [
  */
 export function shockItemKey(item: Pick<ReportItem, 'field' | 'channel'> & { reason: string }): string {
 	if (item.reason === 'no_control_channel' || item.reason === 'no_drive_channel') return 'station.channels';
+	if (item.reason === 'limit_unknown_channel' && !item.field) return 'limits.monitors';
 	if (item.field) {
 		const path = item.field.replace(/^config\./, '').replace(/\[(\d+)\]/g, '.$1');
 		let m = /^schedule\.levels_db\.(\d+)$/.exec(path);

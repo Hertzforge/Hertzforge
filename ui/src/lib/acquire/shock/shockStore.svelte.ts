@@ -726,7 +726,7 @@ export class ShockStore {
 		this.overlayViews = views;
 		if (!next.includes(index) || this.overlayViews[index]) return;
 		try {
-			const res = await this.control.request<ShockPulseResult>('shock.pulse', { index });
+			const res = await this.control.request<ShockPulseResult>('shock.pulse', { index, points: 1024 });
 			if (this.overlay.includes(index)) this.overlayViews = { ...this.overlayViews, [index]: res.views };
 		} catch (err) {
 			this.refusal = toRefusal('Show the pulse', err);

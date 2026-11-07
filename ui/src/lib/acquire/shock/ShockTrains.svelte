@@ -29,7 +29,7 @@
 		{/if}
 		<div class="aq-group">
 			<h3>Train</h3>
-			<p class="aq-lead">Pulses one after another at the present level. The drive in force fires each; the law does not change it inside the train.</p>
+			<p class="aq-lead">Pulses one after another at the present level, at least the time between pulses apart. The drive in force fires each; the law does not change it inside the train.</p>
 			<div class="aq-fields">
 				<NumberField id="st-n" label="Pulses" integer step={1} min={1} bind:value={d.train.count} errors={errs('train.count')} disabled={locked} testid="shock-train-count" />
 				<NumberField id="st-s" label="Apart" unit="s" step={0.5} min={0} bind:value={d.train.spacing_s} errors={errs('train.spacing_s')} disabled={locked} testid="shock-train-spacing" help="At least the time between pulses." />
@@ -49,7 +49,7 @@
 					<NumberField id="st-r" label="Rounds" integer step={1} min={1} bind:value={d.gunfire.rounds} errors={errs('gunfire.rounds')} disabled={locked} testid="shock-gunfire-rounds" />
 				</div>
 				{#if Number.isFinite(d.gunfire.rounds_per_min) && d.gunfire.rounds_per_min > 0}
-					<p class="aq-small aq-muted">Rounds {Math.round((60 / d.gunfire.rounds_per_min) * 1000)} ms apart.</p>
+					<p class="aq-small aq-muted">Rounds {Math.round((60 / d.gunfire.rounds_per_min) * 1000)} ms apart, which must be at least the time between pulses.</p>
 				{/if}
 			{/if}
 		</div>
