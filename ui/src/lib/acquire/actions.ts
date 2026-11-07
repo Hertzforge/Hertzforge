@@ -114,3 +114,62 @@ export function primaryAction(ctx: RunContext): ActionId | null {
 			return null;
 	}
 }
+
+/** What the run bar and the state chip read of a run: single-output Random's or MIMO Random's. */
+export interface RunHead {
+	run_id: string | null;
+	state: RandomRunState;
+	phase: string;
+	title: string | null;
+	mode: import('$lib/protocol/types').LadderMode | null;
+	levels_db: number[] | null;
+	level_db: number | null;
+	at_level_s: number | null;
+	remaining_at_level_s: number | null;
+	end: import('$lib/protocol/types').RunEnd | null;
+}
+
+/**
+ * What the run bar needs of a test type's store: the run, the verbs that apply now and why the
+ * others wait, the controller seat and where the data comes from. Single-output Random's store
+ * is one; MIMO Random's is another.
+ */
+export interface RunBarHost {
+	run: RunHead | null;
+	frame: { level_db: number | null; at_level_s: number | null; remaining_at_level_s: number | null } | null;
+	actions: Record<ActionId, ActionState>;
+	primary: ActionId | null;
+	orphanDeadline: number | null;
+	isLive: boolean;
+	session: import('$lib/protocol/types').SessionState | null;
+	connected: boolean;
+	isController: boolean;
+	busy: string | null;
+	source: { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null;
+	elapsed: number | null;
+	release(): unknown;
+	claim(): unknown;
+	apply(): unknown;
+	arm(): unknown;
+	start(): unknown;
+	proceed(): unknown;
+	reset(): unknown;
+	setMode(mode: 'auto' | 'manual'): unknown;
+	level(deltaDb: number): unknown;
+	goTo(db: number): unknown;
+	stop(): unknown;
+	abort(): unknown;
+}
+
+/** What the notices above a test type's screen read: the refusal, the note and the connection. */
+export interface NoticesHost {
+	refusal: import('./words').Refusal | null;
+	note: { tone: 'pass' | 'info' | 'warn'; text: string } | null;
+	connected: boolean;
+	run: { state: RandomRunState } | null;
+	isLive: boolean;
+	control: { url: string; detail: string | null };
+	syncError: string | null;
+	dismissRefusal(): void;
+	dismissNote(): void;
+}

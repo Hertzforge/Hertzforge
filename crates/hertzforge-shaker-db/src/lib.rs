@@ -959,5 +959,72 @@ fn sanitize_filename(name: &str) -> String {
     out
 }
 
+// =============================================================================
+// Several shakers on one article
+// =============================================================================
+
+/// The feasibility of every shaker driving one article together (multiple-output
+/// Random): one report per drive, and the worst verdict over them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedFeasibility {
+    /// One report per drive, in drive order.
+    pub drives: Vec<FeasibilityReport>,
+    /// `Exceeded` if any drive is, else `Advisory` if any is, else `Pass` if any
+    /// drive was evaluated, else `NotEvaluated`.
+    pub overall: Verdict,
+}
+
+impl SharedFeasibility {
+    /// True when any drive's shaker would be exceeded.
+    pub fn exceeded(&self) -> bool {
+        self.overall == Verdict::Exceeded
+    }
+}
+
+impl FeasibilityCalculator {
+    /// Assess each shaker of a multiple-shaker test against the acceleration it
+    /// must produce (`profiles[k]` for drive `k`, at the shaker), with the test
+    /// article's mass `article_lb` split equally across the shakers and added to
+    /// each one's own moving mass. Each drive is the single-shaker assessment
+    /// ([`FeasibilityCalculator::assess`]) unchanged. `drives` and `profiles` must
+    /// have the same length.
+    pub fn assess_shared(
+        drives: &[(ShakerRecord, MovingMass)],
+        article_lb: f64,
+        profiles: &[LineSpectrum],
+        crest_factor: f64,
+    ) -> SharedFeasibility {
+        let n = drives.len().max(1) as f64;
+        let share = if article_lb.is_finite() && article_lb > 0.0 {
+            article_lb / n
+        } else {
+            0.0
+        };
+        let reports: Vec<FeasibilityReport> = drives
+            .iter()
+            .zip(profiles)
+            .map(|((record, own), profile)| {
+                let mut mass = *own;
+                mass.test_article_lb += share;
+                Self::assess(record, mass, None, profile, crest_factor)
+            })
+            .collect();
+        let any = |v: Verdict| reports.iter().any(|r| r.overall == v);
+        let overall = if any(Verdict::Exceeded) {
+            Verdict::Exceeded
+        } else if any(Verdict::Advisory) {
+            Verdict::Advisory
+        } else if any(Verdict::Pass) {
+            Verdict::Pass
+        } else {
+            Verdict::NotEvaluated
+        };
+        SharedFeasibility {
+            drives: reports,
+            overall,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

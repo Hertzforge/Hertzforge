@@ -7,13 +7,12 @@
 	 */
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProvenanceBadge from '$lib/shell/ProvenanceBadge.svelte';
-	import type { ActionId } from './actions';
+	import type { ActionId, RunBarHost } from './actions';
 	import StateChip from './StateChip.svelte';
-	import type { AcquireState } from './store.svelte';
 	import { clock, db, phaseWord } from './words';
 
 	interface Props {
-		acq: AcquireState;
+		acq: RunBarHost;
 		/** Open the acknowledgement dialog for arming past a feasibility exceedance. */
 		onoverride: () => void;
 		abortKeys: string;

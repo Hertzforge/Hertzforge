@@ -759,7 +759,9 @@ impl SidecarBase {
         let sidecar = self.snapshot(shared, complete);
         let json = serde_json::to_string_pretty(&sidecar)
             .map_err(|e| io::Error::other(format!("sidecar serialize: {e}")))?;
-        std::fs::write(self.run_dir.join(SIDECAR_FILE), json)?;
+        // Atomic: a reader (or a crash) sees the previous sidecar or this one,
+        // never a torn one.
+        write_atomic(&self.run_dir.join(SIDECAR_FILE), json.as_bytes())?;
         Ok(sidecar)
     }
 }
@@ -1156,6 +1158,153 @@ fn f32_as_le_bytes(samples: &[f32]) -> &[u8] {
             std::mem::size_of_val(samples),
         )
     }
+}
+
+// =============================================================================
+// Binary records with a JSON sidecar
+// =============================================================================
+
+/// Write `bytes` to `path` atomically: a temporary file in the same folder,
+/// synced, then renamed over the target, so a reader never sees a half-written
+/// file and a crash leaves the old one or the new one.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "record".into());
+    let tmp = dir.join(format!(".{name}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_data()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+/// A binary record: `<dir>/<name>.bin` holds the payload and `<dir>/<name>.json`
+/// the sidecar that says what is in it (the caller's serializable header). Both
+/// are written atomically, the payload first, so a sidecar never names a payload
+/// that is not there. Matrix records too large for JSON (spectral matrices of a
+/// multiple-output run) are kept this way. Returns the payload's path.
+pub fn write_binary_record<S: Serialize>(
+    dir: &Path,
+    name: &str,
+    sidecar: &S,
+    payload: &[u8],
+) -> io::Result<PathBuf> {
+    let bin = dir.join(format!("{name}.bin"));
+    write_atomic(&bin, payload)?;
+    let json = serde_json::to_vec_pretty(sidecar)
+        .map_err(|e| io::Error::other(format!("record sidecar: {e}")))?;
+    write_atomic(&dir.join(format!("{name}.json")), &json)?;
+    Ok(bin)
+}
+
+/// Append `chunk` to `<dir>/<name>.bin` and rewrite its sidecar atomically (a
+/// record that grows every loop). The sidecar is written after the chunk, so it
+/// never counts more than the payload holds.
+pub fn append_binary_record<S: Serialize>(
+    dir: &Path,
+    name: &str,
+    sidecar: &S,
+    chunk: &[u8],
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let bin = dir.join(format!("{name}.bin"));
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&bin)?;
+        f.write_all(chunk)?;
+        f.sync_data()?;
+    }
+    let json = serde_json::to_vec_pretty(sidecar)
+        .map_err(|e| io::Error::other(format!("record sidecar: {e}")))?;
+    write_atomic(&dir.join(format!("{name}.json")), &json)?;
+    Ok(bin)
+}
+
+/// Append one entry to an indexed record: `chunk` to `<dir>/<name>.bin`, then one
+/// line of JSON to `<dir>/<name>.jsonl` saying where it is. The line is `index`
+/// with two fields added, `offset_bytes` and `len_bytes` (the chunk's place in the
+/// payload). The chunk is written and synced first, so a line never names bytes
+/// that are not there; a crash leaves at most a chunk with no line, which a reader
+/// ignores. Unlike [`append_binary_record`] nothing is rewritten, so a record of
+/// many entries costs one line each. Returns the chunk's offset.
+pub fn append_indexed_record(
+    dir: &Path,
+    name: &str,
+    index: &serde_json::Map<String, serde_json::Value>,
+    chunk: &[u8],
+) -> io::Result<u64> {
+    std::fs::create_dir_all(dir)?;
+    let bin = dir.join(format!("{name}.bin"));
+    let offset = {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&bin)?;
+        let offset = f.metadata()?.len();
+        f.write_all(chunk)?;
+        f.sync_data()?;
+        offset
+    };
+    let mut line = index.clone();
+    line.insert("offset_bytes".into(), serde_json::Value::from(offset));
+    line.insert(
+        "len_bytes".into(),
+        serde_json::Value::from(chunk.len() as u64),
+    );
+    let mut text = serde_json::to_string(&serde_json::Value::Object(line))
+        .map_err(|e| io::Error::other(format!("record index: {e}")))?;
+    text.push('\n');
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(format!("{name}.jsonl")))?;
+    f.write_all(text.as_bytes())?;
+    f.sync_data()?;
+    Ok(offset)
+}
+
+/// One entry of an indexed record: its index line and its chunk.
+pub type IndexedEntry = (serde_json::Map<String, serde_json::Value>, Vec<u8>);
+
+/// Read an indexed record back: each entry's index line with its chunk. A line
+/// that does not parse, or names bytes past the payload (a crash mid-write), ends
+/// the read there.
+pub fn read_indexed_record(dir: &Path, name: &str) -> io::Result<Vec<IndexedEntry>> {
+    let text = std::fs::read_to_string(dir.join(format!("{name}.jsonl")))?;
+    let payload = std::fs::read(dir.join(format!("{name}.bin")))?;
+    let mut out = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let Ok(serde_json::Value::Object(m)) = serde_json::from_str::<serde_json::Value>(line)
+        else {
+            break;
+        };
+        let off = m.get("offset_bytes").and_then(|v| v.as_u64());
+        let len = m.get("len_bytes").and_then(|v| v.as_u64());
+        let (Some(off), Some(len)) = (off, len) else {
+            break;
+        };
+        let Some(chunk) = payload.get(off as usize..(off + len) as usize) else {
+            break;
+        };
+        out.push((m, chunk.to_vec()));
+    }
+    Ok(out)
+}
+
+/// Read a binary record back: its sidecar and its payload.
+pub fn read_binary_record(dir: &Path, name: &str) -> io::Result<(serde_json::Value, Vec<u8>)> {
+    let json = std::fs::read(dir.join(format!("{name}.json")))?;
+    let sidecar = serde_json::from_slice(&json)
+        .map_err(|e| io::Error::other(format!("record sidecar {name}.json: {e}")))?;
+    let payload = std::fs::read(dir.join(format!("{name}.bin")))?;
+    Ok((sidecar, payload))
 }
 
 #[cfg(test)]

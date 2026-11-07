@@ -1,7 +1,9 @@
-//! The control-law host: loads a single-output Random control law compiled to
-//! a WebAssembly component (the `random-single` world of
+//! The control-law host: loads a Random control law compiled to a
+//! WebAssembly component (the `random-single` or the `random-mimo` world of
 //! `hertzforge:control-law@0.1.0`, in `wit/control-law/`) and runs it
-//! contained.
+//! contained. [`LawHost::load`] loads a single-output law,
+//! [`LawHost::load_mimo`] a multiple-output one, and [`LawHost::load_any`]
+//! whichever the file is.
 //!
 //! # What the host guarantees
 //!
@@ -38,6 +40,14 @@
 //! boundary field for field, so an adapter implements the controller's law
 //! trait over a [`LawInstance`] with plain copies. This crate depends on no
 //! controller crate.
+//!
+//! A multiple-output law is written against the MIMO law boundary of
+//! `hertzforge-sdm`, and [`WasmMimoLaw`] implements that boundary's
+//! [`hertzforge_sdm::law::MimoControlLaw`] over a [`MimoLawInstance`]: the
+//! controller runs a law file exactly as it runs a built-in law. The host
+//! checks a MIMO drive's dimensions, finiteness, Hermitian symmetry and band
+//! ([`mimo`]); positive semi-definiteness and every cap belong to the
+//! controller.
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -46,16 +56,33 @@ mod bindings {
     });
 }
 
+/// The `random-mimo` world. The shared `types` interface is the one
+/// [`bindings`] generated, so a manifest converts the same way for both.
+mod mimo_bindings {
+    wasmtime::component::bindgen!({
+        path: "../../wit/control-law",
+        world: "random-mimo",
+        with: {
+            "hertzforge:control-law/types": crate::bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
 mod convert;
 mod error;
 mod host;
+pub mod mimo;
 mod sandbox;
 mod ticker;
 mod types;
 pub mod validate;
 
+pub use error::MimoOutputRule;
 pub use error::{LawError, OutputRule};
-pub use host::{law_file_sha256, HostConfig, LawHost, LawInstance, LoadedLaw};
+pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
+pub use mimo::{
+    DiagnosticKind, DiagnosticLayout, LoadedMimoLaw, MimoLawInstance, MimoManifest, WasmMimoLaw,
+};
 pub use types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, GuestOutput, IntegerSpec,
     LawIdentity, LoopDiagnostics, LoopInputs, LoopOutputs, Manifest, NumberSpec, Param, ParamKind,
@@ -64,5 +91,7 @@ pub use types::{
 
 /// The interface package this host implements.
 pub const INTERFACE: &str = "hertzforge:control-law@0.1.0";
-/// The world a law file must implement.
+/// The world a single-output law file implements.
 pub const WORLD: &str = "random-single";
+/// The world a multiple-output law file implements.
+pub const MIMO_WORLD: &str = "random-mimo";

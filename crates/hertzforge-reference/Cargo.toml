@@ -1,0 +1,20 @@
+[package]
+name = "hertzforge-reference"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+description = "The reference spectral density matrix a multiple-output random test controls to: builders, importers, validation and the native reference file"
+
+[dependencies]
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+hertzforge-breakpoints = { workspace = true }
+hertzforge-capture = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# Reading NumPy `.npz` archives (stored and deflated entries). Default features off:
+# no encryption, no other codecs, no time crate.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# The pure-Rust inflate backend for the zip reader (no C zlib).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

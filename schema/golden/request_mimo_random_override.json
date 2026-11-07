@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 33,
+ "method": "mimo_random.override",
+ "params": {
+  "ack": "Coherence is low below 30 Hz where the fixture is stiff; accepted."
+ }
+}

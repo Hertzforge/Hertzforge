@@ -1,0 +1,201 @@
+{
+ "type": "request",
+ "id": 40,
+ "method": "mimo_random.setup",
+ "params": {
+  "setup": {
+   "title": "Two-Axis Random",
+   "channels": {
+    "controls": [
+     {
+      "channel": 1
+     },
+     {
+      "channel": 2
+     }
+    ],
+    "drives": [
+     {
+      "channel": 3,
+      "ceiling_vrms": 2,
+      "abort_vrms": null,
+      "peak_v": 6,
+      "shaker": null,
+      "moving_mass_lb": 12.5
+     },
+     {
+      "channel": 4,
+      "ceiling_vrms": 2,
+      "abort_vrms": 3,
+      "peak_v": 6,
+      "shaker": null,
+      "moving_mass_lb": 12.5
+     }
+    ],
+    "limits": [
+     {
+      "channel": 5,
+      "ceiling": 0.04,
+      "abort_margin_db": 3
+     }
+    ],
+    "article_mass_lb": 40
+   },
+   "space": {
+    "kind": "virtual",
+    "dofs": [
+     "Sum",
+     "Difference"
+    ],
+    "response_transform": {
+     "rows": 2,
+     "cols": 2,
+     "values": [
+      0.5,
+      0.5,
+      1,
+      -1
+     ]
+    },
+    "drive_transform": null,
+    "dof_bands": [
+     {
+      "alarm_db": [
+       2,
+       2
+      ],
+      "abort_db": [
+       4,
+       4
+      ]
+     },
+     {
+      "alarm_db": [
+       3,
+       3
+      ],
+      "abort_db": [
+       6,
+       6
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "kind": "inline",
+    "freqs_hz": [
+     100.0,
+     106.25,
+     112.5,
+     118.75,
+     125.0,
+     131.25,
+     137.5,
+     143.75
+    ],
+    "n": 2,
+    "re": [
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04,
+     0.04,
+     0.012,
+     0.04
+    ],
+    "im": [
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0,
+     0.0,
+     0.016,
+     0.0
+    ]
+   },
+   "law": {
+    "id": "pinv_closed",
+    "params": {
+     "convergence": 0.5
+    }
+   },
+   "estimation": {
+    "fs_hz": 8192,
+    "n_pts": 4096,
+    "frames_per_loop": 8,
+    "window": "hann",
+    "overlap": 0.5,
+    "memory_loops": 4
+   },
+   "identification": {
+    "level_db": -20,
+    "frames": 32,
+    "noise_frames": 16,
+    "coherence_floor": 0.5,
+    "condition_limit": 1000,
+    "review": true
+   },
+   "control": {
+    "frf": "update",
+    "frf_blend": 0.25,
+    "level_ramp_s": 3,
+    "shutdown_ramp_s": 3,
+    "max_loops_out": 5,
+    "cap_up_db": 2,
+    "cap_down_db": 4,
+    "law_budget": 0.2,
+    "law_misses": 2
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels": [
+     {
+      "db": -6,
+      "dwell_s": 10
+     },
+     {
+      "db": 0
+     }
+    ],
+    "full_level_s": 60
+   },
+   "backend": {
+    "kind": "sim"
+   }
+  }
+ }
+}

@@ -40,13 +40,49 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-hal-sim",
     "hertzforge-module-abi",
     "hertzforge-random",
+    "hertzforge-sdm",
     "hertzforge-shaker-db",
     "hertzforge-station",
+    // The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+    // choice, reviewed 2026-11-03: `hertzforge-random-laws` names no backend (its tests
+    // use the Sim as a fixture, which the Sim-leak lint already allows), and it brings
+    // the law host (the sandbox law files run in), the shared ratio-law math and the
+    // built-in MIMO laws (with the law SDK's plain types they are written against), all
+    // pure computation on the numbers they are handed. These are
+    // on LAW_CRATES, not IMPORTED_CONTROLLER_CRATES: written here, not imported.
+    "hertzforge-law-host",
+    "hertzforge-law-ratio-math",
+    "hertzforge-law-sdk",
+    "hertzforge-mimo-laws",
+    "hertzforge-random-laws",
+    // The MIMO Random run service and the reference reader behind the wire's MIMO
+    // driver (src/mimo/adapter.rs), reviewed 2026-11-03: `hertzforge-mimo-random`
+    // reaches hardware only through the station backend the control service hands it
+    // (built by `hertzforge-station`, wrapped for the operator's stop and abort) and
+    // holds the Sim only as a dev-dependency; `hertzforge-reference` reads and checks
+    // reference files (sha2 and zip, both MIT) and names no backend.
+    "hertzforge-mimo-random",
+    "hertzforge-reference",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
 /// license and hardware coupling when it was imported. A controller crate not on this
 /// list fails the lockfile check; adding one is a review, then a line here.
+///
+/// `hertzforge-mimo-random` was written here as well: the multiple-output Random
+/// run service (identification, the loop, the guards, records). Like the
+/// single-output service it reaches hardware only through the station factory
+/// and builds the Sim only as a test fixture. The control service reaches it
+/// through the wire adapter (`src/mimo/adapter.rs`).
+///
+/// `hertzforge-reference` was written here too: reference SDM builders, validation
+/// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
+/// reaches no hardware. The control service reads a setup's reference file with it, and
+/// reaches it for `mimo_random.reference.*`.
+///
+/// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
+/// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
+/// names no backend and reaches no hardware; it builds for WebAssembly.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-automation",
     "hertzforge-backendd",
@@ -66,13 +102,16 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-host",
     "hertzforge-insight",
     "hertzforge-ipc",
+    "hertzforge-mimo-random",
     "hertzforge-module-abi",
     "hertzforge-protocol",
     "hertzforge-random",
     "hertzforge-recorder",
+    "hertzforge-reference",
     "hertzforge-shaker-db",
     "hertzforge-shock-common",
     "hertzforge-shock-host",
+    "hertzforge-sdm",
     "hertzforge-sine",
     "hertzforge-srs",
     "hertzforge-station",
@@ -91,15 +130,27 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// the control laws under `laws/` and the law host's test fixtures. Reviewed
 /// for license and hardware coupling when they came in: none names a backend
 /// (the catalog's tests use the Sim), and the guests can reach nothing but the
-/// numbers the host hands them. This crate reaches none of them yet.
+/// numbers the host hands them. This crate reaches the catalog and what it needs
+/// (see REVIEWED_CONTROLLER_CRATES), never a guest crate. The
+/// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
+/// reviewed the same way: pure math on the stacks, no backend, synthetic plants
+/// in its tests.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
+    "hertzforge-law-mimo-buzz",
+    "hertzforge-law-mimo-min-drive",
+    "hertzforge-law-mimo-open-loop",
+    "hertzforge-law-mimo-pinv",
+    "hertzforge-law-mimo-shape",
+    "hertzforge-law-mimo-zero",
     "hertzforge-law-ratio",
     "hertzforge-law-ratio-math",
     "hertzforge-law-sdk",
+    "hertzforge-mimo-laws",
     "hertzforge-random-laws",
     "law-fixture-bad-manifest",
+    "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
 ];
 
@@ -310,7 +361,7 @@ fn every_package_built_from_this_repository_is_on_a_reviewed_list() {
     // This crate's allowlist is a subset of what the repository holds.
     let stray: Vec<&&str> = REVIEWED_CONTROLLER_CRATES
         .iter()
-        .filter(|n| !IMPORTED_CONTROLLER_CRATES.contains(*n))
+        .filter(|n| !IMPORTED_CONTROLLER_CRATES.contains(*n) && !LAW_CRATES.contains(*n))
         .collect();
     assert!(
         stray.is_empty(),

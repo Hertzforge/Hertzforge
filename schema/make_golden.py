@@ -431,6 +431,486 @@ TEXT_GOLDENS = {
 }
 
 
+# --- MIMO Random and the law catalog (PROTOCOL.md, "MIMO Random", "Control Laws") ---
+
+#: Eight lines of a 6.25 Hz grid and a two-channel reference on them: each PSD
+#: 0.04, the cross spectrum 0.012 + 0.016j (coherence 0.25, phase 53.13 degrees),
+#: packed as the upper triangle of each line, row by row: G00, G01, G11.
+MIMO_LINES = [100.0 + 6.25 * k for k in range(8)]
+MIMO_RE = [0.04, 0.012, 0.04] * 8
+MIMO_IM = [0.0, 0.016, 0.0] * 8
+
+MIMO_SETUP = {
+    'title': 'Two-Axis Random',
+    'channels': {
+        'controls': [{'channel': 1, 'alarm_db': [3, 3], 'abort_db': [6, 6]},
+                     {'channel': 2, 'alarm_db': [3, 3], 'abort_db': [6, 6]}],
+        'drives': [{'channel': 3, 'ceiling_vrms': 2, 'abort_vrms': None},
+                   {'channel': 4, 'ceiling_vrms': 2, 'abort_vrms': 3}],
+    },
+    'space': {'kind': 'physical'},
+    'reference': {'kind': 'inline', 'freqs_hz': MIMO_LINES, 'n': 2, 're': MIMO_RE, 'im': MIMO_IM},
+    'law': {'id': 'pinv_closed', 'params': {'convergence': 0.5}},
+    'estimation': {'fs_hz': 8192, 'n_pts': 4096, 'frames_per_loop': 8, 'window': 'hann',
+                   'overlap': 0.5, 'memory_loops': 4},
+    'identification': {'level_db': -20, 'frames': 32, 'noise_frames': 16, 'coherence_floor': 0.5,
+                       'condition_limit': 1000, 'review': True},
+    'control': {'frf': 'hold', 'level_ramp_s': 3, 'shutdown_ramp_s': 3, 'max_loops_out': 5},
+    'schedule': {'mode': 'auto', 'levels': [{'db': -6, 'dwell_s': 10}, {'db': 0}],
+                 'full_level_s': 60},
+    'backend': {'kind': 'sim'},
+}
+
+MIMO_LAW_REF = {'id': 'pinv_closed', 'name': 'pseudo-inverse, closed loop', 'version': '1.0.0',
+                'sha256': None}
+
+MIMO_SHAPE = {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None, 'shape': 'square',
+              'labels': ['Control X', 'Control Y'], 'drive_labels': ['Shaker X', 'Shaker Y'],
+              'bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
+
+MIMO_GRID = {'fs_hz': 8192, 'n_pts': 4096, 'df_hz': 2, 'lines': 8, 'loop_s': 2.25, 'actual': False}
+
+
+def _mimo_state(**over) -> dict:
+    state = {
+        'run_id': 'm-0003', 'state': 'configured', 'phase': 'idle', 'title': 'Two-Axis Random',
+        'source': 'SIM', 'station': {'kind': 'sim', 'class': 'sim', 'devices': []},
+        'grid': MIMO_GRID, 'clock': None, 'shape': MIMO_SHAPE, 'mode': 'auto',
+        'levels_db': [-6, 0], 'level_db': None, 'elapsed_s': None, 'at_level_s': None,
+        'remaining_at_level_s': None, 'loop': 0, 'alarm': False, 'control_error_db': [],
+        'gates': None, 'caps': [], 'drive_rms_v': [], 'law': MIMO_LAW_REF, 'faults': [],
+        'override': None, 'overrides': [], 'prediction': None, 'excluded': [], 'end': None,
+    }
+    state.update(over)
+    return state
+
+
+def _mimo_validation(errors=(), law_admitted=True) -> dict:
+    return {
+        'ok': not errors, 'errors': list(errors), 'warnings': [],
+        'shape': {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None,
+                  'shape': 'square'},
+        'transforms': {'response': None, 'drive': None},
+        'reference': {'source': 'inline', 'lines': 8, 'n': 2, 'band_hz': [100, 143.75],
+                      'min_eigenvalue_ratio': 0, 'rank_min': 2, 'rank_max': 2,
+                      'repaired_lines': 0},
+        'feasibility': [
+            {'channel': ch, 'ceiling_vrms': 2, 'verdict': 'not_evaluated', 'predicted_vrms': None,
+             'message': 'The drive this test needs is predicted after system identification, '
+                        'before the loop engages.'} for ch in (3, 4)],
+        'law': {**MIMO_LAW_REF, 'admitted': law_admitted},
+    }
+
+
+MIMO_GATES = {'coherence_min': 0.962, 'coherence_floor': 0.5, 'condition_max': 12.5,
+              'condition_limit': 1000, 'passed': True, 'coherence': [0.962, 0.981]}
+
+MIMO_RUNNING = _mimo_state(
+    state='running', phase='engaged', level_db=-6, elapsed_s=31.5, at_level_s=4.5,
+    remaining_at_level_s=5.5, loop=14, control_error_db=[0.42, -0.31], gates=MIMO_GATES,
+    caps=[1, 0.875], drive_rms_v=[0.412, 0.388],
+    prediction={'iteration': 1, 'law': MIMO_LAW_REF, 'drive_rms_v': [0.82, 0.77],
+                'ceiling_vrms': [2, 2], 'error_db': [0.5, -0.5], 'drives_pass': True,
+                'has_achievable': False, 'unreachable_db': [0, 0], 'drive_accel': [1.25, 1.1],
+                'accel_control': [0, 1],
+                'feasibility': [{'verdict': 'pass', 'message': ''},
+                                {'verdict': 'not_evaluated', 'message': 'no shaker record'}]})
+
+LAW_PINV_CLOSED = {'id': 'pinv_closed',
+     'world': 'mimo',
+     'builtin': True,
+     'name': 'pseudo-inverse, closed loop',
+     'version': '1.0.0',
+     'author': 'Hertzforge',
+     'summary': 'Starts from the regularized pseudo-inverse drive, then each loop corrects a '
+                "lower-triangular factor of the reference from the measured error (Smallwood's "
+                'coupling-matrix correction), autospectra first in channel order, each factor '
+                'diagonal and each drive PSD held to a per-loop limit, the sources held to the '
+                "plant's rank. Every drive is positive semi-definite by construction.",
+     'sha256': None,
+     'check': {'status': 'built_in',
+               'date': None,
+               'tool_version': None,
+               'cases': [],
+               'hardware': True,
+               'message': 'Built in: cleared for hardware.'},
+     'params': [{'key': 'regularization',
+                 'label': 'Regularization',
+                 'help': 'How the inverse of the plant treats weak directions. Truncated drops '
+                         'singular values below the amount times the largest; Tikhonov damps every '
+                         'one with the amount times the largest as the damping; none inverts every '
+                         'singular value above the numerical floor.',
+                 'kind': 'choice',
+                 'options': ['truncated', 'tikhonov', 'none'],
+                 'default': 'truncated'},
+                {'key': 'regularization_amount',
+                 'label': 'Regularization amount',
+                 'help': 'Relative to the largest singular value on each line. For truncation, '
+                         "1e-3 keeps the inverse's condition number under 1,000. Ignored with no "
+                         'regularization.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0,
+                 'max': 1,
+                 'step': 0.0001,
+                 'default': 0.001},
+                {'key': 'convergence',
+                 'label': 'Convergence factor',
+                 'help': "The fraction of each loop's correction applied. 1 applies it whole; "
+                         'smaller values converge more slowly and average estimation noise.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0.1,
+                 'max': 1,
+                 'step': 0.05,
+                 'default': 0.5},
+                {'key': 'cap_up_db',
+                 'label': 'Largest rise per loop',
+                 'help': "The most any drive's PSD, or any factor diagonal's square, may rise in "
+                         "one loop. Never looser than the controller's own cap.",
+                 'kind': 'number',
+                 'unit': 'dB',
+                 'min': 0.1,
+                 'max': 3.5,
+                 'step': 0.1,
+                 'default': 3.5},
+                {'key': 'cap_down_db',
+                 'label': 'Largest fall per loop',
+                 'help': "The most any drive's PSD, or any factor diagonal's square, may fall in "
+                         "one loop. Never looser than the controller's own cap.",
+                 'kind': 'number',
+                 'unit': 'dB',
+                 'min': 0.1,
+                 'max': 6,
+                 'step': 0.1,
+                 'default': 6},
+                {'key': 'rank_tolerance',
+                 'label': 'Rank tolerance',
+                 'help': 'Singular values of the plant above this fraction of the largest count '
+                         'toward its rank. The reference factor keeps no more independent sources '
+                         'than the rank.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0,
+                 'max': 0.1,
+                 'step': 1e-06,
+                 'default': 1e-06},
+                {'key': 'weighting',
+                 'label': 'Error weighting',
+                 'help': "How the least-squares inverse weighs each control's error when there are "
+                         'more controls than drives: equally, or relative to its reference PSD so '
+                         'a quiet control counts as much as a loud one. No effect on a square '
+                         'plant.',
+                 'kind': 'choice',
+                 'options': ['none', 'reference'],
+                 'default': 'none'}],
+     'diagnostics': [{'key': 'condition',
+                      'label': 'Condition number',
+                      'unit': '',
+                      'help': 'Largest over smallest singular value of the plant on each line '
+                              '(weighted when the law weights). 0 out of band; 1e300 on a singular '
+                              'line.',
+                      'layout': 'per_line'},
+                     {'key': 'kept',
+                      'label': 'Singular values kept',
+                      'unit': '',
+                      'help': 'How many singular values of the plant the inverse used on each '
+                              'line.',
+                      'layout': 'per_line'},
+                     {'key': 'correction_db',
+                      'label': 'Largest drive change',
+                      'unit': 'dB',
+                      'help': "The largest change of any drive's PSD on any line from the law's "
+                              'previous drive. 0 at the seed.',
+                      'layout': 'scalar'},
+                     {'key': 'clamped',
+                      'label': 'Clamped factor diagonals',
+                      'unit': '',
+                      'help': 'Diagonal elements of the reference factor whose correction this '
+                              'loop was held to the per-loop limit, over all lines.',
+                      'layout': 'scalar'}],
+     'shapes': ['square', 'more_controls_than_drives', 'fewer_controls_than_drives'],
+     'needs': []}
+
+#: A law file imported from the operator's folder, not yet checked.
+LAW_IMPORTED = {
+    'id': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+    'world': 'mimo', 'builtin': False, 'name': 'notch-aware pseudo-inverse', 'version': '0.2.0',
+    'author': 'A. Contributor', 'summary': 'A pseudo-inverse law that holds notched lines.',
+    'sha256': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+    'check': {'status': 'unchecked', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': False,
+              'message': 'This control law has not been checked on the simulator; check it '
+                         'before it drives hardware.'},
+    'params': [{'key': 'gain', 'label': 'Loop gain', 'help': 'The fraction of each correction '
+                'applied.', 'kind': 'number', 'unit': '', 'min': 0.1, 'max': 1, 'step': 0.05,
+                'default': 0.5}],
+    'diagnostics': [{'key': 'held', 'label': 'Held lines', 'unit': '',
+                     'help': 'Lines held this loop.', 'layout': 'scalar'}],
+    'shapes': ['square', 'more_controls_than_drives'],
+    'needs': ['last_drive'],
+}
+
+_TRIP_CAP = ('The change cap held drive 4 back on 721 lines for 5 loops in a row: the control '
+             'law asked for more change than the core allows.')
+
+
+def _check_case(name, plant, requirement, outcome, conv, at_full, final, line, settle, *,
+                trip=None, capped=0, calls=3, ms=7.4, gate=True):
+    """One case of a `laws.check` report, its `detail` in the controller's words."""
+    gate_words = '' if gate else '; identification gate overridden for the check'
+    detail = (f'{outcome}; {calls} calls, slowest {ms} ms of 2125 ms; 0 drive-lines repaired, '
+              f'{capped} capped{gate_words}')
+    return {
+        'name': name, 'plant': plant, 'passed': True, 'detail': detail,
+        'loops_to_converge': conv, 'loops_at_full': at_full, 'final_error_db': final,
+        'worst_line_db': line, 'settle_db': settle, 'requirement': requirement, 'trip': trip,
+        'misses': 0, 'rejected': 0, 'repaired_lines': 0, 'capped_lines': capped, 'calls': calls,
+        'worst_call_ms': ms, 'budget_ms': 2125, 'gate_passed': gate,
+    }
+
+
+def _within(final, line):
+    return (f'within +/- 1 dB 1 loop after full level (worst control {final} dB, worst line '
+            f'{line} dB)')
+
+
+#: `laws.check` on the imported law: the report (the open-loop law file's check, its
+#: figures rounded; on the ill-conditioned plant the core's own judgement ended the run,
+#: which that case allows) and one progress event. The Rust golden test rebuilds both
+#: from the same figures through the controller's own serializers.
+LAW_CHECK_REPORT = {'passed': True, 'recorded': True, 'tool_version': 'mimo-check 1', 'cases': [
+    _check_case('modal 4 x 4', 'modal-4x4', 'converge', _within('0.46', '4.26'), 1, 1, 0.46,
+                4.26, None),
+    _check_case('modal 12 x 6', 'modal-12x6', 'settle',
+                'settled after 20 loops at full level (worst control 1.98 dB, last changes under '
+                '0.01 dB)', None, 20, 1.98, 11.06, 0.01, calls=22, ms=32.9),
+    _check_case('ill-conditioned 12 x 6', 'modal-12x6-ill', 'survive',
+                f'every call answered; the core ended the run by its own judgement ({_TRIP_CAP})',
+                None, 2, 6.32, 10.55, None, trip=_TRIP_CAP, capped=7210, calls=5, ms=32.3,
+                gate=False),
+    _check_case('rigid plate 12 x 6', 'rigid-plate-12x6', 'settle', _within('0.62', '2.79'), 1, 1,
+                0.62, 2.79, None, ms=5.7),
+    _check_case('measurement noise 4 x 4', 'modal-4x4', 'converge', _within('0.77', '5.29'), 1, 1,
+                0.77, 5.29, None),
+    _check_case('level ladder 12 x 6', 'modal-12x6', 'settle', _within('0.36', '4.02'), 1, 1,
+                0.36, 4.02, None, calls=6, ms=31.7),
+]}
+LAW_CHECK_EVENT = {'law_id': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+                   'index': 2, 'of': 6, 'case': 'ill-conditioned 12 x 6', 'state': 'done',
+                   'result': LAW_CHECK_REPORT['cases'][2]}
+LAW_CHECKED = {**LAW_IMPORTED, 'check': {
+    'status': 'passed', 'date': '2026-11-03T15:42:07Z', 'tool_version': 'mimo-check 1',
+    'cases': [{'name': c['name'], 'passed': c['passed'], 'detail': c['detail']}
+              for c in LAW_CHECK_REPORT['cases']],
+    'hardware': True,
+    'message': 'Checked against the simulated test articles and passed: cleared for hardware.',
+}}
+
+MIMO_TEXT_GOLDENS = {
+    'request_mimo_random_setup': {
+        'type': 'request', 'id': 31, 'method': 'mimo_random.setup',
+        'params': {'setup': MIMO_SETUP},
+    },
+    'response_mimo_random_setup': {
+        'type': 'response', 'id': 31,
+        'result': {'state': _mimo_state(), 'validation': _mimo_validation()},
+    },
+    'response_error_setup_invalid': {
+        'type': 'response', 'id': 32,
+        'error': {'code': 'bad_request', 'reason': 'setup_invalid',
+                  'message': 'The MIMO setup has 1 error; correct it and send it again.',
+                  'detail': _mimo_validation(errors=[
+                      {'reason': 'control_unknown_channel', 'channel': 9,
+                       'message': 'Channel 9 is not an enabled control row of the channel '
+                                  'table; set its role to control, or remove it from the '
+                                  'setup.'}])},
+    },
+    'event_mimo_random_status': {
+        'type': 'event', 'topic': 'mimo_random.status', 'seq': 77, 'data': MIMO_RUNNING,
+    },
+    'request_mimo_random_override': {
+        'type': 'request', 'id': 33, 'method': 'mimo_random.override',
+        'params': {'ack': 'Coherence is low below 30 Hz where the fixture is stiff; accepted.'},
+    },
+    # A prediction over a drive ceiling holds the run until it too is acknowledged.
+    'request_mimo_random_override_prediction': {
+        'type': 'request', 'id': 39, 'method': 'mimo_random.override',
+        'params': {'ack': 'Drive 2 is predicted 0.4 dB over its ceiling; the ceiling holds it '
+                          'and the error is accepted for this run.',
+                   'reason': 'prediction_exceeded'},
+    },
+    # Virtual control with a tolerance band per degree of freedom, and every
+    # optional setup field the run service takes.
+    'request_mimo_random_setup_virtual': {
+        'type': 'request', 'id': 40, 'method': 'mimo_random.setup',
+        'params': {'setup': {
+            **MIMO_SETUP,
+            'channels': {
+                'controls': [{'channel': 1}, {'channel': 2}],
+                'drives': [{'channel': 3, 'ceiling_vrms': 2, 'abort_vrms': None, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5},
+                           {'channel': 4, 'ceiling_vrms': 2, 'abort_vrms': 3, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5}],
+                'limits': [{'channel': 5, 'ceiling': 0.04, 'abort_margin_db': 3}],
+                'article_mass_lb': 40,
+            },
+            'space': {'kind': 'virtual', 'dofs': ['Sum', 'Difference'],
+                      'response_transform': {'rows': 2, 'cols': 2, 'values': [0.5, 0.5, 1, -1]},
+                      'drive_transform': None,
+                      'dof_bands': [{'alarm_db': [2, 2], 'abort_db': [4, 4]},
+                                    {'alarm_db': [3, 3], 'abort_db': [6, 6]}]},
+            'control': {'frf': 'update', 'frf_blend': 0.25, 'level_ramp_s': 3,
+                        'shutdown_ramp_s': 3, 'max_loops_out': 5, 'cap_up_db': 2,
+                        'cap_down_db': 4, 'law_budget': 0.2, 'law_misses': 2},
+        }},
+    },
+    # A control with low coherence taken out of control at the gate, kept as a monitor.
+    'request_mimo_random_exclude': {
+        'type': 'request', 'id': 42, 'method': 'mimo_random.exclude',
+        'params': {'controls': [1],
+                   'ack': 'Control Y sits on a fixture node; kept as a monitor for this run.'},
+    },
+    # The achievable reference on the Predict page, as a block of the grid.
+    'request_mimo_random_subscribe_pred_sdm': {
+        'type': 'request', 'id': 41, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 2, 'plots': [
+            {'id': 'ach', 'quantity': 'pred_sdm', 'block': [0, 1], 'points': 256},
+            {'id': 'acc', 'quantity': 'pred_drive_accel', 'diagonal': True},
+        ]},
+    },
+    'response_mimo_random_report': {
+        'type': 'response', 'id': 34,
+        'result': {'report': {
+            'run_id': 'm-0003', 'title': 'Two-Axis Random', 'source': 'SIM', 'grid': MIMO_GRID,
+            'shape': MIMO_SHAPE, 'law': MIMO_LAW_REF, 'loops': 52,
+            'controls': [
+                {'label': 'Control X', 'rms': 0.5821, 'reference_rms': 0.5657, 'error_db': 0.25},
+                {'label': 'Control Y', 'rms': 0.5528, 'reference_rms': 0.5657, 'error_db': -0.2},
+            ],
+            'drives': [
+                {'channel': 3, 'label': 'Shaker X', 'rms_v': 0.8231, 'ceiling_vrms': 2,
+                 'min_cap': 0.875},
+                {'channel': 4, 'label': 'Shaker Y', 'rms_v': 0.7764, 'ceiling_vrms': 2,
+                 'min_cap': 1},
+            ],
+            'gates': MIMO_GATES, 'override': None, 'overrides': [],
+            'end': {'outcome': 'completed', 'message': 'The schedule finished.', 'at_s': 102.5,
+                    'level_db': 0, 'trip': None},
+        }},
+    },
+    'request_laws_list': {
+        'type': 'request', 'id': 35, 'method': 'laws.list', 'params': {'world': 'mimo'},
+    },
+    'response_laws_list': {
+        'type': 'response', 'id': 35,
+        'result': {'laws': [LAW_PINV_CLOSED], 'problems': [
+            {'file': '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.wasm',
+             'reason': 'its contents have the SHA-256 '
+                       'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210, not '
+                       'the one it is named by'}]},
+    },
+    'request_laws_import': {
+        'type': 'request', 'id': 36, 'method': 'laws.import',
+        'params': {'path': '/home/operator/laws/notch_pinv.wasm'},
+    },
+    'response_laws_import': {
+        'type': 'response', 'id': 36, 'result': {'law': LAW_IMPORTED},
+    },
+    'request_laws_check': {
+        'type': 'request', 'id': 39, 'method': 'laws.check',
+        'params': {'path': '/home/operator/laws/notch_pinv.wasm', 'params': {'gain': 0.5}},
+    },
+    'response_laws_check': {
+        'type': 'response', 'id': 39,
+        'result': {'law': LAW_CHECKED, 'report': LAW_CHECK_REPORT},
+    },
+    'event_laws_check': {
+        'type': 'event', 'topic': 'laws.check', 'seq': 412, 'data': LAW_CHECK_EVENT,
+    },
+    'request_mimo_random_identification_load': {
+        'type': 'request', 'id': 38, 'method': 'mimo_random.identification.load',
+        'params': {'path': '/home/operator/hertzforge/identification/two_axis'},
+    },
+    'response_mimo_random_identification_load': {
+        'type': 'response', 'id': 38,
+        'result': {'identification': {
+            'path': '/home/operator/hertzforge/identification/two_axis',
+            'setup_hash': '9f3c2a7e5b1d0c84', 'frames': 64, 'level_db': -20.3,
+            'drive_vrms': [0.0512, 0.0498]}},
+    },
+    # The error heatmap's two modes: the dB error and the coherence error.
+    'request_mimo_random_subscribe_coh_error': {
+        'type': 'request', 'id': 37, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 5, 'plots': [
+            {'id': 'heat', 'quantity': 'error_db', 'rows': 'all', 'points': 512},
+            {'id': 'coh_heat', 'quantity': 'coh_error', 'rows': 'all', 'points': 512},
+        ]},
+    },
+}
+
+
+def _mimo_data_build() -> tuple[dict, dict]:
+    """`mimo_random.data` for a subscription of a 2 by 2 block of the spectral matrix
+    (packed, three lines), one coherence pair (four lines) and the error heatmap (two
+    rows by four columns, f32): what the service's builders give for that run (the
+    Rust golden test builds it so)."""
+    arrays: dict = {}
+
+    def push(dtype, shape, values):
+        ident = f'a{len(arrays)}'
+        arrays[ident] = (dtype, shape, values)
+        return {'$array': ident}
+
+    freq = {'label': 'Frequency', 'unit': 'Hz', 'scale': 'log'}
+    sdm_lines = MIMO_LINES[:3]
+    sdm = {'view': 'sdm', 'title': 'Spectral Matrix', 'channels': ['Control X', 'Control Y'],
+           'packing': 'upper', 'unit': 'g²/Hz', 'x': freq,
+           'x_values': push('f64', [3], sdm_lines)}
+    sdm['measured'] = {'re': push('f64', [3, 3], MIMO_DATA_RE), 'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    sdm['reference'] = {'re': push('f64', [3, 3], MIMO_DATA_REF_RE),
+                        'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    coh_lines = MIMO_LINES[:4]
+    series = []
+    for name, role, y in (('Measured', 'measured', MIMO_DATA_COH), ('Reference', 'reference', [0.25] * 4)):
+        series.append({'name': name, 'role': role, 'x': push('f64', [4], coh_lines),
+                       'y': push('f64', [4], y)})
+    coh = {'view': 'spectrum', 'title': 'Coherence: Control X, Control Y', 'x': freq,
+           'y': {'label': 'Coherence', 'unit': None, 'scale': 'linear'}, 'series': series,
+           'link': 'frequency'}
+    heat = {'view': 'heatmap', 'title': 'Control Error',
+            'rows': {'label': 'Control', 'ticks': ['Control X', 'Control Y']},
+            'x': freq, 'x_values': push('f64', [4], coh_lines),
+            'values': push('f32', [2, 4], MIMO_DATA_HEAT),
+            'value': {'label': 'Error', 'unit': 'dB'},
+            'row_bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
+    labels = ['Control X', 'Control Y']
+    message = {
+        'type': 'event', 'topic': 'mimo_random.data', 'seq': 120,
+        'data': {
+            'run_id': 'm-0003', 'source': 'SIM', 'state': 'running', 'phase': 'full_level',
+            'loop': 30, 'elapsed_s': 70.5, 'level_db': 0,
+            'plots': [
+                {'id': 'grid', 'quantity': 'sdm', 'selector': {'block': [0, 1]}, 'labels': labels,
+                 'views': [sdm]},
+                {'id': 'coh01', 'quantity': 'coh', 'selector': {'pair': [0, 1]}, 'labels': labels,
+                 'views': [coh]},
+                {'id': 'heat', 'quantity': 'error_db', 'selector': {'rows': 'all'},
+                 'labels': labels, 'views': [heat]},
+            ],
+        },
+    }
+    return message, arrays
+
+
+#: The block's packed lines (G00, G01, G11 per line), every value exact in binary.
+MIMO_DATA_RE = [0.0390625, 0.01171875, 0.041015625] * 3
+MIMO_DATA_IM = [0.0, 0.015625, 0.0] * 3
+MIMO_DATA_REF_RE = [0.0390625, 0.01171875, 0.0390625] * 3
+MIMO_DATA_COH = [0.25, 0.2421875, 0.25, 0.234375]
+MIMO_DATA_HEAT = [0.5, -0.25, 0.125, 0.0, -0.5, 0.25, 0.375, -0.125]
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -483,6 +963,9 @@ def main() -> None:
 
     # one connection's subscribed data: a control, a response and a time plot
     write('event_random_data', random_data(), random_data_arrays())
+
+    # one connection's MIMO data: a packed matrix block, a coherence pair, a heatmap
+    write('event_mimo_random_data', *_mimo_data_build())
 
     # a waterfall of two records; f32 values with u32 offsets. No NaN gap:
     # the expected JSON must parse in JavaScript, which has no NaN literal
@@ -543,7 +1026,7 @@ def main() -> None:
         {'type': 'response', 'id': 8,
          'error': {'code': 'not_found', 'message': "No operation named 'random.nope'; catalog.list names the ones that exist."}}) + '\n')
 
-    for name, message in TEXT_GOLDENS.items():
+    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

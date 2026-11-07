@@ -1,0 +1,24 @@
+{
+ "type": "request",
+ "id": 41,
+ "method": "mimo_random.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ach",
+    "quantity": "pred_sdm",
+    "block": [
+     0,
+     1
+    ],
+    "points": 256
+   },
+   {
+    "id": "acc",
+    "quantity": "pred_drive_accel",
+    "diagonal": true
+   }
+  ]
+ }
+}

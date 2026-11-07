@@ -13,9 +13,9 @@ use std::time::Duration;
 pub enum LawError {
     /// The bytes are not a WebAssembly component this host can compile.
     Compile(String),
-    /// The component does not implement the `random-single` world of
-    /// `hertzforge:control-law@0.1.0`, or imports something the host does
-    /// not provide.
+    /// The component does not implement the world asked for (`random-single`
+    /// or `random-mimo` of `hertzforge:control-law@0.1.0`), or imports
+    /// something the host does not provide.
     NotALaw(String),
     /// The law's manifest breaks a rule (see the crate documentation).
     ManifestInvalid(String),
@@ -58,6 +58,18 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// A multiple-output law returned a result that breaks the output rules:
+    /// a drive of the wrong dimensions, a non-finite value, a matrix that is
+    /// not Hermitian, a drive outside the band, or a diagnostic that is
+    /// undeclared, repeated, of the wrong layout or not finite. Whether the
+    /// drive is positive semi-definite is not checked here: the controller
+    /// repairs or refuses it.
+    BadMimoOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: MimoOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -83,6 +95,26 @@ pub enum OutputRule {
     Diagnostics,
 }
 
+/// The output rules a multiple-output law's result is checked against, in the
+/// order they are checked ([`LawError::BadMimoOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MimoOutputRule {
+    /// The drive has one packed `drives` by `drives` matrix per line of the
+    /// grid.
+    Dimensions,
+    /// Every drive value is a finite number.
+    NonFinite,
+    /// Every line is Hermitian: `||G - G^H|| / ||G||` (Frobenius) at most
+    /// [`crate::mimo::HERMITIAN_TOLERANCE`]. Packed, the only way to break
+    /// this is an imaginary part on the diagonal.
+    NotHermitian,
+    /// Every line outside the band is zero.
+    OutOfBand,
+    /// Every diagnostic is declared, reported once, in its declared layout
+    /// and length, and finite.
+    Diagnostics,
+}
+
 impl LawError {
     /// Whether this error leaves the instance unusable.
     pub fn poisons(&self) -> bool {
@@ -99,7 +131,7 @@ impl fmt::Display for LawError {
             LawError::Compile(s) => write!(f, "the law file did not compile: {s}"),
             LawError::NotALaw(s) => write!(
                 f,
-                "the file is not a single-output Random law for this host: {s}"
+                "the file is not a control law of the kind this host was asked to load: {s}"
             ),
             LawError::ManifestInvalid(s) => write!(f, "the law's manifest is invalid: {s}"),
             LawError::ParamInvalid { key, reason } => {
@@ -122,7 +154,7 @@ impl fmt::Display for LawError {
                  {limit_bytes} bytes"
             ),
             LawError::Law(s) => write!(f, "the law returned an error: {s}"),
-            LawError::BadOutput { detail, .. } => {
+            LawError::BadOutput { detail, .. } | LawError::BadMimoOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(
