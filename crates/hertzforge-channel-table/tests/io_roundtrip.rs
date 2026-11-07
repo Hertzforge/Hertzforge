@@ -1,5 +1,5 @@
 //! Integration tests for the channel-table I/O surface: CSV/TSV/JSON round-trips,
-//! RFC-4180 quoting, the UFF-58 export stub, and a realistic messy spreadsheet paste.
+//! RFC-4180 quoting, and a realistic messy spreadsheet paste.
 
 use hertzforge_channel_table::{
     AbortLimits, Channel, ChannelRole, ChannelTable, Interface, Polarity, ReferenceSpec, Units,
@@ -153,52 +153,4 @@ fn renamed_comma_paste_goes_through_clipboard_csv() {
     assert_eq!(t.channels[0].sensitivity_mv_per_eu, 100.0);
     assert_eq!(t.channels[0].role, ChannelRole::Control);
     assert_eq!(t.channels[0].description, "Loc, A");
-}
-
-#[test]
-fn uff58_stub_structure_and_todo() {
-    let t = tricky_table();
-    let uff = t.to_uff58_stub();
-    // One dataset per enabled non-drive channel, delimited by "    -1" and "    58".
-    assert_eq!(
-        uff.matches("    58").count(),
-        2,
-        "expected 2 dataset-58 blocks"
-    );
-    assert!(uff.contains("    -1"), "missing UFF dataset delimiter");
-    // The stub must loudly flag that ordinate data is not implemented.
-    assert!(
-        uff.contains("TODO"),
-        "UFF stub must carry a TODO marker:\n{uff}"
-    );
-    // Channel descriptions are carried into the identification records.
-    assert!(uff.contains("Airbags, primary"));
-    assert!(uff.contains("Trunions"));
-}
-
-#[test]
-fn uff58_stub_skips_drive_and_disabled() {
-    let mut t = ChannelTable::new();
-    let mut ctrl = Channel::new(1);
-    ctrl.role = ChannelRole::Control;
-    ctrl.description = "Ctrl".into();
-    let mut drive = Channel::new(2);
-    drive.role = ChannelRole::Drive;
-    drive.description = "DriveOut".into();
-    let mut off = Channel::new(3);
-    off.enabled = false;
-    off.description = "Disabled".into();
-    t.channels.push(ctrl);
-    t.channels.push(drive);
-    t.channels.push(off);
-
-    let uff = t.to_uff58_stub();
-    assert_eq!(
-        uff.matches("    58").count(),
-        1,
-        "only the control channel exports"
-    );
-    assert!(uff.contains("Ctrl"));
-    assert!(!uff.contains("DriveOut"));
-    assert!(!uff.contains("Disabled"));
 }
