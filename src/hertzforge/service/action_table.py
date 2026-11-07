@@ -270,9 +270,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
-        if where == 'solid' and part:
-            # the solid picked in the tree is the one the row acts on
-            for held in ('solid', 'solids'):
+        if where in ('mate', 'solid') and part:
+            # the one picked in the tree is the one the row acts on
+            for held in (where, f'{where}s'):
                 if any(p.name == held for p in op.params):
                     fill[held] = str(part['id'])
         more: dict[str, Any] = {'part': True} if home else {}

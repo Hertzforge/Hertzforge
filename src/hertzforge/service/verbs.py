@@ -98,7 +98,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'edit_solid': 'Edit Solid', 'move_solids': 'Move Part', 'copy_solids': 'Copy Solids',
     'reorder_solids': 'Reorder', 'combine_solids': 'Combine', 'separate_solids': 'Take Apart',
     'delete_solids': 'Delete Solids', 'pattern_solids': 'Pattern', 'mesh_solids': 'Mesh',
-    'mate_surfaces': 'Mate', 'edit_mated_surfaces': 'Edit Mates',
+    'mate_surfaces': 'Mate', 'edit_mated_surfaces': 'Edit Mates', 'edit_mate_sides': 'Edit Sides',
     'delete_mated_surfaces': 'Delete Mates', 'set_view': 'Set View', 'tone_readout': 'Tones',
     'transmissibility': 'Transmissibility', 'confidence_band': 'Confidence',
     'partial_coherence': 'Partial Coherence', 'rigid_body_residual': 'Rigid Residual',
@@ -146,6 +146,7 @@ PARTS = {f'project.{name}': part for name, part in {
     'merge_element_groups': 'group',
     'delete_element_groups': 'group',
     'edit_mated_surfaces': 'mate',
+    'edit_mate_sides': 'mate',
     'delete_mated_surfaces': 'mate',
 }.items()}
 

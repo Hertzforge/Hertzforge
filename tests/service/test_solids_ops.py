@@ -257,6 +257,19 @@ def test_mated_surfaces_are_found_kept_edited_and_deleted(project, validate):
     assert rows(reading)['Saved']['value'] == 'seat (normal rigid, shear free)'
     refused(project, 'project.edit_mated_surfaces', 'holds nothing', mate=1, normal='free',
             shear='free')
+    first = project['Part'].mates[0]
+    reading, view = run(project, 'project.edit_mate_sides', mate=1)
+    held = view['pick']
+    assert held['ids'][:len(first.nodes_a)] != [] and held['count'] == 1
+    on = len(held['ids']) - held['off']
+    assert on == len(first.nodes_a), 'the side held is what shows as in'
+    node = held['ids'][0]
+    reading, view = run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
+    assert node not in project['Part'].mates[0].nodes_a
+    assert view['pick']['off'] == held['off'] + 1
+    run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
+    assert node in project['Part'].mates[0].nodes_a, 'a second click puts it back'
+    refused(project, 'project.edit_mate_sides', 'not 9', mate=9)
     refused(project, 'project.mate_surfaces', 'not 9', groups='9')
     refused(project, 'project.delete_mated_surfaces', 'not 4', mates='4')
     reading, mates = run(project, 'project.delete_mated_surfaces', mates='1')

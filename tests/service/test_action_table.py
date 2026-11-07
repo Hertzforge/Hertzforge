@@ -259,6 +259,21 @@ def test_adding_a_geometry_to_shape_sets_is_not_offered(plate):
         project.remove('Shapes B')
 
 
+def test_a_mate_picked_in_the_tree_fills_the_rows_that_act_on_it(plate, validate):
+    from hertzforge import mesh
+
+    project = plate.project
+    project.add('Part', mesh.assemble(
+        mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'base', unit='m'),
+        mesh.block((0, 0, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'lid', unit='m'),
+        apart=True))
+    found = project.mate_surfaces('Part')
+    picked = {'name': 'Part', 'kind': 'mate', 'id': found[0]}
+    (current, *_rest) = table(plate, 'Part', part=picked, validate=validate)
+    assert row(current, 'Edit Sides')['fill']['mate'] == str(found[0])
+    assert row(current, 'Delete Mates')['fill']['mates'] == str(found[0])
+
+
 def test_a_lone_shape_sets_views_are_a_verb_each(plate, validate):
     project = plate.project
     project.add('Shapes', _shapes())
