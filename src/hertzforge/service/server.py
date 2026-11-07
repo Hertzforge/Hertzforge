@@ -144,12 +144,16 @@ def _preview_copy(project: Any, name: str) -> Any:
     return scratch
 
 
+#: a reading's labels as a preview says them: nothing has happened yet
+AS_PREVIEW = {'Added': 'Would add', 'Changed': 'Would change'}
+
+
 def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, Any]]:
     """A preview's views in the display units, saying what would be added."""
     for view in views:
         for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
-            if row.get('label') == 'Added':
-                row['label'] = 'Would add'
+            if row.get('label') in AS_PREVIEW:
+                row['label'] = AS_PREVIEW[row['label']]
     display_units.convert(views, units)
     return views
 
@@ -345,16 +349,32 @@ class Connection:
                 verbs={name: projects.verbs_of(project, name) for name in project})
             if op.id == 'project.save_as' and values['units'] == 'display':
                 values['units'] = self.units
+            if any(param.length for param in op.params):
+                values = display_units.typed_lengths(op.params, values, self.units,
+                                                     project[values['geometry']])
             if params.get('preview') and op.previews:
                 scratch = _preview_copy(project, values['geometry'])
-                return {'views': _said_as_preview(
-                    await self.service.in_worker(op.run, scratch, values), self.units)}
+                return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
             before = list(project)
-            views = await self.service.in_worker(op.run, project, values)
-            if op.edits or list(project) != before:
+            views = await self._ran(op, project, values)
+            if (op.edits and (op.edits_when is None or op.edits_when(values))
+                    or list(project) != before):
                 state.modified = True
             display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}
+
+    async def _ran(self, op: Operation, project: Any, values: dict[str, Any]) -> list[dict]:
+        """The operation's views, with what it says of lengths in words in the display system."""
+        try:
+            views = await self.service.in_worker(op.run, project, values)
+        except ProtocolError as error:
+            if op.says_lengths:
+                error.message = display_units.lengths_in_words(error.message, self.units)
+                error.args = (error.message,)
+            raise
+        if op.says_lengths:
+            display_units.say_lengths(views, self.units)
+        return views
 
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
@@ -414,7 +434,8 @@ class Connection:
                 raise bad_request(f'units.system "name" is one of '
                                   f'{", ".join(display_units.systems())}')
             self.units = name
-        return {'name': self.units, 'systems': display_units.systems()}
+        return {'name': self.units, 'systems': display_units.systems(),
+                'length': display_units.length_of(self.units)}
 
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `fit.*` request: a step of the mode fit on this
@@ -428,7 +449,7 @@ class Connection:
                 raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'fit.start':
-                _only(params, ('frf', 'shapes', 'coherence'), method)
+                _only(params, ('frf', 'shapes', 'records', 'coherence'), method)
                 self.fit = await call(fitting.start, project, params)
                 return {'fit': await call(self.fit_state, self.fit)}
             if method == 'fit.end':

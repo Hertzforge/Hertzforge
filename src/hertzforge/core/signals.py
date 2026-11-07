@@ -643,7 +643,9 @@ def sine_history(specification: SineSweepSpecification, *,
     if tone is not None and tone not in names:
         raise ValueError(f'no tone {tone!r}; the tones are {", ".join(names)}')
     chosen = specification.tones[0 if tone is None else names.index(tone)]
-    if specification.ordinate_dim == UNKNOWN:
+    # a sine specification keeps its quantity named while its units are
+    # undeclared, so it is the unit that says (`SineSweepSpecification`)
+    if specification.ordinate_unit is None or specification.ordinate_dim == UNKNOWN:
         raise ValueError('the specification does not say what its tones '
                          'are; declare its units first')
     if not sample_rate > 0.0:

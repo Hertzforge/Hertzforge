@@ -16,6 +16,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .parsing import parse_numbers
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -67,9 +68,10 @@ def _flat(name: str, role: Any, x0: float, x1: float, y: float) -> dict:
 
 
 def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
+    """A curve on log axes: the points finite and above zero."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    keep = np.isfinite(y) & (y > 0) & (x > 0)
+    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
     return v.series(name, role, x[keep], y[keep])
 
 
@@ -576,8 +578,8 @@ PEAK = Param('peak', 'Peak, 0 for the record\'s own', 'number', default=0.0, uni
              step=1.0)
 DURATION = Param('duration', 'Duration, 0 for the record\'s own', 'number', default=0.0,
                  min=0.0, unit='s', step=0.0005)
-EDGE = Param('edge', 'Edge, 0 for a twentieth of the duration', 'number', default=0.0, min=0.0,
-             unit='s', step=0.0001)
+EDGE_WORDS = 'Edge, 0 for a twentieth of the duration'
+EDGE = Param('edge', EDGE_WORDS, 'number', default=0.0, min=0.0, unit='s', step=0.0001)
 BAND = Param('band', 'Band', 'number', default=20.0, min=0.1, max=99.0, step=1.0, unit='%')
 DURATION_TOLERANCE = Param('duration_tolerance', 'Duration tolerance', 'number', default=10.0,
                            min=0.1, max=99.0, step=1.0, unit='%')
@@ -595,13 +597,19 @@ OPENING_PULSE = (50.0 * 9.80665, 0.011)
 ENVELOPE_POINTS = 2000
 
 
+def pulse_edge(shape: str, edge: float, duration: float) -> float | None:
+    """The edge of a pulse a param gave: none on a half-sine, and an edge
+    of zero a twentieth of the duration."""
+    return None if shape == 'half-sine' else (edge or 0.05 * duration)
+
+
 def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.pulse_check`: one acceleration channel judged against a
     classical pulse's tolerance envelope and its velocity change
     (`core.classical_pulse.check_pulse`). A peak or duration left at zero
-    is the half-sine the record most resembles, rounded to three figures
-    (`core.classical_pulse.suggest_pulse`), as Visual Dynamics' Pulse
-    Check opens on a record."""
+    is the pulse of the shape asked for that the record most resembles,
+    rounded to three figures (`core.classical_pulse.suggest_pulse`), as
+    Visual Dynamics' Pulse Check opens on a record."""
     import hertzforge as hz
     from hertzforge.core import classical_pulse as pulses
     from hertzforge.drawing.plot.classical_pulse import readout
@@ -618,16 +626,16 @@ def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
     if peak == 0.0 or duration == 0.0:
         try:
             near = pulses.suggest_pulse(np.asarray(history.abscissa, dtype=float),
-                                        np.asarray(history.ordinate)[channel])
+                                        np.asarray(history.ordinate)[channel], params['shape'])
             suggested = (float(f'{near.peak:.3g}'), float(f'{near.duration:.3g}'))
         except ValueError:
             suggested = OPENING_PULSE
         peak = peak or suggested[0]
         duration = duration or suggested[1]
     shape = params['shape']
-    edge = None if shape == 'half-sine' else (params['edge'] or 0.05 * duration)
     try:
-        pulse = pulses.ClassicalPulse(shape, peak, duration, edge)
+        pulse = pulses.ClassicalPulse(shape, peak, duration,
+                                      pulse_edge(shape, params['edge'], duration))
         check = pulses.check_pulse(
             history, pulse, channel, band=params['band'] / 100.0,
             duration_tolerance=params['duration_tolerance'] / 100.0,
@@ -721,11 +729,16 @@ def stroke(project: Any, params: dict[str, Any]) -> list[dict]:
     for line in judged:
         rows.append(v.row('Against the rating', line, None,
                           'fail' if 'OVER' in line else 'pass' if 'within' in line else 'info'))
-    if not judged:
+    massless = bool(ratings['force'] and not ratings['moving_mass'])
+    if massless:
+        rows.append(v.row('Against the rating', 'The force rating is not judged: it needs the '
+                          'moving mass.', None, 'warn'))
+    elif not judged:
         rows.append(v.row('Against the rating', 'No ratings given: the reading stands on its '
                           'own.', None, 'info'))
+    unjudged = 'the force rating needs the moving mass' if massless else 'no ratings given'
     rows.append(v.row('Verdict', {True: 'fits', False: 'does not fit',
-                                  None: 'no ratings given'}[reading.fits], None,
+                                  None: unjudged}[reading.fits], None,
                       _verdict(reading.fits)))
     t = reading.time
     t0, t1 = float(t[0]), float(t[-1])
@@ -777,10 +790,7 @@ LOGGED = Param('logged', 'Draw the record as logged', 'boolean', default=False)
 
 
 def _cutoffs(text: str) -> tuple[float, ...]:
-    try:
-        values = sorted({float(part) for part in text.replace(',', ' ').split()})
-    except ValueError:
-        values = []
+    values = sorted(set(parse_numbers(text, 'a list of cutoffs above zero, in Hz')))
     if not values or values[0] <= 0.0:
         raise refused(f'{text!r} is not a list of cutoffs above zero, in Hz')
     return tuple(values)
@@ -962,6 +972,30 @@ START = Param('start', 'Start', 'number', default=0.0, unit='s', step=0.001)
 STOP = Param('stop', 'Stop', 'number', default=0.1, unit='s', step=0.001)
 
 
+def _velocity_check(history: Any) -> list[dict]:
+    """The velocity check of the windows on show, as Visual Dynamics' shock
+    panel states it whenever they change (`core.shock_check`): over the
+    windows the SRS would be computed from, or waiting when none is marked,
+    since a check of the whole record would speak for windows it was not
+    read over. A record with no acceleration has nothing to integrate."""
+    from hertzforge.core.shock_check import check_shock, summarize
+
+    if not any(history.known_dim(i) == 'acceleration' for i in range(history.num_records)):
+        return []
+    if not history.shocks and history.averaging is None:
+        return [v.row('Velocity check', 'No shocks are marked, so the velocity check waits for '
+                      'them. Detect marks them, and so does Compute SRS before it computes.',
+                      None, 'info')]
+    try:
+        checks = check_shock(history)
+    except ValueError as error:
+        return [v.row('Velocity check', f'The velocity check cannot be read: {error}.', None,
+                      'warn')]
+    status = 'warn' if any(check.flagged for check in checks) else 'pass'
+    return [v.row('Velocity check', line, None, status)
+            for line in summarize(checks).splitlines()]
+
+
 def _shocks_reading(name: str, history: Any) -> dict:
     origin = float(history.abscissa[0])
     shocks = tuple(history.shocks or ())
@@ -972,7 +1006,7 @@ def _shocks_reading(name: str, history: Any) -> dict:
     rows.append(v.row('Shocks', f'{len(shocks)} shock{"s" * (len(shocks) != 1)}, '
                       f'{covered:.3f} s of record analyzed. One spectrum per channel per '
                       'shock.' if shocks else 'No shocks marked.', None, 'info'))
-    return v.reading(f'Shocks on {name}', rows)
+    return v.reading(f'Shocks on {name}', rows + _velocity_check(history))
 
 
 def _shock_views(name: str, history: Any, params: dict[str, Any]) -> list[dict]:
@@ -1052,6 +1086,10 @@ def set_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         moved = Shock(params['start'] - origin, params['stop'] - params['start'])
     except ValueError as error:
         raise refused(str(error)) from None
+    length = int(np.asarray(history.ordinate).shape[-1]) / rate
+    if moved.start >= length:
+        raise refused(f'{name} ends at {origin + length:g} s; a window cannot start at '
+                      f'{params["start"]:g} s')
     if number <= len(shocks):
         edited = tuple(moved if k == number - 1 else shock for k, shock in enumerate(shocks))
         index = number - 1

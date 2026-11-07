@@ -396,8 +396,8 @@ def _sine(project: Any, spec_name: str | None, levels_name: str | None,
     requirement and limits, and with both objects the Level Error reading
     (`prefs['sine_reading']` 'bars'): each channel's signed RMS deviation
     in dB. The rows under either object are its control DOFs, and picks on
-    them restrict the reading. The stage (frequency across, time receding,
-    amplitude up) is not drawn yet."""
+    them restrict the reading. Without `prefs['flat']` the reading is the
+    stage: frequency across, time receding, amplitude up."""
     from hertzforge.core.compliance import SINE_ERROR_DB
 
     from .ops_sine_shock import sine_dofs, sine_error_rows, sine_lines

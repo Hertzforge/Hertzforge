@@ -74,9 +74,11 @@ FEATURE = 'run_sections'
 #: a run; a specification is the requirement, the same for every run
 BOUND = ('source', 'measured', 'dofs_source', 'floor')
 
-#: project types whose records are bursts or events, not one continuous
-#: run at level
-EVENTS = ('Shock', 'Transient', 'Modal Test', 'System ID')
+#: the share of a record's energy inside its detected events at which it
+#: is a record of them: the plate's shock and modal records hold 99.4 % and
+#: 100 % there, its random record about 1 %, where the detector only marks
+#: the highest peaks of the noise
+EVENTS_HOLD = 0.9
 
 
 def _provenance(objects: Mapping[str, Any]) -> Mapping[str, Mapping]:
@@ -295,6 +297,42 @@ def _channels(objects: Mapping[str, Any], name: str,
     return [i for i in chosen if pairs[i][1] == common], how
 
 
+def _is_frames(history: Any) -> bool:
+    """Whether a record is read a burst or a playing to a frame: frames
+    with a rectangular window, back to back. That is how a controller's
+    save describes a transient's playings or a modal survey's bursts, and
+    a stationary run is not averaged that way."""
+    from ..core.averaging import normalize_window
+
+    averaging = getattr(history, 'averaging', None)
+    return (averaging is not None and averaging.frames > 1 and averaging.overlap == 0.0
+            and normalize_window(averaging.window) == 'boxcar')
+
+
+def _is_events(history: Any, rows: Sequence[int], window_s: float) -> bool:
+    """Whether a record's energy sits in detected events too short for the
+    running-RMS window to read any of them as a level. A run with a long
+    lead-in or a stop has long stretches at level, and is read."""
+    import numpy as np
+
+    from ..core.shocks import find
+
+    events = find(history)
+    if not events or max(event.duration for event in events) >= window_s:
+        return False
+    rate = float(history.sample_rate)
+    values = np.real(np.asarray(history.ordinate)[list(rows)])
+    values = values - values.mean(axis=1, keepdims=True)
+    total = float(np.sum(values ** 2))
+    if not total > 0.0:
+        return False
+    held = 0.0
+    for event in events:
+        first, last = event.bounds(rate)
+        held += float(np.sum(values[:, first:last] ** 2))
+    return held >= EVENTS_HOLD * total
+
+
 def read_record(objects: Mapping[str, Any], name: str,
                 object_groups: Sequence[Mapping[str, Any]] | None = None,
                 window_s: float = WINDOW_S, drop_db: float = DROP_DB,
@@ -302,8 +340,9 @@ def read_record(objects: Mapping[str, Any], name: str,
     """What the record of run `name` shows: its time at level and the
     interruptions in it (`core.runs.read_levels`), on its control
     channels. A record of bursts or events (a shock, a transient, a
-    modal or system-ID run, a stack of captures) is not one run at
-    level, and is not read: `not_read` says so."""
+    modal survey, a stack of captures) is not one run at level, and is
+    not read: `not_read` says so. That is read from the record, so one
+    record gives one reading whichever module last worked it up."""
     import numpy as np
 
     from ..core.data import _even_steps
@@ -323,10 +362,6 @@ def read_record(objects: Mapping[str, Any], name: str,
                                        'drop_db': float(drop_db),
                                        'min_s': float(min_s)})
 
-    kind = getattr(objects, 'project_type', None)
-    if kind in EVENTS:
-        return refused(f'a {kind.lower()} record is not one run at level; '
-                       'its time at level and interruptions are not read')
     if getattr(history, 'shocks', None):
         return refused('a record of shocks is not one run at level; its '
                        'time at level and interruptions are not read')
@@ -334,6 +369,10 @@ def read_record(objects: Mapping[str, Any], name: str,
         return refused(f'a stack of {len(set(history.block))} captures is not '
                        'one continuous record; its time at level and '
                        'interruptions are not read')
+    if _is_frames(history):
+        return refused('a record of bursts or playings, one to a frame, is not '
+                       'one run at level; its time at level and interruptions '
+                       'are not read')
     if len(abscissa) < 2:
         return refused('the record has fewer than two samples')
     try:
@@ -341,6 +380,9 @@ def read_record(objects: Mapping[str, Any], name: str,
     except ValueError as uneven:
         return refused(str(uneven))
     rows, how = _channels(objects, name, _groups(objects, object_groups))
+    if rows and _is_events(history, rows, window_s):
+        return refused('a record of events is not one run at level; its time '
+                       'at level and interruptions are not read')
     labels = [history.response_dof[i] or f'record {i + 1}' for i in rows]
     reading = read_levels(history.ordinate[rows], 1.0 / step, labels,
                           start, window_s, drop_db, min_s)

@@ -56,30 +56,39 @@ def mac_matrix(shapes: ArrayLike,
     return np.abs(cross) ** 2 / np.outer(own, theirs)
 
 
-def shared_columns(a: ShapeSet, b: ShapeSet) -> tuple[list[int], list[int]]:
+def shared_columns(a: ShapeSet, b: ShapeSet
+                   ) -> tuple[list[int], list[int], np.ndarray]:
     """The columns of `a.shape_matrix` and of `b.shape_matrix` that hold
-    the DOFs both sets have, in `a`'s order: ([a's columns], [b's
-    columns]), both empty when the sets share no DOFs. Two dictionaries,
-    so a set of 400,000 DOFs takes a fraction of a second, where
-    `list.index` per DOF took longer than anyone waits."""
-    positions = {dof: i for i, dof in enumerate(b.coordinate)}
-    ours = [i for i, dof in enumerate(a.coordinate) if dof in positions]
-    theirs = [positions[a.coordinate[i]] for i in ours]
-    return ours, theirs
+    the DOFs both sets have, in `a`'s order, and the sign that puts `b`'s
+    column in `a`'s direction: ([a's columns], [b's columns], signs), the
+    lists empty when the sets share no DOFs. '101X-' is minus '101X+', so
+    the two are one DOF and multiply by -1. Two dictionaries, so a set of
+    400,000 DOFs takes a fraction of a second, where `list.index` per DOF
+    took longer than anyone waits."""
+    positions = b._dof_lookup()
+    ours, theirs, signs = [], [], []
+    for i, dof in enumerate(a.coordinate):
+        base, sign = _split_sign(dof)
+        found = positions.get(base)
+        if found is not None:
+            ours.append(i)
+            theirs.append(found[0])
+            signs.append(sign * found[1])
+    return ours, theirs, np.array(signs)
 
 
 def cross_mac(a: ShapeSet, b: ShapeSet) -> np.ndarray:
     """MAC between two shape sets, on the DOFs they share.
 
-    The sets do not have to cover the same DOFs or list them in the same
-    order; each shape is limited to the shared DOFs before the
-    comparison. Rows are `a`'s modes and columns are `b`'s. Raises
+    The sets do not have to cover the same DOFs, list them in the same
+    order or write them with the same signs; each shape is limited to the
+    shared DOFs before the comparison. Rows are `a`'s modes and columns are `b`'s. Raises
     ValueError when the sets share no DOFs.
     """
-    ours, theirs = shared_columns(a, b)
+    ours, theirs, signs = shared_columns(a, b)
     if not ours:
         raise ValueError('the shape sets share no DOFs')
-    return mac_matrix(a.shape_matrix[:, ours], b.shape_matrix[:, theirs])
+    return mac_matrix(a.shape_matrix[:, ours], b.shape_matrix[:, theirs] * signs)
 
 
 def alignment_factor(a: ShapeSet, i: int, b: ShapeSet,
@@ -95,10 +104,10 @@ def alignment_factor(a: ShapeSet, i: int, b: ShapeSet,
     projection) and has to be applied to a third (the dense set the
     projection was made from).
     """
-    ours, theirs = shared_columns(a, b)
+    ours, theirs, signs = shared_columns(a, b)
     if not ours:
         return 1.0
-    inner = np.vdot(a.shape_matrix[i, ours], b.shape_matrix[j, theirs])
+    inner = np.vdot(a.shape_matrix[i, ours], b.shape_matrix[j, theirs] * signs)
     if inner == 0:
         return 1.0
     return np.exp(-1j * np.angle(inner))
@@ -111,10 +120,11 @@ def alignment_phases(a: ShapeSet, rows: Any, b: ShapeSet,
     inner products of all the pairs at once, so a MAC's grid of overlays
     costs one matrix product instead of a DOF lookup per pair."""
     rows, columns = list(rows), list(columns)
-    ours, theirs = shared_columns(a, b)
+    ours, theirs, signs = shared_columns(a, b)
     if not ours or not rows or not columns:
         return np.zeros((len(rows), len(columns)))
-    inner = np.conj(a.shape_matrix[np.ix_(rows, ours)]) @ b.shape_matrix[np.ix_(columns, theirs)].T
+    inner = (np.conj(a.shape_matrix[np.ix_(rows, ours)])
+             @ (b.shape_matrix[np.ix_(columns, theirs)] * signs).T)
     factor = np.where(inner == 0, 1.0, np.exp(-1j * np.angle(inner)))
     return np.angle(factor)
 
@@ -387,7 +397,7 @@ def scale_ratios(a: ShapeSet, b: ShapeSet,
     """
     if pairs is None:
         pairs = [(i, i) for i in range(min(a.num_shapes, b.num_shapes))]
-    ours, theirs = shared_columns(a, b)
+    ours, theirs, _signs = shared_columns(a, b)
     if not ours:
         return [None] * len(list(pairs))
     ours = a.shape_matrix[:, ours]
@@ -573,6 +583,8 @@ class ShapeSet:
         self.damping = self.damping[order]
         self.shape_matrix = self.shape_matrix[order]
         self.modal_mass = self.modal_mass[order]
+        if self.modal_damping is not None:
+            self.modal_damping = self.modal_damping[order]
         self.comment = [self.comment[i] for i in order]
         self.description = [self.description[i] for i in order]
 
@@ -811,6 +823,8 @@ class ShapeSet:
         self.damping = self.damping[keep]
         self.shape_matrix = self.shape_matrix[keep]
         self.modal_mass = self.modal_mass[keep]
+        if self.modal_damping is not None:
+            self.modal_damping = self.modal_damping[keep]
         self.comment = [self.comment[i] for i in keep]
         self.description = [self.description[i] for i in keep]
 

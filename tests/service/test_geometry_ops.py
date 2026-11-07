@@ -155,7 +155,7 @@ def test_a_field_is_set_and_an_inconsistent_edit_is_put_back(project, validate):
                       field='z', value='0.5')
     wire_views([view, table], validate)
     assert float(cells(table)[0]['Z [m]']) == pytest.approx(0.5)
-    _view, table = run(project, 'project.set_entity', kind='nodes', entity=101, field='id',
+    _view, table = run(project, 'project.set_entity', kind='nodes', entity=102, field='id',
                        value='5000')
     assert '5000' in [row['Node'] for row in cells(table)]
     assert 5000 in project['Geometry'].elem_conn[0]
@@ -377,3 +377,57 @@ def test_an_entity_table_is_edited_cell_by_cell(validate):
     with pytest.raises(ProtocolError, match='there is no row 99999'):
         ops['project.set_entity_cell'].run(project, {
             'geometry': 'Geometry', 'kind': 'nodes', 'row': 99999, 'column': 'x', 'value': '1'})
+
+
+def _brick():
+    import hertzforge
+    from hertzforge import mesh
+
+    project = hertzforge.Project('p')
+    project.add('G', mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'b'))
+    return project
+
+
+def test_a_node_with_data_keeps_its_id_as_it_cannot_be_deleted():
+    project = _brick()
+    project.generate_rigid_body_modes('G')
+    geometry = project['G']
+    node = int(geometry.node_id[0])
+    with pytest.raises(ProtocolError, match='data in the project is measured at node'):
+        run(project, 'project.set_entity', kind='nodes', entity=node, field='id', value='999')
+    assert node in geometry.node_id and 999 not in geometry.node_id
+
+
+@pytest.mark.parametrize(('kind', 'entity', 'field', 'value'), [
+    ('nodes', 1, 'x', 'nan'), ('nodes', 1, 'y', 'inf'),
+    ('coordinate_systems', 1, 'origin_x', 'nan'), ('coordinate_systems', 1, 'rotation_z', 'inf'),
+    ('elements', 1, 'nodes', '1 2 3'), ('elements', 1, 'nodes', '1 1 1 1 1 1 1 1'),
+    ('elements', 1, 'type', 'quad4')])
+def test_a_cell_that_would_break_the_model_is_refused_and_left(kind, entity, field, value):
+    project = _brick()
+    geometry = project['G']
+    xyz = geometry.node_xyz.copy()
+    matrix = geometry.cs_matrix.copy()
+    conn = [c.copy() for c in geometry.elem_conn]
+    types = geometry.elem_type.copy()
+    with pytest.raises(ProtocolError) as error:
+        run(project, 'project.set_entity', kind=kind, entity=entity, field=field, value=value)
+    assert error.value.code == 'refused'
+    assert (geometry.node_xyz == xyz).all() and (geometry.cs_matrix == matrix).all()
+    assert all((a == b).all() for a, b in zip(geometry.elem_conn, conn, strict=True))
+    assert (geometry.elem_type == types).all()
+
+
+def test_a_cell_typed_on_a_row_of_a_repeated_id_changes_that_row():
+    import hertzforge
+    from hertzforge.core.geometry import Geometry
+
+    geometry = Geometry(node_id=[1, 2, 3, 4], node_xyz=np.eye(4)[:, :3].astype(float),
+                        elem_id=[7, 7], elem_type=[21, 21],
+                        elem_conn=[np.array([1, 2]), np.array([3, 4])], elem_group=[1, 1],
+                        group_id=[1], group_name=['b'])
+    project = hertzforge.Project('p')
+    project.add('Q', geometry)
+    run(project, 'project.set_entity_cell', geometry='Q', kind='elements', row=2, column='nodes',
+        value='1 4')
+    assert [c.tolist() for c in geometry.elem_conn] == [[1, 2], [1, 4]]

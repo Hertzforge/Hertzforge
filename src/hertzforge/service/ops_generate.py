@@ -24,19 +24,21 @@ import numpy as np
 from . import run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .ops_sine_shock import STROKE_RATINGS, _flat, _trace
+from .ops_sine_shock import (
+    EDGE_WORDS,
+    STROKE_RATINGS,
+    _flat,
+    _positive,
+    _record,
+    _trace,
+    pulse_edge,
+)
+from .parsing import parse_picks
 from .protocol import refused
 from .waterfalls import unit_text, waterfall_view
 
 FREQUENCY = v.axis('Frequency', 'Hz', 'log')
 TIME = v.axis('Time', 's', 'linear')
-
-
-def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
-    """A curve on log axes: the points finite and above zero."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
-    return v.series(name, role, x[keep], y[keep])
 
 
 def _finite(name: str, role: Any, x: Any, y: Any) -> dict:
@@ -65,29 +67,11 @@ def _core(call: Any) -> Any:
 def _picked(text: str, count: int, what: str) -> list[int] | None:
     """The 0-based items '1-3, 7' names, numbered from 1; None when blank,
     which is all of them."""
-    if not text.strip():
-        return None
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a {what} number or a range such as 3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'{what}s run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return sorted(set(out))
+    return sorted(parse_picks(text, count, what)) if text.strip() else None
 
 
 def _dofs(text: str) -> tuple[str, ...] | None:
     return tuple(text.replace(',', ' ').split()) or None
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 # ---- Generate Signal ----------------------------------------------------------------
@@ -123,7 +107,7 @@ SHAPE = Param('shape', 'Pulse shape', 'enum', default='half-sine', options=(
     Option('trapezoid', 'Trapezoid')))
 PULSE = Param('pulse_duration', 'Pulse duration', 'number', default=0.011, unit='s',
               min=1e-6, step=0.001)
-EDGE = Param('edge', 'Edge, 0 for none', 'number', default=0.0, unit='s', min=0.0, step=0.001)
+EDGE = Param('edge', EDGE_WORDS, 'number', default=0.0, unit='s', min=0.0, step=0.001)
 TONE = Param('tone', 'Tone', 'integer', default=1, min=1, step=1)
 DOFS = Param('dofs', 'DOFs, blank for all', 'string', default='')
 
@@ -151,7 +135,8 @@ def _settings(source: Any, params: dict[str, Any]) -> dict[str, Any]:
             'taper': params['taper'] / 100.0, 'periods': params['periods'],
             'repeats': params['repeats'] or None, 'at': params['at'],
             'width': params['width'], 'shape': params['shape'], 'peak': params['peak'],
-            'pulse_duration': params['pulse_duration'], 'edge': params['edge'] or None,
+            'pulse_duration': params['pulse_duration'],
+            'edge': pulse_edge(params['shape'], params['edge'], params['pulse_duration']),
             'band': (params['low'], params['high']), 'level': params['level'],
             'tone': tone}
 
@@ -307,7 +292,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
     made = _core(lambda: synthesize(spec, sample_rate=rate,
                                     rating=SignalSettings(**settings).rating(),
                                     half_cycles=params['half_cycles'],
-                                    dofs=settings['dofs']))
+                                    dofs=settings['dofs'], unit_system=hz.SI))
     if params['record'] > len(made.channels):
         raise refused(f'the synthesis has {len(made.channels)} channels; there is no channel '
                       f'{params["record"]}')
