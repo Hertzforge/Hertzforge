@@ -369,9 +369,11 @@ class DataIndex:
                ) -> tuple[IndexEntry, ...]:
         """Hash every indexed file again and record what was found.
 
-        Each file is looked for where it was indexed, then by its name
-        in each folder of `search` in turn (an archive copy, the folder
-        the project now sits in). Found with the same size and
+        Each file is looked for where it was indexed, then where the
+        last check found it, then by its name in each folder of `search`
+        in turn (an archive copy, the folder the project now sits in), so
+        a file found once in a folder given is not lost at the next check
+        with none. Found with the same size and
         checksum, it `MATCHES`; found otherwise, it has `CHANGED`; not
         found anywhere, it is `NOT_FOUND`. `progress` is called as
         (bytes read, bytes expected) across the whole index. The
@@ -391,9 +393,9 @@ class DataIndex:
         base = 0
         out = []
         for entry in self.entries:
-            candidates = [entry.path] + [os.path.join(os.fspath(folder),
-                                                      entry.name)
-                                         for folder in search]
+            candidates = [entry.path, *filter(None, [entry.found]),
+                          *(os.path.join(os.fspath(folder), entry.name)
+                            for folder in search)]
             where = next((path for path in candidates
                           if os.path.isfile(path)), None)
             if where is None:
