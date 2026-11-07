@@ -397,7 +397,8 @@
             "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
             "truncation": {"type": "object", "additionalProperties": {"type": "number"}},
             "features": {"type": "object", "additionalProperties": {"type": "boolean"}},
-            "identity": {"type": "object", "additionalProperties": {"type": "string"}}
+            "identity": {"type": "object", "additionalProperties": {"type": "string"}},
+            "rigid": {"type": "object", "additionalProperties": {"type": ["number", "boolean"]}}
           }
         }
       }
