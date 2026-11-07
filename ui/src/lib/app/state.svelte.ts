@@ -15,7 +15,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ActionColumn, ActionRow, Actions, ExportFormat, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -74,6 +74,8 @@ class AnalyzeState {
 	formOpen = $state(false);
 	/** The table's row the open form came from; null when it came from elsewhere. */
 	formRow = $state<ActionRow | null>(null);
+	/** Which of a lone shape set's views a verb asked for; null, the one selecting it shows. */
+	shapeView = $state<ShapeView | null>(null);
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
 	/** A combination's row whose partner is being picked in the tree. */
@@ -177,6 +179,7 @@ class AnalyzeState {
 			this.line = null;
 			this.pair = null;
 			this.picks = [];
+			this.shapeView = null;
 		}
 		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
@@ -197,10 +200,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						animation: this.prefs.animation,
-						mode_table: this.prefs.mode_table,
-						mac: this.prefs.mac,
-						shape_values: this.prefs.shape_values,
+						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
@@ -260,6 +260,14 @@ class AnalyzeState {
 		}
 	}
 
+	/** One of a lone shape set's views takes the frame; null is the one selecting it shows. */
+	private showShapeView(view: ShapeView | null): void {
+		this.shapeView = view;
+		this.pair = null;
+		this.picks = [];
+		void this.showSelection();
+	}
+
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
@@ -272,6 +280,11 @@ class AnalyzeState {
 		}
 		if (row.kind === 'default') {
 			this.endReading();
+			if (this.shapeView) this.showShapeView(null);
+			return;
+		}
+		if (row.id.startsWith('show.')) {
+			this.showShapeView(row.id.slice('show.'.length) as ShapeView);
 			return;
 		}
 		if (row.kind === 'self') {
@@ -973,10 +986,6 @@ function readPrefs(): ShowPrefs {
 		projection: false,
 		bars: true,
 		overlay: true,
-		animation: true,
-		mode_table: true,
-		mac: true,
-		shape_values: false,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
@@ -990,7 +999,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay', 'animation', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;

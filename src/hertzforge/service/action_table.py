@@ -24,7 +24,7 @@ from .descriptors import Operation, Param
 #: (tests/service/test_action_table.py holds the two to each other)
 JOINT: dict[tuple[str, str], tuple[str, ...]] = {
     ('geometry', 'geometry'): ('Overlay',),
-    ('geometry', 'shape_set'): ('Animate', 'Table'),
+    ('geometry', 'shape_set'): ('Animate',),
     ('channel_table', 'geometry'): ('Arrows',),
     ('geometry', 'time_history'): ('Animate',),
     ('geometry', 'psd'): ('Animate',),
@@ -130,8 +130,7 @@ def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
     if len(kinds) == 1:
         kind = kinds[0]
         if kind == 'shape_set':
-            on_geometry = bool(names) and _on_geometry(project, names[0])
-            return [*(['Animate'] if on_geometry else []), 'Table', 'MAC']
+            return ['Animate' if names and _on_geometry(project, names[0]) else 'Table']
         if kind in ('channel_table', 'matched_modes'):
             return ['Table']
         return [] if kind in NO_VIEW else ['Plot']
@@ -144,6 +143,21 @@ def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
     if len(kinds) == 3 and sorted(kinds) == ['geometry', 'shape_set', 'shape_set']:
         return ['MAC']
     return []
+
+
+def _shape_views(project: Any, name: str) -> list[dict[str, Any]]:
+    """A lone shape set's other views, each its own verb: the shell asks for one
+    in `prefs.shape_view`, and clicking the default comes back."""
+    from .show import SHAPE_VALUES_CELL_LIMIT
+
+    shapes = project[name]
+    count = int(shapes.num_shapes) * len(shapes.coordinate)
+    first = (_row('show.table', 'Table', 'reading') if _on_geometry(project, name)
+             else _row('show.animate', 'Animate', 'reading', 'It needs a geometry'))
+    return [first, _row('show.mac', 'MAC', 'reading'),
+            _row('show.values', 'Values', 'reading',
+                 '' if count <= SHAPE_VALUES_CELL_LIMIT
+                 else f'{count:,} shape values, too many for a table')]
 
 
 def _on_geometry(project: Any, name: str) -> bool:
@@ -223,6 +237,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     names = [c[0] for c in chosen]
     kinds = [c[1] for c in chosen]
     rows = [_row(f'show.{verb.lower()}', verb, 'default') for verb in defaults(project, kinds, names)]
+    if kinds == ['shape_set']:
+        rows += _shape_views(project, names[0])
     rows += _fit_rows(kinds)
     if not chosen:
         rows += _project_rows(project)

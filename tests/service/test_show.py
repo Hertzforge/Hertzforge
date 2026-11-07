@@ -88,10 +88,9 @@ def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, valida
     project.add('Modes', shapes)
     try:
         out = shown(plate, 'Modes', validate=validate)
-        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix'], \
-            'on the active geometry, the auto-MAC beside the list'
+        assert [v['view'] for v in out['views']] == ['shape3d'], 'on the active geometry'
         both = shown(plate, 'Modes', named(plate, 'geometry'), records={'Modes': [1]})
-        assert [v['view'] for v in both['views']] == ['shape3d', 'table']
+        assert [v['view'] for v in both['views']] == ['shape3d']
         project.add('Modes 2', shapes)
         mac = shown(plate, 'Modes', 'Modes 2', validate=validate)
         assert mac['views'][0]['view'] == 'matrix'
@@ -100,7 +99,7 @@ def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, valida
         project.remove('Modes')
 
 
-def test_a_shape_set_with_no_geometry_shows_its_table_and_its_own_mac(validate):
+def test_a_shape_set_with_no_geometry_shows_its_table_or_its_own_mac(validate):
     from hertzforge.project import Project
 
     project = Project()
@@ -108,7 +107,11 @@ def test_a_shape_set_with_no_geometry_shows_its_table_and_its_own_mac(validate):
                                   shape_matrix=np.eye(2), coordinate=['1Z+', '2Z+']))
     state = projects.OpenProject(project=project)
     out = shown(state, 'Modes', validate=validate)
-    assert [v['view'] for v in out['views']] == ['table', 'matrix']
+    assert [v['view'] for v in out['views']] == ['table']
+    mac = shown(state, 'Modes', prefs={'shape_view': 'mac'}, validate=validate)
+    assert [v['view'] for v in mac['views']] == ['matrix']
+    alone = shown(state, 'Modes', prefs={'shape_view': 'animate'}, validate=validate)
+    assert [v['view'] for v in alone['views']] == ['table'], 'nothing to animate on'
 
 
 def test_a_measurement_beside_its_requirement_is_the_comparison(validate):
@@ -384,30 +387,27 @@ def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
                                  shape_matrix=np.arange(12.0).reshape(2, 6), coordinate=dofs))
     try:
         out = shown(plate, 'Lone', validate=validate)
-        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix']
+        assert [v['view'] for v in out['views']] == ['shape3d'], 'the animation, by default'
         assert out['offers']['shapes'] is True and out['offers']['values_dofs'] == ['all']
-        off = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False}, validate=validate)
-        assert [v['view'] for v in off['views']] == ['shape3d'], 'the animation alone'
-        still = shown(plate, 'Lone', prefs={'animation': False, 'mode_table': False, 'mac': False},
-                      validate=validate)
-        assert [v['view'] for v in still['views']] == ['table'], 'one view always up'
-        quiet = shown(plate, 'Lone', prefs={'animation': False}, validate=validate)
-        assert [v['view'] for v in quiet['views']] == ['table', 'matrix']
-        values = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False,
-                                             'shape_values': True}, validate=validate)
-        assert [v['view'] for v in values['views']] == ['shape3d', 'table']
-        table = values['views'][1]
+        listed = shown(plate, 'Lone', prefs={'shape_view': 'table'}, validate=validate)
+        assert [v['view'] for v in listed['views']] == ['table']
+        mac = shown(plate, 'Lone', prefs={'shape_view': 'mac'}, validate=validate)
+        assert [v['view'] for v in mac['views']] == ['shape3d', 'matrix'], 'with what its squares animate'
+        assert mac['views'][1]['selects'] == 'shape3d' and 'overlays' in mac['views'][0]
+        values = shown(plate, 'Lone', prefs={'shape_view': 'values'}, validate=validate)
+        assert [v['view'] for v in values['views']] == ['table']
+        table = values['views'][0]
         assert table['title'] == 'Lone, shapes' and table['columns'] == ['DOF', 'M1', 'M2']
         assert len(table['rows']) == 6
-        response = shown(plate, 'Lone', prefs={'shape_values': True, 'values_form': 'response'})
+        response = shown(plate, 'Lone', prefs={'shape_view': 'values', 'values_form': 'response'})
         assert response['views'][-1]['title'] == 'Lone, response transformation'
         assert len(response['views'][-1]['rows']) == 2, 'a row per mode'
-        chosen = shown(plate, 'Lone', prefs={'shape_values': True, 'values_dofs': 'control'})
+        chosen = shown(plate, 'Lone', prefs={'shape_view': 'values', 'values_dofs': 'control'})
         assert 'shape values:' in chosen['note'] and 'channel table' in chosen['note']
         with pytest.raises(ProtocolError, match='"values_form"'):
             projects.show(plate, {'objects': ['Lone'], 'prefs': {'values_form': 'inverse'}})
-        with pytest.raises(ProtocolError, match='"mac"'):
-            projects.show(plate, {'objects': ['Lone'], 'prefs': {'mac': 'yes'}})
+        with pytest.raises(ProtocolError, match='"shape_view"'):
+            projects.show(plate, {'objects': ['Lone'], 'prefs': {'shape_view': 'waterfall'}})
     finally:
         project.remove('Lone')
 
@@ -469,23 +469,29 @@ def test_picked_modes_limit_every_view_of_a_lone_shape_set(plate, validate):
     project.add('Three', ShapeSet(frequency=[10.0, 20.0, 30.0], damping=[0.01, 0.02, 0.03],
                                   shape_matrix=np.arange(18.0).reshape(3, 6), coordinate=dofs))
     try:
-        two = shown(plate, 'Three', records={'Three': [2, 0]},
-                    prefs={'shape_values': True}, validate=validate)
-        stage, table, matrix, values = two['views']
+        picks = {'Three': [2, 0]}
+        (stage,) = shown(plate, 'Three', records=picks, validate=validate)['views']
         assert [m['index'] for m in stage['modes']] == [1, 3]
-        assert [o['index'] for o in stage['overlays']] == [1, 3], 'the MAC picks a pair to overlay'
-        assert matrix['selects'] == 'shape3d'
+        (table,) = shown(plate, 'Three', records=picks, prefs={'shape_view': 'table'},
+                         validate=validate)['views']
         assert [row[0] for row in table['rows']] == ['1', '3']
         assert table['edit']['rows'] == [1, 3], 'an edit of the second shown row is mode 3'
+        stage, matrix = shown(plate, 'Three', records=picks, prefs={'shape_view': 'mac'},
+                              validate=validate)['views']
+        assert [o['index'] for o in stage['overlays']] == [1, 3], 'the MAC picks a pair to overlay'
+        assert matrix['selects'] == 'shape3d'
+        (values,) = shown(plate, 'Three', records=picks, prefs={'shape_view': 'values'},
+                          validate=validate)['views']
         assert matrix['values'].shape == (2, 2)
         assert matrix['rows']['ticks'] == ['10.0 Hz', '30.0 Hz']
         assert values['columns'] == ['DOF', 'M1', 'M3']
-        assert '2 modes picked' in two['note']
-        one = shown(plate, 'Three', records={'Three': [1]}, validate=validate)
+        assert '2 modes picked' in shown(plate, 'Three', records=picks)['note']
+        one = shown(plate, 'Three', records={'Three': [1]}, prefs={'shape_view': 'mac'},
+                    validate=validate)
         assert [m['index'] for m in one['views'][0]['modes']] == [2]
-        assert one['views'][2]['values'].shape == (1, 1)
-        every = shown(plate, 'Three', validate=validate)
-        assert len(every['views'][0]['modes']) == 3 and every['views'][2]['values'].shape == (3, 3)
+        assert one['views'][1]['values'].shape == (1, 1)
+        every = shown(plate, 'Three', prefs={'shape_view': 'mac'}, validate=validate)
+        assert len(every['views'][0]['modes']) == 3 and every['views'][1]['values'].shape == (3, 3)
     finally:
         project.remove('Three')
 

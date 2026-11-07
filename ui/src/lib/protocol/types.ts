@@ -437,6 +437,9 @@ export interface Actions {
 }
 
 /** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
+/** A lone shape set's views, shown one at a time. */
+export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
+
 export interface ExportFormat {
 	/** The `format` param's value. */
 	value: string;
@@ -511,12 +514,7 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
-	/** A lone shape set's three views, one always up, and where and in what form its values are read. */
-	/** A lone shape set's modes animated on its geometry; off, that pane is put away and not computed. */
-	animation: boolean;
-	mode_table: boolean;
-	mac: boolean;
-	shape_values: boolean;
+	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';
 	/** DOF arrows and the channel table's sensors over every stage. */

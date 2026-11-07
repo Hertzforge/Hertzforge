@@ -84,8 +84,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: its bar: the stage or the flat plot, decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'animation': True, 'mode_table': True, 'mac': True,
-         'shape_values': False,
+         'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
@@ -278,48 +277,47 @@ def _alone(project: Any, name: str, picks: list[int],
     if isinstance(obj, Geometry):
         return _run(project, 'project.view_geometry', geometry=name), []
     if isinstance(obj, ShapeSet):
-        # a lone set's four views, each on or off, one always up (VD's
-        # `_shape_views`): on its geometry the modes animate, the mode
-        # list, the auto-MAC beside it since how distinct the modes are is
-        # part of reading the list, and the values themselves. The shell
-        # draws each in a pane of its own and minimizes one by turning its
-        # preference off, so a pane put away costs nothing to compute.
-        # Modes picked in the tree limit every view to those modes.
+        # a lone set's views, one at a time, its verb in the action table
+        # choosing: on its geometry the modes animate, unless the shell asks
+        # for the mode list, the auto-MAC or the values. The auto-MAC brings
+        # the stage its squares animate, which the shell draws once one is
+        # picked. Modes picked in the tree limit every view to those modes.
         from .ops_project import _shape_view, mac_views
 
         prefs = {**PREFS, **(prefs or {})}
         geometry = _geometry_for(project, name)
         picked = sorted({int(i) for i in picks if 0 <= int(i) < obj.num_shapes})
         count = int(obj.num_shapes) * len(obj.coordinate)
-        fits = count <= SHAPE_VALUES_CELL_LIMIT
-        up = {'animation': bool(prefs['animation']) and geometry is not None,
-              'table': bool(prefs['mode_table']), 'mac': bool(prefs['mac']),
-              'values': bool(prefs['shape_values']) and fits}
-        if not any(up.values()):
-            up['table'] = True
-        views: list[dict] = []
         notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
                  f'{len(picked)} modes picked'] if picked else []
-        paired = (mac_views(project, name, name, picked or None, picked or None)
-                  if up['mac'] else [])
-        if up['animation']:
-            stage = _shape_view(project, name, geometry, picked or None)
+        frame = prefs['shape_view'] or 'animate'
+        if frame == 'animate' and geometry is None:
+            frame = 'table'
+        if frame == 'values' and count > SHAPE_VALUES_CELL_LIMIT:
+            notes.append(f'{count:,} shape values, too many for a table')
+            frame = 'table'
+        views: list[dict] = []
+        if frame == 'animate':
+            views.append(_shape_view(project, name, geometry, picked or None))
+        if frame == 'mac':
+            paired = mac_views(project, name, name, picked or None, picked or None)
             selected = next((view for view in paired if view['view'] == 'shape3d'), None)
             if selected is not None:
-                # a square picked on the auto-MAC animates its row mode with its
-                # column mode overlaid; the shell leaves the overlay off on the diagonal
+                # a square picked animates its row mode with its column mode overlaid;
+                # the shell leaves the overlay off on the diagonal
+                stage = _shape_view(project, name, geometry, picked or None)
                 stage['overlays'] = selected['overlays']
                 stage['overlay_phase'] = selected['overlay_phase']
-            views.append(stage)
-        if up['table']:
+                views.append(stage)
+            views += [view for view in paired if view['view'] == 'matrix']
+        if frame == 'table':
             (table,) = _run(project, 'project.table', object=name)
             if picked and len(table['rows']) == obj.num_shapes:
                 table['rows'] = [table['rows'][k] for k in picked]
                 if 'edit' in table:
                     table['edit']['rows'] = [k + 1 for k in picked]
             views.append(table)
-        views += [view for view in paired if view['view'] == 'matrix']
-        if up['values']:
+        if frame == 'values':
             table, said = _values_view(project, name, obj, prefs)
             notes += said
             if table is not None:
@@ -330,8 +328,6 @@ def _alone(project: Any, name: str, picks: list[int],
                 elif picked and len(table['rows']) == obj.num_shapes:
                     table['rows'] = [table['rows'][k] for k in picked]
                 views.append(table)
-        if prefs['shape_values'] and not fits:
-            notes.append(f'{count:,} shape values, too many for a table')
         return views, notes
     if isinstance(obj, ChannelTable):
         # the table itself, typed into, with the Control column of the
@@ -851,8 +847,7 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         obj = project[other]
         picks = records.get(other, [])
         if isinstance(obj, ShapeSet):
-            views = _run(project, 'project.mode_shapes', shapes=other, geometry=geometry)
-            return views + _run(project, 'project.table', object=other), []
+            return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
         if isinstance(obj, ChannelTable):
             return _run(project, 'project.dof_arrows', source=other), []
         if isinstance(obj, TimeHistory):
