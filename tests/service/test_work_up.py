@@ -385,3 +385,45 @@ def test_work_up_transient_keeps_an_averaging_already_set():
     held = project['Run'].averaging
     run(project, 'project.work_up_transient')
     assert project['Run'].averaging == held
+
+
+# ---- the time at level is read from the record ---------------------------------
+
+@pytest.mark.parametrize('file, kept', [('shock.nc4', False), ('modal.nc4', False),
+                                        ('random.nc4', True)])
+def test_a_records_time_at_level_does_not_follow_the_project_type(file, kept):
+    project = load(file)
+    readings = []
+    for kind in (project.project_type, 'Random Vibration', 'Shock', 'Modal Test', None):
+        project.project_type = kind
+        readings.append(read_record(project, 'Time History', project.object_groups))
+    readings.append(read_record(dict(project), 'Time History', project.object_groups))
+    assert len({reading.not_read for reading in readings}) == 1
+    assert (readings[0].not_read == '') is kept
+    if not kept:
+        assert 'not one run at level' in readings[0].not_read
+
+
+def test_work_up_leaves_the_records_time_at_level_as_it_found_it():
+    project = load('random.nc4')
+    before = read_record(project, 'Time History', project.object_groups)
+    run(project, 'project.work_up_transient')
+    after = read_record(project, 'Time History', project.object_groups)
+    assert before.at_level_s == after.at_level_s == pytest.approx(28.0)
+
+
+def test_a_transient_records_playings_are_not_a_run_at_level():
+    project = transient_project()
+    run(project, 'project.work_up_transient')
+    assert 'not one run at level' in read_record(project, 'Run', project.object_groups).not_read
+
+
+def test_a_run_with_a_lead_in_and_a_stop_is_still_read():
+    """Long stretches at level, even with most of the record quiet, are a run."""
+    fs = 2048.0
+    t = np.arange(int(40 * fs)) / fs
+    level = ((t > 5) & (t < 12)) | ((t > 20) & (t < 27))
+    x = level * np.random.default_rng(2).standard_normal(t.size)
+    reading = read_record({'h': history(t, x)}, 'h')
+    assert reading.not_read == ''
+    assert reading.at_level_s == pytest.approx(14.0, abs=0.6)
