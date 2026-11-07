@@ -804,23 +804,6 @@ def rms(frequencies: ArrayLike, values: ArrayLike) -> float:
     return float(np.sqrt(np.sum(values[good] * widths[good])))
 
 
-def bounds(specification: Specification, record: int, pair: str,
-           frequencies: ArrayLike
-           ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """(lower, upper) of one pair of limits, interpolated log-log onto
-    `frequencies`.
-
-    `pair` is 'warning' or 'abort'. None for a limit the specification
-    does not carry: nothing can be exceeded where nothing was specified.
-    """
-    out = []
-    for edge in (f'{pair}_lower', f'{pair}_upper'):
-        values = specification.limits.get(edge)
-        out.append(None if values is None else log_interpolate(
-            frequencies, specification.abscissa, values[record]))
-    return out[0], out[1]
-
-
 #: how far below a channel's own specification peak a line still
 #: carries information about *level*. Beyond it the requirement has
 #: essentially no content, and the measurement there is the article's
@@ -1445,26 +1428,6 @@ def comparison_note(results: Sequence[Any]) -> str | None:
         if note:
             return note
     return None
-
-
-def outside_fraction(values: Sequence[float], low: float,
-                     high: float | None = None) -> float:
-    """The percentage of these values outside the threshold.
-
-    With `high` None the test is one-sided, values at or above `low`:
-    the lines-out chart has a ceiling and no floor, because staying
-    inside the abort limits is never a fault. Otherwise a value is
-    outside when it is above `high` or below `low`. Values that are not
-    finite are ignored, and none left gives zero.
-    """
-    values = [v for v in values if np.isfinite(v)]
-    if not values:
-        return 0.0
-    if high is None:
-        beyond = sum(1 for v in values if v >= low)
-    else:
-        beyond = sum(1 for v in values if v > high or v < low)
-    return 100.0 * beyond / len(values)
 
 
 def compare_all(specification: Specification, measured: DataArray,

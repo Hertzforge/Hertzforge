@@ -24,8 +24,8 @@ import pytest
 from hertzforge.core.averaging import Averaging
 from hertzforge.core.data import Psd, TimeHistory
 from hertzforge.core.rms_check import (
+    _channel,
     _coverage,
-    matching_records,
     refusal,
     rms_check,
     time_rms,
@@ -131,11 +131,10 @@ def test_a_force_at_the_same_dof_is_not_the_channel():
     history = TimeHistory(t, np.ones((2, 64)), response_dof=['1Z+', '1Z+'],
                           ordinate_dim=['force', 'acceleration'],
                           ordinate_unit=['N', 'g'])
-    assert matching_records(history, '1Z+', 'acceleration**2/frequency') \
-        == [1]
-    assert matching_records(history, '1Z+', 'force**2/frequency') == [0]
-    assert matching_records(history, '1Z+',
-                            'acceleration*force/frequency') == []
+    assert _channel(history, '1Z+', 'acceleration**2/frequency')[1] == [1]
+    assert _channel(history, '1Z+', 'force**2/frequency')[1] == [0]
+    with pytest.raises(ValueError):
+        _channel(history, '1Z+', 'acceleration*force/frequency')
 
 
 def test_a_record_with_no_mean_square_has_no_gap():

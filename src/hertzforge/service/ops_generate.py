@@ -39,19 +39,8 @@ def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
     return v.series(name, role, x[keep], y[keep])
 
 
-def _finite(name: str, role: Any, x: Any, y: Any) -> dict:
-    """A curve on a linear y axis: the finite points, x above zero."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0)
-    return v.series(name, role, x[keep], y[keep])
-
-
 def _sentence(text: str) -> str:
     return text[0].upper() + text[1:] if text else text
-
-
-def _notes(notes: Any, status: str = 'info') -> list[dict]:
-    return [v.row('Note', _sentence(note), None, status) for note in notes if note]
 
 
 def _core(call: Any) -> Any:
@@ -680,7 +669,7 @@ def fatigue(project: Any, params: dict[str, Any]) -> list[dict]:
                       'info' if pair is None else 'pass' if pair.covers else 'fail'))
     notes = list(field.notes) + ([] if pair is None else
                                  [f'test: {note}' for note in pair.test.notes])
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [ers, fds, rule, v.reading(f'Fatigue of {name}, {field.label}', rows)]
 
 
@@ -773,7 +762,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         status = 'info' if demand.share is None else 'fail' if demand.exceeds else 'pass'
         words = demand.describe(display_units.words_system()).removeprefix(f'{demand.name}: ')
         rows.append(v.row(_sentence(demand.name), words, None, status))
-    rows += _notes(lines_said[1 + len(prediction.demands):])
+    rows += v.notes(lines_said[1 + len(prediction.demands):])
     return [top, middle, v.reading(f'Drive prediction: {spec_name} through {frf_name}', rows)]
 
 
@@ -844,7 +833,7 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
             'fail' if notch.outside else 'warn' if notch.outside is None else 'pass'))
     rows += [v.row(c.label, _sentence(c.describe(f, display_units.words_system())), None, 'info')
              for c in prediction.channels]
-    rows += _notes(said[1 + len(prediction.notches) + len(prediction.channels):])
+    rows += v.notes(said[1 + len(prediction.notches) + len(prediction.channels):])
     return [*views, v.reading(f'Notch prediction: {spec_name} through {frf_name}', rows)]
 
 
@@ -926,7 +915,7 @@ def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
         notes.insert(0, 'at this line an inverse of the matrix amplifies an error in it by up '
                         'to the condition number: the references reach the rows in nearly the '
                         'same proportions')
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [top, bottom, v.reading(f'Conditioning of {name}', rows)]
 
 
@@ -944,9 +933,9 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     f = np.asarray(reading.frequency, dtype=float)
     judged = reading.judged & (f > 0.0)
     n = len(reading.channels)
-    lines = [_finite('smallest eigenvalue', 'measured', f[judged], reading.smallest[judged]),
-             _finite('largest eigenvalue', 'reference', f[judged], reading.largest[judged])]
-    lines += [_finite(f'eigenvalue {k + 1}', 'other', f[judged], reading.eigenvalues[k][judged])
+    lines = [v.drawable('smallest eigenvalue', 'measured', f[judged], reading.smallest[judged], x_above_zero=True),
+             v.drawable('largest eigenvalue', 'reference', f[judged], reading.largest[judged], x_above_zero=True)]
+    lines += [v.drawable(f'eigenvalue {k + 1}', 'other', f[judged], reading.eigenvalues[k][judged], x_above_zero=True)
               for k in range(1, n - 1)]
     lines.append(v.series('zero', 'tolerance', [f[judged][0], f[judged][-1]], [0.0, 0.0])
                  if judged.any() else v.series('zero', 'tolerance', [], []))
@@ -961,15 +950,15 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
         pair = f'{reading.channels[i]} and {reading.channels[j]}'
         views.append(v.spectrum(f'{pair}: coherence', FREQUENCY,
                                 v.axis('Coherence', None, 'linear'),
-                                [_finite(f'{pair} as written', 'measured', f[judged],
-                                         before[judged]),
-                                 _finite(f'{pair} repaired', 'reference', f[judged],
-                                         after[judged])], link='frequency'))
+                                [v.drawable(f'{pair} as written', 'measured', f[judged],
+                                         before[judged], x_above_zero=True),
+                                 v.drawable(f'{pair} repaired', 'reference', f[judged],
+                                         after[judged], x_above_zero=True)], link='frequency'))
         views.append(v.spectrum(f'{pair}: phase', FREQUENCY, v.axis('Phase', '°', 'linear'),
-                                [_finite(f'{pair} as written', 'measured', f[judged],
-                                         phase_before[judged]),
-                                 _finite(f'{pair} repaired', 'reference', f[judged],
-                                         phase_after[judged])], link='frequency'))
+                                [v.drawable(f'{pair} as written', 'measured', f[judged],
+                                         phase_before[judged], x_above_zero=True),
+                                 v.drawable(f'{pair} repaired', 'reference', f[judged],
+                                         phase_after[judged], x_above_zero=True)], link='frequency'))
     point = reading.at(_cursor(f, reading.failing, params['frequency']))
     shown = bool(point.eigenvalues) and not np.isnan(point.eigenvalues[0])
     rows = [v.row('Channels', float(n), '', 'info'),
@@ -993,7 +982,7 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     if shown and not point.realizable:
         notes.insert(0, 'at this line no set of signals has this matrix: a combination of the '
                         'channels is asked for negative power')
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [*views, v.reading(f'Realizability of {name}', rows)]
 
 

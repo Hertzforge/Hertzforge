@@ -768,17 +768,6 @@ def test_the_signed_rms_deviation_by_hand():
     assert compliance.signed_rms_db(wanted / mixed, wanted) == pytest.approx(-rms)
 
 
-def test_the_share_outside_counts_its_edges_one_way():
-    """One-sided, reaching the threshold is outside (the lines-out
-    chart's ceiling); two-sided, only past either limit is. Not a
-    number is not a line."""
-    assert compliance.outside_fraction([1.0, 2.0, 3.0, 4.0], 3.0) == 50.0
-    assert compliance.outside_fraction([1.0, 2.0, 3.0, 4.0], 2.0, 3.0) == 50.0
-    assert compliance.outside_fraction([2.0, 3.0], 2.0, 3.0) == 0.0
-    assert compliance.outside_fraction([1.0, np.nan, 5.0], 2.0, 3.0) == 100.0
-    assert compliance.outside_fraction([np.nan], 2.0) == 0.0
-
-
 def test_two_binned_curves_are_judged_on_the_coarser_grid():
     """A target written per 2 Hz bin against a measurement every half
     hertz is judged per 2 Hz bin — a requirement on a bin's power,

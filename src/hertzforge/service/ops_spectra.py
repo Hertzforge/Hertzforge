@@ -73,16 +73,6 @@ def _record(data: Any, number: int, name: str) -> int:
     return number - 1
 
 
-def _finite(name: str, role: Any, x: Any, y: Any, positive: bool = False) -> dict:
-    """A curve with the points that cannot be drawn left out: not a
-    number anywhere, and nothing at or under zero on a log axis."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y)
-    if positive:
-        keep &= y > 0.0
-    return v.series(name, role, x[keep], y[keep])
-
-
 def _shaped(name: str, role: Any, data: Any, record: int) -> dict:
     """One record of a density drawn as Visual Dynamics draws it, lines
     off the log axis left out."""
@@ -90,10 +80,6 @@ def _shaped(name: str, role: Any, data: Any, record: int) -> dict:
     y = np.abs(np.asarray(data.ordinate[record]))
     keep = np.isfinite(y) & (y > 0.0) & (f > 0.0)
     return v.shaped(name, role, data, f[keep], y[keep])
-
-
-def _notes(notes: Any, status: str = 'info') -> list[dict]:
-    return [v.row('Note', note[0].upper() + note[1:], None, status) for note in notes if note]
 
 
 def _amplitude_quantity(dimension: str) -> str | None:
@@ -158,7 +144,7 @@ def tone_readout(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Bandwidth', float(reading.noise_bandwidth), 'lines', 'info'),
             v.row('Off its line', abs(float(reading.offset)), 'of a line',
                   'warn' if reading.between_lines else 'info')]
-    rows += _notes(reading.notes_in(*said), 'warn')
+    rows += v.notes(reading.notes_in(*said), 'warn')
     lines = [_shaped(psd.record_label(record), 'measured', psd, record)]
     floor = max(float(reading.floor), 0.0)
     top = floor + float(reading.height)
@@ -230,17 +216,17 @@ def transmissibility(project: Any, params: dict[str, Any]) -> list[dict]:
     if estimator and estimator != 'H1':
         notes.insert(0, f'the FRF drawn is {estimator}; the band and the ratio are against '
                         'H1 from the same frames, drawn with them')
-    rows += _notes(notes)
+    rows += v.notes(notes)
     lower_edge, upper_edge = reading.band()
-    lines = [_finite(frf.record_label(record), 'measured', frf.abscissa,
+    lines = [v.drawable(frf.record_label(record), 'measured', frf.abscissa,
                      np.abs(np.asarray(frf.ordinate[record])), positive=True)]
     if estimator != 'H1':
-        lines.append(_finite('H1 = Gxy/Gxx', 'other', f, reading.magnitude, positive=True))
-    lines += [_finite('ASD ratio √(Gyy/Gxx), magnitude only', 'reference', f,
+        lines.append(v.drawable('H1 = Gxy/Gxx', 'other', f, reading.magnitude, positive=True))
+    lines += [v.drawable('ASD ratio √(Gyy/Gxx), magnitude only', 'reference', f,
                       reading.asd_ratio, positive=True),
-              _finite(f'H1 - 1 random error, {reading.averages:.4g} averages', 'tolerance', f,
+              v.drawable(f'H1 - 1 random error, {reading.averages:.4g} averages', 'tolerance', f,
                       lower_edge, positive=True),
-              _finite(f'H1 + 1 random error, {reading.averages:.4g} averages', 'tolerance', f,
+              v.drawable(f'H1 + 1 random error, {reading.averages:.4g} averages', 'tolerance', f,
                       upper_edge, positive=True)]
     said = display_units.words_in(reading.dimension) if unit else ('', 1.0)
     title = (f'{reading.title}, {reading.response} over {reading.reference}: '
@@ -374,16 +360,16 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
         one, other, share, _top = coupled[0]
         notes.append(f'{one} and {other} are coherent over {COUPLED:g} on {share:.0%} of '
                      'the lines, where the identification cannot tell them apart')
-    rows += _notes(notes)
+    rows += v.notes(notes)
 
     unit_axis = v.axis('Coherence', None, 'linear')
     top = v.spectrum(f'{reading.responses[k]} coherence: ' + reading.describe(k), FREQUENCY,
                      unit_axis,
-                     [_finite('multiple, every reference', 'measured', x, reading.multiple[k])]
-                     + [_finite(f'partial with {ref}, the others removed', 'other', x,
+                     [v.drawable('multiple, every reference', 'measured', x, reading.multiple[k])]
+                     + [v.drawable(f'partial with {ref}, the others removed', 'other', x,
                                 reading.partial[k, i]) for i, ref in enumerate(references)],
                      link='frequency')
-    between = [_finite(f'{references[i]} with {references[j]}', 'other', x,
+    between = [v.drawable(f'{references[i]} with {references[j]}', 'other', x,
                        reading.reference[i, j])
                for i in range(len(references)) for j in range(i + 1, len(references))]
     between.append(v.series(f'coupled, {COUPLED:g}', 'tolerance', x[[0, -1]],
@@ -399,7 +385,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
         defined = virtual[np.isfinite(virtual)]
         said = (f', virtual coherence median {np.median(defined):.2f}'
                 if defined.size else '')
-        principal.append(_finite(f'principal {i + 1}{said}', 'measured' if i == 0 else 'other',
+        principal.append(v.drawable(f'principal {i + 1}{said}', 'measured' if i == 0 else 'other',
                                  x, decibels[i]))
     bottom = v.spectrum('Principal references', FREQUENCY,
                         v.axis('Share of principal 1', 'dB', 'linear'), principal,
@@ -450,18 +436,18 @@ def rigid_body_residual(project: Any, params: dict[str, Any]) -> list[dict]:
         notes.append(f'the conditioning is past {MAX_CONDITION:g}: an error at the channels '
                      'reaches the motions that many times larger, and building the '
                      'transformation is refused there unless the limit is raised')
-    rows += _notes(notes + list(reading.notes))
+    rows += v.notes(notes + list(reading.notes))
     x = np.asarray(reading.frequency, dtype=float)
     unit = unit_text(reading.dimension)
     spectra = v.spectrum(
         f'{t.describe()}: {reading.describe()}', LOG_FREQUENCY, v.axis('PSD', unit, 'log'),
-        [_finite('measured, summed over the inputs', 'measured', x, reading.total, True),
-         _finite('explained by the outputs', 'tolerance', x,
+        [v.drawable('measured, summed over the inputs', 'measured', x, reading.total, True),
+         v.drawable('explained by the outputs', 'tolerance', x,
                  np.sum(reading.explained, axis=0), True),
-         _finite('residual, what the outputs leave', 'reference', x,
+         v.drawable('residual, what the outputs leave', 'reference', x,
                  np.sum(reading.residual, axis=0), True)], link='frequency')
     keep = x > 0.0
-    share_lines = [_finite('residual share of the measured power', 'measured', x[keep],
+    share_lines = [v.drawable('residual share of the measured power', 'measured', x[keep],
                            reading.fraction[keep]),
                    v.series(f'threshold, {reading.threshold:.0%}', 'tolerance',
                             x[keep][[0, -1]], [reading.threshold] * 2)]
@@ -525,13 +511,13 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
         rows.append(v.row('Margin', float(margin), 'dB', 'info'))
     rows.append(v.row('Rests on', limit.rests_on[0].upper() + limit.rests_on[1:], None,
                       'info'))
-    rows += _notes(fit.notes)
+    rows += v.notes(fit.notes)
     f = np.asarray(fieldset.frequencies, dtype=float)
-    lines = [_finite(label, 'drive', f, row, True)
+    lines = [v.drawable(label, 'drive', f, row, True)
              for label, row in zip(fieldset.labels, fieldset.levels, strict=True)]
-    lines += [_finite('mean in dB', 'tolerance', f,
+    lines += [v.drawable('mean in dB', 'tolerance', f,
                       10.0 ** (limit.mean_db / fieldset.db_scale), True),
-              _finite(limit.describe(), 'reference', f, limit.levels, True)]
+              v.drawable(limit.describe(), 'reference', f, limit.levels, True)]
 
     def envelope(label: str, role: Any, levels: Any) -> dict:
         x, y = as_power_law(np.asarray(fit.frequencies, dtype=float),
@@ -623,14 +609,14 @@ def sine_profile(project: Any, params: dict[str, Any]) -> list[dict]:
     views = []
     for quantity, (unit, convention) in units.items():
         dimension = 'peak to peak' if quantity == 'displacement' else 'peak'
-        lines = [_finite(f'{tone_name}, read as a profile', 'measured', f,
+        lines = [v.drawable(f'{tone_name}, read as a profile', 'measured', f,
                          profile.level(f, quantity, dimension), True)]
         if level is not None:
             lf, la = (np.asarray(a, dtype=float) for a in level)
             shown = convert(la, lf, 'acceleration', quantity)
             if quantity == 'displacement':
                 shown = 2.0 * shown
-            lines.append(_finite('as the tone interpolates its breakpoints', 'reference', lf,
+            lines.append(v.drawable('as the tone interpolates its breakpoints', 'reference', lf,
                                  shown, True))
         at, value = maxima[quantity]
         views.append(v.spectrum(
@@ -664,7 +650,7 @@ def cmif(project: Any, params: dict[str, Any]) -> list[dict]:
     if not np.isfinite(singular).any():
         raise refused(f'no line of {name} is a finite matrix to decompose')
     floor = np.nanmax(singular) * 1e-10
-    lines = [_finite(f'CMIF {k + 1}', 'measured', x, singular[k], True)
+    lines = [v.drawable(f'CMIF {k + 1}', 'measured', x, singular[k], True)
              for k in range(singular.shape[0]) if np.nanmax(singular[k]) > floor]
     unit = unit_text(str(frf.ordinate_dim[0]))
     return [v.spectrum(f'CMIF of {name}: {len(lines)} singular value '
