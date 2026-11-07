@@ -45,10 +45,15 @@ def verbs_of(project: Any, name: str) -> list[str]:
     `verb:` param lists the object under. A time history that a linked
     channel table describes also lists `overload_check`, which reads it
     against that table's ranges: Visual Dynamics offers its Overload
-    reading there and nowhere else."""
+    reading there and nowhere else. A shock specification does not list
+    `generate_signal`: the one signal it makes is a synthesis, and that
+    has an operation of its own, `project.srs_synthesis`."""
     verbs = [verb for verb, _summary in project.verbs(name)]
-    if kind_of(project[name]) == 'time_history' and project.channel_table_for(name):
+    kind = kind_of(project[name])
+    if kind == 'time_history' and project.channel_table_for(name):
         verbs.append('overload_check')
+    if kind == 'shock_specification':
+        verbs.remove('generate_signal')
     return verbs
 
 

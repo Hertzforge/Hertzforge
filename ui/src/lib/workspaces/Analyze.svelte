@@ -5,7 +5,7 @@
 	 * result joins the tree; a reading takes the view until its default row is clicked.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
-	import type { View, Workspace } from '$lib/protocol/types';
+	import type { Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
 	import Icon from '$lib/shell/Icon.svelte';

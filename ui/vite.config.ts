@@ -8,10 +8,10 @@ export default defineConfig({
 	build: { chunkSizeWarningLimit: 700 },
 	test: {
 		projects: [
-			{ extends: true, test: { name: 'shell', include: ['src/**/*.test.ts'], exclude: ['**/node_modules/**', 'src/lib/acquire/**'], environment: 'node' } },
+			{ extends: true, test: { name: 'shell', include: ['src/**/*.test.ts'], exclude: ['**/node_modules/**', 'src/lib/acquire/**', 'src/lib/app/**'], environment: 'node' } },
 			// Stores built on runes are tested as the shell runs them: Node, with Svelte modules
 			// compiled for the browser (the server build makes every rune a plain value).
-			{ extends: true, test: { name: 'stores', include: ['src/lib/acquire/**/*.test.ts'], environment: './src/test/runes-environment.ts' } }
+			{ extends: true, test: { name: 'stores', include: ['src/lib/acquire/**/*.test.ts', 'src/lib/app/**/*.test.ts'], environment: './src/test/runes-environment.ts' } }
 		]
 	}
 });

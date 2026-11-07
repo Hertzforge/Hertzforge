@@ -170,6 +170,9 @@ the project's `data_index`, as every imported file is.
                                    were typed (only when there are any)
             mates                  JSON, the mated surfaces (only when
                                    there are any)
+            group_solids           JSON, {element group id: the solids it
+                                   was meshed from} (only when there are
+                                   any); a group absent is found by its name
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,

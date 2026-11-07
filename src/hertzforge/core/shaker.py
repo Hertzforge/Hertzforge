@@ -214,10 +214,14 @@ def sentence(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
-def finite(values: Any, dof: str) -> np.ndarray:
+def finite(values: Any, dof: str,
+           why: str = 'a travel integrated through one is not a number',
+           first: int = 0) -> np.ndarray:
     """`values` as real floats, refused when any is not finite: one NaN
     integrates to a travel of NaN from that sample on, and a NaN is
-    neither inside a rating nor over it.
+    neither inside a rating nor over it. `why` is what the refusal says
+    it stops, and `first` is the record's index of `values[0]`, when they
+    are a stretch of it.
 
     Raises
     ------
@@ -231,6 +235,5 @@ def finite(values: Any, dof: str) -> np.ndarray:
                          + ('sample that is' if bad.size == 1
                             else 'samples that are')
                          + ' not finite, '
-                         f'the first at index {bad[0]}; a travel '
-                         'integrated through one is not a number')
+                         f'the first at index {first + bad[0]}; {why}')
     return values

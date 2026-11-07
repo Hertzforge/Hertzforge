@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASIS_COLOR, CURVE_COLORS, colorOf, spans } from './brackets';
+import { BASIS_COLOR, CURVE_COLORS, spans } from './brackets';
 
 const order = ['Geometry', 'Table', 'Time', 'PSD', 'FRF', 'Modes', 'FEM Modes'];
 
@@ -18,8 +18,6 @@ describe('the link brackets', () => {
 		]);
 		expect(painted[0]).toMatchObject({ color: BASIS_COLOR, bold: true, name: 'Survey', column: 0 });
 		expect(painted[1]).toMatchObject({ color: CURVE_COLORS[1], bold: false, column: 1 });
-		expect(colorOf('FRF', painted)).toBeNull();
-		expect(colorOf('Time', painted)).toBe(BASIS_COLOR);
 	});
 
 	it('a group with one row showing, or a member gone, paints nothing', () => {

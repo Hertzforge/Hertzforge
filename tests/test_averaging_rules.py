@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from hertzforge.core import averaging as av
-from hertzforge.core.averaging import Averaging, from_span
+from hertzforge.core.averaging import Averaging
 
 RATE, SAMPLES = 100.0, 1000
 
@@ -21,25 +21,6 @@ RATE, SAMPLES = 100.0, 1000
 def _frames(overlap=0.5, frames=1, start=0.0):
     return Averaging(frame_length=100, overlap=overlap, window='hann',
                      frames=frames, start=start)
-
-
-def test_a_dragged_span_is_whole_frames_from_where_it_starts():
-    """Frames of 100 samples at half overlap step 50: a span of 300
-    samples from 2 s holds 1 + (300 - 100) // 50 = 5 of them."""
-    got = from_span(_frames(), 2.0, 5.0, RATE, SAMPLES)
-    assert (got.start, got.frames) == (2.0, 5)
-    # narrower than one frame is still one
-    assert from_span(_frames(), 2.0, 2.5, RATE, SAMPLES).frames == 1
-    # dragged before the record, it starts at the record
-    assert from_span(_frames(), -1.0, 2.0, RATE, SAMPLES).start == 0.0
-    # past the last place a whole frame fits, it stops there with one
-    late = from_span(_frames(), 9.5, 9.9, RATE, SAMPLES)
-    assert (late.start, late.frames) == (9.0, 1)
-    # never more frames than the record holds from that start
-    assert from_span(_frames(), 0.0, 50.0, RATE, SAMPLES).frames == 19
-    # the drag is on the record's clock: an origin of 10 s moves nothing
-    assert from_span(_frames(), 12.0, 15.0, RATE, SAMPLES, origin=10.0) == \
-        from_span(_frames(), 2.0, 5.0, RATE, SAMPLES)
 
 
 @pytest.mark.parametrize('overlap, rows, count', [

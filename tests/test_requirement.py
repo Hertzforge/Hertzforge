@@ -1453,3 +1453,29 @@ def test_a_notch_is_as_deep_as_its_deepest_line():
                               past), 'limit')
     assert (row.excursions[0].high, row.excursions[0].worst_db) == (
         480.0, pytest.approx(10 * math.log10(2)))
+
+
+def _two_at_one_dof(second='force'):
+    _records = rq._records
+
+    lines = np.linspace(10.0, 2000.0, 60)
+    measured = Psd(abscissa=lines, ordinate=np.full((2, 60), 0.01),
+                   response_dof=['1Z+', '1Z+'],
+                   ordinate_dim=['acceleration**2/frequency', f'{second}**2/frequency'])
+    specification = Specification(
+        abscissa=lines, ordinate=np.full((1, 60), 0.01), response_dof=['1Z+'],
+        ordinate_dim=['acceleration**2/frequency'])
+    requirement = rq.TestRequirement('Plan', [(None, None, -3.0, 3.0)], channels=['1Z+'])
+    return _records, requirement, specification, measured
+
+
+def test_a_named_dof_with_two_quantities_keeps_the_specifications():
+    records, requirement, specification, measured = _two_at_one_dof()
+    assert records(requirement, specification, measured, None) == [0]
+
+
+def test_a_named_dof_the_specification_cannot_separate_says_what_it_needs():
+    records, requirement, specification, measured = _two_at_one_dof('acceleration')
+    with pytest.raises(ValueError, match='2 autospectra at 1Z[+] that the specification does not tell') as refused:
+        records(requirement, specification, measured, None)
+    assert 'name the one meant' not in str(refused.value)

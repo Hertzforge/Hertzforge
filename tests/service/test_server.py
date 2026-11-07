@@ -17,8 +17,16 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from hertzforge.service import __main__ as entry
-from hertzforge.service import frames
-from hertzforge.service.server import OPERATIONS, SWITCH_INTERVAL, Service, preload, start
+from hertzforge.service import frames, projects
+from hertzforge.service.protocol import ProtocolError
+from hertzforge.service.server import (
+    OPERATIONS,
+    SWITCH_INTERVAL,
+    Connection,
+    Service,
+    preload,
+    start,
+)
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 
@@ -67,15 +75,16 @@ async def _session(check, imported=None):
     server = await start(service, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
     before = _heavy(dict(sys.modules))
-    lag = {'max': 0.0, 'run': True}
+    lag = {'held': 0.0, 'busy': 0.0, 'run': True}
 
     async def ticker():
-        last = time.perf_counter()
+        last, spent = time.perf_counter(), time.thread_time()
         while lag['run']:
             await asyncio.sleep(0.005)
-            now = time.perf_counter()
-            lag['max'] = max(lag['max'], now - last - 0.005)
-            last = now
+            now, used = time.perf_counter(), time.thread_time()
+            lag['held'] = max(lag['held'], now - last - 0.005)
+            lag['busy'] = max(lag['busy'], used - spent)
+            last, spent = now, used
 
     tick = asyncio.create_task(ticker())
     sys.setswitchinterval(SWITCH_INTERVAL)
@@ -92,54 +101,54 @@ async def _session(check, imported=None):
         service.close()
     if imported is not None:
         imported.update(_heavy(dict(sys.modules)) - before)
-    return lag['max']
+    return lag
 
 
-# A timing test: CI runs it alone, after the rest (`-m timing`, without xdist), because any
-# worker beside it can starve its event loop on a small runner. Beside the fresh-interpreter
-# preload test below the loop was held 136 ms on ubuntu-latest with Python 3.12, against a
-# 25-41 ms worst case run alone; the xdist group that kept those two apart still left 175 ms
-# on windows-latest with Python 3.13 beside the other workers. The group stays for a local
-# run of the whole suite under `--dist loadgroup`.
-@pytest.mark.timing
+async def _study(client, socket, validate, seen):
+    hello = frames.decode(await socket.recv())
+    validate(hello)
+    assert hello == {'type': 'hello', 'protocol': 'sds/1',
+                     'service': 'analysis', 'version': hello['version']}
+
+    catalog, frame = await client.call('catalog.list', raw=True)
+    assert isinstance(frame, str)
+    validate(catalog)
+    validate(catalog['result'], 'catalog')
+
+    opened = await client.call('project.import', {'path': str(PLATE / 'random.nc4')})
+    validate(opened)
+    names = [o['name'] for o in opened['result']['project']['objects']]
+    assert 'Time History' in names
+    for op in ('project.plot', 'project.waterfall'):
+        response, frame = await client.call('op.run', {
+            'op': op, 'params': {'data': 'Time History'}}, raw=True)
+        assert isinstance(frame, bytes)
+        validate(wire(response))
+        validate(wire(response['result'])['views'], 'views')
+        seen[op] = response['result']['views']
+
+    await client.call('project.new', {'title': 'Survey'})
+    await client.call('project.import', {'path': str(PLATE / 'modal_spectra.nc4')})
+    await client.call('project.import', {'path': str(PLATE / 'test_geometry.npz')})
+    actions = await client.call('project.actions', {'objects': ['FRF'], 'records': {}})
+    validate(actions)
+    response, frame = await client.call('op.run', {
+        'op': 'project.fit_modes',
+        'params': {'frf': 'FRF', 'low_hz': 300, 'high_hz': 1300, 'count': 4}}, raw=True)
+    validate(wire(response))
+    shape = next(v for v in response['result']['views'] if v['view'] == 'shape3d')
+    assert 1 <= len(shape['modes']) <= 4
+    assert shape['nodes'].dtype.name == 'float32'
+    seen['project.fit_modes'] = shape
+
+
+# Beside other workers: what it holds to does not rest on the wall clock.
 @pytest.mark.xdist_group('serving')
 def test_smoke(validate):
     seen = {}
 
     async def check(client, socket):
-        hello = frames.decode(await socket.recv())
-        validate(hello)
-        assert hello == {'type': 'hello', 'protocol': 'sds/1',
-                         'service': 'analysis', 'version': hello['version']}
-
-        catalog, frame = await client.call('catalog.list', raw=True)
-        assert isinstance(frame, str)
-        validate(catalog)
-        validate(catalog['result'], 'catalog')
-
-        opened = await client.call('project.import', {'path': str(PLATE / 'random.nc4')})
-        validate(opened)
-        names = [o['name'] for o in opened['result']['project']['objects']]
-        assert 'Time History' in names
-        for op in ('project.plot', 'project.waterfall'):
-            response, frame = await client.call('op.run', {
-                'op': op, 'params': {'data': 'Time History'}}, raw=True)
-            assert isinstance(frame, bytes)
-            validate(wire(response))
-            validate(wire(response['result'])['views'], 'views')
-            seen[op] = response['result']['views']
-
-        await client.call('project.new', {'title': 'Survey'})
-        await client.call('project.import', {'path': str(PLATE / 'modal_spectra.nc4')})
-        await client.call('project.import', {'path': str(PLATE / 'test_geometry.npz')})
-        response, frame = await client.call('op.run', {
-            'op': 'project.fit_modes',
-            'params': {'frf': 'FRF', 'low_hz': 300, 'high_hz': 1300, 'count': 4}}, raw=True)
-        validate(wire(response))
-        shape = next(v for v in response['result']['views'] if v['view'] == 'shape3d')
-        assert 1 <= len(shape['modes']) <= 4
-        assert shape['nodes'].dtype.name == 'float32'
-        seen['project.fit_modes'] = shape
+        await _study(client, socket, validate, seen)
 
     imported = set()
     lag = asyncio.run(_session(check, imported))
@@ -148,9 +157,30 @@ def test_smoke(validate):
     # Nothing heavy was first imported while serving: that is what stalls the
     # loop on a cold machine (server.PRELOAD), however fast this one is.
     assert not imported, f'imported while serving: {sorted(imported)}'
-    # heavy work ran off the loop: the ticker was never held up for long
-    print(f'longest event-loop stall {lag * 1000:.1f} ms')
-    assert lag < 0.1, f'event loop held for {lag:.3f} s'
+    # heavy work ran off the loop: what the loop's thread itself spent between two ticks, which
+    # other processes sharing the cores do not add to as they do to the wall clock. Encoding and
+    # checking frames here came to 60-70 ms under load; a fit run on the loop would be seconds.
+    print(f'longest stretch on the event loop {lag["busy"] * 1000:.1f} ms of its thread')
+    assert lag['busy'] < 0.25, f'event loop kept busy for {lag["busy"]:.3f} s'
+
+
+# A timing test: CI runs it alone, after the rest (`-m timing`, without xdist), because any
+# worker beside it can starve its event loop on a small runner. Beside the fresh-interpreter
+# preload test below the loop was held 136 ms on ubuntu-latest with Python 3.12, against a
+# 25-41 ms worst case run alone; the xdist group that kept those two apart still left 175 ms
+# on windows-latest with Python 3.13 beside the other workers. Under xdist it is skipped
+# (tests/conftest.py), since 105 ms beside a local suite says nothing about the loop.
+@pytest.mark.timing
+@pytest.mark.xdist_group('serving')
+def test_the_event_loop_is_not_held_up_for_long(validate):
+    seen = {}
+
+    async def check(client, socket):
+        await _study(client, socket, validate, seen)
+
+    lag = asyncio.run(_session(check))
+    print(f'longest event-loop stall {lag["held"] * 1000:.1f} ms')
+    assert lag['held'] < 0.1, f'event loop held for {lag["held"]:.3f} s'
 
 
 #: Run in a fresh interpreter (argv: HEAVY and the plate folder, as JSON):
@@ -392,3 +422,44 @@ def test_with_watch_stdin_the_end_of_standard_input_ends_the_service():
         if process.poll() is None:
             process.kill()
             process.wait(timeout=20)
+
+
+def test_the_schema_takes_a_photo_renamed_by_index(validate):
+    validate({'name': 'Photos', 'to': 'Mount', 'index': 0}, 'projectRenameParams')
+
+
+def _connection(path=None):
+    service = Service()
+    connection = Connection(service, None)
+    connection.project = (projects.import_file(None, {'path': str(path)})[0] if path
+                          else projects.new({'title': 't'}))
+    return service, connection
+
+
+def test_a_preview_of_an_operation_that_does_not_preview_is_refused_and_runs_nothing():
+    service, connection = _connection()
+    try:
+        with pytest.raises(ProtocolError, match='does not preview') as error:
+            asyncio.run(connection.project_op(
+                {'op': 'project.new_geometry', 'params': {'name': 'H'}, 'preview': True}))
+        assert error.value.code == 'bad_request'
+        assert 'H' not in connection.project.project and not connection.project.modified
+    finally:
+        service.close()
+
+
+def test_a_run_that_journals_marks_the_project_and_a_reading_does_not():
+    service, connection = _connection(PLATE / 'random.nc4')
+    state = connection.project
+    try:
+        asyncio.run(connection.project_op({'op': 'project.work_up_random', 'params': {}}))
+        assert state.modified
+        state.modified = False
+        asyncio.run(connection.project_op({'op': 'project.plot', 'params': {'data': 'Time History'}}))
+        assert not state.modified
+        # a Work Up with nothing to compute that only says what kind of test this is
+        state.project.project_type = None
+        asyncio.run(connection.project_op({'op': 'project.work_up_random', 'params': {}}))
+        assert state.project.project_type == 'Random Vibration' and state.modified
+    finally:
+        service.close()

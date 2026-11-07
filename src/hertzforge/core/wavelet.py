@@ -175,16 +175,6 @@ def scale_for(frequency: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
     return 1.0 / (np.asarray(frequency, dtype=float) * fourier_factor(omega0))
 
 
-def frequency_for(scale: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
-    """The frequency, in Hz, that a wavelet of each scale is tuned to.
-
-    This is the inverse of `scale_for`. The scale axis and the frequency
-    axis are one axis under a change of variable, which is why the view
-    can label its axis in Hz.
-    """
-    return 1.0 / (np.asarray(scale, dtype=float) * fourier_factor(omega0))
-
-
 def log_frequencies(low: float, high: float,
                     per_octave: int = PER_OCTAVE) -> np.ndarray:
     """Frequencies spaced evenly in octaves, `per_octave` lines to the octave.

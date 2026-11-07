@@ -301,3 +301,23 @@ def test_a_systems_temperature_is_converted_with_its_offset():
     assert system.to_si(32.0, 'temperature') == pytest.approx(273.15)
     assert system.from_si(273.15, 'temperature') == pytest.approx(32.0)
     assert system.to_si(212.0, 'temperature') == pytest.approx(373.15)
+
+
+def test_a_signed_value_reads_one_way_everywhere():
+    from hertzforge.units import signed
+
+    assert signed(-0.04, 'dB') == '+0.0 dB', 'what rounds to zero has no minus'
+    assert signed(-1.25, 'dB') == '\u22121.2 dB'
+    assert signed(2.0, '%', places=2) == '+2.00 %'
+    assert signed(float('nan'), 'dB') == 'not read'
+    assert signed(float('inf'), 'dB', missing='-') == '-'
+    assert signed(1.0) == '+1.0'
+
+
+def test_the_report_the_reading_and_the_replication_check_share_it():
+    from hertzforge.core import replication_segments
+    from hertzforge.report import check_blocks
+    from hertzforge.service import ops_sine_shock
+
+    for module in (check_blocks, ops_sine_shock, replication_segments):
+        assert not hasattr(module, '_signed')

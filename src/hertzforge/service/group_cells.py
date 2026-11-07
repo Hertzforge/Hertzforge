@@ -17,6 +17,8 @@ import math
 from dataclasses import replace
 from typing import Any
 
+from .parsing import parse_numbers
+
 #: every column: key, title, what holds the value ('' for the property set
 #: itself), the field there, and the SI unit its heading names
 COLUMNS = (
@@ -322,7 +324,7 @@ def set_cell(geometry: Any, group: int, key: str, text: str) -> None:
         raise ValueError(f'computed from the {section.shape}\'s dimensions: choose '
                          f'{CUSTOM} in Shape to type it')
     if key == 'orientation':
-        parts = tuple(float(v) for v in text.replace(',', ' ').split())
+        parts = tuple(parse_numbers(text, 'an orientation'))
         if text and len(parts) != 3:
             raise ValueError('an orientation is three numbers')
         _hold(geometry, group, replace(props, orientation=parts or None))
