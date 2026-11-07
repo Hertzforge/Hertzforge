@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import hertzforge
+from hertzforge.core import compliance
 from hertzforge.core.averaging import Averaging
 from hertzforge.core.data import Psd, Specification, TimeHistory
 from hertzforge.service import display_units, projects
@@ -238,7 +239,9 @@ def _flat_target(warning_db=3.0, abort_db=6.0):
 @pytest.mark.parametrize('offset_db', [6.0, -6.0, 3.0, -3.0])
 def test_a_power_exactly_on_a_limit_is_inside(offset_db):
     f = np.arange(0.0, 2049.0)
-    measured = Psd(f, np.full((1, f.size), 1e-2 * 10.0 ** (offset_db / 10.0)),
+    share = compliance.area_on_lines(np.array([20.0, 2000.0]), np.ones(2), f)
+    measured = Psd(f, (np.where(np.isfinite(share), share, 1.0)
+                       * 1e-2 * 10.0 ** (offset_db / 10.0))[None, :],
                    response_dof=['1Z+'], ordinate_dim=[DENSITY])
     project = hertzforge.Project()
     measured.scale_db = 0
@@ -250,9 +253,24 @@ def test_a_power_exactly_on_a_limit_is_inside(offset_db):
         assert found['Lines outside warning']['value'] == 0.0
 
 
-def test_a_power_past_a_limit_by_a_little_is_outside():
-    from hertzforge.core import compliance
+def test_a_flagged_line_the_spec_only_partly_reaches_says_so():
+    f = np.arange(0.0, 2049.0)
+    measured = Psd(f, np.full((1, f.size), 1e-2), response_dof=['1Z+'], ordinate_dim=[DENSITY])
+    measured.scale_db = 0
+    project = hertzforge.Project()
+    project.add('Spec', _flat_target())
+    project.add('Run', measured)
+    found = rows(run(project, 'project.spec_spectra', specification='Spec', spectrum='Run'))
+    assert found['Note']['value'] == (
+        'Flagged lines the specification reaches only part of, judged over the '
+        'whole bin: 20 Hz (50 %), 2000 Hz (50 %)')
+    share = compliance.area_on_lines(np.array([20.0, 2000.0]), np.ones(2), f)
+    measured.ordinate = (np.where(np.isfinite(share), share, 1.0) * 1e-2)[None, :]
+    found = rows(run(project, 'project.spec_spectra', specification='Spec', spectrum='Run'))
+    assert 'Note' not in found
 
+
+def test_a_power_past_a_limit_by_a_little_is_outside():
     f = np.arange(0.0, 2049.0)
     measured = Psd(f, np.full((1, f.size), 1e-2 * 10.0 ** (6.001 / 10.0)),
                    response_dof=['1Z+'], ordinate_dim=[DENSITY])

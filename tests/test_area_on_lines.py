@@ -140,14 +140,72 @@ def test_a_response_on_the_lines_read_from_the_curve_is_out_nowhere(spacing):
     assert not over.any() and not under.any()
 
 
-def test_a_flat_response_through_the_end_of_the_curve_is_out_nowhere():
-    spec = _spec(**_limits())
-    f = np.arange(0.0, 4096.0, 1.0)
-    over, under = compliance.exceedances(spec, _psd(f, np.full(f.size, 0.01)),
-                                         scale_db=0)
+def _warned(low=20.0, high=2000.0):
+    level = np.array([[0.01, 0.01]])
+    return Specification(np.array([low, high]), level, response_dof=['1Z+'],
+                         ordinate_dim=[DIM], warning_lower=level / 10 ** 0.3,
+                         warning_upper=level * 10 ** 0.3)
+
+
+@pytest.mark.parametrize('df', [0.5, 1.0, 2.0, 4.0])
+def test_a_line_is_judged_by_the_energy_in_its_whole_bin(df):
+    """The curve's energy does not depend on the spacing (Brandon,
+    2026-11-07). A response on the area-equivalent lines holds exactly
+    that at any spacing and is out nowhere. One running flat through the
+    end lines holds more, by an amount that grows with the bin, and those
+    two lines are over."""
+    spec = _warned()
+    f = np.arange(0.0, 4096.0 + df, df)
+    on = area_on_lines(spec.abscissa, spec.ordinate[0], f)
+    held = _psd(f, np.nan_to_num(on))
+    over, under = compliance.exceedances(spec, held, 0, 0, 'warning', 0.0)
     assert not over.any() and not under.any()
-    got = compliance.compare(spec, _psd(f, np.full(f.size, 0.01)), scale_db=0)
-    assert got['difference_db'] == pytest.approx(0.0, abs=1e-9)
+    got = compliance.compare(spec, held, scale_db=0)
+    assert got['measured_rms'] ** 2 == pytest.approx(19.8)
+    assert got['specification_rms'] ** 2 == pytest.approx(19.8)
+    assert 'partly_written' not in got
+
+    flat = _psd(f, np.where(np.isfinite(on), 0.01, 0.0))
+    over, under = compliance.exceedances(spec, flat, 0, 0, 'warning', 0.0)
+    assert not under.any()
+    assert f[over].tolist() == [20.0, 2000.0]
+    got = compliance.compare(spec, flat, scale_db=0)
+    assert got['measured_rms'] ** 2 == pytest.approx(19.8 + 0.01 * df)
+    assert [line for line, _share in got['partly_written']] == pytest.approx([20.0, 2000.0])
+    assert [share for _line, share in got['partly_written']] == pytest.approx([0.5, 0.5])
+    assert compliance.partly_written_text(got['partly_written']).endswith(
+        'whole bin: 20 Hz (50 %), 2000 Hz (50 %)')
+
+
+def test_a_spec_written_to_the_bins_has_one_reading():
+    """Written from 19.5 to 2000.5 Hz, every 1 Hz line is whole, so a flat
+    response is on it, and half a line is under the limits."""
+    spec = _warned(19.5, 2000.5)
+    f = np.arange(0.0, 4096.0)
+    flat = np.where((f >= 20.0) & (f <= 2000.0), 0.01, 0.0)
+    over, under = compliance.exceedances(spec, _psd(f, flat), 0, 0, 'warning', 0.0)
+    assert not over.any() and not under.any()
+    flat[2000] /= 2.0
+    over, under = compliance.exceedances(spec, _psd(f, flat), 0, 0, 'warning', 0.0)
+    assert not over.any() and f[under].tolist() == [2000.0]
+
+
+def test_a_range_cut_from_a_longer_curve_is_not_an_end():
+    """A flat response is flat across a step in the tolerance: the line
+    on the step is read in each range over its own part, and only the
+    curve's real ends read whole."""
+    from hertzforge.core.requirement import within
+
+    spec = _warned()
+    f = np.arange(0.0, 4096.0)
+    held = _psd(f, np.full(f.size, 0.01))
+    below = compliance.cells(within(spec, 0, None, 500.0), held)
+    above = compliance.cells(within(spec, 0, 500.0, None), held)
+    assert below[0]['pieces'] == [(19.5, 20.5)]
+    assert below[-1]['pieces'] == [(499.5, 500.0)]
+    assert above[0]['pieces'] == [(500.0, 500.5)]
+    assert above[-1]['pieces'] == [(1999.5, 2000.5)]
+    assert below[0]['low'] == 20.0 and above[-1]['high'] == 2000.0
 
 
 def test_a_dead_end_line_and_a_hot_one_are_still_found():

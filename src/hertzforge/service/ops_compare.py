@@ -185,6 +185,9 @@ def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
     found.append(_scale_row(scale, source))
     if result.get('note'):
         found.append(v.row('Note', str(result['note']), None, 'warn'))
+    if result.get('partly_written'):
+        found.append(v.row('Note', compliance.partly_written_text(result['partly_written']),
+                           None, 'info'))
     verdict = compliance.verdict(rows)
     words, status = _verdict(verdict['passed'])
     found.append(v.row(f'Run ({verdict["channels"]} channels)', words, None, status))

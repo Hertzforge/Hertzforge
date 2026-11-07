@@ -19,13 +19,13 @@ are densities on bins. Only frequencies both objects are written over are
 judged. Outside the specification's band nothing is specified, and a
 response there neither passes nor fails.
 
-At the two ends of that band a line's bin is usually partly inside and
-partly outside. Counting the whole bin credits the response with power
-the specification did not ask for, and dropping it loses power that was
-asked for. So a line at an end is compared over the part of its bin that
-the specification covers, the same part the plot shades. Both sides of
-the comparison are then areas over the same range of frequency, which is
-what an RMS error needs.
+At the two ends of a curve written at breakpoints a line's bin is usually
+partly inside and partly outside. A line holds its density over its whole
+bin, so it is compared over the whole bin: the energy it holds there
+against the energy the curve holds there, which is nothing past the
+curve's end. The curve's energy then does not depend on the spacing, and
+a response holding more than the curve in an end bin reads high however
+it got there (Brandon, 2026-11-07).
 """
 
 from __future__ import annotations
@@ -591,9 +591,14 @@ def cells(specification: Specification, measured: DataArray,
     that part, both sides integrated over the same range. The same rule
     applies at the ends of the band and in the middle.
 
-    Against a curve at breakpoints, a cell also has 'whole': the line's
-    bin, cut only to the measurement, which `judge` reads a lower limit
-    over.
+    Against a curve at breakpoints, a line the curve reaches is judged
+    over its whole bin, cut only to the measurement: the curve's energy
+    in the bin against the line's. The curve holds nothing past its end,
+    so that energy does not depend on the spacing, and a line judged over
+    part of its bin would be passing whatever its other part held. A
+    range cut out of a longer curve (`requirement.within`) is not an end:
+    the curve goes on, and the line is judged in each range over its own
+    part.
 
     Parameters
     ----------
@@ -605,12 +610,12 @@ def cells(specification: Specification, measured: DataArray,
     Returns
     -------
     list of dict
-        Each with 'low' and 'high' (the cell's outer reach), 'pieces'
-        (the stretches judged, inside it), 'width' (their sum) and
-        'span' (the whole bin it came from, judged or not).
+        Each with 'low' and 'high' (how far the cell reaches into what
+        is written), 'pieces' (the stretches judged), 'width' (their
+        sum) and 'span' (the whole bin it came from, judged or not).
     """
-    # one rule at the ends and in the middle alike (Brandon,
-    # 2026-09-19)
+    # one rule at the ends and in the middle alike (Brandon, 2026-09-19);
+    # a curve at breakpoints reads whole bins (Brandon, 2026-11-07)
     if comparable(specification, measured) is not None:
         return []
     asked = coverage(specification, spec_record)
@@ -633,7 +638,11 @@ def cells(specification: Specification, measured: DataArray,
         pieces = [piece for a, b in _pieces(float(low), float(high), asked)
                   for piece in _pieces(a, b, held)]
         if pieces:
-            cell = {'low': pieces[0][0], 'high': pieces[-1][1],
+            reach = pieces[0][0], pieces[-1][1]
+            if breakpoints:
+                edges = _read_edges(specification, float(low), float(high))
+                pieces = _pieces(*edges, held)
+            cell = {'low': reach[0], 'high': reach[1],
                     'pieces': pieces,
                     'width': float(sum(b - a for a, b in pieces)),
                     # the bin this cell came from, whole. `width`
@@ -641,10 +650,17 @@ def cells(specification: Specification, measured: DataArray,
                     # band was judged, which is what a share of
                     # the comparison counts in.
                     'span': float(high) - float(low)}
-            if breakpoints:
-                cell['whole'] = _pieces(float(low), float(high), held)
             out.append(cell)
     return out
+
+
+def _read_edges(specification: Specification, low: float,
+                high: float) -> tuple[float, float]:
+    """A bin from `low` to `high`, cut only where `specification` is a
+    range out of a longer curve (`requirement.within`)."""
+    a, b = getattr(specification, 'cut_from_curve', (None, None))
+    return (low if a is None else max(low, a),
+            high if b is None else min(high, b))
 
 
 def cell_lines(cell: dict[str, Any], left: np.ndarray,
@@ -712,15 +728,7 @@ def judge(specification: Specification, measured: DataArray,
         scale_db = comparison_scale_db(specification, measured)
     scale = 10.0 ** (float(scale_db) / 10.0)
     found = cells(specification, measured, spec_record, measured_record)
-    # A line's level is a density over its whole bin, and one line cannot
-    # say whether a response stopped where the curve did. Cut to the
-    # curve, a line that holds its bin's share of the curve
-    # (`area_on_lines`) reads low; whole, a response running past the
-    # curve reads high. So an upper limit is read cut, the 2026-09-19
-    # rule, and a lower limit whole (Brandon, 2026-11-07): an end line is
-    # out only if it is out either way.
-    spans = [cell['whole'] if not over and 'whole' in cell else cell['pieces']
-             for cell in found]
+    spans = [cell['pieces'] for cell in found]
     # every piece of every cell at once — one vectorized read of each
     # object — then summed back per cell
     owner = np.array([k for k, span in enumerate(spans)
@@ -751,7 +759,7 @@ def judge(specification: Specification, measured: DataArray,
         if inside is None:
             continue
         lines[inside] = True
-        level[inside] = asked[k] / sum(b - a for a, b in spans[k])
+        level[inside] = asked[k] / cell['width']
         start[inside] = np.maximum(left[inside], cell['low'])
         stop[inside] = np.minimum(right[inside], cell['high'])
     return {'cells': found, 'asked': asked, 'held': held, 'out': out,
@@ -1338,12 +1346,13 @@ def compare(specification: Specification, measured: DataArray,
     #
     # Narrowband numbers do not move, to every digit: those bins are
     # all one width, so weighting by the fraction judged and weighting
-    # by hertz are the same ratio. Cells *are* cut — at the ends of
-    # every written stretch the outermost line is judged over half its
-    # own bin — which is why this is a weighted count and not a plain
-    # one.
+    # by hertz are the same ratio. Cells *are* cut, where a range is cut
+    # out of a longer curve (`requirement.within`) and the line on its
+    # edge is judged over part of its own bin, which is why this is a
+    # weighted count and not a plain one.
     share = np.array([cell['width'] / cell['span'] if cell['span'] else 0.0
                       for cell in found], dtype=float)
+    flagged = np.zeros(len(found), dtype=bool)
     for pair in ('warning', 'abort'):
         if not any(f'{pair}_{edge}' in specification.limits
                    for edge in ('lower', 'upper')):
@@ -1354,13 +1363,29 @@ def compare(specification: Specification, measured: DataArray,
                 beyond |= judge(specification, measured, spec_record,
                                 measured_record, edge, over, scale_db)['out']
         beyond &= counted
+        flagged |= beyond
         out[f'{pair}_lines'] = int(beyond.sum())
         out[f'{pair}_percent'] = (100.0 * float(share[beyond].sum())
                                   / float(share[counted].sum())
                                   if counted.any() else 0.0)
     if note is not None:
         out['note'] = note
+    partly = [(0.5 * (cell['pieces'][0][0] + cell['pieces'][-1][1]),
+               (cell['high'] - cell['low']) / cell['width'])
+              for k, cell in enumerate(found)
+              if flagged[k] and cell['high'] - cell['low'] < cell['width'] * (1.0 - 1e-9)]
+    if partly:
+        out['partly_written'] = partly
     return out
+
+
+def partly_written_text(partly: list[tuple[float, float]]) -> str:
+    """Says which flagged lines the specification reaches only part of,
+    as `compare` lists them: (line in Hz, share of its bin written)."""
+    lines = ', '.join(f'{line:g} Hz ({100.0 * share:.3g} %)'
+                      for line, share in partly)
+    return ('Flagged lines the specification reaches only part of, judged '
+            f'over the whole bin: {lines}')
 
 
 #: how far the RMS may be out before a channel is called out, in dB.
