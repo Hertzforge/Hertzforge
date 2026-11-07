@@ -1,7 +1,7 @@
 """Editing a geometry and what is drawn on it, and the project's own
 structure: Visual Dynamics' entity tables, the coordinate system gizmo,
-the DOF arrows and sensors of the 3-D view, the project type and its
-Automatic work-up, channel roles and DOF names, a channel table's
+the DOF arrows and sensors of the 3-D view,
+Work Up, channel roles and DOF names, a channel table's
 control loops, and the object groups.
 
 A geometry's nodes, coordinate systems, elements and element groups are
@@ -909,16 +909,7 @@ def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
             v.reading(f'Sensors of {name}', readings)]
 
 
-# ---- project type and Automatic -----------------------------------------------------
-
-def _project_types() -> tuple[Option, ...]:
-    from hertzforge.core.report import PROJECT_TYPES
-
-    return (*(Option(t, t) for t in PROJECT_TYPES), Option('none', 'None'))
-
-
-PROJECT_TYPE = Param('type', 'Project type', 'enum', default='none', options=_project_types())
-
+# ---- Work Up ------------------------------------------------------------------------
 
 def _still_missing(project: Any) -> list[dict]:
     still = [label for label, _cls, _icon, _n, optional, _side in project.missing()
@@ -929,8 +920,8 @@ def _still_missing(project: Any) -> list[dict]:
     return [v.row('Missing', label, None, 'warn') for label in still]
 
 
-def _place_basis(project: Any) -> list[str]:
-    """The project type's Basis slots filled from the objects that
+def _place_basis(project: Any, test: str) -> list[str]:
+    """The Basis slots of a kind of test filled from the objects that
     satisfy them (`core.report.expectation_satisfiers`), each placed in
     the Basis group (`Project.place`) unless it is already in another
     group: what Visual Dynamics' window does when a type is set. Returns
@@ -938,7 +929,7 @@ def _place_basis(project: Any) -> list[str]:
     from hertzforge.core.report import expectation_satisfiers
 
     placed = project.sides()
-    members = expectation_satisfiers(project.project_type, dict(project.items()),
+    members = expectation_satisfiers(test, dict(project.items()),
                                      placed).get('Basis', [])
     elsewhere = {name for group in project.object_groups if group['role'] != 'Basis'
                  for name in group['members']}
@@ -955,38 +946,26 @@ def _place_basis(project: Any) -> list[str]:
     return moved
 
 
-def set_project_type(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.set_project_type`: the kind of test the project is,
-    which decides the objects a finished project holds, the slots the
-    tree shows gray, and what Automatic fills. As in Visual Dynamics, the
-    objects that satisfy the type's Basis slots are placed in the Basis
-    group as the type is set; the window does that from core calls, and
-    so does this. The reading lists what is still missing."""
-    project.project_type = None if params['type'] == 'none' else params['type']
-    if project.project_type is None:
-        return [v.reading('Project type', [v.row('Type', 'none', None, 'info')]),
-                groups_table(project)]
-    rows = [v.row('Type', project.project_type, None, 'info')]
-    moved = _place_basis(project)
-    if moved:
-        rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
-    return [v.reading(f'{project.project_type} project', rows + _still_missing(project)),
-            groups_table(project)]
-
-
-def work_up(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.work_up`: Automatic, every missing object the project's
-    type expects computed from what is loaded, the report last
-    (`Project.work_up`), and what is still missing after it, as Visual
-    Dynamics' status bar says."""
-    try:
-        added = project.work_up()
-    except ValueError as error:
-        raise refused(str(error)) from None
-    rows = ([v.row('Added', name, None, 'pass') for name in added]
-            or [v.row('Added', 'nothing to compute', None, 'info')])
-    return [v.reading(f'Automatic, {project.project_type} project',
-                      rows + _still_missing(project))]
+def _work_up(test: str) -> Any:
+    def run(project: Any, params: dict[str, Any]) -> list[dict]:
+        """Work Up in one module, which says the kind of test: the objects
+        that fill its Basis placed there, then every missing object it
+        expects computed from what is loaded, the report last
+        (`Project.work_up`), and what is still missing after it, as Visual
+        Dynamics' status bar says (Brandon, 2026-11-06)."""
+        if not project.names:
+            raise refused('Nothing is loaded to work up')
+        moved = _place_basis(project, test)
+        try:
+            added = project.work_up(test)
+        except ValueError as error:
+            raise refused(str(error)) from None
+        rows = ([v.row('Added', name, None, 'pass') for name in added]
+                or [v.row('Added', 'nothing to compute', None, 'info')])
+        if moved:
+            rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
+        return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
+    return run
 
 
 # ---- channel roles and DOF names ----------------------------------------------------
@@ -1267,7 +1246,7 @@ def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, ru
 def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
             edits: bool = True, workspace: Workspace = 'signals') -> Operation:
     """An act on the project every module offers: the groups, a channel's
-    role or DOF, the project's type. `workspace` is its home."""
+    role or DOF. `workspace` is its home."""
     return Operation(id=id_, title=title, workspace=workspace,
                      summary=summary, params=params, outputs=outputs, run=run, edits=edits,
                      everywhere=True)
@@ -1322,14 +1301,6 @@ OPERATIONS = (
            'The sensors a channel table names, centered on their nodes and turned as the '
            'table says, at a multiple of true size.',
            (TABLE, SIZE), (*DRAWN, 'reading'), sensors, edits=False),
-    _shared('project.set_project_type', 'Set Project Type',
-             'The kind of test the project is, which says what a finished project holds; '
-             'the objects that fill its Basis are placed there.',
-             (PROJECT_TYPE,), ('reading', 'table'), set_project_type),
-    _shared('project.work_up', 'Automatic',
-             'Every object the project\'s type expects computed from what is loaded, the '
-             'report last.',
-             (), ('reading',), work_up),
     _shared('project.set_channel_role', 'Set Channel Role',
              'One channel made a reference, a response or a monitor, on a time history or '
              'channel table and on what is linked with it.',
@@ -1371,4 +1342,12 @@ OPERATIONS = (
                 Param('column', 'Column', 'string', default='id'),
                 Param('value', 'Value', 'string', default='')),
         outputs=('shape3d', 'table'), run=set_entity_cell, edits=True),
+    *(Operation(
+        id=f'project.work_up_{module}', title=f'Work Up {test}', workspace=module,
+        summary=f'Every object a {test} test expects computed from what is loaded, the report '
+                'last.',
+        params=(), outputs=('reading',), run=_work_up(test))
+      for module, test in (('sysid', 'System ID'), ('random', 'Random Vibration'),
+                           ('shock', 'Shock'), ('transient', 'Transient'),
+                           ('sine', 'Sine Sweep'), ('modal', 'Modal Test'))),
 )

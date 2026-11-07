@@ -33,7 +33,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSObject", "NSString", "NSURL"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSButton", "NSControl", "NSPanel", "NSPopUpButton", "NSResponder", "NSSavePanel", "NSText", "NSTextField", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSButton", "NSControl", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSPopUpButton", "NSResponder", "NSSavePanel", "NSText", "NSTextField", "NSView", "NSWindow"] }
 serde = { version = "1", features = ["derive"] }
 
 [features]

@@ -52,3 +52,33 @@ describe('motion playback', () => {
 		expect(advance(2048, 10, 0.125)).toBe(256);
 	});
 });
+
+describe('modal motion', () => {
+	/** Two modes over two nodes, three samples: node 3 and node 5 of the mesh. */
+	const modal: Motion = {
+		label: 'Time',
+		unit: 's',
+		start: 0,
+		step: 0.1,
+		quantity: 'Length',
+		value_unit: 'm',
+		node: Uint32Array.from([3, 5]),
+		direction: new Float32Array(0),
+		// mode 1 moves node 3 in X and node 5 in Y; mode 2 moves node 3 in Z
+		modes: Float32Array.from([1, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0]),
+		values: Float32Array.from([1, 2, 3, 10, 20, 30]),
+		peak: 1
+	};
+
+	it('counts each mode\'s samples', () => {
+		expect(sampleCount(modal)).toBe(3);
+	});
+
+	it('sums the modes scaled by their values at the sample', () => {
+		const out = new Float32Array(3 * 6).fill(9);
+		writeFrame(modal, 1, movedNodes(modal), out);
+		expect(Array.from(out.slice(9, 12))).toEqual([2, 0, 80]);
+		expect(Array.from(out.slice(15, 18))).toEqual([0, 4, 0]);
+		expect(out[0]).toBe(9);
+	});
+});

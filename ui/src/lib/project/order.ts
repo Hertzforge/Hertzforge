@@ -50,3 +50,10 @@ export function landsBefore(listed: Listed[], links: ProjectSummary['links'] | u
 	const first = order.findIndex((name) => moving.includes(name));
 	return order.slice(first).find((name) => !moving.includes(name)) ?? null;
 }
+
+/** `ids` with `moving` taken out and put before `before`, or last for null. */
+export function reordered(ids: number[], moving: number, before: number | null): number[] {
+	const rest = ids.filter((id) => id !== moving);
+	const at = before === null ? rest.length : rest.indexOf(before);
+	return [...rest.slice(0, at < 0 ? rest.length : at), moving, ...rest.slice(at < 0 ? rest.length : at)];
+}

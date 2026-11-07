@@ -14,6 +14,7 @@ every operation runs on and which ends with it.
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import itertools
 import logging
@@ -132,6 +133,27 @@ def preload() -> None:
 SWITCH_INTERVAL = 0.001
 
 
+
+def _preview_copy(project: Any, name: str) -> Any:
+    """A project holding only a copy of geometry `name`, for an operation to act on while
+    its form is typed: nothing it does reaches the project or its journal."""
+    from hertzforge import Project
+
+    scratch = Project('preview')
+    scratch.add(name, copy.deepcopy(project[name]))
+    return scratch
+
+
+def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, Any]]:
+    """A preview's views in the display units, saying what would be added."""
+    for view in views:
+        for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
+            if row.get('label') == 'Added':
+                row['label'] = 'Would add'
+    display_units.convert(views, units)
+    return views
+
+
 class Service:
     """Everything but the transport: the operations and the worker
     threads. One per process."""
@@ -161,7 +183,7 @@ class Service:
 
     def operation(self, params: Any) -> Operation:
         """The operation an `op.run` names."""
-        _only(params, ('op', 'params'), 'op.run')
+        _only(params, ('op', 'params', 'preview'), 'op.run')
         op = self.operations.get(params.get('op'))
         if op is None:
             raise not_found(f'No operation named {params.get("op")!r}; '
@@ -323,6 +345,10 @@ class Connection:
                 verbs={name: projects.verbs_of(project, name) for name in project})
             if op.id == 'project.save_as' and values['units'] == 'display':
                 values['units'] = self.units
+            if params.get('preview') and op.previews:
+                scratch = _preview_copy(project, values['geometry'])
+                return {'views': _said_as_preview(
+                    await self.service.in_worker(op.run, scratch, values), self.units)}
             before = list(project)
             views = await self.service.in_worker(op.run, project, values)
             if op.edits or list(project) != before:

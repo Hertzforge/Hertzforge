@@ -50,10 +50,10 @@
 		node.select();
 	}
 
-	/** A default is a plain word while it is drawn; once a reading has replaced it, it is the way back. */
+	/** A default is a plain word while it is drawn; once a reading or another view has replaced it, it is the way back. */
 	function live(row: ActionRow, column: ActionColumn): boolean {
 		if (!row.ready) return false;
-		return !(row.kind === 'default' && column.current && !a.reading);
+		return !(row.kind === 'default' && column.current && !a.reading && !a.shapeView);
 	}
 
 	function beginFit() {
@@ -192,7 +192,7 @@
 										{#if row}
 											{@const clickable = live(row, column)}
 											{#if clickable}
-												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{row.verb}</button>
+												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{row.verb}</button>
 											{:else if row.kind === 'default' && row.ready}
 												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{row.verb}</span>
 											{:else}

@@ -325,6 +325,7 @@
 	let marks: Points | null = null;
 	/** Every node as a dot, while clicks place points or pick nodes, so a node with no element still shows. */
 	let dots: Points | null = null;
+	let leftOut: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
 	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
@@ -464,6 +465,7 @@
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
 		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
 	}
@@ -625,10 +627,24 @@
 		if (view.pick && view.pick.target !== 'faces') {
 			const g = new BufferGeometry();
 			g.setAttribute('position', position);
-			g.setDrawRange(0, view.pick.ids?.length ?? view.nodes.length / 3);
-			dots = new Points(g, plain(new PointsMaterial({ size: 4, sizeAttenuation: false })));
+			const off = view.pick.off ?? 0;
+			g.setDrawRange(0, (view.pick.ids?.length ?? view.nodes.length / 3) - off);
+			// marked places show through the model, since a seam runs inside a solid
+			const places = view.pick.off !== undefined;
+			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places })));
+			if (places) dots.renderOrder = 4;
 			dots.frustumCulled = false;
 			scene.add(dots);
+			if (off) {
+				// the places left out: still there to click, and dim so they read as out
+				const dim = new BufferGeometry();
+				dim.setAttribute('position', position);
+				dim.setDrawRange((view.pick.ids?.length ?? 0) - off, off);
+				leftOut = new Points(dim, plain(new PointsMaterial({ size: 6, sizeAttenuation: false, transparent: true, opacity: 0.35, depthTest: false })));
+				leftOut.renderOrder = 4;
+				leftOut.frustumCulled = false;
+				scene.add(leftOut);
+			}
 		}
 		if (view.pick?.target === 'nodes') {
 			markGeometry = new BufferGeometry();
@@ -870,6 +886,7 @@
 		lineGeometry?.dispose();
 		mutedSurface?.geometry.dispose();
 		dots?.geometry.dispose();
+		leftOut?.geometry.dispose();
 		markGeometry?.dispose();
 		overlayGeometry?.dispose();
 		overlayLineGeometry?.dispose();

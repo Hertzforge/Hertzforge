@@ -1,6 +1,6 @@
 """Editing a geometry and what is drawn on it, and the project's structure:
 entity tables and edits, the coordinate system gizmo, DOF arrows and
-sensors, the project type and Automatic, channel roles and DOF names, a
+sensors, Work Up, channel roles and DOF names, a
 channel table's control loops, and the object groups."""
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import hertzforge
+from hertzforge.core.report import Report
 from hertzforge.service import projects
 from hertzforge.service.ops_geometry import OPERATIONS, id_runs_text, parse_id_runs
 from hertzforge.service.protocol import ProtocolError
@@ -245,24 +247,38 @@ def test_sensors_are_drawn_at_a_multiple_of_true_size(project, validate):
     assert np.ptp(corners, axis=0) == pytest.approx([0.099, 0.071, 0.048], rel=1e-5)
 
 
-def test_a_type_is_set_and_automatic_fills_it(validate):
+def test_work_up_goes_by_the_module_it_is_run_in(validate):
+    """Each kind of test's module has its own Work Up, and nothing has to be
+    set first."""
     state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
     project = state.project
-    reading, table = run(project, 'project.set_project_type', type='Random Vibration')
-    wire_views([reading, table], validate)
-    missing = [row['value'] for row in reading['rows'] if row['label'] == 'Missing']
-    assert 'PSD' in missing and 'Report' in missing
-    (reading,) = run(project, 'project.work_up')
+    project.project_type = None
+    (reading,) = run(project, 'project.work_up_random')
     wire_views([reading], validate)
     added = [row['value'] for row in reading['rows'] if row['label'] == 'Added']
     assert 'Time History PSDs' in added and added[-1] == 'Report'
     assert set(added) <= set(project)
-    (reading,) = run(project, 'project.work_up')
+    assert project.project_type == 'Random Vibration'
+    (reading,) = run(project, 'project.work_up_random')
     assert reading['rows'][0]['value'] == 'nothing to compute'
-    run(project, 'project.set_project_type', type='none')
-    assert project.project_type is None
-    with pytest.raises(ProtocolError, match='no type'):
-        run(project, 'project.work_up')
+
+
+def test_work_up_refuses_an_empty_project():
+    with pytest.raises(ProtocolError, match='Nothing is loaded'):
+        run(hertzforge.Project(), 'project.work_up_modal')
+
+
+def test_each_kind_of_test_makes_its_own_report():
+    """A report from Random does not count as Transient's, so working up a
+    mixed run in both modules leaves one of each, and once more adds nothing."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
+    project = state.project
+    run(project, 'project.work_up_random')
+    run(project, 'project.work_up_transient')
+    titles = sorted(obj.title for _name, obj in project.items() if isinstance(obj, Report))
+    assert len(titles) == 2 and len(set(titles)) == 2
+    (reading,) = run(project, 'project.work_up_transient')
+    assert reading['rows'][0]['value'] == 'nothing to compute'
 
 
 def test_a_channel_role_moves_on_the_history_and_its_table(project, validate):

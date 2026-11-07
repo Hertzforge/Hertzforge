@@ -25,6 +25,24 @@
 		if (await fit.confirm(description.trim() || undefined)) description = '';
 	}
 
+	/** Where the half-power reading crosses, drawn beside the cursor. */
+	const crossings = $derived([s?.half_power?.low, s?.half_power?.high].filter((x): x is number => x !== null && x !== undefined));
+
+	/** The plot's whole height is the damping: 0.01 % at the top, 10 % at the bottom, log-linear between, as in Visual Dynamics. */
+	const DAMPING_TOP = 1e-4;
+	const DAMPING_BOTTOM = 0.1;
+	let dragged = $state<number | null>(null);
+
+	/** The cursor dragged: across moves it, up and down holds a damping. Nothing is asked of the service until the release. */
+	async function dragCursor(x: number, fraction: number, moved: { x: boolean; y: boolean }, done: boolean) {
+		const damping = DAMPING_TOP * (DAMPING_BOTTOM / DAMPING_TOP) ** fraction;
+		if (moved.y) dragged = damping;
+		if (!done) return;
+		if (moved.x) await fit.move(x);
+		if (moved.y) await fit.holdDamping(damping);
+		dragged = null;
+	}
+
 	/** A damping typed into a mode's row, in percent; refused words come back from the service. */
 	function editDamping(i: number, text: string) {
 		const percent = Number(text);
@@ -70,7 +88,7 @@
 
 		<div class="readout" data-testid="fit-pending">
 			<span>Cursor <b class="num">{formatFixed(s.pending.frequency, 4)}</b> Hz</span>
-			<span>Damping <b class="num">{formatFixed(s.pending.damping * 100, 3)}</b> %{s.pending.held ? ' (held)' : ''}</span>
+			<span>Damping <b class="num" data-testid="fit-damping">{formatFixed((dragged ?? s.pending.damping) * 100, 3)}</b> %{s.pending.held || dragged !== null ? ' (held)' : ''}</span>
 			{#if s.preview}<span class="preview">Previewing the mode at {formatFixed(s.preview.frequency, 4)} Hz</span>{/if}
 			{#if s.half_power}
 				{@const hp = s.half_power}
@@ -92,6 +110,8 @@
 				view={s.view}
 				minHeight={320}
 				marker={s.pending.frequency}
+				guides={crossings}
+				onMarkerDrag={dragCursor}
 				onPick={(x) => fit.move(x)}
 				onRange={(low, high) => (fit.range = [low, high])}
 			/>

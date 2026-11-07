@@ -33,20 +33,6 @@
 
 	const a = $derived(app.analyze);
 
-	/** A lone shape set's panes, each on a preference the service reads: off, the pane is put away and its view not computed. */
-	const PANES = [
-		['animation', 'Animation'],
-		['mode_table', 'Mode Table'],
-		['mac', 'MAC'],
-		['shape_values', 'Shape Values']
-	] as const;
-	/** The preference a pane's view sits on: the mode table is the first table when it is up, the values table the one after it. */
-	function paneOf(v: View, views: View[]): (typeof PANES)[number][0] {
-		if (v.view === 'shape3d') return 'animation';
-		if (v.view === 'matrix') return 'mac';
-		return a.prefs.mode_table && v === views.find((w) => w.view === 'table') ? 'mode_table' : 'shape_values';
-	}
-
 	// the action column's width, dragged by its edge and remembered; put away, it waits in the frame's header
 	const TABLE_KEY = 'hertzforge.actionTable';
 	function remembered(): { width: number; away: boolean } {
@@ -83,6 +69,7 @@
 
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
+	$effect(() => a.followPreview());
 
 	// a stage that reads at a line follows the frequency cursor of the plot beside it
 	$effect(() => {
@@ -154,16 +141,6 @@
 					{#if a.showError}<p class="meta error" role="alert">{a.showError}</p>{/if}
 					{#if a.shown?.offers}
 						{@const offers = a.shown.offers}
-						{#if offers.shapes}
-							{@const away = PANES.filter(([pref]) => !a.prefs[pref])}
-							{#if away.length}
-								<div class="away" role="toolbar" aria-label="Panes put away">
-									{#each away as [pref, label] (pref)}
-										<button class="btn ghost sm chip" data-testid="restore-{pref}" title="Bring the {label} pane back" onclick={() => a.setPref(pref, true)}><Icon name="chevron" size={12} />{label}</button>
-									{/each}
-								</div>
-							{/if}
-						{/if}
 						<div class="bar" role="toolbar" aria-label="How the data is read">
 							{#if offers.flat}
 								<div class="seg" role="radiogroup" aria-label="Stage or plot">
@@ -226,7 +203,8 @@
 					{@const selfMac = a.shown.views.some((v) => v.view === 'matrix' && v.selects === 'shape3d' && v.rows.label === v.columns.label)}
 					{@const offers = a.shown.offers}
 					{@const shapes = !!offers?.shapes}
-					{@const views = a.shown.views}
+					<!-- the auto-MAC's stage waits for a square to be picked -->
+					{@const views = a.shown.views.filter((v) => !(shapes && a.shapeView === 'mac' && v.view === 'shape3d' && !a.pair))}
 					{@const beside = views.filter((v) => v.view !== 'shape3d')}
 					<!-- every view is a pane that fills the frame, unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
 					<div class="svviews panes" class:several={views.length > 1}
@@ -235,7 +213,7 @@
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
 							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors))}
-							<div class="view pane {v.view}" data-testid="pane-{shapes ? paneOf(v, views) : v.view}">
+							<div class="view pane {v.view}" data-testid="pane-{v.view}">
 								{#if headed && offers}
 									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own; a lone view with nothing to set leaves its title to the frame -->
 									<header class="phead">
@@ -252,7 +230,7 @@
 												<button role="radio" aria-checked={a.prefs.bars} class:on={a.prefs.bars} data-testid="read-bars" title="The MAC as 3-D bars, height and color the value" onclick={() => !a.prefs.bars && a.setPref('bars', true)}>Bars</button>
 												<button role="radio" aria-checked={!a.prefs.bars} class:on={!a.prefs.bars} data-testid="read-grid" title="The MAC as a flat grid" onclick={() => a.prefs.bars && a.setPref('bars', false)}>Grid</button>
 											</div>
-										{:else if shapes && v.view === 'table' && paneOf(v, views) === 'shape_values'}
+										{:else if shapes && v.view === 'table' && a.shapeView === 'values'}
 											{#if offers.values_dofs.length > 1}
 												<select class="field sm" aria-label="Where the values are read" data-testid="read-values-dofs" value={a.prefs.values_dofs} onchange={(e) => a.setPref('values_dofs', (e.currentTarget as HTMLSelectElement).value)} title="Where the values are read: every DOF of the set, or a choice of the channel table in its group, signs as the table writes them">
 													{#each offers.values_dofs as choice (choice)}
@@ -265,9 +243,6 @@
 												<option value="response">Response transformation Φ⁺</option>
 												<option value="reference">Reference transformation Φᵀ</option>
 											</select>
-										{/if}
-										{#if shapes}
-											<button class="btn ghost icon sm" data-testid="minimize-{paneOf(v, views)}" aria-label="Put this pane away" title="Put this pane away; its name in the frame's header brings it back" disabled={views.length === 1} onclick={() => a.setPref(paneOf(v, views), false)}><Icon name="chevron" size={12} /></button>
 										{/if}
 									</header>
 								{/if}
@@ -572,12 +547,6 @@
 	/* a table pane scrolls inside itself once it is taller than the frame, instead of growing past it */
 	.pane.table :global(.scroll) {
 		max-height: calc(100cqh - 150px);
-	}
-
-	.away {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--sp-2);
 	}
 
 	.chip {

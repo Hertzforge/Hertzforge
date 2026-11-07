@@ -21,8 +21,8 @@ ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 #: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
 #: is not offered shock tools; an operation every module needs (Plot
 #: Records, Save As, the averaging settings) says `everywhere`.
-Workspace = Literal['acquire', 'simulate', 'signals', 'random', 'shock', 'sine',
-                    'modal', 'geometry', 'model', 'specify', 'report']
+Workspace = Literal['acquire', 'simulate', 'signals', 'sysid', 'random', 'shock', 'transient',
+                    'sine', 'modal', 'geometry', 'model', 'specify', 'report']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it
@@ -212,6 +212,9 @@ class Operation:
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
+    #: copy of its geometry, so nothing in the project changes
+    previews: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`
@@ -223,6 +226,8 @@ class Operation:
         from .verbs import modules_of
 
         out['modules'] = list(modules_of(self))
+        if self.previews:
+            out['previews'] = True
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,
