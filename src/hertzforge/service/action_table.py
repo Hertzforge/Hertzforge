@@ -373,16 +373,16 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             continue
         if _mixes_types(op, kinds):
             continue
+        if op.id in REAL_SETS_ONLY and any(kind == 'shape_set' and project[name].is_complex
+                                           for name, kind in zip(names, kinds)):
+            rows.append(_op_row(op, 'A complex shape set cannot carry real data'))
+            continue
         reason = _will_not_take(project, op, fill)
         if reason:
             rows.append(_op_row(op, reason))
             continue
         if op.id in NEEDS_NODES and not project[fill['geometry']].num_nodes:
             rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
-            continue
-        if op.id in REAL_SETS_ONLY and any(kind == 'shape_set' and project[name].is_complex
-                                           for name, kind in zip(names, kinds)):
-            rows.append(_op_row(op, 'A complex shape set cannot carry real data'))
             continue
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
