@@ -237,6 +237,21 @@ def _shock_record():
     return t, y
 
 
+def test_a_shock_or_transient_specification_shows_alone(validate):
+    t, y = _shock_record()
+    project = Project()
+    project.add('H', history(t, y))
+    project.add('Req', _requirement())
+    project.add('T', TransientSpecification(t, y[None], response_dof=['1X+'],
+                                            ordinate_dim=['acceleration'],
+                                            ordinate_unit=['m/s**2']))
+    made = project.compute_srs('T')
+    for name in ('Req', 'T', made):
+        (view,) = show(project, [name], {}, {})['views']
+        assert view['view'] == 'waterfall', name
+        wire_views([view], validate)
+    run(project, 'project.plot', data='Req')
+    assert show(project, ['Req', made], {}, {})['views']
 
 
 # ---- the velocity check ---------------------------------------------------------------------
@@ -340,3 +355,7 @@ def _srs_against_requirement(q=25.0):
 
 
 
+def test_no_operation_shares_a_kind_of_data_twice():
+    from hertzforge.service.ops_geometry import RENAMED
+
+    assert len(set(RENAMED)) == len(RENAMED)

@@ -977,7 +977,7 @@ CHANNEL_ROLE = Param('role', 'Role', 'enum', default='response', options=(
     Option('reference', 'Reference: drives the structure'),
     Option('response', 'Response: measured on the structure'),
     Option('monitor', 'Monitor: recorded, not analyzed')))
-RENAMED = ('channel_table', *DATA_KINDS, 'transient_specification', 'shock_specification')
+RENAMED = ('channel_table', *DATA_KINDS)
 RENAME_SOURCE = Param('source', 'Object', 'enum', options_from='objects:' + '|'.join(RENAMED))
 OLD = Param('old', 'DOF', 'string', default='')
 NEW = Param('new', 'New DOF', 'string', default='')

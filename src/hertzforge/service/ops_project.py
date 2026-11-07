@@ -21,7 +21,8 @@ from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
 
 #: the data objects a waterfall draws, by kind
 DATA_KINDS = ('time_history', 'psd', 'frf', 'coherence', 'multiple_coherence',
-              'spectrum', 'srs', 'specification')
+              'spectrum', 'srs', 'specification', 'shock_specification',
+              'transient_specification')
 
 DATA = Param('data', 'Data', 'enum', options_from='objects:' + '|'.join(DATA_KINDS))
 COMPONENT = Param('component', 'Component', 'enum', default='magnitude',
