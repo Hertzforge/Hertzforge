@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from hertzforge.units import signed
+
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .protocol import refused
@@ -450,13 +452,6 @@ TONE_TOLERANCE = Param('tone_tolerance', 'Tone tolerance', 'number', default=10.
                        max=100.0, step=1.0, unit='%')
 
 
-def _signed(value: float, unit: str, places: int = 1) -> str:
-    if not np.isfinite(value):
-        return 'not read'
-    value = 0.0 if round(value, places) == 0.0 else value
-    return f'{value:+.{places}f} {unit}'.replace('-', '−')
-
-
 def _level(value: float, unit: str) -> str:
     return f'{value:.3g} {unit}'.strip() if np.isfinite(value) else 'not read'
 
@@ -490,7 +485,7 @@ def mixed_mode(project: Any, params: dict[str, Any]) -> list[dict]:
     sheet = reading.floor
     if sheet.assessed:
         floor_words = (f'written {_level(sheet.reference, rms)}, measured '
-                       f'{_level(sheet.measured, rms)}, error {_signed(sheet.error, "%")}; '
+                       f'{_level(sheet.measured, rms)}, error {signed(sheet.error, "%")}; '
                        f'±{sheet.rms_percent:g} %, lines ±{sheet.db:g} dB ({sheet.outside} of '
                        f'{sheet.judged} outside, {sheet.expected:.2g} by chance, '
                        f'{sheet.allowed} allowed)')
@@ -504,20 +499,20 @@ def mixed_mode(project: Any, params: dict[str, Any]) -> list[dict]:
                  if reading.tones_reference else float('nan'))
         rows.append(v.row(f'Tones, {len(reading.tones)} together',
                           f'written {_level(reading.tones_reference, rms)}, measured '
-                          f'{_level(reading.tones_measured, rms)}, error {_signed(error, "%")}; '
+                          f'{_level(reading.tones_measured, rms)}, error {signed(error, "%")}; '
                           'none: each tone is judged', None, 'info'))
     for tone in reading.tones:
         where = f'{tone.low:.4g} Hz' if tone.fixed else f'{tone.low:.4g} to {tone.high:.4g} Hz'
         rows.append(v.row(f'Tone {tone.name}',
                           f'{where}: written {_level(tone.reference, peak)}, measured '
-                          f'{_level(tone.measured, peak)}, error {_signed(tone.error, "%")}; '
+                          f'{_level(tone.measured, peak)}, error {signed(tone.error, "%")}; '
                           f'±{tone.tolerance:g} %' + ('' if tone.readings
                                                       else '; no reading left'),
                           None, _verdict(tone.passed)))
     for band in reading.narrowbands:
         where = (f'{band.low:.4g} to {band.high:.4g} Hz' if not band.swept
                  else f'{band.span[0]:.4g} to {band.span[1]:.4g} Hz, swept')
-        tolerance = f'{_signed(band.low_db, "dB")} to {_signed(band.high_db, "dB")}'
+        tolerance = f'{signed(band.low_db, "dB")} to {signed(band.high_db, "dB")}'
         tolerance += (f' at {band.dof:.0f} dof' if band.slices else '; not read, see the notes')
         if band.swept and band.slices:
             tolerance += (f'; {band.slices} slices of {band.slice_dof:.0f} dof, '
@@ -525,14 +520,14 @@ def mixed_mode(project: Any, params: dict[str, Any]) -> list[dict]:
         rows.append(v.row(f'Band {band.name}',
                           f'{where}: written {_level(band.reference, rms)}, measured '
                           f'{_level(band.measured, rms)}, error '
-                          f'{_signed(band.error_db, "dB")}; {tolerance}', None,
+                          f'{signed(band.error_db, "dB")}; {tolerance}', None,
                           _verdict(band.passed)))
     total = reading.total
     error = (100.0 * (total.measured / total.reference - 1.0) if total.reference
              else float('nan'))
     rows.append(v.row('Total, the whole drive',
                       f'written {_level(total.reference, rms)}, measured '
-                      f'{_level(total.measured, rms)}, error {_signed(error, "%")}; none: the '
+                      f'{_level(total.measured, rms)}, error {signed(error, "%")}; none: the '
                       'machine\'s figure', None, 'info'))
     tones = (f'tones read through {reading.tones[0].band}, from {reading.start:g} s'
              if reading.tones else f'no tones; read from {reading.start:g} s')
