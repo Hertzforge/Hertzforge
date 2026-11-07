@@ -5390,7 +5390,24 @@ class Project(dict):
         """The journal line that replays a fit made by hand and published
         as `name`, and the recipe `refresh` runs it again from: a
         `fit_modes(at=...)` call, or a comment when no call can make the set
-        (`ModalFitSession.replay`)."""
+        (`ModalFitSession.replay`).
+
+        Parameters
+        ----------
+        source : str
+            The FRF set fitted.
+        name : str
+            The shape set the fit was published as.
+        session : ModalFitSession
+            The fit.
+        coherence : str, optional
+            The coherence the fit was weighted by, by name.
+
+        Returns
+        -------
+        str
+            The line, for the journal.
+        """
         replay = session.replay()
         args = '' if replay is None else f'at={replay["at"]!r}' + ''.join(
             f', {key}={value!r}' for key, value in (
