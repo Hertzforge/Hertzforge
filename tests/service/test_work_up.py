@@ -338,3 +338,11 @@ def test_the_report_says_a_partial_spectrum_was_not_judged():
     caption = srs_caption(project['Partial'], specification=project['Req'])
     text = caption.points[0].text()
     assert 'not judged' in text and '800' in text
+
+
+# ---- modules ------------------------------------------------------------------
+
+def test_every_module_with_set_filter_can_apply_it():
+    applied = verbs.modules_of(OPS['project.filter_data'])
+    assert set(verbs.modules_of(OPS['project.set_filter'])) <= set(applied)
+    assert 'shock' in verbs.modules_of(OPS['project.integrate'])
