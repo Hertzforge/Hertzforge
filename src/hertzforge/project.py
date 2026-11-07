@@ -7759,6 +7759,14 @@ class Project(dict):
             if target is not None and self[record].averaging is None:
                 self[record].averaging = averaging_for(self[record], self[target])
 
+        def settled(record):
+            # the FRFs and the coherence adopt the suggested averaging,
+            # so PSDs made ahead of them on no averaging were one window
+            # over the whole record, and stale as soon as they were made
+            if self[record].averaging is None:
+                with contextlib.suppress(ValueError):
+                    self[record].averaging = self[record].suggest_averaging()
+
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
             # a report from another kind of test does not fill this one's:
@@ -7787,6 +7795,8 @@ class Project(dict):
                     if record is not None:
                         if project_type == 'Transient':
                             playings(record, side)
+                        else:
+                            settled(record)
                         make(self.compute_psds, record)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
@@ -7844,7 +7854,8 @@ class Project(dict):
                         else recorded(side)
                     if record is not None:
                         make(self.compute_srs, record)
-                elif icon == 'TimeHistory' and ordinal > 1:
+                elif (icon == 'TimeHistory' and ordinal > 1
+                      and project_type == 'Shock'):
                     # the shock's motion chain: filtered, then velocity,
                     # then displacement, each from the one before
                     chain = filtered(side)

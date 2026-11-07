@@ -12,6 +12,7 @@ from hertzforge.core.compliance import srs_errors, srs_tolerance
 from hertzforge.core.data import ShockSpecification, TimeHistory, TransientSpecification
 from hertzforge.core.report import Report
 from hertzforge.core.report_caption import srs_caption
+from hertzforge.core.shocks import Shock
 from hertzforge.core.signals import sine_history
 from hertzforge.core.sine import SineSweepSpecification, SineTone
 from hertzforge.project import Project
@@ -85,8 +86,10 @@ def test_a_geometry_does_not_stop_work_up(module, file, validate):
         assert 'Geometry' in project.placed()['Basis']
         assert 'Time History' in project.placed()['Basis']
         missing = values(reading, 'Missing')
-        assert not {'Channel Table', 'Time History', 'PSD', 'FRF', 'SRS',
+        assert not {'Channel Table', 'Time History', 'FRF', 'SRS',
                     'Multiple Coherence'} & set(missing), missing
+        # one stream has no ambient, so System ID's second PSD stays gray
+        assert missing.count('PSD') == (module == 'sysid')
         (again,) = run(project, f'project.work_up_{module}')
         assert values(again, 'Added') == ['nothing to compute']
 
@@ -468,3 +471,33 @@ def test_each_kind_still_makes_its_own_report_after_a_retitle():
     project['Report'].title = 'Mine'
     run(project, 'project.work_up_transient')
     assert sum(isinstance(obj, Report) for obj in project.values()) == 2
+
+
+# ---- what Work Up leaves on one stream, and on a record with no averaging ------
+
+def test_system_id_on_one_stream_makes_no_filtered_record():
+    project = load('random.nc4')
+    run(project, 'project.work_up_sysid')
+    assert 'Time History Filtered' not in project
+    assert 'Time History Filtered PSDs' not in project
+    assert {'Time History PSDs', 'Time History H1 FRFs'} <= set(project)
+
+
+@pytest.mark.parametrize('module', ['random', 'modal'])
+def test_a_record_with_no_averaging_gets_its_psds_once_on_the_settled_frames(module):
+    project = load('time.npz')
+    assert project['Time History'].averaging is None
+    run(project, f'project.work_up_{module}')
+    assert project.stale() == {}
+    held = project['Time History'].averaging
+    assert held is not None and project.averaging_of('Time History PSDs') == held
+    (again,) = run(project, f'project.work_up_{module}')
+    assert project.stale() == {} and 'Time History PSDs' not in values(again, 'Added')
+
+
+def test_a_record_too_short_to_frame_still_gets_its_psds():
+    t = np.arange(4) / 4096.0
+    project = Project()
+    project.add('Short', history(t, np.array([1.0, -1.0, 2.0, -2.0])))
+    project.work_up('Random Vibration')
+    assert 'Short PSDs' in project
