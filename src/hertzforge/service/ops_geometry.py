@@ -964,9 +964,8 @@ def _place_basis(project: Any, test: str) -> list[str]:
     """The run's group placed in the Basis, then the Basis slots of a kind of
     test filled from the objects that satisfy them
     (`core.report.expectation_satisfiers`), each placed in the Basis group
-    (`Project.place`) unless it is already in another group: what Visual
-    Dynamics' window does when a type is set. Returns what was placed, or
-    the core's refusal of a placement."""
+    (`Project.place`) unless it is already in another group. Returns what
+    was placed, or the core's refusal of a placement."""
     from hertzforge.core.report import expectation_satisfiers
 
     moved = _place_the_run(project)
