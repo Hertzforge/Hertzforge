@@ -1337,6 +1337,13 @@ export class ProjectState {
 		return ok;
 	}
 
+	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
+		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
 	/** The sub-items picked in the tree, by object: what Delete takes when any are picked. */
 	get pickedParts(): Record<string, number[]> {
 		const parts: Record<string, number[]> = {};
