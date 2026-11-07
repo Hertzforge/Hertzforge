@@ -497,18 +497,17 @@ object can be written in, `.hforge` first. The desktop app lists them as the sav
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose
-verb applies to it), every object used and every required object param filled. `reading` rows change how
-the selection is read; `act` rows change the project (the operations named for the project's journaled
-verbs, and the edits). With nothing selected, the first column is the project: the acts that take no object
+verb applies to it), every object used and every required object param filled. With nothing selected, the first column is the project: the acts that take no object
 and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
 when records are picked and the operation takes them).
 
 The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is
 `{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
-for what the selection draws by itself (`id` starting `show.`), `reading` or `act` for an operation (`id`
-is the operation's), and `self` for an act on the selection that is not an operation (`id` starting
-`self.`). A row that cannot run has `ready` false and a `reason` to show. A row without `modules` is
+for what the selection draws by itself (`id` starting `show.`), `run` for an operation (`id` is the
+operation's) or another of a lone shape set's views (`id` starting `show.`), and `self` for an act on the selection that is not an operation (`id` starting
+`self.`). A row that cannot run has `ready` false and a `reason` to show, including one whose operation
+would refuse what the selection holds, as far as that can be told with nothing typed. A row without `modules` is
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, adds the operations on that part, which carry `"part": true`.

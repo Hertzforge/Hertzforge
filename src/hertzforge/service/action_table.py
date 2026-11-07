@@ -13,11 +13,11 @@ The shell filters by module and sorts; every row says which modules offer it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from itertools import permutations
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from . import projects, verbs
+from .actions import _fill, _object_params, _placed, _runs
 from .descriptors import Operation, Param
 
 #: what two objects draw together, the table of `show._pair`'s branches
@@ -88,15 +88,105 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 #: about what a pair means, so it does not make a column of its own
 _ANY = 8
 
+#: takes objects of one type whatever its params list (`core.merge`), so its pair is a column
+_ONE_TYPE = frozenset(('project.merge',))
+
 Chosen = tuple[str, str, list[str]]
+
+
+def _computed_from_history(project: Any, name: str, verb: str) -> bool:
+    from hertzforge.core.data import TimeHistory
+
+    provenance = project.provenance.get(name, {})
+    return (provenance.get('verb') == verb
+            and isinstance(project.get(provenance.get('source')), TimeHistory))
+
+
+def _frf_with_its_history(project: Any, name: str) -> str:
+    if not _computed_from_history(project, name, 'compute_frfs'):
+        return 'It was not computed from a time history in this project'
+    references = {str(dof) for dof in project[name].reference_dof}
+    return '' if len(references) == 1 else 'It was computed against more than one reference'
+
+
+def _coherence_with_its_history(project: Any, name: str) -> str:
+    return ('' if _computed_from_history(project, name, 'compute_multiple_coherence')
+            else 'It was not computed from a time history in this project')
+
+
+def _cross_terms(project: Any, name: str) -> str:
+    from hertzforge.core.data import Psd
+
+    data = project[name]
+    return 'It needs cross terms' if isinstance(data, Psd) and data.reference_dof is None else ''
+
+
+def _solids(project: Any, name: str) -> str:
+    return '' if project[name].solids else 'It has no solids yet'
+
+
+def _shocks_to_unmark(project: Any, name: str) -> str:
+    history = project[name]
+    if history.split_into_frames:
+        return 'The file already cut it into captures'
+    return '' if history.shocks else 'It has no shocks marked'
+
+
+def _span(project: Any, name: str) -> str:
+    return '' if project[name].truncation is not None else 'No span is set: Set Truncation sets one'
+
+
+def _sensors_placed(project: Any, name: str) -> str:
+    try:
+        placed, _notes = project.sensors(name)
+    except (TypeError, ValueError):
+        placed = []
+    return '' if placed else 'It names no sensor model at a node of its geometry'
+
+
+#: what an operation needs of an object beyond its type, tested before the click so the row
+#: can say so (Brandon, 2026-11-07): the param holding the object, and why it will not do, or ''
+WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
+    'project.transmissibility': ('frf', _frf_with_its_history),
+    'project.partial_coherence': ('coherence', _coherence_with_its_history),
+    'project.conditioning': ('data', _cross_terms),
+    'project.realizability': ('data', _cross_terms),
+    'project.mesh_solids': ('geometry', _solids),
+    'project.remove_shock': ('history', _shocks_to_unmark),
+    'project.truncate_data': ('source', _span),
+    'project.sensors': ('table', _sensors_placed),
+}
+
+#: why the core (`Project.selection_verbs`) turns down a pair, where the verb's own reason
+#: in `VERB_WHEN` does not cover it
+PAIR_WHY = {'project.compute_modal_responses': 'It needs a force channel and real shapes',
+            'project.export_state_space': 'It needs real shapes with a mass unit and a drive point'}
+
+
+def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
+    """Why `op` would refuse the objects in `fill`, as far as they say without typing; ''
+    when nothing does. A pair goes by the core's rule, so the table and the core agree."""
+    from hertzforge.core.merge import mergeable
+    from hertzforge.project import PARTNER_VERBS
+
+    when = WHEN.get(op.id)
+    reason = when[1](project, fill[when[0]]) if when else ''
+    verb = op.id.removeprefix('project.')
+    names = fill.values()
+    if op.id in _ONE_TYPE:
+        said = mergeable([project[n] for n in names]) if len(fill) > 1 else None
+        return said[0].upper() + said[1:] if said else ''
+    if reason or verb not in PARTNER_VERBS or len(fill) < 2:
+        return reason
+    if verb in dict(project.selection_verbs(*names)):
+        return ''
+    return (PAIR_WHY.get(op.id)
+            or _why_not(op, [projects.kind_of(project[n]) for n in names])
+            or 'It cannot take this selection')
 
 
 def _rows_of(ops: Iterable[Operation]) -> list[Operation]:
     return [op for op in ops if op.id in verbs.VERBS]
-
-
-def _object_params(op: Operation) -> list[Param]:
-    return [p for p in op.params if p.kinds or p.verb]
 
 
 def _kind_takes(param: Param, kind: str) -> bool:
@@ -107,21 +197,17 @@ def _kind_takes(param: Param, kind: str) -> bool:
 
 def _kinds_fit(op: Operation, kinds: list[str]) -> bool:
     """Whether objects of `kinds` would fill `op`, whatever state they are in:
-    one object per param, each used, every required param filled. Merge asks
-    for one type (`core.merge`), whatever its params take."""
-    params = _object_params(op)
-    if op.id == 'project.merge' and len(set(kinds)) > 1:
-        return False
-    if len(kinds) > len(params):
-        return False
-    required = [p for p in params if p.default != '']
-    return any(all(_kind_takes(p, k) for p, k in zip(order, kinds, strict=True))
-               and all(p in order for p in required)
-               for order in permutations(params, len(kinds)))
+    one object per param, each used, every required param filled."""
+    return (not _mixes_types(op, kinds)
+            and _placed(_object_params(op), kinds, _kind_takes) is not None)
+
+
+def _mixes_types(op: Operation, kinds: list[str]) -> bool:
+    return op.id in _ONE_TYPE and len(set(kinds)) > 1
 
 
 def _takes_anything(op: Operation) -> bool:
-    return any(len(p.kinds) >= _ANY for p in _object_params(op))
+    return op.id not in _ONE_TYPE and any(len(p.kinds) >= _ANY for p in _object_params(op))
 
 
 def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
@@ -143,8 +229,16 @@ def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
     if len(kinds) == 3 and sorted(kinds) == ['geometry', 'shape_set', 'shape_set']:
         return ['MAC']
     if len(kinds) == 3 and sorted(kinds) == ['geometry', 'shape_set', 'time_history']:
-        return ['Animate']
+        history = next((n for n, k in zip(names, kinds, strict=False) if k == 'time_history'), None)
+        return ['Animate'] if history is None or _holds_modal(project, history) else []
     return []
+
+
+def _holds_modal(project: Any, name: str) -> bool:
+    """Whether a time history holds modal coordinates, all `show._three_played` will play."""
+    from hertzforge.core.validate import modal_coordinate
+
+    return any(modal_coordinate(dof) is not None for dof in project[name].response_dof)
 
 
 def _shape_views(project: Any, name: str) -> list[dict[str, Any]]:
@@ -154,10 +248,10 @@ def _shape_views(project: Any, name: str) -> list[dict[str, Any]]:
 
     shapes = project[name]
     count = int(shapes.num_shapes) * len(shapes.coordinate)
-    first = (_row('show.table', 'Table', 'reading') if _on_geometry(project, name)
-             else _row('show.animate', 'Animate', 'reading', 'It needs a geometry'))
-    return [first, _row('show.mac', 'MAC', 'reading'),
-            _row('show.values', 'Values', 'reading',
+    first = (_row('show.table', 'Table', 'run') if _on_geometry(project, name)
+             else _row('show.animate', 'Animate', 'run', 'It needs a geometry'))
+    return [first, _row('show.mac', 'MAC', 'run'),
+            _row('show.values', 'Values', 'run',
                  '' if count <= SHAPE_VALUES_CELL_LIMIT
                  else f'{count:,} shape values, too many for a table')]
 
@@ -176,10 +270,8 @@ def _row(row_id: str, verb: str, kind: str, reason: str = '', **more: Any) -> di
 
 
 def _op_row(op: Operation, reason: str = '', **more: Any) -> dict[str, Any]:
-    from .actions import _is_act
-
-    return _row(op.id, verbs.VERBS[op.id], 'act' if _is_act(op) else 'reading', reason,
-                modules=list(verbs.modules_of(op)), **more)
+    return _row(op.id, verbs.VERBS[op.id], 'run', reason, modules=list(verbs.modules_of(op)),
+                **more)
 
 
 def _own_rows(project: Any, objects: list[str]) -> list[dict[str, Any]]:
@@ -232,7 +324,6 @@ def _fit_rows(kinds: list[str]) -> list[dict[str, Any]]:
 
 def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
              part: dict[str, Any] | None) -> dict[str, Any]:
-    from .actions import _fill, _runs
     from .ops_files import export_formats
     from .server import OPERATIONS
 
@@ -256,17 +347,14 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         fill = _fill(op, chosen)
         if fill is None:
             if _kinds_fit(op, kinds):
-                rows.append(_op_row(op, _why_not(op, kinds, chosen) or 'It cannot take this selection'))
+                rows.append(_op_row(op, _why_not(op, kinds) or 'It cannot take this selection'))
             continue
-        if op.id == 'project.merge':
-            if len(set(kinds)) > 1:
-                continue
-            from hertzforge.core.merge import mergeable
-
-            refused = mergeable([project[n] for n in names])
-            if refused:
-                rows.append(_op_row(op, refused[0].upper() + refused[1:]))
-                continue
+        if _mixes_types(op, kinds):
+            continue
+        reason = _will_not_take(project, op, fill)
+        if reason:
+            rows.append(_op_row(op, reason))
+            continue
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
@@ -284,7 +372,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     return {'kinds': kinds, 'current': True, 'rows': rows}
 
 
-def _why_not(op: Operation, kinds: list[str], chosen: list[Chosen]) -> str:
+def _why_not(op: Operation, kinds: list[str]) -> str:
     for param in _object_params(op):
         when = VERB_WHEN.get(param.verb)
         if when and any(k in when[0] for k in kinds) and when[1]:
@@ -296,7 +384,6 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
                      by_kind: dict[str, list[Chosen]]) -> list[dict[str, Any]]:
     """One column per object type that could join the selection, whichever the
     project holds, with the objects that complete each row."""
-    from .actions import _fill
     from .server import OPERATIONS
 
     names = [c[0] for c in chosen]
@@ -308,17 +395,20 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
         joined = [*kinds, kind]
         present = [c for c in by_kind.get(kind, []) if c[0] not in names]
         rows = []
-        for verb in [] if _shapes_on_their_geometry(joined) else defaults(project, joined, []):
+        for verb in [] if _shapes_on_their_geometry(joined) else defaults(project, joined, names):
             rows.append(_needs(_row(f'show.{verb.lower()}', verb, 'default', modules=None),
-                               kind, [c[0] for c in present]))
+                               kind, [c[0] for c in present
+                                      if verb in defaults(project, joined, [*names, c[0]])]))
         for row in _fit_rows(joined):
             rows.append(_needs(row, kind, [c[0] for c in present]))
         for op in _rows_of(OPERATIONS):
             if op.id in taken or op.id in verbs.PARTS or not _kinds_fit(op, joined):
                 continue
-            if _takes_anything(op) and op.id != 'project.merge':
+            if _takes_anything(op):
                 continue
-            fits = [c[0] for c in present if _fill(op, [*chosen, c]) is not None]
+            fills = ((c[0], _fill(op, [*chosen, c])) for c in present)
+            fits = [name for name, fill in fills
+                    if fill is not None and not _will_not_take(project, op, fill)]
             rows.append(_needs(_op_row(op), kind, fits))
         if rows:
             columns.append({'kinds': joined, 'rows': rows})

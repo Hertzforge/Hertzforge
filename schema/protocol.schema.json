@@ -511,7 +511,7 @@
       "properties": {
         "id": {"type": "string"},
         "verb": {"type": "string"},
-        "kind": {"enum": ["default", "reading", "act", "self"]},
+        "kind": {"enum": ["default", "run", "self"]},
         "ready": {"type": "boolean"},
         "reason": {"type": "string"},
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},

@@ -488,7 +488,7 @@ export interface ActionRow {
 	/** `show.*` for a default, an operation's id, or `self.*`. */
 	id: string;
 	verb: string;
-	kind: 'default' | 'reading' | 'act' | 'self';
+	kind: 'default' | 'run' | 'self';
 	ready: boolean;
 	/** Why it cannot run now. */
 	reason?: string;

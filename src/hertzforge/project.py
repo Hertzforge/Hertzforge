@@ -1954,7 +1954,7 @@ class Project(dict):
 
     def selection_verbs(self, *names: Any) -> list[tuple[str, str]]:
         """The processing verbs a selection can act on, each with its
-        one-line summary. This is what the app's bar offers.
+        one-line summary. The action table reads it for a pair.
 
         For one object, these are its own verbs less the ones that need
         a second object (`transform` needs a shape set beside the
@@ -3069,8 +3069,7 @@ class Project(dict):
         source = self.name_of(source)
         history = self[source]
         if history.truncation is None:
-            raise ValueError('no span set: drag one in the truncate '
-                             'view first')
+            raise ValueError('no span set: Set Truncation sets one')
         return self._derive(source, history.truncate(),
                             f'{source} Truncated',
                             recipe=('truncate_data', {}))
@@ -8988,11 +8987,12 @@ def _two_sets_on_two_geometries(project, objects):
 
 
 def _set_and_table(objects):
-    """One real shape set and one channel table, wherever they live."""
+    """One real, scaled shape set and one channel table, wherever they live: what a
+    state-space model takes (`core.state_space`)."""
     sets = [o for o in objects if isinstance(o, ShapeSet)]
     tables = [o for o in objects if isinstance(o, ChannelTable)]
     return (len(objects) == 2 and len(sets) == 1 and len(tables) == 1
-            and not sets[0].is_complex)
+            and not sets[0].is_complex and sets[0].units_defined and not sets[0].unscaled)
 
 
 def _set_and_table_apart(project, objects):
