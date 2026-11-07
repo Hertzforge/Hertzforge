@@ -444,6 +444,8 @@ export class ShockStore {
 	private onStatus(s: ShockState) {
 		const was = this.status;
 		this.status = s;
+		// The state is newer than any live frame held: the next frame takes over from it.
+		if (this.live && this.live.run_id === s.run_id) this.live = null;
 		if (s.run_id !== this.pulsesRun) void this.loadPulses(s.run_id);
 		else if (s.last_pulse && !this.pulses.some((p) => p.index === s.last_pulse!.index)) this.pulses = [...this.pulses, s.last_pulse];
 		if (was?.run_id !== s.run_id && s.run_id) void this.readServed();
