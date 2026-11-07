@@ -1336,6 +1336,7 @@ dependencies = [
  "hertzforge-twr",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

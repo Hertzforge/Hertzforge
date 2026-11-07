@@ -77,3 +77,5 @@ serde_json = "1"
 # cargo-deny's ban graph does NOT make that distinction, so this crate also has to
 # appear on the hertzforge-hal-sim wrapper list in deny.toml.
 hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+# The recorded open-loop trace hashes the drive frames the station accepted.
+sha2 = "0.10"
