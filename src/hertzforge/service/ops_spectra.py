@@ -16,7 +16,18 @@ import numpy as np
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import COMPONENT
-from .ops_specify import BREAKPOINTS, CONFIDENCE, COVERAGE, MARGIN, STATISTIC
+from .ops_specify import (
+    BREAKPOINTS,
+    CONFIDENCE,
+    COVERAGE,
+    K,
+    MARGIN,
+    OVERSHOOT,
+    RMS,
+    SIGMA,
+    STATISTIC,
+    limit_settings,
+)
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -43,13 +54,6 @@ WINDOW_NUMBER = Param('parameter', 'Alpha or beta', 'number', default=None, min=
 LEVEL = Param('level', 'Confidence', 'enum', default=0.9,
               options=(Option(0.9, '90 %'), Option(0.95, '95 %')))
 DOF = Param('dof', 'Equivalent DOF', 'number', default=0.0, min=0.0, max=1.0e6, step=1.0)
-K = Param('k', 'k', 'number', default=2.0, min=-10.0, max=20.0, step=0.1)
-SIGMA = Param('sigma_db', 'Std. dev. stated', 'number', default=0.0, unit='dB', min=0.0,
-              max=30.0, step=0.5)
-OVERSHOOT = Param('max_overshoot_db', 'Overshoot', 'number', default=3.0, unit='dB',
-                  min=0.0, max=40.0, step=0.5)
-RMS = Param('rms', 'RMS', 'enum', default='exceed',
-            options=(Option('exceed', 'Exceed'), Option('conserve', 'Conserve')))
 BANDS = Param('per_octave', 'Spacing', 'enum', default=6, options=tuple(
     Option(n, 'full octave' if n == 1 else f'1/{n} octave') for n in (1, 2, 3, 6, 12, 24)))
 TONE = Param('tone', 'Tone', 'string', default='')
@@ -489,19 +493,8 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
     records, _left = waterfall_group(data, named)
     if not records:
         raise refused(f'{name} has no records to take a limit over')
-    statistic = params['statistic']
-    settings: dict[str, Any] = {
-        'statistic': statistic, 'coverage': params['coverage'],
-        'max_overshoot_db': params['max_overshoot_db'],
-        'max_breakpoints': params['max_breakpoints'], 'rms': params['rms']}
-    if statistic in ('tolerance', 'distribution_free'):
-        settings['confidence'] = params['confidence']
-    if statistic == 'mean_k':
-        settings['k'] = params['k']
-    if statistic in ('tolerance', 'mean_k') and params['sigma_db'] > 0.0:
-        settings['sigma_db'] = params['sigma_db']
     try:
-        fit = project.field_limit(name, records, **settings)
+        fit = project.field_limit(name, records, **limit_settings(params))
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     limit = fit.limit

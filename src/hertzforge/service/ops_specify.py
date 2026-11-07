@@ -26,6 +26,31 @@ MARGIN = Param('margin_db', 'Margin', 'number', default=0.0, unit='dB', step=1.0
 DOF = Param('dof', 'Written at DOF', 'string', default='')
 BREAKPOINTS = Param('max_breakpoints', 'Breakpoints, at most', 'integer', default=12, min=2,
                     max=60, step=1)
+K = Param('k', 'k', 'number', default=2.0, min=-10.0, max=20.0, step=0.1)
+SIGMA = Param('sigma_db', 'Std. dev. stated', 'number', default=0.0, unit='dB', min=0.0,
+              max=30.0, step=0.5)
+OVERSHOOT = Param('max_overshoot_db', 'Overshoot', 'number', default=3.0, unit='dB',
+                  min=0.0, max=40.0, step=0.5)
+RMS = Param('rms', 'RMS', 'enum', default='exceed',
+            options=(Option('exceed', 'Exceed'), Option('conserve', 'Conserve')))
+
+
+def limit_settings(params: dict[str, Any]) -> dict[str, Any]:
+    """The arguments `Project.field_limit` and `Project.derive_specification`
+    both take, from the params both offer, each limit given only what it
+    reads: Derive Specification writes the envelope Field Limit shows."""
+    statistic = params['statistic']
+    settings: dict[str, Any] = {
+        'statistic': statistic, 'coverage': params['coverage'],
+        'max_overshoot_db': params['max_overshoot_db'],
+        'max_breakpoints': params['max_breakpoints'], 'rms': params['rms']}
+    if statistic in ('tolerance', 'distribution_free'):
+        settings['confidence'] = params['confidence']
+    if statistic == 'mean_k':
+        settings['k'] = params['k']
+    if statistic in ('tolerance', 'mean_k') and params['sigma_db'] > 0.0:
+        settings['sigma_db'] = params['sigma_db']
+    return settings
 
 
 def derive_specification(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -46,10 +71,9 @@ def derive_specification(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} has no records to derive from')
     try:
         added = project.derive_specification(
-            name, records, statistic=params['statistic'], coverage=params['coverage'],
-            confidence=params['confidence'], margin_db=params['margin_db'],
-            max_breakpoints=params['max_breakpoints'], dof=params['dof'].strip() or None)
-    except ValueError as error:
+            name, records, **limit_settings(params), margin_db=params['margin_db'],
+            dof=params['dof'].strip() or None)
+    except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     measured = waterfall_arrays(data, records, unit_system=hz.SI, exponents=False)
     derived = waterfall_arrays(project[added], unit_system=hz.SI, exponents=False)
@@ -72,6 +96,7 @@ OPERATIONS = (
                 'limit over the records, the straight-line envelope over it, and a '
                 'margin. Records "1-8"; blank for the largest group of one quantity. '
                 'A set over several DOFs is written at the DOF named.',
-        params=(SOURCE, RECORDS, STATISTIC, COVERAGE, CONFIDENCE, MARGIN, BREAKPOINTS, DOF),
+        params=(SOURCE, RECORDS, STATISTIC, COVERAGE, CONFIDENCE, K, SIGMA, OVERSHOOT, RMS,
+                MARGIN, BREAKPOINTS, DOF),
         outputs=('spectrum',), run=derive_specification),
 )

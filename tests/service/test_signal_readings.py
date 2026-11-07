@@ -108,3 +108,33 @@ def test_partial_coherence_refuses_a_channel_no_longer_a_response():
     project['Run'].roles = {('3Z+', 'velocity'): 'monitor', ('1Z+', 'force'): 'reference'}
     with pytest.raises(ProtocolError, match=r'3Z\+'):
         run(project, 'project.partial_coherence', coherence=name, record=2)
+
+
+def _flights():
+    rng = np.random.default_rng(2)
+    f = np.arange(1.0, 1001.0)
+    count = 10
+    shape = 1.0 + 20.0 * np.exp(-((f - 300.0) / 60.0) ** 2)
+    levels = shape * 10.0 ** (rng.normal(0.0, 3.0, (count, 1)) / 10.0)
+    project = hertzforge.Project()
+    project.add('Set', Psd(f, levels, response_dof=['1Z+'] * count,
+                           ordinate_dim=[DENSITY] * count,
+                           block=[str(k) for k in range(count)]))
+    return project
+
+
+@pytest.mark.parametrize('settings', [
+    {'statistic': 'mean_k', 'k': 1.5},
+    {'statistic': 'mean_k', 'k': 2.0, 'sigma_db': 4.0},
+    {'statistic': 'tolerance', 'sigma_db': 2.5},
+    {'statistic': 'tolerance', 'max_overshoot_db': 1.0},
+    {'statistic': 'tolerance', 'rms': 'conserve'},
+    {'statistic': 'envelope', 'max_overshoot_db': 1.0},
+], ids=str)
+def test_derive_writes_the_envelope_field_limit_shows(settings):
+    project = _flights()
+    run(project, 'project.derive_specification', source='Set', **settings)
+    written = project['Set Derived Specification']
+    fit = project.field_limit('Set', **{'max_breakpoints': 12, **settings})
+    assert written.abscissa == pytest.approx(fit.frequencies)
+    assert np.real(written.ordinate[0]) == pytest.approx(fit.levels)
