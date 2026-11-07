@@ -1052,9 +1052,9 @@ class Project(dict):
             raise TypeError(f'{name} has no coordinates to rename')
         obj.rename_dof(old, new, quantity)
         changed = [name]
-        for other in list(self.provenance):
-            if other not in self or not self._descends_from(other, name):
-                continue
+        descended = [other for other in self.provenance
+                     if other in self and self._descends_from(other, name)]
+        for other in descended:
             derived = self[other]
             if not hasattr(derived, 'rename_dof'):
                 continue
@@ -1065,6 +1065,14 @@ class Project(dict):
                 # the channel is not on this one — a modal
                 # transformation carries none of the source's
                 continue
+        # a stated role in a fingerprint names the channel by its old
+        # coordinate, and correcting a coordinate changes no number
+        for other in descended:
+            state = self.provenance[other].get('state')
+            if state and state[0] == 'averaging+roles':
+                state[1]['roles'] = sorted(
+                    [new if dof == old and quantity in (None, kind) else dof, kind, role]
+                    for dof, kind, role in state[1]['roles'])
         return changed
 
     def _descends_from(self, name: str, ancestor: str) -> bool:

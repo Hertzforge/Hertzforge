@@ -785,6 +785,13 @@ class DataArray:
                 raise ValueError(
                     f'{new} already has a {factors[i][0]} record — two '
                     'channels cannot share a coordinate and a quantity')
+        # a time history's stated roles name the channel by this pair
+        roles = getattr(self, 'roles', None)
+        if roles:
+            moved = {(old, self.ordinate_dim[i]) for i in rows}
+            self.roles = {((new, identity[1]) if tuple(identity) in moved
+                           else identity): role
+                          for identity, role in roles.items()}
         for i in rows:
             self.response_dof[i] = new
         for i in columns:
