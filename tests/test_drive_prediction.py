@@ -1061,7 +1061,15 @@ def test_an_frf_from_a_record_with_one_nan_sample_is_refused_by_name():
                           ordinate_dim=['voltage', 'acceleration'])
     history.averaging = Averaging(frame_length=1024, overlap=0.5).filled(
         n, fs)
-    frf = history.compute_frfs(references=['1Z+'])
+    with pytest.raises(ValueError, match=r'response channel 2Z\+ holds samples'):
+        history.compute_frfs(references=['1Z+'])
+    # one from elsewhere is not a number at any line, and is refused here too
+    response[400] = 0.0
+    frf = TimeHistory(history.abscissa, np.vstack([drive, response]),
+                      response_dof=['1Z+', '2Z+'],
+                      ordinate_dim=['voltage', 'acceleration'],
+                      ).compute_frfs(['1Z+'], history.averaging)
+    frf.ordinate = np.full_like(frf.ordinate, np.nan)
     with pytest.raises(ValueError, match=r'not a number at every line the '
                                          r'specification is written over, '
                                          r'first at 2Z\+/1Z\+'):

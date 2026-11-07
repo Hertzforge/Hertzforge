@@ -8,7 +8,7 @@ channels, and one channel's unit applies to every record it is in. An FRF
 has two tables, its response channels and its reference channels; a
 cross-spectral matrix has one, the channels on either side of its terms.
 A record converts when every channel it is made of is named, and one only
-half named waits (VD's principle 21).
+half named waits, its named half held on the object until the other comes
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from hertzforge.core.unit_choices import (
     shown_dimension,
     units_for,
 )
+from hertzforge.io.stated_units import unit_problem
 from hertzforge.units import dimension_of, normalize_unit
 
 from .protocol import bad_request, not_found, refused
@@ -74,13 +75,9 @@ def tables(project: Any, name: str) -> dict[str, Any]:
     if not isinstance(obj, DataArray):
         raise refused(f'{name} carries no units to declare')
     found: dict[str, dict[str, dict[str, Any]]] = {side: {} for side in _sides(obj)}
-    held = _held(obj)
-    for i in range(obj.num_records):
-        response, reference = _quantities(obj, i)
-        pairs = [(_side(obj, 'response'), obj.response_dof[i], response)]
-        if obj.reference_dof is not None:
-            pairs.append((_side(obj, 'reference'), obj.reference_dof[i], reference))
-        for side, dof, quantity in pairs:
+    held = {**(obj.pending_units or {}), **_held(obj)}
+    for channels in _channels(obj):
+        for side, dof, quantity in channels:
             key = _key(dof, quantity)
             if key in found[side]:
                 continue
@@ -91,20 +88,44 @@ def tables(project: Any, name: str) -> dict[str, Any]:
                                      for side, rows in found.items()]}
 
 
+def _channels(data: DataArray) -> list[list[tuple[str, str, str | None]]]:
+    """Each record's channels as (side, DOF, quantity). A record not yet
+    converted says no quantity, and one of its channels may already say it on
+    another record: a CPSD's diagonal converts before its cross term. It is
+    the same channel when the DOF has only that one quantity on that side, or
+    one sensor would read as two rows."""
+    records = []
+    said: dict[tuple[str, str], set[str]] = {}
+    for i in range(data.num_records):
+        response, reference = _quantities(data, i)
+        pairs = [(_side(data, 'response'), data.response_dof[i], response)]
+        if data.reference_dof is not None:
+            pairs.append((_side(data, 'reference'), data.reference_dof[i], reference))
+        for side, dof, quantity in pairs:
+            if quantity:
+                said.setdefault((side, dof), set()).add(quantity)
+        records.append(pairs)
+
+    def named(side: str, dof: str, quantity: str | None) -> str | None:
+        known = said.get((side, dof), ())
+        return next(iter(known)) if not quantity and len(known) == 1 else quantity
+
+    return [[(side, dof, named(side, dof, quantity)) for side, dof, quantity in pairs]
+            for pairs in records]
+
+
 def _held(data: DataArray) -> dict[tuple[str, str], str]:
     """Each channel's declared unit, from the records already converted: a
     channel's unit applies to every record it is in."""
     out: dict[tuple[str, str], str] = {}
-    for i in range(data.num_records):
+    for i, channels in enumerate(_channels(data)):
         if data.ordinate_dim[i] == UNKNOWN:
             continue
-        response, reference = _quantities(data, i)
-        out.setdefault((_side(data, 'response'), _key(data.response_dof[i], response)),
-                       data.ordinate_unit[i])
-        if data.reference_dof is not None and data.reference_unit[i]:
-            out.setdefault((_side(data, 'reference'),
-                            _key(data.reference_dof[i], reference)),
-                           data.reference_unit[i])
+        side, dof, quantity = channels[0]
+        out.setdefault((side, _key(dof, quantity)), data.ordinate_unit[i])
+        if len(channels) > 1 and data.reference_unit[i]:
+            side, dof, quantity = channels[1]
+            out.setdefault((side, _key(dof, quantity)), data.reference_unit[i])
     return out
 
 
@@ -143,29 +164,32 @@ def define(project: Any, name: str, given: Any) -> list[int]:
         unit = entry['unit'].strip()
         if dimension_of(normalize_unit(unit)) is None:
             raise refused(f'{unit!r} is not a unit Hertzforge can read')
+        if isinstance(project[name], DataArray) and (problem := unit_problem(unit)):
+            raise refused(f'{unit!r} {problem}')
         named[where] = unit
     obj = project[name]
     try:
-        if isinstance(obj, Geometry):
-            obj.define_units(named[('object', 'length')])
+        if isinstance(obj, (Geometry, ShapeSet)):
+            unit = named[('object', 'length' if isinstance(obj, Geometry) else 'mass')]
+            obj.define_units(unit)
+            project.record_call(name, 'define_units', unit)
             return []
-        if isinstance(obj, ShapeSet):
-            obj.define_units(named[('object', 'mass')])
-            return []
-        return _define_records(obj, named)
+        return _define_records(project, name, obj, named)
     except ValueError as error:
         raise refused(str(error)) from None
 
 
-def _define_records(data: DataArray, named: dict[tuple[str, str], str]) -> list[int]:
-    held = _held(data)
+def _define_records(project: Any, name: str, data: DataArray,
+                    named: dict[tuple[str, str], str]) -> list[int]:
+    # named before and not yet converted: no record holds the unit, so it
+    # waits with the object for the call that names the channel beside it
+    held = {**(data.pending_units or {}), **_held(data)}
     units: dict[int, str] = {}
     references: dict[int, str] = {}
-    for i in range(data.num_records):
-        response, reference = _quantities(data, i)
-        keys = [(_side(data, 'response'), _key(data.response_dof[i], response))]
-        if data.reference_dof is not None:
-            keys.append((_side(data, 'reference'), _key(data.reference_dof[i], reference)))
+    channels = _channels(data)
+    keys_of = [[(side, _key(dof, quantity)) for side, dof, quantity in pairs]
+               for pairs in channels]
+    for i, keys in enumerate(keys_of):
         found = [named.get(key, held.get(key)) for key in keys]
         # a record converts when this call names one of its channels and
         # every one of them is named, now or before
@@ -176,4 +200,11 @@ def _define_records(data: DataArray, named: dict[tuple[str, str], str]) -> list[
             references[i] = found[1]
     if units:
         data.define_units(units, reference_units=references or None)
+        project.record_call(name, 'define_units', units,
+                            reference_units=references or None)
+    waiting = {key for i, keys in enumerate(keys_of) if i not in units
+               and data.ordinate_dim[i] == UNKNOWN for key in keys}
+    data.pending_units = {key: unit
+                          for key, unit in {**(data.pending_units or {}), **named}.items()
+                          if key in waiting} or None
     return sorted(units)

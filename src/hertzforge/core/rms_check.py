@@ -518,22 +518,6 @@ def _channel(history: TimeHistory, dof: str, dimension: str,
     return key, rows
 
 
-def matching_records(history: TimeHistory, dof: str, dimension: str,
-                     hint: str | None = None) -> list[int]:
-    """The records of `history` that are the channel a spectrum's record
-    is the autospectrum of (`TimeHistory.channel_key`): the same DOF,
-    measuring the quantity whose square per hertz `dimension` is
-    ('acceleration' for 'acceleration**2/frequency'), and for a spectrum
-    whose units are not declared, the channel its `hint` names. Every
-    capture of the channel is returned, in order; none when there is no
-    such channel or more than one could be meant.
-    """
-    try:
-        return _channel(history, dof, dimension, hint)[1]
-    except ValueError:
-        return []
-
-
 def refusal(spectrum: Psd, record: int = 0) -> str | None:
     """Why record `record` of `spectrum` cannot be rms-checked, in words,
     or None when it can: an autospectrum on evenly spaced lines. A

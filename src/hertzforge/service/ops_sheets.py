@@ -28,6 +28,7 @@ from hertzforge.core.sensor_catalog import CATALOG
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import chosen_records
+from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
@@ -180,6 +181,7 @@ def _set_cell(project: Any, name: str, number: int, key: str, text: str) -> list
             table.set_cell(key, row, text)
         except (ValueError, KeyError) as error:
             raise refused(str(error).strip('"')) from None
+        project.record_call(name, 'set_cell', key, row, text)
     channel = table.frame.loc[row, 'channel']
     stored = _cell(table, row, key)
     rows = [v.row('Set', f'{title_of(key)} of channel {channel}: {stored or "blank"}', None,
@@ -286,10 +288,7 @@ SLOPE = ' dB/oct'
 
 
 def _numbers(text: str, what: str) -> list[float]:
-    try:
-        return [float(t) for t in text.replace(',', ' ').split()]
-    except ValueError:
-        raise refused(f'{text.strip()!r} is not a list of numbers ({what})') from None
+    return parse_numbers(text, f'a list of numbers ({what})')
 
 
 def _lines(text: str) -> list[str]:
@@ -412,8 +411,10 @@ def _sheet(project: Any, name: str, draft: Any, params: dict[str, Any]) -> Any:
 
 
 def _autos(spec: Any) -> dict[str, int]:
+    from hertzforge.core.data import autospectrum
+
     return {str(spec.response_dof[k]): k for k in range(spec.num_records)
-            if spec.reference_dof is None or spec.reference_dof[k] == spec.response_dof[k]}
+            if autospectrum(spec, k)}
 
 
 def _density_unit(dim: str) -> str | None:
@@ -593,8 +594,10 @@ def _areas_table(name: str, draft: Any, drawn: int) -> dict:
              f'{reading.slopes[k]:.3g}', f'{reading.areas[k]:.4g}',
              f'{100.0 * reading.areas[k] / whole:.1f}', f'{reading.running[k]:.4g}']
             for k in range(len(reading.areas))]
+    quantity = draft.dims[drawn - 1]
     return v.table(f'{name}, {draft.channels[drawn - 1]}: areas and running rms',
-                   ['Hz', 'dB/octave', 'Area', 'Share (%)', 'Running rms'], rows)
+                   ['Hz', 'dB/octave', f'Area [{unit_text(f"{quantity}**2")}]', 'Share (%)',
+                    f'Running rms [{unit_text(quantity)}]'], rows)
 
 
 def specification_areas(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -664,7 +667,7 @@ def set_band_edge(project: Any, params: dict[str, Any]) -> list[dict]:
     plot lands: it snaps to the grid, and a symmetric or uniform channel follows."""
     name = params['specification']
     draft = _opened(project, name, params['channels'])
-    segments = [int(part) for part in params['segments'].replace(' ', '').split(',') if part]
+    segments = parse_id_runs(params['segments'], 'a segment number')
     try:
         draft = draft.with_band_edge(params['kind'], params['side'], segments,
                                      params['decibels'])

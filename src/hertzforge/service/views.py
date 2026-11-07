@@ -50,6 +50,20 @@ def series(name: str, role: Role, x: Any, y: Any, shape: Shape = 'line',
     return out
 
 
+def drawable(name: str, role: Any, x: Any, y: Any, positive: bool = False,
+             x_above_zero: bool = False) -> dict[str, Any]:
+    """A `series` with the points that cannot be drawn left out: not a
+    number anywhere, and at or under zero on a log axis, `positive` for
+    the values and `x_above_zero` for the abscissa."""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    keep = np.isfinite(x) & np.isfinite(y)
+    if positive:
+        keep &= y > 0.0
+    if x_above_zero:
+        keep &= x > 0.0
+    return series(name, role, x[keep], y[keep])
+
+
 def shaped(name: str, role: Role, data: Any, x: Any, y: Any) -> dict[str, Any]:
     """A curve drawn the way Visual Dynamics draws `data`.
 
@@ -150,6 +164,11 @@ def row(label: str, value: float | str, unit: str | None,
         raise ValueError(f'reading {label!r} is {value}; a value that was not '
                          'read is said in words, not sent as a number')
     return {'label': label, 'value': value, 'unit': unit, 'status': status}
+
+
+def notes(said: Any, status: Status = 'info') -> list[dict]:
+    """A `row` per note, each as a sentence; an empty note is no row."""
+    return [row('Note', note[0].upper() + note[1:], None, status) for note in said if note]
 
 
 def reading(title: str, rows: Sequence[dict]) -> dict[str, Any]:

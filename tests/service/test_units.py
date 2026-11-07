@@ -119,3 +119,62 @@ def test_a_geometry_declares_its_length_over_the_socket(validate):
 def test_units_need_an_open_project():
     with pytest.raises(ProtocolError, match='none is open'):
         projects.units(None, {'name': 'FRF'})
+
+
+# ---- declared one table at a time ------------------------------------------------
+
+def plain_frf():
+    return Frf(np.arange(1.0, 9.0), np.full((1, 8), 2.0 + 0j), ['1X+'], ['9X+'])
+
+
+def plain_cpsd():
+    return hz.Psd(np.arange(1.0, 9.0), np.ones((4, 8)) + 0j, ['1X+', '2X+', '1X+', '2X+'],
+                  ['1X+', '2X+', '2X+', '1X+'])
+
+
+def row_of(project, name, side, label):
+    table = next(t for t in units.tables(project, name)['tables'] if t['side'] == side)
+    return next(row for row in table['rows'] if row['label'] == label)
+
+
+def test_a_half_named_frf_converts_when_the_other_table_is_named():
+    project = project_with(f=plain_frf())
+    assert units.define(project, 'f', [{'side': 'response', 'key': '1X+|', 'unit': 'g'}]) == []
+    assert project['f'].ordinate_dim == ['unknown']
+    assert row_of(project, 'f', 'response', '1X+')['unit'] == 'g', 'the row keeps what was named'
+    assert units.define(project, 'f', [{'side': 'reference', 'key': '9X+|', 'unit': 'lbf'}]) == [0]
+    assert project['f'].ordinate_dim == ['acceleration/force']
+    assert project['f'].ordinate[0, 0] == pytest.approx(2.0 * 9.80665 / 4.4482216152605)
+    assert project['f'].pending_units is None
+
+
+def test_a_cross_term_converts_when_its_second_channel_is_named():
+    project = project_with(c=plain_cpsd())
+    assert units.define(project, 'c', [{'side': 'channels', 'key': '1X+|', 'unit': 'g'}]) == [0]
+    second = row_of(project, 'c', 'channels', '2X+')
+    converted = units.define(project, 'c', [{'side': 'channels', 'key': second['key'],
+                                             'unit': 'lbf'}])
+    assert converted == [1, 2, 3]
+    assert 'unknown' not in project['c'].ordinate_dim
+
+
+def test_a_channel_is_one_row_however_many_of_its_records_converted():
+    project = project_with(c=plain_cpsd())
+    units.define(project, 'c', [{'side': 'channels', 'key': '1X+|', 'unit': 'g'}])
+    rows = units.tables(project, 'c')['tables'][0]['rows']
+    assert [row['label'] for row in rows] == ['1X+', '2X+']
+    assert rows[0]['unit'] == 'g'
+
+
+def test_a_load_cell_and_an_accelerometer_at_one_dof_stay_two_rows():
+    project = project_with(f=frf_without_units())
+    rows = {row['key'] for table in units.tables(project, 'f')['tables']
+            for row in table['rows']}
+    assert '1Z+|acceleration' in rows and '1Z+|force' in rows
+
+
+def test_a_unit_that_waits_is_not_saved(tmp_path):
+    project = project_with(f=plain_frf())
+    units.define(project, 'f', [{'side': 'response', 'key': '1X+|', 'unit': 'g'}])
+    project.save(tmp_path / 'p.hforge')
+    assert hz.Project.open(tmp_path / 'p.hforge')['f'].pending_units is None

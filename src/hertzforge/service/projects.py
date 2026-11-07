@@ -45,10 +45,15 @@ def verbs_of(project: Any, name: str) -> list[str]:
     `verb:` param lists the object under. A time history that a linked
     channel table describes also lists `overload_check`, which reads it
     against that table's ranges: Visual Dynamics offers its Overload
-    reading there and nowhere else."""
+    reading there and nowhere else. A shock specification does not list
+    `generate_signal`: the one signal it makes is a synthesis, and that
+    has an operation of its own, `project.srs_synthesis`."""
     verbs = [verb for verb, _summary in project.verbs(name)]
-    if kind_of(project[name]) == 'time_history' and project.channel_table_for(name):
+    kind = kind_of(project[name])
+    if kind == 'time_history' and project.channel_table_for(name):
         verbs.append('overload_check')
+    if kind == 'shock_specification':
+        verbs.remove('generate_signal')
     return verbs
 
 
@@ -153,8 +158,11 @@ def new(params: Mapping[str, Any]) -> OpenProject:
 
 def open_file(params: Mapping[str, Any]) -> OpenProject:
     """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
-    file holds. Any other file is refused with a pointer to import it."""
+    file holds, or a new project holding the object when the file holds
+    one (Save As writes those formats for one object). Any other file is
+    refused with a pointer to import it."""
     import hertzforge as hz
+    from hertzforge.project import SingleObjectFile
 
     path = _path(params, 'project.open')
     if not path.lower().endswith(PROJECT_SUFFIXES):
@@ -164,10 +172,14 @@ def open_file(params: Mapping[str, Any]) -> OpenProject:
     if not os.path.exists(path):
         raise not_found(f'no file at {path}')
     try:
-        project = hz.Project.open(path)
+        try:
+            return OpenProject(hz.Project.open(path))
+        except SingleObjectFile:
+            project = hz.Project(os.path.splitext(os.path.basename(path))[0])
+            project.import_file(path)
+            return OpenProject(project, modified=True)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
-    return OpenProject(project)
 
 
 #: the pictures `project.import` takes, by suffix (`core.photos.FORMATS`)
@@ -540,8 +552,7 @@ def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[i
 
     state = _open(state, 'project.define_units')
     name = _name(params, 'name', 'project.define_units')
-    with state.project.journal_as(None):
-        converted = declared.define(state.project, name, params.get('units'))
+    converted = declared.define(state.project, name, params.get('units'))
     state.modified = True
     return converted
 
@@ -560,4 +571,5 @@ def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
                       'not a geometry')
     if state.project.active_geometry != name:
         state.project.active_geometry = name
+        state.project.journal.append(f'project.active_geometry = {name!r}')
         state.modified = True

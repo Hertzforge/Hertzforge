@@ -129,34 +129,6 @@ def normalize_window(name: str | None) -> str:
     return key
 
 
-def from_span(averaging: Averaging, low: float, high: float,
-              sample_rate: float, samples: int,
-              origin: float = 0.0) -> Averaging:
-    """The averaging a dragged span means, in whole frames.
-
-    `low` and `high` are the span's edges in seconds on the record's
-    clock, which starts at `origin`, and `samples` is the record's
-    length. The frame length and the window stay as they are; a drag
-    sets only where the analysis starts and how many frames it holds.
-    The start is kept inside the record, and the frame count is at
-    least one and no more than fit. The 2-D region and the 3-D stage's
-    handles both commit through this, so they agree on what a span
-    means.
-    """
-    rate = sample_rate
-    n = averaging.frame_length
-    # the drag is on the record's clock; the start counts from the
-    # record's beginning (`Averaging.stop` says why they differ)
-    low, high = float(low) - origin, float(high) - origin
-    last_start = max(samples - n, 0) / rate
-    start = min(max(low, 0.0), last_start)
-    moved = replace(averaging, start=start)
-    width = round((float(high) - start) * rate)
-    wanted = 1 if width < n else 1 + (width - n) // moved.hop
-    frames = max(1, min(int(wanted), moved.most_frames(samples, rate)))
-    return replace(moved, frames=frames)
-
-
 def window_shape(name: str | None, length: int,
                  parameter: float | None = None) -> np.ndarray:
     """The window `name` for a frame of `length` samples, as the values

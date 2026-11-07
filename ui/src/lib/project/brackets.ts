@@ -39,8 +39,3 @@ export function spans(links: ProjectSummary['links'] | undefined, order: string[
 	out.forEach((span, k) => (span.column = k % 2));
 	return out;
 }
-
-/** The group `name` is in, by its bracket color, or null. */
-export function colorOf(name: string, painted: Span[]): string | null {
-	return painted.find((s) => s.rows.includes(name))?.color ?? null;
-}

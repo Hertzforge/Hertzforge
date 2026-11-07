@@ -64,6 +64,13 @@ class Spec(NamedTuple):
 CHANNEL_TYPES = ('acceleration', 'velocity', 'length', 'force', 'pressure',
                  'strain', 'voltage', 'temperature')
 
+def record_quantity(quantity: str) -> str:
+    """A channel's quantity in the word a record's dimension uses. A record
+    never says strain: a microstrain has no dimension, so its `ordinate_dim`
+    is 'dimensionless', and the two words name one channel."""
+    return 'dimensionless' if quantity == 'strain' else quantity
+
+
 #: what a channel is *for*: a reference drives, a response answers, a
 #: monitor is recorded and judged as neither. One value, not three
 #: booleans, so the one nonsense state — a channel that is both the
@@ -935,9 +942,10 @@ class ChannelTable:
             normalized as every DOF is. It is refused if either part is
             missing, although a table row may lack one.
         quantity : str, optional
-            Which channel at `old`, by the quantity its unit names
-            ('acceleration', 'force' and so on; 'unknown' where the unit
-            names none). Every channel at the coordinate when omitted.
+            Which channel at `old`, by its type, or the quantity its unit
+            names when it has none ('acceleration', 'force' and so on;
+            'unknown' where neither says). Every channel at the coordinate
+            when omitted.
 
         Returns
         -------
@@ -962,9 +970,11 @@ class ChannelTable:
         if node is None:
             raise ValueError(f'{new!r} has no node number')
         units = [str(u).strip() for u in self.frame['unit']]
-        named = [(dimension_of(u) if u else None) or 'unknown' for u in units]
+        named = [record_quantity(kind or (dimension_of(u) if u else None) or 'unknown')
+                 for kind, u in zip(self.types(), units)]
+        wanted = None if quantity is None else record_quantity(quantity)
         rows = [i for i, dof in enumerate(self.dof_strings())
-                if dof == old and quantity in (None, named[i])]
+                if dof == old and wanted in (None, named[i])]
         if not rows:
             raise ValueError(f'no {quantity + " " if quantity else ""}channel '
                              f'at {old!r}')
@@ -1004,6 +1014,7 @@ class ChannelTable:
         out: list[Any] = []
         for dof, kind in zip(dofs, types):
             if kind:
+                kind = record_quantity(kind)
                 out.append((dof, kind) if (dof, kind) in known else None)
             else:
                 at = [identity for identity in identities

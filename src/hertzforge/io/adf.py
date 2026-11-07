@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .unv import _58_DATA_TYPES, _build_data_objects
+from .unv import _58_DATA_TYPES, _build_data_objects, _ratio_dim
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import DataArray
@@ -183,15 +183,17 @@ def _load_functions(raw, entries, path):
         function_type = int(i[4])
         if den_code:
             den_dim, den_l, den_f = axis(den_code)
-            ordinate_dim = f'{num_dim}/{den_dim}'
+            ordinate_dim = _ratio_dim(num_dim, den_dim)
             lexp, fexp = num_l - den_l, num_f - den_f
         elif function_type == 4:
             # an FRF is a ratio by definition; a record that names no
             # denominator still is one, and the class holds it to that
-            ordinate_dim = f'{num_dim}/dimensionless'
+            ordinate_dim = _ratio_dim(num_dim, 'dimensionless')
             lexp, fexp = num_l, num_f
         else:
             ordinate_dim, lexp, fexp = num_dim, num_l, num_f
+        if ordinate_dim == 'unknown':
+            lexp, fexp = 0, 0
 
         # +500 flags the NX12+ extended character header (afu_nx12
         # against a plain record): an extra block after the char block

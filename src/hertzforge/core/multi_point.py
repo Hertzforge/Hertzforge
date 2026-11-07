@@ -463,10 +463,9 @@ def control_channels(specification: Specification, measured: Psd,
         named twice, not found, ambiguous or a cross term.
     """
     from .compliance import matched_records
+    from .data import autospectrum
 
-    autos = [i for i in range(measured.num_records)
-             if measured.reference_dof is None
-             or str(measured.reference_dof[i]) == str(measured.response_dof[i])]
+    autos = [i for i in range(measured.num_records) if autospectrum(measured, i)]
     flagged = (np.asarray(table.controls_for(specification.response_dof),
                           dtype=bool)
                if table is not None and channels is None

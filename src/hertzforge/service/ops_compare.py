@@ -20,8 +20,10 @@ from typing import Any
 
 import numpy as np
 
+from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .parsing import parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, positive, quantity_of, sig, spec_line
 from .waterfalls import unit_text
@@ -106,25 +108,30 @@ def _compared(project: Any, params: dict[str, Any]) -> tuple[Any, Any, list, int
     spec_name, name = params['specification'], params['spectrum']
     spec, psd = project[spec_name], project[name]
     scale, source = _scale(project, spec_name, name)
-    rows = compare_all(spec, psd, scale_db=scale)
+    rows = _refusing(compare_all, spec, psd, scale_db=scale)
     if not rows:
         raise refused(f'{name} and {spec_name} have no channel in common to compare')
     return spec, psd, rows, scale, source
 
 
 def _count_row(values: list[float], beyond: Any, where: str, notes: int,
-               note: str | None) -> dict:
+               note: str | None, counted: str = 'channels') -> dict:
     """The bar chart's count as Visual Dynamics writes it: how many
-    channels are out, of how many scored, and the share."""
+    channels (or whatever is `counted`) are out, of how many scored, and
+    the share. With none scored there is no verdict to give."""
     scored = [value for value in values if np.isfinite(value)]
     out = sum(1 for value in scored if beyond(value))
-    share = 100.0 * out / len(scored) if scored else 0.0
-    text = f'{out} of {len(values) - notes} channels {where} — {share:.0f}%'
+    if scored:
+        text = f'{out} of {len(values) - notes} {counted} {where} — '
+        text += f'{100.0 * out / len(scored):.0f}%'
+    else:
+        text = f'no {counted} scored'
     if notes:
         text += f'; {notes} not scored'
     if note:
         text += f'; {note}'
-    return v.row('Channels out', text, None, 'fail' if out else 'pass')
+    status = 'warn' if not scored else 'fail' if out else 'pass'
+    return v.row(f'{counted.capitalize()} out', text, None, status)
 
 
 def spec_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -248,8 +255,9 @@ def spec_lines_out(project: Any, params: dict[str, Any]) -> list[dict]:
             found.append(v.row(label, notes[k], None, 'warn'))
         else:
             found.append(v.row(label, _db(percent), '%',
-                               'fail' if percent >= ceiling else 'pass'))
-    found.append(_count_row([p for _l, _e, p in errors], lambda p: p >= ceiling,
+                               _status(compliance.lines_state(percent, ceiling))))
+    found.append(_count_row([p for _l, _e, p in errors],
+                            lambda p: compliance.lines_state(p, ceiling) == 'over',
                             f'over {ceiling:g}%', len(notes), compliance.comparison_note(rows)))
     found.append(_scale_row(scale, source))
     return [v.reading(f'Lines out of {params["spectrum"]} against {params["specification"]}',
@@ -358,13 +366,7 @@ INDIVIDUAL_HIGH = Param('individual_high', 'Channel band, above', 'number', defa
 
 def _numbers(text: str, what: str) -> tuple[float, ...] | None:
     """Numbers typed, separated by commas or spaces; None for none."""
-    parts = [part for part in re.split(r'[,\s;]+', text.strip()) if part]
-    if not parts:
-        return None
-    try:
-        return tuple(float(part) for part in parts)
-    except ValueError:
-        raise refused(f'{text!r} is not {what}') from None
+    return tuple(parse_numbers(text, what)) or None
 
 
 def _band(params: dict[str, Any], key: str) -> str | tuple[float, float]:
@@ -479,30 +481,32 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
     as Visual Dynamics' RMS bars of a specification on its own show
     them, with no limit to be out of."""
     from hertzforge.core.compliance import specification_rms
+    from hertzforge.core.data import autospectrum
     from hertzforge.drawing.plot import pair_label
 
     name = params['specification']
     spec = project[name]
     references = spec.reference_dof
-    wanted = [i for i in range(spec.num_records)
-              if references is None or str(references[i]) == str(spec.response_dof[i])]
+    wanted = [i for i in range(spec.num_records) if autospectrum(spec, i)]
     if not wanted:
         raise refused(f'{name} holds no autospectrum, so no channel asks for a level')
     rows, top = [], None
     for i in wanted:
         level = float(specification_rms(spec, i))
-        unit = unit_text(quantity_of(str(spec.ordinate_dim[i])))
+        quantity = quantity_of(str(spec.ordinate_dim[i]))
+        unit = unit_text(quantity)
         label = pair_label((str(spec.response_dof[i]),
                             str(spec.response_dof[i] if references is None else references[i])))
         if np.isfinite(level):
             rows.append(v.row(label, sig(level), unit, 'info'))
             if top is None or level > top[0]:
-                top = (level, label, unit)
+                top = (level, label, quantity if unit else None)
         else:
             rows.append(v.row(label, 'not read', None, 'warn'))
     count = f'{len(wanted)} channel{"s" * (len(wanted) != 1)}'
     if top is not None:
-        count += f' — {top[1]} highest at {top[0]:.4g} {top[2] or ""}'.rstrip()
+        said, scale = display_units.words_in(top[2]) if top[2] else ('', 1.0)
+        count += f' — {top[1]} highest at {top[0] * scale:.4g} {said}'.rstrip()
     rows.append(v.row('Channels', count, None, 'info'))
     return [v.reading(f'RMS levels of {name}', rows)]
 
@@ -819,6 +823,10 @@ def srs_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
         label = row.dof if row.event is None else f'{row.dof}, {row.event}'
         rows.append(v.row(label, f'not scored: {row.refused}', None, 'warn') if row.refused
                     else v.row(label, _db(row.db), 'dB', 'info'))
+    unread = next((row.unread for row in _srs_rows(spec, measured)
+                   if row.dof == dof and row.unread), None)
+    if unread:
+        rows.append(v.row('Not read', unread, None, 'warn'))
     return [plot, v.reading(f'{dof}: {name} against {spec_name}', rows)]
 
 
@@ -847,10 +855,18 @@ def srs_error(project: Any, params: dict[str, Any]) -> list[dict]:
             values.append(float('nan'))
             continue
         values.append(row.db)
+        inside = 'warn' if row.unread else 'pass'
         rows.append(v.row(label, _db(row.db), 'dB',
-                          'pass' if low <= row.db <= high else 'fail'))
-    rows.append(_count_row(values, lambda db: db > high or db < low,
-                           f'outside {low:g} to {high:g} dB', notes, comparison_note(found)))
+                          inside if low <= row.db <= high else 'fail'))
+    count = _count_row(values, lambda db: db > high or db < low,
+                       f'outside {low:g} to {high:g} dB', notes, comparison_note(found),
+                       'readings' if len(events) > 1 else 'channels')
+    unread = next((row.unread for row in found if row.unread), None)
+    if unread and count['status'] == 'pass':
+        count['status'] = 'warn'
+    rows.append(count)
+    if unread:
+        rows.append(v.row('Not read', unread, None, 'warn'))
     return [v.reading(f'SRS error of {name} against {spec_name}', rows)]
 
 
@@ -952,6 +968,8 @@ def srs_points(project: Any, params: dict[str, Any]) -> list[dict]:
                  v.row('Worst at', sig(result['worst_frequency']), 'Hz', 'info')]
     if result.get('note'):
         rows.append(v.row('Note', str(result['note']), None, 'warn'))
+    if result.get('unread'):
+        rows.append(v.row('Not read', result['unread'], None, 'warn'))
     return [plot, v.reading(f'Points rule: {where}', rows)]
 
 
@@ -1052,7 +1070,7 @@ def waveform_error(project: Any, params: dict[str, Any]) -> list[dict]:
         values.append(value)
         notes += bool(row.get('refused') or row.get('zero_target'))
     rows.append(_count_row(values, lambda value: value >= ceiling, f'over {ceiling:g}%', notes,
-                           comparison_note(found)))
+                           comparison_note(found), 'readings' if many else 'channels'))
     lag = rep.lag_of(run, reference)
     rows.append(v.row('Aligned', float(lag), 'samples', 'info'))
     return [v.reading(f'Waveform error of {run_name} against {ref_name}', rows)]

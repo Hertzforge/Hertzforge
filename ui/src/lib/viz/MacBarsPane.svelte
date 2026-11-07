@@ -20,7 +20,6 @@
 		InstancedMesh,
 		LineBasicMaterial,
 		LineSegments,
-		Matrix4,
 		Mesh,
 		MeshBasicMaterial,
 		MeshLambertMaterial,
