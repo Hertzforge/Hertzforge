@@ -14,3 +14,9 @@ publish = false
 # `cargo build -p hertzforge-shock-law-math --target wasm32-wasip2`.
 [dependencies]
 hertzforge-dsp = { path = "../hertzforge-dsp" }
+
+[dev-dependencies]
+# The cross-check (`tests/twr_formula.rs`): the seed and the correction are time
+# waveform replication's, bin for bin. A dev-dependency only, so the library keeps
+# building for `wasm32-wasip2`.
+hertzforge-twr = { path = "../hertzforge-twr" }

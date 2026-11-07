@@ -1344,6 +1344,7 @@ name = "hertzforge-shock-law-math"
 version = "0.1.0"
 dependencies = [
  "hertzforge-dsp",
+ "hertzforge-twr",
 ]
 
 [[package]]
