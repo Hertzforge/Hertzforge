@@ -3,7 +3,7 @@ import { RequestError, ServiceClient, type SocketLike } from './client.svelte';
 import { createAnalysisServer } from './mock/analysis';
 import { createControlServer } from './mock/control';
 import { MockError, MockSocket, mockSocketFactory, type MockServer } from './mock/socket';
-import type { DisplayEvent, OpResult, OpenedDataset, SpectrumView } from './types';
+import type { Catalog, DisplayEvent, SpectrumView } from './types';
 
 const until = async (cond: () => boolean, ms = 3000) => {
 	const t0 = Date.now();
@@ -24,41 +24,39 @@ describe('ServiceClient over the mock transport', () => {
 		await c.whenOpen();
 		expect(c.status).toBe('open');
 		expect(c.hello?.protocol).toBe('sds/1');
-		const [catalog, opened] = await Promise.all([
-			c.request<{ operations: unknown[]; datasets: { id: string }[] }>('catalog.list'),
-			c.request<OpenedDataset>('dataset.open', { id: 'syn-run-qual-z' })
-		]);
-		expect(catalog.operations.length).toBeGreaterThan(0);
-		expect(opened.channels.length).toBe(4);
+		const [catalog, again] = await Promise.all([c.request<Catalog>('catalog.list'), c.request<Catalog>('catalog.list')]);
+		expect(Array.isArray(catalog.operations)).toBe(true);
+		expect(again).toEqual(catalog);
 		c.close();
 	});
 
 	it('carries typed arrays through binary frames', async () => {
-		const c = analysisClient();
+		const server: MockServer = {
+			hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: 't' },
+			methods: { arrays: () => ({ x: new Float64Array([1, 2, 3]), n: new Int32Array([4, 5]) }) }
+		};
+		const c = new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1) });
 		c.connect();
-		const opened = await c.request<OpenedDataset>('dataset.open', { id: 'syn-run-qual-z' });
-		const res = await c.request<OpResult>('op.run', {
-			op: 'random.psd_vs_spec',
-			handle: opened.handle,
-			params: { channel: 'ctrl1', tolerance_db: 3, abort_db: 6, label: 'Control' }
-		});
-		const spectrum = res.views[0] as SpectrumView;
-		expect(spectrum.view).toBe('spectrum');
-		expect(spectrum.series[0].x).toBeInstanceOf(Float64Array);
-		expect(spectrum.series[0].x.length).toBe(397);
-		expect(res.views[1].view).toBe('reading');
+		const res = await c.request<{ x: Float64Array; n: Int32Array }>('arrays');
+		expect(res.x).toBeInstanceOf(Float64Array);
+		expect(Array.from(res.x)).toEqual([1, 2, 3]);
+		expect(res.n).toBeInstanceOf(Int32Array);
 		c.close();
 	});
 
 	it('turns error responses into RequestError with the protocol code', async () => {
-		const c = analysisClient();
+		const server: MockServer = {
+			hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: 't' },
+			methods: {
+				refuse: () => {
+					throw new MockError('bad_request', 'The abort limit is inside the tolerance.');
+				}
+			}
+		};
+		const c = new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1) });
 		c.connect();
-		await expect(c.request('dataset.open', { id: 'plate-x' })).rejects.toMatchObject({ code: 'not_found' });
 		await expect(c.request('no.such.method')).rejects.toMatchObject({ code: 'unknown_method' });
-		const opened = await c.request<OpenedDataset>('dataset.open', { id: 'syn-run-qual-z' });
-		const err = await c
-			.request('op.run', { op: 'random.psd_vs_spec', handle: opened.handle, params: { channel: 'ctrl1', tolerance_db: 4, abort_db: 3 } })
-			.catch((e) => e);
+		const err = await c.request('refuse').catch((e) => e);
 		expect(err).toBeInstanceOf(RequestError);
 		expect(err.code).toBe('bad_request');
 		expect(err.message).toMatch(/abort limit/);
@@ -106,7 +104,7 @@ describe('ServiceClient over the mock transport', () => {
 		expect(c.status).toBe('retrying');
 		await until(() => c.status === 'open');
 		expect(sockets.length).toBe(2);
-		expect((await c.request<{ datasets: unknown[] }>('catalog.list')).datasets.length).toBeGreaterThan(0);
+		expect(Array.isArray((await c.request<Catalog>('catalog.list')).operations)).toBe(true);
 		c.close();
 		expect(c.status).toBe('offline');
 	});

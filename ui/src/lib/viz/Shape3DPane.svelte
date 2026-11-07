@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
 	/** Where the camera stood in each result's view that takes clicks: a click replaces the view, and the view belongs to the person, so the new one opens where they left it. */
 	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
 </script>
@@ -38,6 +39,8 @@
 		Mesh,
 		MeshBasicMaterial,
 		MeshLambertMaterial,
+		Matrix4,
+		Object3D,
 		PerspectiveCamera,
 		Points,
 		PointsMaterial,
@@ -50,8 +53,10 @@
 		type Material
 	} from 'three';
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapGradient } from './colormap';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
@@ -70,9 +75,69 @@
 		scope?: string;
 		/** Run the view's `pick` operation with these params added: what a click chose. */
 		onpick?: (patch: Record<string, unknown>) => void;
+		/** A gizmo let go: the operation to run, with what the drag adds. */
+		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, scope, onpick }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, scope, onpick, ongizmo }: Props = $props();
+
+	// kept across the view each drag answers with
+	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
+	let handles: TransformControls | null = null;
+	let gizmoAnchor: Object3D | null = null;
+
+	/** Arrows and rings on `view.gizmo`, along its axes. A drag on one axis runs its act on release; the view it answers with redraws them. */
+	function buildGizmo() {
+		const g = view.gizmo;
+		if (!g || !ongizmo || !renderer) return;
+		const anchor = new Object3D();
+		anchor.position.fromArray(g.origin);
+		const [ax, ay, az] = g.axes.map((a) => new Vector3().fromArray(a));
+		anchor.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(ax, ay, az));
+		scene.add(anchor);
+		gizmoAnchor = anchor;
+		const tc = new TransformControls(camera, renderer.domElement);
+		tc.setSpace('local');
+		tc.setMode(gizmoMode);
+		tc.attach(anchor);
+		tc.addEventListener('change', () => (dirty = true));
+		tc.addEventListener('dragging-changed', (e) => {
+			const dragging = Boolean(e.value);
+			controls.enabled = !dragging;
+			if (dragging) return;
+			const axis = (tc.axis ?? '').toLowerCase() as 'x' | 'y' | 'z';
+			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return void resetGizmo();
+			const along = g.axes['xyz'.indexOf(axis)];
+			if (tc.mode === 'translate') {
+				const d = anchor.position.clone().sub(new Vector3().fromArray(g.origin)).dot(new Vector3().fromArray(along));
+				if (Math.abs(d) < 1e-12) return;
+				ongizmo!({ op: g.slide.op, params: g.slide.params }, { ...g.slide.adds?.[axis], [g.slide.values[axis]]: d * (g.to_si ?? 1) });
+			} else {
+				const degrees = ((tc as unknown as { rotationAngle: number }).rotationAngle * 180) / Math.PI;
+				if (Math.abs(degrees) < 1e-9) return;
+				ongizmo!({ op: g.turn.op, params: g.turn.params }, { ...g.turn.adds?.[axis], [g.turn.values[axis]]: degrees });
+			}
+		});
+		scene.add(tc.getHelper());
+		handles = tc;
+	}
+
+	/** A drag that said nothing to run (a plane or the free handle) goes back. */
+	function resetGizmo() {
+		const g = view.gizmo;
+		if (!g || !gizmoAnchor) return;
+		gizmoAnchor.position.fromArray(g.origin);
+		const [ax, ay, az] = g.axes.map((a) => new Vector3().fromArray(a));
+		gizmoAnchor.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(ax, ay, az));
+		dirty = true;
+	}
+
+	function setGizmoMode(mode3: 'translate' | 'rotate') {
+		gizmoMode = mode3;
+		lastGizmoMode = mode3;
+		handles?.setMode(mode3);
+		dirty = true;
+	}
 
 	/** The click the view takes, when it takes one and there is somewhere to send it. */
 	const pick = $derived(onpick ? view.pick : undefined);
@@ -104,8 +169,8 @@
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
-	/** Amplitude slider full scale, as a fraction of the model's diagonal. */
-	const AMP_FULL_SCALE = 0.15;
+	/** An amplitude of 1, as a fraction of the model's diagonal: the slider's default position, and its scale. */
+	const AMP_UNIT = 0.075;
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
@@ -149,14 +214,20 @@
 	let host: HTMLDivElement;
 	let canvasHost: HTMLDivElement;
 	let triad: SVGSVGElement;
+	/** The labeled axes over the canvas: ticks, values and a titled edge per axis, redrawn each frame the view moves. */
+	let axesSvg: SVGSVGElement;
 
 	let playing = $state(true);
-	let amplitude = $state(0.5);
+	/** The deflection amplitude, a multiple of `AMP_UNIT`: the slider runs from 0 to `amplitudeMax`, which the field beside it sets. */
+	let amplitude = $state(1);
+	let amplitudeMax = $state(4);
 	let wireframe = $state(false);
+	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
+	let opacity = $state(1);
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
 	let colored = $state(true);
-	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, its extents written out. */
+	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, one edge per axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
@@ -167,12 +238,12 @@
 		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
 		return nodeCaption(n, view.node_ids, groupsFor.groups);
 	}
-	/** The deflection scale as a typed multiplier of the slider's middle, VD's scale box: 0.01 to 1000. */
-	const scaleFactor = $derived(amplitude / 0.5);
-	function setScale(text: string) {
+	/** The slider's top, typed: 0.1 to 1000; the slider is pulled down to it when it was above. */
+	function setAmplitudeMax(text: string) {
 		const value = Number(text);
 		if (!Number.isFinite(value)) return;
-		amplitude = Math.min(1000, Math.max(0.01, value)) * 0.5;
+		amplitudeMax = Math.min(1000, Math.max(0.1, value));
+		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
 	}
 	let fps = $state<number | null>(null);
 	let failure = $state<string | null>(null);
@@ -203,7 +274,7 @@
 		return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
 	});
 
-	const peak = $derived(amplitude * AMP_FULL_SCALE * diagonal);
+	const peak = $derived(amplitude * AMP_UNIT * diagonal);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
 	const extents = $derived.by(() => {
@@ -254,6 +325,7 @@
 	let marks: Points | null = null;
 	/** Every node as a dot, while clicks place points or pick nodes, so a node with no element still shows. */
 	let dots: Points | null = null;
+	let leftOut: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
 	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
@@ -393,6 +465,7 @@
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
 		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
 	}
@@ -554,10 +627,24 @@
 		if (view.pick && view.pick.target !== 'faces') {
 			const g = new BufferGeometry();
 			g.setAttribute('position', position);
-			g.setDrawRange(0, view.pick.ids?.length ?? view.nodes.length / 3);
-			dots = new Points(g, plain(new PointsMaterial({ size: 4, sizeAttenuation: false })));
+			const off = view.pick.off ?? 0;
+			g.setDrawRange(0, (view.pick.ids?.length ?? view.nodes.length / 3) - off);
+			// marked places show through the model, since a seam runs inside a solid
+			const places = view.pick.off !== undefined;
+			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places })));
+			if (places) dots.renderOrder = 4;
 			dots.frustumCulled = false;
 			scene.add(dots);
+			if (off) {
+				// the places left out: still there to click, and dim so they read as out
+				const dim = new BufferGeometry();
+				dim.setAttribute('position', position);
+				dim.setDrawRange((view.pick.ids?.length ?? 0) - off, off);
+				leftOut = new Points(dim, plain(new PointsMaterial({ size: 6, sizeAttenuation: false, transparent: true, opacity: 0.35, depthTest: false })));
+				leftOut.renderOrder = 4;
+				leftOut.frustumCulled = false;
+				scene.add(leftOut);
+			}
 		}
 		if (view.pick?.target === 'nodes') {
 			markGeometry = new BufferGeometry();
@@ -582,13 +669,14 @@
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
-		const pose = view.pick && scope ? poses.get(scope) : undefined;
+		const pose = (view.pick || view.gizmo) && scope ? poses.get(scope) : undefined;
 		if (pose) {
 			camera.position.fromArray(pose.position);
 			camera.up.fromArray(pose.up);
 			controls.target.fromArray(pose.target);
 			controls.update();
 		} else resetView();
+		buildGizmo();
 		applyTheme();
 		loadMode();
 		loadOverlay();
@@ -638,6 +726,55 @@
 		}
 	}
 
+	const corner = new Vector3();
+	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
+	function updateAxes() {
+		if (!axesSvg) return;
+		if (!bounds || !boundsBox) {
+			if (axesSvg.firstChild) axesSvg.replaceChildren();
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		axesSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		const { lo, hi } = extents;
+		const onPicture = (): Point => ({ x: ((corner.x + 1) / 2) * w, y: ((1 - corner.y) / 2) * h });
+		const corners: Point[] = [];
+		for (let i = 0; i < 8; i++) {
+			corner.set(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]).project(camera);
+			corners.push(onPicture());
+		}
+		corner.set((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).project(camera);
+		const centre = onPicture();
+		const unit = view.unit === 'undefined' ? '' : ` ${view.unit}`;
+		// a label `by` pixels out from `p`, kept on the canvas by its anchor and its width (about 6.5 px a character)
+		const at = (p: Point, out: Point, by: number, anchor: string, text: string) => {
+			const half = 3.3 * text.length;
+			const least = anchor === 'start' ? 3 : anchor === 'end' ? 3 + 2 * half : 3 + half;
+			const most = anchor === 'start' ? w - 3 - 2 * half : anchor === 'end' ? w - 3 : w - 3 - half;
+			const x = Math.min(most, Math.max(least, p.x + out.x * by));
+			const y = Math.min(h - 8, Math.max(8, p.y + out.y * by));
+			return `x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}"`;
+		};
+		let drawn = '';
+		labeledEdges(corners, centre).forEach((edge, k) => {
+			const a = corners[edge.from];
+			const b = corners[edge.to];
+			// a tick every 70 px or so, and only the ends of an edge seen short
+			const { values, decimals } = niceTicks(lo[k], hi[k], Math.max(1, Math.min(5, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 70))));
+			const anchor = Math.abs(edge.out.x) < 0.35 ? 'middle' : edge.out.x > 0 ? 'start' : 'end';
+			for (const v of values) {
+				const p = along(a, b, lo[k], hi[k], v);
+				drawn += `<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(p.x + edge.out.x * 5).toFixed(1)}" y2="${(p.y + edge.out.y * 5).toFixed(1)}"/>`;
+				const text = v.toFixed(decimals);
+				drawn += `<text ${at(p, edge.out, 9, anchor, text)} dominant-baseline="middle">${text}</text>`;
+			}
+			const title = `${'XYZ'[k]}${unit}`;
+			drawn += `<text class="title" ${at(along(a, b, 0, 1, 0.5), edge.out, 30, 'middle', title)} dominant-baseline="middle">${title}</text>`;
+		});
+		axesSvg.innerHTML = drawn;
+	}
+
 	function loop(now: number) {
 		raf = requestAnimationFrame(loop);
 		if (!renderer) return;
@@ -676,6 +813,7 @@
 		dirty = false;
 		renderer.render(scene, camera);
 		updateTriad();
+		updateAxes();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -714,7 +852,13 @@
 
 	$effect(() => {
 		if (!renderer) return;
-		for (const m of [surface.material as MeshLambertMaterial]) m.wireframe = wireframe;
+		for (const m of [surface.material as MeshLambertMaterial]) {
+			m.wireframe = wireframe;
+			m.transparent = opacity < 1;
+			m.opacity = opacity;
+			m.depthWrite = opacity >= 1;
+			m.needsUpdate = true;
+		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
 		dirty = true;
@@ -733,12 +877,16 @@
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
-		if (view.pick && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
+		if ((view.pick || view.gizmo) && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
+		handles?.detach();
+		handles?.getHelper().removeFromParent();
+		handles?.dispose();
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
 		mutedSurface?.geometry.dispose();
 		dots?.geometry.dispose();
+		leftOut?.geometry.dispose();
 		markGeometry?.dispose();
 		overlayGeometry?.dispose();
 		overlayLineGeometry?.dispose();
@@ -926,7 +1074,17 @@
 		onpointerup={onPointerUp}
 		onpointermove={onPointerMove}
 		onpointerleave={() => (hoverNode = null)}
-	></div>
+	>
+		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
+	</div>
+
+	{#if view.gizmo && ongizmo}
+		<div class="pickbar gizmobar" data-testid="shape3d-gizmo" role="toolbar" aria-label="What the handles do">
+			<button class="btn sm" class:primary={gizmoMode === 'translate'} data-testid="gizmo-move" onclick={() => setGizmoMode('translate')}>Move</button>
+			<button class="btn sm" class:primary={gizmoMode === 'rotate'} data-testid="gizmo-turn" onclick={() => setGizmoMode('rotate')}>Turn</button>
+			<span>Drag an arrow or a ring</span>
+		</div>
+	{/if}
 
 	{#if pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">
@@ -962,18 +1120,24 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max={Math.max(1, amplitude)} step="0.01" bind:value={amplitude} aria-valuetext="Peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={amplitudeMax} step={amplitudeMax / 400} bind:value={amplitude} aria-valuetext="Amplitude {formatFixed(amplitude, 3)}, peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
-			<label class="scale" title="The deflection scale as a multiplier of the slider's middle, 0.01 to 1000">
-				<span class="lbl">×</span>
-				<input class="field mono num" data-testid="shape3d-scale" type="number" min="0.01" max="1000" step="any" value={Number(scaleFactor.toPrecision(3))} onchange={(e) => setScale(e.currentTarget.value)} aria-label="Deflection scale" />
+			<label class="scale" title="The slider's top: the amplitude at its right end, 0.1 to 1000">
+				<span class="lbl">to</span>
+				<input class="field mono num" data-testid="shape3d-amplitude-max" type="number" min="0.1" max="1000" step="any" value={Number(amplitudeMax.toPrecision(3))} onchange={(e) => setAmplitudeMax(e.currentTarget.value)} aria-label="The slider's top amplitude" />
 			</label>
 			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
 				<button role="radio" data-testid="shape3d-surface" aria-checked={!wireframe} class:on={!wireframe} onclick={() => (wireframe = false)} title="Surface (W)">Surface</button>
 				<button role="radio" data-testid="shape3d-wireframe" aria-checked={wireframe} class:on={wireframe} onclick={() => (wireframe = true)} title="Wireframe (W)">Wireframe</button>
 			</div>
+			{#if !wireframe}
+				<label class="amp opacity" title="How solid the surface is drawn; lower it to see through to what is inside">
+					<span class="lbl">Opacity</span>
+					<input type="range" data-testid="shape3d-opacity" min="0.1" max="1" step="0.01" bind:value={opacity} aria-valuetext="{Math.round(opacity * 100)} %" />
+				</label>
+			{/if}
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-ghost" class:on={ghost} aria-pressed={ghost} onclick={() => (ghost = !ghost)} title="Undeformed ghost (G)">
 				<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="2" y="5" width="12" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6" /></svg>
@@ -983,7 +1147,7 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
-			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, its extents written out">Axes</button>
+			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1074,13 +1238,6 @@
 				{#if hovered !== null && !pick}
 					<span class="hovercap" data-testid="shape3d-hover">{caption(hovered)}</span>
 				{/if}
-				{#if bounds}
-					<span class="extents" data-testid="shape3d-extents" aria-label="Model extents">
-						{#each ['X', 'Y', 'Z'] as axis, k (axis)}
-							<span>{axis} {formatFixed(extents.lo[k], 4)} to {formatFixed(extents.hi[k], 4)}{view.unit === 'undefined' ? '' : ` ${view.unit}`}</span>
-						{/each}
-					</span>
-				{/if}
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
@@ -1123,6 +1280,31 @@
 
 	.canvas.picking {
 		cursor: crosshair;
+	}
+
+	.axes {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.axes :global(line) {
+		stroke: var(--text-2);
+		stroke-width: 1;
+	}
+
+	.axes :global(text) {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		fill: var(--text-2);
+	}
+
+	.axes :global(text.title) {
+		font-size: 12px;
+		fill: var(--text-1);
 	}
 
 	.pickbar {
@@ -1195,11 +1377,6 @@
 		color: var(--text-1);
 	}
 
-	.extents {
-		display: inline-flex;
-		gap: var(--sp-2);
-	}
-
 	.amp {
 		display: inline-flex;
 		align-items: center;
@@ -1211,6 +1388,10 @@
 
 	.amp input {
 		width: 110px;
+	}
+
+	.opacity input {
+		width: 70px;
 	}
 
 	.ampval {

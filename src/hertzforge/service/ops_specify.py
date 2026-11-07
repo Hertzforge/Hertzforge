@@ -67,7 +67,7 @@ def derive_specification(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.derive_specification', title='Derive Specification',
-        workspace='specify', accepts='project',
+        workspace='specify',
         summary='A test specification from measured PSDs or SRSs: the statistical '
                 'limit over the records, the straight-line envelope over it, and a '
                 'margin. Records "1-8"; blank for the largest group of one quantity. '

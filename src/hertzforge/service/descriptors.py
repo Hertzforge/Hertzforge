@@ -21,12 +21,8 @@ ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
 #: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
 #: is not offered shock tools; an operation every module needs (Plot
 #: Records, Save As, the averaging settings) says `everywhere`.
-Workspace = Literal['acquire', 'simulate', 'signals', 'random', 'shock', 'sine',
-                    'modal', 'geometry', 'model', 'specify', 'report']
-DatasetKind = Literal['random_run', 'modal_model', 'modal_run']
-#: what an operation runs on: a catalog dataset of one kind, or the
-#: connection's own project
-Accepts = DatasetKind | Literal['project']
+Workspace = Literal['acquire', 'simulate', 'signals', 'sysid', 'random', 'shock', 'transient',
+                    'sine', 'modal', 'geometry', 'model', 'specify', 'report']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it
@@ -58,8 +54,7 @@ class Param:
     max: float | None = None
     step: float | None = None
     options: Sequence[Option] = ()
-    #: an enum whose options are the opened dataset's channels
-    #: ('channels'), the open project's objects of some kinds
+    #: an enum whose options are the open project's objects of some kinds
     #: ('objects:psd' or 'objects:psd|frf', by `projects.kind_of`), or
     #: the objects a core verb applies to ('verb:integrate', by
     #: `Project.verbs`, the table the verbs themselves are offered by)
@@ -78,16 +73,16 @@ class Param:
 
     def __post_init__(self) -> None:
         source = self.options_from
-        if source is not None and source != 'channels' and not (
+        if source is not None and not (
                 source.startswith('objects:') and all(self.kinds)
                 or source.startswith('verb:') and self.verb):
-            raise ValueError(f'options_from {source!r} is "channels", '
+            raise ValueError(f'options_from {source!r} is '
                              '"objects:<kind>|<kind>" or "verb:<verb>"')
 
     @property
     def optional(self) -> bool:
         """Whether this is an object param that may name none ('')."""
-        return bool(self.options_from) and self.options_from != 'channels' and self.default == ''
+        return bool(self.options_from) and self.default == ''
 
     @property
     def kinds(self) -> tuple[str, ...]:
@@ -198,15 +193,13 @@ def json_type(value: Any) -> str:
 class Operation:
     """An operation's descriptor, plus the function that runs it.
 
-    `run(dataset, params)` receives the opened dataset (the connection's
-    `Project` when `accepts` is 'project') and the resolved params and
-    returns the result's list of views.
+    `run(project, params)` receives the connection's `Project` and the
+    resolved params and returns the result's list of views.
     """
 
     id: str
     title: str
     workspace: Workspace
-    accepts: Accepts
     summary: str
     params: Sequence[Param]
     outputs: Sequence[ViewKind]
@@ -219,29 +212,32 @@ class Operation:
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
+    #: copy of its geometry, so nothing in the project changes
+    previews: bool = False
 
     def to_json(self) -> dict[str, Any]:
         """The descriptor `catalog.list` sends for this operation; `run`
         stays behind."""
         out = {'id': self.id, 'title': self.title,
-               'workspace': self.workspace, 'accepts': self.accepts,
-               'summary': self.summary,
+               'workspace': self.workspace, 'summary': self.summary,
                'params': [param.to_json() for param in self.params],
                'outputs': list(self.outputs)}
-        if self.everywhere:
-            out['everywhere'] = True
+        from .verbs import modules_of
+
+        out['modules'] = list(modules_of(self))
+        if self.previews:
+            out['previews'] = True
         return out
 
-    def resolve(self, given: Any, channels: Sequence[str] = (),
-                objects: Mapping[str, str] | None = None,
+    def resolve(self, given: Any, objects: Mapping[str, str] | None = None,
                 verbs: Mapping[str, Collection[str]] | None = None
                 ) -> dict[str, Any]:
         """The params to run with: each given value checked, each missing
         one its default. An `options_from` param with no default takes the
-        first of its choices: the dataset's channels, the names in
-        `objects` (name to kind, the project's order) of the kinds it
-        takes, or the names in `verbs` (name to the verbs that apply to
-        it) its verb applies to."""
+        first of its choices: the names in `objects` (name to kind, the
+        project's order) of the kinds it takes, or the names in `verbs`
+        (name to the verbs that apply to it) its verb applies to."""
         if not isinstance(given, Mapping):
             raise bad_request(f'op.run "params" must be an object, not '
                               f'{json_type(given)}')
@@ -253,9 +249,8 @@ class Operation:
                 f'; it takes {", ".join(map(repr, known)) or "none"}')
         out = {}
         for param in self.params:
-            choices = (channels if param.options_from == 'channels'
-                       else [name for name, kind in (objects or {}).items()
-                             if kind in param.kinds] if param.kinds
+            choices = ([name for name, kind in (objects or {}).items()
+                        if kind in param.kinds] if param.kinds
                        else [name for name, applies in (verbs or {}).items()
                              if param.verb in applies] if param.verb
                        else None)

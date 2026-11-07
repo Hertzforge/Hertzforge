@@ -15,7 +15,7 @@ from hertzforge.service.ops_project import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 from hertzforge.service.server import Service, start
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS}
@@ -65,7 +65,6 @@ def test_an_options_source_is_channels_or_objects_of_named_kinds(source):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.accepts == 'project'
 
 
 def test_a_waterfall_draws_any_data_object(plate, validate):
@@ -255,6 +254,50 @@ def test_rigid_body_modes_are_drawn_on_their_geometry(plate, validate):
     wire_views([view], validate)
     assert view['view'] == 'shape3d' and len(view['modes']) == 6
     assert 'Geometry Rigid Body Modes' in plate
+
+
+def test_rigid_body_modes_take_a_point_and_a_mass(plate, validate):
+    """The Modes pane's kinematic settings: the point goes on the geometry,
+    the mass and inertia scale the set, and a bad tensor is refused."""
+    geometry = plate['Geometry']
+    plain = run(plate, 'project.generate_rigid_body_modes', x=0.1, y=0.2, z=0.3)
+    wire_views(plain, validate)
+    assert geometry.mass_properties.point == (0.1, 0.2, 0.3)
+    assert plate.journal[-1].startswith("project.generate_rigid_body_modes('Geometry', "
+                                        "point=(0.1, 0.2, 0.3)")
+    unit = plate['Geometry Rigid Body Modes'].shape_matrix.copy()
+    run(plate, 'project.generate_rigid_body_modes', x=0.1, y=0.2, z=0.3, normalize=True,
+        mass=4.0, ixx=2.0, iyy=2.0, izz=2.0)
+    scaled = plate['Geometry Rigid Body Modes (2)'].shape_matrix
+    assert np.allclose(np.abs(scaled[0]), np.abs(unit[0]) / 2.0)
+    assert geometry.mass_properties.mass == 4.0
+    with pytest.raises(ProtocolError, match='not positive definite'):
+        run(plate, 'project.generate_rigid_body_modes', normalize=True, ixx=1.0, iyy=1.0,
+            izz=1.0, ixy=5.0)
+
+
+def test_a_rigid_body_preview_adds_nothing_and_leaves_the_geometry_alone(plate, validate):
+    before = set(plate)
+    held = plate['Geometry'].mass_properties
+    (view,) = run(plate, 'project.generate_rigid_body_modes', x=0.5, keep=False)
+    wire_views([view], validate)
+    assert view['view'] == 'shape3d' and len(view['modes']) == 6
+    assert 'Preview' in view['title']
+    assert set(plate) == before and plate['Geometry'].mass_properties == held
+
+
+def test_the_rigid_form_opens_on_what_the_geometry_holds(plate):
+    from hertzforge.service.ops_settings import settings_of
+
+    geometry = plate['Geometry']
+    opened = settings_of(geometry)['rigid']
+    assert opened['normalize'] is False and 'mass' not in opened
+    assert opened['x'] == pytest.approx(float(geometry.node_xyz[:, 0].mean()))
+    run(plate, 'project.generate_rigid_body_modes', x=0.1, y=0.2, z=0.3, normalize=True,
+        mass=4.0, ixx=2.0, iyy=2.0, izz=2.0)
+    held = settings_of(geometry)['rigid']
+    assert held['x'] == 0.1 and held['normalize'] is True and held['mass'] == 4.0
+    assert held['ixx'] == 2.0 and held['ixy'] == 0.0
 
 
 def test_a_transform_the_shapes_cannot_resolve_is_refused_in_the_cores_words(plate):

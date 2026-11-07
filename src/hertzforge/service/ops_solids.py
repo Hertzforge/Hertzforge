@@ -22,8 +22,8 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .datasets import _mesh
 from .descriptors import Operation, Option, Param
+from .mesh import drawn_mesh, places_view
 from .protocol import refused
 
 GEOMETRY = Param('geometry', 'Geometry', 'enum', options_from='objects:geometry')
@@ -203,7 +203,7 @@ def _drawn(title: str, geometry: Any, defined: bool | None = None
     the geometry it was made from."""
     from hertzforge.core import solids
 
-    used, triangles, lines = _mesh(geometry)
+    used, triangles, lines = drawn_mesh(geometry)
     nodes = [np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)[used]]
     faces = [triangles.reshape(-1, 3)]
     start = len(used)
@@ -437,12 +437,27 @@ def move_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     ids = _ids(geometry, params['solids'])
     offset = tuple(params[f'offset_{a}'] for a in 'xyz')
     turn = _angles(params, 'turn')
-    if not any(offset) and not any(turn):
-        raise refused('type how far to move it or how far to turn it')
-    moved = _call(lambda: project.move_solids(name, ids, offset, turn))
-    return _result(name, geometry, f'Moved in {name}', [
-        v.row('Moved', f'{", ".join(map(str, ids))}: {moved} solids with what they are '
-              'made of', None, 'pass')])
+    said = 'nothing yet: type how far, or drag an arrow or a ring'
+    if any(offset) or any(turn):
+        moved = _call(lambda: project.move_solids(name, ids, offset, turn))
+        said = f'{", ".join(map(str, ids))}: {moved} solids with what they are made of'
+    views = _result(name, geometry, f'Moved in {name}', [v.row('Moved', said, None, 'pass')])
+    views[1]['gizmo'] = _solids_gizmo(name, geometry, ids)
+    return views
+
+
+def _solids_gizmo(name: str, geometry: Any, ids: list[int]) -> dict:
+    """VD's arrows and rings at the middle of the parts' extent, along the model's axes:
+    dragging them runs Move Part."""
+    from hertzforge.core.tetmesh import _extent
+
+    low, high = _extent(geometry, ids)
+    held = {'geometry': name, 'solids': ', '.join(map(str, ids))}
+    return v.gizmo((np.asarray(low) + np.asarray(high)) / 2.0, np.eye(3),
+                   {'op': 'project.move_solids', 'params': held,
+                    'values': {axis: f'offset_{axis}' for axis in 'xyz'}},
+                   {'op': 'project.move_solids', 'params': held,
+                    'values': {axis: f'turn_{axis}' for axis in 'xyz'}})
 
 
 INTO = Param('into', 'Into geometry', 'enum', options_from='objects:geometry')
@@ -562,6 +577,9 @@ PARTS_APART = Param('parts_apart', 'Keep the parts apart from each other', 'bool
                     default=False)
 ANYWAY = Param('anyway', 'Mesh even where the fit is likely to fold', 'boolean',
                default=False)
+PIECE_SIZES = Param('sizes', 'A size per piece, as "3: 0.01, 5: 0.002" (hexes)', 'string',
+                    default='')
+DETECT_SIZES = Param('detect', 'Detect a size for every piece', 'boolean', default=False)
 MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean',
                   default=False)
 
@@ -683,8 +701,43 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
     return rows
 
 
+def _piece_sizes(text: str) -> dict[int, float]:
+    """The sizes '3: 0.01, 5: 0.002' names, by piece."""
+    out: dict[int, float] = {}
+    for entry in text.replace(' ', '').split(','):
+        if not entry:
+            continue
+        piece, colon, size = entry.partition(':')
+        try:
+            out[int(piece)] = float(size)
+        except ValueError:
+            raise refused(f'{entry!r} is not a piece and its size, such as 3: 0.01') from None
+        if not colon or out[int(piece)] <= 0.0:
+            raise refused(f'{entry!r} is not a piece and a size above 0, such as 3: 0.01')
+    return out
+
+
+def _likely_or_refused(geometry: Any, ids: list[int]) -> float:
+    return _call(lambda: _likely_size(geometry, ids, 'hexes'))
+
+
+def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, float]) -> dict:
+    """How `solids.piece_plan` would mesh the parts, a row a piece, with the size each is
+    likely to hold at beside the one it has."""
+    from hertzforge.core import solids
+
+    rows = []
+    for entry in _call(lambda: solids.piece_plan(geometry, ids, size, sizes)):
+        piece = entry.get('id')
+        likely = _likely_or_refused(geometry, [piece] if piece is not None else ids)
+        rows.append([piece if piece is not None else '', entry.get('name', ''),
+                     entry['method'], float(entry['size']), float(likely),
+                     int(entry['bricks'])])
+    return v.table('Pieces', ['Piece', 'Name', 'Method', 'Size', 'Likely size', 'Bricks'], rows)
+
+
 def _preview(geometry: Any, ids: list[int], size: float, elements: str,
-             parts_apart: bool) -> tuple[Any, list[dict]]:
+             parts_apart: bool, sizes: dict[int, float] | None = None) -> tuple[Any, list[dict]]:
     """The mesh Mesh Solids would make, unjoined, and what it holds; or
     no mesh and its count past VD's preview budgets."""
     from hertzforge.core import shells, solids, tetmesh
@@ -713,14 +766,14 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
                                 'makes them', None, 'info')]
         part, made = tetmesh.tet_mesh(geometry, ids, size)
     else:
-        plan = solids.piece_plan(geometry, ids, size)
+        plan = solids.piece_plan(geometry, ids, size, sizes)
         bricks = sum(entry['bricks'] for entry in plan)
         budget = (PREVIEW_FITTED if any(e['method'] == 'overlay' for e in plan)
                   else PREVIEW_BRICKS)
         if bricks > budget:
             return None, [v.row('Bricks', f'about {bricks:,} at this size; Mesh makes '
                                 'them', None, 'info')]
-        part, made = solids.brick_mesh(geometry, ids, size, parts_apart)
+        part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
     earlier = len(solids.meshed_elements(geometry, part.group_name))
     return part, _made_rows(made, earlier)
 
@@ -730,7 +783,9 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     an element size, each part an element group (`Project.mesh_solids`).
     Without `keep` it is VD's live preview: the mesh the core's mesher
     makes (`solids.brick_mesh`, `tetmesh.tet_mesh`, `shells.shell_mesh`)
-    drawn on its own and said, the project unchanged. A fitted brick mesh
+    drawn on its own and said, the project unchanged. A union meshed in
+    pieces is listed a row a piece, and each takes its own size, typed or
+    detected, as VD's table does. A fitted brick mesh
     likely to fold (`hexmesh.likely_to_fold`) is said in the preview and
     made only with `anyway`, where VD asks. The size sets the time: a
     fine size on a large part is seconds to minutes."""
@@ -747,6 +802,12 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     size = params['size'] or _call(lambda: _likely_size(geometry, ids, elements))
     fold = (_call(lambda: _fold_check(geometry, ids, size)) if elements == 'hexes'
             else '')
+    sizes = _piece_sizes(params['sizes']) if elements == 'hexes' else {}
+    pieces = _pieces_table(geometry, ids, size, sizes) if elements == 'hexes' else None
+    if params['detect'] and pieces is not None:
+        sizes = {int(entry['id']): _likely_or_refused(geometry, [int(entry['id'])])
+                 for entry in _call(lambda: solids.piece_plan(geometry, ids, size)) if 'id' in entry}
+        pieces = _pieces_table(geometry, ids, size, sizes)
     said = [v.row('Solids', ', '.join(_label(solids.solid(geometry, i)) for i in ids),
                   None, 'info'),
             v.row('Element size', float(size), 'm', 'info')]
@@ -754,8 +815,10 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         said.append(v.row('Fit', fold, None, 'warn'))
     if not params['keep']:
         part, rows = _call(lambda: _preview(geometry, ids, size, elements,
-                                            params['parts_apart']))
+                                            params['parts_apart'], sizes))
         out = [v.reading(f'Mesh Solids preview of {name}', said + rows)]
+        if pieces is not None and len(pieces['rows']) > 1:
+            out.append(pieces)
         if part is not None:
             out.append(_drawn(f'Mesh preview of {name}', part,
                               geometry.units_defined)[0])
@@ -764,7 +827,8 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{fold}. Mesh at the size suggested, or ask to mesh anyway')
     found = _call(lambda: project.mesh_solids(
         name, ids, size, apart=params['apart'],
-        parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements))
+        parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements,
+        sizes=sizes or None))
     rows = _made_rows(found, 0)
     if found['replaced']:
         rows.append(v.row('Replaced', f'the {found["replaced"]:,} elements meshed before',
@@ -907,6 +971,42 @@ def edit_mated_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
         _mates_table(name, geometry)]
 
 
+MATE_SIDE = Param('side', 'Side', 'enum', default='a', options=(
+    Option('a', 'First group'), Option('b', 'Second group')))
+MATE_NODE = Param('toggle', 'Node clicked', 'string', default='', in_view=True)
+
+
+def edit_mate_sides(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.edit_mate_sides`: the nodes of a kept set's one side, marked among the nodes
+    of that side's group, a click adding one or taking it away
+    (`Project.edit_mated_surfaces`): VD's node clicks on a set's pane. Only that group's
+    nodes are marked, so coincident nodes of the two sides are told apart."""
+    name, geometry = _geometry(project, params)
+    known = {m.id: m for m in geometry.mates}
+    mated = known.get(params['mate'])
+    if mated is None:
+        raise refused(f'the geometry has mated surfaces '
+                      f'{", ".join(map(str, known)) or "none"}; not {params["mate"]}')
+    field, group = (('nodes_a', mated.groups[0]) if params['side'] == 'a'
+                    else ('nodes_b', mated.groups[1]))
+    if params['toggle'].strip():
+        node = int(params['toggle'])
+        held = [int(n) for n in getattr(mated, field)]
+        changed = [n for n in held if n != node] if node in held else [*held, node]
+        _call(lambda: project.edit_mated_surfaces(name, mated.id, **{field: tuple(changed)}))
+        (mated,) = [m for m in geometry.mates if m.id == params['mate']]
+    held = {int(n) for n in getattr(mated, field)}
+    places = [int(n) for n in geometry.nodes_in([group])]
+    return [v.reading(f'{mated.name} on {name}', [
+        v.row('Holds', mated.describe(), None, 'info'),
+        v.row('First side', float(len(mated.nodes_a)), 'nodes', 'info'),
+        v.row('Second side', float(len(mated.nodes_b)), 'nodes', 'info')]),
+        places_view(geometry, f'{mated.name}, {"first" if params["side"] == "a" else "second"} '
+                    'side', 'project.edit_mate_sides',
+                    {'geometry': name, 'mate': mated.id, 'side': params['side']}, places,
+                    set(places) - held, 'Click a node to add it to this side or take it away')]
+
+
 MATES = Param('mates', 'Mated surfaces (ids, as "1, 3")', 'string', default='')
 
 
@@ -960,45 +1060,41 @@ def set_view(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.new_geometry', title='New Geometry', workspace='geometry',
-        accepts='project',
         summary='An empty geometry to build a part in from solids, recording the length '
                 'unit it is built in.',
         params=(GEOMETRY_NAME, UNIT), outputs=('reading', 'table'), run=new_geometry),
     Operation(
-        id='project.solids', title='Solids', workspace='geometry', accepts='project',
+        id='project.solids', title='Solids', workspace='geometry',
         summary='A geometry\'s solids, each part and what it is made of, with their ids '
                 'for the other solid tools, and the geometry drawn.',
         params=(GEOMETRY,), outputs=('reading', 'shape3d', 'table'), run=view_solids),
     Operation(
-        id='project.add_solid_block', title='Add Block', workspace='geometry', accepts='project',
+        id='project.add_solid_block', title='Add Block', workspace='geometry',
         summary='A block, its widths along its own axes, centered and turned; a corner radius '
                 'rounds its four edges along its own Z.',
         params=(GEOMETRY, *CENTER, *WIDTHS, *ANGLES, CORNER, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True, previews=True),
     Operation(
         id='project.add_solid_cylinder', title='Add Cylinder', workspace='geometry',
-        accepts='project',
         summary='A cylinder of a radius about its own Z and a length along it, centered and '
                 'turned; subtracted from a part it makes a hole.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.25, 0.0),
                 _length('length', 'Length', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True, previews=True),
     Operation(
-        id='project.add_solid_cone', title='Add Cone', workspace='geometry', accepts='project',
+        id='project.add_solid_cone', title='Add Cone', workspace='geometry',
         summary='A cone or frustum along its own Z, a radius at its base and its top (either '
                 'zero for a point), centered and turned.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Base radius', 0.5, 0.0),
                 _length('top_radius', 'Top radius', 0.25, 0.0),
                 _length('height', 'Height', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True, previews=True),
     Operation(
-        id='project.add_solid_sphere', title='Add Sphere', workspace='geometry',
-        accepts='project', summary='A sphere of a radius about its center.',
+        id='project.add_solid_sphere', title='Add Sphere', workspace='geometry', summary='A sphere of a radius about its center.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True, previews=True),
     Operation(
         id='project.add_solid_section', title='Add Section', workspace='geometry',
-        accepts='project',
         summary='A structural section along its own Z. Dimensions in order: I-beam and '
                 'channel depth, flange width, flange thickness, web thickness; tee the same; '
                 'angle long leg, short leg, thickness; rectangular tube width, height, wall; '
@@ -1007,108 +1103,108 @@ OPERATIONS = (
                                 options=_section_shapes()),
                 Param('dimensions', 'Dimensions [m], in order', 'string', default=''),
                 _length('length', 'Length', 4.0, 0.0), *CENTER, *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True, previews=True),
     Operation(
-        id='project.add_solid_plate', title='Add Plate', workspace='geometry', accepts='project',
+        id='project.add_solid_plate', title='Add Plate', workspace='geometry',
         summary='A flat rectangle in its own XY plane, centered and turned; it is meshed '
                 'into shells, whose element group takes the thickness.',
         params=(GEOMETRY, *CENTER, *WIDTHS[:2], *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True, previews=True),
     Operation(
-        id='project.add_solid_disk', title='Add Disk', workspace='geometry', accepts='project',
+        id='project.add_solid_disk', title='Add Disk', workspace='geometry',
         summary='A flat circle in its own XY plane, centered and turned; it is meshed into '
                 'shells, whose element group takes the thickness.',
         params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True, previews=True),
     Operation(
-        id='project.add_solid_hole', title='Add Hole', workspace='geometry', accepts='project',
+        id='project.add_solid_hole', title='Add Hole', workspace='geometry',
         summary='A hole entering at its center and running down its own Z, a depth of 0 '
                 'through the part, a counterbore diameter of 0 none; subtract it from a part.',
         params=(GEOMETRY, *CENTER, _length('diameter', 'Diameter', 0.25, 0.0),
                 _length('depth', 'Depth (0 through)', 0.0, 0.0),
                 _length('counterbore_diameter', 'Counterbore diameter (0 none)', 0.0, 0.0),
                 _length('counterbore_depth', 'Counterbore depth', 0.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_hole, edits=True),
+        outputs=('reading', 'shape3d', 'table'), run=add_solid_hole, edits=True, previews=True),
     Operation(
-        id='project.edit_solid', title='Edit Solid', workspace='geometry', accepts='project',
+        id='project.edit_solid', title='Edit Solid', workspace='geometry',
         summary='Change a solid after it is made: only the fields typed change, lists as '
                 '"0, 0, 0.1". A boolean it is part of changes with it; Mesh Solids again to '
                 'mesh the change.',
         params=(GEOMETRY, SOLID, *EDIT_FIELDS), outputs=('reading', 'shape3d', 'table'),
-        run=edit_solid, edits=True),
+        run=edit_solid, edits=True, previews=True),
     Operation(
-        id='project.move_solids', title='Move Part', workspace='geometry', accepts='project',
+        id='project.move_solids', title='Move Part', workspace='geometry',
         summary='Move parts whole, each with every solid it is made of: turned about the '
                 'middle of their extent, then moved.',
         params=(GEOMETRY, SOLIDS, *OFFSET, *TURN), outputs=('reading', 'shape3d', 'table'),
         run=move_solids, edits=True),
     Operation(
-        id='project.copy_solids', title='Copy Solids', workspace='geometry', accepts='project',
+        id='project.copy_solids', title='Copy Solids', workspace='geometry',
         summary='Copy solids, recipe and all, into the same geometry or another; a boolean '
                 'or pattern comes with every solid it is made of.',
         params=(GEOMETRY, SOLIDS, INTO), outputs=('reading', 'shape3d', 'table'),
         run=copy_solids, edits=True),
     Operation(
         id='project.reorder_solids', title='Reorder Solids', workspace='geometry',
-        accepts='project',
         summary='Put the parts, or one boolean\'s solids, in a new order, naming every one; '
                 'a subtraction cuts the rest from the first.',
         params=(GEOMETRY, SOLIDS, WITHIN), outputs=('reading', 'shape3d', 'table'),
         run=reorder_solids, edits=True),
     Operation(
         id='project.combine_solids', title='Combine Solids', workspace='geometry',
-        accepts='project',
         summary='Make two or more parts one: their union, the rest subtracted from the '
                 'first, or their intersection.',
         params=(GEOMETRY, OPERATION, SOLIDS, NAME), outputs=('reading', 'shape3d', 'table'),
         run=combine_solids, edits=True),
     Operation(
         id='project.separate_solids', title='Take Apart', workspace='geometry',
-        accepts='project',
         summary='Undo booleans or patterns: the solids they were made of stand on their own '
                 'again.',
         params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d', 'table'),
         run=separate_solids, edits=True),
     Operation(
         id='project.delete_solids', title='Delete Solids', workspace='geometry',
-        accepts='project',
         summary='Delete solids, each with every solid it is made of; a mesh made from them '
                 'stays.',
         params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d', 'table'),
         run=delete_solids, edits=True),
     Operation(
-        id='project.pattern_solids', title='Pattern', workspace='geometry', accepts='project',
+        id='project.pattern_solids', title='Pattern', workspace='geometry',
         summary='Copy parts in rows, columns and layers along X, Y and Z, the originals '
                 'counted, as one solid whose copies follow them.',
         params=(GEOMETRY, SOLIDS, *COUNTS, *SPACING), outputs=('reading', 'shape3d', 'table'),
         run=pattern_solids, edits=True),
     Operation(
-        id='project.mesh_solids', title='Mesh Solids', workspace='model', accepts='project',
+        id='project.mesh_solids', title='Mesh Solids', workspace='model',
         summary='Mesh parts into hexes, tetras or shells, each part an element group; the '
                 'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
-        params=(GEOMETRY, PARTS, ELEMENTS, SIZE, APART, PARTS_APART, ANYWAY, MESH_KEEP),
+        params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
+                MESH_KEEP),
         outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',
-        accepts='project',
         summary='Find where element groups\' surfaces mate; Keep ties each patch, along the '
                 'normal and in the plane, rigidly, by a stiffness or not at all.',
         params=(GEOMETRY, GROUPS, MATE_TOLERANCE, NORMAL, NORMAL_STIFFNESS, SHEAR,
                 SHEAR_STIFFNESS, PATCHES, MATE_KEEP),
         outputs=('reading', 'table', 'shape3d', 'table'), run=mate_surfaces, edits=True),
     Operation(
-        id='project.edit_mated_surfaces', title='Edit Mated Surfaces', workspace='geometry',
-        accepts='project', summary='Change how a kept set of mated surfaces is held, or its '
+        id='project.edit_mated_surfaces', title='Edit Mated Surfaces', workspace='geometry', summary='Change how a kept set of mated surfaces is held, or its '
                                    'name.',
         params=(GEOMETRY, MATE, NORMAL, NORMAL_STIFFNESS, SHEAR, SHEAR_STIFFNESS, MATE_NAME),
         outputs=('reading', 'table'), run=edit_mated_surfaces, edits=True),
     Operation(
-        id='project.delete_mated_surfaces', title='Delete Mated Surfaces', workspace='geometry',
-        accepts='project', summary='Delete kept sets of mated surfaces, by id.',
+        id='project.edit_mate_sides', title='Edit Mate Sides', workspace='geometry',
+        summary='The nodes of one side of a kept set of mated surfaces, by clicking them in '
+                'the view.',
+        params=(GEOMETRY, MATE, MATE_SIDE, MATE_NODE), outputs=('reading', 'shape3d'),
+        run=edit_mate_sides, edits=True),
+    Operation(
+        id='project.delete_mated_surfaces', title='Delete Mated Surfaces', workspace='geometry', summary='Delete kept sets of mated surfaces, by id.',
         params=(GEOMETRY, MATES), outputs=('reading', 'table'), run=delete_mated_surfaces,
         edits=True),
     Operation(
-        id='project.set_view', title='Set Default View', workspace='geometry', accepts='project',
+        id='project.set_view', title='Set Default View', workspace='geometry',
         summary='The view a geometry opens on: where the eye is, seen from the model\'s '
                 'center, and which way is up. An eye of 0, 0, 0 is the default isometric view.',
         params=(GEOMETRY, *EYE, *UP), outputs=('reading', 'shape3d'), run=set_view,

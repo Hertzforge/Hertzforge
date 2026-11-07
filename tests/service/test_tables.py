@@ -13,7 +13,7 @@ from hertzforge.service.ops_project import OPERATIONS as PROJECT_OPERATIONS
 from hertzforge.service.ops_tables import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS + PROJECT_OPERATIONS}
@@ -25,6 +25,27 @@ def run(project, op_id, **given):
                                         for name, obj in project.items()},
                         verbs={name: projects.verbs_of(project, name) for name in project})
     return op.run(project, values)
+
+
+def test_a_mode_table_takes_descriptions(fitted, validate):
+    """The Description column is typed into (Brandon, 2026-11-05): the
+    edit names the mode by its row, the text is kept on the set and
+    journaled, and a row the table does not have is refused."""
+    project = fitted
+    (table,) = run(project, 'project.table', object='Three')
+    assert table['edit']['op'] == 'project.describe_mode'
+    assert table['edit']['columns'] == [None, None, None, 'description']
+    (after,) = run(project, 'project.describe_mode', shapes='Three', row=2, column='description',
+                   value='  first bending ')
+    assert after['rows'][1][3] == 'first bending'
+    assert project['Three'].description[1] == 'first bending'
+    assert any('set_description' in line for line in project.journal)
+    wire_views([after], validate)
+    with pytest.raises(ProtocolError, match='no mode 9'):
+        run(project, 'project.describe_mode', shapes='Three', row=9, column='description',
+            value='x')
+    run(project, 'project.describe_mode', shapes='Three', row=2, column='description', value='')
+    assert project['Three'].description[1] == ''
 
 
 @pytest.fixture(scope='module')

@@ -8,11 +8,9 @@ import type { ParamDescriptor, ParamOption, ProjectObject } from '$lib/protocol/
 export type ParamValue = number | string | boolean;
 export type ParamValues = Record<string, ParamValue>;
 
-/** The options an enum shows: its own list, or the dataset's channels for `options_from`. */
-export function optionsFor(p: ParamDescriptor, channels: ParamOption[] = []): ParamOption[] {
-	if (p.type !== 'enum') return [];
-	if (p.options_from === 'channels') return channels;
-	return p.options ?? [];
+/** The options an enum shows: its own list, filled from the project's objects for `options_from`. */
+export function optionsFor(p: ParamDescriptor): ParamOption[] {
+	return p.type === 'enum' ? (p.options ?? []) : [];
 }
 
 /** The kinds an `objects:` param takes, or none for any other param. */
@@ -58,7 +56,7 @@ function clamp(v: number, p: ParamDescriptor): number {
 }
 
 /** The starting value for one parameter: its valid default, else the first sensible value. */
-export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): ParamValue {
+export function defaultFor(p: ParamDescriptor): ParamValue {
 	const d = p.default;
 	switch (p.type) {
 		case 'number': {
@@ -74,7 +72,7 @@ export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
 		case 'string':
 			return typeof d === 'string' ? d : '';
 		case 'enum': {
-			const opts = optionsFor(p, channels);
+			const opts = optionsFor(p);
 			if (opts.some((o) => o.value === d)) return d as string | number;
 			return opts[0]?.value ?? '';
 		}
@@ -86,15 +84,15 @@ export function defaultFor(p: ParamDescriptor, channels: ParamOption[] = []): Pa
  * one starts on an object the earlier ones have not taken, when there is one: two shape sets to
  * match or compare start as two sets, not one set twice.
  */
-export function defaultValues(params: ParamDescriptor[], channels: ParamOption[] = []): ParamValues {
+export function defaultValues(params: ParamDescriptor[]): ParamValues {
 	const taken = new Map<string, Set<ParamValue>>();
 	return Object.fromEntries(
 		params.map((p) => {
-			let value = defaultFor(p, channels);
+			let value = defaultFor(p);
 			const source = objectKinds(p).length || objectVerb(p) ? p.options_from : undefined;
 			if (source) {
 				const used = taken.get(source) ?? new Set();
-				if (used.has(value)) value = optionsFor(p, channels).find((o) => !used.has(o.value))?.value ?? value;
+				if (used.has(value)) value = optionsFor(p).find((o) => !used.has(o.value))?.value ?? value;
 				used.add(value);
 				taken.set(source, used);
 			}
@@ -104,7 +102,7 @@ export function defaultValues(params: ParamDescriptor[], channels: ParamOption[]
 }
 
 /** Words a user can act on, or null when the value is valid. */
-export function validate(p: ParamDescriptor, value: unknown, channels: ParamOption[] = []): string | null {
+export function validate(p: ParamDescriptor, value: unknown): string | null {
 	const unit = p.unit ? ` ${p.unit}` : '';
 	switch (p.type) {
 		case 'number':
@@ -123,9 +121,8 @@ export function validate(p: ParamDescriptor, value: unknown, channels: ParamOpti
 		case 'string':
 			return typeof value === 'string' ? null : 'Enter text.';
 		case 'enum': {
-			const opts = optionsFor(p, channels);
+			const opts = optionsFor(p);
 			if (opts.length === 0) {
-				if (p.options_from === 'channels') return 'Open a dataset to list its channels.';
 				const kinds = objectKinds(p);
 				if (kinds.length) return `The project has no ${kinds.map((k) => k.replace(/_/g, ' ')).join(' or ')}.`;
 				return objectVerb(p) ? 'Nothing in the project takes this.' : 'No options.';
@@ -135,10 +132,10 @@ export function validate(p: ParamDescriptor, value: unknown, channels: ParamOpti
 	}
 }
 
-export function validateAll(params: ParamDescriptor[], values: ParamValues, channels: ParamOption[] = []): Record<string, string> {
+export function validateAll(params: ParamDescriptor[], values: ParamValues): Record<string, string> {
 	const errors: Record<string, string> = {};
 	for (const p of params) {
-		const e = validate(p, values[p.name], channels);
+		const e = validate(p, values[p.name]);
 		if (e) errors[p.name] = e;
 	}
 	return errors;
@@ -161,7 +158,6 @@ export function rangeHint(p: ParamDescriptor): string | null {
 	return null;
 }
 
-/** Keep values that are still valid after the descriptor or channels change; reset the rest. */
 /**
  * The values with each `setting` param taken from the source object's settings, where the object
  * has that setting and it is a valid value; every other value is left as it was.
@@ -177,11 +173,12 @@ export function withSettings(params: ParamDescriptor[], values: ParamValues, sou
 	return out;
 }
 
-export function reconcile(params: ParamDescriptor[], previous: ParamValues | undefined, channels: ParamOption[] = []): ParamValues {
-	const out = defaultValues(params, channels);
+/** Keep values that are still valid after the descriptor or the project's objects change; reset the rest. */
+export function reconcile(params: ParamDescriptor[], previous: ParamValues | undefined): ParamValues {
+	const out = defaultValues(params);
 	if (!previous) return out;
 	for (const p of params) {
-		if (p.name in previous && validate(p, previous[p.name], channels) === null) out[p.name] = previous[p.name];
+		if (p.name in previous && validate(p, previous[p.name]) === null) out[p.name] = previous[p.name];
 	}
 	return out;
 }

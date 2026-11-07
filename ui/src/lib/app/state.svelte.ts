@@ -6,6 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
+import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -14,11 +15,9 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
-	DatasetInfo,
 	DisplayEvent,
-	OpenedDataset,
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
@@ -29,12 +28,10 @@ import type { Action, Actions, ProjectChildren, ShowPrefs, Shown,
 	ReportEditor,
 	RunState,
 	SimProfile,
-	Pick3D,
-	Region,
 	SimStateResult,
 	TableEdit,
 	View,
-	Workspace, MatrixView } from '$lib/protocol/types';
+	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
@@ -50,37 +47,13 @@ function message(err: unknown): string {
 
 // ---------------------------------------------------------------------------------------------
 
-export interface AnalyzeResult {
-	id: number;
-	opId: string;
-	opTitle: string;
-	datasetTitle: string;
-	/** "Channel Control 1, Tolerance 3 dB" */
-	paramSummary: string;
-	views: View[];
-	at: Date;
-	/** What it ran with, so a choice made in its view can run it again. */
-	params: ParamValues;
-	handle: string;
-	/** A rerun from the view is under way. */
-	busy?: boolean;
-}
-
-/** The dataset id Analyze uses for the connection's own project. */
-export const PROJECT = 'project';
-
 class AnalyzeState {
-	datasetId = $state<string | null>(null);
-	opened = $state.raw<OpenedDataset | null>(null);
-	opening = $state(false);
-	openError = $state<string | null>(null);
 	opId = $state<string | null>(null);
-	/** Form values per operation id, kept while the dataset stays open. */
+	/** Form values per operation id, kept while the project stays open. */
 	values = $state<Record<string, ParamValues>>({});
 	triedRun = $state(false);
 	running = $state(false);
 	runError = $state<string | null>(null);
-	results = $state.raw<AnalyzeResult[]>([]);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
 	/** The bar's choices, remembered across launches as VD remembers 3D. */
@@ -97,57 +70,60 @@ class AnalyzeState {
 	reading = $state.raw<{ title: string; views: View[] } | null>(null);
 	/** What the selection can take, as the service last answered; null while nothing is selected. */
 	actions = $state.raw<Actions | null>(null);
+	/** The operation's form is open in the action column, in place of the table. */
+	formOpen = $state(false);
+	/** The table's row the open form came from; null when it came from elsewhere. */
+	formRow = $state<ActionRow | null>(null);
+	/** Which of a lone shape set's views a verb asked for; null, the one selecting it shows. */
+	shapeView = $state<ShapeView | null>(null);
+	/** The reading drawn in place of what the selection shows, by its row's id. */
+	readingId = $state<string | null>(null);
+	/** A combination's row whose partner is being picked in the tree. */
+	picking = $state<{ verb: string; kind: string; row: ActionRow } | null>(null);
+	/** The row to run once the object it needed has joined the selection. */
+	private joined: string | null = null;
+	/** The fit about to begin by hand, when a coherence could weight it. */
+	fitWeighing = $state(false);
 	private showSeq = 0;
 	private actionSeq = 0;
-	private nextResult = 1;
-	private openSeq = 0;
 
 	constructor(private readonly app: AppState) {}
 
-	/** The datasets a module's tools accept: a kind of data shows up in a module once a tool there takes it. */
-	datasetsFor(workspace: Workspace): DatasetInfo[] {
-		const catalog = this.app.catalog;
-		const kinds = new Set((catalog?.operations ?? []).filter((o) => o.accepts !== PROJECT && o.workspace === workspace).map((o) => o.accepts));
-		return (catalog?.datasets ?? []).filter((d) => kinds.has(d.kind));
-	}
-
-	/** The module whose tools take a dataset's kind, where it opens. */
-	moduleFor(dataset: DatasetInfo): Workspace | null {
-		return (this.app.catalog?.operations ?? []).find((o) => o.accepts === dataset.kind)?.workspace ?? null;
-	}
-
-	/** The module's own tools and the ones every module offers, of those that take what is open. */
+	/** The module's own tools and the ones every module offers, of those with something to run on. */
 	toolsFor(workspace: Workspace): OperationDescriptor[] {
 		return this.tools.filter((o) => offeredIn(o, workspace));
 	}
 
-	/**
-	 * Tools follow the data: only operations that accept the open dataset's kind, and on the project
-	 * only those with an object to run on.
-	 */
+	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
-		const kind = this.opened?.kind;
-		if (!kind) return [];
-		return (this.app.catalog?.operations ?? []).filter(
-			(o) => o.accepts === kind && (kind !== PROJECT || hasObjectsFor(this.paramsOf(o)))
-		);
+		if (!this.onProject) return [];
+		return (this.app.catalog?.operations ?? []).filter((o) => hasObjectsFor(this.paramsOf(o)));
 	}
 
 	get op(): OperationDescriptor | null {
 		return this.tools.find((o) => o.id === this.opId) ?? null;
 	}
 
+	/** Whether there is a project to work on. */
 	get onProject(): boolean {
-		return this.datasetId === PROJECT;
+		return this.app.project.summary !== null;
 	}
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		return op.accepts === 'project' ? withObjects(op.params, this.app.project.summary?.objects ?? []) : op.params;
+		return withObjects(op.params, this.app.project.summary?.objects ?? []);
 	}
 
 	get params(): ParamDescriptor[] {
 		return this.op ? this.paramsOf(this.op) : [];
+	}
+
+	/** What the form asks: not the objects the selection already filled, and of a format only those the object can be written in. */
+	get formParams(): ParamDescriptor[] {
+		const row = this.formRow;
+		return this.params
+			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill))
+			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
 
 	get currentValues(): ParamValues {
@@ -157,19 +133,12 @@ class AnalyzeState {
 	get errors(): Record<string, string> {
 		const op = this.op;
 		if (!op) return {};
-		return validateAll(this.paramsOf(op), this.currentValues, this.opened?.channels ?? []);
+		return validateAll(this.paramsOf(op), this.currentValues);
 	}
 
-	/** Work on the connection's own project, as a dataset whose tools take its objects. */
+	/** A project was opened: its tools take its objects. */
 	selectProject(): void {
-		const summary = this.app.project.summary;
-		if (!summary) return;
-		++this.openSeq;
-		this.datasetId = PROJECT;
-		this.opening = false;
-		this.openError = null;
 		this.projectChanged();
-		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
 	}
 
 	/** Per operation, the source and its settings its form was last filled from. */
@@ -191,45 +160,12 @@ class AnalyzeState {
 		this.values = { ...this.values, [op.id]: withSettings(this.paramsOf(op), values, source) };
 	}
 
-	/** The project's objects changed: its title, and every form's object choices, follow. */
+	/** The project's objects changed: every form's object choices follow. */
 	projectChanged(): void {
-		const summary = this.app.project.summary;
 		if (!this.onProject) return;
-		if (!summary) {
-			this.datasetId = null;
-			this.opened = null;
-			return;
-		}
-		this.opened = { handle: '', kind: 'project', title: summary.title, summary: {}, channels: [] };
 		const next = { ...this.values };
 		for (const op of this.tools) next[op.id] = reconcile(this.paramsOf(op), this.values[op.id]);
 		this.values = next;
-		if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
-	}
-
-	async selectDataset(id: string): Promise<void> {
-		if (id === PROJECT) return this.selectProject();
-		if (this.datasetId === id && this.opened) return;
-		const seq = ++this.openSeq;
-		this.datasetId = id;
-		this.opening = true;
-		this.openError = null;
-		try {
-			const opened = await this.app.analysis.request<OpenedDataset>('dataset.open', { id });
-			if (seq !== this.openSeq) return;
-			this.opened = opened;
-			// Re-fit every remembered form to the new dataset's channels.
-			const next: Record<string, ParamValues> = {};
-			for (const op of this.tools) next[op.id] = reconcile(op.params, this.values[op.id], opened.channels);
-			this.values = next;
-			if (!this.op) this.selectOp(this.tools[0]?.id ?? null);
-		} catch (err) {
-			if (seq !== this.openSeq) return;
-			this.opened = null;
-			this.openError = message(err);
-		} finally {
-			if (seq === this.openSeq) this.opening = false;
-		}
 	}
 
 	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
@@ -237,11 +173,13 @@ class AnalyzeState {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
 		this.reading = null;
+		this.readingId = null;
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
 			this.pair = null;
 			this.picks = [];
+			this.shapeView = null;
 		}
 		void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
@@ -262,9 +200,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						mode_table: this.prefs.mode_table,
-						mac: this.prefs.mac,
-						shape_values: this.prefs.shape_values,
+						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
@@ -298,29 +234,124 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<Actions>('project.actions', {
 				objects: selection.objects,
-				records: selection.records
+				records: selection.records,
+				part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null
 			});
 			if (seq !== this.actionSeq) return;
 			this.actions = res;
 			if (!this.onProject) return;
-			const offered = [...res.readings, ...res.acts, ...res.project];
-			const current = offered.find((e) => e.id === this.opId);
-			if (current) this.pickAction(current);
-			else if (offered.length) this.pickAction(offered[0]);
+			const current = res.table.columns.find((column) => column.current);
+			if (this.joined) {
+				const row = current?.rows.find((r) => r.id === this.joined);
+				this.joined = null;
+				if (row?.ready && current) void this.perform(row, current);
+				return;
+			}
+			// an open form follows the selection while the selection can still take it
+			if (this.formOpen) {
+				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
+				if (row) this.openRow(row);
+				else this.closeForm();
+			}
+			this.fitWeighing = false;
 		} catch (err) {
 			if (seq === this.actionSeq) this.actions = null;
 			void err;
 		}
 	}
 
-	/** An action chosen in the frame: its tool, with the selection filled into its params. */
-	pickAction(entry: Action): void {
+	/** One of a lone shape set's views takes the frame; null is the one selecting it shows. */
+	private showShapeView(view: ShapeView | null): void {
+		this.shapeView = view;
+		this.pair = null;
+		this.picks = [];
+		void this.showSelection();
+	}
+
+	/** A row of the action table, clicked. */
+	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
+		if (!row.ready) return;
+		if (!column.current) {
+			const partner = column.kinds[column.kinds.length - 1];
+			const candidates = row.candidates ?? [];
+			if (candidates.length === 1) this.join(candidates[0], row);
+			else this.picking = { verb: row.verb, kind: partner, row };
+			return;
+		}
+		if (row.kind === 'default') {
+			this.endReading();
+			if (this.shapeView) this.showShapeView(null);
+			return;
+		}
+		if (row.id.startsWith('show.')) {
+			this.showShapeView(row.id.slice('show.'.length) as ShapeView);
+			return;
+		}
+		if (row.kind === 'self') {
+			await this.app.project.ownAct(row.id);
+			return;
+		}
+		if (row.formats && hasNativeFiles()) {
+			await this.exportObject(row, row.formats);
+			return;
+		}
+		this.openRow(row);
+		const op = this.op;
+		if (!op) return;
+		const filled = new Set(Object.keys(row.fill ?? {}));
+		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
+		if (asks.length) this.formOpen = true;
+		else await this.run();
+	}
+
+	/** A row's operation, filled from the selection, with a format the object can be written in. */
+	private openRow(row: ActionRow): void {
+		this.pickAction({ id: row.id, fill: row.fill ?? {} });
+		this.formRow = row;
+		const formats = row.formats;
+		if (formats && !formats.some((f) => f.value === this.currentValues.format)) {
+			this.pickAction({ id: row.id, fill: { format: formats[0].value } });
+		}
+	}
+
+	/** Export in the desktop app: the native save window says where and in which format, as in Visual Dynamics. */
+	private async exportObject(row: ActionRow, formats: ExportFormat[]): Promise<void> {
+		this.runError = null;
+		try {
+			const chosen = await chooseObjectFile(row.fill?.object ?? '', formats);
+			if (!chosen) return;
+			this.pickAction({ id: row.id, fill: { ...row.fill, format: chosen.format, path: chosen.path, units: 'display', creator: '' } });
+			await this.run();
+		} catch (err) {
+			this.runError = message(err);
+		}
+	}
+
+	/** The object a combination needed was chosen: it joins the selection, and the row runs once the table has caught up. */
+	join(name: string, row: ActionRow): void {
+		this.picking = null;
+		this.joined = row.kind === 'default' ? null : row.id;
+		const p = this.app.project;
+		p.clickObject(name, p.summary?.objects.map((o) => o.name) ?? [], { toggle: true });
+	}
+
+	/** Back from a form to the table. */
+	closeForm(): void {
+		this.formOpen = false;
+		this.formRow = null;
+		this.runError = null;
+		this.triedRun = false;
+	}
+
+	/** A row chosen in the action table: its tool, with the selection filled into its params. */
+	pickAction(entry: { id: string; fill: Record<string, string> }): void {
 		if (this.opId !== entry.id) this.selectOp(entry.id);
 		const op = this.op;
 		if (!op) return;
 		const values = { ...this.currentValues };
 		let changed = false;
-		for (const [key, value] of Object.entries(entry.fill)) {
+		for (const [key, text] of Object.entries(entry.fill)) {
+			const value = op.params.find((p) => p.name === key)?.type === 'integer' ? Number(text) : text;
 			if (values[key] !== value) {
 				values[key] = value;
 				changed = true;
@@ -381,6 +412,7 @@ class AnalyzeState {
 	/** Back from a reading to what the selection shows. */
 	endReading(): void {
 		this.reading = null;
+		this.readingId = null;
 	}
 
 	/** A reading's own control changed (a waterfall's quantity): run it again with the patch. */
@@ -389,6 +421,49 @@ class AnalyzeState {
 		if (!op || !this.reading) return;
 		this.values = { ...this.values, [op.id]: { ...this.currentValues, ...patch } };
 		await this.run();
+	}
+
+	private previewTimer: ReturnType<typeof setTimeout> | null = null;
+	private previewKey = '';
+	private previewSeq = 0;
+
+	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
+	followPreview(): void {
+		const op = this.op;
+		const values = this.currentValues;
+		if (!op?.previews || !this.onProject || Object.keys(this.errors).length) return;
+		const key = `${op.id}\u0000${JSON.stringify(values)}`;
+		if (key === this.previewKey) return;
+		this.previewKey = key;
+		if (this.previewTimer) clearTimeout(this.previewTimer);
+		const seq = ++this.previewSeq;
+		this.previewTimer = setTimeout(async () => {
+			try {
+				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
+				if (seq !== this.previewSeq || this.opId !== op.id) return;
+				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.readingId = op.id;
+				this.runError = null;
+			} catch (err) {
+				if (seq === this.previewSeq && this.opId === op.id) this.runError = message(err);
+			}
+		}, 300);
+	}
+
+	/** A click in the reading's 3-D view: runs the view's operation with what was clicked, and the form holds what it left. */
+	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			if (res.project) this.app.project.apply(res.project);
+			this.reading = { title, views: res.views };
+			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
+			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
+				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
+			}
+		} catch (err) {
+			this.runError = message(err);
+		}
 	}
 
 	/**
@@ -415,56 +490,40 @@ class AnalyzeState {
 		this.runError = null;
 		this.triedRun = false;
 		const op = this.op;
-		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
+		if (op && !this.values[op.id]) this.values[op.id] = defaultValues(this.paramsOf(op));
 	}
 
 	resetParams(): void {
 		const op = this.op;
-		if (op) this.values[op.id] = defaultValues(this.paramsOf(op), this.opened?.channels ?? []);
+		if (op) this.values[op.id] = defaultValues(this.paramsOf(op));
 		this.triedRun = false;
 	}
 
 	async run(): Promise<void> {
 		const op = this.op;
-		const opened = this.opened;
-		if (!op || !opened || this.running) return;
+		if (!op || !this.onProject || this.running) return;
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
-		const shown = this.paramsOf(op);
 		this.running = true;
 		this.runError = null;
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
-			const res = await this.app.analysis.request<OpResult>('op.run', target(op, opened.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
-			if (this.onProject) {
-				// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
-				// takes the view until Back
-				const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
-				if (added.length) {
-					const order = (res.project?.objects ?? []).map((o) => o.name);
-					this.app.project.clickObject(added[0], order);
-				} else if (res.views.length) {
-					this.reading = { title: op.title, views: res.views };
-				}
-				this.triedRun = false;
-				return;
+			// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+			// takes the view until Back
+			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+			if (added.length) {
+				const order = (res.project?.objects ?? []).map((o) => o.name);
+				this.app.project.clickObject(added[0], order);
+				this.closeForm();
+			} else if (res.views.length) {
+				this.reading = { title: op.title, views: res.views };
+				this.readingId = op.id;
+			} else {
+				this.closeForm();
 			}
-			this.results = [
-				{
-					id: this.nextResult++,
-					opId: op.id,
-					opTitle: op.title,
-					datasetTitle: opened.title,
-					paramSummary: summarize(shown, params, opened.channels),
-					views: res.views,
-					at: new Date(),
-					params,
-					handle: opened.handle
-				},
-				...this.results
-			];
 			this.triedRun = false;
 		} catch (err) {
 			this.runError = message(err);
@@ -473,137 +532,28 @@ class AnalyzeState {
 		}
 	}
 
-	/**
-	 * Run a result's operation again with `patch` over the params it ran with, as a choice made in
-	 * its view asks (an `in_view` param), and show the new views in the same card.
-	 */
-	async rerun(id: number, patch: ParamValues): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		const op = this.app.catalog?.operations.find((o) => o.id === result?.opId);
-		if (!result || !op || result.busy) return;
-		const params = { ...result.params, ...patch };
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', target(op, result.handle, params), { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, params, paramSummary: summarize(this.paramsOf(op), params, this.opened?.channels ?? []), busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	/**
-	 * Set one cell of a result's editable table (`TableEdit`): its operation runs, and the first table
-	 * it answers with takes that view's place. The refusal, when there is one, comes back as words.
-	 */
-	async editCell(id: number, viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
-		try {
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
-				{ timeoutMs: RUN_TIMEOUT_MS }
-			);
-			if (res.project) this.app.project.apply(res.project);
-			const table = res.views.find((v) => v.view === 'table');
-			if (table) {
-				this.results = this.results.map((r) =>
-					r.id === id ? { ...r, views: r.views.map((v, i) => (i === viewIndex ? table : v)) } : r
-				);
-			}
-			return null;
-		} catch (err) {
-			return message(err);
-		}
-	}
-
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: row + 1, column, value } },
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value } },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.project) this.app.project.apply(res.project);
 			const table = res.views.find((v) => v.view === 'table');
-			if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
+			// a table showing a pick of its rows is shown again, since the one that comes back has them all
+			if (edit.rows) void this.showSelection();
+			else if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
 			return null;
 		} catch (err) {
 			return message(err);
 		}
 	}
-
-	/** A span dragged on a result's plot: its operation runs with the new edges, and its views take the result's place. */
-	async dragSpan(id: number, drag: NonNullable<Region['drag']>, x0: number, x1: number): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		if (!result || result.busy) return;
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const params = { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) };
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	/** A click in a result's 3-D view: the view's pick operation runs with what was clicked, and its views take the result's place. */
-	async pickIn(id: number, pick: Pick3D, patch: Record<string, unknown>): Promise<void> {
-		const result = this.results.find((r) => r.id === id);
-		if (!result || result.busy) return;
-		const replace = (changes: Partial<AnalyzeResult>) =>
-			(this.results = this.results.map((r) => (r.id === id ? { ...r, ...changes } : r)));
-		replace({ busy: true });
-		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
-			replace({ views: res.views, busy: false });
-		} catch (err) {
-			replace({ busy: false });
-			this.runError = message(err);
-		}
-	}
-
-	removeResult(id: number): void {
-		this.results = this.results.filter((r) => r.id !== id);
-	}
-
-	clearResults(): void {
-		this.results = [];
-	}
 }
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
-
-/** `op.run`'s params: a project operation names no handle, since it runs on the connection's project. */
-function target(op: OperationDescriptor, handle: string, params: ParamValues): Record<string, unknown> {
-	return op.accepts === 'project' ? { op: op.id, params } : { op: op.id, handle, params };
-}
-
-function summarize(params: ParamDescriptor[], values: ParamValues, channels: { value: string | number; label: string }[]): string {
-	return params
-		.filter((p) => !p.in_view)
-		.map((p) => {
-			const v = values[p.name];
-			let text: string;
-			if (p.type === 'enum') {
-				const opts = p.options_from === 'channels' ? channels : (p.options ?? []);
-				text = opts.find((o) => o.value === v)?.label ?? String(v);
-			} else if (p.type === 'boolean') text = v ? 'on' : 'off';
-			else if (p.type === 'string') text = v ? `"${v}"` : 'none';
-			else text = `${v}${p.unit ? ` ${p.unit}` : ''}`;
-			return `${p.label}: ${text}`;
-		})
-		.join(' \u00b7 ');
-}
 
 // ---------------------------------------------------------------------------------------------
 
@@ -765,7 +715,9 @@ export class FitState {
 
 	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}) });
+		// records picked in the tree limit the fit, as in Visual Dynamics; an Edit Fit takes its set's own
+		const records = shapes ? [] : (this.app.project.selection.records[frf] ?? []);
+		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}), ...(records.length ? { records } : {}) });
 	}
 
 	find(): Promise<boolean> {
@@ -1062,7 +1014,6 @@ export class UnitsState {
 			// not kept between launches; this session still uses it
 		}
 		// what is on screen was drawn in the old system: draw it again
-		for (const r of this.app.analyze.results) void this.app.analyze.rerun(r.id, {});
 		if (this.app.report.name) void this.app.report.show(this.app.report.name);
 	}
 }
@@ -1081,9 +1032,6 @@ function readPrefs(): ShowPrefs {
 		projection: false,
 		bars: true,
 		overlay: true,
-		mode_table: true,
-		mac: true,
-		shape_values: false,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
@@ -1097,7 +1045,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
-		for (const key of ['projection', 'bars', 'overlay', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'] as const) {
+		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
@@ -1128,8 +1076,10 @@ export class ProjectState {
 	renamingPart = $state<{ name: string; index: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
-	/** The group being named from the strip: the member it is reached by, or null. */
+	/** The group being named from the action table: the member it is reached by, or null. */
 	namingGroup = $state<string | null>(null);
+	/** The path a browser is asking for in the top bar, and what it is for. */
+	asking = $state<'open' | 'import' | 'save' | null>(null);
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1187,6 +1137,7 @@ export class ProjectState {
 		this.renamingPart = null;
 		this.confirming = false;
 		this.namingGroup = null;
+		this.units = null;
 		if (next.objects.length === 1) this.app.analyze.followSelection(next.objects[0]);
 		void this.app.analyze.showSelection();
 	}
@@ -1263,6 +1214,63 @@ export class ProjectState {
 		return this.call(`Removing ${names.join(', ')}`, 'project.remove', { names }, false);
 	}
 
+	/**
+	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
+	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
+	 */
+	async fileAct(what: 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+		if (what === 'save' && this.summary?.file && !this.summary.file.endsWith('.vdyn')) {
+			await this.save();
+			return;
+		}
+		const asked = what === 'save-as' ? 'save' : what;
+		if (hasNativeFiles()) {
+			if (asked === 'save') {
+				const path = await chooseSavePath(this.summary?.title ?? 'Project');
+				if (path) await this.save(path);
+				return;
+			}
+			const paths = await chooseFiles(asked);
+			if (paths) await this.openPaths(paths);
+			return;
+		}
+		this.asking = this.asking === asked ? null : asked;
+	}
+
+	/** An act of the action table's on the selection itself, by its row's id. */
+	async ownAct(id: string): Promise<void> {
+		if (id === 'self.open' || id === 'self.import' || id === 'self.save') {
+			await this.fileAct(id === 'self.open' ? 'open' : id === 'self.import' ? 'import' : 'save');
+			return;
+		}
+		if (id === 'self.recompute_all') {
+			await this.refresh();
+			return;
+		}
+		const picked = [...this.selection.objects];
+		const one = picked.length === 1 ? picked[0] : null;
+		const stale = picked.filter((n) => this.summary?.objects.find((o) => o.name === n)?.stale);
+		const kinds = picked.map((n) => this.summary?.objects.find((o) => o.name === n)?.kind);
+		const coherent = (this.summary?.objects ?? []).some((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence');
+		if (id === 'self.activate' && one) await this.activate(one);
+		else if (id === 'self.units' && one) await this.toggleUnits(one);
+		else if (id === 'self.recompute') await this.refresh(stale);
+		else if (id === 'self.link') await this.link(picked);
+		else if (id === 'self.unlink' && one) await this.unlink(one);
+		else if (id === 'self.basis' && one) await this.setBasis(one);
+		else if (id === 'self.name_group' && one) this.namingGroup = one;
+		else if (id === 'self.copy') await this.duplicate(picked);
+		else if (id === 'self.rename' && one) this.renaming = one;
+		else if (id === 'self.remove') this.confirming = true;
+		else if (id === 'self.fit' || id === 'self.edit_fit') {
+			if (coherent) {
+				this.app.analyze.fitWeighing = true;
+				return;
+			}
+			await this.app.fit.start(picked[kinds.indexOf('frf')], id === 'self.edit_fit' ? picked[kinds.indexOf('shape_set')] : undefined);
+		}
+	}
+
 	duplicate(names: string[]): Promise<boolean> {
 		return this.call(`Copying ${names.join(', ')}`, 'project.duplicate', { names }, false);
 	}
@@ -1286,6 +1294,58 @@ export class ProjectState {
 		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
 	}
 
+	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V), as VD pastes its own objects. */
+	copied = $state.raw<string[]>([]);
+
+	copySelection(): boolean {
+		const names = [...this.selection.objects];
+		if (!names.length) return false;
+		this.copied = names;
+		this.error = null;
+		try {
+			void navigator.clipboard?.writeText(names.join('\n')).catch(() => {});
+		} catch {
+			// no clipboard here; the copy still lives in the shell
+		}
+		return true;
+	}
+
+	async paste(): Promise<boolean> {
+		// files copied elsewhere since, as VD reads the clipboard: a copy here puts text on it and no file
+		const paths = await pastedFiles();
+		if (paths.length) {
+			await this.openPaths(paths);
+			return true;
+		}
+		const ours = this.copied.filter((n) => this.summary?.objects.some((o) => o.name === n));
+		if (!ours.length) {
+			this.error = this.copied.length ? 'The copied objects are not in this project' : 'Nothing copied to paste';
+			return false;
+		}
+		return this.duplicate(ours);
+	}
+
+	/**
+	 * Objects dragged onto `target` join its group and leave their own, as VD's drag moves them;
+	 * dragged onto nothing (`target` null) they leave their groups.
+	 */
+	async moveInto(names: string[], target: string | null): Promise<boolean> {
+		const groupOf = (n: string) => (this.summary?.links ?? []).find((g) => g.members.includes(n));
+		const moving = names.filter((n) => n !== target && this.summary?.objects.some((o) => o.name === n));
+		if (!moving.length) return false;
+		if (target === null) {
+			for (const n of moving) if (groupOf(n) && !(await this.unlink(n))) return false;
+			return true;
+		}
+		for (const n of moving) {
+			const home = groupOf(target);
+			const own = groupOf(n);
+			if (own && own !== home && !(await this.unlink(n))) return false;
+		}
+		const joining = moving.filter((n) => groupOf(n) !== groupOf(target) || !groupOf(n));
+		return joining.length ? this.link([target, ...joining]) : true;
+	}
+
 	setBasis(name: string): Promise<boolean> {
 		return this.act(`Making the group of ${name} the Basis`, 'project.set_basis', { object: name });
 	}
@@ -1307,6 +1367,13 @@ export class ProjectState {
 		const order = ['reference', 'response', 'monitor'];
 		const next = order[(order.indexOf(role) + 1) % order.length];
 		const ok = await this.act(`Making ${name}'s channel ${index + 1} a ${next}`, 'project.set_channel_role', { source: name, record: index + 1, role: next });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
+	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
+		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
 		if (ok) void this.loadChildren(name);
 		return ok;
 	}

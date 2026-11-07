@@ -11,7 +11,7 @@ from hertzforge.service import projects
 from hertzforge.service.ops_model import OPERATIONS
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 OPS = {op.id: op for op in OPERATIONS}
@@ -34,7 +34,7 @@ def run(project, op_id, **given):
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
-        assert op.workspace in ('geometry', 'model') and op.accepts == 'project'
+        assert op.workspace in ('geometry', 'model')
 
 
 def test_a_geometry_is_drawn_on_its_own(project, validate):
@@ -70,7 +70,7 @@ def test_what_the_groups_cannot_take_is_refused(project, given, match):
 
 
 def test_coincident_nodes_are_merged_and_counted(project):
-    (reading,) = run(project, 'project.merge_coincident_nodes')
+    (reading,) = run(project, 'project.merge_coincident_nodes', keep=True)
     rows = {row['label']: row['value'] for row in reading['rows']}
     assert rows['Nodes before'] == rows['Nodes now'] + rows['Nodes merged away']
 
@@ -126,12 +126,78 @@ def test_deleting_an_element_group_takes_its_elements():
 def test_a_patch_ties_to_a_group_by_name():
     project = _parts()
     patch = project['Plate'].elements_in('foot')[:1]
-    (reading,) = run(project, 'project.tie_elements', geometry='Plate',
+    (reading,) = run(project, 'project.tie_elements', geometry='Plate', keep=True,
                      elements=str(int(patch[0])), to='floor')
     found = {row['label']: row['value'] for row in reading['rows']}
     assert found['Links added'] == 4 and found['Links in group'] == '3'
     with pytest.raises(ProtocolError, match='name what the patch ties to'):
-        run(project, 'project.tie_elements', geometry='Plate', elements='1')
+        run(project, 'project.tie_elements', geometry='Plate', elements='1', keep=True)
+
+
+def _apart():
+    """Two plates sharing a line of coincident nodes, meshed apart."""
+    import hertzforge
+    from hertzforge import mesh
+
+    left = mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'left', unit='m')
+    right = mesh.block((1, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'right', unit='m')
+    project = hertzforge.Project('p')
+    project.add('Geometry', mesh.assemble(left, right, apart=True))
+    return project
+
+
+def test_merge_marks_the_places_and_a_click_leaves_one_out(validate):
+    """VD's merge pane: every place is marked before anything merges, and a click on a
+    place moves it between in and out, dim once it is out."""
+    project = _apart()
+    before = project['Geometry'].num_nodes
+    reading, view = run(project, 'project.merge_coincident_nodes')
+    wire_views([reading, view], validate)
+    assert project['Geometry'].num_nodes == before, 'marking merges nothing'
+    places = view['pick']['ids']
+    assert len(places) == 4 and view['pick']['off'] == 0 and view['pick']['count'] == 1
+    assert view['node_ids'][:4].tolist() == places, 'a pick addresses the first rows'
+    _reading, view = run(project, 'project.merge_coincident_nodes', toggle=str(places[0]))
+    held = view['pick']
+    assert held['off'] == 1 and held['ids'][-1] == places[0]
+    assert held['params']['left_out'] == str(places[0])
+    assert view['node_ids'][:4].tolist() == held['ids']
+    _reading, view = run(project, 'project.merge_coincident_nodes', left_out=str(places[0]),
+                         toggle=str(places[0]))
+    assert view['pick']['off'] == 0, 'a second click puts it back'
+    (done,) = run(project, 'project.merge_coincident_nodes', left_out=str(places[0]), keep=True)
+    rows = {row['label']: row['value'] for row in done['rows']}
+    assert rows['Nodes merged away'] == 3 and rows['Places left out'] == 1
+    assert project['Geometry'].num_nodes == before - 3
+
+
+def test_merge_leaves_every_place_out_with_all(validate):
+    project = _apart()
+    before = project['Geometry'].num_nodes
+    _reading, view = run(project, 'project.merge_coincident_nodes', left_out='all')
+    assert view['pick']['off'] == 4
+    (done,) = run(project, 'project.merge_coincident_nodes', left_out='all', keep=True)
+    assert {row['label']: row['value'] for row in done['rows']}['Nodes merged away'] == 0
+    assert project['Geometry'].num_nodes == before
+
+
+def test_align_marks_each_move_and_a_click_leaves_one_out(validate):
+    import hertzforge
+    from hertzforge import mesh
+
+    fine = mesh.block((0, 0, -0.5), (1, 0, 0), (0, 1, 0), (0, 0, 0.5), 0.25, 'frame',
+                      unit='in')
+    coarse = mesh.block((0.02, 0.01, 0.05), (1, 0, 0), (0, 1, 0), (0, 0, 1 / 3), 1 / 3,
+                        'wing', unit='in')
+    project = hertzforge.Project('p')
+    project.add('Wing', mesh.assemble(fine, coarse, apart=True))
+    reading, view = run(project, 'project.align_meshes', geometry='Wing')
+    wire_views([reading, view], validate)
+    moves = view['pick']['ids']
+    assert len(moves) == 16
+    (done,) = run(project, 'project.align_meshes', geometry='Wing', left_out=str(moves[0]),
+                  keep=True)
+    assert {row['label']: row['value'] for row in done['rows']}['Nodes moved'] == 15
 
 
 def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
@@ -144,7 +210,31 @@ def test_align_meshes_moves_the_coarser_mesh_onto_the_finer():
                         'wing', unit='in')
     project = hertzforge.Project('p')
     project.add('Wing', mesh.assemble(fine, coarse, apart=True))
-    (reading,) = run(project, 'project.align_meshes', geometry='Wing')
+    (reading,) = run(project, 'project.align_meshes', geometry='Wing', keep=True)
     found = {row['label']: row['value'] for row in reading['rows']}
     assert found['Nodes moved'] == 16
     assert 0 < found['Farthest move'] <= 0.5 / 3 * 25.4
+
+
+def test_tie_picks_its_patch_by_clicking_and_lists_the_groups(validate):
+    project = _parts()
+    reading, view = run(project, 'project.tie_elements', geometry='Plate')
+    wire_views([reading, view], validate)
+    rows = {row['label']: row['value'] for row in reading['rows']}
+    assert rows['Patch'] == 'none yet' and rows['Tie to'] == 'not set'
+    pick = view['pick']
+    assert pick['target'] == 'faces' and pick['kept'] == []
+    first = int(project['Plate'].elem_id[0])
+    assert first in pick['faces'].tolist()
+    assert len(pick['faces']) == len(view['triangles']) // (3 if view['triangles'].ndim == 1 else 1)
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate', add=str(first))
+    assert view['pick']['kept'] == [first]
+    assert view['pick']['params']['elements'] == str(first)
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate',
+                         elements=str(first), drop=str(first))
+    assert view['pick']['kept'] == []
+    _reading, view = run(project, 'project.tie_elements', geometry='Plate', elements=str(first),
+                         side='second', add=str(first + 1))
+    assert view['pick']['kept'] == [first + 1], 'the second patch is what shows'
+    assert view['pick']['params']['to'] == str(first + 1)
+    assert view['pick']['params']['elements'] == str(first)

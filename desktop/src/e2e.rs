@@ -3,9 +3,11 @@
 //! runs in the main window once the shell has loaded and drives the shell through
 //! its test ids, as an operator would (packaging/e2e/random_run.js). It reports
 //! through `e2e_log` and quits through `e2e_quit`, which takes the same path as
-//! closing the window. `HERTZFORGE_E2E_ANSWER` (`stop` or `keep`) answers the
-//! question asked when quitting during a run, since nothing can click it; the
-//! question is logged word for word.
+//! closing the window. `HERTZFORGE_E2E_FILES` (paths, separated as PATH is) are
+//! the files the script may drop on the window, given to it as
+//! `window.__HERTZFORGE_E2E_FILES__`. `HERTZFORGE_E2E_ANSWER` (`stop` or `keep`)
+//! answers the question asked when quitting during a run, since nothing can click
+//! it; the question is logged word for word.
 
 use crate::{log, Quit};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +30,17 @@ pub fn attach<'a>(
             return builder;
         }
     };
+    let files: Vec<String> = std::env::var_os("HERTZFORGE_E2E_FILES")
+        .map(|v| {
+            std::env::split_paths(&v)
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let script = format!(
+        "window.__HERTZFORGE_E2E_FILES__ = {};\n{script}",
+        serde_json::to_string(&files).unwrap_or_else(|_| "[]".into())
+    );
     builder.on_page_load(move |window, payload| {
         if payload.event() == PageLoadEvent::Finished && !RAN.swap(true, Ordering::SeqCst) {
             let _ = window.eval(&script);

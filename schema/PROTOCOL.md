@@ -160,7 +160,9 @@ the result's place:
         "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
         "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
         "kept":[1,3],                  faces: the surfaces in use now
-        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+        "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
+        "off":2}                       nodes: marked places, shown through the model; this many of
+                                       the last `ids` are left out and drawn dim
 ```
 
 A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
@@ -179,6 +181,10 @@ how each measured DOF moves, sample by sample.
           "values":{"$array":.. f32 [D,S]},      DOF d at sample k
           "peak":130.4}                          the furthest any node gets, in value_unit
 ```
+
+With `modes` (f32 [M,D,3]), `values` is instead [M,S], modal coordinates: `node` lists the D nodes
+that move, `direction` is empty, and sample k's offset at node d is the sum over modes of
+`modes[m, d] * values[m, k]`, so the physical response never has to be formed or sent.
 
 At sample k each node is offset by the sum over its DOFs of `direction * values[d, k]`, scaled
 so that `peak` is the amplitude the person chose. Sending each DOF's samples rather than a frame
@@ -322,18 +328,15 @@ The analysis service describes each operation; the shell builds the panel from t
 A feature that fits this pattern needs no TypeScript.
 
 ```
-{"id":"random.psd_vs_spec","title":"PSD Against Specification","workspace":"random",
- "accepts":"random_run","summary":"one sentence",
- "params":[{"name":"tolerance_db","label":"Tolerance","type":"number","unit":"dB",
-            "default":3,"min":0,"max":12,"step":0.5},
-           {"name":"channel","label":"Channel","type":"enum",
-            "options":[{"value":"ch1","label":"Control 1"}],"default":"ch1"}],
- "outputs":["spectrum","reading"]}
+{"id":"project.fit_modes","title":"Fit Modes","workspace":"modal","summary":"one sentence",
+ "params":[{"name":"frf","label":"FRF","type":"enum","options_from":"verb:fit_modes"},
+           {"name":"low_hz","label":"From","type":"number","unit":"Hz","default":0,"min":0},
+           {"name":"high_hz","label":"To","type":"number","unit":"Hz","default":1000,"min":0},
+           {"name":"count","label":"Modes, at most","type":"integer","default":10,"min":1,"max":60}],
+ "outputs":["shape3d","reading"]}
 ```
 
-Param `type`: `number`, `integer`, `enum`, `boolean`, `string`. An `enum` whose options depend
-on the dataset sets `"options_from":"channels"`; the shell fills them from the dataset's
-`channels` list returned by `dataset.open`.
+Param `type`: `number`, `integer`, `enum`, `boolean`, `string`.
 
 An `enum` that names one of the project's objects sets `"options_from":"objects:<kind>"`, or
 `"objects:<kind>|<kind>"` for more than one kind; the shell fills it with the names of the open
@@ -369,17 +372,18 @@ the person picks one there.
 `modal`, `geometry`, `model`, `specify` or `report`. Visual Dynamics put every analysis under one
 window and typed the project instead; Hertzforge splits the analysis by what is studied, so a sine
 test is not offered shock tools. The modules share one project, one tree and one way of showing a
-selection; they differ in which operations their Actions frame offers. An operation every study
-needs (Plot Records, View Table, Save As, the averaging, filter and truncation settings, a table's
-cell edit) says `"everywhere": true` and is offered in every analysis module, its `workspace`
-naming its home.
-`accepts` is a dataset kind (`random_run`, `modal_model`, `modal_run`); the shell shows an operation only when
-the selected dataset is of that kind ("tools follow the data"). `accepts` `project` is an operation
-on the connection's own project: `op.run` names no `handle`, and is refused while no project is
-open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`, and
-the project counts as modified when the operation added an object. These operations are the
-core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes so far). A view drawn
-by a verb that adds an object offers no in-view choice, since choosing would run the verb again.
+selection; they differ in which operations their action table offers. An operation's `modules`
+lists the modules that offer it: its own `workspace`, or more when several studies need it (Export
+in all of them, Averaging in Signals, Random and Modal).
+Every operation runs on the connection's own project, and `op.run` is refused while no project
+is open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`,
+and the project counts as modified when the operation added an object. The operations are the
+core's verbs (Waterfall, Compute PSDs, Compute FRFs, Fit Modes, Mode Shapes and the rest); the
+shell shows a tool only when the project holds something it runs on ("tools follow the data"). A
+view drawn by a verb that adds an object offers no in-view choice, since choosing would run the
+verb again. Until 2026-11-05 the service also offered a catalog of built-in datasets (the plate
+runs and three finite element models) with operations of their own; those are now example
+projects downloaded from hertzforge.com and opened like any other file.
 
 ## Methods
 
@@ -387,9 +391,8 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 
 | Method | Params | Result |
 |---|---|---|
-| `catalog.list` | `{}` | `{"operations":[descriptor...],"datasets":[{"id","kind","title","description"}]}` |
-| `dataset.open` | `{"id"}` | `{"handle","kind","title","summary":{...},"channels":[{"value","label"}]}` |
-| `op.run` | `{"op","handle"?,"params":{...}}` | `{"views":[view...],"project"?}` |
+| `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
+| `op.run` | `{"op","params":{...}}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
@@ -404,11 +407,19 @@ by a verb that adds an object offers no in-view choice, since choosing would run
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
-| `project.actions` | `{"objects","records"?}` | `{"readings","acts","project"}` |
+| `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `units.system` | `{"name"?}` | `{"name","systems"}` |
 | `fit.*` | see Fitting modes below | |
+
+**Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
+Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
+in the param `values` names for that axis, and what `adds` (optional) gives for that axis.
+
+**Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
+`"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
+Nothing reaches the project or its journal. A reading's `Added` row says `Would add`.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
@@ -465,8 +476,9 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the second set projected onto the
-first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set's three
-views are `prefs.mode_table`, `prefs.mac` and `prefs.shape_values` (one always up; `offers.shapes`), the
+first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set shows
+one view at a time, named by `prefs.shape_view` (`offers.shapes`): `animate` (its modes on its geometry,
+and the default), `table`, `mac` (with the stage its squares animate) or `values`, the
 values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in
 `offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
@@ -479,15 +491,27 @@ Control column shows (`offers.environments`) and `prefs.table_view` the table or
 transformations (`offers.table_views`). `project.save_as` takes `units`: `display` for the connection's
 display unit system (the server puts its name in), `si` for the stored values.
 
+**Export's formats.** The Export row carries `formats`, each `{"value","label","suffix"}`: what that
+object can be written in, `.hforge` first. The desktop app lists them as the save window's file types.
+
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
-the operations the selection can run, as Visual Dynamics' bar offers only the acts a selection allows:
-every operation on the project whose object params the selected objects fill, each object on a param
-that takes its kind (or whose verb applies to it), every object used and every required object param
-filled. Each entry is `{"id","title","workspace","everywhere"?,"fill"}`, `fill` the params to set from the selection
-(and `records`, as `'1-3, 7'`, when records are picked and the operation takes them). `readings` change
-how the selection is read; `acts` change the project (the operations named for the project's journaled
-verbs, and the edits); `project` lists, when nothing is selected, the acts that take no object (New
-Geometry, New Channel Table).
+for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
+when the selected objects fill its object params: each object on a param that takes its kind (or whose
+verb applies to it), every object used and every required object param filled. `reading` rows change how
+the selection is read; `act` rows change the project (the operations named for the project's journaled
+verbs, and the edits). With nothing selected, the first column is the project: the acts that take no object
+and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
+when records are picked and the operation takes them).
+
+The first column has `"current": true` and is the selection; each other column is the selection with one
+more object of the last type in its `kinds`, `"*"` meaning any object. A row is
+`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
+for what the selection draws by itself (`id` starting `show.`), `reading` or `act` for an operation (`id`
+is the operation's), and `self` for an act on the selection that is not an operation (`id` starting
+`self.`). A row that cannot run has `ready` false and a `reason` to show. A row without `modules` is
+offered in every module. In a combination column, `candidates` names the project's objects that
+complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
+as `project.show` takes it, adds the operations on that part, which carry `"part": true`.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts
@@ -561,7 +585,9 @@ linked channel table describes a time history; `verb:` params are filled from th
 a time history's analysis settings, each group
 present only when set: `averaging` (`frame_length` in samples, `overlap` as a fraction, `window`,
 `frames`, `start` in seconds, `detrend`), `filtering` (`kind`, `low` and `high` in Hz as the kind
-has them, `order`) and `truncation` (`start`, `stop` in seconds). A report's `settings` are
+has them, `order`) and `truncation` (`start`, `stop` in seconds). A geometry's are `rigid`: the
+reference point `x`, `y`, `z` in meters, `normalize`, and with it `mass` and the inertia terms
+`ixx`, `iyy`, `izz`, `ixy`, `ixz`, `iyz`. A report's `settings` are
 `features` (each report feature's key, true where it is on) and `identity` (each identification
 field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
@@ -577,7 +603,7 @@ project, and opening or starting another project ends it.
 
 | Method | Params | Result |
 |---|---|---|
-| `fit.start` | `{"frf","shapes"?,"coherence"?}` | `{"fit"}` |
+| `fit.start` | `{"frf","shapes"?,"coherence"?,"records"?}` | `{"fit"}` |
 | `fit.find` | `{"low"?,"high"?}` | `{"fit"}` |
 | `fit.move` | `{"frequency"}` | `{"fit"}` |
 | `fit.damping` | `{"damping"}` | `{"fit"}` |
@@ -590,7 +616,7 @@ project, and opening or starting another project ends it.
 | `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
 | `fit.end` | `{}` | `{}` |
 
-`fit.start` fits the FRF `frf`, or, with `shapes`, edits that shape set's fit (Edit Fit): its
+`fit.start` fits the FRF `frf`, on the `records` given (indices from 0) or all of them, or, with `shapes`, edits that shape set's fit (Edit Fit): its
 modes are adopted as confirmed. A suggestion is made at once, so the pending mode already has a
 frequency and damping. `fit.find` moves the pending mode to the most prominent peak left in the
 residual CMIF between `low` and `high` in Hz, the frequencies on screen (the whole range when left

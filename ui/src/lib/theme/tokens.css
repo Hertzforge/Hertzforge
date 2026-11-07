@@ -64,6 +64,7 @@
 	/* Blue: the active, interactive and measured hue */
 	--blue-1: #8ac6f2;
 	--blue-2: #5aa9e6;
+	--action-default: #e0a8f0;
 	--blue-3: #2f7fbf;
 	--blue-weak: rgba(90, 169, 230, 0.13);
 	--region-frame: rgba(90, 169, 230, 0.1);
@@ -128,6 +129,7 @@
 		--text-on-accent: #ffffff;
 		--blue-1: #1d5f99;
 		--blue-2: #1f6fb2;
+		--action-default: #8a3fa8;
 		--blue-3: #2b86d1;
 		--blue-weak: rgba(31, 111, 178, 0.1);
 		--region-frame: rgba(31, 111, 178, 0.08);
@@ -182,6 +184,7 @@
 	--text-on-accent: #ffffff;
 	--blue-1: #1d5f99;
 	--blue-2: #1f6fb2;
+	--action-default: #8a3fa8;
 	--blue-3: #2b86d1;
 	--blue-weak: rgba(31, 111, 178, 0.1);
 	--region-frame: rgba(31, 111, 178, 0.08);

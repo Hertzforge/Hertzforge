@@ -1,20 +1,20 @@
 """The analysis service: sds/1 over WebSocket.
 
 On connect the server sends `hello`. Each request is answered by a
-response with its id; requests run concurrently, so a long `dataset.open`
+response with its id; requests run concurrently, so a long `project.open`
 does not hold up a `catalog.list` sent after it, and responses may come
 back in a different order from the requests. Heavy work (opening a
-dataset, running an operation, framing a large result) runs in a worker
+project, running an operation, framing a large result) runs in a worker
 thread so the event loop stays responsive.
 
-Datasets are opened once per process and shared; a handle belongs to the
-connection that opened it and ends with it. Each connection also has at
-most one project of its own (`project.*`), which ends with it.
+Each connection has at most one project of its own (`project.*`), which
+every operation runs on and which ends with it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import importlib
 import itertools
 import logging
@@ -22,7 +22,6 @@ import pkgutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +29,6 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 from . import display_units, fitting, frames, projects, reports, run_logs
-from .datasets import CATALOG, Entry
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
@@ -38,8 +36,7 @@ log = logging.getLogger('hertzforge.service')
 
 #: the operation modules served first, in this order; every other `ops_*` module of this package
 #: follows, by name, so a module of operations is served by being added
-FIRST_MODULES = ('ops_random', 'ops_modal', 'ops_modal_run', 'ops_project', 'ops_settings',
-                 'ops_model', 'ops_specify', 'ops_readings')
+FIRST_MODULES = ('ops_project', 'ops_settings', 'ops_model', 'ops_specify', 'ops_readings')
 
 
 def _operations() -> tuple[Operation, ...]:
@@ -64,30 +61,34 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
 
-#: What the datasets and operations reach, imported before the server
+#: What the readers and operations reach, imported before the server
 #: listens. Loading a compiled extension holds the interpreter lock until it
 #: is done, so a first import inside a worker thread stalls the event loop
-#: with it: 5.1 s once, opening the first dataset with nothing on disk cached
-#: yet. Imported here, the cost is paid at startup, before anyone is waiting
-#: on the loop. tests/test_server.py fails if a session still imports one of
-#: these packages for the first time, and names it.
+#: with it: 5.1 s once, opening the first file. Imported here, the cost is
+#: paid at startup, before anyone is waiting on the loop.
+#: tests/test_server.py fails if a session still imports one of these
+#: packages for the first time, and names it.
 #:
-#: Listed module by module, as the datasets and operations reach them, not
+#: Listed module by module, as the readers and operations reach them, not
 #: by walking whole packages, which imports every module whether anything
-#: uses it or not. One path is left out on purpose: the frame-wing model's
-#: first build, which loads the CAD kernel (OCP, about 0.6 s) and four
-#: modules of its own to combine its solids. That build runs once (about
-#: 30 s) and is read from the cache after, so it is not worth paying for on
-#: every start.
+#: uses it or not.
 PRELOAD = (
     'hertzforge',
     'hertzforge.drawing.plot',
     'hertzforge.drawing.viz.geometry',
     'hertzforge.drawing.viz.waterfall',
     'hertzforge.deform',
-    'hertzforge.demo.drone',
-    'hertzforge.demo.plate',
-    'hertzforge.demo.frame_wing',
+    # what showing a selection reaches, imported inside the core at first use
+    'hertzforge.service.show',
+    'hertzforge.core.classical_pulse',
+    'hertzforge.core.filters',
+    'hertzforge.core.rigid',
+    'hertzforge.core.sensors',
+    'hertzforge.core.shaker',
+    'hertzforge.core.shock_synthesis',
+    'hertzforge.core.signals',
+    'hertzforge.core.tables',
+    'hertzforge.core.transform',
     # imported inside hertzforge at first use: reading a random run and
     # forming its octave and coherence products
     'hertzforge.core.detect',
@@ -125,37 +126,43 @@ def preload() -> None:
 
 #: The interpreter's switch interval while serving, in seconds. It hands its
 #: lock between threads every 5 ms by default; a worker doing pure-Python
-#: work (building a demonstration model) then costs the event loop tens of
+#: work (reading a file, fitting modes) then costs the event loop tens of
 #: milliseconds per wait. At 1 ms the loop gets the lock back sooner, for a
 #: small cost in the worker's speed. Process-wide, so the entry point sets
 #: it, never `start`.
 SWITCH_INTERVAL = 0.001
 
 
-@dataclass
-class Handle:
-    """An opened dataset as one connection holds it: the name the client
-    uses in `op.run`, its catalog entry and the opened data, which is
-    shared with every other handle on the same dataset."""
 
-    name: str
-    entry: Entry
-    data: Any
+def _preview_copy(project: Any, name: str) -> Any:
+    """A project holding only a copy of geometry `name`, for an operation to act on while
+    its form is typed: nothing it does reaches the project or its journal."""
+    from hertzforge import Project
+
+    scratch = Project('preview')
+    scratch.add(name, copy.deepcopy(project[name]))
+    return scratch
+
+
+def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, Any]]:
+    """A preview's views in the display units, saying what would be added."""
+    for view in views:
+        for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
+            if row.get('label') == 'Added':
+                row['label'] = 'Would add'
+    display_units.convert(views, units)
+    return views
 
 
 class Service:
-    """Everything but the transport: the catalog, the datasets opened so
-    far, and the worker threads. One per process."""
+    """Everything but the transport: the operations and the worker
+    threads. One per process."""
 
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
-                 catalog: Sequence[Entry] = CATALOG,
                  workers: int = 2) -> None:
         self.operations: dict[str, Operation] = {op.id: op for op in operations}
-        self.catalog: tuple[Entry, ...] = tuple(catalog)
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             workers, thread_name_prefix='hertzforge-service')
-        self._opening: dict[str, asyncio.Future] = {}
-        self._handles = itertools.count(1)
 
     def close(self) -> None:
         """Stop the worker threads without waiting; work not yet started is
@@ -171,77 +178,17 @@ class Service:
     # ---- methods --------------------------------------------------------------
 
     def catalog_list(self) -> dict[str, Any]:
-        """The `catalog.list` result: every operation's descriptor and every
-        dataset in the catalog."""
-        return {'operations': [op.to_json() for op in self.operations.values()],
-                'datasets': [item.to_json() for item in self.catalog]}
-
-    async def load(self, item: Entry) -> Any:
-        """The dataset, opened at most once however many ask at the same
-        time; a failed open is forgotten so it can be tried again."""
-        future = self._opening.get(item.id)
-        if future is None:
-            future = asyncio.ensure_future(self.in_worker(item.open))
-            self._opening[item.id] = future
-        try:
-            return await asyncio.shield(future)
-        except BaseException:
-            if future.done() and self._opening.get(item.id) is future:
-                del self._opening[item.id]
-            raise
-
-    async def dataset_open(self, params: Mapping[str, Any],
-                           handles: dict[str, Handle]) -> dict[str, Any]:
-        """Answer `dataset.open`: open the dataset (once per process), give
-        this connection a new handle on it, and return the handle with the
-        dataset's summary and channels. A missing or unknown `id` is an
-        error response."""
-        _only(params, ('id',), 'dataset.open')
-        if 'id' not in params:
-            raise bad_request('dataset.open needs "id", a dataset id from '
-                              'catalog.list')
-        item = next((d for d in self.catalog if d.id == params['id']), None)
-        if item is None:
-            raise not_found(f'No dataset named "{params["id"]}"; catalog.list '
-                            'names the ones that exist.')
-        data = await self.load(item)
-        name = f'h{next(self._handles)}'
-        handles[name] = Handle(name, item, data)
-        return {'handle': name, 'kind': item.kind, 'title': item.title,
-                'summary': data.summary(),
-                'channels': [c.to_json() for c in data.channels]}
+        """The `catalog.list` result: every operation's descriptor."""
+        return {'operations': [op.to_json() for op in self.operations.values()]}
 
     def operation(self, params: Any) -> Operation:
         """The operation an `op.run` names."""
-        _only(params, ('op', 'handle', 'params'), 'op.run')
+        _only(params, ('op', 'params', 'preview'), 'op.run')
         op = self.operations.get(params.get('op'))
         if op is None:
             raise not_found(f'No operation named {params.get("op")!r}; '
                             'catalog.list names the ones that exist.')
         return op
-
-    async def op_run(self, params: Mapping[str, Any],
-                     handles: dict[str, Handle]) -> dict[str, Any]:
-        """The result of one operation; the caller frames it in a worker,
-        since a dense model's shapes are megabytes."""
-        op = self.operation(params)
-        handle = handles.get(params.get('handle'))
-        if handle is None:
-            raise not_found(f'No open handle {params.get("handle")!r} on this '
-                            'connection; dataset.open returns one, and a '
-                            'handle ends with its connection.')
-        if handle.entry.kind != op.accepts:
-            raise refused(f'{op.id} works on a {op.accepts} dataset; handle '
-                          f'{handle.name} is {handle.entry.title}, a '
-                          f'{handle.entry.kind}.')
-        values = op.resolve(params.get('params', {}),
-                            [c.value for c in handle.data.channels])
-        if values.get('units') == 'display':
-            # a file written in the display units is written in this
-            # connection's (Save As)
-            values['units'] = self.units
-        views = await self.in_worker(op.run, handle.data, values)
-        return {'views': views}
 
 
 def _only(params: Any, allowed: Sequence[str], method: str) -> None:
@@ -259,13 +206,12 @@ PROGRESS_INTERVAL_S = 0.1
 
 
 class Connection:
-    """One client: its handles, its project, its requests in flight, and
-    the lock that keeps its frames whole."""
+    """One client: its project, its requests in flight, and the lock that
+    keeps its frames whole."""
 
     def __init__(self, service: Service, socket: ServerConnection) -> None:
         self.service: Service = service
         self.socket: ServerConnection = socket
-        self.handles: dict[str, Handle] = {}
         self.project: projects.OpenProject | None = None
         #: one project request at a time: two imports must not add to one
         #: project at once, and a save must not write one half-imported
@@ -358,7 +304,7 @@ class Connection:
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
         if method == 'project.actions':
-            _only(params, ('objects', 'records'), method)
+            _only(params, ('objects', 'records', 'part'), method)
             return await call(projects.actions, self.project, params)
         if method == 'project.show':
             _only(params, ('objects', 'records', 'part', 'prefs'), method)
@@ -386,9 +332,6 @@ class Connection:
         project's summary, which counts as modified when the operation
         added or removed an object."""
         op = self.service.operation(params)
-        if 'handle' in params:
-            raise bad_request(f'{op.id} works on the connection\'s project and '
-                              'takes no "handle"')
         async with self.project_lock:
             state = self.project
             if state is None:
@@ -400,6 +343,12 @@ class Connection:
                 objects={name: projects.kind_of(obj)
                          for name, obj in project.items()},
                 verbs={name: projects.verbs_of(project, name) for name in project})
+            if op.id == 'project.save_as' and values['units'] == 'display':
+                values['units'] = self.units
+            if params.get('preview') and op.previews:
+                scratch = _preview_copy(project, values['geometry'])
+                return {'views': _said_as_preview(
+                    await self.service.in_worker(op.run, scratch, values), self.units)}
             before = list(project)
             views = await self.service.in_worker(op.run, project, values)
             if op.edits or list(project) != before:
@@ -553,18 +502,8 @@ class Connection:
                 frame = frames.encode_text(
                     {'type': 'response', 'id': ident,
                      'result': self.service.catalog_list()})
-            elif method == 'dataset.open':
-                result = await self.service.dataset_open(params, self.handles)
-                frame = frames.pack({'type': 'response', 'id': ident,
-                                     'result': result})
-            elif method == 'op.run' and self.service.operation(params).accepts == 'project':
-                result = await self.project_op(params)
-                frame = await self.service.in_worker(
-                    frames.pack, {'type': 'response', 'id': ident,
-                                  'result': result})
             elif method == 'op.run':
-                result = await self.service.op_run(params, self.handles)
-                display_units.convert(result.get('views', []), self.units)
+                result = await self.project_op(params)
                 frame = await self.service.in_worker(
                     frames.pack, {'type': 'response', 'id': ident,
                                   'result': result})
@@ -600,7 +539,7 @@ class Connection:
                 raise ProtocolError(
                     'unknown_method',
                     f'The analysis service has no method {method!r}; it '
-                    'answers catalog.list, dataset.open, op.run, '
+                    'answers catalog.list, op.run, '
                     f'{", ".join(PROJECT_METHODS)}, '
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)} and '

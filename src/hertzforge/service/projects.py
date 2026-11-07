@@ -488,7 +488,9 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "component" is magnitude, real, imag or phase')
     if prefs.get('line') is not None and not isinstance(prefs['line'], (int, float)):
         raise bad_request('project.show "line" is a frequency in Hz, or null')
-    for key in ('projection', 'mode_table', 'mac', 'shape_values', 'arrows', 'sensors'):
+    if prefs.get('shape_view') not in (None, 'animate', 'table', 'mac', 'values'):
+        raise bad_request('project.show "shape_view" is animate, table, mac or values, or null')
+    for key in ('projection', 'arrows', 'sensors'):
         if key in prefs and not isinstance(prefs[key], bool):
             raise bad_request(f'project.show "{key}" is true or false')
     from .show import TABLE_VIEWS, VALUES_CHOICES, VALUES_FORMS
@@ -524,8 +526,11 @@ def actions(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, A
     records = params.get('records') or {}
     if not isinstance(records, Mapping):
         raise bad_request('project.actions "records" maps an object\'s name to its picked records')
+    part = params.get('part')
+    if part is not None and not isinstance(part, Mapping):
+        raise bad_request('project.actions "part" names a part of a geometry in the tree')
     return acting.actions(state.project, list(objects),
-                          {str(k): [int(i) for i in v] for k, v in records.items()})
+                          {str(k): [int(i) for i in v] for k, v in records.items()}, part)
 
 
 def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:

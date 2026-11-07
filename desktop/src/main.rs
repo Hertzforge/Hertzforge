@@ -14,7 +14,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod pasted_files;
 mod probe;
+#[cfg(target_os = "macos")]
+mod save_panel;
 mod services;
 
 #[cfg(feature = "e2e")]
@@ -135,15 +139,9 @@ fn startup(app: AppHandle) {
     let layout = match (
         std::env::current_exe(),
         paths.resource_dir(),
-        paths.app_cache_dir(),
         paths.app_log_dir(),
     ) {
-        (Ok(exe), Ok(res), Ok(cache), Ok(logs)) => Layout::installed(
-            exe.parent().unwrap_or(&exe),
-            &res,
-            cache.join("analysis"),
-            logs,
-        ),
+        (Ok(exe), Ok(res), Ok(logs)) => Layout::installed(exe.parent().unwrap_or(&exe), &res, logs),
         _ => return fail(&app, "The app's own folders could not be found."),
     };
     let services = match Services::start(&layout) {
@@ -168,9 +166,10 @@ fn startup(app: AppHandle) {
         return;
     }
     let query = format!(
-        "?analysis={}&control={}",
+        "?analysis={}&control={}{}",
         encode(&services.analysis.url()),
-        encode(&services.control.url())
+        encode(&services.control.url()),
+        run_log_query(std::env::args().skip(1))
     );
     if let Err(e) = main_window(&app, &query) {
         fail(&app, &format!("The window could not be opened: {e}"));
@@ -210,6 +209,19 @@ fn main_window(app: &AppHandle, query: &str) -> tauri::Result<()> {
 }
 
 /// Percent-encode a query value (the services' addresses).
+/// `--run-log [file]`: the window with the log alone in it, for the keeper's own computer,
+/// as Visual Dynamics launches it. Its own flag, not a file to import.
+fn run_log_query(args: impl Iterator<Item = String>) -> String {
+    let args: Vec<String> = args.collect();
+    let Some(at) = args.iter().position(|a| a == "--run-log") else {
+        return String::new();
+    };
+    match args.get(at + 1).filter(|a| !a.starts_with('-')) {
+        Some(file) => format!("&runlog=1&runlog_file={}", encode(file)),
+        None => "&runlog=1".to_string(),
+    }
+}
+
 fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -258,6 +270,25 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             &P::select_all(app, None)?,
         ],
     )?;
+    // The project's files: the shell answers, since the dialogs and the service are its.
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, "file-open", "Open...", true, Some("CmdOrCtrl+O"))?,
+            &MenuItem::with_id(app, "file-import", "Import...", true, Some("CmdOrCtrl+I"))?,
+            &P::separator(app)?,
+            &MenuItem::with_id(app, "file-save", "Save", true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(
+                app,
+                "file-save-as",
+                "Save As...",
+                true,
+                Some("CmdOrCtrl+Shift+S"),
+            )?,
+        ],
+    )?;
     let view = Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?;
     let window = Submenu::with_items(
         app,
@@ -270,12 +301,17 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
             &P::close_window(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &view, &window])
+    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
 }
 
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Check for Updates, from the shell's palette: the updater reads the latest
+        // release's manifest, verifies the archive against the public key in
+        // tauri.conf.json, installs it, and the process plugin relaunches.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppLog::new())
         .manage(Quit::default())
         .setup(|app| {
@@ -297,9 +333,24 @@ fn main() {
     let builder = builder.on_menu_event(|app, event| {
         if event.id() == QUIT_ID {
             Quit::request(app);
+        } else if let Some(act) = event.id().as_ref().strip_prefix("file-") {
+            // nothing to tell when the window is gone
+            let _ = tauri::Emitter::emit(app, "file-menu", act);
         }
     });
-    #[cfg(feature = "e2e")]
+    #[cfg(all(target_os = "macos", not(feature = "e2e")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        pasted_files::pasted_files,
+        save_panel::save_with_file_types
+    ]);
+    #[cfg(all(target_os = "macos", feature = "e2e"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        e2e::e2e_log,
+        e2e::e2e_quit,
+        pasted_files::pasted_files,
+        save_panel::save_with_file_types
+    ]);
+    #[cfg(all(not(target_os = "macos"), feature = "e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![e2e::e2e_log, e2e::e2e_quit]);
     let app = builder
         .build(tauri::generate_context!())
@@ -332,6 +383,26 @@ mod tests {
         assert_eq!(
             encode("ws://127.0.0.1:61234/"),
             "ws%3A%2F%2F127.0.0.1%3A61234%2F"
+        );
+    }
+}
+
+#[cfg(test)]
+mod run_log_tests {
+    use super::run_log_query;
+
+    fn query(args: &[&str]) -> String {
+        run_log_query(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn the_flag_asks_for_the_log_alone_and_takes_a_file() {
+        assert_eq!(query(&[]), "");
+        assert_eq!(query(&["--run-log"]), "&runlog=1");
+        assert_eq!(query(&["--run-log", "--other"]), "&runlog=1");
+        assert_eq!(
+            query(&["--run-log", "/tmp/a b.hflog"]),
+            "&runlog=1&runlog_file=%2Ftmp%2Fa%20b.hflog"
         );
     }
 }

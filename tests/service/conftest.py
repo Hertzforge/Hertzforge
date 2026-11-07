@@ -1,5 +1,4 @@
-"""Shared fixtures: the contract's files, schema validators, and the
-datasets opened once per test session."""
+"""Shared fixtures: the contract's files and schema validators."""
 
 from __future__ import annotations
 
@@ -9,7 +8,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from hertzforge.service import datasets
+from hertzforge.service import frames
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIR = ROOT / 'schema'
@@ -42,26 +41,8 @@ def validate(schema):
     return check
 
 
-def _open(dataset_id):
-    return datasets.entry(dataset_id).open()
-
-
-@pytest.fixture(scope='session')
-def random_run():
-    # a missing file is an error naming the fetch command, never a skip
-    return _open('plate-random')
-
-
-@pytest.fixture(scope='session')
-def modal_run():
-    return _open('plate-modal')
-
-
-@pytest.fixture(scope='session')
-def drone():
-    return _open('drone-fem')
-
-
-@pytest.fixture(scope='session')
-def plate_fem():
-    return _open('plate-fem')
+def wire_views(views, validate):
+    """The views as they travel, references in place, checked."""
+    wire, arrays = frames.to_wire({'views': views})
+    validate(wire['views'], 'views')
+    return wire, arrays

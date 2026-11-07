@@ -14,7 +14,7 @@ from hertzforge.core.shapes import ShapeSet
 from hertzforge.service import frames, projects, show
 from hertzforge.service.protocol import ProtocolError
 
-from .test_ops import wire_views
+from .conftest import wire_views
 from .test_server import _session
 
 PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
@@ -88,10 +88,9 @@ def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, valida
     project.add('Modes', shapes)
     try:
         out = shown(plate, 'Modes', validate=validate)
-        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix'], \
-            'on the active geometry, the auto-MAC beside the list'
+        assert [v['view'] for v in out['views']] == ['shape3d'], 'on the active geometry'
         both = shown(plate, 'Modes', named(plate, 'geometry'), records={'Modes': [1]})
-        assert [v['view'] for v in both['views']] == ['shape3d', 'table']
+        assert [v['view'] for v in both['views']] == ['shape3d']
         project.add('Modes 2', shapes)
         mac = shown(plate, 'Modes', 'Modes 2', validate=validate)
         assert mac['views'][0]['view'] == 'matrix'
@@ -100,7 +99,7 @@ def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, valida
         project.remove('Modes')
 
 
-def test_a_shape_set_with_no_geometry_shows_its_table_and_its_own_mac(validate):
+def test_a_shape_set_with_no_geometry_shows_its_table_or_its_own_mac(validate):
     from hertzforge.project import Project
 
     project = Project()
@@ -108,7 +107,11 @@ def test_a_shape_set_with_no_geometry_shows_its_table_and_its_own_mac(validate):
                                   shape_matrix=np.eye(2), coordinate=['1Z+', '2Z+']))
     state = projects.OpenProject(project=project)
     out = shown(state, 'Modes', validate=validate)
-    assert [v['view'] for v in out['views']] == ['table', 'matrix']
+    assert [v['view'] for v in out['views']] == ['table']
+    mac = shown(state, 'Modes', prefs={'shape_view': 'mac'}, validate=validate)
+    assert [v['view'] for v in mac['views']] == ['matrix']
+    alone = shown(state, 'Modes', prefs={'shape_view': 'animate'}, validate=validate)
+    assert [v['view'] for v in alone['views']] == ['table'], 'nothing to animate on'
 
 
 def test_a_measurement_beside_its_requirement_is_the_comparison(validate):
@@ -384,25 +387,27 @@ def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
                                  shape_matrix=np.arange(12.0).reshape(2, 6), coordinate=dofs))
     try:
         out = shown(plate, 'Lone', validate=validate)
-        assert [v['view'] for v in out['views']] == ['shape3d', 'table', 'matrix']
+        assert [v['view'] for v in out['views']] == ['shape3d'], 'the animation, by default'
         assert out['offers']['shapes'] is True and out['offers']['values_dofs'] == ['all']
-        off = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False}, validate=validate)
-        assert [v['view'] for v in off['views']] == ['shape3d', 'table'], 'one view always up'
-        values = shown(plate, 'Lone', prefs={'mode_table': False, 'mac': False,
-                                             'shape_values': True}, validate=validate)
-        assert [v['view'] for v in values['views']] == ['shape3d', 'table']
-        table = values['views'][1]
+        listed = shown(plate, 'Lone', prefs={'shape_view': 'table'}, validate=validate)
+        assert [v['view'] for v in listed['views']] == ['table']
+        mac = shown(plate, 'Lone', prefs={'shape_view': 'mac'}, validate=validate)
+        assert [v['view'] for v in mac['views']] == ['shape3d', 'matrix'], 'with what its squares animate'
+        assert mac['views'][1]['selects'] == 'shape3d' and 'overlays' in mac['views'][0]
+        values = shown(plate, 'Lone', prefs={'shape_view': 'values'}, validate=validate)
+        assert [v['view'] for v in values['views']] == ['table']
+        table = values['views'][0]
         assert table['title'] == 'Lone, shapes' and table['columns'] == ['DOF', 'M1', 'M2']
         assert len(table['rows']) == 6
-        response = shown(plate, 'Lone', prefs={'shape_values': True, 'values_form': 'response'})
+        response = shown(plate, 'Lone', prefs={'shape_view': 'values', 'values_form': 'response'})
         assert response['views'][-1]['title'] == 'Lone, response transformation'
         assert len(response['views'][-1]['rows']) == 2, 'a row per mode'
-        chosen = shown(plate, 'Lone', prefs={'shape_values': True, 'values_dofs': 'control'})
+        chosen = shown(plate, 'Lone', prefs={'shape_view': 'values', 'values_dofs': 'control'})
         assert 'shape values:' in chosen['note'] and 'channel table' in chosen['note']
         with pytest.raises(ProtocolError, match='"values_form"'):
             projects.show(plate, {'objects': ['Lone'], 'prefs': {'values_form': 'inverse'}})
-        with pytest.raises(ProtocolError, match='"mac"'):
-            projects.show(plate, {'objects': ['Lone'], 'prefs': {'mac': 'yes'}})
+        with pytest.raises(ProtocolError, match='"shape_view"'):
+            projects.show(plate, {'objects': ['Lone'], 'prefs': {'shape_view': 'waterfall'}})
     finally:
         project.remove('Lone')
 
@@ -451,6 +456,68 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
     finally:
         table.set_cell('model', 0, was)
+
+
+def test_picked_modes_limit_every_view_of_a_lone_shape_set(plate, validate):
+    """Modes picked in the tree are what the panes show: the animation
+    steps through them, the table lists them, the auto-MAC is theirs and
+    the values keep their columns, each still numbered as the set numbers
+    it (Brandon, 2026-11-05)."""
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    project.add('Three', ShapeSet(frequency=[10.0, 20.0, 30.0], damping=[0.01, 0.02, 0.03],
+                                  shape_matrix=np.arange(18.0).reshape(3, 6), coordinate=dofs))
+    try:
+        picks = {'Three': [2, 0]}
+        (stage,) = shown(plate, 'Three', records=picks, validate=validate)['views']
+        assert [m['index'] for m in stage['modes']] == [1, 3]
+        (table,) = shown(plate, 'Three', records=picks, prefs={'shape_view': 'table'},
+                         validate=validate)['views']
+        assert [row[0] for row in table['rows']] == ['1', '3']
+        assert table['edit']['rows'] == [1, 3], 'an edit of the second shown row is mode 3'
+        stage, matrix = shown(plate, 'Three', records=picks, prefs={'shape_view': 'mac'},
+                              validate=validate)['views']
+        assert [o['index'] for o in stage['overlays']] == [1, 3], 'the MAC picks a pair to overlay'
+        assert matrix['selects'] == 'shape3d'
+        (values,) = shown(plate, 'Three', records=picks, prefs={'shape_view': 'values'},
+                          validate=validate)['views']
+        assert matrix['values'].shape == (2, 2)
+        assert matrix['rows']['ticks'] == ['10.0 Hz', '30.0 Hz']
+        assert values['columns'] == ['DOF', 'M1', 'M3']
+        assert '2 modes picked' in shown(plate, 'Three', records=picks)['note']
+        one = shown(plate, 'Three', records={'Three': [1]}, prefs={'shape_view': 'mac'},
+                    validate=validate)
+        assert [m['index'] for m in one['views'][0]['modes']] == [2]
+        assert one['views'][1]['values'].shape == (1, 1)
+        every = shown(plate, 'Three', prefs={'shape_view': 'mac'}, validate=validate)
+        assert len(every['views'][0]['modes']) == 3 and every['views'][1]['values'].shape == (3, 3)
+    finally:
+        project.remove('Three')
+
+
+def test_a_finite_element_set_offers_no_dof_arrows(plate, validate):
+    """A measured set's few DOFs are worth marking; a mesh's hundreds of
+    thousands are not (`ARROW_DOF_LIMIT`)."""
+    from hertzforge.service import show
+    from hertzforge.service.show import ARROW_DOF_LIMIT
+
+    project = plate.project
+    geometry = project[named(plate, 'geometry')]
+    few = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
+    n = ARROW_DOF_LIMIT + 1
+    project.add('Few', ShapeSet(frequency=[10.0], damping=[0.01],
+                                shape_matrix=np.ones((1, 6)), coordinate=few))
+    project.add('Dense', ShapeSet(frequency=[10.0], damping=[0.01], shape_matrix=np.ones((1, n)),
+                                  coordinate=[f'{k + 1}X+' for k in range(n)]))
+    try:
+        # the plate's channel table would mark its own channels; a set with no table marks its DOFs
+        assert len(show._arrow_dofs(project, ['Few'], None)[0]) == 6
+        assert show._arrow_dofs(project, ['Dense'], None) == ([], [])
+        assert shown(plate, 'Few', validate=validate)['offers']['arrows'] is True
+    finally:
+        project.remove('Dense')
+        project.remove('Few')
 
 
 def test_a_channel_table_shows_typed_into_with_its_widgets(plate, validate):
@@ -561,3 +628,56 @@ def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
     assert 'at 101Z+' in picked['views'][0]['title']
     unknown = shown(swept, 'Profile', prefs={**flat, 'tone': 'Down'}, validate=validate)
     assert unknown['views'][0]['title'].startswith('Up'), 'a tone the set lacks falls to the first'
+
+
+def _played_modes():
+    """A plate's rigid modes and modal responses computed through them."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'geometry.unv'),
+                                           'units': {'length_unit': 'mm'}})
+    project = state.project
+    shapes = project.generate_rigid_body_modes('Geometry')
+    set_ = project[shapes]
+    time = np.arange(50) / 100.0
+    rows = np.vstack([np.sin(2 * np.pi * (k + 1) * time) for k in range(set_.num_shapes)])
+    project.add('Responses', TimeHistory(
+        time, rows, [f'M{k + 1}' for k in range(set_.num_shapes)], ordinate_dim='modal_length',
+        comment=[f'{shapes}: modal displacement, mode {k + 1}' for k in range(set_.num_shapes)]))
+    return state, shapes
+
+
+def test_modal_responses_play_on_a_geometry_with_or_without_their_set(validate):
+    """As VD plays them: the geometry and the responses are enough, since the responses name
+    the set they came from, and the set can be selected with them."""
+    state, shapes = _played_modes()
+    project = state.project
+    out = projects.show(state, {'objects': ['Geometry', 'Responses'], 'records': {}, 'prefs': {}})
+    wire_views(out['views'], validate)
+    stage = out['views'][0]
+    assert stage['view'] == 'shape3d' and 'motion' in stage and out['views'][1]['view'] == 'spectrum'
+    motion = stage['motion']
+    held = project[shapes]
+    assert motion['modes'].shape == (held.num_shapes, len(motion['node']), 3)
+    assert motion['values'].shape == (held.num_shapes, 50)
+    assert motion['quantity'] == 'Length' and motion['value_unit'] == 'm'
+    # one sample by hand: the offsets the shell sums are u = Phi q
+    k = 7
+    summed = np.tensordot(motion['values'][:, k], motion['modes'], axes=1)
+    q = project['Responses'].ordinate[:, k]
+    u = held.shape_matrix.T @ q
+    first = list(held.coordinate).index(f'{int(stage["node_ids"][motion["node"][0]])}X+')
+    assert summed[0, 0] == pytest.approx(u[first], rel=1e-5)
+    assert motion['peak'] > 0
+    three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
+                                  'prefs': {}})
+    assert three['views'][0]['motion']['modes'].shape == motion['modes'].shape
+
+
+def test_modal_responses_with_no_set_to_name_say_what_to_select():
+    state, shapes = _played_modes()
+    project = state.project
+    project['Responses'].comment = ['nothing here'] * project['Responses'].num_records
+    out = projects.show(state, {'objects': ['Geometry', 'Responses'], 'records': {}, 'prefs': {}})
+    assert 'select their shape set' in ' '.join(out.get('notes', [out.get('note', '')]))
+    three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
+                                  'prefs': {}})
+    assert 'motion' in three['views'][0]

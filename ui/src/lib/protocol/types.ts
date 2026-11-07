@@ -119,6 +119,8 @@ export interface SpectrumView {
 	link?: string;
 	/** Spans of x shaded behind the curves: frames averaged from, or spans cut away. */
 	regions?: Region[];
+	/** Places on a series to drag up and down, which run `op` with `decibels` on release. */
+	handles?: SpectrumHandle[];
 }
 
 /** A span of x shaded behind a spectrum's curves. */
@@ -174,6 +176,8 @@ export interface Motion {
 	direction: Float32Array;
 	/** f32 [D, S]: DOF d at sample k is values[d * S + k]. */
 	values: Float32Array;
+	/** f32 [M, D, 3]: each mode's offset at each moved node; then `values` is [M, S], modal coordinates. */
+	modes?: Float32Array;
 	/** The furthest any node gets, in value_unit. */
 	peak: number;
 }
@@ -206,6 +210,37 @@ export interface Shape3DView {
 	note?: string;
 	/** What a click in the view does. */
 	pick?: Pick3D;
+	gizmo?: Gizmo3D;
+}
+
+/** What a drag on a gizmo's arrow or ring runs. */
+export interface GizmoAct {
+	op: string;
+	params: Record<string, unknown>;
+	/** The param a drag along each axis goes in. */
+	values: Record<'x' | 'y' | 'z', string>;
+	/** What else each axis adds. */
+	adds?: Record<'x' | 'y' | 'z', Record<string, unknown>>;
+}
+
+/** Arrows and rings to drag in a `shape3d` view (schema/PROTOCOL.md). */
+export interface Gizmo3D {
+	origin: [number, number, number];
+	axes: [number, number, number][];
+	slide: GizmoAct;
+	turn: GizmoAct;
+	/** A drag's length in the view's unit, to meters. */
+	to_si?: number;
+}
+
+/** A drag on a `spectrum` view: a place on `series` near `x`, at `decibels` from what it follows. */
+export interface SpectrumHandle {
+	series: number;
+	x: number;
+	decibels: number;
+	label: string;
+	op: string;
+	params: Record<string, unknown>;
 }
 
 /** A click in a `shape3d` view: the operation it runs, and what it sends (schema/PROTOCOL.md). */
@@ -220,6 +255,8 @@ export interface Pick3D {
 	count?: number;
 	/** nodes: the param the ids go in. */
 	param?: string;
+	/** nodes: how many of the last `ids` are left out, and drawn dim. */
+	off?: number;
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */
@@ -342,6 +379,8 @@ export interface TableEdit {
 	choices?: Record<string, string[]>;
 	/** How a column's cells are edited, by key: a flag is a check box, a choice a drop-down, a date a date field. */
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
+	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
+	rows?: number[];
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
@@ -364,9 +403,7 @@ export type ViewKind = View['view'];
  * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
  * project type as Visual Dynamics did.
  */
-export type Workspace = 'acquire' | 'simulate' | 'signals' | 'random' | 'shock' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
-
-export type DatasetKind = 'random_run' | 'modal_model' | 'modal_run';
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
 
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 
@@ -431,21 +468,51 @@ export interface ProjectSummary {
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
-/** One operation a selection can run, with the params the selection fills. */
-export interface Action {
-	id: string;
-	title: string;
-	workspace: Workspace;
-	/** Offered in every analysis module. */
-	everywhere?: boolean;
-	fill: Record<string, string>;
+/** `project.actions`: the action table for a selection. */
+export interface Actions {
+	table: ActionTable;
 }
 
-/** `project.actions`: what a selection can take; `project` is what takes no object, with nothing selected. */
-export interface Actions {
-	readings: Action[];
-	acts: Action[];
-	project: Action[];
+/** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
+/** A lone shape set's views, shown one at a time. */
+export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
+
+export interface ExportFormat {
+	/** The `format` param's value. */
+	value: string;
+	label: string;
+	/** The file's suffix with its dot; empty for a folder. */
+	suffix: string;
+}
+
+export interface ActionRow {
+	/** `show.*` for a default, an operation's id, or `self.*`. */
+	id: string;
+	verb: string;
+	kind: 'default' | 'reading' | 'act' | 'self';
+	ready: boolean;
+	/** Why it cannot run now. */
+	reason?: string;
+	/** The modules that offer it; absent, every module. */
+	modules?: Workspace[];
+	fill?: Record<string, string>;
+	/** In a combination column, the objects that complete the row. */
+	candidates?: string[];
+	/** An operation on the part of a geometry picked in the tree. */
+	part?: true;
+	/** Export: the formats this object can be written in. */
+	formats?: ExportFormat[];
+}
+
+/** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */
+export interface ActionColumn {
+	kinds: string[];
+	current?: true;
+	rows: ActionRow[];
+}
+
+export interface ActionTable {
+	columns: ActionColumn[];
 }
 
 /** `project.show`: what a selection in the tree shows, as Visual Dynamics' window shows it. */
@@ -484,10 +551,7 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
-	/** A lone shape set's three views, one always up, and where and in what form its values are read. */
-	mode_table: boolean;
-	mac: boolean;
-	shape_values: boolean;
+	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';
 	/** DOF arrows and the channel table's sensors over every stage. */
@@ -602,34 +666,17 @@ export interface OperationDescriptor {
 	title: string;
 	/** The module that offers it, its home. */
 	workspace: Workspace;
-	/** Offered in every analysis module, not only its home: an act any study needs. */
-	everywhere?: boolean;
-	/** A dataset kind, or `project` for an operation on the connection's own project. */
-	accepts: DatasetKind | 'project';
+	/** The modules that offer it. */
+	modules: Workspace[];
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
-}
-
-export interface DatasetInfo {
-	id: string;
-	kind: DatasetKind;
-	title: string;
-	description?: string;
+	/** The form shows this while it is typed: `op.run` with `preview`, on a copy. */
+	previews?: boolean;
 }
 
 export interface Catalog {
 	operations: OperationDescriptor[];
-	datasets: DatasetInfo[];
-}
-
-export interface OpenedDataset {
-	handle: string;
-	/** `project` for the connection's own project, which Analyze shows as a dataset. */
-	kind: DatasetKind | 'project';
-	title: string;
-	summary: Record<string, unknown>;
-	channels: ParamOption[];
 }
 
 export interface OpResult {

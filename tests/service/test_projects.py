@@ -17,11 +17,11 @@ PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
 CORPUS = Path(__file__).resolve().parents[2] / 'testdata' / 'hforge_corpus'
 
 
-def test_kinds_are_class_names_in_lower_case_with_underscores(modal_run):
-    kinds = {name: projects.kind_of(obj) for name, obj in modal_run.project.items()}
+def test_kinds_are_class_names_in_lower_case_with_underscores():
+    state, _added = projects.import_file(None, {'path': str(PLATE / 'modal_spectra.nc4')})
+    kinds = {name: projects.kind_of(obj) for name, obj in state.project.items()}
     assert kinds == {'Channel Table': 'channel_table', 'Time History': 'time_history',
-                     'FRF': 'frf', 'Multiple Coherence': 'multiple_coherence',
-                     'Geometry': 'geometry'}
+                     'FRF': 'frf', 'Multiple Coherence': 'multiple_coherence'}
 
 
 def test_a_new_project_is_empty_and_named(validate):

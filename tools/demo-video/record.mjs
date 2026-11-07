@@ -4,8 +4,10 @@
 // painted frame over the DevTools screencast, and lets ffmpeg lay the frames out on their
 // real timestamps. Captions and a pointer are drawn into the page so they land in the frames.
 //
-//   node record.mjs [output.mp4] [--url http://127.0.0.1:5191/]
+//   node record.mjs [output.mp4] [--url http://127.0.0.1:5191/] [--examples <folder>]
 //
+// The example projects it opens (the plate random run and the frame-wing model) come from
+// `python scripts/make_examples.py <folder>`; the folder defaults to out/examples.
 // The test ids it drives are the shell's own (`data-testid`), so layout changes do not break it.
 
 import { chromium } from 'playwright-core';
@@ -16,7 +18,9 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 const urlFlag = args.indexOf('--url');
 const BASE = urlFlag >= 0 ? args[urlFlag + 1] : 'http://127.0.0.1:5191/';
-const OUT = path.resolve(args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--url') ?? 'out/demo.mp4');
+const examplesFlag = args.indexOf('--examples');
+const EXAMPLES = path.resolve(examplesFlag >= 0 ? args[examplesFlag + 1] : 'out/examples');
+const OUT = path.resolve(args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--url' && args[i - 1] !== '--examples') ?? 'out/demo.mp4');
 const FRAMES = path.resolve('out/frames');
 const W = 1280, H = 720, SCALE = 1.5; // 1920 x 1080 frames
 
@@ -92,6 +96,14 @@ async function click(id, settle = 400) {
 	await el.click();
 	await pause(settle);
 }
+// Open an example project by its path, through the panel's path field (the desktop app's file dialog).
+async function openProject(name) {
+	await click('project-open', 300);
+	await tid('project-path').fill(path.join(EXAMPLES, name));
+	await page.keyboard.press('Enter');
+	await page.waitForFunction(() => !document.querySelector('[data-testid="project-busy"]') && document.querySelector('[data-testid="project-tree"]'), null, { timeout: 60000 });
+	await pause(600);
+}
 
 // ---- the walkthrough -----------------------------------------------------------------
 await page.goto(`${BASE}?theme=dark#analyze`, { waitUntil: 'networkidle' });
@@ -115,7 +127,7 @@ for (const ws of ['acquire', 'analyze', 'modal', 'model', 'specify', 'simulate',
 await pause(400);
 
 // Command palette
-await caption('<b>Command palette.</b> Every tool, dataset and action, found by name.');
+await caption('<b>Command palette.</b> Every tool and action, found by name.');
 await click('palette-trigger', 500);
 await page.keyboard.type('psd', { delay: 140 });
 await pause(1600);
@@ -124,18 +136,11 @@ await pause(400);
 
 // Analyze
 await click('rail-analyze', 500);
-await caption('<b>Analyze.</b> Visual Dynamics computes every number from a controller run file. The shell only draws.');
-await click('dataset-plate-random', 900);
-await page.waitForSelector('[data-testid="tool-random.psd_vs_spec"]', { timeout: 30000 });
-await click('tool-random.psd_vs_spec', 500);
-await click('run-op', 300);
+await caption('<b>Analyze.</b> Hertzforge computes every number from a controller run file. The shell only draws.');
+await openProject('plate-random-run.hforge');
+await click('object-Time History PSDs', 900);
 await page.waitForSelector('[data-testid="view-spectrum"]', { timeout: 30000 });
 await pause(1400);
-await click('tool-random.error_db', 400);
-await click('run-op', 300);
-await page.waitForFunction(() => document.querySelectorAll('[data-testid="view-spectrum"]').length >= 2, null, { timeout: 30000 });
-await pause(900);
-await caption('<b>Linked cursors.</b> Panes on the same frequency axis follow each other.');
 const plot = page.locator('[data-testid="view-spectrum"] .u-over').first();
 const pb = await plot.boundingBox();
 if (pb) {
@@ -146,7 +151,7 @@ if (pb) {
 await pause(600);
 // Zoom into a narrow band so the bins are visible, then reset the zoom.
 await caption('<b>Drawn the way it is computed.</b> Each spectral line is flat across its own bin, one df wide.');
-const psdPlot = page.locator('[data-testid="view-spectrum"] .u-over').nth(1);
+const psdPlot = plot;
 await psdPlot.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 await pause(500);
 const zb = await psdPlot.boundingBox();
@@ -162,15 +167,15 @@ if (zb) {
 	await page.mouse.dblclick(zb.x + zb.width * 0.5, zb.y + zb.height * 0.5);
 	await pause(700);
 }
-await caption('<b>Readings judge the run</b> against the specification\'s own warning and abort limits.');
-await tid('view-reading').scrollIntoViewIfNeeded();
-await glide(tid('view-reading'), 0.3, 0.3, 14);
+await caption('<b>The specification beside it.</b> Select both and the run is judged against its own limits.');
+await click('object-Specification', 900);
 await pause(2600);
 
 // Modal
 await click('rail-modal', 600);
-await caption('<b>Modal.</b> A 74,000-triangle FE model solved by Visual Dynamics, animated live in the shell.');
-await click('dataset-frame-wing-fem', 300);
+await caption('<b>Modal.</b> A 74,000-triangle FE model solved by Hertzforge, animated live in the shell.');
+await openProject('frame-wing.hforge');
+await click('object-Modes', 300);
 await page.waitForSelector('[data-testid="mode-row-7"]', { timeout: 60000 });
 await pause(2600);
 const canvas = tid('shape3d-canvas');

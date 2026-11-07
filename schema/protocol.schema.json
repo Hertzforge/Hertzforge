@@ -103,7 +103,19 @@
         "y": {"$ref": "#/$defs/axis"},
         "series": {"type": "array", "items": {"$ref": "#/$defs/series"}},
         "link": {"type": "string"},
-        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}}
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+        "handles": {"type": "array", "items": {
+          "type": "object", "required": ["series", "x", "decibels", "label", "op", "params"],
+          "additionalProperties": false,
+          "properties": {
+            "series": {"type": "integer", "minimum": 0},
+            "x": {"type": "number"},
+            "decibels": {"type": "number"},
+            "label": {"type": "string"},
+            "op": {"type": "string"},
+            "params": {"type": "object"}
+          }
+        }}
       }
     },
     "region": {
@@ -180,6 +192,16 @@
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
+        "gizmo": {
+          "type": "object", "required": ["origin", "axes", "slide", "turn"],
+          "properties": {
+            "origin": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+            "axes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "minItems": 3, "maxItems": 3},
+            "slide": {"type": "object"},
+            "turn": {"type": "object"},
+            "to_si": {"type": "number"}
+          }
+        },
         "pick": {
           "type": "object", "required": ["op", "params", "target", "hint"],
           "properties": {
@@ -190,6 +212,7 @@
             "ids": {"type": "array", "items": {"type": "integer"}},
             "count": {"type": "integer", "minimum": 0},
             "param": {"type": "string"},
+            "off": {"type": "integer", "minimum": 0},
             "faces": {"$ref": "#/$defs/arrayRef"},
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},
@@ -210,6 +233,7 @@
             "node": {"$ref": "#/$defs/arrayRef"},
             "direction": {"$ref": "#/$defs/arrayRef"},
             "values": {"$ref": "#/$defs/arrayRef"},
+            "modes": {"$ref": "#/$defs/arrayRef"},
             "peak": {"type": "number", "minimum": 0}
           }
         }
@@ -329,7 +353,8 @@
             "params": {"type": "object"},
             "columns": {"type": "array", "items": {"type": ["string", "null"]}},
             "choices": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
-            "kinds": {"type": "object", "additionalProperties": {"enum": ["choice", "flag", "date", "unit", "number", "text"]}}
+            "kinds": {"type": "object", "additionalProperties": {"enum": ["choice", "flag", "date", "unit", "number", "text"]}},
+            "rows": {"type": "array", "items": {"type": "integer", "minimum": 1}}
           }
         }
       }
@@ -351,32 +376,23 @@
           "items": {"type": "object", "required": ["value", "label"],
                     "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}}}
         },
-        "options_from": {"type": "string", "pattern": "^(channels|objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
+        "options_from": {"type": "string", "pattern": "^(objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
         "in_view": {"type": "boolean"},
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"}
       }
     },
-    "workspace": {"enum": ["acquire", "simulate", "signals", "random", "shock", "sine", "modal", "geometry", "model", "specify", "report"]},
+    "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
     "operation": {
-      "type": "object", "required": ["id", "title", "workspace", "accepts", "params", "outputs"],
+      "type": "object", "required": ["id", "title", "workspace", "modules", "params", "outputs"],
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"},
         "title": {"type": "string"},
         "workspace": {"$ref": "#/$defs/workspace"},
-        "everywhere": {"type": "boolean"},
-        "accepts": {"enum": ["random_run", "modal_model", "modal_run", "project"]},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
+        "previews": {"type": "boolean"},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}
-      }
-    },
-    "dataset": {
-      "type": "object", "required": ["id", "kind", "title"],
-      "properties": {
-        "id": {"type": "string"},
-        "kind": {"enum": ["random_run", "modal_model", "modal_run"]},
-        "title": {"type": "string"},
-        "description": {"type": "string"}
       }
     },
     "projectObject": {
@@ -406,7 +422,8 @@
             "filtering": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
             "truncation": {"type": "object", "additionalProperties": {"type": "number"}},
             "features": {"type": "object", "additionalProperties": {"type": "boolean"}},
-            "identity": {"type": "object", "additionalProperties": {"type": "string"}}
+            "identity": {"type": "object", "additionalProperties": {"type": "string"}},
+            "rigid": {"type": "object", "additionalProperties": {"type": ["number", "boolean"]}}
           }
         }
       }
@@ -472,22 +489,39 @@
         }
       }
     },
-    "action": {
-      "type": "object", "required": ["id", "title", "workspace", "fill"], "additionalProperties": false,
+    "actions": {
+      "type": "object", "required": ["table"], "additionalProperties": false,
       "properties": {
-        "id": {"type": "string"},
-        "title": {"type": "string"},
-        "workspace": {"$ref": "#/$defs/workspace"},
-        "everywhere": {"type": "boolean"},
-        "fill": {"type": "object", "additionalProperties": {"type": "string"}}
+        "table": {
+          "type": "object", "required": ["columns"], "additionalProperties": false,
+          "properties": {"columns": {"type": "array", "items": {"$ref": "#/$defs/actionColumn"}}}
+        }
       }
     },
-    "actions": {
-      "type": "object", "required": ["readings", "acts", "project"], "additionalProperties": false,
+    "actionColumn": {
+      "type": "object", "required": ["kinds", "rows"], "additionalProperties": false,
       "properties": {
-        "readings": {"type": "array", "items": {"$ref": "#/$defs/action"}},
-        "acts": {"type": "array", "items": {"$ref": "#/$defs/action"}},
-        "project": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+        "kinds": {"type": "array", "items": {"type": "string"}},
+        "current": {"const": true},
+        "rows": {"type": "array", "items": {"$ref": "#/$defs/actionRow"}}
+      }
+    },
+    "actionRow": {
+      "type": "object", "required": ["id", "verb", "kind", "ready"], "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "verb": {"type": "string"},
+        "kind": {"enum": ["default", "reading", "act", "self"]},
+        "ready": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
+        "fill": {"type": "object", "additionalProperties": {"type": "string"}},
+        "candidates": {"type": "array", "items": {"type": "string"}},
+        "part": {"const": true},
+        "formats": {"type": "array", "items": {
+          "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
+          "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}
+        }}
       }
     },
     "solidRow": {
@@ -699,10 +733,9 @@
       }
     },
     "catalog": {
-      "type": "object", "required": ["operations", "datasets"],
+      "type": "object", "required": ["operations"],
       "properties": {
-        "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
-        "datasets": {"type": "array", "items": {"$ref": "#/$defs/dataset"}}
+        "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}}
       }
     },
     "displayEvent": {

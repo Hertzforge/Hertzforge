@@ -23,8 +23,18 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 serde_json = "1"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+# The save window with a file type list (src/save_panel.rs). The window toolkit's dialog
+# crate already brings these three; they are named here for the classes it does not use.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSObject", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSButton", "NSControl", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSPopUpButton", "NSResponder", "NSSavePanel", "NSText", "NSTextField", "NSView", "NSWindow"] }
+serde = { version = "1", features = ["derive"] }
 
 [features]
 # The local proof of the built app (packaging/e2e/): runs a script in the window

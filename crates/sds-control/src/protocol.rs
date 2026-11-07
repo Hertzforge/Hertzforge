@@ -281,7 +281,7 @@ mod tests {
     fn error_response_matches_the_golden_layout() {
         // schema/golden/response_error.json, re-serialized compactly.
         let e = MethodError::not_found(
-            "No dataset named \"plate-x\"; catalog.list names the ones that exist.",
+            "No operation named 'random.nope'; catalog.list names the ones that exist.",
         );
         let golden = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),

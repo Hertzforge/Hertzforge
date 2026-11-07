@@ -8,6 +8,8 @@
  * shell needs no Tauri package of its own and runs unchanged in a browser.
  */
 
+import type { ExportFormat } from '$lib/protocol/types';
+
 /** What `project.open` reads as a whole project; anything else is imported into one. */
 export const PROJECT_SUFFIXES = ['.hforge', '.vdyn', '.mat', '.h5', '.hdf5', '.escdf'];
 
@@ -33,6 +35,12 @@ interface DragDropEvent {
 
 /** The part of Tauri's global API the shell uses. */
 interface TauriGlobals {
+	core?: {
+		invoke<T>(command: string, args: Record<string, unknown>): Promise<T>;
+	};
+	event?: {
+		listen: (name: string, handler: (event: { payload: string }) => void) => Promise<() => void>;
+	};
 	dialog?: {
 		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
@@ -80,11 +88,56 @@ export async function chooseExportPath(title: string, defaultPath: string, filte
 	return dialog.save({ title, defaultPath, filters: [filter] });
 }
 
+/** An object's name as a file's name: the characters a path gives a meaning to are replaced. */
+export function fileNameOf(name: string): string {
+	return name.replace(/[\\/:]/g, '-');
+}
+
+/** The format a path's suffix names, the first when two share it, or else the first of all. */
+export function formatForPath(path: string, formats: ExportFormat[]): string {
+	const lower = path.toLowerCase();
+	return (formats.find((f) => f.suffix && lower.endsWith(f.suffix.toLowerCase())) ?? formats[0]).value;
+}
+
+/**
+ * Where to write an object and in which of its formats, from the native save window with the
+ * formats as its file types. Null when cancelled. macOS's window comes from the app itself, since
+ * the dialog plugin's has no file type list there. Elsewhere the plugin's has one but does not say
+ * which was chosen, so the path's suffix says, and of two formats sharing a suffix the first is written.
+ */
+export async function chooseObjectFile(name: string, formats: ExportFormat[]): Promise<{ path: string; format: string } | null> {
+	const t = tauri();
+	if (!t?.dialog) return null;
+	const title = `Export ${name}`;
+	const stem = fileNameOf(name);
+	if (hasFileMenu() && t.core) {
+		return t.core.invoke<{ path: string; format: string } | null>('save_with_file_types', { title, name: stem, types: formats });
+	}
+	const path = await t.dialog.save({
+		title,
+		defaultPath: `${stem}${formats[0].suffix}`,
+		filters: formats.filter((f) => f.suffix).map((f) => ({ name: f.label, extensions: [f.suffix.slice(1)] }))
+	});
+	return path === null ? null : { path, format: formatForPath(path, formats) };
+}
+
 /** A path for a report's page chosen in the native save dialog, or null when cancelled. */
 export async function chooseReportPath(title: string): Promise<string | null> {
 	const dialog = tauri()?.dialog;
 	if (!dialog) return null;
 	return dialog.save({ title: 'Save Report', defaultPath: `${title}.html`, filters: [{ name: 'Web page', extensions: ['html'] }] });
+}
+
+/** The paths of files on the clipboard, in the desktop app on a Mac; none anywhere else. */
+export async function pastedFiles(): Promise<string[]> {
+	const t = tauri();
+	if (!t?.core || !t.dialog) return [];
+	try {
+		return await t.core.invoke<string[]>('pasted_files', {});
+	} catch {
+		// no such command off a Mac
+		return [];
+	}
 }
 
 /**
@@ -142,4 +195,24 @@ export async function chooseRunLog(purpose: 'open' | 'new'): Promise<string | nu
 	if (purpose === 'new') return dialog.save({ title: 'New Run Log', defaultPath: 'Run log.hflog', filters: [RUN_LOG_FILTER] });
 	const chosen = await dialog.open({ title: 'Open Run Log', multiple: false, filters: [RUN_LOG_FILTER] });
 	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
+}
+
+/** Whether the app has a File menu (the macOS desktop app): without one, the top bar has the buttons. */
+export function hasFileMenu(): boolean {
+	return hasNativeFiles() && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent);
+}
+
+/** The File menu chosen ('open', 'import', 'save', 'save-as'); returns how to stop listening. */
+export function listenForFileMenu(onAct: (act: string) => void): () => void {
+	const events = tauri()?.event;
+	if (!events) return () => {};
+	let stop: (() => void) | null = null;
+	let stopped = false;
+	void events
+		.listen('file-menu', (event) => onAct(event.payload))
+		.then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+	return () => {
+		stopped = true;
+		stop?.();
+	};
 }
