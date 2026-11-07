@@ -153,8 +153,11 @@ def new(params: Mapping[str, Any]) -> OpenProject:
 
 def open_file(params: Mapping[str, Any]) -> OpenProject:
     """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
-    file holds. Any other file is refused with a pointer to import it."""
+    file holds, or a new project holding the object when the file holds
+    one (Save As writes those formats for one object). Any other file is
+    refused with a pointer to import it."""
     import hertzforge as hz
+    from hertzforge.project import SingleObjectFile
 
     path = _path(params, 'project.open')
     if not path.lower().endswith(PROJECT_SUFFIXES):
@@ -164,10 +167,14 @@ def open_file(params: Mapping[str, Any]) -> OpenProject:
     if not os.path.exists(path):
         raise not_found(f'no file at {path}')
     try:
-        project = hz.Project.open(path)
+        try:
+            return OpenProject(hz.Project.open(path))
+        except SingleObjectFile:
+            project = hz.Project(os.path.splitext(os.path.basename(path))[0])
+            project.import_file(path)
+            return OpenProject(project, modified=True)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
-    return OpenProject(project)
 
 
 #: the pictures `project.import` takes, by suffix (`core.photos.FORMATS`)

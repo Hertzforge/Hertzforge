@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, pastedFiles } from '$lib/project/files';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
@@ -33,7 +33,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	View,
 	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
-import { baseName, isProjectFile } from '$lib/project/files';
+import { baseName } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
@@ -1169,17 +1169,26 @@ export class ProjectState {
 	}
 
 	/**
-	 * Open or import each path, as a drop or a dialog gives them: a project file opens (replacing
-	 * the project), anything else is imported into it. Stops at the first refusal and says why.
+	 * Open or import each path, as a drop, a paste or File > Open gives them: the first project file
+	 * opens (replacing the project, after asking when that loses work), and everything else is
+	 * imported into it. Stops at the first refusal and says why.
 	 */
 	async openPaths(paths: string[]): Promise<void> {
+		const { opens, imports } = openingOrder(paths);
+		if (opens && !(await this.open(opens))) return;
+		await this.importPaths(imports);
+	}
+
+	/** Import each path into the open project, a project file's objects among them. */
+	async importPaths(paths: string[]): Promise<void> {
 		for (const path of paths) {
-			const ok = isProjectFile(path) ? await this.open(path) : await this.importFile(path);
-			if (!ok) return;
+			if (!(await this.importFile(path))) return;
 		}
 	}
 
-	open(path: string): Promise<boolean> {
+	/** Open a project file in place of the project; false when the person keeps working instead. */
+	async open(path: string): Promise<boolean> {
+		if (this.summary?.modified && !(await askToReplace(this.summary.title, baseName(path)))) return false;
 		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
 	}
 
@@ -1231,7 +1240,7 @@ export class ProjectState {
 				return;
 			}
 			const paths = await chooseFiles(asked);
-			if (paths) await this.openPaths(paths);
+			if (paths) await (asked === 'import' ? this.importPaths(paths) : this.openPaths(paths));
 			return;
 		}
 		this.asking = this.asking === asked ? null : asked;

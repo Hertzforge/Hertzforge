@@ -526,8 +526,9 @@ not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's
 machine; nothing is uploaded. `project.open` replaces the project with the one a `.hforge`, `.vdyn`,
-`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, and refuses any other file with a pointer to
-import it. `project.import` adds a file's objects to the project, making an empty one first when
+`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, or with a new project holding the object when
+the file holds one, as Save As writes them, and refuses any other file with a pointer to import it.
+A client asks before it opens over a project whose `modified` is true. `project.import` adds a file's objects to the project, making an empty one first when
 none is open. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
 project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`

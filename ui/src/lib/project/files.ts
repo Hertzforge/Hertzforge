@@ -19,6 +19,24 @@ export function isProjectFile(path: string): boolean {
 	return PROJECT_SUFFIXES.some((suffix) => lower.endsWith(suffix));
 }
 
+/**
+ * Which of several paths opens and which import into it. The first project file opens, whatever
+ * order they came in: an import before it would go with the project it replaces, and a second project
+ * file opened after it would replace the first.
+ */
+export function openingOrder(paths: string[]): { opens: string | null; imports: string[] } {
+	const opens = paths.find(isProjectFile) ?? null;
+	return { opens, imports: paths.filter((path) => path !== opens) };
+}
+
+/** Whether the person will lose the unsaved changes in `title` to open `next`. */
+export async function askToReplace(title: string, next: string): Promise<boolean> {
+	const text = `${title} has unsaved changes, and opening ${next} replaces it. Open it anyway?`;
+	const ask = tauri()?.dialog?.ask;
+	if (ask) return ask(text, { title: 'Hertzforge', okLabel: 'Open', cancelLabel: 'Keep Working' });
+	return globalThis.confirm?.(text) ?? false;
+}
+
 /** The last part of a path, for messages. */
 export function baseName(path: string): string {
 	return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -44,6 +62,7 @@ interface TauriGlobals {
 	dialog?: {
 		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
+		ask?(text: string, options: { title?: string; okLabel?: string; cancelLabel?: string }): Promise<boolean>;
 	};
 	webview?: {
 		getCurrentWebview(): { onDragDropEvent(handler: (event: DragDropEvent) => void): Promise<() => void> };

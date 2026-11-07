@@ -207,6 +207,11 @@ def remap_links(object_groups: Iterable[ObjectGroup],
     return out
 
 
+class SingleObjectFile(ValueError):
+    """A project file's format holding one object, which `Project.open`
+    cannot open and `Project.import_file` can read."""
+
+
 def retarget(obj: Any, mapping: dict[str, str]) -> None:
     """Point an object's references at renamed objects.
 
@@ -8553,7 +8558,7 @@ class Project(dict):
 
         The journal starts over with the one line that opens the file. A
         file holding a single object rather than a project raises
-        ValueError.
+        SingleObjectFile, a ValueError.
         """
         from .io import import_file, load
         from .io.escdf_objects import SUFFIXES
@@ -8569,7 +8574,7 @@ class Project(dict):
                 f'project = hertzforge.Project.open({str(path)!r})']
             loaded.file = os.path.abspath(os.path.expanduser(str(path)))
             return loaded
-        raise ValueError(f'{path} holds a single object, not a project')
+        raise SingleObjectFile(f'{path} holds a single object, not a project')
 
     def _journal_arg(self, value: Any) -> str:
         """One argument as the source text a script would pass.
