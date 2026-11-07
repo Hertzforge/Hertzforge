@@ -20,6 +20,9 @@ hertzforge-law-host = { path = "../hertzforge-law-host" }
 hertzforge-law-ratio-math = { path = "../hertzforge-law-ratio-math" }
 # The built-in multiple-output laws and the MIMO law boundary they implement.
 hertzforge-mimo-laws = { path = "../hertzforge-mimo-laws" }
+# The built-in classical shock law's declaration (`fd_correct`'s parameters and
+# values), for its catalog entry. Plain math, no controller crate.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
 hertzforge-sdm = { path = "../hertzforge-sdm" }
 # `default_data_root()`: law files live in the local data root, never in a
 # synced folder.

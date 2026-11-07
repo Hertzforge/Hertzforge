@@ -53,6 +53,7 @@ pub fn law_fault(e: &LawError) -> LawFault {
         // A multiple-output law's refused output: a single-output law never
         // returns one.
         LawError::BadMimoOutput { .. }
+        | LawError::BadClassicalOutput { .. }
         | LawError::Compile(_)
         | LawError::NotALaw(_)
         | LawError::ManifestInvalid(_)

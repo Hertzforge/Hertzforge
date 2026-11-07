@@ -18,13 +18,6 @@
 //! The law catalog, check records and the arming rule are
 //! `hertzforge-random-laws`'s, shared by every world.
 //!
-//! # State
-//!
-//! The types and signatures are the contract the closed loop is built against.
-//! Resolving a choice and running a case answer with a clear error until the
-//! closed loop, the built-in law and the law host's `shock-classical` world are
-//! built.
-//!
 //! [`ClassicalLawFactory`]: hertzforge_shock_host::ClassicalLawFactory
 //! [`LawChoice`]: hertzforge_random_laws::LawChoice
 //! [`LawCatalog`]: hertzforge_random_laws::LawCatalog
@@ -35,10 +28,16 @@
 
 mod check;
 mod choice;
+mod wasm;
 
 pub use check::{
-    judge_classical, run_classical_check_case, CheckRunError, ClassicalCaseEnd,
-    ClassicalCaseMeasure, ClassicalCheckCase, ClassicalCheckPlant, ClassicalRequirement,
+    classical_check_config, classical_check_record, judge_classical, run_classical_check_case,
+    CheckRunError, ClassicalCaseEnd, ClassicalCaseMeasure, ClassicalCheckCase, ClassicalCheckPlant,
+    ClassicalRequirement, CHECK_DRIVE_ABORT_V, CHECK_DRIVE_CEILING_V, CHECK_PULSE_G,
     CLASSICAL_CHECK_VERSION,
 };
 pub use choice::{default_classical_choice, resolve_classical, DEFAULT_CLASSICAL_LAW_ID};
+pub use wasm::{classical_law_fault, WasmClassicalLaw, WasmClassicalLawFactory};
+
+/// The built-in law's factory: `fd_correct` natively, with its parameter values.
+pub type BuiltinClassicalFactory = hertzforge_shock_host::FdCorrectFactory;

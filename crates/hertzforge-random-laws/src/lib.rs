@@ -1,5 +1,6 @@
-//! The Random control laws an operator can choose from, single-output and
-//! multiple-output, and the one door every law goes through.
+//! The control laws an operator can choose from (single-output and
+//! multiple-output Random here; classical shock listed here too and resolved
+//! in `hertzforge-shock-laws`), and the one door every law goes through.
 //!
 //! - [`LawCatalog`] lists every law: the built-in laws first ([`BuiltinLaw`]:
 //!   `hinv`, the default, and `ratio`), then the law files imported into the
@@ -51,8 +52,8 @@ mod ratio;
 pub use adapter::{law_fault, WasmControlLaw, WasmLawFactory};
 pub use builtin::{BuiltinLaw, DEFAULT_LAW_ID};
 pub use catalog::{
-    CatalogEntry, CatalogError, CatalogProblem, CheckStatus, LawCatalog, LawWorld, LAWS_DIR,
-    MAX_LAW_FILE_BYTES,
+    classical_builtin_manifest, CatalogEntry, CatalogError, CatalogProblem, CheckStatus,
+    LawCatalog, LawWorld, CLASSICAL_BUILTIN_ID, LAWS_DIR, MAX_LAW_FILE_BYTES,
 };
 pub use check::{may_arm_on_hardware, ArmRefusal, CheckCase, CheckRecord, CHECK_FORMAT};
 pub use choice::{ChoiceError, LawChoice};
