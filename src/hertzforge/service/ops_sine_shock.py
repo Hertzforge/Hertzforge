@@ -67,9 +67,10 @@ def _flat(name: str, role: Any, x0: float, x1: float, y: float) -> dict:
 
 
 def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
+    """A curve on log axes: the points finite and above zero."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    keep = np.isfinite(y) & (y > 0) & (x > 0)
+    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
     return v.series(name, role, x[keep], y[keep])
 
 
@@ -631,7 +632,6 @@ def pulse_check(project: Any, params: dict[str, Any]) -> list[dict]:
         peak = peak or suggested[0]
         duration = duration or suggested[1]
     shape = params['shape']
-    edge = None if shape == 'half-sine' else (params['edge'] or 0.05 * duration)
     try:
         pulse = pulses.ClassicalPulse(shape, peak, duration,
                                       pulse_edge(shape, params['edge'], duration))

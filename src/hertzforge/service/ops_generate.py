@@ -40,13 +40,6 @@ FREQUENCY = v.axis('Frequency', 'Hz', 'log')
 TIME = v.axis('Time', 's', 'linear')
 
 
-def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
-    """A curve on log axes: the points finite and above zero."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
-    return v.series(name, role, x[keep], y[keep])
-
-
 def _finite(name: str, role: Any, x: Any, y: Any) -> dict:
     """A curve on a linear y axis: the finite points, x above zero."""
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
@@ -90,12 +83,6 @@ def _picked(text: str, count: int, what: str) -> list[int] | None:
 
 def _dofs(text: str) -> tuple[str, ...] | None:
     return tuple(text.replace(',', ' ').split()) or None
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 # ---- Generate Signal ----------------------------------------------------------------
