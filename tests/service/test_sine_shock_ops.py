@@ -556,6 +556,8 @@ def test_a_spectrum_stale_because_a_window_was_added_counts_them():
 
 # ---- what is listed ------------------------------------------------------------------------
 
+def test_every_action_named_is_an_operation():
+    assert actions.ADDS <= set(OPS), sorted(actions.ADDS - set(OPS))
 
 
 def test_no_operation_shares_a_kind_of_data_twice():
