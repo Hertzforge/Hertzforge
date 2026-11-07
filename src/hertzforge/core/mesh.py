@@ -297,12 +297,11 @@ def landing(geometry: Geometry, part: Geometry,
 
 def _own_group_rows(geometry: Geometry, part: Geometry) -> np.ndarray:
     """Rows of the geometry's nodes used by the element groups the part
-    joins by name — what a part kept apart may land on. An unnamed
+    joins (`group_home`) — what a part kept apart may land on. An unnamed
     group joins none, so a part of one lands on nothing."""
-    names = {name for name in part.group_name if name}
-    groups = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
-              if name in names]
-    rows = np.flatnonzero(np.isin(geometry.elem_group, groups))
+    groups = [group_home(geometry, part, k) for k in range(len(part.group_id))]
+    rows = np.flatnonzero(np.isin(geometry.elem_group,
+                                  [g for g in groups if g is not None]))
     if not len(rows):
         return np.empty(0, dtype=int)
     used = np.unique(np.concatenate([geometry.elem_conn[k] for k in rows]))
@@ -320,6 +319,30 @@ def group_families(geometry: Geometry, group_id: int) -> set[str]:
     return {element_family(int(code)) for code in np.asarray(geometry.elem_type)[mask]}
 
 
+def group_home(geometry: Geometry, part: Geometry, row: int) -> int | None:
+    """The element group of `geometry` that the part's element group on `row`
+    joins, or None when it takes a new one.
+
+    A group meshed from solids (`Geometry.group_solids`) joins the group those
+    solids were meshed into, whatever it is called now; failing that, one of its
+    name that no solid is tied to, so a group made by hand or read from an older
+    file is found, never another solid's. Any other group joins by name alone.
+    """
+    name = part.group_name[row]
+    solids = set(part.group_solids.get(int(part.group_id[row]), ()))
+    if solids:
+        for group in (int(g) for g in geometry.group_id):
+            if solids & set(geometry.group_solids.get(group, ())):
+                return group
+    if not name:
+        return None
+    for held, group in zip(geometry.group_name, (int(g) for g in geometry.group_id),
+                           strict=True):
+        if held == name and (not solids or group not in geometry.group_solids):
+            return group
+    return None
+
+
 def group_refusal(geometry: Geometry, part: Geometry) -> str | None:
     """Why `part` cannot join `geometry` by element group name, or None.
 
@@ -333,12 +356,12 @@ def group_refusal(geometry: Geometry, part: Geometry) -> str | None:
     # row in the tree (Brandon, 2026-10-02).
     from .geometry import FAMILY_LABELS
 
-    names = list(geometry.group_name)
     for k, group in enumerate(part.group_id):
-        name = part.group_name[k]
-        if not name or name not in names:
+        home = group_home(geometry, part, k)
+        if home is None:
             continue
-        held = group_families(geometry, int(geometry.group_id[names.index(name)]))
+        name = part.group_name[k]
+        held = group_families(geometry, home)
         coming = group_families(part, int(group))
         if held and coming and held != coming:
             have = ', '.join(FAMILY_LABELS[f].lower() for f in sorted(held))
@@ -373,7 +396,8 @@ def join(geometry: Geometry, part: Geometry,
 
     An element group of the part with the same name as one already in the
     geometry joins it, so the five planes of a box, each named 'box', are
-    one part and are given a material once. An unnamed element group is
+    one part and are given a material once; a group meshed from solids goes
+    by those solids first (`group_home`). An unnamed element group is
     always an element group of its own. A named element group holding a
     different element family is refused (`group_refusal`), since an
     element group holds one family, and so is a part whose length unit is
@@ -421,18 +445,18 @@ def join(geometry: Geometry, part: Geometry,
     renumber = dict(zip(part.node_id[~on].tolist(), new_ids.tolist()))
     renumber.update(zip(part.node_id[on].tolist(),
                         geometry.node_id[nearest[on]].tolist()))
-    names = list(geometry.group_name)
     group_map = {}
     for k, group in enumerate(part.group_id):
-        name = part.group_name[k]
-        if name and name in names:
-            group_map[int(group)] = int(geometry.group_id[names.index(name)])
-            continue
-        new = geometry.add_group(name)
-        names.append(name)
-        group_map[int(group)] = new
-        if int(group) in part.group_properties:
-            geometry.group_properties[new] = part.group_properties[int(group)]
+        home = group_home(geometry, part, k)
+        if home is None:
+            home = geometry.add_group(part.group_name[k])
+            if int(group) in part.group_properties:
+                geometry.group_properties[home] = part.group_properties[int(group)]
+        group_map[int(group)] = home
+        solids = part.group_solids.get(int(group))
+        if solids:
+            geometry.group_solids[home] = tuple(sorted(
+                {*geometry.group_solids.get(home, ()), *solids}))
     # an element of the part that is an element already there — the
     # overlap of two crossing bars — fills that cell once, as the one
     # already there; adding it again counted the overlap twice

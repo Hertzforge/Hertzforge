@@ -108,3 +108,17 @@ export function toggledSurface(params: Record<string, unknown>, kept: number[], 
 	const added = idsIn(params[add]).filter((n) => n !== id);
 	return { [add]: idList([...added, id]), [drop]: idList(idsIn(params[drop]).filter((n) => n !== id)) };
 }
+
+/** Meters in a length unit the view can be drawn in. */
+const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, ft: 0.3048 };
+
+/**
+ * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
+ * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
+ * whose numbers have no unit to round in.
+ */
+export function gridStep(unit: string): number | null {
+	const meters = METERS[unit];
+	if (meters === undefined) return null;
+	return (unit === 'in' || unit === 'ft' ? 0.00254 : 0.01) / meters;
+}

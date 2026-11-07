@@ -74,10 +74,12 @@ def sine_stage(spec: Any, levels: list[Any], tone: str, dofs: list[str] | None =
             if dof not in spec_dofs:
                 continue
             k = spec_dofs.index(dof)
-            target = np.asarray(tone_obj.target(f), dtype=float)[:, k]
+            target = np.asarray(tone_obj.target(f, seconds=t - float(tone_obj.start_time)),
+                                dtype=float)[:, k]
             limits = {}
             for limit in tone_obj.limits:
-                values = np.asarray(tone_obj.target(f, curve=limit), dtype=float)[:, k]
+                values = np.asarray(tone_obj.target(f, limit, t - float(tone_obj.start_time)),
+                                    dtype=float)[:, k]
                 if np.isfinite(values).any():
                     limits[limit] = values
             station = len(labels)
@@ -111,11 +113,14 @@ def sine_stage(spec: Any, levels: list[Any], tone: str, dofs: list[str] | None =
             if dof not in level_dofs:
                 continue
             i = level_dofs.index(dof)
-            amplitude = np.abs(np.asarray(level.ordinate[i], dtype=float))
-            seconds = np.asarray(level.seconds, dtype=float)
+            # a level's lines are in frequency order; a sweep up and back
+            # would draw as a zigzag between its passes
+            path = np.argsort(level.seconds)
+            amplitude = np.abs(np.asarray(level.ordinate[i]))[path]
+            seconds = np.asarray(level.seconds, dtype=float)[path]
             if tone_obj is not None:
                 seconds = seconds - float(level.onset) + float(tone_obj.start_time)
-            frequencies = np.asarray(level.abscissa, dtype=float)
+            frequencies = np.asarray(level.abscissa, dtype=float)[path]
             if unit is None and level.ordinate_unit is not None and level.ordinate_unit[i]:
                 unit = unit_text(level.ordinate_dim[i])
             station = len(labels)
@@ -131,7 +136,7 @@ def sine_stage(spec: Any, levels: list[Any], tone: str, dofs: list[str] | None =
             for limit, side, over in (('abort_upper', 'upper', True), ('abort_lower', 'lower', False)):
                 if limit not in tone_obj.limits:
                     continue
-                edge = np.asarray(tone_obj.target(frequencies, curve=limit), dtype=float)[:, k]
+                edge = np.asarray(level.target_on(tone_obj, limit), dtype=float)[path, k]
                 out = good & np.isfinite(edge) & (amplitude > edge if over else amplitude < edge)
                 hits = np.flatnonzero(out)
                 if hits.size:

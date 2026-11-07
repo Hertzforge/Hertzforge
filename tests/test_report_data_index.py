@@ -794,6 +794,22 @@ def test_export_report_checks_the_index_first(tmp_path):
         'the check inside is not a line of its own'
 
 
+def test_a_file_found_in_a_search_folder_is_found_there_at_the_next_check(tmp_path):
+    index = di.DataIndex()
+    original = _file(tmp_path, 'log.txt')
+    index.add(original, 'log')
+    archive = tmp_path / 'archive'
+    archive.mkdir()
+    moved = _file(archive, 'log.txt')
+    os.remove(original)
+    assert index.verify([str(archive)])[0].found == moved
+    again = index.verify()[0]
+    assert again.status == di.MATCHES and again.found == moved
+    os.remove(moved)
+    gone = index.verify()[0]
+    assert gone.status == di.NOT_FOUND and gone.found == ''
+
+
 def test_the_registry_entry():
     feature = rf.FEATURES[rdi.FEATURE]
     assert feature.available and feature.requires == () and not feature.default

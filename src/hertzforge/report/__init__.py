@@ -3499,6 +3499,9 @@ def _srs_bars(block, specification, measured):
     raw = comparison_note(rows)
     if raw:
         caption = (caption + f' — {raw}').strip(' —')
+    unread = next((row.unread for row in rows if row.unread), None)
+    if unread:
+        caption = (caption + f' — {unread}').strip(' —')
     return {
         'kind': 'bars', 'caption': caption,
         'labels': [f'{row.dof} {row.event}' if many and row.event

@@ -36,7 +36,7 @@ ADDS = frozenset((
     'project.slide_coordinate_system', 'project.reset_rotation', 'project.merge_coincident_nodes',
     'project.mate_surfaces', 'project.edit_mated_surfaces', 'project.edit_mate_sides', 'project.delete_mated_surfaces',
     'project.set_shock', 'project.remove_shock', 'project.plan_instrumentation',
-    'project.generate_signal', 'project.shock_synthesis', 'project.srs_synthesis',
+    'project.generate_signal', 'project.srs_synthesis',
     'project.derive_specification', 'project.predict', 'project.work_up_sysid', 'project.work_up_random',
     'project.work_up_shock', 'project.work_up_transient', 'project.work_up_sine',
     'project.work_up_modal',

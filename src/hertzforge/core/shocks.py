@@ -548,7 +548,15 @@ def find(history: TimeHistory, hop_seconds: float = HOP_SECONDS,
     of the longest window, capped so that no two windows overlap and
     none runs past the record. Pass False for a record whose events are
     not the same kind of event.
+
+    A sample that is not a finite number is refused with its index: one
+    NaN takes the whole envelope's floor with it, and every shock would
+    go unseen.
     """
+    from .shaker import finite
+
+    for dof, row in zip(history.response_dof, np.asarray(history.ordinate), strict=True):
+        finite(row, str(dof), 'shocks are not found across one')
     level, hop = envelope(history, hop_seconds)
     floor = floor_of(level, quantile)
     if floor is None or level.size < 2:
