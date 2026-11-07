@@ -33,6 +33,7 @@ pub mod laws;
 pub mod mimo;
 pub mod profiles;
 pub mod protocol;
+pub mod pulse;
 pub mod random;
 pub mod server;
 pub mod session;

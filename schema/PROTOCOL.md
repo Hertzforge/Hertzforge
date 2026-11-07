@@ -1851,9 +1851,6 @@ and `clear` need control; everything that only reads is open to every connection
 service is shutting down, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`
 are refused `shutting_down`.
 
-**Status.** The control service does not offer these methods yet; this section is the contract
-they are built to.
-
 | Method | Params | From | Result |
 |---|---|---|---|
 | `shock.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
@@ -1898,7 +1895,7 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
  "identification":{"drive_vrms":0.05,"duration_s":4,"nfft":2048,"band_hz":[5,5000],
                    "min_mean_coherence":0.8,"review":true},
  "control":{"law":{"id":"fd_correct","params":{"beta":0.5}},
-            "band_hz":[5,5000],"coherence_floor":0.9,"tikhonov_floor":0.05,"ref_floor_db":50,
+            "band_hz":[5,5000],"coherence_floor":0.9,"tikhonov_floor":0.01,"ref_floor_db":50,
             "min_band_energy":0.9,"law_budget":0.25,"law_misses":3,"max_pulses":100,
             "max_peak_rise_db":10,"max_bin_rise_db":10,"first_drive_ratio":2,
             "divergence_pulses":3},
@@ -1942,7 +1939,7 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
 | `control.law` | `{"id":"fd_correct"}` | The control law, by its catalog `id` (see "Control Laws", world `shock_classical`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest) |
 | `control.band_hz` | as `identification.band_hz` | The correction band, below half the rate |
 | `control.coherence_floor` | 0.9 | Bins identified under this coherence are not trusted (0 to 1) |
-| `control.tikhonov_floor` | 0.05 | The inverse's floor, a fraction of the in-band peak gain (above 0, below 1) |
+| `control.tikhonov_floor` | 0.01 | The inverse's floor, a fraction of the in-band peak gain (above 0, below 1) |
 | `control.ref_floor_db` | 50 | Bins of the reference more than this far under its in-band peak are not trusted |
 | `control.min_band_energy` | 0.9 | The fraction of the reference's energy the trusted bins must cover, or the run is held before any pulse |
 | `control.law_budget` | 0.25 | One law call's time, a fraction of the time between pulses (`derived.call_budget_s`); above 0, at most 1 |
@@ -2019,13 +2016,15 @@ pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled 
   `not_yet` (with `seconds`) before the time between pulses has passed or while a pulse is in
   flight.
 - **`shock.level`** steps ±1 dB (`delta_db`) or goes to a level of the table (`rung`, from 0),
-  between the first and last levels. Refused `wrong_mode` in `auto`, `not_a_rung`, and
-  `drive_ceiling` when the identified drive at the new level would pass the drive abort (with
-  `vpk`, `abort_vpk` and `level_db`).
-- **`shock.train`** fires `count` pulses `spacing_s` apart (at least the floors) and
-  **`shock.burst`** the configured gunfire burst, at the present level, each firing the drive in
-  force with no law call inside it. Every pulse is judged. Both are refused `not_yet` as
-  `shock.fire` is.
+  between the first and last levels, while the run waits between pulses or holds for review.
+  Refused `wrong_mode` in `auto`, `not_a_rung` (a rung the table does not have, or a step past its
+  first or last level), and `drive_ceiling` when the identified drive at the new level would pass
+  the drive abort (with `vpk`, `abort_vpk` and `level_db`).
+- **`shock.train`** fires `count` pulses `spacing_s` apart and **`shock.burst`** the configured
+  gunfire burst, at the present level, each firing the drive in force with no law call inside it.
+  Every pulse is judged. A train's spacing under the time between pulses is refused `bad_params`;
+  `shock.burst` without `gunfire` is refused `wrong_state`; both are refused `wrong_mode` and
+  `not_yet` as `shock.fire` is.
 - **`shock.stop`** ends the run at the next boundary: the pulse in flight finishes and nothing
   more fires (`stopping`, then `operator_stop`). **`shock.abort`** takes the drive down with the
   station's own stop at once (`operator_abort`). The committed output queue is longer than a
@@ -2273,7 +2272,9 @@ full-level pulse passes); a wire with the identified gain scaled +3 dB before in
 measurement noise 30 dB under the response (`pass_by` 4); and a 30 dB notch at 300 Hz with its
 coherence under the floor (`survive`: completed, or ended by the core's own judgement, never over
 the drive ceiling and never an overshoot abort). Every case first asks that every call is
-answered, in time, with zero misses and zero refused outputs. A case's result:
+answered, in time, with zero misses and zero refused outputs. A classical law is named by `id`;
+`params` are checked against its manifest (`law_params_invalid`), and a case that cannot be run at
+all is refused `law_check_unsupported`, naming it. A case's result:
 
 ```
 {"name":"one mode","plant":"one mode, 400 Hz, Q 10","requirement":"pass_by","passed":true,
