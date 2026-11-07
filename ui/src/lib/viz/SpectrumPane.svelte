@@ -13,7 +13,7 @@
 	import uPlot from 'uplot';
 	import 'uplot/dist/uPlot.min.css';
 	import { onDestroy, onMount } from 'svelte';
-	import type { Series, SpectrumView } from '$lib/protocol/types';
+	import type { Series, SpectrumView, SpectrumHandle } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { alignSeries, valueAt } from './align';
 	import { cursors, playheadGroup, playheads } from './cursor';
@@ -46,9 +46,11 @@
 		guides?: number[];
 		/** The marker can be dragged: `x` where it is, `fraction` of the way down the plot. `done` on release. */
 		onMarkerDrag?: (x: number, fraction: number, moved: { x: boolean; y: boolean }, done: boolean) => void;
+		/** A handle let go at `decibels`. */
+		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, guides = [], onMarkerDrag, onspan }: Props = $props();
+	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, guides = [], onMarkerDrag, onhandle, onspan }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -285,7 +287,7 @@
 				}))
 			],
 			hooks: {
-				draw: [placePlayLine, placeMarker, placeRegions],
+				draw: [placePlayLine, placeMarker, placeRegions, placeHandles],
 				setScale: [
 					(u, key) => {
 						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
@@ -349,6 +351,8 @@
 			return el;
 		});
 		placeRegions();
+		handleEls = [];
+		placeHandles();
 		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
 		plot.over.addEventListener('click', (e) => {
 			const moved = pressedAt === null ? 0 : Math.abs(e.clientX - pressedAt);
@@ -431,6 +435,75 @@
 		void guides;
 		placeGuides();
 	});
+
+	let handleEls: HTMLDivElement[] = [];
+	/** The series' value nearest `x`, where a handle sits. */
+	function handleValue(h: SpectrumHandle): number | null {
+		const series = view.series[h.series];
+		if (!series?.x.length) return null;
+		let at = 0;
+		for (let k = 1; k < series.x.length; k++) {
+			if (Math.abs(series.x[k] - h.x) < Math.abs(series.x[at] - h.x)) at = k;
+		}
+		return series.y[at];
+	}
+	/** Each band's handle on its edge, in the plot's top layer. */
+	function placeHandles() {
+		const handles = onhandle ? (view.handles ?? []) : [];
+		if (!plot) return;
+		while (handleEls.length > handles.length) handleEls.pop()!.remove();
+		while (handleEls.length < handles.length) {
+			const el = document.createElement('div');
+			el.className = 'band-handle';
+			const k = handleEls.length;
+			// its own drag, not the plot's zoom
+			el.addEventListener('mousedown', (e) => e.stopPropagation());
+			el.addEventListener('click', (e) => e.stopPropagation());
+			el.addEventListener('pointerdown', (e) => startHandle(e, k));
+			plot.over.appendChild(el);
+			handleEls.push(el);
+		}
+		handles.forEach((h, k) => {
+			const value = handleValue(h);
+			const left = plot!.valToPos(h.x, 'x');
+			const top = value === null ? -1 : plot!.valToPos(value, 'y');
+			const el = handleEls[k];
+			const inside = left >= 0 && left <= plot!.over.clientWidth && top >= 0 && top <= plot!.over.clientHeight;
+			el.style.display = inside ? '' : 'none';
+			if (!inside) return;
+			el.style.left = `${left}px`;
+			el.style.top = `${top}px`;
+			el.title = `${h.label}: ${h.decibels >= 0 ? '+' : ''}${h.decibels.toFixed(2)} dB. Drag up or down`;
+		});
+	}
+	function startHandle(e: PointerEvent, k: number) {
+		const h = view.handles?.[k];
+		const start = h && handleValue(h);
+		if (!h || !start || !plot) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const el = e.currentTarget as HTMLDivElement;
+		el.setPointerCapture?.(e.pointerId);
+		const decibels = (ev: PointerEvent) => {
+			const box = plot!.over.getBoundingClientRect();
+			const y = Math.min(box.height, Math.max(0, ev.clientY - box.top));
+			el.style.top = `${y}px`;
+			return h.decibels + 10 * Math.log10(plot!.posToVal(y, 'y') / start);
+		};
+		const move = (ev: PointerEvent) => {
+			el.title = `${h.label}: ${decibels(ev).toFixed(2)} dB`;
+		};
+		const up = (ev: PointerEvent) => {
+			el.removeEventListener('pointermove', move);
+			el.removeEventListener('pointerup', up);
+			el.removeEventListener('pointercancel', up);
+			if (Math.abs(ev.clientY - e.clientY) > 3) onhandle?.(h, decibels(ev));
+			else placeHandles();
+		};
+		el.addEventListener('pointermove', move);
+		el.addEventListener('pointerup', up);
+		el.addEventListener('pointercancel', up);
+	}
 
 	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */
 	function placeMarker() {
@@ -798,6 +871,20 @@
 		left: 3.5px;
 		width: 2px;
 		background: #e69f00;
+	}
+
+	.plot :global(.band-handle) {
+		position: absolute;
+		width: 12px;
+		height: 12px;
+		margin: -6px 0 0 -6px;
+		border-radius: 50%;
+		border: 2px solid var(--accent);
+		background: var(--surface-1, #111);
+		cursor: ns-resize;
+		pointer-events: auto;
+		touch-action: none;
+		z-index: 2;
 	}
 
 	.plot :global(.region) {

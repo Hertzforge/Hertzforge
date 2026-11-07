@@ -103,7 +103,19 @@
         "y": {"$ref": "#/$defs/axis"},
         "series": {"type": "array", "items": {"$ref": "#/$defs/series"}},
         "link": {"type": "string"},
-        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}}
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+        "handles": {"type": "array", "items": {
+          "type": "object", "required": ["series", "x", "decibels", "label", "op", "params"],
+          "additionalProperties": false,
+          "properties": {
+            "series": {"type": "integer", "minimum": 0},
+            "x": {"type": "number"},
+            "decibels": {"type": "number"},
+            "label": {"type": "string"},
+            "op": {"type": "string"},
+            "params": {"type": "object"}
+          }
+        }}
       }
     },
     "region": {

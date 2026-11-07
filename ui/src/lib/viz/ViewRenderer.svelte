@@ -4,7 +4,7 @@
 	 * charts. Unknown kinds render a short note instead of failing the page.
 	 */
 	import type { ParamValues } from '$lib/forms/params';
-	import type { View } from '$lib/protocol/types';
+	import type { View, SpectrumHandle } from '$lib/protocol/types';
 	import ImagePane from './ImagePane.svelte';
 	import MatrixPane from './MatrixPane.svelte';
 	import ReadingPane from './ReadingPane.svelte';
@@ -40,9 +40,11 @@
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
 		/** A click in a 3-D view with `pick`: what it chose, to run the pick's operation with. */
 		onpick?: (patch: Record<string, unknown>) => void;
+		/** A spectrum's handle let go at `decibels`. */
+		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onspan, onpick }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onspan, onpick, onhandle }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -51,7 +53,7 @@
 </script>
 
 {#if view.view === 'spectrum'}
-	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {onspan} />
+	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {onspan} {onhandle} />
 {:else if view.view === 'reading'}
 	<ReadingPane {view} {layout} {showTitle} />
 {:else if view.view === 'shape3d'}
