@@ -33,7 +33,8 @@ use crate::service::report::IdentificationSummary;
 use crate::spec::ClassicalPulseSpec;
 use hertzforge_dsp::fft::Cplx;
 use hertzforge_shock_common::law_guard::{
-    LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawRecordRing, LawValue, MissCounter,
+    LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawRecordRing, LawValue,
+    MissCounter, OutputRule, MAX_LAW_VALUES,
 };
 use hertzforge_shock_law_math::spectrum::{abs, irfft_half, mul, rfft_half};
 use hertzforge_twr::grid::RecordGrid;
@@ -41,6 +42,7 @@ use hertzforge_twr::inverse::GridInverse;
 use hertzforge_twr::law::{apply_coherence_gate, build_mask, mask_energy_coverage, LawConfig};
 use hertzforge_twr::sysid::SysIdResult;
 use serde::{Deserialize, Serialize};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// A bin of the drive spectrum whose last magnitude is under this fraction of
 /// the largest bin's is treated as that small for the per-bin rise cap: a bin
@@ -112,9 +114,19 @@ impl PulseGrid {
         k as f64 * self.fs_hz / self.n as f64
     }
 
-    /// The core's at-rest taper (not applied yet: the record plays as the law
-    /// returns it).
-    pub fn taper(&self, _d: &mut [f64]) {}
+    /// The core's at-rest taper: the outer half of each quiet margin falls to
+    /// zero on a raised cosine, so the record's first and last samples are 0.
+    pub fn taper(&self, d: &mut [f64]) {
+        let n = d.len().min(self.n);
+        let head = self.lead / 2;
+        let tail = n.saturating_sub(self.lead + self.composite_len) / 2;
+        for (i, v) in d[..head.min(n)].iter_mut().enumerate() {
+            *v *= rise(i, head);
+        }
+        for (j, v) in d[..n].iter_mut().rev().take(tail).enumerate() {
+            *v *= rise(j, tail);
+        }
+    }
 
     /// The judged window on the grid, `[start, end)`: the standard's quiet
     /// windows either side of the main pulse.
@@ -389,7 +401,10 @@ pub(crate) fn build_law(
     factory: &dyn ClassicalLawFactory,
     setup: &ClassicalLawSetup<'_>,
 ) -> Result<Box<dyn ClassicalLaw + Send>, LawFault> {
-    factory.build(setup)
+    match catch_unwind(AssertUnwindSafe(|| factory.build(setup))) {
+        Ok(r) => r,
+        Err(p) => Err(LawFault::Crashed(panic_text(p))),
+    }
 }
 
 /// Call the law once, timed on `clock` and contained. A call that returns an
@@ -402,13 +417,17 @@ pub(crate) fn guarded_call(
     clock: &dyn LawClock,
     budget_s: f64,
 ) -> (Result<PulseOutputs, LawFault>, f64) {
-    let _ = budget_s;
     let t0 = clock.now_s();
-    let r = match which {
+    let r = catch_unwind(AssertUnwindSafe(|| match which {
         LawCall::Seed => law.seed(inputs),
         LawCall::Iterate => law.iterate(inputs),
-    };
+    }));
     let took_s = (clock.now_s() - t0).max(0.0);
+    let r = match r {
+        Ok(Ok(_)) if took_s > budget_s => Err(LawFault::OverBudget { took_s, budget_s }),
+        Ok(r) => r,
+        Err(p) => Err(LawFault::Crashed(panic_text(p))),
+    };
     (r, took_s)
 }
 
@@ -422,21 +441,53 @@ fn panic_text(p: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// The drive spectrum's bin magnitudes of a law's output (`candidate`, the
-/// output as it will play). No checks yet.
+/// Check a law's output: its length, that every number is finite, how many
+/// values it reports, and (against the drive in force) the per-pulse rise caps
+/// on its peak and on every bin. `candidate` is the output already tapered.
 pub(crate) fn check_output(
-    _out: &PulseOutputs,
+    out: &PulseOutputs,
     candidate: &[f64],
-    _n: usize,
-    _last: Option<(&[f64], &[f64])>,
-    _peak_cap_db: f64,
-    _bin_cap_db: f64,
+    n: usize,
+    last: Option<(&[f64], &[f64])>,
+    peak_cap_db: f64,
+    bin_cap_db: f64,
 ) -> Result<(OutputCheck, Vec<f64>), (LawFault, OutputCheck)> {
-    let spec = rfft_half(candidate).map_err(|e| (LawFault::Failed(e), OutputCheck::default()))?;
-    Ok((
-        OutputCheck::default(),
-        spec.iter().map(|&c| abs(c)).collect(),
-    ))
+    let none = OutputCheck::default();
+    if out.drive.len() != n {
+        return Err((LawFault::BadOutput(OutputRule::WrongLength), none));
+    }
+    if out.drive.iter().any(|v| !v.is_finite()) || out.values.iter().any(|v| !v.value.is_finite()) {
+        return Err((LawFault::BadOutput(OutputRule::NonFinite), none));
+    }
+    if out.values.len() > MAX_LAW_VALUES {
+        return Err((LawFault::BadOutput(OutputRule::TooManyValues), none));
+    }
+    let spec =
+        rfft_half(candidate).map_err(|_| (LawFault::BadOutput(OutputRule::WrongLength), none))?;
+    let mags: Vec<f64> = spec.iter().map(|&c| abs(c)).collect();
+    let Some((last_drive, last_mags)) = last else {
+        return Ok((none, mags));
+    };
+    let mut check = OutputCheck::default();
+    let peak_grow = 10f64.powf(peak_cap_db / 20.0);
+    let last_peak = peak(last_drive);
+    if peak(candidate) > last_peak.max(f64::MIN_POSITIVE) * peak_grow {
+        check.peak_capped = true;
+    }
+    let bin_grow = 10f64.powf(bin_cap_db / 20.0);
+    let floor = BIN_RISE_FLOOR_FRACTION * last_mags.iter().fold(0.0f64, |m, &v| m.max(v));
+    for (new, old) in mags.iter().zip(last_mags) {
+        if *new > old.max(floor) * bin_grow {
+            check.capped_bins += 1;
+        }
+    }
+    if check.peak_capped {
+        return Err((LawFault::BadOutput(OutputRule::PeakRise), check));
+    }
+    if check.capped_bins > 0 {
+        return Err((LawFault::BadOutput(OutputRule::BinRise), check));
+    }
+    Ok((check, mags))
 }
 
 /// What identification found, as the status shows it.
@@ -494,6 +545,19 @@ mod tests {
             .iter()
             .zip(&g.reference)
             .all(|(a, b)| *a == -*b));
+    }
+
+    #[test]
+    fn the_taper_brings_both_ends_to_zero_and_leaves_the_pulse_alone() {
+        let g = PulseGrid::new(&spec(), 5120.0, Polarity::Positive);
+        let mut d = vec![1.0; g.n];
+        g.taper(&mut d);
+        assert_eq!(d[0], 0.0);
+        assert!(d[g.n - 1].abs() < 1e-3, "{}", d[g.n - 1]);
+        assert!(d[g.lead / 2..g.lead + g.composite_len]
+            .iter()
+            .all(|&v| v == 1.0));
+        assert!(d.windows(2).take(g.lead / 2).all(|w| w[1] >= w[0]));
     }
 
     #[test]

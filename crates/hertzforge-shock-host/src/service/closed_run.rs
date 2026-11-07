@@ -35,11 +35,13 @@ use super::closed::{
     ClassicalCallRecord, GridPlant, LawRun, LawStats,
 };
 use super::*;
-use crate::law::{FdCorrectFactory, PulseInputs, ToleranceAbort, Verdict};
-use crate::service::report::{DrivePrediction, HeldReason, LawReport, LawStatus, PulseLawCall};
+use crate::law::{FdCorrectFactory, PulseInputs, ToleranceAbort, Verdict, DIVERGENCE_RISE_DB};
+use crate::service::report::{
+    ConvergenceLimit, DrivePrediction, HeldReason, LawReport, LawStatus, PulseLawCall,
+};
 use hertzforge_dsp::shock::pulse_kinematics;
 use hertzforge_shock_common::law_guard::{
-    LawCall, LawCallRecord, LawFault, LawRecordRing, MissCounter,
+    LawCall, LawCallRecord, LawFault, LawRecordRing, MissCounter, OutputRule,
 };
 use hertzforge_shock_common::LadderTick;
 use hertzforge_twr::sysid::SysIdConfig;
@@ -93,8 +95,19 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         (!run.drive.is_empty()).then(|| peak(&run.drive) * db_scale(level_db))
     }
 
-    /// A level move (no check yet).
-    pub(super) fn check_level_move(&self, _level_db: f64) -> Result<(), ServiceError> {
+    /// Refuse a level move whose drive would pass the drive abort.
+    pub(super) fn check_level_move(&self, level_db: f64) -> Result<(), ServiceError> {
+        let (Some(vpk), Some(control)) = (self.predicted_drive_vpk_at(level_db), &self.cfg.control)
+        else {
+            return Ok(());
+        };
+        if vpk > control.drive_vpk_abort {
+            return Err(ServiceError::DriveCeiling {
+                level_db,
+                vpk,
+                abort_vpk: control.drive_vpk_abort,
+            });
+        }
         Ok(())
     }
 
@@ -402,6 +415,21 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         if !self.call_law(LawCall::Seed, &[], &[], None, false)? {
             return Ok(self.state);
         }
+        let top_db = if self.cfg.schedule.mode == ShockRunMode::Auto {
+            self.cfg.schedule.full_db()
+        } else {
+            self.current_level_db()
+        };
+        let vpk = self.predicted_drive_vpk_at(top_db).unwrap_or(0.0);
+        if vpk > control.drive_vpk_abort {
+            self.latch_trip(TripKind::DriveVpk {
+                pulse: 0,
+                vpk,
+                abort_vpk: control.drive_vpk_abort,
+                predicted: true,
+            });
+            return Ok(self.state);
+        }
         self.transition(RunState::Firing);
         Ok(self.state)
     }
@@ -418,9 +446,11 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         verdict: Option<Verdict>,
         limited: bool,
     ) -> Result<bool, ServiceError> {
-        if self.cfg.control.is_none() {
-            return Err(ServiceError::Internal("a law call on the open loop".into()));
-        }
+        let control = self
+            .cfg
+            .control
+            .clone()
+            .ok_or_else(|| ServiceError::Internal("a law call on the open loop".into()))?;
         let clock = Arc::clone(&self.law_clock);
         let pulse_index = self.pulses_fired;
         let fs = self.fs_hz();
@@ -469,6 +499,12 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                     let predicted = plant
                         .predict(&candidate)
                         .map_err(|e| (LawFault::Failed(e), Default::default()))?;
+                    if which == LawCall::Seed {
+                        let bound = control.first_drive_ratio * peak(&grid.reference);
+                        if peak(&predicted) > bound {
+                            return Err((LawFault::BadOutput(OutputRule::FirstDrive), chk));
+                        }
+                    }
                     Ok((chk, mags, predicted))
                 });
                 (
@@ -529,8 +565,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                     peak_capped: chk.peak_capped,
                     call_ms,
                 });
-                run.misses.miss();
-                (which == LawCall::Seed).then(|| (fault, run.misses.in_a_row()))
+                let tripped = run.misses.miss();
+                (which == LawCall::Seed || tripped).then(|| (fault, run.misses.in_a_row()))
             }
         };
         let _ = fs;
@@ -748,6 +784,17 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         if self.state == RunState::Armed {
             self.transition(RunState::Firing);
         }
+        // 1. The run's pulse cap.
+        if self.pulses_fired >= control.guards.max_pulses {
+            self.end_run(
+                TripKind::NotConverged {
+                    limit: ConvergenceLimit::Run,
+                    pulses: self.pulses_fired,
+                },
+                RunState::NotConverged,
+            );
+            return Ok(false);
+        }
 
         let ladder_scale = db_scale(scheduled_level_db);
         let mut extra_scale = self.next_pulse_scale;
@@ -773,9 +820,62 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 return Ok(false);
             }
         }
+        // 2b. The drive in volts: over the abort it is refused, over the
+        // ceiling it is scaled to it.
+        let vpk = peak(&drive_full) * ladder_scale * extra_scale;
+        if vpk > control.drive_vpk_abort {
+            self.latch_trip(TripKind::DriveVpk {
+                pulse: self.pulses_fired,
+                vpk,
+                abort_vpk: control.drive_vpk_abort,
+                predicted: false,
+            });
+            return Ok(false);
+        }
+        if vpk > control.drive_vpk_ceiling {
+            let s = control.drive_vpk_ceiling / vpk;
+            extra_scale *= s;
+            self.drive_limit_action(
+                self.pulses_fired,
+                "drive-ceiling",
+                s,
+                format!(
+                    "the drive's {vpk:.4} V pk is over the {:.4} V pk drive ceiling; scaled to it",
+                    control.drive_vpk_ceiling
+                ),
+            );
+        }
         let total_scale = ladder_scale * extra_scale;
         let commanded_db = scheduled_level_db + 20.0 * extra_scale.log10();
         let commanded_amplitude_g = self.cfg.spec.amplitude_g * total_scale;
+        // 2c. The predicted response's kinematics at the commanded scale.
+        if let Some(shaker) = &self.cfg.shaker {
+            let response: Vec<f64> = predicted_full.iter().map(|v| v * total_scale).collect();
+            let k = pulse_kinematics(&response, fs);
+            let breach = shaker
+                .max_velocity_ips
+                .as_ref()
+                .filter(|v| k.peak_velocity_ips > v.value)
+                .map(|v| ("peak velocity (in/s)", k.peak_velocity_ips, v.value))
+                .or_else(|| {
+                    shaker
+                        .max_displacement_in_pp
+                        .as_ref()
+                        .filter(|d| k.pk_pk_disp_in > d.value)
+                        .map(|d| ("pk-pk displacement (in)", k.pk_pk_disp_in, d.value))
+                });
+            if let Some((quantity, value, limit)) = breach {
+                self.latch_trip(TripKind::Kinematic {
+                    quantity: quantity.into(),
+                    value,
+                    limit,
+                    pulse: self.pulses_fired,
+                    predicted: true,
+                });
+                return Ok(false);
+            }
+        }
+
         // 3. Fire the grid record in volts.
         let drive: Vec<f64> = drive_full.iter().map(|&v| v * total_scale).collect();
         let fired_at_s = self.run_clock_s;
@@ -917,6 +1017,14 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         // The judgement, in order: overshoot, measured kinematics, the
         // between-pulse monitors, then the tolerance verdict.
         let mut abort_after: Option<TripKind> = None;
+        let limit_ratio = 1.0 + control.overshoot_abort_frac(self.cfg.standard);
+        if peak_ratio > limit_ratio {
+            abort_after = Some(TripKind::Overshoot {
+                pulse: pulse_no,
+                peak_ratio,
+                limit_ratio,
+            });
+        }
         if abort_after.is_none() {
             if let Some(shaker) = &self.cfg.shaker {
                 if let Some(v) = shaker
@@ -1019,7 +1127,27 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             return Ok(true);
         }
 
-        // 5. The ladder.
+        // 5. Divergence at this level, then the ladder.
+        let rises = self
+            .closed
+            .as_mut()
+            .map(|c| {
+                c.diverging(
+                    scheduled_level_db,
+                    error_pct,
+                    DIVERGENCE_RISE_DB,
+                    control.divergence_pulses,
+                )
+            })
+            .unwrap_or(0);
+        if rises > 0 {
+            self.latch_trip(TripKind::Divergence {
+                pulse: pulse_no,
+                pulses: rises,
+                error_pct,
+            });
+            return Ok(false);
+        }
         let tick = {
             let ladder = self.ladder.as_mut().ok_or_else(|| {
                 ServiceError::Internal("no ladder while running (ladder tick)".into())
@@ -1029,7 +1157,16 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             (tick, before, ladder.current_level_db())
         };
         match tick {
-            (LadderTick::NotConverged { .. }, ..) => {}
+            (LadderTick::NotConverged { pulses }, ..) => {
+                self.end_run(
+                    TripKind::NotConverged {
+                        limit: ConvergenceLimit::PerLevel,
+                        pulses: u64::from(pulses),
+                    },
+                    RunState::NotConverged,
+                );
+                return Ok(false);
+            }
             (LadderTick::Completed, ..) => return Ok(true),
             (LadderTick::Advanced, from_db, to_db) => {
                 self.level_history.push(LevelHistoryEntry {
