@@ -315,6 +315,10 @@ pub struct RandomService {
     /// Set when `law_misses` reaches `law_guards.max_misses`: the reason the
     /// controlled stop is owed, taken at the next point the loop can stop.
     law_stop_due: Option<LawFaultReason>,
+    /// Set when an AUTO schedule has held full level for its duration: the run
+    /// ends with the controlled stop (the shutdown ramp), and its end is a
+    /// completion, not an operator stop.
+    schedule_complete: bool,
     /// Once the run is stopping for a law fault the law is not called again: the
     /// core holds the drive in force and the ramp takes it down.
     law_retired: bool,
@@ -601,6 +605,7 @@ impl RandomService {
             law_stats: LawGuardStats::default(),
             law_misses: 0,
             law_stop_due: None,
+            schedule_complete: false,
             law_retired: false,
             law_cap_streak: Vec::new(),
             schedule_level_db: 0.0,
@@ -758,6 +763,12 @@ impl RandomService {
     /// it has been.
     pub fn stop_requested_db(&self) -> Option<f64> {
         self.ramp.stop_requested()
+    }
+    /// Whether an AUTO schedule held full level for its whole duration. The run
+    /// then ends through the controlled stop, and this marks the end as the
+    /// schedule's own.
+    pub fn schedule_complete(&self) -> bool {
+        self.schedule_complete
     }
     /// The in-band gRMS of the FULL (0 dB) shaped target.
     pub fn full_target_grms(&self) -> f64 {
@@ -1379,6 +1390,7 @@ impl RandomService {
         self.law_stats = LawGuardStats::default();
         self.law_misses = 0;
         self.law_stop_due = None;
+        self.schedule_complete = false;
         self.law_retired = false;
         self.law_cap_streak = vec![0; nbins];
         self.law_stats.calls += 1;
@@ -2610,12 +2622,20 @@ impl RandomService {
         // 11. Capture/save clocks + AUTO ladder advance + full-duration stop.
         self.advance_capture_clocks();
         self.maybe_advance_auto();
+        //     The end of the schedule takes the same controlled stop as an
+        //     operator's Stop: the shutdown ramp, then Stopped (step 7a). With no
+        //     ramp configured `request_stop` stops at once, as before.
         if matches!(self.state, RunState::FullLevel)
             && matches!(self.cfg.schedule.mode, RunMode::Auto)
             && self.elapsed_at_level_s >= self.cfg.full_level_duration_s
+            && !self.schedule_complete
+            && self.ramp.stop_requested().is_none()
         {
-            self.stop()?;
-            return Ok(false);
+            self.schedule_complete = true;
+            self.request_stop()?;
+            if !matches!(self.state, RunState::Engaged | RunState::FullLevel) {
+                return Ok(false);
+            }
         }
         Ok(true)
     }
