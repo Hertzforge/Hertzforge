@@ -75,7 +75,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'transform': (_RECORDS, 'No shape set in the project reads it as physical'),
     'expand': (_RECORDS, 'No shape set in the project reads it as modal'),
     'generate_rigid_body_modes': (('geometry',), ''),
-    'generate_signal': (('specification', 'shock_specification', 'transient_specification',
+    'generate_signal': (('specification', 'transient_specification',
                          'sine_sweep_specification', 'psd', 'srs', 'time_history'),
                         'No signal can be made from it'),
     'solve_modes': (('geometry',), 'Its element groups have no properties yet'),

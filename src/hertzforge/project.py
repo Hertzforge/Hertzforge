@@ -534,6 +534,8 @@ class Project(dict):
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (object_groups or [])]
+        #: what the last Work Up could not compute, (slot, why)
+        self.last_work_up_skipped: list[tuple[str, str]] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -2885,7 +2887,9 @@ class Project(dict):
     def compute_srs(self, source: Any, *,
                     per_octave: int | None = None,
                     q: float | None = None,
-                    kind: str = 'maximax') -> str:
+                    kind: str = 'maximax',
+                    low: float | None = None,
+                    high: float | None = None) -> str:
         """Compute shock response spectra from a time history's shocks
         (Compute SRS), one curve per channel per event.
 
@@ -2894,7 +2898,10 @@ class Project(dict):
         no averaging set and is not a transient specification. A record
         read as frames already says where its events are (in a transient
         run each playing is one frame), and a specification is one
-        playing by definition.
+        playing by definition. A record filtered in this project takes
+        its events from the recording it was filtered from, which is
+        where they are detected (`detect_shocks`), and its spectrum stops
+        at the low-pass corner it came through (`srs_ceiling`).
 
         Parameters
         ----------
@@ -2908,12 +2915,23 @@ class Project(dict):
         kind : str, default 'maximax'
             Which peak each oscillator reports: 'maximax' (largest
             magnitude of either sign), 'positive' or 'negative'.
+        low, high : float, optional
+            The natural-frequency band, in Hz, to reach a requirement's
+            own. Default to the record's (`TimeHistory.srs_band`) and
+            `srs_ceiling`.
 
         Returns
         -------
         str
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            For a `low` under a quarter cycle of the shortest window, a
+            `high` above the Nyquist frequency, or a `high` above a
+            low-pass the record came through.
         """
         # Detection is the last resort. Set loose on a transient run, whose
         # playings are its averaging, the detector found thirty-one
@@ -2927,17 +2945,108 @@ class Project(dict):
                 and not isinstance(history, TransientSpecification)):
             from .core.shocks import suggest
 
-            history.shocks = suggest(history)
+            recording = self._recording_of(source)
+            # on a filtered record the detector's floor sinks with the
+            # noise taken out, and ordinary noise then clears it: 13
+            # events where the plate's shock file holds 4
+            if not recording.shocks and recording.averaging is None:
+                recording.shocks = suggest(recording)
+            history.shocks = recording.shocks
+        self._check_srs_band(source, low, high)
+        band = {key: float(value) for key, value in (('low', low), ('high', high))
+                if value is not None}
         # the analysis choices are parameters of the act, recorded in
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
-                            history.compute_srs(per_octave=per_octave,
-                                                q=q, kind=kind),
+                            history.compute_srs(
+                                per_octave=per_octave, q=q, kind=kind,
+                                low=band.get('low'),
+                                high=band.get('high', self.srs_ceiling(source))),
                             f'{source} SRS',
                             recipe=('compute_srs',
                                     {'per_octave': per_octave,
-                                     'q': q, 'kind': kind}))
+                                     'q': q, 'kind': kind, **band}))
+
+    def _check_srs_band(self, source: str, low: float | None,
+                        high: float | None) -> None:
+        """Refuse a band a record cannot be read over. An oscillator
+        peaks a quarter cycle after a pulse, so a window holding a quarter
+        cycle of the lowest line reads it true: a 26 ms window on a lone
+        half-sine read 20 Hz as the whole record does, 10 Hz within 0.2 dB
+        and 5 Hz 2 to 3 dB low."""
+        history = self[source]
+        if low is not None:
+            shortest = 1.0 / history.srs_band()[0]
+            floor = 1.0 / (4.0 * shortest)
+            if low < floor:
+                raise ValueError(
+                    f'{source}\'s shortest window, {1e3 * shortest:.4g} ms, reads an SRS '
+                    f'down to {floor:.4g} Hz; {low:g} Hz needs a window of at least '
+                    f'{1e3 / (4.0 * low):.4g} ms')
+        if high is not None:
+            rate = history.sample_rate
+            if high > rate / 2.0:
+                raise ValueError(f'{high:g} Hz is above the Nyquist frequency of '
+                                 f'{source}, {rate / 2.0:g} Hz')
+            corner = self._low_pass_of(source)
+            if corner is not None and high > corner:
+                raise ValueError(
+                    f'{source} is low-passed at {corner:g} Hz, and its SRS stops there; '
+                    'read the band above it from the recording')
+
+    def _recording_of(self, name: str) -> Any:
+        """The record `name` was filtered from, through any number of
+        filters; `name`'s own object when it was not filtered."""
+        seen = set()
+        while name not in seen:
+            seen.add(name)
+            made = self.provenance.get(name) or {}
+            if made.get('verb') != 'filter_data' or made.get('source') not in self:
+                break
+            name = made['source']
+        return self[name]
+
+    def srs_ceiling(self, name: Any) -> float | None:
+        """The highest natural frequency a record's SRS can be read to,
+        in Hz, when a low-pass on its way sets it: the lowest corner of
+        the filters applied in this project on the way to the record, as
+        recorded when each was applied (`_filters_on_the_way` reads the
+        same record). None when no low-pass did, or when the corner is
+        above the top of the record's own band (`TimeHistory.srs_band`).
+
+        The filter is zero phase, so it takes 6 dB at its corner, and a
+        response above it is gone: a 1500 Hz ring read 22 dB low on a
+        record low-passed at 1024 Hz, with no sign of it on the curve.
+
+        Parameters
+        ----------
+        name : str or object
+            The record.
+
+        Returns
+        -------
+        float or None
+        """
+        name = self.name_of(name)
+        corner = self._low_pass_of(name)
+        return corner if corner is not None and corner < self[name].sample_rate / 5.0 else None
+
+    def _low_pass_of(self, name: str) -> float | None:
+        """The lowest low-pass corner on the way to a record, in Hz, or
+        None when it came through none."""
+        corners, seen = [], set()
+        current = name
+        while current and current not in seen:
+            seen.add(current)
+            made = self.provenance.get(current) or {}
+            if made.get('verb') == 'filter_data':
+                state = made.get('state') or (None, None)
+                high = state[1].get('high') if isinstance(state[1], Mapping) else None
+                if high is not None:
+                    corners.append(float(high))
+            current = made.get('source')
+        return min(corners) if corners else None
 
     def detect_shocks(self, source: Any) -> int:
         """Find the events in a time history and mark them on it (Detect
@@ -5799,7 +5908,14 @@ class Project(dict):
             report.marking = str(marking)
         if marking_color is not None:
             report.marking_color = marking_color
-        return self.add(name, report)
+        added = self.add(name, report)
+        # which template it is goes by this record, not by its title,
+        # which the author can change (`work_up`)
+        self.provenance.pop(added, None)
+        if template in builders:
+            self.provenance[added] = {'verb': 'generate_report', 'source': None,
+                                      'params': {'template': template}}
+        return added
 
     def report_features(self, name: str, *, enable: Sequence[str] = (),
                         disable: Sequence[str] = (),
@@ -7599,8 +7715,9 @@ class Project(dict):
         the type's report. A slot the loaded data cannot fill (a
         geometry, the photographs, a specification) is left gray. A
         computation the data refuses (no drive channel for a coherence)
-        is skipped, and the rest still run. Nothing already present is
-        made again, so calling this twice adds nothing the second time.
+        is skipped, with its reason in `last_work_up_skipped`, and the
+        rest still run. Nothing already present is made again, so calling
+        this twice adds nothing the second time.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -7639,6 +7756,7 @@ class Project(dict):
             raise ValueError('the project has no type, so there is nothing '
                              'to work up: name the kind of test')
         added: list[str] = []
+        self.last_work_up_skipped = []
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -7678,6 +7796,25 @@ class Project(dict):
             done = derived(record, 'filter_data')
             return done or make(self.filter_data, record)[0]
 
+        def playings(record, side):
+            # a run against a reference is read a playing to a frame, so
+            # that the two PSDs share their lines: one window over six
+            # playings put the same power on lines six times closer and
+            # read 7.8 dB over the reference at its peak
+            from .core.replication import averaging_for
+
+            target = next(iter(on(side, TransientSpecification)), None)
+            if target is not None and self[record].averaging is None:
+                self[record].averaging = averaging_for(self[record], self[target])
+
+        def settled(record):
+            # the FRFs and the coherence adopt the suggested averaging,
+            # so PSDs made ahead of them on no averaging were one window
+            # over the whole record, and stale as soon as they were made
+            if self[record].averaging is None:
+                with contextlib.suppress(ValueError):
+                    self[record].averaging = self[record].suggest_averaging()
+
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
             # a report from another kind of test does not fill this one's:
@@ -7704,6 +7841,10 @@ class Project(dict):
                         continue
                     record = recorded(side)
                     if record is not None:
+                        if project_type == 'Transient':
+                            playings(record, side)
+                        else:
+                            settled(record)
                         make(self.compute_psds, record)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
@@ -7761,7 +7902,8 @@ class Project(dict):
                         else recorded(side)
                     if record is not None:
                         make(self.compute_srs, record)
-                elif icon == 'TimeHistory' and ordinal > 1:
+                elif (icon == 'TimeHistory' and ordinal > 1
+                      and project_type == 'Shock'):
                     # the shock's motion chain: filtered, then velocity,
                     # then displacement, each from the one before
                     chain = filtered(side)
@@ -7772,22 +7914,29 @@ class Project(dict):
                             make(self.integrate, chain)[0]
                 elif icon == 'Report':
                     # the type's reports in order, each made once: chosen
-                    # by which are already here (by title), not by the
-                    # slot's number, so a random-and-sine project holding
-                    # its sine report gets the random one, not a second
-                    # sine (2026-10-05, two reports for that type)
-                    made = {self[name].title for name in self.names
-                            if isinstance(self[name], Report)}
+                    # by which are already here, not by the slot's number,
+                    # so a random-and-sine project holding its sine report
+                    # gets the random one, not a second sine (2026-10-05,
+                    # two reports for that type). A report's recipe says
+                    # which template made it; one from a file older than
+                    # that goes by its title
+                    reports = [name for name in self.names
+                               if isinstance(self[name], Report)]
+                    built = {(self.provenance.get(name) or {}).get('params', {}).get('template')
+                             for name in reports}
+                    titles = {self[name].title for name in reports}
                     wanted = next(
                         (template for template
                          in PROJECT_TEMPLATES[project_type]
-                         if TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
-                         not in made), None)
+                         if template not in built
+                         and TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
+                         not in titles), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
-            except ValueError:
+            except ValueError as error:
                 # what the data refuses (a coherence with no drive
                 # channel) stays gray; the slots after it still fill
+                self.last_work_up_skipped.append((_label, str(error)))
                 continue
         return added
 
@@ -8101,6 +8250,11 @@ class Project(dict):
         -------
         list of str
             A list holding the name of the sine level set added.
+
+        Raises
+        ------
+        ValueError
+            When none is named and the project does not hold exactly one.
         """
         from dataclasses import replace
 
@@ -8108,8 +8262,14 @@ class Project(dict):
 
         source = self.name_of(source)
         if specification is None:
-            spec = self.sine_sweep_specification
-            spec_name = self.name_of(spec)
+            found = Selection(self).of_type(SineSweepSpecification)
+            if len(found) != 1:
+                raise ValueError(
+                    'no sine sweep specification in the project' if not found else
+                    f'{len(found)} sine sweep specifications in the project, '
+                    f'{" and ".join(repr(name) for name in found)}: name the one to read')
+            spec_name = found[0]
+            spec = self[spec_name]
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]
@@ -9162,7 +9322,8 @@ _RECOMPUTE = {
         lambda p, s, k: p[s].compute_multiple_coherence(),
     'compute_srs': lambda p, s, k: p[s].compute_srs(
         per_octave=k.get('per_octave'), q=k.get('q'),
-        kind=k.get('kind', 'maximax')),
+        kind=k.get('kind', 'maximax'), low=k.get('low'),
+        high=k.get('high', p.srs_ceiling(s))),
     'make_realizable': lambda p, s, k: p[s].made_realizable(
         tolerance=k.get('tolerance'),
         keep_diagonal=k.get('keep_diagonal', True)),
@@ -9455,6 +9616,8 @@ def _state_story(was, now):
             return 'computed on nodes that have since moved'
         return (f'computed {_summarize_state(was)}; the geometry now '
                 f'says {_summarize_state(now)}')
+    if was[0] == 'shocks' and len(was[1]) == len(now[1]):
+        return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
 

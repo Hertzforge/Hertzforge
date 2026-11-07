@@ -283,7 +283,7 @@ def test_srs_error_scores_each_channel_and_event(shock, validate):
     wire_views([reading], validate)
     first = reading['rows'][0]
     assert first['value'] == pytest.approx(0.0, abs=1e-9) and first['status'] == 'pass'
-    assert reading['rows'][-1]['label'] == 'Channels out'
+    assert reading['rows'][-1]['label'] == 'Readings out'
     with pytest.raises(ProtocolError, match='low edge up'):
         run(shock, 'project.srs_error', low=0.0, high=0.0)
 
@@ -339,9 +339,9 @@ def test_waveform_error_scores_every_playing(transient, validate):
     found = rows(reading)
     assert [found[f'1Z+ e{k}']['value'] for k in (1, 2, 3)] == pytest.approx([10.0] * 3,
                                                                              abs=0.01)
-    assert found['Channels out']['status'] == 'pass'
+    assert found['Readings out']['status'] == 'pass'
     (tight,) = run(transient, 'project.waveform_error', ceiling=5.0)
-    assert rows(tight)['Channels out']['value'].startswith('3 of 3')
+    assert rows(tight)['Readings out']['value'].startswith('3 of 3 readings')
 
 
 def test_segments_are_judged_each_by_its_kind(transient, validate):

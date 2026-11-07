@@ -586,7 +586,7 @@ def tone_mean_square(tone: SineTone, column: int = 0) -> float:
     level, and the time average of its amplitude squared over two for
     one whose level changes along its run, swept or held."""
     t, f = tone.trajectory(tone.duration() / 400.0)
-    level = np.asarray(tone.target(f)[:, column], dtype=np.float64)
+    level = np.asarray(tone.target(f, seconds=t)[:, column], dtype=np.float64)
     # each point weighed by the time it stands for, since a segment's
     # steps are whole and may differ from the next segment's
     weight = np.gradient(np.asarray(t, dtype=np.float64))
@@ -1183,7 +1183,7 @@ def _judge_tone(history, spec, tone, column, band, onset, start, tolerance,
     level = track_sine(history, spec, band, tone=tone.name,
                        onset=tone_onset, channels=[channel])[0]
     read = np.abs(np.asarray(level.ordinate[0])).astype(np.float64)
-    written = tone.target(level.abscissa)[:, column]
+    written = level.target_on(tone)[:, column]
     # the band settles from the tone's own start, which is `start_time`
     # after the environment's
     settled = np.asarray(level.seconds) >= start + float(tone.start_time)

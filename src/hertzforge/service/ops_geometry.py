@@ -920,21 +920,61 @@ def _still_missing(project: Any) -> list[dict]:
     return [v.row('Missing', label, None, 'warn') for label in still]
 
 
+def _is_a_run(project: Any, members: Any) -> bool:
+    """Whether objects in one group are a test's: they hold a recording,
+    or they hold neither a geometry nor shapes, which make a model of it."""
+    from hertzforge.core.data import TimeHistory, TransientSpecification
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    held = [project[name] for name in members]
+    return (any(isinstance(obj, TimeHistory) and not isinstance(obj, TransientSpecification)
+                for obj in held)
+            or (bool(held) and not any(isinstance(obj, (Geometry, ShapeSet)) for obj in held)))
+
+
+def _place_the_run(project: Any) -> list[str]:
+    """A file's import group into the Basis when the Basis holds no run: a
+    Basis of a geometry alone leaves every other slot looking for its object
+    in a group that has none of them. A second run stays where it is."""
+    basis = project.object_group_with_role('Basis')
+    if basis is not None and _is_a_run(project, basis['members']):
+        return []
+    groups = [group for group in project.object_groups if group is not basis]
+    from hertzforge.core.data import TimeHistory
+
+    run = next((group for group in groups
+                if any(isinstance(project[name], TimeHistory) for name in group['members'])
+                and _is_a_run(project, group['members'])),
+               next((group for group in groups if _is_a_run(project, group['members'])), None))
+    if run is None:
+        return []
+    members = list(run['members'])
+    if basis is None:
+        project.set_role(members[0], 'Basis')
+        return members
+    try:
+        project.link(*basis['members'], *members, role='Basis')
+    except (ValueError, KeyError) as error:
+        return [f'not placed: {str(error).strip(chr(39))}']
+    return members
+
+
 def _place_basis(project: Any, test: str) -> list[str]:
-    """The Basis slots of a kind of test filled from the objects that
-    satisfy them (`core.report.expectation_satisfiers`), each placed in
-    the Basis group (`Project.place`) unless it is already in another
-    group: what Visual Dynamics' window does when a type is set. Returns
-    what was placed, or the core's refusal of a placement."""
+    """The run's group placed in the Basis, then the Basis slots of a kind of
+    test filled from the objects that satisfy them
+    (`core.report.expectation_satisfiers`), each placed in the Basis group
+    (`Project.place`) unless it is already in another group. Returns what
+    was placed, or the core's refusal of a placement."""
     from hertzforge.core.report import expectation_satisfiers
 
+    moved = _place_the_run(project)
     placed = project.sides()
     members = expectation_satisfiers(test, dict(project.items()),
                                      placed).get('Basis', [])
     elsewhere = {name for group in project.object_groups if group['role'] != 'Basis'
                  for name in group['members']}
     here = set(placed.get('Basis', ()))
-    moved = []
     for name in members:
         if name in elsewhere or name in here:
             continue
@@ -944,6 +984,21 @@ def _place_basis(project: Any, test: str) -> list[str]:
             return [*moved, f'not placed: {str(error).strip(chr(39))}']
         moved.append(name)
     return moved
+
+
+def _srs_bands(project: Any, added: list[str]) -> list[dict]:
+    """Where a low-pass stopped an SRS Work Up made, since nothing else in
+    its reading would say the top of the band was left off."""
+    rows = []
+    for name in added:
+        made = project.provenance.get(name) or {}
+        corner = (project.srs_ceiling(made['source']) if made.get('verb') == 'compute_srs'
+                  else None)
+        if corner is not None:
+            rows.append(v.row('SRS band', f'{name} stops at {corner:g} Hz, the low-pass corner '
+                              'of the record it was read from; the filter takes 6 dB at the '
+                              'corner, so the top of the band reads low', None, 'info'))
+    return rows
 
 
 def _work_up(test: str) -> Any:
@@ -964,6 +1019,9 @@ def _work_up(test: str) -> Any:
                 or [v.row('Added', 'nothing to compute', None, 'info')])
         if moved:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
+        rows += _srs_bands(project, added)
+        rows += [v.row('Not computed', f'{slot}: {why}', None, 'warn')
+                 for slot, why in dict.fromkeys(project.last_work_up_skipped)]
         return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
     return run
 
@@ -977,7 +1035,7 @@ CHANNEL_ROLE = Param('role', 'Role', 'enum', default='response', options=(
     Option('reference', 'Reference: drives the structure'),
     Option('response', 'Response: measured on the structure'),
     Option('monitor', 'Monitor: recorded, not analyzed')))
-RENAMED = ('channel_table', *DATA_KINDS, 'transient_specification', 'shock_specification')
+RENAMED = ('channel_table', *DATA_KINDS)
 RENAME_SOURCE = Param('source', 'Object', 'enum', options_from='objects:' + '|'.join(RENAMED))
 OLD = Param('old', 'DOF', 'string', default='')
 NEW = Param('new', 'New DOF', 'string', default='')
