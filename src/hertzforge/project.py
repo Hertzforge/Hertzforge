@@ -7239,38 +7239,10 @@ class Project(dict):
 
         identify(self._report(name), **fields)
 
-    # Issuing printed the report as a PDF through Qt WebEngine, which
-    # Hertzforge does not carry; it returns when the desktop app prints the
-    # page (MIGRATION_PLAN.md, phase 4) and calls this sequence again.
-    def _issue(self, report: Report, unit_system: Any, write: Any,
-               file: str) -> None:
-        """Mark `report` issued, render it, hand the page to `write`
-        (which returns the PDF's bytes), and record the issue; on any
-        failure the report is put back as it was. The one sequence the
-        script verb and the window share."""
-        from .report import render_html
-        from .report.identity import (
-            issue_ready,
-            mark_issued,
-            record_issue,
-            unmark,
-        )
-
-        status = issue_ready(report, self, self.object_groups)
-        before = mark_issued(report, status)
-        try:
-            page = render_html(report, self, unit_system,
-                               object_groups=self.object_groups)
-            pdf = write(page)
-        except BaseException:
-            unmark(report, before)
-            raise
-        record_issue(report, page, pdf, file)
-
     def amend_report(self, name: str, changes: Sequence[Mapping[str, str]],
                      *, revision: str, number: str | None = None) -> None:
         """Make an issued report an amendment, to be issued in its turn
-        (`issue_report`).
+        (`report.issue`).
 
         The amendment carries its own revision (and, if given, its own
         number), refers to the revision it amends by number, revision
@@ -7319,16 +7291,22 @@ class Project(dict):
         if 'data_index' in enabled(self._report(name)):
             self.verify_data_index()
 
-    def _export_page(self, name: str, unit_system: Any = None) -> str:
-        """The report rendered for export, refused when it was issued and
-        has changed since (`report.identity.guard`)."""
+    def _report_page(self, name: str, unit_system: Any = None) -> str:
+        """The report as it leaves the project: the one document issued,
+        printed and exported. Light whatever the reader's own theme, as
+        paper is."""
         from .report import render_html
+
+        return render_html(self._report(name), self, unit_system,
+                           object_groups=self.object_groups, theme='light')
+
+    def _export_page(self, name: str, unit_system: Any = None) -> str:
+        """`_report_page`, refused when the report was issued and has
+        changed since (`report.identity.guard`)."""
         from .report.identity import guard
 
-        report = self._report(name)
-        page = render_html(report, self, unit_system,
-                           object_groups=self.object_groups)
-        guard(report, page)
+        page = self._report_page(name, unit_system)
+        guard(self._report(name), page)
         return page
 
     def run_identity(self, name: str) -> Any:

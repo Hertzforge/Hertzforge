@@ -95,14 +95,16 @@ def test_a_report_over_the_socket(validate, tmp_path):
         ('report.generate', {'template': 'modal', 'name': 'Plate Report'}),
         ('report.render', {'name': 'Plate Report'}),
         ('report.export', {'name': 'Plate Report', 'path': str(tmp_path / 'out.html')}),
+        ('report.print', {'name': 'Plate Report', 'anyway': True}),
         ('report.render', {}),
     ]))
-    none, _, made, shown, written, unnamed = (got[-1] for got in responses)
+    none, _, made, shown, written, printed, unnamed = (got[-1] for got in responses)
     assert none['error']['code'] == 'refused'
     validate(made['result'], 'reportGenerateResult')
     assert made['result']['name'] == 'Plate Report' and made['result']['project']['modified']
     validate(shown['result'], 'reportRenderResult')
     validate(written['result'], 'reportExportResult')
+    validate(printed['result'], 'reportPrintResult')
     assert (tmp_path / 'out.html').exists()
     assert unnamed['error']['code'] == 'bad_request'
 
@@ -197,7 +199,7 @@ def identified(project):
 
 def test_the_printed_page_draws_finely_and_asks_to_print(edited):
     project, name = edited
-    page = reports.print_page(project, {'name': name})
+    page = reports.print_page(project, {'name': name})['html']
     assert "replaceState(null, '', '#print')" in page and 'print()' in page
 
 
@@ -221,7 +223,6 @@ def test_an_issue_cancelled_leaves_a_draft(identified, tmp_path):
 
     project, name = identified
     reports.issue(project, {'name': name, 'step': 'begin'})
-    assert value(project[name], 'status') == 'issued'
     reports.issue(project, {'name': name, 'step': 'cancel'})
     assert value(project[name], 'status') == 'draft'
     with pytest.raises(ProtocolError, match='not waiting to be issued'):

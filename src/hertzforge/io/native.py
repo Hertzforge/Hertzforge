@@ -948,6 +948,7 @@ def load_report(group: h5py.Group) -> Report:
     import json
 
     from ..core.report import Report
+    from ..report.identity import settled
 
     blocks = group['blocks'][()]
     if isinstance(blocks, bytes):
@@ -964,7 +965,7 @@ def load_report(group: h5py.Group) -> Report:
                   blocks=json.loads(blocks),
                   marking=str(group.attrs['marking']),
                   marking_color=str(group.attrs['marking_color']),
-                  features=features, identity=json.loads(identity))
+                  features=features, identity=settled(json.loads(identity)))
 
 
 def save_predictions(predictions: Predictions, group: h5py.Group) -> None:

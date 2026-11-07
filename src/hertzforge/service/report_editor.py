@@ -319,7 +319,7 @@ def editor(project: Any, name: str, selected: int | None, theme: str | None,
     out['selected'] = selected
     if page:
         labels: list[tuple[str, str]] = []
-        out['html'] = render_html(report, dict(project), units, edit=True, channel_js=CHANNEL_JS,
+        out['html'] = render_html(report, project, units, edit=True, channel_js=CHANNEL_JS,
                                   object_groups=project.object_groups, selected=selected,
                                   labels=labels, theme=theme)
         out['references'] = [[label, caption] for label, caption in labels]

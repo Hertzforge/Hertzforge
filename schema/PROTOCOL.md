@@ -698,7 +698,7 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 | `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index"}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
-| `report.print` | `{"name"}` | `{"html"}` |
+| `report.print` | `{"name","anyway"?}` | `{"html","owed","index"}` |
 | `report.issue` | `{"name","step","path"?,"anyway"?}` | `{"html","status"}`, `{"index"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
@@ -706,15 +706,17 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 `transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
-shell shows it in a sandboxed frame. `report.export` writes that page, light, to `path` (`.html`
-added when it has another suffix), beside the target first and renamed over it. First it makes
-the checks Visual Dynamics makes before a report leaves the project: with skeleton sections on,
-the sections (a flash report's parts) the report still owes; with the data index on, every
+shell shows it in a sandboxed frame. `report.export` writes the page that is printed and issued,
+light, to `path` (`.html` added when it has another suffix), beside the target first and renamed
+over it. First it makes the checks asked before a report leaves the project: with skeleton sections
+on, the sections (a flash report's parts) the report still owes; with the data index on, every
 indexed file hashed again and those that do not match the checksum indexed. A report that owes
 or whose files have `CHANGED` or are `NOT FOUND` is not written unless `anyway` is true; the
 answer then carries `owed` (the sections' lines) and `index` (`{name, status}` a file) with
 `path` null, and the shell asks "Export anyway?". Written, the answer is the `path` with both
-lists empty.
+lists empty. An issued report that has changed since is refused: a change after issue is an
+amendment. What is compared leaves out the page's line on the last check of the files and its line
+on the program and the project file, so checking again or saving the project is not a change.
 
 `report.editor` gives Visual Dynamics' report editor: `html`, the core's edit page (every block
 tagged with its index, the block at `selected` framed, and unbound blocks shown as cards to bind),
@@ -732,14 +734,17 @@ bindings such as `@basis:ShapeSet` first) and `caption`.
 
 `report.print` gives the reader's page as it is printed: light, its figures drawn at print
 resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
-PDF. Its print stylesheet carries the margins the identity rides in. An issued report that has
-changed since is refused: a change after issue is an amendment. `report.issue` is Visual Dynamics'
-Issue in three steps around that print. `begin` checks the report can be issued (Report Identity
-on, every required field entered, not already issued), makes the data index check `report.export`
-makes (answering `{"index":[...]}` alone, nothing marked, when files are astray and `anyway` is not
-true), marks it issued (or amended), and gives the page to print and the `status`. `record` reads the PDF saved from it at `path` and records the
-issue with the SHA-256 of the PDF and of the page; its `entry` is the record's new line. `cancel`
-puts the report back as it was. The summary's `settings` for a report carry its `identity` fields
+PDF. Its print stylesheet carries the margins the identity rides in. It makes `report.export`'s
+checks first and answers the same way: `html` null with `owed` and `index` until `anyway` is true.
+An issued report that has changed since is refused. `report.issue` is the Issue in three steps
+around that print. `begin` checks the report can be issued (Report Identity on, every required
+field entered, not already issued), makes the data index check `report.export` makes (answering
+`{"index":[...]}` alone when files are astray and `anyway` is not true), and gives the page to
+print, which says issued (or the amendment), and the `status`. The report itself stays a draft, so
+a save in between writes a draft. `record` reads the PDF saved from the page at `path`, marks the
+report and records the issue with the SHA-256 of the PDF and of the page; its `entry` is the
+record's new line. `cancel` forgets the page. A file that holds a status of issued or amended with
+no record behind it opens as a draft. The summary's `settings` for a report carry its `identity` fields
 as text beside its `features`.
 
 `report.operate` applies one of VD's editor operations and answers with the editor at the block it

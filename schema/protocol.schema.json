@@ -634,9 +634,25 @@
       "type": "object", "required": ["name", "html"],
       "properties": {"name": {"type": "string"}, "html": {"type": "string"}}
     },
+    "reportHeld": {
+      "type": "object", "required": ["owed", "index"],
+      "properties": {
+        "owed": {"type": "array", "items": {"type": "string"}},
+        "index": {"type": "array", "items": {
+          "type": "object", "required": ["name", "status"],
+          "properties": {"name": {"type": "string"}, "status": {"type": "string"}}
+        }}
+      }
+    },
     "reportExportResult": {
+      "allOf": [{"$ref": "#/$defs/reportHeld"}],
       "type": "object", "required": ["path"],
-      "properties": {"path": {"type": "string"}}
+      "properties": {"path": {"type": ["string", "null"]}}
+    },
+    "reportPrintResult": {
+      "allOf": [{"$ref": "#/$defs/reportHeld"}],
+      "type": "object", "required": ["html"],
+      "properties": {"html": {"type": ["string", "null"]}}
     },
     "reportField": {
       "type": "object", "required": ["field", "label", "value", "options"],

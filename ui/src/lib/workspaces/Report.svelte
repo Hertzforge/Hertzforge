@@ -188,7 +188,7 @@
 				{#if r.held}
 					<div class="ask held" data-testid="report-held" role="alertdialog" aria-label="The report is not ready">
 						{#if r.held.owed.length}
-							<p class="muted">{r.name} still owes {r.held.owed.length} {r.held.owed.length === 1 ? 'section' : 'sections'}:</p>
+							<p class="muted">{r.name} still owes:</p>
 							<ul class="owed">{#each r.held.owed as line (line)}<li>{line}</li>{/each}</ul>
 						{/if}
 						{#if r.held.index.length}
@@ -196,7 +196,7 @@
 							<ul class="owed">{#each r.held.index as entry (entry.name)}<li>{entry.name}: {entry.status}</li>{/each}</ul>
 						{/if}
 						<div class="row">
-							<button class="btn sm danger" data-testid="report-anyway" onclick={() => r.anyway()} disabled={r.busy !== null}>{r.held.act === 'export' ? 'Export anyway' : 'Issue anyway'}</button>
+							<button class="btn sm danger" data-testid="report-anyway" onclick={() => r.anyway()} disabled={r.busy !== null}>{{ export: 'Export anyway', print: 'Print anyway', issue: 'Issue anyway' }[r.held.act]}</button>
 							<button class="btn ghost sm" onclick={() => (r.held = null)}>Not yet</button>
 						</div>
 					</div>
@@ -204,10 +204,10 @@
 				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
 					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
 				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
-					title="Mark the report issued, print it, then name the PDF so the issue is recorded with its hash">Issue</button>
+					title="Print the page as issued, then name the PDF, which issues the report and records its hash">Issue</button>
 				{#if r.issuing}
 					<form class="ask" onsubmit={recordIssue} data-testid="report-issue-form">
-						<p class="muted">Marked {r.issuing}. Save the page from the print dialog as a PDF, then name it here so the issue is recorded.</p>
+						<p class="muted">Not issued yet. Save the page from the print dialog as a PDF, then name it here to record the issue.</p>
 						<label class="lbl" for="report-pdf">The PDF printed</label>
 						<input id="report-pdf" class="field mono" bind:value={pdf} placeholder={hasNativeFiles() ? 'Leave empty to choose it' : '/path/to/report.pdf'} data-testid="report-pdf" spellcheck="false" />
 						<button class="btn primary sm" type="submit" disabled={r.busy !== null || (!pdf.trim() && !hasNativeFiles())}>Record the Issue</button>
