@@ -2154,6 +2154,11 @@ class TimeHistory(DataArray):
         windows = self.srs_windows(shocks)
         named = len(windows) > 1
         band_low, band_high = self.srs_band(shocks)
+        if low is None and band_low >= band_high:
+            raise ValueError(
+                f'the shortest window is {1.0 / band_low:.4g} s long, too short '
+                f'to hold a cycle of {band_high:.6g} Hz, the highest frequency '
+                'this record can read a spectrum at; lengthen the window')
         low = band_low if low is None else float(low)
         high = band_high if high is None else float(high)
         frequencies = octave_frequencies(

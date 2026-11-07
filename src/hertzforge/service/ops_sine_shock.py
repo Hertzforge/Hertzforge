@@ -1076,6 +1076,10 @@ def set_shock(project: Any, params: dict[str, Any]) -> list[dict]:
         moved = Shock(params['start'] - origin, params['stop'] - params['start'])
     except ValueError as error:
         raise refused(str(error)) from None
+    length = int(np.asarray(history.ordinate).shape[-1]) / rate
+    if moved.start >= length:
+        raise refused(f'{name} ends at {origin + length:g} s; a window cannot start at '
+                      f'{params["start"]:g} s')
     if number <= len(shocks):
         edited = tuple(moved if k == number - 1 else shock for k, shock in enumerate(shocks))
         index = number - 1

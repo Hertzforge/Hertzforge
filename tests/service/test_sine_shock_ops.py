@@ -382,10 +382,31 @@ def test_a_nan_outside_the_shock_windows_does_not_stop_the_spectrum():
 
 # ---- a window past the record ---------------------------------------------------------------
 
+def test_a_shock_window_past_the_records_end_is_refused():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    with pytest.raises(ProtocolError, match='ends at 2 s'):
+        run(project, 'project.set_shock', history='H', shock=1, start=50.0, stop=60.0)
+    assert not project['H'].shocks
 
 
+def test_a_window_running_off_the_end_is_held_to_the_record():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    run(project, 'project.set_shock', history='H', shock=1, start=1.5, stop=60.0)
+    assert project['H'].shocks[0].stop == pytest.approx(2.0)
 
 
+def test_a_window_too_short_for_a_spectrum_is_refused_by_its_length():
+    t, y = _pulse()
+    project = Project()
+    project.add('H', history(t, y))
+    project['H'].shocks = (Shock(1.0, 2.0 / RATE),)
+    with pytest.raises(ProtocolError, match='shortest window is .* s long') as refusal:
+        run(project, 'project.compute_srs', source='H')
+    assert 'octave band' not in str(refusal.value)
 
 
 
