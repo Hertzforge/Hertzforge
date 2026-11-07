@@ -179,3 +179,17 @@ describe('a form that previews', () => {
 		expect(a.reading).toBeNull();
 	});
 });
+
+describe('a drag in a reading', () => {
+	it('refused, draws the same views anew, so the handle goes back to where it is', async () => {
+		const { a, answers } = make();
+		await a.perform(row(addBlock), column);
+		await a.run();
+		const before = a.reading!.views[0];
+		answers.refuse = 'not there';
+		await a.pickInReading({ op: 'project.slide_coordinate_system', params: {} }, { distance: 1 });
+		expect(a.runError).toBe('not there');
+		expect(a.reading!.views[0]).not.toBe(before);
+		expect(a.reading!.views[0]).toEqual(before);
+	});
+});

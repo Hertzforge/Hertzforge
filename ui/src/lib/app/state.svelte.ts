@@ -495,9 +495,18 @@ class AnalyzeState {
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
+			this.redrawReading();
 			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
 				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
 			}
+	/** No new view is coming: the same ones again, so a handle let go where it was refused goes back. */
+	private redrawReading(): void {
+		const was = this.reading;
+		if (!was) return;
+		this.reading = { ...was, views: was.views.map((v) => ({ ...v })) };
+		if (was === this.previewDrawn) this.previewDrawn = this.reading;
+	}
+
 		} catch (err) {
 			this.runError = message(err);
 		}

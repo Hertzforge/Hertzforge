@@ -988,7 +988,8 @@
 	}
 
 	function onPointerDown(e: PointerEvent) {
-		pressedAt = e.button === 0 ? at(e) : null;
+		// read at the press: the handles clear their axis on release, before the click would be asked
+		pressedAt = e.button === 0 && !handles?.axis ? at(e) : null;
 	}
 
 	function onPointerUp(e: PointerEvent) {
