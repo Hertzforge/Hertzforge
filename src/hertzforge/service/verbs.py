@@ -22,7 +22,8 @@ STUDIES = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal', 
 _RECORDED = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal')
 
 HIDDEN = frozenset(f'project.{name}' for name in (
-    # what a selection draws by itself
+    # what a selection draws by itself, or nearly: `mac`, `shape_values` and
+    # `channel_table_view` are drawn another way by `show`, and stay for the palette and scripts
     'plot', 'waterfall', 'view_geometry', 'mode_shapes', 'mac', 'dof_arrows', 'spec_spectra',
     'psd_overlay', 'srs_spectra', 'replication_waveforms', 'table', 'channel_table_view',
     'shape_values',

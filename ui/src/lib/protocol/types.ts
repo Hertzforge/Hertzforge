@@ -473,7 +473,6 @@ export interface Actions {
 	table: ActionTable;
 }
 
-/** One row of the action table: what a default draws, an operation, or an act on the selection itself. */
 /** A lone shape set's views, shown one at a time. */
 export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
 
@@ -839,12 +838,6 @@ export interface SessionState {
 	timeout_s: number;
 }
 
-export interface SessionClaimParams {
-	name?: string;
-	/** The lease of a seat this client held, to resume it. */
-	lease?: string;
-}
-
 export interface SessionClaimResult {
 	role: 'controller';
 	lease: string;
@@ -924,8 +917,6 @@ export interface StationList {
 	stations: [SimStation, NiStation];
 	selected: StationSelected;
 }
-
-export type StationSelectParams = { kind: 'sim' } | { kind: 'ni'; devices: string[] };
 
 // --- channel table -------------------------------------------------------------------------
 
@@ -1075,11 +1066,6 @@ export interface RandomConfig {
 	feasibility?: FeasibilityInputs | null;
 }
 
-export interface RandomConfigureParams {
-	config: RandomConfig;
-	dry_run?: boolean;
-}
-
 export interface Grid {
 	fs_hz: number;
 	n_pts: number;
@@ -1125,19 +1111,8 @@ export interface RandomConfigResult {
 
 // --- running -------------------------------------------------------------------------------
 
-export interface RandomArmParams {
-	/** The operator's acknowledgement to arm past a feasibility exceedance; logged verbatim. */
-	override_ack?: string;
-}
-
-export type RandomLevelParams = { delta_db: number } | { to_db: number };
-
 export interface RandomLevelResult {
 	level_db: number;
-}
-
-export interface RandomModeParams {
-	mode: LadderMode;
 }
 
 export type RandomRunState = 'unconfigured' | 'configured' | 'blocked' | 'armed' | 'running' | 'review' | 'stopping' | 'finished';
@@ -1272,8 +1247,6 @@ export interface SubscribePlot {
 	channels?: ChannelSelector;
 	points?: number;
 }
-
-export type RandomSubscribeParams = { rate_hz?: number; plots: SubscribePlot[] } | { default: true };
 
 export interface RandomSubscribeResult {
 	default: boolean;

@@ -12,7 +12,7 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import { tick } from 'svelte';
-	import { spans, type Span } from './brackets';
+	import { spans } from './brackets';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';

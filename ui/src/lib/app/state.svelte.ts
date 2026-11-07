@@ -31,13 +31,13 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	SimStateResult,
 	TableEdit,
 	View,
-	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
+	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace, offeredIn, STUDIES } from './workspaces';
+import { isWorkspace, STUDIES } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -88,11 +88,6 @@ class AnalyzeState {
 	private actionSeq = 0;
 
 	constructor(private readonly app: AppState) {}
-
-	/** The module's own tools and the ones every module offers, of those with something to run on. */
-	toolsFor(workspace: Workspace): OperationDescriptor[] {
-		return this.tools.filter((o) => offeredIn(o, workspace));
-	}
 
 	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
@@ -495,21 +490,21 @@ class AnalyzeState {
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
-			this.redrawReading();
 			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
 				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
 			}
+		} catch (err) {
+			this.runError = message(err);
+			this.redrawReading();
+		}
+	}
+
 	/** No new view is coming: the same ones again, so a handle let go where it was refused goes back. */
 	private redrawReading(): void {
 		const was = this.reading;
 		if (!was) return;
 		this.reading = { ...was, views: was.views.map((v) => ({ ...v })) };
 		if (was === this.previewDrawn) this.previewDrawn = this.reading;
-	}
-
-		} catch (err) {
-			this.runError = message(err);
-		}
 	}
 
 	/**
@@ -1237,10 +1232,6 @@ export class ProjectState {
 
 	save(path?: string): Promise<boolean> {
 		return this.call('Saving', 'project.save', path ? { path } : {}, false);
-	}
-
-	newProject(title: string): Promise<boolean> {
-		return this.call('Starting a project', 'project.new', { title });
 	}
 
 	async rename(name: string, to: string): Promise<boolean> {

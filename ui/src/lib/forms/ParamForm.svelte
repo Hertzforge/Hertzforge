@@ -4,7 +4,7 @@
 	 * parameters, with units, ranges and dataset-driven options. Values bind out; the parent
 	 * decides when to run. Errors are words beside the field, never a color alone.
 	 */
-	import type { ParamDescriptor, ParamOption } from '$lib/protocol/types';
+	import type { ParamDescriptor } from '$lib/protocol/types';
 	import { optionsFor, parseNumber, rangeHint, validate, type ParamValues } from './params';
 
 	interface Props {

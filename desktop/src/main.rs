@@ -208,7 +208,6 @@ fn main_window(app: &AppHandle, query: &str) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Percent-encode a query value (the services' addresses).
 /// `--run-log [file]`: the window with the log alone in it, for the keeper's own computer,
 /// as Visual Dynamics launches it. Its own flag, not a file to import.
 fn run_log_query(args: impl Iterator<Item = String>) -> String {
@@ -222,6 +221,7 @@ fn run_log_query(args: impl Iterator<Item = String>) -> String {
     }
 }
 
+/// Percent-encode a query value (the services' addresses).
 fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
