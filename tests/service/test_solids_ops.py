@@ -519,3 +519,171 @@ def test_renumbering_a_group_takes_its_properties_with_it(project):
     assert geometry.group_properties == {7: held}
     assert geometry.add_group('new', 1) == 1
     assert 1 not in geometry.group_properties, 'a later group of the old id inherits nothing'
+
+
+@pytest.fixture
+def undefined():
+    from hertzforge.core.geometry import Geometry
+
+    project = Project()
+    project.add('Raw', Geometry(node_id=[], node_xyz=np.empty((0, 3))))
+    assert not project['Raw'].units_defined
+    return project
+
+
+@pytest.mark.parametrize('kind', ['block', 'cylinder', 'section'])
+@pytest.mark.parametrize('keep', [False, True])
+def test_a_single_turned_solid_meshes_swept_along_its_own_axis(project, kind, keep):
+    given = {'angle_x': 30.0, 'angle_z': 20.0}
+    if kind == 'block':
+        block(project, width_x=1.0, width_y=0.5, width_z=0.25, **given)
+    elif kind == 'cylinder':
+        run(project, 'project.add_solid_cylinder', radius=0.25, length=1.0, **given)
+    else:
+        run(project, 'project.add_solid_section', shape='rectangular tube',
+            dimensions='1 0.5 0.1', **given)
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.1, keep=keep)
+    assert rows(reading)['Method']['value'] == 'swept along its own axis'
+    assert bool(project['Part'].num_nodes) == keep
+
+
+@pytest.mark.parametrize('add', [
+    {'op': 'project.add_solid_plate', 'width_x': 2.0, 'width_y': 1.0},
+    {'op': 'project.add_solid_disk', 'radius': 0.5}], ids=['plate', 'disk'])
+def test_move_part_moves_a_flat_part_and_gives_it_a_gizmo(project, add):
+    given = dict(add)
+    run(project, given.pop('op'), **given)
+    (_reading, view, _table) = run(project, 'project.move_solids', solids='1')
+    assert view['gizmo']['origin'] == [0.0, 0.0, 0.0], 'the middle of its extent'
+    (_reading, view, _table) = run(project, 'project.move_solids', solids='1', offset_z=1.0)
+    assert project['Part'].solids[0].center == (0.0, 0.0, 1.0)
+    assert view['gizmo']['origin'] == [0.0, 0.0, 1.0]
+    run(project, 'project.move_solids', solids='1', turn_x=90.0)
+    assert project['Part'].solids[0].center == pytest.approx((0.0, 0.0, 1.0))
+
+
+def test_a_flat_part_turned_reaches_as_far_as_its_edges(project):
+    from hertzforge.core import solids
+
+    run(project, 'project.add_solid_plate', width_x=2.0, width_y=1.0, angle_x=90.0)
+    run(project, 'project.add_solid_disk', radius=0.5, x=5.0, angle_y=90.0)
+    low, high = solids._box(project['Part'], 1)
+    assert low == pytest.approx([-1.0, 0.0, -0.5]) and high == pytest.approx([1.0, 0.0, 0.5])
+    low, high = solids._box(project['Part'], 2)
+    assert low == pytest.approx([5.0, -0.5, -0.5]) and high == pytest.approx([5.0, 0.5, 0.5])
+
+
+def test_detect_on_parts_that_mesh_as_one_says_so(project):
+    for x in (0.0, 5.0):
+        run(project, 'project.add_solid_block', x=x, width_x=1, width_y=1, width_z=1)
+    (reading, *_rest) = run(project, 'project.mesh_solids', detect=True, size=0.5)
+    assert 'mesh as one' in rows(reading)['Detect']['value']
+    assert not project['Part'].num_nodes
+    (reading, *_rest) = run(project, 'project.mesh_solids', detect=True, size=0.5, keep=True)
+    assert len(project['Part'].elem_id) == 16
+
+
+def test_a_size_for_a_piece_that_is_not_there_is_refused(monkeypatch, project):
+    from hertzforge.service import ops_solids
+
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    run(project, 'project.add_solid_block', width_x=1, width_y=1, width_z=1)
+    refused(project, 'project.mesh_solids', 'mesh as one', sizes='1: 0.5', size=0.5)
+    in_pieces, both, _cut, _bar = _union_in_pieces()
+    refused(in_pieces, 'project.mesh_solids', 'no piece 99', solids=str(both), size=0.01,
+            sizes='99: 0.01')
+
+
+def _spheres(project):
+    for x in (0.0, 5.0):
+        run(project, 'project.add_solid_sphere', x=x, radius=0.5)
+
+
+def test_the_fold_check_reads_each_piece_at_its_own_size(monkeypatch, project):
+    from hertzforge.service import ops_solids
+
+    _spheres(project)
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.2, sizes='1: 0.1, 2: 0.1')
+    assert 'Fit' not in rows(reading), 'both pieces are given a size they hold at'
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.1, sizes='1: 0.3')
+    assert 'at 0.3 m the fit is likely to fold' in rows(reading)['Fit']['value']
+
+
+def test_sizes_detected_can_be_kept_without_asking_to_mesh_anyway(monkeypatch, project):
+    _spheres(project)
+    asked = {}
+    monkeypatch.setattr(project, 'mesh_solids', lambda *_a, **kw: asked.update(kw) or {
+        'bricks': 0, 'nodes': 0, 'axis': 0, 'added': 0, 'shared': 0, 'replaced': 0, 'groups': []})
+    run(project, 'project.mesh_solids', size=0.2, detect=True, keep=True)
+    assert set(asked['sizes']) == {1, 2}
+
+
+def test_a_piece_with_a_hole_reads_its_likely_size_with_the_hole(monkeypatch, project):
+    from hertzforge.core import solids
+    from hertzforge.service import ops_solids
+
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    block(project, width_x=0.4, width_y=0.2, width_z=0.1)
+    block(project, x=0.1, z=0.1, width_x=0.1, width_y=0.2, width_z=0.1)
+    run(project, 'project.combine_solids', solids='1, 2', operation='union')
+    run(project, 'project.add_solid_cylinder', x=-0.1, radius=0.005, length=0.3, angle_x=30.0)
+    run(project, 'project.combine_solids', solids='3, 4', operation='subtract')
+    geometry = project['Part']
+    views = run(project, 'project.mesh_solids', solids='5', size=0.02)
+    table = next(view for view in views if view.get('title') == 'Pieces')
+    likely = {int(row[0]): float(row[4]) for row in table['rows']}
+    for entry in solids.piece_plan(geometry, [5], 0.02):
+        assert entry['cuts'] and likely[entry['id']] < ops_solids._likely_size(
+            geometry, [entry['id']], 'hexes')
+    assert table['columns'][3:5] == ['Size [m]', 'Likely size [m]']
+    views = run(project, 'project.mesh_solids', solids='5', size=0.02, detect=True)
+    table = next(view for view in views if view.get('title') == 'Pieces')
+    assert {int(row[0]): float(row[3]) for row in table['rows']} == likely
+
+
+def test_an_undefined_geometry_reports_its_numbers_without_a_unit(undefined):
+    from hertzforge.service import display_units
+
+    project = undefined
+    assert not project['Raw'].units_defined
+    run(project, 'project.add_solid_block', geometry='Raw', width_x=100.0, width_y=100.0,
+        width_z=10.0)
+    views = run(project, 'project.mesh_solids', geometry='Raw', size=10.0)
+    assert views[-1]['unit'] == 'undefined'
+    said = rows(views[0])
+    assert said['Element size']['unit'] is None and said['Shortest edge']['unit'] is None
+    display_units.convert(views, display_units.START)
+    said = rows(views[0])
+    assert said['Element size']['value'] == 10.0 and said['Element size']['unit'] is None
+    assert said['Shortest edge']['value'] == 10.0
+
+
+def test_an_undefined_geometry_says_a_refusal_and_a_fold_without_a_unit(monkeypatch, undefined):
+    from hertzforge.service import ops_solids
+
+    project = undefined
+    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    for x in (0.0, 5.0):
+        run(project, 'project.add_solid_sphere', geometry='Raw', x=x, radius=0.5)
+    (reading, *_rest) = run(project, 'project.mesh_solids', geometry='Raw', size=0.3)
+    assert ' m ' not in rows(reading)['Fit']['value']
+    views = run(project, 'project.mesh_solids', geometry='Raw', size=0.3)
+    table = next(view for view in views if view.get('title') == 'Pieces')
+    assert table['columns'][3:5] == ['Size', 'Likely size']
+    run(project, 'project.mesh_solids', geometry='Raw', size=0.1, anyway=True, keep=True)
+    with pytest.raises(ProtocolError) as error:
+        run(project, 'project.mate_surfaces', geometry='Raw', tolerance=0.001)
+    assert not str(error.value).endswith(' m')
+
+
+def test_meshing_again_says_the_mated_surfaces_it_deleted(project):
+    for z in (0.0, 1.0):
+        run(project, 'project.add_solid_block', z=z, width_x=1, width_y=1, width_z=1)
+    run(project, 'project.mesh_solids', size=0.5, parts_apart=True, keep=True)
+    run(project, 'project.mate_surfaces', keep=True)
+    assert len(project['Part'].mates) == 1
+    (reading, *_rest) = run(project, 'project.mesh_solids', size=0.5, parts_apart=True, keep=True)
+    assert not project['Part'].mates
+    said = rows(reading)['Mated surfaces']
+    assert '1 on the old mesh' in said['value'] and said['status'] == 'warn'

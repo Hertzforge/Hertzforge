@@ -2054,15 +2054,15 @@ def _pieces_contain(pieces, points: np.ndarray) -> np.ndarray:
 
 
 def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
-    """A block's, a cylinder's, a cone's or a sphere's extent along the
-    geometry's axes (a cone's as its wider end's cylinder's)."""
+    """A block's, a plate's, a cylinder's, a disk's, a cone's or a sphere's
+    extent along the geometry's axes (a cone's as its wider end's cylinder's)."""
     axes = _frame(item)
     if item.kind == 'sphere':
         center = np.asarray(item.center)
         return center - item.radius, center + item.radius
     if item.kind == 'cone':
         item = replace(item, radius=max(item.radius, _top(item)))
-    if item.kind == 'block':
+    if item.kind in ('block', 'plate'):
         half = np.abs(axes.T) @ (np.asarray(item.widths) / 2.0)
     else:
         along = np.abs(axes[2]) * item.length / 2.0
@@ -2075,7 +2075,7 @@ def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
 def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
     """The solid's extent along the geometry's axes, from its recipe."""
     item = solid(geometry, solid_id)
-    if item.kind in BASIC:
+    if item.kind in BASIC or item.kind in FLAT:
         return _basic_box(item)
     if item.kind in SHAPED:
         boxes = [_basic_box(p) for cut, p in _pieces(geometry, item) if not cut]

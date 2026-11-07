@@ -122,6 +122,16 @@ def _f(value: float) -> str:
     return f'{float(value):.4g}'
 
 
+def _meters(geometry: Any) -> str | None:
+    """The unit of a length row: an undefined geometry's numbers are the file's own."""
+    return 'm' if geometry.units_defined else None
+
+
+def _in_meters(geometry: Any) -> str:
+    """The same, to follow a length in words."""
+    return ' m' if geometry.units_defined else ''
+
+
 def _dimensions(geometry: Any, item: Any) -> str:
     """A solid's size as typed, in a few words."""
     from hertzforge.core import solids
@@ -600,7 +610,8 @@ def _likely_size(geometry: Any, ids: list[int], elements: str) -> float:
     return hexmesh.suggested_size(geometry, ids, elements)
 
 
-def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
+def _fold_check(geometry: Any, ids: list[int], size: float,
+                sizes: dict[int, float] | None = None) -> str:
     """VD's question before a fit is paid for, as words, or '' when the
     bricks are swept or the fit is likely to hold
     (`hexmesh.likely_to_fold` on each fitted piece)."""
@@ -611,7 +622,7 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
         return ''
     except solids.NotAnExtrusion:
         pass
-    for entry in solids.piece_plan(geometry, ids, size):
+    for entry in solids.piece_plan(geometry, ids, size, sizes):
         if entry['method'] != 'overlay':
             continue
         piece = ids if entry['id'] is None else [entry['id']]
@@ -633,8 +644,9 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
                        f'and a fit needs {hexmesh.THROUGH:g}')
         if read['flat']:
             why.append(f'{read["flat"]:,} bricks are flat before any fitting')
-        said = (f'{entry["name"]}: at {entry["size"]:.4g} m the fit is likely to fold: '
-                f'{"; ".join(why)}. {read["suggested"]:.3g} m is likely to hold')
+        unit = _in_meters(geometry)
+        said = (f'{entry["name"]}: at {entry["size"]:.4g}{unit} the fit is likely to fold: '
+                f'{"; ".join(why)}. {read["suggested"]:.3g}{unit} is likely to hold')
         if bricks > solids.MESH_LIMIT or cells > solids.GRID_LIMIT:
             said += (', but that is too many bricks: the part wants a finer size on its '
                      'thin piece than on the rest, which one fit cannot give; Tetras '
@@ -643,9 +655,10 @@ def _fold_check(geometry: Any, ids: list[int], size: float) -> str:
     return ''
 
 
-def _made_rows(made: dict, earlier: int) -> list[dict]:
+def _made_rows(geometry: Any, made: dict, earlier: int) -> list[dict]:
     """What a mesh holds, as VD's Mesh Solids pane says it."""
     rows = []
+    unit = _in_meters(geometry)
     method = made.get('method')
     if 'tets' in made:
         rows += [v.row('Ten-node tetrahedra', float(made['tets']), '', 'pass'),
@@ -669,7 +682,7 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
                 how = ('fitted' if piece['method'] == 'overlay' else
                        'swept along its own axis' if piece.get('turned') else
                        f'swept along {"XYZ"[piece["axis"]]}')
-                rows.append(v.row(piece['name'], f'{how} at {piece["size"]:.4g} m, '
+                rows.append(v.row(piece['name'], f'{how} at {piece["size"]:.4g}{unit}, '
                                   f'{piece["bricks"]:,} bricks', None, 'info'))
             rows.append(v.row('Shared at the seams', float(made['seam_shared']), 'nodes',
                               'info'))
@@ -683,12 +696,12 @@ def _made_rows(made: dict, earlier: int) -> list[dict]:
                            'warn' if made['poor'] else 'pass'),
                      v.row('Under 0.3', float(made['poor']), '', 'info')]
         else:
-            rows.append(v.row('Method', f'extruded along {"XYZ"[made["axis"]]}', None,
-                              'info'))
+            rows.append(v.row('Method', 'swept along its own axis' if made.get('turned')
+                              else f'extruded along {"XYZ"[made["axis"]]}', None, 'info'))
             if made.get('rounded'):
                 rows.append(v.row('Nodes on circles', float(made['rounded']), '', 'info'))
     if 'shortest' in made:
-        rows.append(v.row('Shortest edge', float(made['shortest']), 'm', 'info'))
+        rows.append(v.row('Shortest edge', float(made['shortest']), _meters(geometry), 'info'))
     if earlier:
         rows.append(v.row('Replaces', f'the {earlier:,} elements meshed before', None,
                           'warn'))
@@ -713,6 +726,17 @@ def _likely_or_refused(geometry: Any, ids: list[int]) -> float:
     return _call(lambda: _likely_size(geometry, ids, 'hexes'))
 
 
+def _likely_of_piece(geometry: Any, ids: list[int], entry: dict) -> float:
+    """The size a `piece_plan` entry is likely to hold at, read as it is meshed: with what
+    is cut from it."""
+    from hertzforge.core import solids
+
+    if entry['id'] is None:
+        return _likely_or_refused(geometry, ids)
+    with solids.meshed_as(geometry, entry['id'], entry['cuts']) as read_as:
+        return _likely_or_refused(geometry, [read_as])
+
+
 def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, float]) -> dict:
     """How `solids.piece_plan` would mesh the parts, a row a piece, with the size each is
     likely to hold at beside the one it has."""
@@ -721,11 +745,12 @@ def _pieces_table(geometry: Any, ids: list[int], size: float, sizes: dict[int, f
     rows = []
     for entry in _call(lambda: solids.piece_plan(geometry, ids, size, sizes)):
         piece = entry.get('id')
-        likely = _likely_or_refused(geometry, [piece] if piece is not None else ids)
         rows.append([piece if piece is not None else '', entry.get('name', ''),
-                     entry['method'], float(entry['size']), float(likely),
-                     int(entry['bricks'])])
-    return v.table('Pieces', ['Piece', 'Name', 'Method', 'Size', 'Likely size', 'Bricks'], rows)
+                     entry['method'], float(entry['size']),
+                     float(_likely_of_piece(geometry, ids, entry)), int(entry['bricks'])])
+    unit = ' [m]' if geometry.units_defined else ''
+    return v.table('Pieces', ['Piece', 'Name', 'Method', f'Size{unit}', f'Likely size{unit}',
+                              'Bricks'], rows)
 
 
 def _preview(geometry: Any, ids: list[int], size: float, elements: str,
@@ -768,7 +793,7 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
         part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
     earlier = len(solids.meshed_elements(geometry,
                                          solids.groups_meshed_again(geometry, ids, part)))
-    return part, _made_rows(made, earlier)
+    return part, _made_rows(geometry, made, earlier)
 
 
 def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -793,17 +818,28 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{solids.piece_name(geometry, flat[0])} is flat: a plate or a disk '
                       'is meshed into shells, quads or triangles')
     size = params['size'] or _call(lambda: _likely_size(geometry, ids, elements))
-    fold = (_call(lambda: _fold_check(geometry, ids, size)) if elements == 'hexes'
-            else '')
     sizes = _piece_sizes(params['sizes']) if elements == 'hexes' else {}
-    pieces = _pieces_table(geometry, ids, size, sizes) if elements == 'hexes' else None
-    if params['detect'] and pieces is not None:
-        sizes = {int(entry['id']): _likely_or_refused(geometry, [int(entry['id'])])
-                 for entry in _call(lambda: solids.piece_plan(geometry, ids, size)) if 'id' in entry}
-        pieces = _pieces_table(geometry, ids, size, sizes)
     said = [v.row('Solids', ', '.join(_label(solids.solid(geometry, i)) for i in ids),
                   None, 'info'),
-            v.row('Element size', float(size), 'm', 'info')]
+            v.row('Element size', float(size), _meters(geometry), 'info')]
+    pieces, fold = None, ''
+    if elements == 'hexes':
+        plan = _call(lambda: solids.piece_plan(geometry, ids, size))
+        in_pieces = len(plan) > 1
+        wrong = sorted(set(sizes) - {entry['id'] for entry in plan} if in_pieces else sizes)
+        if wrong:
+            raise refused(f'there is no piece {wrong[0]}: these parts mesh in pieces '
+                          f'{", ".join(str(entry["id"]) for entry in plan)}' if in_pieces else
+                          'these parts mesh as one, at the element size: a size per piece is '
+                          'for a union meshed in pieces')
+        if params['detect'] and in_pieces:
+            sizes = {int(entry['id']): _likely_of_piece(geometry, ids, entry) for entry in plan}
+        elif params['detect']:
+            likely = _likely_of_piece(geometry, ids, plan[0])
+            said.append(v.row('Detect', f'these parts mesh as one, likely to hold at '
+                              f'{likely:.4g}{_in_meters(geometry)}', None, 'info'))
+        pieces = _pieces_table(geometry, ids, size, sizes)
+        fold = _call(lambda: _fold_check(geometry, ids, size, sizes))
     if fold:
         said.append(v.row('Fit', fold, None, 'warn'))
     if not params['keep']:
@@ -822,10 +858,15 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
         name, ids, size, apart=params['apart'],
         parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements,
         sizes=sizes or None))
-    rows = _made_rows(found, 0)
+    rows = _made_rows(geometry, found, 0)
     if found['replaced']:
         rows.append(v.row('Replaced', f'the {found["replaced"]:,} elements meshed before',
                           None, 'info'))
+    # a union meshed in pieces brings its seams again
+    lost = found.get('mates_dropped', 0) - found.get('seams', 0)
+    if lost > 0:
+        rows.append(v.row('Mated surfaces', f'{lost} on the old mesh deleted with it: Mate '
+                          'Surfaces again', None, 'warn'))
     rows += [v.row('Nodes added', float(found['added']), '', 'info'),
              v.row('Nodes shared with the geometry', float(found['shared']), '', 'info'),
              v.row('Nodes in all', float(geometry.num_nodes), '', 'info')]
@@ -912,8 +953,8 @@ def mate_surfaces(project: Any, params: dict[str, Any]) -> list[dict]:
     found = _call(lambda: project.detect_mated_surfaces(name, groups, tolerance))
     if not found:
         raise refused(f'no surface of these element groups lies on another within '
-                      f'{tolerance:.4g} m')
-    rows = [v.row('Tolerance', float(tolerance), 'm', 'info'),
+                      f'{tolerance:.4g}{_in_meters(geometry)}')
+    rows = [v.row('Tolerance', float(tolerance), _meters(geometry), 'info'),
             v.row('Patches found', float(len(found)), '', 'pass' if found else 'warn')]
     patches = v.table(f'Patches of {name}', ['Patch', 'First side (follows)', 'Second side',
                                              'Nodes'], [
