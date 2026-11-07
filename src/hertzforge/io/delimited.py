@@ -32,10 +32,12 @@ A time column without a unit is read as seconds, and the import says
 so with the sample rate it gives. A time column written to a fixed
 number of decimal places steps unevenly by up to a unit of its last
 digit (1/5120 s written to six places alternates between 0.000195 and
-0.000196); when every time lies within that rounding of an even step,
-the even step is taken and the import says so. A time column that is
-uneven beyond its rounding, or out of order, is refused with the reason
-`TimeHistory`'s own spectra would give.
+0.000196), each time being half a unit from its true value; when an even
+step lies within that rounding of every time, the even step is taken and
+the import says so. A time column that is uneven beyond its rounding, or
+out of order, is refused with the reason `TimeHistory`'s own spectra
+would give, and so is one whose steps are all alike but for one or two
+whole multiples of them, which reads as dropped rows.
 
 **Channels.** Every column but the time column is a channel, or the
 ones `columns` names. A channel's name is its header, or ``column 3``
@@ -747,14 +749,75 @@ def _resolution(rows: Sequence[tuple[int, str]], layout: TextLayout,
     return out
 
 
+def _line_within(values: np.ndarray, reach: np.ndarray) -> bool:
+    """Whether a straight line over the indices passes within `reach[i]` of
+    every `values[i]`; a row whose reach is infinite does not constrain it.
+
+    It does when the upper hull of the lowest values allowed nowhere rises
+    above the lower hull of the highest allowed.
+    """
+    index = np.flatnonzero(np.isfinite(reach))
+    # the margin is for the arithmetic: a value exactly half a unit away
+    # is still what rounding can do, and a tie is common (1/5120 s ends in a
+    # 5 at the tenth place)
+    margin = reach[index] * (1.0 + 1e-9) + 8.0 * np.spacing(np.abs(values[index]))
+    low, high = values[index] - margin, values[index] + margin
+
+    def hull(heights: np.ndarray, sign: float) -> list[int]:
+        kept: list[int] = []
+        xs, ys = index.tolist(), heights.tolist()
+        for k, (x, y) in enumerate(zip(xs, ys)):
+            while len(kept) > 1:
+                ax, ay = xs[kept[-2]], ys[kept[-2]]
+                bx, by = xs[kept[-1]], ys[kept[-1]]
+                if sign * ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) < 0:
+                    break
+                kept.pop()
+            kept.append(k)
+        return kept
+
+    upper, lower = hull(low, 1.0), hull(high, -1.0)
+    return bool((np.interp(index, index[upper], low[upper])
+                 <= np.interp(index, index[lower], high[lower])).all())
+
+
+#: at most this many long steps read as missing rows. More, spaced evenly
+#: enough to pass as rounding, is a step just over a whole digit
+_MOST_GAPS = 2
+
+
+def _dropped_rows(time: np.ndarray) -> tuple[float, int] | None:
+    """(the step, the first sample after a gap) when every step of a time
+    column is one value but for a long one or two that are whole multiples of
+    it, otherwise None.
+
+    The digits alone cannot refuse this. A long step among exact ones is what a
+    rate just below a round one looks like when rounded (1 ms steps with one of
+    2 ms over 200 rows is 992.5 per second, written to three places), so the
+    digits pass, and the rate is off on every frequency in the record. A
+    dropped row is the likelier story, and the person can say otherwise by
+    stating the rate.
+    """
+    steps = np.diff(time)
+    step = float(np.median(steps))
+    whole = np.round(steps / step)
+    close = 1e-6 * step + 1e-12 * float(np.abs(time).max())
+    long_steps = np.flatnonzero(whole > 1)
+    if (not 1 <= len(long_steps) <= _MOST_GAPS or len(steps) - len(long_steps) < 4
+            or (np.abs(steps - whole * step) > close).any()):
+        return None
+    return step, int(long_steps[0]) + 1
+
+
 def _even_time(time: np.ndarray, rows: Sequence[tuple[int, str]],
                layout: TextLayout, column: int, scale: float, name: str
                ) -> tuple[float, float, float]:
     """(start, step, rounding) of an evenly stepped time column, in
     seconds; `rounding` is how far the times sat from the even step,
     zero when they were even as written. Refused when the column is out
-    of order, or when any time sits off the even step by more than a
-    unit of the last digit it was written to, beyond the fit."""
+    of order, when rows look to be missing (`_dropped_rows`), or when no
+    even step lies within half a unit of the last digit each time was
+    written to."""
     from ..core.data import _even_steps
 
     try:
@@ -776,10 +839,19 @@ def _even_time(time: np.ndarray, rows: Sequence[tuple[int, str]],
     step = float(middle @ (time - time.mean()) / (middle @ middle))
     start = float(time.mean() - step * index.mean())
     off = np.abs(time - (start + step * index))
-    # each time may sit a unit of its own last digit off the even step,
-    # and the fitted step itself by about a unit of the typical digit
     printed = _resolution(rows, layout, column) * scale
-    if (off <= printed + np.median(printed)).all():
+    if (dropped := _dropped_rows(time)) is not None:
+        raise ValueError(
+            f'{name}: {refusal} (the time column, {layout.columns[column]}), and '
+            f'every step is {dropped[0]:g} but at sample {dropped[1]}, a whole '
+            'number of them: rows look to be missing. If the rows were sampled '
+            'evenly, read them without it: time_column=False and the '
+            'sample_rate') from None
+    # rounding moves a value at most half a unit of the digit it printed, so
+    # an even record has a straight line within that of every time. The fit
+    # above is not that line: on a step just over a whole unit it can sit
+    # almost a unit from a time, with the rounding entirely honest
+    if _line_within(time, printed / 2.0):
         return start, step, float(off.max())
     raise ValueError(
         f'{name}: {refusal} (the time column, {layout.columns[column]}), more '
