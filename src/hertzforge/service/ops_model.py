@@ -14,7 +14,7 @@ import numpy as np
 from . import group_cells
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .mesh import drawn_mesh
+from .mesh import drawn_mesh, places_view
 from .ops_geometry import entity_table
 from .protocol import refused
 
@@ -140,28 +140,6 @@ def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
     return [_properties_reading(name, geometry)]
 
 
-def _places_view(geometry: Any, name: str, op: str, params: dict[str, Any], places: list[int],
-                 out: set[int], hint: str) -> dict:
-    """The geometry with `places` (node ids) as the first rows, those left out last among
-    them, so a click on one reruns `op` with it in `toggle`."""
-    rows, triangles, lines = drawn_mesh(geometry)
-    index = {int(node): i for i, node in enumerate(geometry.node_id)}
-    ordered = [index[n] for n in places if n not in out] + [index[n] for n in places if n in out]
-    first = set(ordered)
-    final = np.asarray(ordered + [int(r) for r in rows if int(r) not in first], dtype=np.int64)
-    position = np.full(geometry.num_nodes, -1, dtype=np.int64)
-    position[final] = np.arange(final.size)
-    return v.shape3d(
-        name, 'm' if geometry.units_defined else 'undefined',
-        np.asarray(geometry.node_xyz, dtype=float)[final], [],
-        triangles=position[rows[triangles]] if len(triangles) else triangles,
-        lines=position[rows[lines]] if len(lines) else lines,
-        node_ids=np.asarray(geometry.node_id)[final],
-        pick=v.picking(op, params, 'nodes', hint,
-                       ids=[int(geometry.node_id[i]) for i in ordered], count=1, param='toggle',
-                       off=sum(n in out for n in places)))
-
-
 def _left_out(params: dict[str, Any], places: list[int]) -> set[int]:
     """The places left out: every one for 'all', the ids named otherwise, with `toggle`
     moved across. Ids that are no longer places drop out."""
@@ -218,7 +196,7 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
     held = {'geometry': name, 'groups': params['groups'], 'tolerance': params['tolerance'],
             'left_out': _id_text(out), 'keep': False}
     return [v.reading(f'Merge Coincident Nodes on {name}', rows),
-            _places_view(geometry, f'Where {name} would merge', 'project.merge_coincident_nodes',
+            places_view(geometry, f'Where {name} would merge', 'project.merge_coincident_nodes',
                          held, places, out, 'Click a place to leave it out or put it back')]
 
 
@@ -422,7 +400,7 @@ def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
     held = {'geometry': name, 'groups': params['groups'], 'reach': params['reach'],
             'left_out': _id_text(out), 'keep': False}
     return [v.reading(f'Align Meshes on {name}', rows),
-            _places_view(geometry, f'What would move on {name}', 'project.align_meshes', held,
+            places_view(geometry, f'What would move on {name}', 'project.align_meshes', held,
                          places, out, 'Click a move to leave it out or put it back')]
 
 

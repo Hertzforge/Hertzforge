@@ -350,7 +350,8 @@ class AnalyzeState {
 		if (!op) return;
 		const values = { ...this.currentValues };
 		let changed = false;
-		for (const [key, value] of Object.entries(entry.fill)) {
+		for (const [key, text] of Object.entries(entry.fill)) {
+			const value = op.params.find((p) => p.name === key)?.type === 'integer' ? Number(text) : text;
 			if (values[key] !== value) {
 				values[key] = value;
 				changed = true;

@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from . import views as v
+
 
 def triangulate(faces: list[list[int]]) -> np.ndarray:
     """Polygons (3 or 4 corners, as `element_cells` draws faces and solid
@@ -45,3 +47,25 @@ def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     remap = np.full(geometry.num_nodes, -1, dtype=np.int64)
     remap[used] = np.arange(used.size)
     return used, remap[triangles], remap[segments]
+
+
+def places_view(geometry: Any, name: str, op: str, params: dict[str, Any], places: list[int],
+                out: set[int], hint: str) -> dict:
+    """A geometry with `places` (node ids) marked through it, as its first rows and those in
+    `out` last among them and dim, so a click on one reruns `op` with it in `toggle`."""
+    rows, triangles, lines = drawn_mesh(geometry)
+    index = {int(node): i for i, node in enumerate(geometry.node_id)}
+    ordered = [index[n] for n in places if n not in out] + [index[n] for n in places if n in out]
+    first = set(ordered)
+    final = np.asarray(ordered + [int(r) for r in rows if int(r) not in first], dtype=np.int64)
+    position = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    position[final] = np.arange(final.size)
+    return v.shape3d(
+        name, 'm' if geometry.units_defined else 'undefined',
+        np.asarray(geometry.node_xyz, dtype=float)[final], [],
+        triangles=position[rows[triangles]] if len(triangles) else triangles,
+        lines=position[rows[lines]] if len(lines) else lines,
+        node_ids=np.asarray(geometry.node_id)[final],
+        pick=v.picking(op, params, 'nodes', hint,
+                       ids=[int(geometry.node_id[i]) for i in ordered], count=1, param='toggle',
+                       off=sum(n in out for n in places)))
