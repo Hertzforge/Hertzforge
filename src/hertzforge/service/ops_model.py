@@ -159,7 +159,8 @@ def _core_tolerance(geometry: Any) -> float:
 
 
 def _id_text(ids: set[int] | list[int]) -> str:
-    return ', '.join(str(i) for i in sorted(ids))
+    """Ids as `_ids` reads them: a list in the order named, a set in order."""
+    return ', '.join(str(i) for i in (sorted(ids) if isinstance(ids, set) else ids))
 
 
 def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -198,10 +199,6 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
     return [v.reading(f'Merge Coincident Nodes on {name}', rows),
             places_view(geometry, f'Where {name} would merge', 'project.merge_coincident_nodes',
                          held, places, out, 'Click a place to leave it out or put it back')]
-
-
-def _id_text(ids: Any) -> str:
-    return ', '.join(str(i) for i in ids)
 
 
 def _ids(text: str, what: str) -> list[int]:

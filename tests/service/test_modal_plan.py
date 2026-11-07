@@ -53,6 +53,31 @@ def run(project, op_id, **given):
     return op.run(project, values)
 
 
+def test_a_flat_plate_opens_on_enough_sensors_to_tell_its_modes_apart():
+    from hertzforge import Project
+    from hertzforge.core import fem
+
+    material = fem.Material('al', youngs_modulus=70e9, density=2700, poissons_ratio=0.3)
+    columns, rows = 12, 8
+    model = fem.Model('plate')
+    node = lambda i, j: i * (rows + 1) + j + 1  # noqa: E731
+    for i in range(columns + 1):
+        for j in range(rows + 1):
+            model.add_node(node(i, j), i * 0.6 / columns, j * 0.4 / rows, 0.0)
+    for i in range(columns):
+        for j in range(rows):
+            model.add_plate((node(i, j), node(i + 1, j), node(i + 1, j + 1), node(i, j + 1)),
+                            material, 0.005)
+    project = Project()
+    geometry = project.add('G', model.geometry())
+    project.link(geometry, project.add('S', model.eigensolution(num_modes=12, damping=0.01)))
+    views = run(project, 'project.plan_instrumentation', source='S', keep=False)
+    reading = next(view for view in views if view['view'] == 'reading')
+    said = {row['label']: row['value'] for row in reading['rows']}
+    assert said['Sensors'].startswith('7 tri-axial')
+    assert 'the 1 direction they move in' in said['Sensors']
+
+
 def test_the_descriptors_validate(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')

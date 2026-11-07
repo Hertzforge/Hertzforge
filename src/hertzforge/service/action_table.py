@@ -91,6 +91,11 @@ _ANY = 8
 Chosen = tuple[str, str, list[str]]
 
 
+#: what a complex set refuses, since real data cannot carry a complex coordinate
+REAL_SETS_ONLY = frozenset({'project.transform', 'project.expand',
+                            'project.compute_modal_responses'})
+
+
 def _rows_of(ops: Iterable[Operation]) -> list[Operation]:
     return [op for op in ops if op.id in verbs.VERBS]
 
@@ -281,6 +286,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             if refused:
                 rows.append(_op_row(op, refused[0].upper() + refused[1:]))
                 continue
+        if op.id in REAL_SETS_ONLY and any(kind == 'shape_set' and project[name].is_complex
+                                           for name, kind in zip(names, kinds)):
+            rows.append(_op_row(op, 'A complex shape set cannot carry real data'))
+            continue
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
@@ -333,7 +342,9 @@ def _partner_columns(project: Any, chosen: list[Chosen], taken: set[str],
                 continue
             if _takes_anything(op) and op.id != 'project.merge':
                 continue
-            fits = [c[0] for c in present if _fill(op, [*chosen, c]) is not None]
+            fits = [c[0] for c in present if _fill(op, [*chosen, c]) is not None
+                    and not (op.id in REAL_SETS_ONLY and c[1] == 'shape_set'
+                             and project[c[0]].is_complex)]
             rows.append(_needs(_op_row(op), kind, fits))
         if rows:
             columns.append({'kinds': joined, 'rows': rows})

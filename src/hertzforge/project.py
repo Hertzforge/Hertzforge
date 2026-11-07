@@ -4898,6 +4898,14 @@ class Project(dict):
         shapes = model.eigensolution(maximum_frequency=maximum_frequency,
                                      num_modes=num_modes, damping=damping,
                                      progress=progress)
+        if not shapes.num_shapes:
+            lowest = model.eigensolution(num_modes=1).frequency[0]
+            raise ValueError(f'{source} has no mode up to {maximum_frequency:g} Hz; '
+                             f'its lowest is at {lowest:.4g} Hz')
+        if not geometry.units_defined:
+            # coordinates with no unit: these shapes are per the root of no
+            # declared mass, whatever the solve divided by
+            shapes.mass_unit = None
         params = {'maximum_frequency': maximum_frequency,
                   'num_modes': num_modes, 'damping': damping}
         return self._derive(source, shapes, name or f'{source} Modes',
@@ -5546,7 +5554,8 @@ class Project(dict):
 
         first, second = self.name_of(first), self.name_of(second)
         if pairs is None or macs is None:
-            matrix = self.comparison_mac(first, second)
+            # a mode of zero on the shared DOFs has no MAC, and is nobody's match
+            matrix = np.nan_to_num(self.comparison_mac(first, second))
             if pairs is None:
                 pairs = [(row, int(np.argmax(matrix[row])))
                          for row in range(matrix.shape[0])
@@ -8963,6 +8972,8 @@ def _goes(data, shapes, direction):
     responses appended reads physical, and its modal records expand."""
     from .core.transform import expands, reads_as
 
+    if shapes.is_complex:
+        return False
     if direction == 'modal':
         return expands(data, shapes)
     return reads_as(data, shapes) == direction

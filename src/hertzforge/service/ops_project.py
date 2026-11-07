@@ -333,7 +333,8 @@ def _inertia_param(term: str, default: float) -> Param:
 
 
 RIGID_POINT = tuple(_point_param(axis) for axis in 'xyz')
-RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia', 'boolean',
+RIGID_NORMALIZE = Param('normalize', 'Mass-normalize by the mass and inertia about the CG; '
+                        'the reference point must be the CG', 'boolean',
                         default=False, setting='rigid.normalize')
 RIGID_MASS = Param('mass', 'Mass', 'number', default=1.0, unit='kg', min=0.0,
                    setting='rigid.mass')
