@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub mod csv;
+pub mod uff;
 
 /// The schema this build reads and writes.
 ///
