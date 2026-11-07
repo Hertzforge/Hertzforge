@@ -77,7 +77,8 @@ kit. Services never send pixels and the shell never computes the numbers.
             "x":{"$array":..},"y":{"$array":..},
             "shape":"line"|"steps"|"law", "edges":{"$array":..}, "follows":0}],
  "link":"frequency",
- "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}]}
+ "regions":[{"x0":0.5,"x1":0.9,"kind":"frame"|"cut","label":"..."}],
+ "handles":[{"series":0,"x":100.0,"decibels":3.0,"label":"...","op":"...","params":{...}}]}
 ```
 
 `role` sets the line style so no meaning rests on color alone: measured solid, reference
@@ -94,6 +95,11 @@ discards; a `span` draws its edges alone. `label` is said when the span is hover
 `low` and the new x1 as `high`, and the answer's views take the result's place, as Visual
 Dynamics' averaging and truncation regions are dragged. They are not listed in the legend; the
 result's reading says what they are.
+
+`handles` (optional) are points dragged up and down on the plot, each at `x` on the curve of
+`series`, `decibels` from its target and said as `label`. On release the shell runs `op` with
+`params` and the new `decibels`, and the answer's views take the result's place, as a
+specification's band edges are dragged (`project.set_band_edge`).
 
 `follows` (optional) is the index, in this view's `series`, of the measurement a curve follows:
 a model's prediction of it, such as an FRF synthesized from fitted modes. A follower is drawn
@@ -392,7 +398,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | Method | Params | Result |
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
-| `op.run` | `{"op","params":{...}}` | `{"views":[view...],"project"}` |
+| `op.run` | `{"op","params":{...},"preview"?}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
@@ -415,11 +421,13 @@ projects downloaded from hertzforge.com and opened like any other file.
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
 Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
-in the param `values` names for that axis, and what `adds` (optional) gives for that axis.
+in the param `values` names for that axis, and what `adds` (optional) gives for that axis. `origin` is
+in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters.
 
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
 `"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
-Nothing reaches the project or its journal. A reading's `Added` row says `Would add`.
+Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
+operation without `previews` is a `bad_request`, and nothing runs.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
@@ -520,7 +528,7 @@ operation computes in SI; the service converts what it sends: a `spectrum`'s axe
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
 typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
-not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent. A view already on screen is not converted again; the shell draws it again.
+not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
 has one, and it ends with the connection. A file reaches the service by its path on the service's

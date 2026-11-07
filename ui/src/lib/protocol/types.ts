@@ -526,7 +526,7 @@ export interface Shown {
 		complex: boolean;
 		frequency: boolean;
 		projection: boolean;
-		/** A lone shape set: its three views and where its values are read. */
+		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
 		values_dofs: string[];
 		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */

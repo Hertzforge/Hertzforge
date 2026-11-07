@@ -192,6 +192,7 @@
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},
+        "note": {"type": "string"},
         "gizmo": {
           "type": "object", "required": ["origin", "axes", "slide", "turn"],
           "properties": {
@@ -616,7 +617,11 @@
     },
     "projectRenameParams": {
       "type": "object", "required": ["name", "to"], "additionalProperties": false,
-      "properties": {"name": {"type": "string", "minLength": 1}, "to": {"type": "string", "minLength": 1}}
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "to": {"type": "string", "minLength": 1},
+        "index": {"type": "integer", "minimum": 0}
+      }
     },
     "projectRemoveParams": {
       "type": "object", "required": ["names"], "additionalProperties": false,
