@@ -8,7 +8,8 @@
 import { describe, expect, it } from 'vitest';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createControlServer, type ControlServerOptions } from '$lib/protocol/mock/control';
-import { mockSocketFactory } from '$lib/protocol/mock/socket';
+import { mockSocketFactory, type MockConnection, type MockServer } from '$lib/protocol/mock/socket';
+import type { ShockLive, ShockState } from '$lib/protocol/shock';
 import { AcquireState } from '../store.svelte';
 import { ShockStore } from './shockStore.svelte';
 import { lastPulseWords } from './shockWords';
@@ -155,5 +156,30 @@ describe('the classical shock store', () => {
 		await acq.release();
 		await until(() => shock.status?.state === 'finished', 4000);
 		expect(shock.status?.end?.outcome).toBe('safe_stop');
+	});
+});
+
+describe('the run numbers on screen', () => {
+	it('take a state event over an older live frame, until the next frame comes', async () => {
+		let conn: MockConnection | null = null;
+		const server: MockServer = { hello: { type: 'hello', protocol: 'sds/1', service: 'control', version: 'test' }, methods: {}, attach: (c) => void (conn = c) };
+		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
+		const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
+		const shock = new ShockStore(acq, { local: null, checkDelayMs: 0 });
+		client.connect();
+		await client.whenOpen();
+		await until(() => conn !== null);
+		const pulses = (fired: number) => ({ fired, passed: fired, at_level: 0, of_level: 1 });
+		const live = (fired: number, phase: ShockLive['phase']): ShockLive => ({ run_id: 's-0001', source: 'SIM', state: 'running', phase, mode: 'manual', level_db: -12, rung: 0, pulses: pulses(fired), next_pulse_s: null, fire: null });
+		const state = { run_id: 's-0001', state: 'running', phase: 'waiting', title: 't', source: 'SIM', station: null, grid: null, clock: null, mode: 'manual', levels_db: [-12, 0], level_db: -12, rung: 0, pulses: pulses(2), next_pulse_s: 0.4, elapsed_s: 3, alarm: false, identification: null, prediction: null, last_pulse: null, law: null, feasibility: null, end: null } as unknown as ShockState;
+		conn!.emit('shock.live', live(1, 'firing') as unknown as Record<string, unknown>);
+		await until(() => shock.live !== null);
+		conn!.emit('shock.state', state as unknown as Record<string, unknown>);
+		await until(() => shock.status !== null);
+		// the pulse in flight has been judged: the state says so, and the older frame must not undo it
+		expect([shock.now?.phase, shock.now?.pulses.fired]).toEqual(['waiting', 2]);
+		conn!.emit('shock.live', { ...live(2, 'waiting'), next_pulse_s: 0.2 } as unknown as Record<string, unknown>);
+		await until(() => shock.live !== null);
+		expect(shock.now?.next_pulse_s).toBe(0.2);
 	});
 });

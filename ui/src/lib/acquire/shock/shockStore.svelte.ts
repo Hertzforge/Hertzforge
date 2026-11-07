@@ -53,7 +53,7 @@ import {
 	type ShockSection
 } from './shockSetup';
 import { shockBarActions, shockIsLive, shockModuleVerbs, shockPrimary, type ShockVerbContext, type ShockVerbId } from './shockVerbs';
-import { plannedPulses } from './shockWords';
+import { plannedPulses, SHOCK_OUTCOME_WORDS, SHOCK_PHASE_WORDS } from './shockWords';
 
 const SETUP_KEY = 'hertzforge.acquire.shock.setup.v1';
 /** The setup this screen applied, by run: `{runId, key}`. */
@@ -339,6 +339,9 @@ export class ShockStore {
 
 	/** Classical shock sends no live head the bar reads; the bar reads the state. */
 	readonly frame = null;
+	/** The run bar's words for classical shock's outcomes and phases. */
+	readonly outcomeWords: Record<string, string> = SHOCK_OUTCOME_WORDS;
+	readonly phaseWords: Record<string, string> = SHOCK_PHASE_WORDS;
 
 	get elapsed(): number | null {
 		return this.status?.elapsed_s ?? null;
