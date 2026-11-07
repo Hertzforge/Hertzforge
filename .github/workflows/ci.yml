@@ -74,10 +74,10 @@ jobs:
             echo
             python -m coverage report --format=markdown --sort=cover
           } >> "$GITHUB_STEP_SUMMARY"
-          # A floor: a change that adds code without
-          # tests fails the way a license finding does. Measured at 95% on
-          # 2026-11-01; raise it when the number rises, never lower it to pass.
-          python -m coverage report --fail-under=90 > /dev/null
+          # A floor: a change that adds code without tests fails the way a
+          # license finding does. Measured at 95.7% on 2026-11-07; raise it when
+          # the number rises, never lower it to pass.
+          python -m coverage report --fail-under=95 > /dev/null
 
   # The guide's mesh table: 11 CPU-minutes here and 17 minutes of a runner, so
   # weekly and on demand rather than on every pull request.
