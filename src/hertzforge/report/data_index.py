@@ -47,6 +47,7 @@ from datetime import datetime
 from typing import Any
 
 from ..core.data_index import CHANGED, MATCHES, NOT_FOUND, DataIndex
+from .identity import STAMP
 
 #: the feature's key in `report.features`
 FEATURE = 'data_index'
@@ -215,6 +216,11 @@ def _html(markup: str) -> dict[str, Any]:
     return {'kind': 'text', 'html': markup}
 
 
+def _stamped(markup: str) -> dict[str, Any]:
+    # says when it was checked, not what the report holds
+    return {**_html(markup), STAMP: True}
+
+
 def _log_now(status: Any) -> tuple[str, str]:
     """What the Log now column says of the live log, and its mark: the
     extract's badge, in capitals and marked as a failure when the log
@@ -294,10 +300,10 @@ def page_blocks(objects: Mapping[str, Any], heading: bool = False,
         out.append(_html(f'<p class="index-empty">{html.escape(EMPTY)}</p>'))
     else:
         out.append(table(index))
-        out.append(_html(f'<p class="index-check">'
-                         f'{html.escape(checked(index))}</p>'))
+        out.append(_stamped(f'<p class="index-check">'
+                            f'{html.escape(checked(index))}</p>'))
     out.extend(run_logs(objects, index))
-    out.append(_html(f'<p class="index-analysis">{html.escape(analysis(
+    out.append(_stamped(f'<p class="index-analysis">{html.escape(analysis(
         index, bool(getattr(objects, "file", None))))}</p>'))
     made = recipe(getattr(objects, 'provenance', None) or {}, objects)
     if made is not None:

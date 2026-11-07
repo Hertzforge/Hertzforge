@@ -17,6 +17,7 @@ from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import COMPONENT
+from .ops_sine_shock import _record
 from .ops_specify import (
     BREAKPOINTS,
     CONFIDENCE,
@@ -65,12 +66,6 @@ OWN_LEVEL = Param('interpolated', "Tone's own level", 'boolean', default=True)
 
 FREQUENCY = v.axis('Frequency', 'Hz', 'linear')
 LOG_FREQUENCY = v.axis('Frequency', 'Hz', 'log')
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 def _shaped(name: str, role: Any, data: Any, record: int) -> dict:

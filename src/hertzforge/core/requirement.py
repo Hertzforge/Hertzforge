@@ -1534,6 +1534,16 @@ def _records(requirement: TestRequirement, specification: Specification,
             raise ValueError('no control channel is found: none of the '
                              f"measurement's autospectra {where}; name it")
     if len(at) > 1:
+        # two quantities at one DOF, a drive point's force and acceleration:
+        # the specification says which one the test controlled
+        limited = {specification.known_dim(j)
+                   for j in range(specification.num_records)}
+        at = [i for i in at if measured.known_dim(i) in limited] or at
+    if len(at) > 1 and named:
+        raise ValueError(f'the measurement has {len(at)} autospectra at '
+                         f'{named[0]} that the specification does not tell '
+                         'apart')
+    if len(at) > 1:
         said = ', '.join(str(measured.response_dof[i]) for i in at)
         raise ValueError(f'a single-point requirement controls one channel; '
                          f'{len(at)} autospectra are candidates ({said}), so '

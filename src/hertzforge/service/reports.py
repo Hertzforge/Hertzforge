@@ -19,13 +19,14 @@ from .protocol import bad_request, not_found, refused
 REPORT_METHODS = ('report.generate', 'report.render', 'report.export', 'report.editor',
                   'report.operate', 'report.print', 'report.issue')
 
-#: the steps of an issue: the page marked issued is printed by the shell
+#: the steps of an issue: the page that says issued is printed by the shell
 #: between `begin` and `record`
 ISSUE_STEPS = ('begin', 'record', 'cancel')
 
-#: a report marked issued and waiting for its PDF: its identity as it was,
-#: and the page the shell prints, by the report object
-_PENDING: dict[int, tuple[dict[str, Any], str]] = {}
+#: a report waiting for its PDF, by the report object: the status it will
+#: carry and the page the shell prints. The report stays as it was until
+#: `record`, so a save in between writes nothing that was not recorded.
+_PENDING: dict[int, tuple[str, str]] = {}
 
 #: run first by the page printed: it draws its figures at print
 #: resolution (the page's `#print`), then asks for the print dialog once
@@ -77,7 +78,7 @@ def render(project: Any, params: Mapping[str, Any], method: str = 'report.render
     theme = params.get('theme')
     if theme is not None and theme not in THEMES:
         raise bad_request(f'{method} "theme" is light or dark')
-    return render_html(project[name], dict(project), units, object_groups=project.object_groups,
+    return render_html(project[name], project, units, object_groups=project.object_groups,
                        theme=theme)
 
 
@@ -88,14 +89,13 @@ def _anyway(params: Mapping[str, Any], method: str) -> bool:
     return anyway
 
 
-def export_checks(project: Any, name: str, index: bool = True) -> dict[str, Any]:
-    """What Visual Dynamics asks about before a report leaves the project
-    (`_export_owed`, `_export_index`): with skeleton sections on, the
-    sections (a flash report's parts) the report still owes; with the data
-    index on, every indexed file hashed again and those that do not match
-    the checksum indexed, each with what the check found. `{'owed': [...],
-    'index': [{'name', 'status'}]}`, both empty when nothing is asked.
-    `index` False leaves the files unread (an issue's record step)."""
+def export_checks(project: Any, name: str) -> dict[str, Any]:
+    """What is asked about before a report leaves the project: with
+    skeleton sections on, the sections (a flash report's parts) the report
+    still owes; with the data index on, every indexed file hashed again and
+    those that do not match the checksum indexed, each with what the check
+    found. `{'owed': [...], 'index': [{'name', 'status'}]}`, both empty
+    when nothing is asked."""
     from hertzforge.core.data_index import MATCHES
     from hertzforge.report.data_index import CHECK_WORDS
     from hertzforge.report.data_index import FEATURE as INDEX
@@ -106,7 +106,7 @@ def export_checks(project: Any, name: str, index: bool = True) -> dict[str, Any]
     features = enabled(report)
     owed = list(project.report_check(name)) if SKELETON in features else []
     astray: list[dict[str, str]] = []
-    if index and INDEX in features:
+    if INDEX in features:
         try:
             project.verify_data_index()
         except OSError as error:
@@ -116,14 +116,32 @@ def export_checks(project: Any, name: str, index: bool = True) -> dict[str, Any]
     return {'owed': owed, 'index': astray}
 
 
+def _written_note(project: Any, name: str) -> str:
+    """What a page just written does not say on its face: the blocks left
+    out as unbound, and what the check of the data index found."""
+    from hertzforge.report.data_index import FEATURE as INDEX
+    from hertzforge.report.data_index import checked
+    from hertzforge.report.features import enabled
+
+    report = project[name]
+    count = len(report.unbound(project, project.object_groups))
+    said = [f'{count} unbound block{"s" * (count != 1)} left out.'] if count else []
+    if INDEX in enabled(report) and len(project.data_index):
+        said.append(checked(project.data_index))
+    return ' '.join(said)
+
+
 def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.export`: the page written to `path` (`.html` added when it
     has another suffix); `{'path'}`, the path written. Written beside the
     target and renamed over it, so a failed write leaves an earlier file
-    whole. First the checks VD makes (`export_checks`): a report that still
-    owes sections or whose indexed files do not all match is not written
-    unless `anyway`; the answer then carries `owed` and `index` and no
-    `path`, for the shell to ask "Export anyway?"."""
+    whole. First the checks (`export_checks`): a report that still owes
+    sections or whose indexed files do not all match is not written unless
+    `anyway`; the answer then carries `owed` and `index` and no `path`, for
+    the shell to ask "Export anyway?". The page is the one printed and
+    issued, and refused when the report was issued and has changed since.
+    Written, the answer's `note` says what the page leaves out and what the
+    check found (`_written_note`)."""
     name = _report(project, params, 'report.export')
     path = params.get('path')
     if not isinstance(path, str) or not path.strip():
@@ -134,7 +152,10 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
     checks = export_checks(project, name)
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.export'):
         return {'path': None, **checks}
-    html = render(project, {'name': name, 'theme': 'light'}, 'report.export', units)
+    try:
+        html = project._export_page(name, units)
+    except ValueError as error:
+        raise refused(str(error)) from None
     partial = f'{path}.partial'
     try:
         with open(partial, 'w', encoding='utf-8') as handle:
@@ -144,7 +165,7 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
         if os.path.exists(partial):
             os.remove(partial)
         raise refused(f'could not write {path}: {error.strerror or error}') from None
-    return {'path': path, 'owed': [], 'index': []}
+    return {'path': path, 'owed': [], 'index': [], 'note': _written_note(project, name)}
 
 
 def _selected(params: Mapping[str, Any], method: str) -> int | None:
@@ -189,29 +210,33 @@ def _printable(page: str) -> str:
     return page.replace('</body>', body + '</body>', 1)
 
 
-def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> str:
+def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.print`: the reader's page, light, as it is printed: drawn at
     print resolution and asking for the print dialog once its figures are
     drawn, where the reader saves a PDF. Its print stylesheet carries the
-    margins the identity rides in (`report.identity.MARGINS`). Refused
-    when the report was issued and has changed since, as VD refuses to
-    print it."""
+    margins the identity rides in (`report.identity.MARGINS`). `{'html',
+    'owed', 'index'}`. First the checks an export makes (`export_checks`):
+    unless `anyway`, a report that owes sections or whose indexed files do
+    not all match answers with them and `html` null, for the shell to ask.
+    Refused when the report was issued and has changed since."""
     name = _report(project, params, 'report.print')
-    project._verify_index_for(name)
+    checks = export_checks(project, name)
+    if (checks['owed'] or checks['index']) and not _anyway(params, 'report.print'):
+        return {'html': None, **checks}
     try:
-        return _printable(project._export_page(name, units))
+        return {'html': _printable(project._export_page(name, units)), 'owed': [], 'index': []}
     except ValueError as error:
         raise refused(str(error)) from None
 
 
 def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
-    """`report.issue`, VD's Issue in three steps around the print the shell
-    makes. `begin` checks the report can be issued (`issue_ready`), marks it
-    issued and gives the page to print. `record` reads the PDF printed from
-    it at `path`, records the issue with the SHA-256 of the PDF and of the
-    page (`record_issue`), and gives the record's entry. `cancel` puts the
-    report back as it was."""
-    from hertzforge.report import render_html
+    """`report.issue`, in three steps around the print the shell makes.
+    `begin` checks the report can be issued (`issue_ready`) and gives the
+    page to print, which says issued; the report itself is unchanged.
+    `record` reads the PDF printed from it at `path`, records the issue
+    with the SHA-256 of the PDF and of the page (`record_issue`), which is
+    what makes the report issued, and gives the record's entry. `cancel`
+    forgets the page."""
     from hertzforge.report.identity import issue_ready, mark_issued, record_issue, unmark
 
     name = _report(project, params, 'report.issue')
@@ -219,27 +244,29 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
     step = params.get('step')
     if step not in ISSUE_STEPS:
         raise bad_request(f'report.issue "step" is one of {", ".join(ISSUE_STEPS)}')
-    pending = _PENDING.get(id(report))
     if step == 'begin':
-        if pending is not None:
-            unmark(report, pending[0])
+        _PENDING.pop(id(report), None)
         try:
             status = issue_ready(report, project, project.object_groups)
         except ValueError as error:
             raise refused(str(error)) from None
-        # VD's `_export_index` with the act 'Issue': the files hashed again,
-        # and an issue of a report whose files do not all match is asked about
+        # the files hashed again, and an issue of a report whose files do
+        # not all match is asked about
         checks = export_checks(project, name)
         if checks['index'] and not _anyway(params, 'report.issue'):
             return {'index': checks['index']}
         before = mark_issued(report, status)
-        page = render_html(report, project, units, object_groups=project.object_groups)
-        _PENDING[id(report)] = (before, page)
+        try:
+            page = project._report_page(name, units)
+        finally:
+            unmark(report, before)
+        _PENDING[id(report)] = (status, page)
         return {'html': _printable(page), 'status': status}
+    pending = _PENDING.get(id(report))
     if pending is None:
         raise refused(f'{name} is not waiting to be issued; begin the issue first')
     if step == 'cancel':
-        unmark(report, _PENDING.pop(id(report))[0])
+        _PENDING.pop(id(report))
         return {}
     path = params.get('path')
     if not isinstance(path, str) or not path.strip():
@@ -252,6 +279,6 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
         raise refused(f'could not read {path}: {error.strerror or error}') from None
     if not pdf.startswith(b'%PDF'):
         raise refused(f'{path} is not a PDF; save the printed page as PDF')
-    entry = record_issue(report, pending[1], pdf, os.path.basename(path))
-    _PENDING.pop(id(report))
-    return {'entry': entry}
+    status, page = _PENDING.pop(id(report))
+    mark_issued(report, status)
+    return {'entry': record_issue(report, page, pdf, os.path.basename(path))}

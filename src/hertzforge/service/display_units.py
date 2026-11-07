@@ -72,6 +72,7 @@ def _dimensions() -> dict[str, str]:
     simple = [d for d in _DIMENSIONALITY if d != 'dimensionless']
     candidates = list(simple)
     candidates += [f'{d}**2' for d in simple] + [f'{d}**2/frequency' for d in simple]
+    candidates += ['length**3']
     candidates += [f'{d}/frequency' for d in simple]
     candidates += [f'{a}/{b}' for a in simple for b in simple if a != b]
     candidates += [f'{a}*{b}/frequency' for a in simple for b in simple if a != b]
@@ -180,6 +181,62 @@ def _table(view: dict, system: Any) -> None:
             row[k] = _cell(row[k], change)
 
 
+def length_of(name: str) -> dict[str, Any]:
+    """What the shell labels and converts a typed length by in the system `name`."""
+    system = _system(name)
+    return {'unit': system.label_text('length'), 'to_si': float(system.transform('length')[0])}
+
+
+#: a number in a text of lengths; a piece's id before its colon ('3: 0.01') is not one
+_TYPED = re.compile(r'(\d+\s*:)|([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)')
+
+
+def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
+    """`values` with each `length` param taken from the system `name` to meters. An
+    undefined geometry's numbers are its own, and pass as they are."""
+    if not geometry.units_defined or name == DEFAULT:
+        return values
+    scale = float(_system(name).transform('length')[0])
+
+    def scaled(found: re.Match) -> str:
+        return found.group(1) or repr(float(found.group(2)) * scale)
+
+    out = dict(values)
+    for param in params:
+        if param.length:
+            held = out[param.name]
+            out[param.name] = _TYPED.sub(scaled, held) if isinstance(held, str) else held * scale
+    return out
+
+
+#: a length said in words: '0.2 m', not '0.2 m²' or '1e+06 N/m'
+_SAID = re.compile(r'(?<![\w.])(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?) m\b')
+
+
+def lengths_in_words(text: str, name: str) -> str:
+    """`text` with each length said in meters said in the system `name`."""
+    if name == DEFAULT:
+        return text
+    length = length_of(name)
+    return _SAID.sub(lambda found: f'{float(found.group(1)) / length["to_si"]:.4g} {length["unit"]}',
+                     text)
+
+
+def say_lengths(views: list[dict], name: str) -> None:
+    """The lengths in a reading's words and in a solids table's cells, in the system `name`."""
+    for view in views:
+        if view.get('view') == 'reading':
+            for row in view['rows']:
+                if isinstance(row['value'], str):
+                    row['value'] = lengths_in_words(row['value'], name)
+        elif view.get('view') == 'table':
+            spoken = [k for k, heading in enumerate(view['columns'])
+                      if heading in ('Dimensions', 'Center')]
+            for row in view['rows']:
+                for k in spoken:
+                    row[k] = lengths_in_words(row[k], name)
+
+
 def _shape(view: dict, system: Any) -> None:
     change = _change(view.get('unit'), system)
     if change is not None:
@@ -192,7 +249,8 @@ def _shape(view: dict, system: Any) -> None:
         gizmo = view.get('gizmo')
         if gizmo is not None:
             gizmo['origin'] = [float((v - change[1]) / change[0]) for v in gizmo['origin']]
-            gizmo['to_si'] = change[0]
+            if not gizmo['slide'].get('in_display'):
+                gizmo['to_si'] = change[0]
         pick = view.get('pick')
         if pick is not None and pick.get('target') == 'point':
             pick['to_si'] = [change[0], change[1]]

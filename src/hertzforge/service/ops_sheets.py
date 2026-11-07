@@ -28,6 +28,7 @@ from hertzforge.core.sensor_catalog import CATALOG
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import chosen_records
+from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
@@ -286,10 +287,7 @@ SLOPE = ' dB/oct'
 
 
 def _numbers(text: str, what: str) -> list[float]:
-    try:
-        return [float(t) for t in text.replace(',', ' ').split()]
-    except ValueError:
-        raise refused(f'{text.strip()!r} is not a list of numbers ({what})') from None
+    return parse_numbers(text, f'a list of numbers ({what})')
 
 
 def _lines(text: str) -> list[str]:
@@ -668,7 +666,7 @@ def set_band_edge(project: Any, params: dict[str, Any]) -> list[dict]:
     plot lands: it snaps to the grid, and a symmetric or uniform channel follows."""
     name = params['specification']
     draft = _opened(project, name, params['channels'])
-    segments = [int(part) for part in params['segments'].replace(' ', '').split(',') if part]
+    segments = parse_id_runs(params['segments'], 'a segment number')
     try:
         draft = draft.with_band_edge(params['kind'], params['side'], segments,
                                      params['decibels'])

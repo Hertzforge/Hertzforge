@@ -2145,6 +2145,7 @@ class TimeHistory(DataArray):
         # for numbers the first pass already holds. `compute_srs` keeps
         # one of these, so the windows, band and labels have one
         # statement.
+        from .shaker import finite
         from .srs import DEFAULT_Q, KINDS, PER_OCTAVE, octave_frequencies
         from .srs import peaks as srs_peaks
         from .srs import spectra as srs_spectra
@@ -2153,6 +2154,11 @@ class TimeHistory(DataArray):
         windows = self.srs_windows(shocks)
         named = len(windows) > 1
         band_low, band_high = self.srs_band(shocks)
+        if low is None and band_low >= band_high:
+            raise ValueError(
+                f'the shortest window is {1.0 / band_low:.4g} s long, too short '
+                f'to hold a cycle of {band_high:.6g} Hz, the highest frequency '
+                'this record can read a spectrum at; lengthen the window')
         low = band_low if low is None else float(low)
         high = band_high if high is None else float(high)
         frequencies = octave_frequencies(
@@ -2164,8 +2170,9 @@ class TimeHistory(DataArray):
         for i, record in enumerate(self.ordinate):
             for k, window in enumerate(windows):
                 first, last = window.bounds(rate)
-                read = srs_spectra(*srs_peaks(record.real[first:last],
-                                              frequencies, rate, q=q))
+                held = finite(record[first:last], str(self.response_dof[i]),
+                              'a spectrum is not read across one', first)
+                read = srs_spectra(*srs_peaks(held, frequencies, rate, q=q))
                 for kind in KINDS:
                     rows[kind].append(read[kind])
                 dofs.append(self.response_dof[i])
