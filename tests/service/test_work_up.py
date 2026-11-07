@@ -184,6 +184,12 @@ def test_a_failed_slot_says_why_on_any_module(validate):
     assert any('Multiple Coherence' in value for value in values(reading, 'Not computed'))
 
 
+def test_two_slots_refused_alike_are_said_once():
+    (reading,) = run(load('time.npz'), 'project.work_up_shock')
+    said = values(reading, 'Not computed')
+    assert len(said) == 1 and 'nothing here integrates' in said[0]
+
+
 # ---- Work Up Shock: where the events are found, and how far the SRS runs -------
 
 def test_work_up_shock_finds_the_events_on_the_recording():

@@ -1022,7 +1022,7 @@ def _work_up(test: str) -> Any:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
         rows += _srs_bands(project, added)
         rows += [v.row('Not computed', f'{slot}: {why}', None, 'warn')
-                 for slot, why in project.last_work_up_skipped]
+                 for slot, why in dict.fromkeys(project.last_work_up_skipped)]
         return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
     return run
 
