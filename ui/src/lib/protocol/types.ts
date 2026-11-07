@@ -220,6 +220,8 @@ export interface Pick3D {
 	count?: number;
 	/** nodes: the param the ids go in. */
 	param?: string;
+	/** nodes: how many of the last `ids` are left out, and drawn dim. */
+	off?: number;
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */

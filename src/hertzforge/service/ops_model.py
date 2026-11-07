@@ -37,6 +37,11 @@ TIE_TO = Param('to', 'Tie to', 'string', default='')
 REACH = Param('reach', 'Reach', 'number', default=0.0, unit='mm', min=0.0, step=0.1)
 TOLERANCE = Param('tolerance', 'Tolerance', 'number', default=0.0, unit='m', min=0.0,
                   step=0.0001)
+LEFT_OUT = Param('left_out', 'Places left out: node ids, or all', 'string', default='')
+#: a place the view was clicked on; not a setting of the form's
+TOGGLE = Param('toggle', 'Place clicked', 'string', default='', in_view=True)
+MERGE_KEEP = Param('keep', 'Merge (else mark the places)', 'boolean', default=False)
+ALIGN_KEEP = Param('keep', 'Align (else mark the moves)', 'boolean', default=False)
 
 
 def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -129,22 +134,86 @@ def group_properties(project: Any, params: dict[str, Any]) -> list[dict]:
     return [_properties_reading(name, geometry)]
 
 
+def _places_view(geometry: Any, name: str, op: str, params: dict[str, Any], places: list[int],
+                 out: set[int], hint: str) -> dict:
+    """The geometry with `places` (node ids) as the first rows, those left out last among
+    them, so a click on one reruns `op` with it in `toggle`."""
+    rows, triangles, lines = drawn_mesh(geometry)
+    index = {int(node): i for i, node in enumerate(geometry.node_id)}
+    ordered = [index[n] for n in places if n not in out] + [index[n] for n in places if n in out]
+    first = set(ordered)
+    final = np.asarray(ordered + [int(r) for r in rows if int(r) not in first], dtype=np.int64)
+    position = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    position[final] = np.arange(final.size)
+    return v.shape3d(
+        name, 'm' if geometry.units_defined else 'undefined',
+        np.asarray(geometry.node_xyz, dtype=float)[final], [],
+        triangles=position[rows[triangles]] if len(triangles) else triangles,
+        lines=position[rows[lines]] if len(lines) else lines,
+        node_ids=np.asarray(geometry.node_id)[final],
+        pick=v.picking(op, params, 'nodes', hint,
+                       ids=[int(geometry.node_id[i]) for i in ordered], count=1, param='toggle',
+                       off=sum(n in out for n in places)))
+
+
+def _left_out(params: dict[str, Any], places: list[int]) -> set[int]:
+    """The places left out: every one for 'all', the ids named otherwise, with `toggle`
+    moved across. Ids that are no longer places drop out."""
+    text = params['left_out'].strip()
+    named = set(places) if text.lower() == 'all' else set(_ids(text, 'a node id'))
+    toggle = params['toggle'].strip()
+    if toggle:
+        named ^= set(_ids(toggle, 'a node id'))
+    return named & set(places)
+
+
+def _core_tolerance(geometry: Any) -> float:
+    """What `Project.merge_coincident_nodes` takes with none given: a millionth of the
+    diagonal of the extent, so what is marked is what merges."""
+    low, high = geometry.extent
+    return 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+
+
+def _id_text(ids: set[int] | list[int]) -> str:
+    return ', '.join(str(i) for i in sorted(ids))
+
+
 def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.merge_coincident_nodes`: each set of a geometry's coincident
-    nodes merged into one, the elements reconnected to the lowest id
-    (`Project.merge_coincident_nodes`)."""
+    """`project.merge_coincident_nodes`: every place a geometry's nodes coincide marked, a
+    click leaving one out or putting it back, and with `keep` each place still in merged
+    into one node, the elements reconnected to the lowest id
+    (`Project.merge_coincident_nodes`), as VD's merge pane does."""
     name = params['geometry']
-    tolerance = params['tolerance'] or None
-    before = len(project[name].node_id)
-    try:
-        project.merge_coincident_nodes(name, tolerance=tolerance)
-    except ValueError as error:
-        raise refused(str(error)) from None
-    after = len(project[name].node_id)
-    return [v.reading(f'Coincident nodes of {name}', [
-        v.row('Nodes before', float(before), '', 'info'),
-        v.row('Nodes merged away', float(before - after), '', 'info'),
-        v.row('Nodes now', float(after), '', 'info')])]
+    geometry = project[name]
+    groups = _groups(geometry, params['groups']) if params['groups'].strip() else None
+    tolerance = params['tolerance'] or _core_tolerance(geometry)
+    every = geometry.coincident_spots(tolerance, groups)
+    places = [spot[0] for spot in every]
+    out = _left_out(params, places)
+    exclude = [node for spot in every if spot[0] in out for node in spot]
+    if params['keep']:
+        before = len(geometry.node_id)
+        try:
+            project.merge_coincident_nodes(name, tolerance=tolerance, groups=groups,
+                                           exclude=exclude or None)
+        except ValueError as error:
+            raise refused(str(error)) from None
+        after = len(geometry.node_id)
+        return [v.reading(f'Coincident nodes of {name}', [
+            v.row('Nodes before', float(before), '', 'info'),
+            v.row('Nodes merged away', float(before - after), '', 'info'),
+            v.row('Places left out', float(len(out)), '', 'info'),
+            v.row('Nodes now', float(after), '', 'info')])]
+    rows = [v.row('Places', float(len(places)), '', 'info'),
+            v.row('Left out', _id_text(out) or 'none', None, 'info')]
+    fold = geometry.merge_folds(tolerance, groups, exclude or None)
+    if fold:
+        rows.append(v.row('Refused', fold, None, 'warn'))
+    held = {'geometry': name, 'groups': params['groups'], 'tolerance': params['tolerance'],
+            'left_out': _id_text(out), 'keep': False}
+    return [v.reading(f'Merge Coincident Nodes on {name}', rows),
+            _places_view(geometry, f'Where {name} would merge', 'project.merge_coincident_nodes',
+                         held, places, out, 'Click a place to leave it out or put it back')]
 
 
 def _ids(text: str, what: str) -> list[int]:
@@ -237,21 +306,38 @@ def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.align_meshes`: where parts meshed apart meet, the coarser
-    mesh's nodes moved onto the finer mesh's nearest nodes within a
-    reach (`Project.align_meshes`), so Merge Coincident Nodes can join
-    them next. 0 reaches half the coarsest piece's spacing."""
+    """`project.align_meshes`: every move marked on the node that would move, a click leaving
+    one out or putting it back, and with `keep` each one still in made
+    (`Project.align_meshes`), as VD's merge pane does for an alignment."""
     name = params['geometry']
     geometry = project[name]
     groups = _groups(geometry, params['groups']) if params['groups'].strip() else None
     reach = params['reach'] / 1000.0 or None
-    try:
-        found = project.align_meshes(name, reach, groups)
-    except ValueError as error:
-        raise refused(str(error)) from None
-    return [v.reading(f'Aligned meshes of {name}', [
-        v.row('Nodes moved', float(found['moved']), '', 'info'),
-        v.row('Farthest move', float(found['farthest']) * 1000.0, 'mm', 'info')])]
+    used = reach if reach is not None else (geometry.align_reach(groups) or 0.0)
+    every = geometry.align_moves(used, groups)
+    places = [int(move[0]) for move in every]
+    out = _left_out(params, places)
+    exclude = sorted(out) or None
+    if params['keep']:
+        try:
+            found = project.align_meshes(name, reach, groups, exclude)
+        except ValueError as error:
+            raise refused(str(error)) from None
+        return [v.reading(f'Aligned meshes of {name}', [
+            v.row('Nodes moved', float(found['moved']), '', 'info'),
+            v.row('Moves left out', float(len(out)), '', 'info'),
+            v.row('Farthest move', float(found['farthest']) * 1000.0, 'mm', 'info')])]
+    moves = [move for move in every if int(move[0]) not in out]
+    rows = [v.row('Moves', float(len(every)), '', 'info'),
+            v.row('Left out', _id_text(out) or 'none', None, 'info')]
+    fold = geometry.align_folds(moves)
+    if fold:
+        rows.append(v.row('Refused', fold, None, 'warn'))
+    held = {'geometry': name, 'groups': params['groups'], 'reach': params['reach'],
+            'left_out': _id_text(out), 'keep': False}
+    return [v.reading(f'Align Meshes on {name}', rows),
+            _places_view(geometry, f'What would move on {name}', 'project.align_meshes', held,
+                         places, out, 'Click a move to leave it out or put it back')]
 
 
 OPERATIONS = (
@@ -269,9 +355,10 @@ OPERATIONS = (
     Operation(
         id='project.merge_coincident_nodes', title='Merge Coincident Nodes',
         workspace='geometry',
-        summary='Each set of coincident nodes merged into one, so parts meshed '
-                'apart are joined; 0 for the core\'s own tolerance.',
-        params=(GEOMETRY, TOLERANCE), outputs=('reading',),
+        summary='Every place nodes coincide marked, for leaving some out, then each one '
+                'left in merged into one node; tolerance 0 for the core\'s own.',
+        params=(GEOMETRY, GROUPS, TOLERANCE, LEFT_OUT, TOGGLE, MERGE_KEEP),
+        outputs=('reading', 'shape3d'),
         run=merge_coincident_nodes, edits=True),
     Operation(
         id='project.element_groups', title='Element Groups', workspace='model',
@@ -298,9 +385,10 @@ OPERATIONS = (
         edits=True),
     Operation(
         id='project.align_meshes', title='Align Meshes', workspace='geometry',
-        summary='Where parts meshed apart meet, the coarser mesh\'s nodes moved onto the '
-                'finer one\'s, so Merge Coincident Nodes can join them; reach 0 for half '
-                'the coarsest spacing.',
-        params=(GEOMETRY, GROUPS, REACH), outputs=('reading',), run=align_meshes,
+        summary='Where parts meshed apart meet, every move of a coarser node onto a finer '
+                'one marked, for leaving some out, then each one left in made; reach 0 for '
+                'half the coarsest spacing.',
+        params=(GEOMETRY, GROUPS, REACH, LEFT_OUT, TOGGLE, ALIGN_KEEP),
+        outputs=('reading', 'shape3d'), run=align_meshes,
         edits=True),
 )

@@ -160,7 +160,9 @@ the result's place:
         "param":"nodes",               nodes: the param the ids go in, as "4, 7, 9"
         "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
         "kept":[1,3],                  faces: the surfaces in use now
-        "out":"leave_out","back":"put_back"}   faces: the params a click names a surface in
+        "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
+        "off":2}                       nodes: marked places, shown through the model; this many of
+                                       the last `ids` are left out and drawn dim
 ```
 
 A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
