@@ -1,21 +1,16 @@
-"""Four ready-to-open .vdyn projects, one per workflow, skeleton full.
+"""Three ready-to-open .hforge projects, one per workflow, skeleton full.
 
-Each is the plate's own data assembled the way the workflow guides
-assemble it — modal, random vibration, transient, shock — with every
-gray slot of its project type filled: geometry, photos, channel
-table, the data, the derived spectra, the report. They exist to be
-dropped onto the window for workflow testing, and to sit behind the
-documentation's screenshots.
+Each is the plate's own data assembled the way the workflows assemble
+it — modal, random vibration, shock — with every slot of its project
+type filled: geometry, photos, channel table, the data, the derived
+spectra, the report. They exist to be dropped onto the window for
+workflow testing.
 
-    ./.venv/bin/python testdata/generate_plate_projects.py
+    python testdata/generate_plate_projects.py
 
-Writes stressdata/plate_projects/{modal,random,transient,shock}.vdyn
-— outside the repository, because each embeds megabytes of run data
-that testdata already carries once. Regenerating takes seconds; the
-transient one needs stressdata/plate/transient.nc4 first
-(generate_plate_runs.py --transient, in hertzforge-generators)
-and is skipped with a note when
-it is absent.
+Writes testdata/plate_projects/{modal,random,shock}.hforge, ignored by
+git because each embeds megabytes of run data that `testdata/plate`
+already carries once. Regenerating takes seconds.
 
 The photos slot gets rendered scenes of the article rather than
 photographs — this article has never been photographed, having never
@@ -45,8 +40,7 @@ from hertzforge.core.report import missing_expectations
 
 HERE = pathlib.Path(__file__).parent
 PLATE = HERE / 'plate'
-STRESS = HERE.parent / 'stressdata' / 'plate'
-OUT = HERE.parent / 'stressdata' / 'plate_projects'
+OUT = HERE / 'plate_projects'
 
 
 def photos(*scenes) -> Photos:
@@ -144,33 +138,6 @@ def random_project():
         'shaped acceleration specification.'))
 
 
-def transient_project():
-    run = STRESS / 'transient.nc4'
-    if not run.exists():
-        print('transient.nc4 absent — run '
-              'generate_plate_runs.py --transient first (it lives in '
-              'hertzforge-generators); skipping')
-        return None
-    project = hertzforge.Project('Plate Transient Replication')
-    project.import_file(str(run))
-    assert project.project_type == 'Transient', project.project_type
-    geometry = hertzforge.import_file(str(PLATE / 'geometry.npz'))
-    geometry.define_units('m')
-    project.add('Geometry', geometry)
-    project.add('Photos', photos(('Test article', geometry)))
-    project.link(*[name for name in project.names])
-    project.set_basis(*[name for name in project.names])
-    # the spectral pair: the target's own PSD arrives as a
-    # specification, the measurement's as data — see the workflow
-    # guide. No SRS: that judgment belongs to the shock type
-    project.compute_psds(project.transient_specification)
-    project.compute_psds(project.time_history)
-    return finish(project, 'transient', (
-        'Demonstration transient replication on the aluminum plate: '
-        'the target waveform is the plate\'s own response to a '
-        'burst at the corner drive, replicated by two shakers.'))
-
-
 def shock_project():
     project = hertzforge.Project('Plate Shock Series')
     project.import_file(str(PLATE / 'shock.nc4'))
@@ -241,91 +208,12 @@ def shock_project():
         'response spectra against the specification band.'))
 
 
-def sine_project():
-    run = STRESS / 'sine.nc4'
-    if not run.exists():
-        print('sine.nc4 absent — run generate_plate_sine.py first (it '
-              'lives in hertzforge-generators); skipping')
-        return None
-    project = hertzforge.Project('Plate Sine Sweep')
-    project.import_file(str(run))
-    assert project.project_type == 'Sine Sweep', project.project_type
-    geometry = hertzforge.import_file(str(PLATE / 'geometry.npz'))
-    geometry.define_units('m')
-    project.add('Geometry', geometry)
-    project.add('Photos', photos(('Test article', geometry)))
-    project.link(*[name for name in project.names])
-    project.set_basis(*[name for name in project.names])
-    # the levels each tone actually held, read out of the recording by
-    # the tracking demodulator — the sweep counterpart of the random
-    # workflow's PSDs
-    project.extract_sine(project.time_history)
-    return finish(project, 'sine', (
-        'Demonstration sine sweep on the aluminum plate: four '
-        'simultaneous tones on two shakers, each swept on its own '
-        'schedule, with the achieved levels extracted from the '
-        'recording and judged against the specification bands.'))
-
-
-def sysid_project():
-    stream = STRESS / 'sysid_stream.nc4'
-    if not stream.exists():
-        print('sysid_stream.nc4 absent — run generate_plate_sysid.py '
-              'first (it lives in hertzforge-generators); skipping')
-        return None
-    project = hertzforge.Project('Plate System ID')
-    # everything computes from the *streamed* save (Brandon,
-    # 2026-08-25): it carries the channel table, so the readings come
-    # out with real node labels and engineering units, and the
-    # geometry links. The spectral package cannot give any of that —
-    # it records hardware channel numbers and no units, which is what
-    # its import tests document — so the package stays the importer's
-    # concern and the demonstration works the data up itself.
-    project.import_file(str(stream))
-    project.project_type = 'System ID'
-    # the two phases named for what they are, quiet first — the same
-    # reading the app's import question applies
-    histories = sorted(
-        (name for name in project.names
-         if type(project[name]).__name__ == 'TimeHistory'),
-        key=lambda name: float(np.asarray(project[name].ordinate).std()))
-    project.rename(histories[0], 'Noise Time History')
-    project.rename(histories[1], 'Excitation Time History')
-    geometry = hertzforge.import_file(str(PLATE / 'geometry.npz'))
-    geometry.define_units('m')
-    project.add('Geometry', geometry)
-    project.add('Photos', photos(('Test article', geometry)))
-    project.link(*[name for name in project.names])
-    project.set_basis(*[name for name in project.names])
-    # H1, the controller's own sysid estimator: the plant is measured
-    # driving through known excitation, so the noise is on the response
-    project.compute_frfs('Excitation Time History', 'H1')
-    project.compute_multiple_coherence('Excitation Time History')
-    # the two densities the ratio reading divides — identically framed
-    # on purpose, the ambient borrowing the excitation's frames, since
-    # a ratio of densities only exists on shared lines (the signal-to-
-    # noise is a *reading* of this pair, never a third object)
-    project.compute_psds('Excitation Time History')
-    project['Noise Time History'].averaging = \
-        project['Excitation Time History'].averaging
-    project.compute_psds('Noise Time History')
-    return finish(project, 'sysid', (
-        'Demonstration system identification of the aluminum plate: '
-        'the ambient noise measured first, then the driven '
-        'excitation, with the plant FRFs, the multiple coherence and '
-        'the signal-to-noise of the measurement all computed from '
-        'the recording.'))
-
-
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    for build in (modal_project, random_project, transient_project,
-                  shock_project, sine_project, sysid_project):
+    for build in (modal_project, random_project, shock_project):
         project = build()
-        if project is None:
-            continue
         name = build.__name__.replace('_project', '')
-        path = OUT / f'{name}.vdyn'
+        path = OUT / f'{name}.hforge'
         project.save(str(path))
         print(f'{path.name}: {len(project)} objects, '
               f'{path.stat().st_size / 1e6:.1f} MB')

@@ -1,4 +1,4 @@
-"""The four demonstration projects build complete, one per workflow.
+"""The three demonstration projects build complete, one per workflow.
 
 Marked `slow` like the Frame-Wing: each build runs a real
 fit, real spectra and offscreen renders, and what they guard — that
@@ -30,22 +30,13 @@ def builders():
 @pytest.mark.parametrize('name,project_type', [
     ('modal_project', 'Modal Test'),
     ('random_project', 'Random Vibration'),
-    ('transient_project', 'Transient'),
     ('shock_project', 'Shock'),
-    ('sine_project', 'Sine Sweep'),
-    ('sysid_project', 'System ID'),
 ])
 def test_the_project_builds_with_no_gray_slots(builders, name,
                                                project_type):
     """The builders assert completeness themselves before returning —
     this holds that they still do, for every type, whenever the
     skeleton or the workflows move."""
-    needs = {'transient_project': ['transient.nc4'],
-             'sine_project': ['sine.nc4'],
-             'sysid_project': ['sysid_stream.nc4', 'sysid_data.nc4']}
-    for stem in needs.get(name, ()):
-        if not (builders.STRESS / stem).exists():
-            pytest.skip(f'{stem} not generated on this machine')
     project = getattr(builders, name)()
     assert project is not None
     assert project.project_type == project_type

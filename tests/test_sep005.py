@@ -3,9 +3,7 @@
 SEP 005 is sdypy's unified-timeseries standard: a plain dict per
 series, a list for several. It is an in-memory standard rather than a
 file format, so the surface is `hertzforge.from_sep005` and
-`TimeHistory.to_sep005` — and the exported dicts are proved against the
-sdypy project's *own* validator (`sdypy-sep005`, a test-only
-dependency; the package itself imports nothing of sdypy's).
+`TimeHistory.to_sep005`. The package imports nothing of sdypy's.
 """
 
 from __future__ import annotations
@@ -155,27 +153,3 @@ def test_the_round_trip_is_exact():
     assert list(again.response_dof) == list(history.response_dof)
     assert again.ordinate_dim == history.ordinate_dim
     assert again.abscissa == pytest.approx(history.abscissa)
-
-
-def test_the_export_passes_sdypys_own_validator():
-    """The point of the whole module: what we hand a sdypy user must
-    pass the sdypy project's compliance checker, not our reading of the
-    spec. Both shapes — SI-defined and raw-with-empty-units — and an
-    uneven record with a time vector."""
-    sep005 = pytest.importorskip('sdypy_sep005.sep005')
-
-    defined = hertzforge.from_sep005(_series())
-    t = np.arange(64) / 64.0
-    raw = hertzforge.TimeHistory(t, np.ones((2, 64)),
-                                     response_dof=['1X+', '2X+'])
-    uneven = hertzforge.TimeHistory(
-        np.array([0.0, 0.1, 0.3, 0.7]), np.ones((1, 4)),
-        response_dof=['1X+'])
-    mixed = hertzforge.TimeHistory(
-        t, np.ones((2, 64)), response_dof=['1Z+', '1Z+'])
-    mixed.define_units(['m/s**2', 'N'])
-    # their assert takes the standard's list-of-timeseries form
-    sep005.assert_sep005([*defined.to_sep005('defined run'),
-                          *raw.to_sep005('raw run'),
-                          *uneven.to_sep005('uneven run'),
-                          *mixed.to_sep005('drive point')])

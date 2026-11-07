@@ -298,11 +298,10 @@ def test_a_source_gone_from_the_file_is_not_read_as_a_same_named_object(tmp_path
 
 # ---- older files --------------------------------------------------------------
 
-CORPUS = Path.home() / 'visualdynamics/stressdata/plate_projects'
+CORPUS = Path(__file__).parent.parent / 'testdata' / 'vdyn_corpus'
 
 
-@pytest.mark.skipif(not (CORPUS / 'random.vdyn').exists(), reason='no corpus here')
-@pytest.mark.parametrize('name', ['random.vdyn', 'sysid.vdyn'])
+@pytest.mark.parametrize('name', ['schema1.vdyn', 'schema2.vdyn', 'schema3.vdyn'])
 def test_an_older_project_opens_with_nothing_stale(tmp_path, name):
     shutil.copy(CORPUS / name, tmp_path / name)
     assert hz.Project.open(tmp_path / name).stale() == {}

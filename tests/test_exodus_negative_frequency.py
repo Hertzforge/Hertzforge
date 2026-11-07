@@ -63,15 +63,3 @@ def test_a_file_with_no_negative_frequency_is_read_in_silence(tmp_path):
         back = hertzforge.import_file(path)
     assert not [w for w in caught if 'negative frequency' in str(w.message)]
     assert back['shapes'].description == ['', '', '']
-
-
-def _answer_dialogs(window_module, monkeypatch, shown):
-    """The window asks how an exodus file's steps read; a person picks
-    mode shapes. The report dialogs are recorded rather than shown."""
-    monkeypatch.setattr(
-        window_module.QInputDialog, 'getItem',
-        lambda parent, title, label, items, *rest: (items[0], True))
-    for kind in ('information', 'warning'):
-        monkeypatch.setattr(
-            window_module.QMessageBox, kind,
-            lambda parent, title, text: shown.append((title, text)))

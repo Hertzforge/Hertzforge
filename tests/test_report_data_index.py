@@ -817,15 +817,6 @@ def test_the_registry_entry():
     assert rdi.FEATURE in rf.PRESETS['test_report'].features
 
 
-def _menu(editor):
-    out = []
-    for action in editor.insert_menu.actions():
-        out.append(action.text())
-        if action.menu() is not None:
-            out += [f'> {sub.text()}' for sub in action.menu().actions()]
-    return out
-
-
 #: every field the identification needs to be issued, entered
 IDENTITY = {
     'number': 'R-0037', 'revision': '0', 'laboratory': 'Test Lab',

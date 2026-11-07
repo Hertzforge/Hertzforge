@@ -411,36 +411,6 @@ def test_the_project_verbs_are_journaled():
     assert rf.FEATURES[ri.FEATURE].available
 
 
-#: reads a PDF's pages as text, in a process of its own
-_READ_PAGES = """
-import json, sys
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtPdf import QPdfDocument
-app = QGuiApplication([])
-document = QPdfDocument()
-document.load(sys.argv[1])
-print(json.dumps([' '.join(document.getAllText(at).text().split())
-                  for at in range(document.pageCount())]))
-"""
-
-
-def _pdf_pages(path):
-    """The text of each page of the PDF at `path`, read with QtPdf in a
-    separate process. QtPdf is never loaded into a process running Qt
-    WebEngine: both carry the browser engine's own libraries, and a
-    test worker that loaded QtPdf beside a live web engine crashed in
-    its next event loop on Linux."""
-    import os
-    import subprocess
-    import sys
-
-    run = subprocess.run(
-        [sys.executable, '-c', _READ_PAGES, str(path)], capture_output=True,
-        text=True, encoding='utf-8', timeout=120, check=True,
-        env=dict(os.environ, QT_QPA_PLATFORM='offscreen'))
-    return json.loads(run.stdout.strip().splitlines()[-1])
-
-
 def test_only_the_revision_the_report_carries_counts_as_issued():
     """A record of revision 0 does not make revision 1 issued, though
     the number is the same: the guard reads the entry that matches both."""
