@@ -414,6 +414,47 @@ impl BidirSweep {
         self.held
     }
 
+    /// The band the sweep runs over, Hz.
+    pub fn band(&self) -> (f64, f64) {
+        self.cfg.band
+    }
+
+    /// The direction the sweep moves in now.
+    pub fn direction(&self) -> SweepDirection {
+        self.direction
+    }
+
+    /// The sweep rate now, Hz per second, signed by the direction: what the law
+    /// moves the frequency at from here. Zero while held or done.
+    pub fn rate_hz_per_s(&self) -> f64 {
+        if self.held || self.done {
+            return 0.0;
+        }
+        let magnitude = match self.cfg.rate {
+            SweepRate::LogOctPerMin(r) => self.f_hz * std::f64::consts::LN_2 * r / 60.0,
+            SweepRate::LinearHzPerSec(r) => r,
+        };
+        match self.direction {
+            SweepDirection::Up => magnitude,
+            SweepDirection::Down => -magnitude,
+        }
+    }
+
+    /// The sweep rate now in octaves per minute, signed by the direction, for a
+    /// logarithmic sweep; `None` for a linear one. Zero while held or done.
+    pub fn rate_oct_per_min(&self) -> Option<f64> {
+        let SweepRate::LogOctPerMin(r) = self.cfg.rate else {
+            return None;
+        };
+        if self.held || self.done {
+            return Some(0.0);
+        }
+        Some(match self.direction {
+            SweepDirection::Up => r,
+            SweepDirection::Down => -r,
+        })
+    }
+
     /// Full progress readout.
     pub fn progress(&self) -> SweepProgress {
         SweepProgress {
@@ -652,6 +693,11 @@ impl StepSine {
             held: false,
             done: false,
         })
+    }
+
+    /// The band the steps span, Hz.
+    pub fn band(&self) -> (f64, f64) {
+        self.cfg.band
     }
 
     /// The full step-frequency ladder.
@@ -905,6 +951,11 @@ impl RstdPlan {
             held: false,
             band_exit_latched: false,
         })
+    }
+
+    /// The band the search and the dwell are bounded by, Hz.
+    pub fn band(&self) -> (f64, f64) {
+        self.cfg.band
     }
 
     /// The settle hold duration, seconds: `settle_k / tracking_bw_hz`.

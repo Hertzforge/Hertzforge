@@ -21,6 +21,7 @@
 //! (the retired Sim per-block drive latch, mirrored from hertzforge-demo).
 
 pub mod config;
+pub mod display;
 pub mod engine;
 pub mod report;
 pub mod ring;
@@ -48,8 +49,8 @@ use hertzforge_hal::Backend;
 use hertzforge_shaker_db::{FeasibilityReport, RatingValue, Verdict};
 use report::{
     ChannelRow, ChannelTrace, CompositeModeRecord, EventKind, EventLog, FeasibilityDigest,
-    FrfDisplay, Honesty, LevelHistoryEntry, RunSettings, RunState, SineStatus, TracePoint,
-    TripRecord,
+    FrfDisplay, Honesty, LevelHistoryEntry, RunSettings, RunState, SineIdentificationFacts,
+    SineInputReading, SineStatus, TracePoint, TripRecord,
 };
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -386,6 +387,11 @@ pub struct SineService {
     sysid_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The drive->response pipeline lag the sysID measured, in frames.
     sysid_lag_frames: usize,
+    /// The fraction of the sysID grid inside the run band the feedforward
+    /// trusts; computed once, at sysID.
+    ident_trusted_frac: f64,
+    /// The coherence gate's verdict; `None` until it has run.
+    gate_passed: Option<bool>,
 
     // --- the control-law seam -----------------------------------------------------
     /// The factory the run builds its control law with, after identification.
@@ -560,6 +566,8 @@ impl SineService {
             device_parked: false,
             sysid_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sysid_lag_frames: 0,
+            ident_trusted_frac: 0.0,
+            gate_passed: None,
             law_factory: None,
             law_clock: std::sync::Arc::new(MonotonicClock::new()),
         })
@@ -687,6 +695,24 @@ impl SineService {
             .iter()
             .filter(|c| c.enabled && c.role != ChannelRole::Drive)
             .count()
+    }
+
+    /// The channel-table index of each input slot: every enabled input
+    /// (control, monitor, reference), in table order. `n` slots; a slot the
+    /// table does not have (before configure) takes its own number.
+    fn input_channel_indices(&self, n: usize) -> Vec<u32> {
+        let mut v: Vec<u32> = self
+            .table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role != ChannelRole::Drive)
+            .map(|c| c.index)
+            .take(n)
+            .collect();
+        while v.len() < n {
+            v.push(v.len() as u32);
+        }
+        v
     }
 
     /// Offset of each requested channel index among the ENABLED input
@@ -1142,6 +1168,68 @@ impl SineService {
             // converts at the one place that knows both units.
             thd: s.thd.is_finite().then_some(s.thd),
             cola: self.cfg.cola.enabled.then_some(self.cfg.cola.volts_pk),
+        }
+    }
+
+    /// **THE RUN'S DISPLAY**: every enabled input, the drive as played, the
+    /// control composite and its profile, against frequency and against time.
+    ///
+    /// The record a Sine screen draws, kept by the control tick (see
+    /// [`display::SineDisplay`] for its two views and its grid). Against
+    /// frequency the grid is log-spaced across the adopted band and each point
+    /// holds the latest tick at it; against time it is the last 60 s of
+    /// station time. The profile reference and its bands on the grid are at
+    /// the present level.
+    ///
+    /// [`SineService::display_snapshot`] stays as it is for the daemon wire it
+    /// serves (a linear raster of the control channels, the identification
+    /// `|H|` on its drive curve); this is the record for every other host.
+    ///
+    /// It allocates: call it between batches, at a display cadence.
+    pub fn display(&self) -> display::SineDisplay {
+        let level_db = self
+            .handles
+            .as_ref()
+            .map(|h| h.status.read().level_db)
+            .unwrap_or(self.cfg.ladder.start_db);
+        let (grid_hz, visited, sweep, history_t_s, history) = match self.handles.as_ref() {
+            Some(h) => {
+                let slots = h
+                    .display
+                    .slots
+                    .lock()
+                    .map(|s| s.clone())
+                    .unwrap_or_default();
+                match h.display.log.lock() {
+                    Ok(log) => log.snapshot(&slots),
+                    Err(_) => Default::default(),
+                }
+            }
+            None => {
+                let log = display::DisplayLog::new(0, 0, self.band, 0.01);
+                log.snapshot(&display::DisplaySlots::default())
+            }
+        };
+        let scale = 10f64.powf(level_db / 20.0);
+        let profile = &self.cfg.profile;
+        let on_grid = |f: &dyn Fn(f64) -> Option<f64>| -> Vec<f32> {
+            grid_hz
+                .iter()
+                .map(|&hz| f(hz).map(|v| (v * scale) as f32).unwrap_or(f32::NAN))
+                .collect()
+        };
+        display::SineDisplay {
+            reference: on_grid(&|hz| profile.target_accel_g_pk(hz)),
+            alarm_lo: on_grid(&|hz| profile.alarm_bounds(hz).map(|b| b.0)),
+            alarm_hi: on_grid(&|hz| profile.alarm_bounds(hz).map(|b| b.1)),
+            abort_lo: on_grid(&|hz| profile.abort_bounds(hz).map(|b| b.0)),
+            abort_hi: on_grid(&|hz| profile.abort_bounds(hz).map(|b| b.1)),
+            grid_hz,
+            visited,
+            sweep,
+            history_t_s,
+            history,
+            identification: self.frf.clone(),
         }
     }
 
@@ -1947,6 +2035,20 @@ impl SineService {
             .as_ref()
             .map(|t| t.trusted().to_vec())
             .unwrap_or_else(|| vec![false; freqs.len()]);
+        // The trusted fraction INSIDE the run band, for the state and the live
+        // frame: the share of the grid the feedforward will act on.
+        let (in_band, trusted_in_band) = freqs
+            .iter()
+            .zip(trusted.iter())
+            .filter(|(&f, _)| f >= b_lo && f <= b_hi)
+            .fold((0usize, 0usize), |(n, t), (_, &ok)| {
+                (n + 1, t + ok as usize)
+            });
+        self.ident_trusted_frac = if in_band > 0 {
+            trusted_in_band as f64 / in_band as f64
+        } else {
+            0.0
+        };
         self.frf = Some(FrfDisplay {
             freqs,
             h_mag,
@@ -2262,6 +2364,7 @@ impl SineService {
             )));
         }
         let passed = self.band_coherence >= self.cfg.coherence_floor;
+        self.gate_passed = Some(passed);
         self.log.push(EventKind::CoherenceGate {
             band_coherence: self.band_coherence,
             floor: self.cfg.coherence_floor,
@@ -2460,6 +2563,9 @@ impl SineService {
                 .max(1),
         };
         let (step, handles) = SineProcessStep::new(build);
+        handles
+            .display
+            .set_input_indices(&self.input_channel_indices(n_input));
         self.step = Some(step);
         self.handles = Some(handles);
         Ok(())
@@ -2731,7 +2837,8 @@ impl SineService {
     }
 
     /// EVERY drive output is at zero (ch0 and, when COLA is on, the aux).
-    fn drive_is_zero(&self) -> bool {
+    /// `true` before the loop has engaged (nothing is driven).
+    pub fn drive_is_zero(&self) -> bool {
         self.step
             .as_ref()
             .map(|s| s.drive_is_zero())
@@ -3706,9 +3813,32 @@ impl SineService {
             .collect()
     }
 
-    /// The live status snapshot for the UI.
+    /// The latest control-tick snapshot: the live cell once the loop has
+    /// engaged, the last drained copy before.
+    fn live_snapshot(&self) -> ControlSnapshot {
+        match self.handles.as_ref() {
+            Some(h) => h.status.read(),
+            None => self.last_snapshot.clone(),
+        }
+    }
+
+    /// The status as of the last [`SineService::run_chunk`]: the numbers that
+    /// chunk drained, before any stop it then took. A caller that drives the
+    /// run with `run_chunk` reads this.
     pub fn status(&self) -> SineStatus {
-        let s = &self.last_snapshot;
+        self.status_of(&self.last_snapshot)
+    }
+
+    /// The status at the last control tick the step ran, whichever pump drove
+    /// it. A host that runs its own [`SineService::run_batches`] loop (and
+    /// never calls `run_chunk`) reads this: [`SineService::status`] would stay
+    /// at whatever the last chunk drained. After a stop it is the tick that
+    /// ended the ramp.
+    pub fn live_status(&self) -> SineStatus {
+        self.status_of(&self.live_snapshot())
+    }
+
+    fn status_of(&self, s: &ControlSnapshot) -> SineStatus {
         let control_indices = self.cfg.control.indices();
         let overload_latches: Vec<(u32, bool)> = control_indices
             .iter()
@@ -3719,7 +3849,7 @@ impl SineService {
             state: self.state,
             freq_hz: s.freq_hz,
             sweeps_done: s.sweeps_done,
-            progress: self.progress(),
+            progress: self.progress_of(s),
             level_db: s.level_db,
             target_g: s.target_g,
             measured_g: if s.measured_g > 0.0 {
@@ -3739,7 +3869,73 @@ impl SineService {
             remaining_test_s: None,
             overload_latches,
             trip: self.trip.clone(),
+            t_s: s.t_s,
+            held: s.held,
+            direction: s.direction,
+            sweep_rate_hz_per_s: s.sweep_rate_hz_per_s,
+            sweep_rate_oct_per_min: s.sweep_rate_oct_per_min,
+            rung_index: s.rung_index,
+            at_last_level: self
+                .cfg
+                .ladder
+                .table_db
+                .last()
+                .is_some_and(|&full| (s.level_db - full).abs() <= 1e-9),
+            at_level_s: s.at_level_s,
+            achieved_level_db: self.achieved_level_db(s),
+            drive_vpk: s.drive_vpk,
+            cola_vpk: s.cola_vpk,
+            notch_ceiling_vpk: s.notch_ceiling,
+            inputs: self.input_readings(s),
+            identification: self.frf.as_ref().map(|_| SineIdentificationFacts {
+                level_db: self.cfg.sysid_level_db,
+                band_coherence: self.band_coherence,
+                gate_coherence: self.cfg.coherence_floor,
+                passed: self
+                    .gate_passed
+                    .unwrap_or(self.band_coherence >= self.cfg.coherence_floor),
+                lag_frames: self.sysid_lag_frames,
+                trusted_fraction: self.ident_trusted_frac,
+            }),
+            law: None,
         }
+    }
+
+    /// The response against the full-level profile at the tick's frequency,
+    /// dB; `None` until both are known.
+    fn achieved_level_db(&self, s: &ControlSnapshot) -> Option<f64> {
+        let full = self.cfg.profile.target_accel_g_pk(s.freq_hz)?;
+        (s.measured_g > 0.0 && full > 0.0).then(|| 20.0 * (s.measured_g / full).log10())
+    }
+
+    /// Every enabled input's live numbers, in table order.
+    fn input_readings(&self, s: &ControlSnapshot) -> Vec<SineInputReading> {
+        let inputs: Vec<&hertzforge_channel_table::Channel> = self
+            .table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role != ChannelRole::Drive)
+            .collect();
+        (0..s.input_tracked.len())
+            .map(|slot| {
+                let ch = inputs.get(slot);
+                let control_pos = self.control_slots.iter().position(|&c| c == slot);
+                let limit_pos = self.limit_specs.iter().position(|(ls, _, _)| *ls == slot);
+                SineInputReading {
+                    channel_index: ch.map(|c| c.index).unwrap_or(slot as u32),
+                    role: ch.map(|c| format!("{:?}", c.role)).unwrap_or_default(),
+                    unit: ch.map(|c| units_label(&c.units)).unwrap_or_default(),
+                    is_control: control_pos.is_some(),
+                    tracked: s.input_tracked[slot],
+                    phase_deg: s.input_phase_deg.get(slot).copied().unwrap_or(0.0),
+                    rms: s.input_rms.get(slot).copied().unwrap_or(0.0),
+                    overload: control_pos
+                        .and_then(|p| s.overload_latched.get(p).copied())
+                        .unwrap_or(false),
+                    limit: limit_pos.and_then(|p| s.limit_bound.get(p).copied()),
+                }
+            })
+            .collect()
     }
 
     /// A best-effort sweep/dwell progress fraction for the status, `[0, 1]`.
@@ -3752,18 +3948,18 @@ impl SineService {
     /// invent a second one. `None` = no determinable end (a dwell, a step run, a
     /// free-running schedule), which renders as no progress bar rather than as 0%.
     pub fn progress(&self) -> Option<f64> {
-        self.progress_fraction()
+        self.progress_of(&self.last_snapshot)
     }
 
-    fn progress_fraction(&self) -> Option<f64> {
+    fn progress_of(&self, s: &ControlSnapshot) -> Option<f64> {
         match &self.cfg.mode {
             SineMode::Sweep(c) => match c.target {
                 crate::scheduler::SweepTarget::Sweeps(n)
                 | crate::scheduler::SweepTarget::WhicheverFirst { sweeps: n, .. } => {
-                    Some((self.last_snapshot.sweeps_done as f64 / n as f64).min(1.0))
+                    Some((s.sweeps_done as f64 / n as f64).min(1.0))
                 }
                 crate::scheduler::SweepTarget::DurationS(d) => {
-                    Some((self.last_snapshot.elapsed_test_s / d).min(1.0))
+                    Some((s.elapsed_test_s / d).min(1.0))
                 }
             },
             _ => None,

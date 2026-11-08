@@ -7,6 +7,8 @@
 //! world: a swept scalar at one frequency instead of a per-bin PSD.
 
 use crate::control::CompositeMode;
+use crate::law::LawFault;
+use crate::scheduler::SweepDirection;
 use hertzforge_shaker_db::FeasibilityReport;
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +161,13 @@ pub enum TripKind {
     /// a silent hold (which would leave the servo chasing a target the excitation
     /// is no longer at).
     OscillatorRange { requested_hz: f64, fs_hz: f64 },
+    /// The control law gave no usable drive `consecutive` calls in a row (or
+    /// could not be built): the drive in force was held through the misses,
+    /// then the run took the controlled stop. `fault` is the last miss.
+    LawFault { fault: LawFault, consecutive: u32 },
+    /// The core's change cap bound for `capped_s` seconds without a break: the
+    /// law kept asking for more change per tick than the core allows.
+    Divergence { capped_s: f64 },
 }
 
 /// A record of the trip that aborted the run: the kind, the frequency it fired
@@ -489,6 +498,112 @@ pub struct SineStatus {
     pub overload_latches: Vec<(u32, bool)>,
     /// The trip record if aborted.
     pub trip: Option<TripRecord>,
+    /// Station time of the tick these numbers are from, seconds since the
+    /// loop engaged, holds included (frames the step processed over the
+    /// adopted rate). 0 before engage.
+    pub t_s: f64,
+    /// Whether test progress is held (the operator's hold): the tone stays at
+    /// its frequency and level, still under control.
+    pub held: bool,
+    /// The sweep's direction now; `None` outside a sweep.
+    pub direction: Option<SweepDirection>,
+    /// The sweep rate now, Hz per second, signed (negative sweeping down); 0
+    /// outside a sweep or while held.
+    pub sweep_rate_hz_per_s: f64,
+    /// The sweep rate now in octaves per minute, signed, for a logarithmic
+    /// sweep; `None` for a linear sweep and outside a sweep.
+    pub sweep_rate_oct_per_min: Option<f64>,
+    /// The ladder's rung index (into `ladder.table_db`).
+    pub rung_index: usize,
+    /// Whether the level in force is the ladder's last (full) level. The run
+    /// state's `FullLevel` is later: it means the ladder has also held that
+    /// level for its `full_for`.
+    pub at_last_level: bool,
+    /// Test time at this level, seconds.
+    pub at_level_s: f64,
+    /// The level the response is at now against the full-level profile, dB
+    /// (`20 log10(measured / full-level target)`); `None` until both are
+    /// known. It differs from `level_db` (the scheduled level) while the drive
+    /// comes onto a new level.
+    pub achieved_level_db: Option<f64>,
+    /// The drive as played, drive units peak (volts peak on hardware).
+    pub drive_vpk: f64,
+    /// The reference output's amplitude as played, volts peak; `None` without
+    /// one.
+    pub cola_vpk: Option<f64>,
+    /// The limit channels' ceiling on the drive, drive units peak; `None` when
+    /// none binds or there are no limit channels.
+    pub notch_ceiling_vpk: Option<f64>,
+    /// Every enabled input, in table order.
+    pub inputs: Vec<SineInputReading>,
+    /// The identification's facts; `None` until identification has run.
+    pub identification: Option<SineIdentificationFacts>,
+    /// The run's control law and its counters; `None` until the law is built.
+    pub law: Option<SineLawStatus>,
+}
+
+/// One enabled input's live numbers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SineInputReading {
+    /// The channel-table index.
+    pub channel_index: u32,
+    /// The table's role for the channel (`Control`, `Monitor`, `Reference`).
+    pub role: String,
+    /// The channel's unit.
+    pub unit: String,
+    /// Whether the channel is one of the control rows.
+    pub is_control: bool,
+    /// Tracked amplitude at the tone's frequency, the channel's unit, peak.
+    pub tracked: f64,
+    /// Phase against the drive, degrees, in (-180, 180].
+    pub phase_deg: f64,
+    /// Broadband rms over the last tick, the channel's unit.
+    pub rms: f64,
+    /// For a control row, its overload latch; `false` otherwise.
+    pub overload: bool,
+    /// For a limit channel, its bound at the tone's frequency (the limit
+    /// profile's abort edge), the channel's unit, peak.
+    pub limit: Option<f64>,
+}
+
+/// The identification's facts, for the state and the live frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SineIdentificationFacts {
+    /// The identification level, dB.
+    pub level_db: f64,
+    /// Mean coherence over the run band.
+    pub band_coherence: f64,
+    /// The gate's floor (`coherence_floor`).
+    pub gate_coherence: f64,
+    /// Whether the band coherence met the floor.
+    pub passed: bool,
+    /// The drive-to-response lag the identification measured, frames (0 when
+    /// no decisive peak was found).
+    pub lag_frames: usize,
+    /// The fraction of the identification's grid inside the run band the
+    /// core trusts (its `feedforward` coherence and gain floors).
+    pub trusted_fraction: f64,
+}
+
+/// The run's control law, as the state and the live frame name it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SineLawStatus {
+    /// The catalog id: the built-in's id, or a law file's SHA-256.
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// A law file's SHA-256; `None` for a built-in.
+    pub sha256: Option<String>,
+    /// Calls made.
+    pub calls: u64,
+    /// Unusable calls in a row now.
+    pub misses: u32,
+    /// Ticks a core cap bound.
+    pub capped_ticks: u64,
+    /// The law's values on its last call, by the keys its manifest declares.
+    pub values: Vec<(String, f64)>,
+    /// The live parameters' values in force.
+    pub live: Vec<(String, f64)>,
 }
 
 #[cfg(test)]

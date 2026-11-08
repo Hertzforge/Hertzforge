@@ -77,10 +77,14 @@ pub use service::config::{
     CaptureConfig, CaptureRule, ColaConfig, ColaWaveform, ConfigError, ControlChannel, ControlSet,
     LimitProfile, MetaField, SineMode, SineTestConfig,
 };
+pub use service::display::{
+    SineCurves, SineDisplay, SineInputCurves, DISPLAY_GRID_POINTS, DISPLAY_HISTORY_POINTS,
+    DISPLAY_HISTORY_S,
+};
 pub use service::report::{
     ChannelRow, ChannelTrace, EventKind, EventLog, FeasibilityDigest, FrfDisplay, Honesty,
-    LevelHistoryEntry, ReportData, RunSettings, RunState, SineStatus, TracePoint, TripKind,
-    TripRecord,
+    LevelHistoryEntry, ReportData, RunSettings, RunState, SineIdentificationFacts,
+    SineInputReading, SineLawStatus, SineStatus, TracePoint, TripKind, TripRecord,
 };
 pub use service::{
     RunMode, ServiceError, SineDisplayChannel, SineDisplaySnapshot, SineService,

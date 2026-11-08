@@ -46,9 +46,13 @@ use crate::control::{
     composite_amplitude, tracked_displacement_in_pp, tracked_velocity_ips_pk, BlendLaw,
     CompositeMode, DriveGuard, DriveVerdict, FeedforwardTable, LimitChannelTick, NotchGovernor,
 };
+use crate::law::LawValues;
 use crate::profile::SineProfile;
-use crate::scheduler::{BidirSweep, DwellRun, LadderPlan, RstdEvent, RstdPlan, StepSine};
+use crate::scheduler::{
+    BidirSweep, DwellRun, LadderPlan, RstdEvent, RstdPlan, StepSine, SweepDirection,
+};
 use crate::service::config::ColaWaveform;
+use crate::service::display::{DisplayCell, DisplayLog, DisplayRow, DisplaySlots};
 use crate::service::report::{TripKind, TripRecord};
 use crate::service::ring::SampleRing;
 use hertzforge_dsp::sine::AmplitudeServo;
@@ -190,6 +194,47 @@ pub struct ControlSnapshot {
     pub elapsed_test_s: f64,
     /// Overload latches per control channel, in control-set order.
     pub overload_latched: Vec<bool>,
+    /// Station time of this tick, seconds since the loop engaged, holds
+    /// included: frames the step has processed over the adopted rate.
+    pub t_s: f64,
+    /// Frames the step has processed at this tick.
+    pub frames: u64,
+    /// The drive as played, drive units peak (volts peak on hardware).
+    pub drive_vpk: f64,
+    /// The reference output's amplitude as played, volts peak; `None` without
+    /// one.
+    pub cola_vpk: Option<f64>,
+    /// The limit channels' ceiling on the drive, drive units peak; `None`
+    /// when there is none or it is unbounded.
+    pub notch_ceiling: Option<f64>,
+    /// Whether test progress is held (the operator's hold).
+    pub held: bool,
+    /// The sweep's direction; `None` outside a sweep.
+    pub direction: Option<SweepDirection>,
+    /// The sweep rate now, Hz per second, signed; 0 outside a sweep or while
+    /// held.
+    pub sweep_rate_hz_per_s: f64,
+    /// The same in octaves per minute for a logarithmic sweep; `None`
+    /// otherwise.
+    pub sweep_rate_oct_per_min: Option<f64>,
+    /// The ladder's rung index and the time at this level, seconds of test
+    /// time.
+    pub rung_index: usize,
+    pub at_level_s: f64,
+    /// Every input slot (every enabled input, in table order): tracked
+    /// amplitude, phase against the drive in degrees, broadband rms over the
+    /// tick.
+    pub input_tracked: Vec<f64>,
+    pub input_phase_deg: Vec<f64>,
+    pub input_rms: Vec<f64>,
+    /// Per limit channel, in configuration order: its bound at the tick's
+    /// frequency (the limit profile's abort edge).
+    pub limit_bound: Vec<f64>,
+    /// The control law's counters and its values on the last call.
+    pub law_calls: u64,
+    pub law_misses: u32,
+    pub law_capped_ticks: u64,
+    pub law_values: Option<LawValues>,
 }
 
 /// The shared status cell.
@@ -214,6 +259,25 @@ pub(crate) struct ControlSnapshotRef<'a> {
     pub sweeps_done: u32,
     pub elapsed_test_s: f64,
     pub overload_latched: &'a [bool],
+    pub t_s: f64,
+    pub frames: u64,
+    pub drive_vpk: f64,
+    pub cola_vpk: Option<f64>,
+    pub notch_ceiling: Option<f64>,
+    pub held: bool,
+    pub direction: Option<SweepDirection>,
+    pub sweep_rate_hz_per_s: f64,
+    pub sweep_rate_oct_per_min: Option<f64>,
+    pub rung_index: usize,
+    pub at_level_s: f64,
+    pub input_tracked: &'a [f64],
+    pub input_phase_deg: &'a [f64],
+    pub input_rms: &'a [f64],
+    pub limit_bound: &'a [f64],
+    pub law_calls: u64,
+    pub law_misses: u32,
+    pub law_capped_ticks: u64,
+    pub law_values: Option<LawValues>,
 }
 
 impl StatusCell {
@@ -247,6 +311,29 @@ impl StatusCell {
                 .extend_from_slice(r.per_channel_broadband);
             s.overload_latched.clear();
             s.overload_latched.extend_from_slice(r.overload_latched);
+            s.t_s = r.t_s;
+            s.frames = r.frames;
+            s.drive_vpk = r.drive_vpk;
+            s.cola_vpk = r.cola_vpk;
+            s.notch_ceiling = r.notch_ceiling;
+            s.held = r.held;
+            s.direction = r.direction;
+            s.sweep_rate_hz_per_s = r.sweep_rate_hz_per_s;
+            s.sweep_rate_oct_per_min = r.sweep_rate_oct_per_min;
+            s.rung_index = r.rung_index;
+            s.at_level_s = r.at_level_s;
+            s.input_tracked.clear();
+            s.input_tracked.extend_from_slice(r.input_tracked);
+            s.input_phase_deg.clear();
+            s.input_phase_deg.extend_from_slice(r.input_phase_deg);
+            s.input_rms.clear();
+            s.input_rms.extend_from_slice(r.input_rms);
+            s.limit_bound.clear();
+            s.limit_bound.extend_from_slice(r.limit_bound);
+            s.law_calls = r.law_calls;
+            s.law_misses = r.law_misses;
+            s.law_capped_ticks = r.law_capped_ticks;
+            s.law_values = r.law_values;
         }
     }
 }
@@ -650,6 +737,33 @@ pub struct SineProcessStep {
     /// post-abort / stop ramp-down so the COLA ch1 output DECAYS to zero with ch0
     /// rather than cliffing at full amplitude on a Drive-role DAC (never a cliff).
     cola_ramp_scale: f64,
+    /// The tracking filters' reference phase, mirrored: every filter is fed
+    /// the same reference frequency every frame, so one accumulator stepped
+    /// by the same arithmetic is the phase each of them demodulated against.
+    /// With the NCO's phase it turns a filter's phase (against its own
+    /// reference) into the phase against the drive.
+    ref_phase_mirror: f64,
+    /// The filters' reference phase less the NCO's, on the last frame,
+    /// radians.
+    phase_offset: f64,
+    /// Per input slot: the phase against the drive this tick, degrees.
+    /// Preallocated, refilled in place.
+    input_phase_buf: Vec<f64>,
+    /// Per limit channel: its bound at the tick's frequency. Preallocated.
+    limit_bound_buf: Vec<f64>,
+    /// The display record (see [`crate::service::display`]).
+    display: Arc<DisplayCell>,
+    /// The frequency this tick's amplitudes were measured at (before the
+    /// scheduler advances), Hz.
+    tick_freq_hz: f64,
+    /// The operator moved the tone (a jog or a go to): the display must not
+    /// fill the points between.
+    display_jump: bool,
+    /// The control law's counters and its values on the last call.
+    law_calls: u64,
+    law_misses: u32,
+    law_capped_ticks: u64,
+    law_values: Option<LawValues>,
 
     // --- shared surfaces ------------------------------------------------------
     status: Arc<StatusCell>,
@@ -727,6 +841,16 @@ pub enum SchedulerBuild {
 }
 
 impl SchedulerBuild {
+    /// The band the scheduler runs over (a dwell's one frequency, twice).
+    fn band(&self) -> (f64, f64) {
+        match self {
+            SchedulerBuild::Sweep(s) => s.band(),
+            SchedulerBuild::Dwell(d) => (d.freq_hz(), d.freq_hz()),
+            SchedulerBuild::StepSine(s) => s.band(),
+            SchedulerBuild::Rstd(r) => r.band(),
+        }
+    }
+
     fn into_state(self) -> SchedulerState {
         match self {
             SchedulerBuild::Sweep(s) => SchedulerState::Sweep(s),
@@ -747,6 +871,8 @@ pub struct StepHandles {
     pub stop_requested: Arc<AtomicBool>,
     /// The raw acquisition ring the service drains between batches.
     pub ring: Arc<SampleRing>,
+    /// The display record the service copies out between batches.
+    pub display: Arc<DisplayCell>,
 }
 
 impl SineProcessStep {
@@ -789,6 +915,21 @@ impl SineProcessStep {
         let mut b = b;
         b.ladder.set_manual(matches!(b.run_mode, RunMode::Manual));
         let start_level_db = b.ladder.level_db();
+        let tick_s = b.control_tick_frames.max(1) as f64 / b.fs_hz;
+        let display = Arc::new(DisplayCell {
+            log: Mutex::new(DisplayLog::new(
+                b.n_input_channels,
+                n_limit,
+                b.scheduler.band(),
+                tick_s,
+            )),
+            slots: Mutex::new(DisplaySlots {
+                input_index: (0..b.n_input_channels as u32).collect(),
+                control_slots: b.control_slots.clone(),
+                limit_slots: b.limit_channels.iter().map(|l| l.input_slot).collect(),
+                cola: b.cola.enabled,
+            }),
+        });
         let handles = StepHandles {
             status: status.clone(),
             trace: trace.clone(),
@@ -796,6 +937,7 @@ impl SineProcessStep {
             abort: abort.clone(),
             stop_requested: stop_requested.clone(),
             ring: ring.clone(),
+            display: display.clone(),
         };
 
         let step = SineProcessStep {
@@ -878,6 +1020,17 @@ impl SineProcessStep {
             ramp_per_frame: ramp_factor_per_frame(b.fs_hz),
             ring,
             cola_ramp_scale: 1.0,
+            ref_phase_mirror: 0.0,
+            phase_offset: 0.0,
+            input_phase_buf: vec![0.0; b.n_input_channels],
+            limit_bound_buf: vec![0.0; n_limit],
+            display,
+            tick_freq_hz: b.start_f_hz,
+            display_jump: false,
+            law_calls: 0,
+            law_misses: 0,
+            law_capped_ticks: 0,
+            law_values: None,
             status,
             trace,
             mailbox,
@@ -1125,6 +1278,7 @@ impl SineProcessStep {
             // during the ramp is exactly the case where "what was the drive
             // doing" has a fast-moving answer, and a stale pre-ramp snapshot
             // would over-state it.
+            self.tick_freq_hz = self.freq_hz();
             let m = self.control_composite();
             self.push_frame_context(m);
             self.publish_snapshot(broadband, false, false);
@@ -1133,6 +1287,7 @@ impl SineProcessStep {
         }
 
         let f = self.freq_hz();
+        self.tick_freq_hz = f;
 
         // 3b. Level-settle window: on a rung change (or at engage), re-open the
         //     settle window so the protections stay suppressed while the startup
@@ -1732,6 +1887,7 @@ impl SineProcessStep {
                     s.jog(dhz);
                     let f = s.freq_hz();
                     self.retune(f);
+                    self.display_jump = true;
                     // A commanded frequency MOVE re-opens the settle window, same
                     // as a rung change: the tracking filters re-acquire at the new
                     // center and the tracked amplitude transiently collapses. The
@@ -1748,6 +1904,7 @@ impl SineProcessStep {
                 if let SchedulerState::Sweep(s) = &mut self.scheduler {
                     let f = s.go_to(hz);
                     self.retune(f);
+                    self.display_jump = true;
                     // Same re-open as Jog: an absolute move is the same filter
                     // re-acquisition transient at the destination.
                     self.settle_remaining = self.settle_ticks;
@@ -1817,6 +1974,45 @@ impl SineProcessStep {
                 .unwrap_or(0.0)
                 .max(1e-12),
         );
+
+        // What the live frame and the display add: every input's phase against
+        // the drive, the limit bounds, the drive and reference as played, the
+        // sweep's rate and direction, the ladder's rung. All refilled in place.
+        let mut phase_deg = std::mem::take(&mut self.input_phase_buf);
+        phase_deg.clear();
+        phase_deg.extend(
+            self.last_phase
+                .iter()
+                .map(|&p| wrap_deg((p + self.phase_offset).to_degrees())),
+        );
+        let f_meas = self.tick_freq_hz;
+        let mut limit_bound = std::mem::take(&mut self.limit_bound_buf);
+        limit_bound.clear();
+        limit_bound.extend(self.limit_channels.iter().map(|lc| {
+            lc.profile
+                .abort_bounds(f_meas)
+                .map(|(_, hi)| hi)
+                .unwrap_or(f64::NAN)
+        }));
+        let t_s = self.frames_processed as f64 / self.fs_hz;
+        let drive_vpk = self.current_drive_scale;
+        let cola_vpk = self
+            .cola
+            .enabled
+            .then_some(self.cola.amp * self.cola_ramp_scale);
+        let notch_ceiling = self
+            .notch
+            .as_ref()
+            .map(|g| g.ceiling())
+            .filter(|c| c.is_finite());
+        let (direction, sweep_rate_hz_per_s, sweep_rate_oct_per_min) = match &self.scheduler {
+            SchedulerState::Sweep(s) => {
+                (Some(s.direction()), s.rate_hz_per_s(), s.rate_oct_per_min())
+            }
+            _ => (None, 0.0, None),
+        };
+        let ladder = self.ladder.progress();
+        let held = self.is_held();
         self.status.store_from(ControlSnapshotRef {
             freq_hz: f,
             level_db: self.ladder.level_db(),
@@ -1830,7 +2026,60 @@ impl SineProcessStep {
             sweeps_done: self.sweeps_done(),
             elapsed_test_s,
             overload_latched: &overload,
+            t_s,
+            frames: self.frames_processed,
+            drive_vpk,
+            cola_vpk,
+            notch_ceiling,
+            held,
+            direction,
+            sweep_rate_hz_per_s,
+            sweep_rate_oct_per_min,
+            rung_index: ladder.rung_index,
+            at_level_s: ladder.rung_elapsed_s,
+            input_tracked: &self.tracked,
+            input_phase_deg: &phase_deg,
+            input_rms: broadband,
+            limit_bound: &limit_bound,
+            law_calls: self.law_calls,
+            law_misses: self.law_misses,
+            law_capped_ticks: self.law_capped_ticks,
+            law_values: self.law_values,
         });
+
+        // The display record, at the frequency the amplitudes were measured at.
+        // `try_lock`: a reader copying the record out never holds the tick up.
+        if let Ok(mut log) = self.display.log.try_lock() {
+            if self.display_jump {
+                log.mark_jump();
+                self.display_jump = false;
+            }
+            let rung_scale = 10f64.powf(self.ladder.level_db() / 20.0);
+            let nan2 = (f64::NAN, f64::NAN);
+            let scaled = |b: Option<(f64, f64)>| {
+                b.map(|(lo, hi)| (lo * rung_scale, hi * rung_scale))
+                    .unwrap_or(nan2)
+            };
+            log.write(&DisplayRow {
+                t_s,
+                freq_hz: f_meas,
+                level_db: self.ladder.level_db(),
+                measured,
+                target: self.profile.target_accel_g_pk(f_meas).unwrap_or(f64::NAN) * rung_scale,
+                alarm: scaled(self.profile.alarm_bounds(f_meas)),
+                abort: scaled(self.profile.abort_bounds(f_meas)),
+                drive_vpk,
+                cola_vpk: cola_vpk.unwrap_or(f64::NAN),
+                thd,
+                tracked: &self.tracked,
+                phase_deg: &phase_deg,
+                rms: broadband,
+                limit_bound: &limit_bound,
+            });
+        }
+
+        self.input_phase_buf = phase_deg;
+        self.limit_bound_buf = limit_bound;
         self.tracked_buf = per_channel_tracked;
         self.bb_pub_buf = per_channel_broadband;
         self.overload_pub_buf = overload;
@@ -1906,6 +2155,16 @@ impl SineProcessStep {
         for ss in self.broadband_ss.iter_mut() {
             *ss = 0.0;
         }
+    }
+}
+
+/// An angle in degrees, wrapped to `(-180, 180]`.
+fn wrap_deg(d: f64) -> f64 {
+    let w = d.rem_euclid(360.0);
+    if w > 180.0 {
+        w - 360.0
+    } else {
+        w
     }
 }
 
@@ -1994,6 +2253,15 @@ impl ProcessStep for SineProcessStep {
             //    the drive is leaving on it; see `reference_freq`. Identical to
             //    `inst_freq` whenever the lag is zero or the sweep is stationary.
             let ref_freq = self.reference_freq(inst_freq);
+            // The filters demodulate this sample against the reference phase
+            // BEFORE they advance it; mirror that, and keep its offset from the
+            // drive's own phase for the phase-against-drive readout. Read only by
+            // the status and the display, never by the control law.
+            self.phase_offset = self.ref_phase_mirror - phase;
+            self.ref_phase_mirror += std::f64::consts::TAU * ref_freq / self.fs_hz;
+            if self.ref_phase_mirror > std::f64::consts::TAU {
+                self.ref_phase_mirror -= std::f64::consts::TAU;
+            }
             for (ch, filt) in self.filters.iter_mut().enumerate() {
                 let sample = input.get(fi * in_ch + ch).copied().unwrap_or(0.0) as f64;
                 let (amp, ph) = filt.update(sample, ref_freq);
