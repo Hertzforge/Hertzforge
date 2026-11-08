@@ -417,10 +417,38 @@ impl SrsShockService {
         (db_scale(self.top_level_db()) / level_scale).max(1.0)
     }
 
+    /// The bands the limit channels hold down on purpose: every band the
+    /// arm-time notch cut, and every band within the limit cap's window
+    /// ([`crate::law::LIMIT_CAP_WINDOW_OCTAVES`]) of one, where the cap holds
+    /// the components that reach the notched band. Empty without limit
+    /// channels.
+    pub fn limit_held_bands(&self) -> Vec<usize> {
+        let Some(report) = &self.arm_notch_report else {
+            return Vec::new();
+        };
+        let window = std::f64::consts::LN_2 * crate::law::LIMIT_CAP_WINDOW_OCTAVES;
+        let notched: Vec<f64> = report
+            .notched_bands
+            .iter()
+            .map(|b| b.band_freq_hz)
+            .collect();
+        self.band_freqs
+            .iter()
+            .enumerate()
+            .filter(|(_, &f)| {
+                notched
+                    .iter()
+                    .any(|&n| n > 0.0 && f > 0.0 && (f / n).ln().abs() <= window + 1e-12)
+            })
+            .map(|(b, _)| b)
+            .collect()
+    }
+
     /// The pulse's pass, for the ladder and its row: no band outside the alarm
-    /// band. With `control`, a band the arm-time notch cut that reads low is
-    /// not held against the pulse: the limit channels hold it there on
-    /// purpose. A band reading high, or outside the abort band, still fails.
+    /// band. With `control`, a band the limit channels hold down
+    /// ([`Self::limit_held_bands`]) that reads low is not held against the
+    /// pulse: the limit holds it there on purpose. A band reading high, or
+    /// outside the abort band, still fails it.
     pub(super) fn judged_pass(
         &self,
         check: &super::config::EnvelopeCheck,
@@ -433,15 +461,11 @@ impl SrsShockService {
         if self.cfg.control.is_none() {
             return !check.alarmed();
         }
-        let notched: Vec<usize> = self
-            .arm_notch_report
-            .as_ref()
-            .map(|r| r.notched_bands.iter().map(|b| b.band_index).collect())
-            .unwrap_or_default();
+        let held = self.limit_held_bands();
         check.alarm_bands.iter().all(|&b| {
             let t = self.target_full.get(b).copied().unwrap_or(0.0) * level_scale;
             let m = measured.get(b).copied().unwrap_or(0.0);
-            notched.contains(&b) && m < t
+            held.contains(&b) && m < t
         })
     }
 
