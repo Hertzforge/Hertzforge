@@ -44,6 +44,9 @@ mod mimo_methods;
 #[path = "server_shock.rs"]
 mod shock_methods;
 
+#[path = "server_srs.rs"]
+mod srs_methods;
+
 /// Display event topic of the `sim.*` runs.
 pub const DISPLAY_TOPIC: &str = "random.display";
 /// Display event period (5 per second), for `random.display` and `random.live`.
@@ -65,7 +68,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 17] = [
+const DRIVE_METHODS: [&str; 22] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -83,6 +86,11 @@ const DRIVE_METHODS: [&str; 17] = [
     "shock.level",
     "shock.train",
     "shock.burst",
+    "srs.arm",
+    "srs.start",
+    "srs.proceed",
+    "srs.fire",
+    "srs.level",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -98,8 +106,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_random.reference.import, shock.configure, shock.config, shock.preview, shock.arm, \
     shock.start, shock.proceed, shock.fire, shock.level, shock.train, shock.burst, shock.stop, \
     shock.abort, shock.reset, shock.clear, shock.state, shock.log, shock.subscribe, \
-    shock.pulses, shock.pulse, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
-    sim.stop and sim.state";
+    shock.pulses, shock.pulse, srs.configure, srs.config, srs.preview, srs.target.import, \
+    srs.table.import, srs.arm, srs.start, srs.proceed, srs.fire, srs.level, srs.stop, srs.abort, \
+    srs.reset, srs.clear, srs.state, srs.log, srs.subscribe, srs.pulses, srs.pulse, laws.list, \
+    laws.import, laws.check, sim.profiles, sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -143,6 +153,10 @@ pub struct ServiceOptions {
     /// classical shock service, [`crate::shock::engine::ServiceEngine`]). Tests that
     /// need no real run give [`simulated_shock_engine`].
     pub shock_engine: Option<crate::shock::engine::EngineFactory>,
+    /// Makes the engine of an SRS shock run (`None`: the controller's SRS shock
+    /// service, [`crate::srs::engine::ServiceEngine`]). Tests that need no real run
+    /// give [`simulated_srs_engine`].
+    pub srs_engine: Option<crate::srs::engine::EngineFactory>,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -163,6 +177,13 @@ pub fn simulated_shock_engine() -> crate::shock::engine::EngineFactory {
     Arc::new(|ctx| Box::new(crate::shock::sim::SimulatedEngine::new(ctx.clone())))
 }
 
+/// The simulated SRS shock engine ([`crate::srs::sim::SimulatedEngine`]): for wire
+/// tests that exercise the protocol without the controller's service. A run never
+/// uses it unless given it here.
+pub fn simulated_srs_engine() -> crate::srs::engine::EngineFactory {
+    Arc::new(|ctx| Box::new(crate::srs::sim::SimulatedEngine::new(ctx.clone())))
+}
+
 impl Default for ServiceOptions {
     fn default() -> Self {
         ServiceOptions {
@@ -175,6 +196,7 @@ impl Default for ServiceOptions {
             bind: format!("ws://{}:{}/", crate::DEFAULT_HOST, crate::DEFAULT_PORT),
             mimo_driver: None,
             shock_engine: None,
+            srs_engine: None,
         }
     }
 }
@@ -186,6 +208,7 @@ pub enum Feed {
     Random,
     Mimo,
     Shock,
+    Srs,
 }
 
 /// A frame for every connection.
@@ -274,6 +297,14 @@ struct Inner {
     shock_log_sent: (String, u64),
     shock_rows_sent: u64,
     shock_ident_sent: bool,
+    /// The SRS shock configuration and its run, beside the others, and what of it
+    /// has been sent.
+    srs: Option<Arc<crate::srs::SrsRun>>,
+    srs_runs: u64,
+    srs_state_key: String,
+    srs_log_sent: (String, u64),
+    srs_rows_sent: u64,
+    srs_ident_sent: bool,
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -297,10 +328,14 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
-    /// Any run live, Random, MIMO or classical shock: what the session's orphan
-    /// clock guards.
+    fn srs_live(&self) -> bool {
+        self.srs.as_ref().is_some_and(|s| s.view().state.is_live())
+    }
+
+    /// Any run live, Random, MIMO, classical shock or SRS shock: what the
+    /// session's orphan clock guards.
     fn any_live(&self) -> bool {
-        self.random_live() || self.mimo_live() || self.shock_live()
+        self.random_live() || self.mimo_live() || self.shock_live() || self.srs_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -352,6 +387,21 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.srs {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "SRS shock run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -388,6 +438,13 @@ pub struct Service {
     shock_notices: std::sync::Mutex<
         Option<mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::shock::view::ShockView>>>,
     >,
+    /// The connections with an SRS shock display subscription.
+    srs_displays: std::sync::Mutex<HashMap<ConnId, srs_methods::SrsDisplay>>,
+    /// SRS shock runs' publishes, in order.
+    srs_notify: mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::srs::view::SrsView>>,
+    srs_notices: std::sync::Mutex<
+        Option<mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::srs::view::SrsView>>>,
+    >,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -421,6 +478,7 @@ impl Service {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (notify, notices) = mpsc::unbounded_channel();
         let (shock_notify, shock_notices) = mpsc::unbounded_channel();
+        let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -436,6 +494,12 @@ impl Service {
                 shock_log_sent: (String::new(), 0),
                 shock_rows_sent: 0,
                 shock_ident_sent: false,
+                srs: None,
+                srs_runs: 0,
+                srs_state_key: String::new(),
+                srs_log_sent: (String::new(), 0),
+                srs_rows_sent: 0,
+                srs_ident_sent: false,
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -452,6 +516,9 @@ impl Service {
             shock_displays: std::sync::Mutex::new(HashMap::new()),
             shock_notify,
             shock_notices: std::sync::Mutex::new(Some(shock_notices)),
+            srs_displays: std::sync::Mutex::new(HashMap::new()),
+            srs_notify,
+            srs_notices: std::sync::Mutex::new(Some(srs_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -512,6 +579,7 @@ impl Service {
             Feed::Random => self.displays().contains_key(&conn),
             Feed::Mimo => self.mimo_displays().contains_key(&conn),
             Feed::Shock => self.shock_displays().contains_key(&conn),
+            Feed::Srs => self.srs_displays().contains_key(&conn),
         }
     }
 
@@ -606,6 +674,15 @@ impl Service {
                 }
             });
         }
+        let srs_notices = self.srs_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = srs_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.srs_changed(&run_id, &view).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -670,10 +747,20 @@ impl Service {
                 }
             }
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
+            let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
             if let Some(s) = shock {
                 shock_methods::stop_shock(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = srs {
+                srs_methods::stop_srs(
                     &s,
                     Some("safe_stop"),
                     "the service (nobody held control)".into(),
@@ -706,13 +793,34 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim, shock) = {
+        let (random, sim, shock, srs) = {
             let inner = self.inner.lock().await;
             (
                 inner.random.clone(),
                 inner.sim.run.clone(),
                 inner.shock.clone(),
+                inner.srs.clone(),
             )
+        };
+        // An SRS shock run takes its controlled stop the same way.
+        let srs_said = match srs.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                srs_methods::stop_srs(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true).await;
+                let asked = Instant::now();
+                while s.view().state.is_live() {
+                    if asked.elapsed() > Duration::from_secs(30) {
+                        srs_methods::stop_srs(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // A classical shock run takes its controlled stop: nothing more fires, the
         // pulse in flight finishes. Should it still be live well after, it is aborted.
@@ -743,7 +851,7 @@ impl Service {
             let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
         }
         let Some(run) = random.filter(|r| r.view().state.is_live()) else {
-            return shock_said;
+            return shock_said.or(srs_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -792,8 +900,17 @@ impl Service {
         self.displays().remove(&conn.id);
         self.mimo_displays().remove(&conn.id);
         self.shock_displays().remove(&conn.id);
+        self.srs_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
+            if let Some(s) = &inner.srs {
+                if s.view().state.is_live() {
+                    s.hold(true);
+                    let name = inner.session.client_name(conn.id, &conn.peer);
+                    s.shared
+                        .add_log("note", format!("{name} left control; firing is held"));
+                }
+            }
             // Nobody holds control now: a classical shock run fires nothing more
             // until control is claimed again (or the orphan clock stops it).
             if let Some(s) = &inner.shock {
@@ -860,6 +977,10 @@ impl Service {
             "shock.config" => Ok(self.shock_config().await),
             "shock.preview" => self.shock_preview(params).await,
             "shock.pulse" => self.shock_pulse(params).await,
+            "srs.configure" => self.srs_configure(conn, params).await,
+            "srs.config" => Ok(self.srs_config().await),
+            "srs.preview" => self.srs_preview(params).await,
+            "srs.pulse" => self.srs_pulse(params).await,
             _ => self
                 .call_plain(conn, method, params)
                 .await
@@ -898,6 +1019,11 @@ impl Service {
                     self.session_changed(&inner);
                 }
                 if let Some(s) = inner.shock.as_ref().filter(|_| held) {
+                    if s.view().state.is_live() {
+                        s.hold(true);
+                    }
+                }
+                if let Some(s) = inner.srs.as_ref().filter(|_| held) {
                     if s.view().state.is_live() {
                         s.hold(true);
                     }
@@ -960,6 +1086,21 @@ impl Service {
             "shock.log" => self.shock_log(params).await,
             "shock.subscribe" => self.shock_subscribe(conn, params).await,
             "shock.pulses" => self.shock_pulses(params).await,
+            "srs.target.import" => self.srs_target_import(params).await,
+            "srs.table.import" => self.srs_table_import(params).await,
+            "srs.arm" => self.srs_arm(conn, params, false).await,
+            "srs.start" => self.srs_arm(conn, params, true).await,
+            "srs.proceed" => self.srs_proceed(conn).await,
+            "srs.fire" => self.srs_fire(conn).await,
+            "srs.level" => self.srs_level(conn, params).await,
+            "srs.stop" => self.srs_end(conn, false).await,
+            "srs.abort" => self.srs_end(conn, true).await,
+            "srs.reset" => self.srs_reset(conn).await,
+            "srs.clear" => self.srs_clear(conn).await,
+            "srs.state" => Ok(self.srs_state_now().await),
+            "srs.log" => self.srs_log(params).await,
+            "srs.subscribe" => self.srs_subscribe(conn, params).await,
+            "srs.pulses" => self.srs_pulses(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             "laws.check" => match self.classical_law_id(conn, params).await {
@@ -969,7 +1110,15 @@ impl Service {
                     p.insert("id".into(), Value::from(id));
                     self.shock_laws_check(conn, &p).await
                 }
-                None => self.laws_check(conn, params).await,
+                None => match self.srs_law_id(conn, params).await {
+                    Some(id) => {
+                        let mut p = params.clone();
+                        p.remove("path");
+                        p.insert("id".into(), Value::from(id));
+                        self.srs_laws_check(conn, &p).await
+                    }
+                    None => self.laws_check(conn, params).await,
+                },
             },
             other => Err(MethodError::new(
                 ErrorCode::UnknownMethod,
@@ -1004,6 +1153,14 @@ impl Service {
             }
         }
         if let Some(s) = &inner.shock {
+            if s.shared.signals.held() {
+                s.hold(false);
+                let who = inner.session.client_name(conn.id, &conn.peer);
+                s.shared
+                    .add_log("note", format!("{who} holds control; firing resumes"));
+            }
+        }
+        if let Some(s) = &inner.srs {
             if s.shared.signals.held() {
                 s.hold(false);
                 let who = inner.session.client_name(conn.id, &conn.peer);
@@ -1409,7 +1566,7 @@ impl Service {
             if v.state.is_busy() || (!start && v.state == State::Armed) {
                 inner.run_active()?;
             }
-            if inner.mimo_live() || inner.shock_live() {
+            if inner.mimo_live() || inner.shock_live() || inner.srs_live() {
                 inner.run_active()?;
             }
             if inner.sim_running() {
@@ -1682,7 +1839,7 @@ impl Service {
         request.validate().map_err(MethodError::bad_request)?;
 
         let mut inner = self.inner.lock().await;
-        if inner.mimo_live() || inner.shock_live() {
+        if inner.mimo_live() || inner.shock_live() || inner.srs_live() {
             inner.run_active()?;
         }
         if let Some(r) = &inner.random {

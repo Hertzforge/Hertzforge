@@ -1,0 +1,876 @@
+{
+ "type": "event",
+ "topic": "srs.data",
+ "seq": 152,
+ "data": {
+  "run_id": "srs-0004",
+  "source": "SIM",
+  "state": "running",
+  "phase": "waiting",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 1,
+  "pulses": {
+   "fired": 3,
+   "passed": 2,
+   "at_level": 1,
+   "of_level": 2
+  },
+  "next_pulse_s": 0.6,
+  "fire": null,
+  "plots": [
+   {
+    "id": "srs",
+    "quantity": "srs",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "SRS",
+      "x": {
+       "label": "Natural frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Peak acceleration",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Target",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          12.5,
+          15.0,
+          11.0
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          17.5,
+          21.0,
+          15.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          9.0,
+          10.5,
+          7.75
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          25.0,
+          30.0,
+          22.0
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          6.25,
+          7.5,
+          5.5
+         ]
+        }
+       },
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          12.25,
+          15.5,
+          10.5
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Pulse",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.5,
+          -1.25,
+          2.5,
+          -3.0,
+          1.5,
+          -0.5,
+          0.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     },
+     {
+      "view": "spectrum",
+      "title": "Drive",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Drive",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.0125,
+          -0.03125,
+          0.0625,
+          -0.075,
+          0.0375,
+          -0.0125,
+          0.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "vel",
+    "quantity": "velocity",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Velocity",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Velocity",
+       "unit": "in/s",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.25,
+          -0.125,
+          0.5,
+          -0.5,
+          0.25,
+          0.0,
+          0.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "id",
+    "quantity": "identification",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Identification Gain",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": "g/V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Gain",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.75
+         ]
+        }
+       },
+       {
+        "name": "Floor",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.05,
+          0.05
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Coherence",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Coherence",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Coherence",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.99,
+          0.5,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Hold",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.8,
+          0.8
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "comp",
+    "quantity": "components",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Components",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Drive amplitude",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.125,
+          0.25,
+          0.0625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Gains",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": null,
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Last gains",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          1.0,
+          1.125,
+          0.875
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "lim",
+    "quantity": "limit_channels",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Limit Fixture",
+      "x": {
+       "label": "Natural frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Peak acceleration",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Predicted",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          10.0,
+          45.0,
+          20.0
+         ]
+        }
+       },
+       {
+        "name": "Bound",
+        "role": "limit",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          50.0,
+          50.0
+         ]
+        }
+       },
+       {
+        "name": "Bound less headroom",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          50.0,
+          50.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "frf",
+    "quantity": "limit_frf",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Gain Fixture",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": "g/V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Supplied",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          500.0,
+          1000.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          1.0,
+          4.0,
+          1.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Law",
+      "rows": [
+       {
+        "label": "Worst band error",
+        "value": -1.2,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Worst band",
+        "value": 630.0,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Components at the change limit",
+        "value": 0.0,
+        "unit": "components",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Level",
+        "value": -6.0,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Pulses fired",
+        "value": 3.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Pulses passed",
+        "value": 2.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Worst band",
+        "value": -1.2,
+        "unit": "dB",
+        "status": "pass"
+       },
+       {
+        "label": "At",
+        "value": 630.0,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Last peak",
+        "value": 36.3,
+        "unit": "g",
+        "status": "info"
+       },
+       {
+        "label": "Last drive peak",
+        "value": 0.205,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Next pulse",
+        "value": 0.6,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "table",
+    "quantity": "pulses",
+    "views": [
+     {
+      "view": "table",
+      "title": "Pulses",
+      "columns": [
+       "Pulse",
+       "Level (dB)",
+       "Peak (g)",
+       "Worst band (dB)",
+       "At (Hz)",
+       "Alarm bands",
+       "Abort bands",
+       "Drive (V)",
+       "Passed"
+      ],
+      "rows": [
+       [
+        "3",
+        "-6",
+        "36.3",
+        "-1.2",
+        "630",
+        "0",
+        "0",
+        "0.205",
+        "pass"
+       ]
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

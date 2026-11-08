@@ -1332,6 +1332,427 @@ SHOCK_TEXT_GOLDENS = {
 }
 
 
+# --- SRS shock (PROTOCOL.md, "SRS Shock") ---
+#
+# As classical shock's: the configuration golden is the contract's example with
+# every field given, and its `derived` is what the control service computes for it
+# (the Rust golden test recomputes it). The binary goldens carry short records
+# whose values are exact in binary, laid out as the service's view builders lay
+# them out.
+
+SRS_CONFIG = {
+    'title': 'SRS 100 g, 100 to 2000 Hz',
+    'target': {'kind': 'breakpoints', 'points': [[100, 40], [1000, 100], [2500, 100]]},
+    'bands': {'f_lo_hz': 100, 'f_hi_hz': 2000, 'bands_per_octave': 3, 'q': 10},
+    'synthesis': {'engine': 'wavsyn', 'components': None, 'max_iters': 50, 'tol_db': 1.5,
+                  'max_gain_db_per_iter': 3},
+    'envelope': {'alarm_db': [3, 3], 'abort_db': [9, 6], 'per_band': None},
+    'acquisition': {'fs_hz': 51200, 'ring_out_s': 0.05, 'pvss': True},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -6, 0], 'pulses': [2, 2, 3], 'start_db': -12,
+                 'advance': 'on_pass', 'max_pulses_per_level': 5},
+    'spacing': {'cooling_s': 1, 'settling_s': 0.5, 'compute_s': 0.25},
+    'identification': {'excitation': 'shaped', 'level_db': -20, 'max_vpk': None, 'nfft': 1024,
+                       'h_floor_frac': 0.05, 'min_mean_coherence': 0.8, 'review': True},
+    'control': {'law': {'id': 'srs_ratio', 'params': {'max_db_per_pulse': 3}},
+                'law_budget': 0.25, 'law_misses': 3, 'max_pulses': 100, 'max_gain_rise_db': 6},
+    'limits': {'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8, 'peak_accel_g': None,
+               'abort_factor': 2,
+               'kinematic': {'accel_g': None, 'velocity_ips': None, 'disp_pp_in': None},
+               'monitors': [{'channel': 2, 'unit': 'A', 'peak_ceiling': 40,
+                             'kind': 'between_pulse'}]},
+    'limit_channels': {'headroom_db': 1,
+                       'channels': [{'channel': 3, 'bound': {'kind': 'flat', 'accel_g': 50},
+                                     'frf': None}]},
+    'feasibility': {'shaker': SHOCK_SHAKER,
+                    'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
+                                       'fixturing': 10, 'test_article': 12},
+                    'residual_velocity_ips': 0.1, 'residual_disp_in': 0.001},
+    'capture': {'auto_start': False, 'run_name': 'srs_shock'},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
+                 {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
+                 {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
+                 {'key': 'operator', 'label': 'Operator', 'value': ''}],
+}
+
+SRS_DERIVED = {
+    'grid': {'fs_hz': 51200, 'record_len': 10569, 'actual': False},
+    'bands_hz': [100, 125.9921, 158.7401, 200, 251.9842, 317.4802, 400, 503.9684, 634.9604, 800,
+                 1007.9368, 1269.9208, 1600, 2015.8737],
+    'target_g': [40, 43.8521, 48.0752, 52.705, 57.7807, 63.3451, 69.4454, 76.1333, 83.4651,
+                 91.5031, 100, 100, 100, 100],
+    'synthesis': {'engine': 'wavsyn', 'components': 14, 'iters': 9, 'converged': True,
+                  'worst_err_db': -0.893, 'duration_s': 0.15643},
+    'reference': {'peak_g': 22.2066, 'velocity_pk_ips': 6.1726, 'displacement_pk_pk_in': 0.020336,
+                  'residual_velocity_ips': 0, 'residual_disp_in': 0},
+    'spacing_s': 1, 'call_budget_s': 0.25,
+    'feasibility': {'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."},
+}
+
+SRS_LAW_REF = {'id': 'srs_ratio', 'name': 'SRS ratio', 'version': '0.1.0', 'sha256': None,
+               'misses': 0}
+SRS_LEVELS = [-12, -6, 0]
+
+
+def _srs_state(**over) -> dict:
+    s = {
+        'run_id': 'srs-0001', 'state': 'configured', 'phase': 'idle',
+        'title': SRS_CONFIG['title'], 'source': 'SIM', 'station': SHOCK_STATION,
+        'grid': SRS_DERIVED['grid'], 'clock': None, 'mode': 'auto', 'levels_db': SRS_LEVELS,
+        'level_db': None, 'rung': None,
+        'pulses': {'fired': 0, 'passed': 0, 'at_level': 0, 'of_level': 0},
+        'next_pulse_s': None, 'elapsed_s': None, 'alarm': False, 'identification': None,
+        'prediction': None, 'notch': None, 'last_pulse': None, 'law': SRS_LAW_REF,
+        'feasibility': None, 'end': None,
+    }
+    s.update(over)
+    return s
+
+
+#: The third pulse of the golden run: -6 dB, every band in the alarm band.
+SRS_ROW = {
+    'index': 2, 'origin': 'ladder', 'scheduled_db': -6, 'commanded_db': -6, 'limit_scale': 1,
+    'drive_vpk': 0.205, 'peak_g': 36.3, 'velocity_pk_ips': 7.1, 'displacement_pk_pk_in': 0.016,
+    'worst_err_db': -1.2, 'worst_band_hz': 630, 'alarm_bands': 0, 'abort_bands': 0,
+    'passed': True, 'limited_components': 2, 'worst_limit_db': -0.7, 'at_s': 7.5,
+    'law': {'used': True, 'miss': None, 'call_ms': 0.2},
+}
+
+SRS_RUNNING = _srs_state(
+    run_id='srs-0004', state='running', phase='waiting',
+    grid={'fs_hz': 51200, 'record_len': 14336, 'actual': True}, clock='shared',
+    level_db=-6, rung=1, pulses={'fired': 3, 'passed': 2, 'at_level': 1, 'of_level': 2},
+    next_pulse_s=0.6, elapsed_s=9.5,
+    identification={'excitation': 'shaped', 'drive_vpk': 0.05, 'max_vpk': 0.05,
+                    'coherence_mean': 0.97, 'min_mean_coherence': 0.8, 'passed': True},
+    prediction={'drive_vpk': 0.41, 'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8,
+                'response_peak_g': 72.1, 'velocity_pk_ips': 14.1, 'displacement_pk_pk_in': 0.031},
+    notch={'notched_bands': 2, 'worst_before_db': 3.1, 'worst_after_db': -0.6, 'converged': True},
+    last_pulse=SRS_ROW,
+    feasibility={'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."})
+
+SRS_LIVE = {
+    'run_id': 'srs-0004', 'source': 'SIM', 'state': 'running', 'phase': 'firing',
+    'mode': 'auto', 'level_db': -6, 'rung': 1,
+    'pulses': {'fired': 3, 'passed': 2, 'at_level': 1, 'of_level': 2},
+    'next_pulse_s': None, 'fire': {'done': 4096, 'of': 14336},
+}
+
+#: Three bands, eight samples at 1 kHz from the record's first sample.
+SRS_FS = 1000.0
+SRS_BANDS = [100.0, 200.0, 400.0]
+SRS_TARGET = [12.5, 15.0, 11.0]
+SRS_ALARM_HI = [17.5, 21.0, 15.5]
+SRS_ALARM_LO = [9.0, 10.5, 7.75]
+SRS_ABORT_HI = [25.0, 30.0, 22.0]
+SRS_ABORT_LO = [6.25, 7.5, 5.5]
+SRS_MEASURED = [12.25, 15.5, 10.5]
+SRS_ACHIEVED = [12.0, 15.25, 11.5]
+SRS_PULSE = [0.0, 0.5, -1.25, 2.5, -3.0, 1.5, -0.5, 0.0]
+SRS_DRIVE = [0.0, 0.0125, -0.03125, 0.0625, -0.075, 0.0375, -0.0125, 0.0]
+SRS_VELOCITY = [0.0, 0.25, -0.125, 0.5, -0.5, 0.25, 0.0, 0.0]
+SRS_DISPLACEMENT = [0.0, 0.0001, 0.0002, 0.0003, 0.0002, 0.0001, 0.0, 0.0]
+
+
+def _srs_times(n: int) -> list:
+    return [i / SRS_FS for i in range(n)]
+
+
+_SRS_X = _axis('Natural frequency', 'Hz', 'log')
+_SRS_Y = _axis('Peak acceleration', 'g', 'log')
+
+
+def _srs_bands_view(a: _Arr, title: str, other=None) -> dict:
+    x = SRS_BANDS
+    series = [a.series('Target', 'reference', x, SRS_TARGET),
+              a.series('Alarm high', 'tolerance', x, SRS_ALARM_HI),
+              a.series('Alarm low', 'tolerance', x, SRS_ALARM_LO),
+              a.series('Abort high', 'abort', x, SRS_ABORT_HI),
+              a.series('Abort low', 'abort', x, SRS_ABORT_LO)]
+    if other:
+        name, role, y = other
+        series.append(a.series(name, role, x, y))
+    return _spectrum(title, _SRS_X, _SRS_Y, series, 'frequency')
+
+
+def _srs_time_view(a: _Arr, title, label, unit, name, role, values) -> dict:
+    return _spectrum(title, _TIME, _axis(label, unit, 'linear'),
+                     [a.series(name, role, _srs_times(len(values)), values)], 'time')
+
+
+def _srs_pulse_views(a: _Arr) -> list:
+    return [_srs_bands_view(a, 'SRS', ('Measured', 'measured', SRS_MEASURED)),
+            _srs_time_view(a, 'Pulse', 'Acceleration', 'g', 'Measured', 'measured', SRS_PULSE),
+            _srs_time_view(a, 'Drive', 'Drive', 'V', 'Drive', 'drive', SRS_DRIVE)]
+
+
+def _srs_identification_views(a: _Arr) -> list:
+    f = [100.0, 200.0, 300.0]
+    ends = [f[0], f[-1]]
+    gain = _spectrum('Identification Gain', _FREQ, _axis('Gain', 'g/V', 'log'),
+                     [a.series('Gain', 'measured', f, [0.5, 1.0, 0.75]),
+                      a.series('Floor', 'tolerance', ends, [0.05, 0.05])], 'frequency')
+    coh = _spectrum('Coherence', _FREQ, _axis('Coherence', None, 'linear'),
+                    [a.series('Coherence', 'measured', f, [0.99, 0.5, 0.98]),
+                     a.series('Hold', 'tolerance', ends, [0.8, 0.8])], 'frequency')
+    return [gain, coh]
+
+
+def _srs_component_views(a: _Arr) -> list:
+    comps = _spectrum('Components', _FREQ, _axis('Amplitude', 'V', 'log'),
+                      [a.series('Drive amplitude', 'drive', SRS_BANDS, [0.125, 0.25, 0.0625])],
+                      'frequency')
+    gains = _spectrum('Gains', _FREQ, _axis('Gain', None, 'log'),
+                      [a.series('Last gains', 'other', SRS_BANDS, [1.0, 1.125, 0.875])],
+                      'frequency')
+    return [comps, gains]
+
+
+def _srs_limit_views(a: _Arr) -> list:
+    bx = [100.0, 400.0]
+    return [_spectrum('Limit Fixture', _SRS_X, _SRS_Y,
+                      [a.series('Predicted', 'other', SRS_BANDS, [10.0, 45.0, 20.0]),
+                       a.series('Bound', 'limit', bx, [50.0, 50.0]),
+                       a.series('Bound less headroom', 'tolerance', bx, [50.0, 50.0])],
+                      'frequency')]
+
+
+def _srs_frf_views(a: _Arr) -> list:
+    return [_spectrum('Gain Fixture', _FREQ, _axis('Gain', 'g/V', 'log'),
+                      [a.series('Supplied', 'reference', [100.0, 500.0, 1000.0],
+                                [1.0, 4.0, 1.0])], 'frequency')]
+
+
+SRS_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
+    {'label': 'Worst band error', 'value': -1.2, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Worst band', 'value': 630.0, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Components at the change limit', 'value': 0.0, 'unit': 'components',
+     'status': 'info'},
+]}
+
+SRS_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Level', 'value': -6.0, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Pulses fired', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Pulses passed', 'value': 2.0, 'unit': None, 'status': 'info'},
+    {'label': 'Worst band', 'value': -1.2, 'unit': 'dB', 'status': 'pass'},
+    {'label': 'At', 'value': 630.0, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Last peak', 'value': 36.3, 'unit': 'g', 'status': 'info'},
+    {'label': 'Last drive peak', 'value': 0.205, 'unit': 'V', 'status': 'info'},
+    {'label': 'Next pulse', 'value': 0.6, 'unit': 's', 'status': 'info'},
+]}
+
+SRS_PULSES_TABLE = {
+    'view': 'table', 'title': 'Pulses',
+    'columns': ['Pulse', 'Level (dB)', 'Peak (g)', 'Worst band (dB)', 'At (Hz)', 'Alarm bands',
+                'Abort bands', 'Drive (V)', 'Passed'],
+    'rows': [['3', '-6', '36.3', '-1.2', '630', '0', '0', '0.205', 'pass']],
+}
+
+SRS_SUBSCRIBE_PLOTS = [
+    {'id': 'srs', 'quantity': 'srs'},
+    {'id': 'pulse', 'quantity': 'pulse', 'points': 1024},
+    {'id': 'vel', 'quantity': 'velocity', 'points': 1024},
+    {'id': 'id', 'quantity': 'identification'},
+    {'id': 'comp', 'quantity': 'components'},
+    {'id': 'lim', 'quantity': 'limit_channels'},
+    {'id': 'frf', 'quantity': 'limit_frf'},
+    {'id': 'law', 'quantity': 'law'},
+    {'id': 'run', 'quantity': 'readings'},
+    {'id': 'table', 'quantity': 'pulses'},
+]
+SRS_QUANTITIES = ['srs', 'pulse', 'velocity', 'displacement', 'identification', 'components',
+                  'limit_channels', 'limit_frf', 'law', 'readings', 'pulses']
+
+
+def _srs_pulse_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = _srs_pulse_views(a)
+    message = {'type': 'event', 'topic': 'srs.pulse', 'seq': 151,
+               'data': {'run_id': 'srs-0004', 'pulse': SRS_ROW, 'views': views}}
+    return message, a.arrays
+
+
+def _srs_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 'srs', 'quantity': 'srs',
+         'views': [_srs_bands_view(a, 'SRS', ('Measured', 'measured', SRS_MEASURED))]},
+        {'id': 'pulse', 'quantity': 'pulse',
+         'views': [_srs_time_view(a, 'Pulse', 'Acceleration', 'g', 'Measured', 'measured',
+                                  SRS_PULSE),
+                   _srs_time_view(a, 'Drive', 'Drive', 'V', 'Drive', 'drive', SRS_DRIVE)]},
+        {'id': 'vel', 'quantity': 'velocity',
+         'views': [_srs_time_view(a, 'Velocity', 'Velocity', 'in/s', 'Measured', 'measured',
+                                  SRS_VELOCITY)]},
+        {'id': 'id', 'quantity': 'identification', 'views': _srs_identification_views(a)},
+        {'id': 'comp', 'quantity': 'components', 'views': _srs_component_views(a)},
+        {'id': 'lim', 'quantity': 'limit_channels', 'views': _srs_limit_views(a)},
+        {'id': 'frf', 'quantity': 'limit_frf', 'views': _srs_frf_views(a)},
+        {'id': 'law', 'quantity': 'law', 'views': [SRS_LAW_READING]},
+        {'id': 'run', 'quantity': 'readings', 'views': [SRS_RUN_READING]},
+        {'id': 'table', 'quantity': 'pulses', 'views': [SRS_PULSES_TABLE]},
+    ]
+    data = dict(SRS_LIVE)
+    data.update({'phase': 'waiting', 'next_pulse_s': 0.6, 'fire': None, 'plots': plots})
+    message = {'type': 'event', 'topic': 'srs.data', 'seq': 152, 'data': data}
+    return message, a.arrays
+
+
+SRS_PREVIEW_DERIVED = {
+    'bands_hz': [100, 200, 400], 'target_g': [12.5, 15, 11],
+    'synthesis': {'engine': 'wavsyn', 'components': 3, 'iters': 6, 'converged': True,
+                  'worst_err_db': 1.2, 'duration_s': 0.008},
+    'reference': {'peak_g': 3, 'velocity_pk_ips': 0.5, 'displacement_pk_pk_in': 0.0003,
+                  'residual_velocity_ips': 0, 'residual_disp_in': 0},
+}
+
+
+def _srs_preview_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [
+        _srs_bands_view(a, 'Target'),
+        _spectrum('Synthesis', _SRS_X, _SRS_Y,
+                  [a.series('Target', 'reference', SRS_BANDS, SRS_TARGET),
+                   a.series('Synthesis', 'other', SRS_BANDS, SRS_ACHIEVED)], 'frequency'),
+        _srs_time_view(a, 'Pulse', 'Acceleration', 'g', 'Synthesized', 'reference', SRS_PULSE),
+        _srs_time_view(a, 'Velocity', 'Velocity', 'in/s', 'Synthesized', 'reference',
+                       SRS_VELOCITY),
+        _srs_time_view(a, 'Displacement', 'Displacement', 'in', 'Synthesized', 'reference',
+                       SRS_DISPLACEMENT),
+    ]
+    message = {'type': 'response', 'id': 63,
+               'result': {'derived': SRS_PREVIEW_DERIVED, 'views': views}}
+    return message, a.arrays
+
+
+#: The built-in SRS law's catalog entry, from its own declaration.
+LAW_SRS_RATIO = {
+    'id': 'srs_ratio', 'world': 'shock_srs', 'builtin': True, 'name': 'SRS ratio',
+    'version': '0.1.0', 'author': 'Hertzforge contributors',
+    'summary': 'Starts each component from the inverse of the identified gain at its frequency, '
+               'then after each pulse scales it by the target over the measured response at the '
+               'nearest band, limited per pulse. The controller caps every change by what the '
+               'limit channels can take.',
+    'sha256': None,
+    'check': {'status': 'built_in', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': True, 'message': 'Built in: cleared for hardware.'},
+    'params': [
+        {'key': 'max_db_per_pulse', 'label': 'Largest change per pulse',
+         'help': 'The most any one component of the drive may rise or fall from one pulse to the '
+                 'next. Smaller values settle more gently when the measured response is noisy.',
+         'kind': 'number', 'unit': 'dB', 'min': 0.5, 'max': 5, 'step': 0.5, 'default': 3}],
+    'diagnostics': [
+        {'key': 'worst_band_error_db', 'label': 'Worst band error', 'unit': 'dB',
+         'help': "The last pulse's measured response against the target at the band furthest "
+                 'from it, in dB (0 at the seed).', 'layout': None},
+        {'key': 'worst_band_hz', 'label': 'Worst band', 'unit': 'Hz',
+         'help': 'The frequency of that band (0 at the seed).', 'layout': None},
+        {'key': 'clamped_components', 'label': 'Components at the change limit',
+         'unit': 'components',
+         'help': 'Components whose change the law held to its largest change per pulse on this '
+                 'call.', 'layout': None}],
+    'shapes': None, 'needs': None,
+}
+
+
+def _srs_case(name, plant, requirement, *, pulses, first, worst, limit_over=None, limited=0,
+              calls, ms, vpk):
+    detail = (f'completed; {pulses} pulses; every band within the band from full-level pulse '
+              f'{first}; {calls} calls, slowest {ms} ms of 250 ms')
+    return {'name': name, 'plant': plant, 'requirement': requirement, 'passed': True,
+            'detail': detail, 'end': 'completed', 'trip': None, 'pulses': pulses,
+            'full_level_pulses': 3, 'first_within_pulse': first, 'final_worst_band_db': worst,
+            'worst_limit_over_db': limit_over, 'misses': 0, 'refused': 0,
+            'limited_components': limited, 'calls': calls, 'worst_call_ms': ms,
+            'budget_ms': 250, 'max_drive_vpk': vpk}
+
+
+SRS_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'shock-srs-check 1',
+                    'cases': [
+    _srs_case('one mode', 'one mode, 400 Hz, Q 10', 'within_by', pulses=9, first=1, worst=0.6,
+              calls=10, ms=0.1, vpk=0.41),
+    _srs_case('close modes', 'two modes, 240 and 260 Hz, Q 30', 'within_by', pulses=9, first=2,
+              worst=1.1, calls=10, ms=0.1, vpk=0.43),
+    _srs_case('measurement noise', 'one mode, 400 Hz, Q 10, noise 30 dB under', 'within_by',
+              pulses=9, first=1, worst=0.9, calls=10, ms=0.1, vpk=0.41),
+    _srs_case('level ladder', 'one mode, 400 Hz, Q 10', 'each_level_within', pulses=9, first=1,
+              worst=0.7, calls=10, ms=0.1, vpk=0.41),
+    _srs_case('identification error', 'one mode, 400 Hz, Q 10, identified gain +3 dB',
+              'within_by', pulses=9, first=2, worst=0.8, calls=10, ms=0.1, vpk=0.42),
+    _srs_case('limit channel', 'a wire, a limit channel resonating at 500 Hz', 'limit_held',
+              pulses=9, first=1, worst=1.4, limit_over=0.3, limited=6, calls=10, ms=0.1,
+              vpk=0.38),
+]}
+
+SRS_TEXT_GOLDENS = {
+    'request_srs_configure': {
+        'type': 'request', 'id': 61, 'method': 'srs.configure',
+        'params': {'config': SRS_CONFIG},
+    },
+    'response_srs_configure': {
+        'type': 'response', 'id': 61,
+        'result': {'state': _srs_state(), 'derived': SRS_DERIVED, 'warnings': []},
+    },
+    'event_srs_state': {
+        'type': 'event', 'topic': 'srs.state', 'seq': 150, 'data': SRS_RUNNING,
+    },
+    'request_srs_subscribe': {
+        'type': 'request', 'id': 62, 'method': 'srs.subscribe',
+        'params': {'rate_hz': 2, 'plots': SRS_SUBSCRIBE_PLOTS},
+    },
+    'response_srs_subscribe': {
+        'type': 'response', 'id': 62,
+        'result': {'default': False, 'rate_hz': 2, 'plots': SRS_SUBSCRIBE_PLOTS,
+                   'quantities': SRS_QUANTITIES},
+    },
+    'request_srs_fire': {
+        'type': 'request', 'id': 64, 'method': 'srs.fire', 'params': {},
+    },
+    'request_srs_level': {
+        'type': 'request', 'id': 65, 'method': 'srs.level', 'params': {'delta_db': 1},
+    },
+    'response_srs_target_import': {
+        'type': 'response', 'id': 69,
+        'result': {'target': {'kind': 'breakpoints',
+                              'points': [[100, 40], [1000, 100], [2500, 100]]},
+                   'errors': [], 'warnings': []},
+    },
+    'response_srs_table_import': {
+        'type': 'response', 'id': 70,
+        'result': {'components': {'engine': 'wavsyn', 'rows': [
+            {'freq_hz': 100, 'amplitude_g': 1.5, 'half_cycles': 5, 'delay_s': 0.04},
+            {'freq_hz': 200, 'amplitude_g': 1.25, 'half_cycles': 7, 'delay_s': 0.02},
+            {'freq_hz': 400, 'amplitude_g': 1, 'half_cycles': 9, 'delay_s': 0}]},
+                   'errors': [], 'warnings': []},
+    },
+    'response_laws_list_shock_srs': {
+        'type': 'response', 'id': 66,
+        'result': {'laws': [LAW_SRS_RATIO], 'problems': []},
+    },
+    'response_laws_check_shock_srs': {
+        'type': 'response', 'id': 67,
+        'result': {'law': LAW_SRS_RATIO, 'report': SRS_CHECK_REPORT},
+    },
+    'response_error_srs_config_invalid': {
+        'type': 'response', 'id': 68,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'alarm_wider_than_abort', 'field': 'envelope.abort_db',
+                       'message': 'The abort band is narrower than the alarm band on one side; '
+                                  'a band would abort without ever alarming. Widen the abort '
+                                  'band or narrow the alarm band.'},
+                      {'reason': 'out_of_range', 'field': 'limits.drive_vpk_abort',
+                       'message': 'The drive abort is 0.4; it is above the drive ceiling of 0.5 '
+                                  'V and at most 10 V'},
+                      {'reason': 'limit_unknown_channel',
+                       'field': 'limit_channels.channels[0].channel',
+                       'message': 'Channel 7 is not a row of the channel table other than the '
+                                  'control channel; name the row the bound is for.'}],
+                      'warnings': []}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -1454,7 +1875,15 @@ def main() -> None:
     write('event_shock_data', *_shock_data_build())
     write('response_shock_preview', *_shock_preview_build())
 
-    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS}.items():
+    # SRS shock: the live frame (no arrays), a pulse, a subscription's data, a preview
+    write('event_srs_live', {'type': 'event', 'topic': 'srs.live', 'seq': 149,
+                             'data': SRS_LIVE}, {})
+    write('event_srs_pulse', *_srs_pulse_build())
+    write('event_srs_data', *_srs_data_build())
+    write('response_srs_preview', *_srs_preview_build())
+
+    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
+                          **SRS_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 
