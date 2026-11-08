@@ -238,6 +238,12 @@ hertzforge-law-host  test:sine_host  a_late_sine_law_is_stopped_within_its_tick_
 hertzforge-law-host  test:sine_host  each_misbehaviour_is_a_named_error
 hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_tick_is_well_inside_its_budget
 
+# The template law file on a simulated station with the NI chassis's output queue: each run goes
+# through the law host, whose call deadline is on the wall clock, so a starved call is a miss
+hertzforge-sine-laws  test:template_lag  a_first_drive_four_db_high_comes_back_without_a_trip
+hertzforge-sine-laws  test:template_lag  the_default_start_at_20_hz_at_full_level_holds_until_the_measurement_comes_up
+hertzforge-sine-laws  test:template_lag  the_default_start_on_a_ladder_sweep_completes_within_its_band
+
 # The Sine service end to end over its socket and on its run thread: runs on the
 # simulated station paced to the wall clock, waited on against wall-clock
 # deadlines, with the orphan timeout, the shutdown and the stop ramp on the real
