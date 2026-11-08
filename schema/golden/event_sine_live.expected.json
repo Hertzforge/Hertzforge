@@ -1,0 +1,365 @@
+{
+ "type": "event",
+ "topic": "sine.live",
+ "seq": 171,
+ "data": {
+  "run_id": "sine-0003",
+  "source": "SIM",
+  "class": "sim",
+  "state": "running",
+  "phase": "engaged",
+  "test": "sweep",
+  "mode": "auto",
+  "t_s": 236.75,
+  "elapsed_s": 230.5,
+  "frequency_hz": 970.25,
+  "direction": "down",
+  "sweep_rate_oct_per_min": -2,
+  "sweeps": {
+   "done": 0,
+   "of": 1
+  },
+  "held": false,
+  "level_db": -6,
+  "commanded_db": -6,
+  "target": 0.5,
+  "measured": 0.5,
+  "error_db": 0,
+  "drive_vpk": 0.125,
+  "cola_vpk": null,
+  "notch": false,
+  "alarm": false,
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "amplitude": 0.5,
+    "phase_deg": -12.5,
+    "rms": 0.375,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 2,
+    "description": "Response",
+    "role": "monitor",
+    "amplitude": 0.75,
+    "phase_deg": -30.25,
+    "rms": 0.5625,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 3,
+    "description": "Fixture",
+    "role": "monitor",
+    "amplitude": 1.25,
+    "phase_deg": -95.5,
+    "rms": 0.875,
+    "unit": "g",
+    "overload": false
+   }
+  ],
+  "alarms": [],
+  "law": {
+   "values": {
+    "servo_step_db": 0.015625,
+    "prediction_step_db": 0.0078125,
+    "total_step_db": 0.0234375
+   },
+   "misses": 0,
+   "capped_ticks": 2
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Control",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Control",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.515625
+       ]
+      }
+     },
+     {
+      "name": "Profile",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        500.0,
+        750.0,
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        500.0,
+        750.0,
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.625,
+        0.625,
+        0.625,
+        0.625
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        500.0,
+        750.0,
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.375,
+        0.375,
+        0.375,
+        0.375
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        500.0,
+        750.0,
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.75,
+        0.75,
+        0.75,
+        0.75
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        500.0,
+        750.0,
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Drive",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Drive",
+     "unit": "V",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Drive",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1000.0,
+        1250.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.125,
+        0.140625
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "reading",
+    "title": "Run",
+    "rows": [
+     {
+      "label": "Frequency",
+      "value": 970.25,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Direction",
+      "value": "down",
+      "unit": null,
+      "status": "info"
+     },
+     {
+      "label": "Level",
+      "value": -6,
+      "unit": "dB",
+      "status": "info"
+     },
+     {
+      "label": "Target",
+      "value": 0.5,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Measured",
+      "value": 0.5,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Error",
+      "value": 0,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Drive",
+      "value": 0.125,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Sweeps",
+      "value": "0 of 1",
+      "unit": null,
+      "status": "info"
+     },
+     {
+      "label": "Elapsed",
+      "value": 230.5,
+      "unit": "s",
+      "status": "info"
+     },
+     {
+      "label": "Remaining",
+      "value": 566.75,
+      "unit": "s",
+      "status": "info"
+     }
+    ]
+   }
+  ]
+ }
+}

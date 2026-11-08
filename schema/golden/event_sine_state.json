@@ -1,0 +1,69 @@
+{
+ "type": "event",
+ "topic": "sine.state",
+ "seq": 170,
+ "data": {
+  "run_id": "sine-0003",
+  "state": "running",
+  "phase": "engaged",
+  "title": "Sine 1 g, 20 to 2000 Hz",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 16384,
+   "tick_frames": 164,
+   "tick_s": 0.0100098,
+   "actual": true
+  },
+  "clock": "shared",
+  "test": "sweep",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -6,
+   0
+  ],
+  "level_db": -6,
+  "rung": 1,
+  "frequency_hz": 970.25,
+  "direction": "down",
+  "sweeps": {
+   "done": 0,
+   "of": 1
+  },
+  "held": false,
+  "elapsed_s": 230.5,
+  "at_level_s": 31.25,
+  "remaining_s": 566.75,
+  "alarm": false,
+  "notch": false,
+  "identification": {
+   "level_db": -20,
+   "band_coherence": 0.98,
+   "gate_coherence": 0.5,
+   "lag_frames": 0,
+   "trusted_frac": 0.97,
+   "passed": true
+  },
+  "law": {
+   "id": "servo_blend",
+   "name": "Servo blend",
+   "version": "0.1.0",
+   "sha256": null,
+   "misses": 0,
+   "capped_ticks": 2,
+   "live": {
+    "blend_w": 0.5
+   }
+  },
+  "feasibility": {
+   "verdict": "pass",
+   "message": "The profile is within the shaker's ratings."
+  },
+  "end": null
+ }
+}

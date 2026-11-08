@@ -22,6 +22,8 @@
 //!   on the transient-run rails ([`pulse`]) and its views.
 //! - [`srs`]: SRS shock: its configuration, the offline synthesis and its preview,
 //!   the imports, the run on the same rails and its views.
+//! - [`sine`]: Sine: its configuration, the profile's imports and views, the
+//!   run's state and live frames, its subscriptions and the law check's results.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -41,6 +43,7 @@ pub mod server;
 pub mod session;
 pub mod shock;
 pub mod sim;
+pub mod sine;
 pub mod srs;
 pub mod station;
 pub mod table;
