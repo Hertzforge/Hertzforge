@@ -230,7 +230,7 @@ impl WireComponents {
     }
 }
 
-/// One band's envelope, `[low, high]` dB for the alarm and the abort.
+/// One band's envelope, `[under, over]` dB for the alarm and the abort.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WireEnvelopeBand {
     pub alarm_db: (f64, f64),
@@ -380,13 +380,13 @@ fn bad(path: &str, message: impl Into<String>) -> MethodError {
     MethodError::bad_params(path, message)
 }
 
-/// `[low, high]` dB at `k` of `o`.
+/// `[under, over]` dB at `k` of `o`: how far a band may sit under and over the target.
 fn db_pair(o: &Obj<'_>, k: &str) -> Result<Option<(f64, f64)>, MethodError> {
     let Some(a) = o.array(k)? else {
         return Ok(None);
     };
     let at = o.at(k);
-    let wrong = || bad(&at, format!("\"{at}\" is [low, high] in dB"));
+    let wrong = || bad(&at, format!("\"{at}\" is [under, over] in dB"));
     if a.len() != 2 {
         return Err(wrong());
     }
@@ -1267,7 +1267,7 @@ impl WireSrs {
                     r.errors.push(Item::field(
                         "out_of_range",
                         &at,
-                        "A band's alarm and abort are [low, high] dB, each side above 0 and at \
+                        "A band's alarm and abort are [under, over] dB, each side above 0 and at \
                          most 60 dB.",
                     ));
                 } else if wider(b.alarm_db, b.abort_db) {

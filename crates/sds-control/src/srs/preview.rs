@@ -415,7 +415,7 @@ pub fn preview_json(
     preview_frame(&s.facts(), &s.reference, &s.figures(env), points, arrays)
 }
 
-/// A uniform envelope over `n` bands from `[low, high]` alarm and abort dB.
+/// A uniform envelope over `n` bands from `[under, over]` alarm and abort dB.
 pub fn uniform_envelope(n: usize, alarm: (f64, f64), abort: (f64, f64)) -> Vec<EnvelopeBand> {
     vec![(alarm.0, alarm.1, abort.0, abort.1); n]
 }

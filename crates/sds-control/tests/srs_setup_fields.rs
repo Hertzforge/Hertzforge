@@ -965,3 +965,21 @@ fn each_shape_error_is_bad_params_naming_the_field() {
     let e = config::parse(&c).map(|_| ()).unwrap_err();
     assert_eq!(e.reason, Some("shaker_record_invalid"));
 }
+
+#[test]
+fn an_envelope_pair_is_under_then_over_the_target_as_the_controller_judges_it() {
+    // abort_db [9, 6]: a band may sit 9 dB under the target and 6 dB over it.
+    let mut c = golden_config();
+    set(&mut c, "envelope.alarm_db", json!([3, 3]));
+    set(&mut c, "envelope.abort_db", json!([9, 6]));
+    let w = config::parse(&c).unwrap();
+    let k = built(&w);
+    let env = k.envelope.resolve(1).unwrap();
+    let at = |db: f64| env.check(&[10.0], &[10.0 * 10f64.powf(db / 20.0)], 1.0);
+    assert!(at(7.0).aborted(), "7 dB over is past the 6 dB over");
+    assert!(
+        !at(-8.0).aborted() && at(-8.0).alarmed(),
+        "8 dB under alarms only"
+    );
+    assert!(at(-10.0).aborted(), "10 dB under is past the 9 dB under");
+}
