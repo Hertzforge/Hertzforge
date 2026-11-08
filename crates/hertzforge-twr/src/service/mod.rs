@@ -20,11 +20,14 @@ pub mod config;
 pub mod report;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use hertzforge_capture::{save_snapshot, CaptureConfig, CaptureSink, Mark, Snapshot};
 use hertzforge_dsp::fft::Cplx;
+use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use serde::{Deserialize, Serialize};
 
+use crate::control::TwrLawFactory;
 use crate::grid::{irfft_half, rfft_half, RecordGrid};
 use crate::inverse::GridInverse;
 use crate::law;
@@ -174,6 +177,15 @@ pub struct TwrService<P: ReferencePlayer> {
     events: Vec<String>,
     run_clock_s: f64,
     capture: Option<CaptureSink>,
+
+    // --- the control-law seam -----------------------------------------------------
+    /// The factory a closed-loop run builds its control law with, at proceed.
+    /// Stored, not yet called: the seam that calls it is not built, and
+    /// [`TwrService::new`] refuses a configuration that sets `control`.
+    law_factory: Option<Arc<dyn TwrLawFactory>>,
+    /// The clock law calls are timed on. Stored only until the seam reads it.
+    #[allow(dead_code)]
+    law_clock: Arc<dyn LawClock>,
 }
 
 impl<P: ReferencePlayer> TwrService<P> {
@@ -182,6 +194,16 @@ impl<P: ReferencePlayer> TwrService<P> {
     pub fn new(mut player: P, config: TwrConfig) -> Result<Self, TwrError> {
         let fs = player.fs_hz();
         config.validate(fs)?;
+        // The law seam is a contract only so far: a configuration that asks for
+        // the core's guards on a changeable law must not quietly run the
+        // built-in iteration without them.
+        if config.control.is_some() {
+            return Err(TwrError::Config(
+                "the closed loop under a changeable control law (control) is not built yet; \
+                 this service runs only without it"
+                    .into(),
+            ));
+        }
 
         // ---- prep pipeline (documented order) ----
         let mut r = config.reference.clone();
@@ -285,11 +307,36 @@ impl<P: ReferencePlayer> TwrService<P> {
             events: Vec::new(),
             run_clock_s: 0.0,
             capture: None,
+            law_factory: None,
+            law_clock: Arc::new(MonotonicClock::new()),
         };
         if blocked {
             svc.log("feasibility hard-block: a kinematic ceiling failed");
         }
         Ok(svc)
+    }
+
+    /// Install the factory a closed-loop run builds its control law with, at
+    /// proceed.
+    ///
+    /// Stored only: nothing calls it until the law seam is built.
+    pub fn with_law_factory(mut self, factory: Arc<dyn TwrLawFactory>) -> Self {
+        self.law_factory = Some(factory);
+        self
+    }
+
+    /// Install the clock law calls are timed on (a test clock makes a law
+    /// "slow" deterministically).
+    ///
+    /// Stored only: nothing reads it until the law seam is built.
+    pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
+    }
+
+    /// Whether a law factory has been installed ([`Self::with_law_factory`]).
+    pub fn has_law_factory(&self) -> bool {
+        self.law_factory.is_some()
     }
 
     fn log(&mut self, msg: &str) {

@@ -32,6 +32,9 @@
 //! - [`inverse`] - regularized inverse on the sysid grid + interpolation onto the
 //!   record grid + the per-bin trust mask.
 //! - [`law`] - the pure iterative correction law (unit-testable with no backend).
+//! - [`control`] - the control-law seam: what a changeable law sees and
+//!   returns ([`control::TwrLaw`], [`control::TwrLawFactory`]) and the
+//!   closed-loop settings the core runs it under ([`control::TwrControl`]).
 //! - [`metrics`] - error metrics + convergence history + debounced divergence
 //!   detection.
 //! - [`schedule`] - the convergence-gated dB ladder + the run schedule
@@ -42,6 +45,7 @@
 //!   Backend playout, NOT through `hertzforge_engine::Engine`).
 //! - [`service`] - the run orchestration state machine + status/report surface.
 
+pub mod control;
 pub mod grid;
 pub mod inverse;
 pub mod law;
@@ -53,6 +57,10 @@ pub mod schedule;
 pub mod service;
 pub mod sysid;
 
+pub use control::{
+    PlayInputs, PlayKind, PlayOutputs, TwrControl, TwrLaw, TwrLawFactory, TwrLawSetup, TwrPlant,
+    Verdict,
+};
 pub use grid::RecordGrid;
 pub use inverse::{GridInverse, InverseConfig};
 pub use law::LawConfig;

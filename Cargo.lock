@@ -1477,6 +1477,7 @@ dependencies = [
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-module-abi",
+ "hertzforge-shock-common",
  "serde",
  "serde_json",
 ]

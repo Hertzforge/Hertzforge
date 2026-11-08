@@ -2783,6 +2783,8 @@ fn translate_twr(p: &TwrProfile, staged: &StagedReference) -> Result<TwrConfig, 
                 value: m.value.clone(),
             })
             .collect(),
+        // The daemon host runs the built-in iteration only: it has no law seam.
+        control: None,
     };
     Ok(cfg)
 }
