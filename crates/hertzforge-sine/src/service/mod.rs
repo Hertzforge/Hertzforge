@@ -516,16 +516,6 @@ impl SineService {
     ) -> Result<Self, ServiceError> {
         let caps = backend.caps();
         cfg.validate()?;
-        // The core's guards on the law are not built yet: a configuration that
-        // asks for them, or for a tick in seconds at the adopted rate, must not
-        // quietly run without them.
-        if cfg.law_guards.is_some() || cfg.control_tick_s.is_some() {
-            return Err(ServiceError::Config(ConfigError::BadConfig(
-                "the core's control-law guards (law_guards) and a control tick in seconds \
-                 (control_tick_s) are not built yet; this service runs only without them"
-                    .into(),
-            )));
-        }
         table
             .validate()
             .map_err(|e| ServiceError::Config(ConfigError::BadTable(e.to_string())))?;
