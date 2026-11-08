@@ -2396,6 +2396,4 @@ fn interp_clamped(xs: &[f64], ys: &[f64], x: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod recorded_trace;
-#[cfg(test)]
 mod tests;

@@ -18,14 +18,14 @@
 //! Re-record (only when a change to the run is intended and said so):
 //! `HERTZFORGE_RECORD_SRS_TRACE=1 cargo test -p hertzforge-srs recorded_trace`.
 
-use super::plant::{FirePath, FiredResponses, HalPulsePlant, PlantError, PulsePlant};
-use super::report::RunState;
-use super::tests::{
+use super::{
     cfg_a, cfg_b, cfg_c, cfg_e, mock_cfg, plant, siso_table, table_with_monitor, MockPlant,
     PlantSpy,
 };
-use super::SrsShockService;
 use crate::service::config::SrsTestConfig;
+use crate::service::plant::{FirePath, FiredResponses, HalPulsePlant, PlantError, PulsePlant};
+use crate::service::report::RunState;
+use crate::service::SrsShockService;
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_hal_sim::SimBackend;
 use serde_json::{json, Value};

@@ -36,6 +36,11 @@ use hertzforge_hal_sim::{SimBackend, SimConfig};
 use hertzforge_shaker_db::{MovingMass, RatingValue, ShakerRecord};
 use hertzforge_shock_common::ShockLevelSchedule;
 
+/// The recorded trace of the run without `control`, on these fixtures. It lives under
+/// `tests/` so the workspace's lint that keeps the simulator out of production code
+/// reads it as test code, which it is.
+mod recorded_trace;
+
 const FS: f64 = 20_000.0;
 
 // ---------------------------------------------------------------------------
