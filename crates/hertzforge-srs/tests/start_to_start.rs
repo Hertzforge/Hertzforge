@@ -3,15 +3,18 @@
 //! host timestamps taken somewhere near them.
 //!
 //! The plant here is the shipping [`HalPulsePlant`] over a loopback backend that
-//! runs on the same virtual clock as the service's pacer. Each arm costs 15 ms
-//! and 0 ms in turn, and the start itself takes 0.5 ms before the clock runs
-//! and 0.5 ms after, so the work between the service's decision to fire and the
-//! clock actually running is a different length on alternate pulses, as it is on
-//! the real chassis. The backend records the instant its clock started.
+//! runs on the same virtual clock as the service's pacer. Each arm costs 120 ms
+//! and 15 ms in turn (the bench measured about 125 ms of bring-up a shot), and
+//! the start itself takes 0.5 ms before the clock runs and 0.5 ms after, so the
+//! work between the service's decision to fire and the clock actually running is
+//! long, and a different length on alternate pulses, as it is on the real
+//! chassis. The backend records the instant its clock started.
 //!
 //! What must hold for every pair of pulses: the physical start-to-start is at
-//! least the floor, and the start time the core reports is the physical start
-//! give or take the start call itself (never before it).
+//! least the floor and at most the floor plus the start call (the bring-up is
+//! done inside the time between pulses, not after it), and the start time the
+//! core reports is the physical start give or take the start call itself (never
+//! before it).
 
 mod common;
 
@@ -47,11 +50,13 @@ impl PulsePacer for SharedPacer {
     }
 }
 
-/// Each arm's cost in turn, seconds.
-const ARM_COST_S: [f64; 2] = [0.015, 0.0];
+/// Each arm's cost in turn, seconds: 120 ms is the bring-up the bench measured.
+const ARM_COST_S: [f64; 2] = [0.120, 0.015];
 /// The start call's time before the clock runs, and after.
 const START_PRE_S: f64 = 0.0005;
 const START_POST_S: f64 = 0.0005;
+/// The start call's whole length.
+const START_S: f64 = START_PRE_S + START_POST_S;
 
 /// A 1 g/V loopback on the shared clock that records when its clock started.
 struct Loopback {
@@ -142,7 +147,7 @@ impl Backend for Loopback {
 }
 
 #[test]
-fn physical_start_to_start_is_never_under_the_time_between_pulses() {
+fn physical_start_to_start_is_the_time_between_pulses_plus_the_start_call() {
     let clock: Clock = Arc::default();
     let starts = Arc::new(Mutex::new(Vec::new()));
     let backend = Loopback {
@@ -187,6 +192,13 @@ fn physical_start_to_start_is_never_under_the_time_between_pulses() {
             w[1] - w[0] >= floor - 1e-9,
             "pulses {k} and {} started {:.4} s apart on the device clock, under the \
              {floor} s floor (starts {physical:?})",
+            k + 1,
+            w[1] - w[0]
+        );
+        assert!(
+            w[1] - w[0] <= floor + START_S + 1e-6,
+            "pulses {k} and {} started {:.4} s apart on the device clock, more than the \
+             {floor} s floor and the {START_S} s start call (starts {physical:?})",
             k + 1,
             w[1] - w[0]
         );
