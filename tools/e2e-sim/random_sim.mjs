@@ -293,7 +293,7 @@ try {
 	);
 	const sections = await a.locator('[data-testid^="test-group-"] h2').allInnerTexts();
 	// A test type still to come cannot be opened (forced past the browser's own refusal to click it).
-	await tid(a, 'test-type-sine').click({ force: true });
+	await tid(a, 'test-type-twr').click({ force: true });
 	const stayed = await tid(a, 'test-type-chooser').isVisible();
 	const inGroup = (g) => cards.filter((c) => c.group === g).map((c) => c.id).join();
 	check(
