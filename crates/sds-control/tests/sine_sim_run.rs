@@ -63,13 +63,15 @@ fn config(test: Value, schedule: Value) -> Value {
     })
 }
 
-/// sim-1's sweep: 50 to 800 Hz at 8 oct/min, one sweep at each of -12, -6, 0 dB.
+/// sim-1's sweep: 50 to 800 Hz at 8 oct/min, one sweep at each of -12 and -6 dB and two at
+/// 0 dB. Two at full level give a minute of station time there: at ten times speed and five
+/// frames a second of wall time, about 30 frames to judge the error on.
 fn sim1() -> Value {
     config(
         json!({"kind": "sweep", "band_hz": [50, 800], "rate": {"law": "log", "oct_per_min": 8},
-               "start_hz": 50, "direction": "up", "end": {"sweeps": 3}}),
+               "start_hz": 50, "direction": "up", "end": {"sweeps": 4}}),
         json!({"mode": "auto", "levels_db": [-12, -6, 0], "per_level": {"sweeps": 1},
-               "full_level": {"sweeps": 1}}),
+               "full_level": {"sweeps": 2}}),
     )
 }
 
@@ -430,7 +432,7 @@ async fn sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_
         ("random.configure", json!({"config": {}})),
         ("srs.configure", json!({"config": {}})),
         ("shock.configure", json!({"config": {}})),
-        ("sim.start", json!({"profile": "flat"})),
+        ("sim.start", json!({"profile": "ramp_plateau"})),
     ] {
         let e = c.refused(m, p).await;
         assert!(
