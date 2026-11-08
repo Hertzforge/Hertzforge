@@ -1204,6 +1204,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-twr-correct"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
 name = "hertzforge-mimo-laws"
 version = "0.1.0"
 dependencies = [
@@ -1763,6 +1771,21 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-srs-template"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-twr-misbehave"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "law-fixture-twr-template"
 version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
