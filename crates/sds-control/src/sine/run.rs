@@ -2226,6 +2226,35 @@ mod tests {
         assert_eq!(end.ramp_s, None);
     }
 
+    /// The review hold is where the operator reads the identification: its gain
+    /// and coherence views are drawn from the run's figures as soon as it holds,
+    /// before anything has driven at test level.
+    #[test]
+    fn the_identification_is_drawn_at_the_review_hold() {
+        let r = rig(config(|c| {
+            c["identification"]["review"] = json!(true);
+        }));
+        ask(&r, |reply| Cmd::Start { ctx: ctx(), reply }).unwrap();
+        let v = wait_until(&r, 60, |v| v.state == State::Review);
+        let figures = v.figures.as_deref();
+        let mut arrays = crate::codec::Arrays::new();
+        let views = super::super::view::identification_views(
+            figures.and_then(|f| f.identification.as_ref()),
+            &mut arrays,
+        );
+        let titles: Vec<&str> = views.iter().filter_map(|v| v["title"].as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Identification Gain", "Coherence"],
+            "at the review hold"
+        );
+        ask(&r, |reply| Cmd::Abort {
+            by: "test".into(),
+            reply,
+        })
+        .unwrap();
+    }
+
     #[test]
     fn the_review_hold_waits_for_proceed_and_the_sweep_verbs_act() {
         let r = rig(config(|c| {

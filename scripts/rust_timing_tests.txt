@@ -247,6 +247,7 @@ sds-control  lib  sine::run::tests::a_run_goes_from_start_to_completed_with_the_
 sds-control  lib  sine::run::tests::a_stop_ramps_down_and_ends_operator_stop_at_the_level_it_was_asked
 sds-control  lib  sine::run::tests::an_abort_ends_without_the_ramp
 sds-control  lib  sine::run::tests::the_capture_run_name_reaches_the_controllers_capture
+sds-control  lib  sine::run::tests::the_identification_is_drawn_at_the_review_hold
 sds-control  lib  sine::run::tests::the_review_hold_waits_for_proceed_and_the_sweep_verbs_act
 sds-control  test:sine_protocol  a_live_srs_run_refuses_a_sine_configure_and_start
 sds-control  test:sine_protocol  a_subscription_parses_to_its_result_and_refuses_what_a_quantity_does_not_take
