@@ -138,8 +138,18 @@ fn check_json(e: &CatalogEntry) -> Value {
     })
 }
 
-/// One catalog entry on the wire.
+/// One catalog entry on the wire. A Sine entry alone carries `live`.
 pub fn entry_json(e: &CatalogEntry) -> Value {
+    let mut v = entry_json_common(e);
+    if e.world == LawWorld::Sine {
+        if let Value::Object(m) = &mut v {
+            m.insert("live".into(), Value::from(e.live.clone()));
+        }
+    }
+    v
+}
+
+fn entry_json_common(e: &CatalogEntry) -> Value {
     let layout = |key: &str| e.mimo.as_ref().and_then(|m| m.layout(key)).map(layout_name);
     json!({
         "id": e.id,
@@ -162,7 +172,8 @@ pub fn entry_json(e: &CatalogEntry) -> Value {
 }
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
-/// first, then multiple-output Random, then classical shock, then SRS shock).
+/// first, then multiple-output Random, then classical shock, then SRS shock, then
+/// Sine).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
     for w in [
@@ -170,6 +181,7 @@ pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
         LawWorld::Mimo,
         LawWorld::ShockClassical,
         LawWorld::ShockSrs,
+        LawWorld::Sine,
     ] {
         if world.is_none_or(|x| x == w) {
             laws.extend(catalog.entries_for(w).iter().map(entry_json));
@@ -192,10 +204,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("mimo") => Ok(Some(LawWorld::Mimo)),
         Some("shock_classical") => Ok(Some(LawWorld::ShockClassical)),
         Some("shock_srs") => Ok(Some(LawWorld::ShockSrs)),
+        Some("sine") => Ok(Some(LawWorld::Sine)),
         Some(_) => Err(MethodError::bad_params(
             "world",
-            "\"world\" is \"single\", \"mimo\", \"shock_classical\" or \"shock_srs\", or \
-             absent for every world",
+            "\"world\" is \"single\", \"mimo\", \"shock_classical\", \"shock_srs\" or \
+             \"sine\", or absent for every world",
         )),
     }
 }
@@ -335,4 +348,68 @@ pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
         },
         params: e.manifest.params.clone(),
     }
+}
+
+/// The built-in Sine law's id (the catalog's).
+pub use hertzforge_random_laws::SINE_BUILTIN_ID;
+
+/// The built-in Sine law's manifest, from the core's declaration (the catalog's).
+pub use hertzforge_random_laws::sine_builtin_manifest;
+
+/// The built-in Sine law's catalog entry, for a check made with no catalog at hand: the
+/// catalog's own declaration and live parameters.
+pub fn builtin_sine_entry() -> CatalogEntry {
+    let m = sine_builtin_manifest();
+    CatalogEntry {
+        id: SINE_BUILTIN_ID.to_owned(),
+        identity: hertzforge_law_host::LawIdentity {
+            name: m.name.clone(),
+            version: m.version.clone(),
+            author: m.author.clone(),
+            sha256: String::new(),
+        },
+        manifest: m,
+        builtin: true,
+        check: CheckStatus::BuiltIn,
+        world: LawWorld::Sine,
+        mimo: None,
+        live: hertzforge_random_laws::sine_builtin_live(),
+    }
+}
+
+/// A catalog entry as a Sine configuration's checks see it: a law of another
+/// world is refused by the test type it is for.
+pub fn sine_facts(e: &CatalogEntry) -> crate::sine::config::LawFacts {
+    crate::sine::config::LawFacts {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: match e.world {
+            LawWorld::Single => Err("single-output Random"),
+            LawWorld::Mimo => Err("multiple-output Random"),
+            LawWorld::ShockClassical => Err("classical shock"),
+            LawWorld::ShockSrs => Err("SRS shock"),
+            LawWorld::Sine => Ok(()),
+        },
+        params: e.manifest.params.clone(),
+        live: e.live.clone(),
+    }
+}
+
+/// The built-in Sine law as a Sine configuration's checks see it.
+pub fn builtin_sine_facts() -> crate::sine::config::LawFacts {
+    sine_facts(&builtin_sine_entry())
+}
+
+/// Look a Sine law up by id: the catalog's entry, or the built-in.
+pub fn sine_lookup(
+    catalog: Option<&LawCatalog>,
+    id: &str,
+) -> Option<crate::sine::config::LawFacts> {
+    if let Some(e) = catalog.and_then(|c| c.entry(id)) {
+        return Some(sine_facts(&e));
+    }
+    (id == SINE_BUILTIN_ID).then(builtin_sine_facts)
 }

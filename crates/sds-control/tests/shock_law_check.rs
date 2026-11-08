@@ -103,7 +103,7 @@ async fn the_classical_world_lists_the_built_in_law_first() {
         .unwrap()
         .iter()
         .all(|l| l["world"] == "mimo"));
-    let e = c.refused("laws.list", json!({"world": "sine"})).await;
+    let e = c.refused("laws.list", json!({"world": "sinus"})).await;
     assert_eq!(e["reason"], "bad_params");
 }
 
