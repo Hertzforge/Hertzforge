@@ -351,10 +351,21 @@ pub fn live_params() -> Vec<LiveParam> {
 }
 
 /// The built-in law: today's amplitude servo and feedforward blend.
+///
+/// The law follows the drive the core played. Each tick it compares the drive
+/// in force with the drive it asked for on the tick before; where the core
+/// held the drive under the request (the notch ceiling clamping it, a cap, the
+/// drive ceiling, the first-drive bound), the servo's own level is moved down
+/// by the same amount. The servo's steps are relative, so this changes no step
+/// it takes; it keeps the servo's level with the drive, so a long clamp cannot
+/// wind it up to its ceiling and leave it unable to raise the drive when the
+/// clamp ends.
 #[derive(Debug, Clone)]
 pub struct ServoBlendLaw {
     servo: AmplitudeServo,
     blend: BlendLaw,
+    /// The drive the law asked for on its last call (0 before the engage).
+    asked: f64,
 }
 
 impl ServoBlendLaw {
@@ -380,15 +391,34 @@ impl ServoBlendLaw {
             max_step_db_per_tick: BLEND_MAX_STEP_DB,
         })
         .map_err(|e| LawFault::Failed(e.to_string()))?;
-        Ok(ServoBlendLaw { servo, blend })
+        Ok(ServoBlendLaw::from_parts(servo, blend))
     }
 
     /// The law from a servo and a blend already built (a step built without a
     /// law of its own takes these).
     pub fn from_parts(servo: AmplitudeServo, blend: BlendLaw) -> Self {
-        ServoBlendLaw { servo, blend }
+        ServoBlendLaw {
+            servo,
+            blend,
+            asked: 0.0,
+        }
+    }
+
+    /// Move the servo's level down by what the core held the drive under the
+    /// last request. The servo's level does not set the drive here (the drive
+    /// moves by the servo's step from the drive in force), so the reseat moves
+    /// no drive; it is what keeps the level with the drive.
+    fn follow_the_drive_played(&mut self, played: f64) {
+        if self.asked > 0.0 && played > 0.0 && played < self.asked * (1.0 - HELD_UNDER) {
+            let level = self.servo.drive_scale() * (played / self.asked);
+            self.servo.set_feedforward_scale(level);
+        }
     }
 }
+
+/// How far under its request the drive played must be before the law follows
+/// it down, as a fraction: well above rounding, well under any cap's step.
+const HELD_UNDER: f64 = 1e-9;
 
 /// Write the values; a law's own values are always declared, so a refusal
 /// here is the law's bug and is reported as one.
@@ -418,6 +448,7 @@ impl SineControlLaw for ServoBlendLaw {
             None => UNTRUSTED_SEED,
         };
         let drive = 10f64.powf(inputs.level_db / 20.0) * seed;
+        self.asked = drive;
         put(
             values,
             0.0,
@@ -436,6 +467,7 @@ impl SineControlLaw for ServoBlendLaw {
         inputs: &TickInputs<'_>,
         values: &mut LawValues,
     ) -> Result<TickOutputs, LawFault> {
+        self.follow_the_drive_played(inputs.drive);
         let feed = inputs.measured / inputs.target.max(1e-12);
         let before = self.servo.drive_scale();
         let after = match inputs.hold {
@@ -452,6 +484,7 @@ impl SineControlLaw for ServoBlendLaw {
             // The search maps the plant at a fixed drive: the blend does not
             // move, and the drive in force is what the law asks for.
             put(values, servo_step_db, 0.0, 0.0, level);
+            self.asked = inputs.drive;
             return Ok(TickOutputs {
                 drive: inputs.drive,
                 faulted: self.servo.faulted(),
@@ -459,8 +492,10 @@ impl SineControlLaw for ServoBlendLaw {
         }
         let (delta_db, prediction_db) = self.blend.step_parts(inputs.prediction_db, servo_step_db);
         put(values, servo_step_db, prediction_db, delta_db, level);
+        let drive = inputs.drive * 10f64.powf(delta_db / 20.0);
+        self.asked = drive;
         Ok(TickOutputs {
-            drive: inputs.drive * 10f64.powf(delta_db / 20.0),
+            drive,
             faulted: self.servo.faulted(),
         })
     }
