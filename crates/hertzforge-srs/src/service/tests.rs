@@ -604,9 +604,12 @@ impl PulsePlant for MockPlant {
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
-        started: &mut dyn FnMut(),
+        hooks: &mut dyn hertzforge_shock_common::ShotHooks,
     ) -> Result<FiredResponses, PlantError> {
-        started();
+        if !hooks.ready(hertzforge_shock_common::Prepared::default()) {
+            return Err(PlantError::Withheld);
+        }
+        hooks.started(0.0);
         let n = self.spy.fires.fetch_add(1, Ordering::Relaxed);
         self.spy
             .last_drive_len

@@ -81,6 +81,7 @@ use hertzforge_shock_common::{
     gunfire_spacing, pulse_feasibility, MeasuredPeak, PulseStore, ShockLadderState, ShockRunMode,
     TrainError, TrainSpec,
 };
+use hertzforge_shock_common::{BringUp, Prepared, ShotHooks};
 use pacer::{RealPacer, TrainPacer};
 use report::{
     ChannelRow, DriveLimitActionRecord, EventKind, EventLog, FeasibilityDigest, Honesty,
@@ -108,6 +109,7 @@ struct PlayedPulse {
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 /// How often the inter-pulse wait re-reads the `should_continue` flag.
 ///
@@ -164,6 +166,11 @@ pub enum ServiceError {
         frames_committed: usize,
         frames_expected: usize,
     },
+    /// The shot was brought up (armed, the record committed) and the service's
+    /// wait before it was stopped or held, so it never started: nothing played,
+    /// and the device was left armed for the service to park. The service
+    /// handles it itself; a host never sees it from a fire, train or burst.
+    Withheld,
     /// Closed loop: a level move refused because the identified drive at the
     /// new level would pass the drive abort.
     DriveCeiling {
@@ -200,6 +207,11 @@ impl std::fmt::Display for ServiceError {
                 "fire CANCELLED after {frames_done} of {frames_expected} frames; \
                  {} committed frame(s) were still queued at the device",
                 frames_committed.saturating_sub(*frames_done)
+            ),
+            ServiceError::Withheld => write!(
+                f,
+                "the shot was brought up and not started (the wait before it was stopped \
+                 or held); nothing played"
             ),
             ServiceError::DriveCeiling {
                 level_db,
@@ -305,6 +317,13 @@ pub struct ClassicalShockService<F: PulseFirer> {
     /// `None` from arm until the first pulse (the first pulse after arm never
     /// waits, on either the ladder or a train).
     last_pulse_wall_s: Option<f64>,
+    /// The last pulse's bring-up, timed, for its row (`fire_paced`).
+    last_bring_up: Option<BringUp>,
+    /// Set when the last `fire_one` withheld its shot: the wait before it was
+    /// stopped or held, the station was parked, and nothing played. The ladder
+    /// and the train loop take it (`std::mem::take`) to tell that apart from a
+    /// pulse that fired or a run that ended.
+    withheld: bool,
     /// The HOST's cancel flag: TRUE means STOP AT THE NEXT BOUNDARY.
     ///
     /// An `Arc` and not a plain field because the service is SYNCHRONOUS - a
@@ -410,6 +429,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             quiet_frames: 0,
             played: Vec::new(),
             last_pulse_wall_s: None,
+            last_bring_up: None,
+            withheld: false,
             cancel: Arc::new(AtomicBool::new(false)),
             block_observer: None,
             base_unix: 0,
@@ -789,6 +810,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         self.cancel.store(false, Ordering::SeqCst);
         self.last_pulse_wall_s = None;
         self.last_spacing_s = None;
+        self.last_bring_up = None;
+        self.withheld = false;
 
         self.base_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -962,18 +985,23 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 "rate model refuses all spacing (read cadence unsustainable)".into(),
             ));
         }
-        if let Some(prev) = self.last_pulse_wall_s {
-            if !self.wait_until(prev + spacing, should_continue) {
-                // Cancelled inside the gap: nothing is queued at the device and
-                // nothing fired. Not an abort - the operator asked.
-                self.log.push(EventKind::Note {
-                    text: "ladder pulse cancelled during the inter-pulse wait; nothing fired"
-                        .into(),
-                });
-                return Ok(false);
-            }
+        // The floor from the last pulse's own start. The wait runs inside the
+        // fire, once the shot is brought up (`fire_paced`), so the bring-up is
+        // done inside the floor and only the start lands on the deadline.
+        let slot = Slot {
+            deadline: self.last_pulse_wall_s.map(|prev| prev + spacing),
+            should_continue,
+        };
+        let running = self.fire_one(level, spacing, true, PulseOrigin::Ladder, slot)?;
+        if std::mem::take(&mut self.withheld) {
+            // Cancelled inside the gap: the station was parked with the record
+            // unplayed and nothing fired. Not an abort - the operator asked.
+            self.log.push(EventKind::Note {
+                text: "ladder pulse cancelled during the inter-pulse wait; nothing fired".into(),
+            });
+            return Ok(false);
         }
-        self.fire_one(level, spacing, true, PulseOrigin::Ladder)
+        Ok(running)
     }
 
     /// Run the whole AUTO ladder: fire the scheduled pulses level by level
@@ -1194,26 +1222,30 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         for i in 0..plan.count {
             // The inter-pulse gap, in real time, off the last pulse's OWN start
             // stamp: the realized spacing inside the train, and the floor into
-            // it. `wait_until` returns false when the host lowered
-            // `should_continue` - the burst ends HERE, between pulses, with
-            // nothing queued at the device. Lowered before the first pulse, it
-            // fires nothing.
+            // it. It is waited out inside the fire, once the shot is brought up
+            // (`fire_paced`). Lowered there, `should_continue` ends the burst
+            // HERE, between pulses, with the station parked and nothing played.
+            // Lowered before the first pulse after arm, it fires nothing.
             let gap = if i > 0 {
                 plan.realized_spacing_s
             } else {
                 plan.floor_s
             };
-            let go = match self.last_pulse_wall_s {
-                Some(prev) => self.wait_until(prev + gap, should_continue),
-                // The first pulse after arm: nothing to be spaced from.
-                None => self.keep_going(should_continue),
-            };
-            if !go {
+            let deadline = self.last_pulse_wall_s.map(|prev| prev + gap);
+            if deadline.is_none() && !self.keep_going(should_continue) {
                 cancelled = true;
                 break;
             }
             let n = self.pulses_fired;
-            let running = self.fire_one(level, plan.realized_spacing_s, false, origin)?;
+            let slot = Slot {
+                deadline,
+                should_continue,
+            };
+            let running = self.fire_one(level, plan.realized_spacing_s, false, origin, slot)?;
+            if std::mem::take(&mut self.withheld) {
+                cancelled = true;
+                break;
+            }
             if self.pulses_fired > n {
                 pulse_numbers.push(n);
                 // The pulse's own start, stamped once the device's clock ran.
@@ -1254,40 +1286,19 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         still_running(should_continue) && !self.cancel.load(Ordering::Relaxed)
     }
 
-    /// Wait until `deadline_s` on the injected pacer, re-reading both cancel
-    /// channels every [`CANCEL_POLL_S`]. Returns `false` if either said stop
-    /// (the caller must not fire), `true` if the deadline arrived.
-    fn wait_until(&mut self, deadline_s: f64, should_continue: Option<&AtomicBool>) -> bool {
-        loop {
-            if !self.keep_going(should_continue) {
-                return false;
-            }
-            let now = self.pacer_mut().now_s();
-            if let Some(obs) = self.wait_observer.as_mut() {
-                obs((deadline_s - now).max(0.0));
-            }
-            if now >= deadline_s {
-                return true;
-            }
-            // Chunked, so a Stop raised DURING the gap is seen inside
-            // CANCEL_POLL_S rather than at the end of a 2 s spacing. The LAST
-            // chunk targets `deadline_s` itself rather than `now + remainder`:
-            // the two differ by a float ulp, and on the wrong side of it the
-            // `now >= deadline_s` test above spins on ever-smaller steps.
-            if deadline_s - now <= CANCEL_POLL_S {
-                self.pacer_mut().sleep_until(deadline_s);
-            } else {
-                self.pacer_mut().sleep_until(now + CANCEL_POLL_S);
-            }
-        }
-    }
-
-    /// Fire one pulse record and stamp its start: [`Self::last_pulse_wall_s`]
-    /// (with `spacing_s` as [`Self::last_spacing_s`]) is read off the pacer once
-    /// the device's clock is running ([`FireControl::started`]), so the next
-    /// pulse's deadline counts from the device's own start. A firer that never
-    /// says it started (a failure before the start, or a firer with no hook) is
-    /// stamped when it returns: late, never early.
+    /// Fire one pulse record on its slot and stamp its start.
+    ///
+    /// The firer brings the shot up (arms, commits the whole record) and then
+    /// calls `ready` ([`FireControl::hooks`]), where the slot's deadline is waited
+    /// out, reading the cancel flag and the host's `should_continue`. So the
+    /// bring-up is done inside the time between pulses and only the start lands
+    /// on the deadline. Then [`Self::last_pulse_wall_s`] (with `spacing_s` as
+    /// [`Self::last_spacing_s`]) is read off the pacer once the device's clock is
+    /// running, so the next deadline counts from the device's own start. A firer
+    /// that never says it started (a failure before the start, or a firer with
+    /// no hooks) is stamped when it returns: late, never early. A wait that was
+    /// stopped or held is [`ServiceError::Withheld`], nothing stamped; the caller
+    /// parks the armed station.
     ///
     /// The host's live channels go with the fire: the cancel flag and the block
     /// observer. The observer is moved out and back so the borrow checker sees
@@ -1299,47 +1310,118 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         drive: &[f64],
         commanded_db: f64,
         spacing_s: f64,
+        slot: Slot<'_>,
+        checks_from: Instant,
     ) -> Result<Option<Vec<f64>>, ServiceError> {
         let cancel = Arc::clone(&self.cancel);
-        let mut observer = self.block_observer.take();
-        let mut started_at = None;
-        let fired = {
-            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
-            let mut started = || {
-                if started_at.is_none() {
-                    started_at = Some(pacer.pulse_start_s());
+        let checks_s = checks_from.elapsed().as_secs_f64();
+        let mut deadline = slot.deadline;
+        let mut waited_before_s = 0.0;
+        if !self.firer.paces_shots() {
+            // A firer that does not call `ready` is waited for before its fire:
+            // the floor holds, its bring-up lands after it.
+            if let Some(d) = deadline.take() {
+                let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
+                let t0 = pacer.now_s();
+                let go = wait_out(
+                    pacer,
+                    &cancel,
+                    slot.should_continue,
+                    &mut self.wait_observer,
+                    d,
+                );
+                waited_before_s = (pacer.now_s() - t0).max(0.0);
+                if !go {
+                    return Err(ServiceError::Withheld);
                 }
-            };
+            }
+        }
+        let mut observer = self.block_observer.take();
+        let mut pace = Pace {
+            pacer: self.pacer.get_mut().unwrap_or_else(|e| e.into_inner()),
+            cancel: &cancel,
+            should_continue: slot.should_continue,
+            observer: &mut self.wait_observer,
+            deadline,
+            prepared: Prepared::default(),
+            wait_s: waited_before_s,
+            start_s: 0.0,
+            started_at: None,
+        };
+        let fired = {
             let mut ctl = FireControl {
                 cancel: Some(cancel.as_ref()),
                 observer: observer.as_deref_mut(),
-                started: Some(&mut started),
+                hooks: Some(&mut pace),
             };
             self.firer.fire(drive, commanded_db, &mut ctl)
         };
+        let Pace {
+            prepared,
+            wait_s,
+            start_s,
+            started_at,
+            ..
+        } = pace;
         self.block_observer = observer;
+        if matches!(fired, Err(ServiceError::Withheld)) {
+            return fired;
+        }
         let at = match started_at {
             Some(t) => t,
             None => self.pacer_mut().pulse_start_s(),
         };
         self.last_pulse_wall_s = Some(at);
         self.last_spacing_s = Some(spacing_s);
+        self.last_bring_up = Some(BringUp {
+            checks_ms: checks_s * 1e3,
+            arm_ms: prepared.arm_s * 1e3,
+            commit_ms: prepared.commit_s * 1e3,
+            wait_ms: wait_s * 1e3,
+            start_ms: start_s * 1e3,
+        });
         fired
+    }
+
+    /// The last pulse's bring-up, timed: the drive's checks, the arm, the
+    /// commit, the wait for the time between pulses and the start call. `None`
+    /// before the first pulse.
+    pub fn last_bring_up(&self) -> Option<BringUp> {
+        self.pulse_rows.last().and_then(|r| r.bring_up)
+    }
+
+    /// A withheld shot: park the armed station (the record is unreserved
+    /// unplayed), give the between-pulse carry back to the next pulse, and say so
+    /// to the caller through [`Self::withheld`].
+    pub(super) fn withhold(&mut self, carried: f64) {
+        let _ = self.firer.stop();
+        self.drain_warnings(None);
+        self.next_pulse_scale = carried;
+        self.withheld = true;
     }
 
     /// The per-pulse pipeline (see the module docs). `spacing_s` is charged to
     /// the run clock AFTER the pulse (so a train's fire times are spaced by the
     /// realized spacing). Returns `true` if the run is still running.
+    ///
+    /// `slot` is the deadline the pulse may not start before and the host's flag
+    /// read through the wait for it. The checks run first, then the shot is
+    /// brought up, then the wait (`fire_paced`): nothing is committed that the
+    /// checks would refuse. A wait that was stopped or held parks the station,
+    /// gives the between-pulse carry back, sets [`Self::withheld`] and returns
+    /// `false`.
     fn fire_one(
         &mut self,
         scheduled_level_db: f64,
         spacing_s: f64,
         tick_ladder: bool,
         origin: PulseOrigin,
+        slot: Slot<'_>,
     ) -> Result<bool, ServiceError> {
         if self.closed.is_some() {
-            return self.fire_one_closed(scheduled_level_db, spacing_s, tick_ladder, origin);
+            return self.fire_one_closed(scheduled_level_db, spacing_s, tick_ladder, origin, slot);
         }
+        let checks_from = Instant::now();
         if !self.state.is_running() {
             return Err(ServiceError::BadState(format!(
                 "fire from {:?} (arm first)",
@@ -1356,8 +1438,10 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         }
 
         let ladder_scale = db_scale(scheduled_level_db);
-        // The between-pulse carry is consumed by THIS pulse.
-        let mut extra_scale = self.next_pulse_scale;
+        // The between-pulse carry is consumed by THIS pulse (and given back if
+        // its shot is withheld).
+        let carried = self.next_pulse_scale;
+        let mut extra_scale = carried;
         self.next_pulse_scale = 1.0;
 
         // 1. Pre-fire predictive peak-accel check: deterministic
@@ -1408,7 +1492,11 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             .map(|&v| v * total_scale)
             .collect();
         let fired_at_s = self.run_clock_s;
-        let fired = self.fire_paced(&drive, commanded_db, spacing_s);
+        let fired = self.fire_paced(&drive, commanded_db, spacing_s, slot, checks_from);
+        if matches!(fired, Err(ServiceError::Withheld)) {
+            self.withhold(carried);
+            return Ok(false);
+        }
         let fired_at_wall_s = self.last_pulse_wall_s.unwrap_or(0.0);
 
         // DRIVER DIAGNOSTICS, drained after EVERY fire including a failed one:
@@ -1456,6 +1544,7 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             drive_limit_scale: extra_scale,
             at_run_time_s: fired_at_s,
             at_wall_time_s: fired_at_wall_s,
+            bring_up: self.last_bring_up.take(),
             measured: false,
             peak_g: None,
             velocity_change_ips: None,
@@ -3213,5 +3302,94 @@ mod tests {
             &e.kind,
             EventKind::Note { text } if text.contains("CLAMPED")
         )));
+    }
+}
+
+/// Where a pulse sits in time: the deadline its start may not precede (on the
+/// pacer; `None` when no pulse is before it) and the host's `should_continue`
+/// flag, read with the cancel flag through the wait for it.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Slot<'a> {
+    pub deadline: Option<f64>,
+    pub should_continue: Option<&'a AtomicBool>,
+}
+
+/// Wait until `deadline_s` on `pacer`, re-reading both cancel channels (the
+/// caller's `should_continue`, TRUE to continue, and the service's cancel flag,
+/// TRUE to stop) every [`CANCEL_POLL_S`] and telling `observer` the seconds left
+/// at each read. `false` if either said stop (the shot must not start), `true`
+/// when the deadline arrived.
+fn wait_out(
+    pacer: &mut Box<dyn TrainPacer>,
+    cancel: &AtomicBool,
+    should_continue: Option<&AtomicBool>,
+    observer: &mut Option<Box<dyn FnMut(f64) + Send>>,
+    deadline_s: f64,
+) -> bool {
+    loop {
+        if !still_running(should_continue) || cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+        let now = pacer.now_s();
+        if let Some(obs) = observer.as_mut() {
+            obs((deadline_s - now).max(0.0));
+        }
+        if now >= deadline_s {
+            return true;
+        }
+        // Chunked, so a Stop raised DURING the gap is seen inside
+        // CANCEL_POLL_S rather than at the end of a 2 s spacing. The LAST
+        // chunk targets `deadline_s` itself rather than `now + remainder`:
+        // the two differ by a float ulp, and on the wrong side of it the
+        // `now >= deadline_s` test above spins on ever-smaller steps.
+        if deadline_s - now <= CANCEL_POLL_S {
+            pacer.sleep_until(deadline_s);
+        } else {
+            pacer.sleep_until(now + CANCEL_POLL_S);
+        }
+    }
+}
+
+/// One shot's pacing, as the firer's hooks (`hertzforge_shock_common::shot`):
+/// the slot's wait inside `ready`, once the shot is brought up, and the start
+/// stamp inside `started`, once the device's clock is running.
+struct Pace<'a> {
+    pacer: &'a mut Box<dyn TrainPacer>,
+    cancel: &'a AtomicBool,
+    should_continue: Option<&'a AtomicBool>,
+    observer: &'a mut Option<Box<dyn FnMut(f64) + Send>>,
+    deadline: Option<f64>,
+    prepared: Prepared,
+    /// The wait, seconds on the pacer.
+    wait_s: f64,
+    /// The start call, seconds.
+    start_s: f64,
+    /// The pulse's start, on the pacer.
+    started_at: Option<f64>,
+}
+
+impl ShotHooks for Pace<'_> {
+    fn ready(&mut self, prepared: Prepared) -> bool {
+        self.prepared = prepared;
+        let Some(deadline) = self.deadline else {
+            return true;
+        };
+        let t0 = self.pacer.now_s();
+        let go = wait_out(
+            self.pacer,
+            self.cancel,
+            self.should_continue,
+            self.observer,
+            deadline,
+        );
+        self.wait_s = (self.pacer.now_s() - t0).max(0.0);
+        go
+    }
+
+    fn started(&mut self, start_s: f64) {
+        self.start_s = start_s;
+        if self.started_at.is_none() {
+            self.started_at = Some(self.pacer.pulse_start_s());
+        }
     }
 }

@@ -87,6 +87,7 @@ use hertzforge_shock_common::ladder::MANUAL_STEP_DB;
 use hertzforge_shock_common::law_guard::LawCall;
 use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use hertzforge_shock_common::pulse_store::{build_snapshot, capture_pulse};
+use hertzforge_shock_common::BringUp;
 use hertzforge_shock_common::{
     predict_peak_accel_g, pulse_feasibility, LadderTick, MeasuredPeak, MonitorEnforcement,
     PathCapabilities, PulseStore, ShockLadderState,
@@ -104,6 +105,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Errors from a service operation.
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +192,7 @@ struct PlayedFacts {
     limited_components: usize,
     law: Option<PulseLawCall>,
     at_s: Option<f64>,
+    bring_up: Option<BringUp>,
 }
 
 /// A measured drive->channel FRF from the reduced-level system ID.
@@ -1328,6 +1331,29 @@ impl SrsShockService {
     /// Fire one pulse through the per-pulse pipeline (module docs). Returns `true`
     /// while the run keeps going, `false` when it stopped or aborted this pulse.
     pub fn fire_pulse(&mut self) -> Result<bool, ServiceError> {
+        self.fire_pulse_cancellable(None)
+    }
+
+    /// [`Self::fire_pulse`] plus a host's `should_continue` flag (TRUE to keep
+    /// going), read with the cancel flag throughout the wait for the time between
+    /// pulses. Lowered there (nobody holds control, say), the pulse does not
+    /// start: the station is parked with nothing played, the run stays in
+    /// `Firing`, and this returns `false`; a later call fires it.
+    ///
+    /// # The order inside a pulse
+    ///
+    /// The drive is built and checked first (its volts, its predicted peak and
+    /// kinematics), then the shot is brought up (armed, the record's head
+    /// committed), and only then does the wait for the time between pulses run,
+    /// inside the plant's `ready` hook (`PulsePlant::fire_timed`). So nothing is
+    /// committed that the checks would refuse, and the bring-up, about 125 ms a
+    /// shot on the NI bench, is done inside the floor instead of after it. The
+    /// start call is the only thing left on the deadline, and the pulse's start
+    /// is stamped once it returns.
+    pub fn fire_pulse_cancellable(
+        &mut self,
+        should_continue: Option<&AtomicBool>,
+    ) -> Result<bool, ServiceError> {
         self.refuse_if_awaiting_review("fire_pulse")?;
         if !matches!(self.state, RunState::Armed | RunState::Firing) {
             return Err(ServiceError::BadState(format!(
@@ -1348,25 +1374,17 @@ impl SrsShockService {
         let level_scale = ladder.current_scale();
         let pulse_seq = self.store.len() as u64;
 
-        // The closed loop: the run's pulse cap, then the time between pulses.
+        // The closed loop: the run's pulse cap. The time between pulses is waited
+        // out once the shot is brought up (below).
         let closed = self.cfg.control.clone();
         if let Some(c) = &closed {
             if self.run_pulse_cap_reached(c.guards.max_pulses, pulse_seq) {
                 return Ok(false);
             }
-            if !self.wait_for_spacing(c.min_spacing_s()) {
-                // A stop raised in the wait: nothing more fires.
-                self.cancel.store(false, Ordering::Relaxed);
-                self.log.push(EventKind::Note {
-                    text: format!(
-                        "stopped in the wait before pulse {pulse_seq}; nothing more fired"
-                    ),
-                });
-                self.stop()?;
-                return Ok(false);
-            }
         }
         let mut at_s = None;
+        let mut bring_up = None;
+        let checks_from = Instant::now();
 
         // --- synthesize + fire (path split) ------------------------------------
         let is_host = self.path.drive_path().is_host();
@@ -1436,21 +1454,63 @@ impl SrsShockService {
             let drive: Vec<f64> = full.iter().map(|&v| v * fire_scale).collect();
             let ring = self.ring_out_samples;
             let cancel = Arc::clone(&self.cancel);
-            // The pulse's start is stamped once the device's clock runs, not before
-            // its bring-up, so the time between pulses holds between the device's
-            // own starts (`PulsePlant::fire_timed`). Only the closed loop paces.
-            let paced = closed.is_some();
-            let mut started_at = None;
-            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
+            let checks_s = checks_from.elapsed().as_secs_f64();
+            // The shot is brought up, then the time between pulses is waited out
+            // in the plant's `ready` hook, then the start, and the pulse's start is
+            // stamped once the device's clock runs (`PulsePlant::fire_timed`). Only
+            // the closed loop paces.
+            let deadline = closed
+                .as_ref()
+                .and_then(|c| self.last_pulse_start_s.map(|t| t + c.min_spacing_s()));
+            let mut pace = closed::Pace {
+                pacer: self.pacer.get_mut().unwrap_or_else(|e| e.into_inner()),
+                cancel: &cancel,
+                should_continue,
+                observer: &mut self.wait_observer,
+                deadline,
+                paced: closed.is_some(),
+                prepared: Default::default(),
+                waited: closed::Waited::Due,
+                wait_s: 0.0,
+                start_s: 0.0,
+                started_at: None,
+            };
             let FirePath::Host(p) = &mut self.path else {
                 unreachable!("path checked above");
             };
-            let fired = p.fire_timed(&drive, ring, Some(&cancel), &mut || {
-                if paced && started_at.is_none() {
-                    started_at = Some(pacer.pulse_start_s());
+            let fired = p.fire_timed(&drive, ring, Some(&cancel), &mut pace);
+            let closed::Pace {
+                prepared,
+                waited,
+                wait_s,
+                start_s,
+                started_at,
+                ..
+            } = pace;
+            if matches!(fired, Err(PlantError::Withheld)) {
+                // Nothing started: the station is armed with the record committed
+                // and unplayed. Parking it unreserves the record.
+                if waited == closed::Waited::Held {
+                    self.park_plant();
+                    self.log.push(EventKind::Note {
+                        text: format!(
+                            "held in the wait before pulse {pulse_seq}: the station was \
+                             parked with nothing played"
+                        ),
+                    });
+                    return Ok(false);
                 }
-            });
-            if paced {
+                // A stop raised in the wait: nothing more fires.
+                self.cancel.store(false, Ordering::Relaxed);
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "stopped in the wait before pulse {pulse_seq}; nothing more fired"
+                    ),
+                });
+                self.stop()?;
+                return Ok(false);
+            }
+            if closed.is_some() {
                 // A fire that never said its device started is stamped now: late,
                 // never early.
                 at_s = Some(started_at.unwrap_or_else(|| {
@@ -1460,6 +1520,13 @@ impl SrsShockService {
                         .pulse_start_s()
                 }));
                 self.last_pulse_start_s = at_s;
+                bring_up = Some(BringUp {
+                    checks_ms: checks_s * 1e3,
+                    arm_ms: prepared.arm_s * 1e3,
+                    commit_ms: prepared.commit_s * 1e3,
+                    wait_ms: wait_s * 1e3,
+                    start_ms: start_s * 1e3,
+                });
             }
             let fired = match fired {
                 Ok(f) => f,
@@ -1568,6 +1635,7 @@ impl SrsShockService {
                 .and(self.law_run.as_ref())
                 .and_then(|r| r.pending.clone()),
             at_s,
+            bring_up,
         };
         if self.played.len() == PULSE_VIEWS_KEPT {
             self.played.pop_front();
@@ -1829,6 +1897,7 @@ impl SrsShockService {
             worst_limit_db: facts.worst_limit_db,
             law: facts.law.clone(),
             at_s: facts.at_s,
+            bring_up: facts.bring_up,
         });
     }
 

@@ -43,9 +43,10 @@ use hertzforge_shock_common::law_guard::{
     MissCounter, OutputRule, MAX_LAW_VALUES,
 };
 use hertzforge_shock_common::predict_peak_accel_g;
+use hertzforge_shock_common::{Prepared, ShotHooks};
 use serde::{Deserialize, Serialize};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// How often the wait between pulses reads the cancel flag, seconds.
@@ -746,38 +747,6 @@ impl SrsShockService {
         });
     }
 
-    /// Wait until the time between pulses has passed since the last pulse
-    /// started, reading the cancel flag every [`CANCEL_POLL_S`]. `false` when
-    /// a cancel came first (the caller must not fire).
-    pub(super) fn wait_for_spacing(&mut self, spacing_s: f64) -> bool {
-        let Some(prev) = self.last_pulse_start_s else {
-            return !self.cancel.load(Ordering::Relaxed);
-        };
-        let deadline = prev + spacing_s;
-        loop {
-            if self.cancel.load(Ordering::Relaxed) {
-                return false;
-            }
-            let now = self
-                .pacer
-                .get_mut()
-                .unwrap_or_else(|e| e.into_inner())
-                .now_s();
-            if let Some(obs) = self.wait_observer.as_mut() {
-                obs((deadline - now).max(0.0));
-            }
-            if now >= deadline {
-                return true;
-            }
-            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
-            if deadline - now <= CANCEL_POLL_S {
-                pacer.sleep_until(deadline);
-            } else {
-                pacer.sleep_until(now + CANCEL_POLL_S);
-            }
-        }
-    }
-
     /// The predicted kinematics of the control response to `drive` through
     /// the identified gain, against the run's kinematic aborts and the
     /// shaker's ratings: the breach, if any, as `(axis, value, limit)`.
@@ -961,5 +930,106 @@ impl SrsShockService {
             TripKind::NotConverged { limit, pulses },
             RunState::NotConverged,
         );
+    }
+}
+
+/// How the wait before a pulse ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Waited {
+    /// The pulse may start.
+    Due,
+    /// A stop was raised: nothing more fires.
+    Cancelled,
+    /// The host's `should_continue` was lowered (nobody holds control): this
+    /// pulse does not start, the run goes on.
+    Held,
+}
+
+/// Wait until `deadline` on `pacer`, reading the cancel flag and the host's
+/// `should_continue` every [`CANCEL_POLL_S`] and telling `observer` the seconds
+/// left at each read. `None` checks the flags once and does not wait (the first
+/// pulse has no pulse before it).
+pub(super) fn wait_out(
+    pacer: &mut Box<dyn PulsePacer>,
+    cancel: &AtomicBool,
+    should_continue: Option<&AtomicBool>,
+    observer: &mut Option<Box<dyn FnMut(f64) + Send>>,
+    deadline: Option<f64>,
+) -> Waited {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Waited::Cancelled;
+        }
+        if should_continue.is_some_and(|g| !g.load(Ordering::Relaxed)) {
+            return Waited::Held;
+        }
+        let Some(deadline) = deadline else {
+            return Waited::Due;
+        };
+        let now = pacer.now_s();
+        if let Some(obs) = observer.as_mut() {
+            obs((deadline - now).max(0.0));
+        }
+        if now >= deadline {
+            return Waited::Due;
+        }
+        // The last chunk targets the deadline itself, not `now + remainder`: the
+        // two differ by a float ulp, and on the wrong side of it the test above
+        // spins on ever smaller steps.
+        if deadline - now <= CANCEL_POLL_S {
+            pacer.sleep_until(deadline);
+        } else {
+            pacer.sleep_until(now + CANCEL_POLL_S);
+        }
+    }
+}
+
+/// One shot's pacing, as the plant's hooks (`hertzforge_shock_common::shot`):
+/// the wait for the time between pulses inside `ready`, once the shot is
+/// brought up, so only the start call lands on the deadline; and the start
+/// stamp inside `started`, once the device's clock is running.
+pub(super) struct Pace<'a> {
+    pub pacer: &'a mut Box<dyn PulsePacer>,
+    pub cancel: &'a AtomicBool,
+    pub should_continue: Option<&'a AtomicBool>,
+    pub observer: &'a mut Option<Box<dyn FnMut(f64) + Send>>,
+    /// When the pulse may start, on the pacer; `None` when no pulse is before it.
+    pub deadline: Option<f64>,
+    /// Whether the run is paced (the closed loop). The open loop neither waits
+    /// nor stamps.
+    pub paced: bool,
+    pub prepared: Prepared,
+    pub waited: Waited,
+    /// The wait, seconds on the pacer.
+    pub wait_s: f64,
+    /// The start call, seconds.
+    pub start_s: f64,
+    /// The pulse's start, on the pacer.
+    pub started_at: Option<f64>,
+}
+
+impl ShotHooks for Pace<'_> {
+    fn ready(&mut self, prepared: Prepared) -> bool {
+        self.prepared = prepared;
+        if !self.paced {
+            return true;
+        }
+        let t0 = self.pacer.now_s();
+        self.waited = wait_out(
+            self.pacer,
+            self.cancel,
+            self.should_continue,
+            self.observer,
+            self.deadline,
+        );
+        self.wait_s = (self.pacer.now_s() - t0).max(0.0);
+        self.waited == Waited::Due
+    }
+
+    fn started(&mut self, start_s: f64) {
+        self.start_s = start_s;
+        if self.paced && self.started_at.is_none() {
+            self.started_at = Some(self.pacer.pulse_start_s());
+        }
     }
 }

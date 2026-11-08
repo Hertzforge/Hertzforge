@@ -58,6 +58,7 @@ pub mod ladder;
 pub mod law_guard;
 pub mod path;
 pub mod pulse_store;
+pub mod shot;
 pub mod train;
 
 // Curated re-exports so downstream crates and the UI bind against one path.
@@ -79,6 +80,7 @@ pub use law_guard::{
 };
 pub use path::{DrivePath, PathCapabilities, ReferenceForPath, UncompensatedReference};
 pub use pulse_store::{PulseRecord, PulseStore, ShockSnapshotPayload};
+pub use shot::{BringUp, NoHooks, Prepared, ShotHooks};
 pub use train::{gunfire_spacing, RateModel, Spacing, TrainError, TrainSpec};
 
 #[cfg(test)]

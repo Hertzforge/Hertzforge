@@ -192,7 +192,7 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             let mut ctl = FireControl {
                 cancel: Some(cancel.as_ref()),
                 observer: observer.as_deref_mut(),
-                started: None,
+                hooks: None,
             };
             self.firer.fire(&drive, 0.0, &mut ctl)
         };
@@ -743,7 +743,9 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         spacing_s: f64,
         tick_ladder: bool,
         origin: PulseOrigin,
+        slot: super::Slot<'_>,
     ) -> Result<bool, ServiceError> {
+        let checks_from = std::time::Instant::now();
         if !self.state.is_running() {
             return Err(ServiceError::BadState(format!(
                 "fire from {:?} (arm first)",
@@ -798,7 +800,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         }
 
         let ladder_scale = db_scale(scheduled_level_db);
-        let mut extra_scale = self.next_pulse_scale;
+        let carried = self.next_pulse_scale;
+        let mut extra_scale = carried;
         self.next_pulse_scale = 1.0;
         let fs = self.fs_hz();
 
@@ -880,7 +883,11 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         // 3. Fire the grid record in volts.
         let drive: Vec<f64> = drive_full.iter().map(|&v| v * total_scale).collect();
         let fired_at_s = self.run_clock_s;
-        let fired = self.fire_paced(&drive, commanded_db, spacing_s);
+        let fired = self.fire_paced(&drive, commanded_db, spacing_s, slot, checks_from);
+        if matches!(fired, Err(ServiceError::Withheld)) {
+            self.withhold(carried);
+            return Ok(false);
+        }
         let fired_at_wall_s = self.last_pulse_wall_s.unwrap_or(0.0);
         let pulse_no = self.pulses_fired;
         self.drain_warnings(Some(pulse_no));
@@ -987,6 +994,7 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             drive_limit_scale: extra_scale,
             at_run_time_s: fired_at_s,
             at_wall_time_s: fired_at_wall_s,
+            bring_up: self.last_bring_up.take(),
             measured: true,
             peak_g: Some(peak_g),
             velocity_change_ips: Some(tol.velocity_change.measured_dv_ips),

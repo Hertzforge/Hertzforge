@@ -6,6 +6,7 @@
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
 use hertzforge_shock_common::law_guard::{LawClock, LawDescriptor, LawFault};
 use hertzforge_shock_common::{LadderAdvance, ShockRunMode};
+use hertzforge_shock_common::{Prepared, ShotHooks};
 use hertzforge_srs::iterate::SynthesisOpts;
 use hertzforge_srs::service::pacer::VirtualPacer;
 use hertzforge_srs::service::plant::{FiredResponses, PlantError};
@@ -75,9 +76,12 @@ impl PulsePlant for Linear {
         drive: &[f64],
         ring_out_samples: usize,
         _cancel: Option<&AtomicBool>,
-        started: &mut dyn FnMut(),
+        hooks: &mut dyn ShotHooks,
     ) -> Result<FiredResponses, PlantError> {
-        started();
+        if !hooks.ready(Prepared::default()) {
+            return Err(PlantError::Withheld);
+        }
+        hooks.started(0.0);
         self.fired.lock().unwrap().push(drive.to_vec());
         let mut control: Vec<f64> = drive.iter().map(|v| v * self.gain).collect();
         control.resize(drive.len() + ring_out_samples, 0.0);

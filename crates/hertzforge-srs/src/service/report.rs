@@ -10,7 +10,7 @@ use crate::limit::NotchReport;
 use crate::service::config::{MetaField, ShockCaptureTrigger, SrsToleranceBand, SysIdExcitation};
 use hertzforge_shaker_db::FeasibilityReport;
 use hertzforge_shock_common::law_guard::{LawCall, LawDescriptor, LawFault, LawValue};
-use hertzforge_shock_common::{DriveLimit, DrivePath, PulseRecord, ShockLevelSchedule};
+use hertzforge_shock_common::{BringUp, DriveLimit, DrivePath, PulseRecord, ShockLevelSchedule};
 use serde::{Deserialize, Serialize};
 
 /// The SRS-shock run state machine (mirrors Random's state machine with shock semantics):
@@ -614,9 +614,15 @@ pub struct PulseRow {
     /// without `control`.
     #[serde(default)]
     pub law: Option<PulseLawCall>,
-    /// When the pulse started, seconds on the run's pacer.
+    /// When the pulse started, seconds on the run's pacer: the moment the
+    /// station's start call returned, its clock running.
     #[serde(default)]
     pub at_s: Option<f64>,
+    /// The pulse's bring-up, timed (the drive's checks, the arm, the commit, the
+    /// wait for the time between pulses, the start call); `None` on a run
+    /// without `control`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bring_up: Option<BringUp>,
 }
 
 fn one() -> f64 {

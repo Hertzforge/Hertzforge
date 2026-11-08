@@ -68,7 +68,7 @@ impl PulsePlant for Tap {
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
-        started: &mut dyn FnMut(),
+        hooks: &mut dyn hertzforge_shock_common::ShotHooks,
     ) -> Result<FiredResponses, PlantError> {
         self.fired.lock().unwrap().push(Fired {
             len: drive_g.len(),
@@ -77,7 +77,7 @@ impl PulsePlant for Tap {
             fnv: fnv(drive_g),
         });
         self.inner
-            .fire_timed(drive_g, ring_out_samples, cancel, started)
+            .fire_timed(drive_g, ring_out_samples, cancel, hooks)
     }
     fn stop(&mut self) -> Result<(), String> {
         self.inner.stop()

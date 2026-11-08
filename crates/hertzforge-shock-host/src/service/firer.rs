@@ -50,8 +50,9 @@
 use crate::service::ServiceError;
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_hal::{Backend, HalError, StreamError};
-use hertzforge_shock_common::DrivePath;
+use hertzforge_shock_common::{DrivePath, Prepared, ShotHooks};
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 /// Quiet surround as a fraction of the MAIN pulse duration (see
 /// [`quiet_lead_frames`]).
@@ -119,29 +120,35 @@ pub struct FireControl<'a> {
     /// elided object-lifetime bound of `'a` would force `'a = 'static` at the
     /// call site and the borrow could never be released.
     pub observer: Option<&'a mut (dyn FnMut(usize, usize) + Send + 'static)>,
-    /// Called once, as soon as the device's start call has returned and before
-    /// the play. The service stamps the pulse's start here.
+    /// The service's pacing of the shot (`hertzforge_shock_common::shot`):
+    /// [`ShotHooks::ready`] once the shot is brought up (armed, the whole record
+    /// committed) and before the start, where the service waits out the time
+    /// between pulses so only the start call lands on the deadline; and
+    /// [`ShotHooks::started`] as soon as the start call has returned, where it
+    /// stamps the pulse's start.
     ///
     /// A start call returns once the device's clock is running, so the record's
-    /// first sample is out at or before this call, and the service issues the
-    /// next start call no sooner than the time between pulses after it: the
-    /// floor holds between the device's own starts. A stamp taken before the
-    /// shot's arm and pre-start commit, whose length varies from shot to shot on
-    /// a real device, let two physical starts come closer than the floor (4.984 s
-    /// against a 5 s floor, timed on the bench by an instrument on its own
-    /// clock). A firer with no device beneath it calls this first; one that never
-    /// calls it is stamped when its fire returns, which is late but never early.
-    pub started: Option<&'a mut dyn FnMut()>,
+    /// first sample is out at or before `started`, and the service issues the
+    /// next start call no sooner than the time between pulses after it: the floor
+    /// holds between the device's own starts. A stamp taken before the shot's arm
+    /// and commit let two physical starts come closer than the floor (4.984 s
+    /// against 5 s, timed on the bench by an instrument on its own clock), and a
+    /// bring-up done after the wait put its whole length, about 125 ms a shot on
+    /// the NI bench, on every interval. `ready` returning `false` is
+    /// [`ServiceError::Withheld`]: nothing started, and the device stays armed
+    /// for the caller to park. A firer with no device beneath it calls `ready`
+    /// and `started` first; one that never calls `started` is stamped when its
+    /// fire returns, which is late but never early.
+    pub hooks: Option<&'a mut dyn ShotHooks>,
 }
 
 impl<'a> FireControl<'a> {
-    /// No cancel channel, no observer and no start hook - the plain synchronous
-    /// fire.
+    /// No cancel channel, no observer and no hooks - the plain synchronous fire.
     pub fn none() -> Self {
         FireControl {
             cancel: None,
             observer: None,
-            started: None,
+            hooks: None,
         }
     }
 
@@ -150,7 +157,7 @@ impl<'a> FireControl<'a> {
         FireControl {
             cancel,
             observer: None,
-            started: None,
+            hooks: None,
         }
     }
 }
@@ -183,6 +190,16 @@ pub trait PulseFirer {
     /// against it, and defaulting to the requested rate is precisely the
     /// requested-rate defect this seam exists to prevent.
     fn actual_fs_hz(&self) -> Option<f64>;
+
+    /// `true` when [`Self::fire`] calls [`FireControl::hooks`]: `ready` once the
+    /// shot is brought up and before its start, `started` once it starts. The
+    /// service then waits out the time between pulses inside `ready`, so the
+    /// bring-up is done inside the floor. A firer that does not is waited for
+    /// before its fire is called, which keeps the floor but puts its bring-up
+    /// after it. The default is `false`, the safe side.
+    fn paces_shots(&self) -> bool {
+        false
+    }
 
     /// Set the quiet lead-in / lead-out surrounding each pulse, in FRAMES at the
     /// adopted rate. The service computes it from the pulse duration through
@@ -507,6 +524,10 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
         DrivePath::HostDac
     }
 
+    fn paces_shots(&self) -> bool {
+        true
+    }
+
     fn actual_fs_hz(&self) -> Option<f64> {
         self.actual_fs_hz
     }
@@ -618,9 +639,11 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
     ///    shoulders is a few thousand frames) and a record LONGER than it needs no
     ///    special handling either: the device takes what it has room for and the
     ///    play loop re-offers the rest, in order.
-    /// 3. `start()` - output and input release together. Once it returns the
-    ///    clock is running, and `ctl.started` is called: the service stamps the
-    ///    pulse's start there.
+    /// 3. `ctl.hooks`' `ready`: the shot is brought up and nothing runs; the
+    ///    service waits out the time between pulses here (or withholds the shot,
+    ///    and the tasks stay armed for it to park). Then `start()` - output and
+    ///    input release together - and `started`: the clock is running, and the
+    ///    service stamps the pulse's start there.
     /// 4. `play_block_wise` over the WHOLE record, told how many frames are
     ///    already at the device (`committed_frames`). It skips the
     ///    committed prefix on the write side and still reads back exactly the
@@ -669,12 +692,26 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
 
         // 1 + 2 + 3: cold task, the whole record in front of the clock, then
         // release.
+        let armed_at = Instant::now();
         self.backend.arm().map_err(hal_err)?;
+        let committed_at = Instant::now();
         let committed = self.commit_whole_record()?;
+        // Brought up: armed, the record committed, nothing started. The service
+        // waits out the time between pulses here (`FireControl::hooks`).
+        let prepared = Prepared {
+            arm_s: (committed_at - armed_at).as_secs_f64(),
+            commit_s: committed_at.elapsed().as_secs_f64(),
+        };
+        if let Some(hooks) = ctl.hooks.as_mut() {
+            if !hooks.ready(prepared) {
+                return Err(ServiceError::Withheld);
+            }
+        }
+        let start_at = Instant::now();
         self.backend.start().map_err(hal_err)?;
-        // The clock is running, so the pulse has started (`FireControl::started`).
-        if let Some(started) = ctl.started.as_mut() {
-            started();
+        // The clock is running, so the pulse has started (`FireControl::hooks`).
+        if let Some(hooks) = ctl.hooks.as_mut() {
+            hooks.started(start_at.elapsed().as_secs_f64());
         }
 
         // 4: play the record, reading back exactly `record_frames`.
