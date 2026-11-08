@@ -84,22 +84,24 @@ export type AcquireView = 'chooser' | TestTypeId;
 export type LiveTest = TestTypeId | null | undefined;
 
 /**
- * Which test type holds a live run, from the Random, MIMO Random and classical shock stores and
- * their connection. Before the first read the answer is not known yet; a service that cannot be
- * reached, or that refused the read, has nothing live to show.
+ * Which test type holds a live run, from the Random, MIMO Random, classical shock and SRS shock
+ * stores and their connection. Before the first read the answer is not known yet; a service that
+ * cannot be reached, or that refused the read, has nothing live to show.
  */
 export function liveTestOf(
 	acq: { run: RandomState | null; syncError: string | null },
 	status: ConnectionStatus,
 	mimo?: { status: { state: RandomRunState } | null; syncError: string | null },
-	shock?: { status: { state: ShockRunState } | null; syncError: string | null }
+	shock?: { status: { state: ShockRunState } | null; syncError: string | null },
+	srs?: { status: { state: ShockRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
 	if (shock?.status && LIVE_STATES.includes(shock.status.state)) return 'shock';
+	if (srs?.status && LIVE_STATES.includes(srs.status.state)) return 'srs';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

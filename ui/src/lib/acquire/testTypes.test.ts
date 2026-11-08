@@ -173,6 +173,19 @@ describe('the chooser', () => {
 		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: null })).toBeUndefined();
 		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: 'refused' })).toBeNull();
 	});
+
+	it('reads a live SRS shock run, and waits for its store to answer too', () => {
+		const random = { run: { state: 'configured' } as RandomState, syncError: null };
+		const mimo = { status: { state: 'unconfigured' as const }, syncError: null };
+		const shock = { status: { state: 'finished' as const }, syncError: null };
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'running' }, syncError: null })).toBe('srs');
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'armed' }, syncError: null })).toBe('srs');
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'configured' }, syncError: null })).toBeNull();
+		expect(liveTestOf(random, 'open', mimo, shock, { status: null, syncError: null })).toBeUndefined();
+		expect(liveTestOf(random, 'open', mimo, shock, { status: null, syncError: 'refused' })).toBeNull();
+		// the SRS card stays coming until SRS shock is served
+		expect(new TestTypeView(() => null).whyNot('srs')).toBe('Coming');
+	});
 });
 
 describe('the chooser against the control service', () => {
