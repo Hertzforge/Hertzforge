@@ -810,8 +810,17 @@ impl TwrEngine for ServiceEngine {
             .as_ref()
             .ok_or_else(|| fault("the run lost its station"))?;
         let mut played = Played::default();
+        let committed = svc.committed_frames();
         if let Some(p) = svc.plays().get(rows_before) {
             let row = row_of(p);
+            // What the device took before start: the head of the record, never
+            // the backend's start-time silence (the bench reads it every play).
+            if let Some(n) = committed {
+                self.log.push((
+                    "note",
+                    format!("Play {}: {n} frames committed before start.", row.index),
+                ));
+            }
             played.records = self.records(row.level_db);
             played.row = Some(row);
         }
@@ -1165,6 +1174,18 @@ mod tests {
         );
         assert_eq!(e.frames_clocked(), last.start_frame + last.frames);
         assert!(rows.iter().all(|r| r.lag_frames.is_none()));
+        // Every play says what the device took before start, and it is drive.
+        let committed: Vec<String> = e
+            .take_log()
+            .into_iter()
+            .filter(|(_, t)| t.contains("frames committed before start"))
+            .map(|(_, t)| t)
+            .collect();
+        assert_eq!(committed.len(), rows.len(), "{committed:?}");
+        assert!(
+            committed.iter().all(|t| !t.contains(": 0 frames")),
+            "{committed:?}"
+        );
     }
 
     #[test]

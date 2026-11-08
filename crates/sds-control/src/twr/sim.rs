@@ -314,6 +314,14 @@ impl TwrEngine for SimulatedEngine {
             at_s: start as f64 / self.fs,
             law: None,
         };
+        // As the core's note: the simulated device takes a block before start.
+        self.log.push((
+            "note",
+            format!(
+                "Play {}: {BLOCK} frames committed before start.",
+                self.plays
+            ),
+        ));
         self.plays += 1;
         let records = self.records(level, err);
         let mut end = None;

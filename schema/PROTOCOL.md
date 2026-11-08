@@ -3379,7 +3379,8 @@ Event topics:
 - `twr.state` (text): the state object on every change: after every judged play (its
   `last_play`, so a screen can append the rows from it), on every change of state or phase, and
   after `twr.freeze` takes effect. The station time alone changing sends none.
-- `twr.log` (text): new log entries, as Random's, driver warnings included.
+- `twr.log` (text): new log entries, as Random's, driver warnings included, and after every
+  judged play a note of the frames the station took before it started the play.
 - `twr.live` (binary, to every connection without a TWR subscription of its own, as Random's and
   Sine's live frames, 5 times a second from arm until the run has finished, then once more):
   `{"run_id","source","state","phase","mode","t_s","level_db","rung",
