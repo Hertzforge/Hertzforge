@@ -334,10 +334,12 @@ impl SineCheckCase {
     /// What the case asks of the law.
     pub fn requirement(self) -> SineRequirement {
         match self {
-            // The accuracy bar's 1 dB (measured 0.35 dB at blend 1 and a 2 ms
-            // tick) does not hold at the check's 10 ms tick for the built-in at
-            // its defaults (blend 0.5, slow): it measures +1.13 dB at 247.9 Hz.
-            SineCheckCase::Slow => SineRequirement::Through { db: 1.5, hz: 30.0 },
+            // Within 1 dB through the resonance (within 30 Hz of it): the
+            // built-in at its defaults measures -0.48 dB at 253.6 Hz at the
+            // check's 10 ms tick. Judged near the resonance only: where the
+            // identification is not trusted the seed starts low, and the
+            // sweep's first ticks after the settle window are still climbing.
+            SineCheckCase::Slow => SineRequirement::Through { db: 1.0, hz: 30.0 },
             SineCheckCase::Fast => SineRequirement::WithinAway {
                 through_db: 5.0,
                 away_db: 2.0,
