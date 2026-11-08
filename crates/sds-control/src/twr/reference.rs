@@ -517,6 +517,7 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
                 unreadable(format!(
                     "{p} could not be read ({e}). Check the path and that the file is readable."
                 ))
+                .with_detail(json!({"path": p, "line": null}))
             })?;
             (bytes, Some(PathBuf::from(p)))
         }
@@ -524,6 +525,11 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
     };
     let (format, fs_hz, units, samples) =
         read(&bytes, path.as_deref(), &req.options).map_err(|why| {
+            // The reader's words name a line as "line N: ..." when one is at fault.
+            let line = why
+                .strip_prefix("line ")
+                .and_then(|r| r.split(':').next())
+                .and_then(|n| n.parse::<u64>().ok());
             unreadable(match &path {
                 Some(p) => format!(
                     "{} is not a record this service can read: {why}.",
@@ -531,6 +537,10 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
                 ),
                 None => format!("The text is not a record this service can read: {why}."),
             })
+            .with_detail(json!({
+                "path": path.as_ref().map(|p| p.display().to_string()),
+                "line": line,
+            }))
         })?;
     let name = req.name.clone().unwrap_or_else(|| match &path {
         Some(p) => p

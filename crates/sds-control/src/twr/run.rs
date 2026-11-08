@@ -132,7 +132,7 @@ pub fn wrong_mode(verb: &str) -> MethodError {
 }
 
 /// The refusal at the coherence hold, in the service's own words.
-pub fn coherence_hold(message: &str) -> MethodError {
+pub fn coherence_hold(message: &str, ident: Option<&super::view::IdentFacts>) -> MethodError {
     refuse(
         "coherence_hold",
         format!(
@@ -140,18 +140,28 @@ pub fn coherence_hold(message: &str) -> MethodError {
             message
         ),
     )
+    .with_detail(json!({
+        "coherence_mean": ident.map_or(serde_json::Value::Null, |i| {
+            crate::protocol::opt_num(i.coherence_mean.is_finite().then_some(i.coherence_mean))
+        }),
+        "min_mean_coherence": ident.map_or(serde_json::Value::Null, |i| num(i.min_mean_coherence)),
+    }))
 }
 
 /// The refusal of playback before the present level has gated.
-pub fn not_converged(level_db: f64) -> MethodError {
+pub fn not_converged(level_db: f64, gate_pct: f64) -> MethodError {
     refuse(
         "not_converged",
         format!(
-            "Playback begins once the present level has gated; {} has not.",
-            level_words(level_db)
+            "Playback begins once the present level has gated; {} has not met the {} % gate.",
+            level_words(level_db),
+            num(gate_pct)
         ),
     )
-    .with_detail(json!({"level_db": num(crate::shock::config::round(level_db, 2))}))
+    .with_detail(json!({
+        "level_db": num(crate::shock::config::round(level_db, 2)),
+        "gate_pct": num(gate_pct),
+    }))
 }
 
 /// The run thread's state.
@@ -163,6 +173,8 @@ struct Actor {
     view: TwrView,
     lock: Option<hertzforge_station::lock::LockGuard>,
     seeded: bool,
+    /// A level verb has moved the level (from review, before proceed).
+    level_moved: bool,
     hold_message: String,
     /// The play a stop or an abort cancelled, and the frames it had played.
     cancelled: Option<(u64, u64)>,
@@ -194,6 +206,7 @@ pub fn spawn(
             view: initial,
             lock: None,
             seeded: false,
+            level_moved: false,
             hold_message: String::new(),
             cancelled: None,
             stop_outcome: "operator_stop",
@@ -241,8 +254,10 @@ impl Actor {
     fn publish(&mut self) {
         if self.armed() && self.view.grid.actual {
             let p = self.engine.position();
-            self.view.level_db = Some(p.level_db);
-            self.view.rung = p.rung;
+            if self.seeded || self.level_moved {
+                self.view.level_db = Some(p.level_db);
+                self.view.rung = p.rung;
+            }
             self.view.plays.at_level = p.at_level;
             self.view.plays.of_level = p.of_level;
             self.view.plays.playback = p.playback;
@@ -330,7 +345,10 @@ impl Actor {
                     self.proceed();
                 }
                 State::Held => {
-                    let _ = reply.send(Err(coherence_hold(&self.hold_message)));
+                    let _ = reply.send(Err(coherence_hold(
+                        &self.hold_message,
+                        self.view.identification.as_ref(),
+                    )));
                 }
                 _ => {
                     let _ = reply.send(Err(wrong_state(&self.view, "Proceeding")));
@@ -651,7 +669,10 @@ impl Actor {
             return Err(wrong_mode("An iteration"));
         }
         if self.view.state == State::Held {
-            return Err(coherence_hold(&self.hold_message));
+            return Err(coherence_hold(
+                &self.hold_message,
+                self.view.identification.as_ref(),
+            ));
         }
         let pos = self.engine.position();
         if !(self.view.state == State::Running
@@ -669,7 +690,10 @@ impl Actor {
             return Err(wrong_mode("Playback"));
         }
         if self.view.state == State::Held {
-            return Err(coherence_hold(&self.hold_message));
+            return Err(coherence_hold(
+                &self.hold_message,
+                self.view.identification.as_ref(),
+            ));
         }
         let pos = self.engine.position();
         if !(self.view.state == State::Running
@@ -680,7 +704,7 @@ impl Actor {
             return Err(wrong_state(&self.view, "Playback"));
         }
         if !pos.gated {
-            return Err(not_converged(pos.level_db));
+            return Err(not_converged(pos.level_db, self.plan.cfg.gate_pct));
         }
         let Some(r) = self.call("beginning playback", |e| e.begin_playback()) else {
             return Err(MethodError::internal("the run failed beginning playback"));
@@ -752,13 +776,15 @@ impl Actor {
     }
 
     fn level_cmd(&mut self, to: LevelMove) -> Result<f64, MethodError> {
-        if self.plan.cfg.mode == TwrRunMode::Auto {
+        // In `auto` a level moves only from the hold a failed gate leaves under the
+        // `hold` policy.
+        if self.plan.cfg.mode == TwrRunMode::Auto && self.view.phase != "holding" {
             return Err(wrong_mode("A level change"));
         }
         let pos = self.engine.position();
         let live = matches!(
             (self.view.state, self.view.phase),
-            (State::Running, "waiting") | (State::Running, "holding")
+            (State::Running, "waiting") | (State::Running, "holding") | (State::Review, _)
         ) && !pos.playing;
         if !live {
             return Err(wrong_state(&self.view, "A level change"));
@@ -823,6 +849,7 @@ impl Actor {
             return Err(MethodError::internal("the run failed changing level"));
         };
         let level = r?;
+        self.level_moved = true;
         self.data.set_target(self.engine.level_target());
         if self.view.phase == "holding" {
             self.set(State::Running, "waiting");

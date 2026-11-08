@@ -185,6 +185,9 @@ fn what_is_not_a_record_is_refused_by_name() {
         .unwrap_err();
         assert_eq!(e.reason, Some("reference_unreadable"), "{text:?}");
         assert!(e.message.contains(words), "{text:?}: {}", e.message);
+        if words == "line 3" {
+            assert_eq!(e.detail.as_deref().unwrap()["line"], json!(3));
+        }
     }
     let missing = root.join("nope.csv");
     let e = reference::import(
@@ -197,6 +200,10 @@ fn what_is_not_a_record_is_refused_by_name() {
     )
     .unwrap_err();
     assert_eq!(e.reason, Some("reference_unreadable"));
+    assert_eq!(
+        e.detail.as_deref().unwrap()["path"],
+        json!(missing.to_str().unwrap())
+    );
     // The parameters' shapes.
     for (p, param) in [
         (json!({}), "path"),
@@ -210,7 +217,7 @@ fn what_is_not_a_record_is_refused_by_name() {
         assert_eq!(e.reason, Some("bad_params"), "{p}");
         assert_eq!(e.detail.as_deref().unwrap()["param"], json!(param), "{p}");
     }
-    assert!(MAX_IMPORT_SAMPLES >= hertzforge_twr::control::MAX_RECORD_LEN);
+    const { assert!(MAX_IMPORT_SAMPLES >= hertzforge_twr::control::MAX_RECORD_LEN) };
     let _ = std::fs::remove_dir_all(root);
 }
 

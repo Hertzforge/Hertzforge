@@ -275,12 +275,24 @@ async fn an_auto_run_goes_from_the_import_through_review_to_completed() {
     let e = obs.refused("twr.record", json!({"index": 11})).await;
     assert_eq!(e["code"], "not_found");
 
-    // The events: a state on each change, live frames, the data, the log.
+    // The events: a state on each change; live frames to the screen without a
+    // subscription of its own and the data to the one with; the log.
     obs.pump(Duration::from_millis(300)).await;
+    c.pump(Duration::from_millis(100)).await;
     for ev in obs.of_topic("twr.state") {
         schema.assert_valid(ev.data(), Some("twrState"));
     }
-    let live = obs.of_topic("twr.live");
+    let states = obs.of_topic("twr.state");
+    let judged: std::collections::BTreeSet<u64> = states
+        .iter()
+        .filter_map(|e| e.data()["last_play"]["index"].as_u64())
+        .collect();
+    assert_eq!(judged.len(), 11, "a state event follows every judged play");
+    assert!(
+        obs.of_topic("twr.live").is_empty(),
+        "a subscribed screen gets twr.data, not twr.live"
+    );
+    let live = c.of_topic("twr.live");
     assert!(!live.is_empty());
     for ev in &live {
         assert!(ev.decoded.is_some(), "twr.live is a binary frame");
@@ -763,4 +775,91 @@ async fn plays_hold_when_the_controller_goes_resume_on_a_reclaim_and_safe_stop_a
         .unwrap()
         .contains("Nobody held control"));
     assert!(fin["plays"]["done"].as_u64().unwrap() <= 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_level_moves_from_review_in_manual_and_from_a_held_gate_in_auto() {
+    let svc = service(0.0, Duration::from_secs(30));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sha = import(&mut c).await;
+
+    // Manual: the level is null until proceed; a move from review steps from the
+    // table's first level.
+    c.ok(
+        "twr.configure",
+        json!({"config": config(&sha, "manual", true)}),
+    )
+    .await;
+    c.ok("twr.start", json!({})).await;
+    let review = wait_twr(&mut c, "review", |d| d["state"] == "review").await;
+    assert_eq!(review["level_db"], Value::Null, "{review}");
+    assert_eq!(
+        c.ok("twr.level", json!({"delta_db": 1})).await["level_db"],
+        -11
+    );
+    c.ok("twr.proceed", json!({})).await;
+    let w = wait_twr(&mut c, "waiting", |d| d["phase"] == "waiting").await;
+    assert_eq!(w["level_db"], -11);
+    assert_eq!(w["rung"], Value::Null, "off the table's levels");
+    // Playback before the gate names the gate.
+    let e = c.refused("twr.play", json!({})).await;
+    assert_eq!(e["reason"], "not_converged");
+    assert_eq!(e["detail"]["gate_pct"], 10);
+    c.ok("twr.stop", json!({})).await;
+    wait_twr(&mut c, "finished", |d| d["state"] == "finished").await;
+
+    // Auto under the hold policy: a level that spends its plays without a gate
+    // holds; only then does a level move, and the run goes on from it.
+    let mut cfg = config(&sha, "auto", false);
+    cfg["schedule"]["max_iterations"] = json!(1);
+    cfg["schedule"]["on_gate_fail"] = json!("hold");
+    let second = c.ok("twr.configure", json!({"config": cfg})).await["state"]["run_id"].clone();
+    assert_eq!(
+        c.refused("twr.level", json!({"delta_db": 1})).await["reason"],
+        "wrong_mode",
+        "in auto a level moves only from the held gate"
+    );
+    c.ok("twr.start", json!({})).await;
+    let holding = wait_twr(&mut c, "holding", |d| {
+        d["run_id"] == second && d["phase"] == "holding"
+    })
+    .await;
+    assert_eq!(holding["plays"]["at_level"], 1, "{holding}");
+    assert_eq!(
+        c.refused("twr.iterate", json!({})).await["reason"],
+        "wrong_mode"
+    );
+    assert_eq!(c.ok("twr.level", json!({"rung": 1})).await["level_db"], -6);
+    let moved = wait_twr(&mut c, "a play at -6 dB", |d| {
+        d["last_play"]["level_db"] == -6
+    })
+    .await;
+    assert_eq!(moved["mode"], "auto");
+    c.ok("twr.abort", json!({})).await;
+    let end = wait_twr(&mut c, "finished", |d| {
+        d["run_id"] == second && d["state"] == "finished"
+    })
+    .await;
+    assert_eq!(end["end"]["outcome"], "operator_abort");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_coherence_hold_refusal_says_the_coherence_against_its_floor() {
+    let svc = service(0.0, Duration::from_secs(30));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sha = import(&mut c).await;
+    let mut cfg = config(&sha, "manual", true);
+    cfg["identification"]["drive_vrms"] = json!(0.00005);
+    c.ok("twr.configure", json!({"config": cfg})).await;
+    c.ok("twr.start", json!({})).await;
+    wait_twr(&mut c, "held", |d| d["state"] == "held").await;
+    let e = c.refused("twr.proceed", json!({})).await;
+    assert_eq!(e["reason"], "coherence_hold");
+    assert_eq!(e["detail"]["min_mean_coherence"], 0.8, "{e}");
+    assert_eq!(e["detail"]["coherence_mean"], 0.5, "{e}");
+    c.ok("twr.reset", json!({})).await;
 }

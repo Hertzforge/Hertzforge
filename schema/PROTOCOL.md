@@ -880,11 +880,11 @@ plain words: it never names a protocol method.
 | `law_params_invalid` | `bad_request` | `laws.check` parameter values the law does not accept | `id` |
 | `law_check_unsupported` | `refused` | `laws.check` names a single-output Random law, or a law the check cannot build, or a case of a check cannot be run at all (the message names it) | |
 | `not_yet` | `refused` | `shock.fire`, `shock.train`, `shock.burst` or `srs.fire` before the time between pulses has passed, or while a pulse is in flight | `seconds` |
-| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire`, `srs.level`, `twr.iterate`, `twr.play` or `twr.level` while the ladder is automatic | `mode` |
-| `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort; `twr.level` to a level where the drive in force would pass the drive ceiling | `vpk`, `abort_vpk` (`ceiling_vpk` for TWR), `level_db` |
-| `reference_unreadable` | `refused` | `twr.reference.import`: the file cannot be read, or its content is not a record (the message names the line or field) | |
-| `not_converged` | `refused` | `twr.play` before the present level has gated | `level_db` |
-| `coherence_hold` | `refused` | `twr.proceed`, `twr.iterate` or `twr.play` while the coherence hold holds the run; `twr.reset` alone releases it | |
+| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire`, `srs.level`, `twr.iterate` or `twr.play` while the ladder is automatic, or `twr.level` then anywhere but `holding` | `mode` |
+| `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort; `twr.level` to a level where the drive in force would pass the drive ceiling | `vpk`, `abort_vpk` (for TWR `ceiling_vpk`, and `vpk` null when the service cannot state it), `level_db` |
+| `reference_unreadable` | `refused` | `twr.reference.import`: the file cannot be read, or its content is not a record (the message names the line or field) | `path` (null for pasted text), `line` (null when no line is at fault) |
+| `not_converged` | `refused` | `twr.play` before the present level has gated | `level_db`, `gate_pct` |
+| `coherence_hold` | `refused` | `twr.proceed`, `twr.iterate` or `twr.play` while the coherence hold holds the run; `twr.reset` alone releases it | `coherence_mean` (null when not measured), `min_mean_coherence` |
 | `not_a_sweep` | `refused` | `sine.reverse`, `sine.jog` or `sine.goto` when the test is not a sweep | `test` |
 | `out_of_band` | `refused` | `sine.goto` to a frequency outside the test's band | `band_hz` |
 | `adjust_refused` | `refused` | `sine.adjust` of a parameter that is not one of the law's live parameters, or out of its range, or that the law refused | `key`, `why` (`unknown_key`, `not_live`, `out_of_range` or `law_refused`) |
@@ -2972,7 +2972,7 @@ shutting down, `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level` are 
 | `twr.proceed` | `{}` | `review` | state |
 | `twr.iterate` | `{}` | `running`, in `manual`, between plays | state |
 | `twr.play` | `{}` | `running`, in `manual`, between plays, the level gated | state |
-| `twr.level` | `{"delta_db"}` (1 or -1) or `{"rung"}` (from 0) | `running` or `review`, in `manual`, between plays | `{"level_db"}` |
+| `twr.level` | `{"delta_db"}` (1 or -1) or `{"rung"}` (from 0) | `running` or `review` in `manual`, between plays; in `auto` only at `holding` | `{"level_db"}` |
 | `twr.freeze` | `{"frozen"}` | `running` or `review` | `{"frozen"}`, at once |
 | `twr.stop` | `{}` | any | state |
 | `twr.abort` | `{}` | any | state |
@@ -3030,10 +3030,13 @@ the line or field).
 **`twr.reference.preview`** prepares a stored reference as a configuration would (`reference` is
 `{"sha256"}`; the others as in "TWR Configuration", their defaults when left out, the correction
 band the default identification's when not given) and answers with what the run would
-replicate, so a screen never repeats the preparation. A part with an error is refused
-`config_invalid` with the items a configuration would get for it (`reference_unknown`,
-`rate_mismatch`, `section_outside_reference`, `record_too_long`, `highpass_above_band`,
-`band_above_grid`, `out_of_range`):
+replicate, so a screen never repeats the preparation. Its refusals: `bad_params` naming the
+parameter for a wrong shape (`reference.sha256` that is not 64 lowercase hexadecimal digits, a
+`prep`, `section`, `pads`, `acquisition`, `correction` or `feasibility` of the wrong type), and
+`config_invalid` with the items a configuration would get for the parts given:
+`reference_unknown` at `reference.sha256` (no stored reference has it), `rate_mismatch`,
+`section_outside_reference`, `record_too_long`, `highpass_above_band`, `band_above_grid` and
+`out_of_range`, each at its field:
 
 ```
 {"derived":{"grid":{"fs_hz":12800,"record_len":65536,"df_hz":0.1953125,"record_s":5.12,
@@ -3095,7 +3098,7 @@ replicate, so a screen never repeats the preparation. A part with an error is re
 |---|---|---|
 | `title` | empty | The run's name |
 | `reference.sha256` | (required) | The stored reference (`twr.reference.import`), by its SHA-256 |
-| `reference.path` | null | The file it was imported from. When given, the file must still have that SHA-256 (`reference_changed`); the run plays the stored record either way |
+| `reference.path` | null | The file it was imported from. When given, it must be a file this record was imported from and still read to it, as it was imported (`reference_changed`); the run plays the stored record either way |
 | `prep.auto_resample` | true | Resample the reference to the station's rate when they differ (upward only; a reference above the rate is refused, `rate_mismatch`). Off, a rate difference is refused (`rate_mismatch`) |
 | `prep.detrend` | `mean` | `none`, `mean` or `linear` |
 | `prep.highpass_hz` | 5 | A drift high-pass, Hz, above 0 and at most the correction band's low edge; null for none |
@@ -3216,8 +3219,10 @@ warnings `reference_resampled`.
   hold.
 - **`twr.level`** steps ±1 dB (`delta_db`) or goes to a level of the table (`rung`, from 0),
   between plays and before playback, the drive carried forward by the exact ratio; from
-  `holding` it releases the hold. Refused `wrong_mode` in `auto`, `wrong_state` while a play is
-  in flight,
+  `holding` it releases the hold and the run goes on from the new level. From `review` it steps
+  from the table's first level. In `auto` it is taken only at `holding` (a level that failed its
+  gate under `hold`); anywhere else in `auto` it is refused `wrong_mode`. Refused `wrong_state`
+  while a play is in flight,
   `not_a_rung` (a rung the table does not have, or a step past its first or last level), and
   `drive_ceiling` when the drive's peak at the new level would pass the ceiling (with `vpk`,
   null when the service cannot state it, `ceiling_vpk` and `level_db`); the level and the drive
@@ -3270,11 +3275,12 @@ clock. The safe stop's countdown (`orphan_s`) is the only number timed by the se
 | `stopping` | `stopping` | A stop or an abort is bringing the play in flight to rest |
 | `finished` | `stopped`, `aborted` | Ended; `end` says how |
 
-- `level_db` is the commanded level (null before the run starts); `rung` its place in
-  `levels_db` (null when a manual step has left the table's levels).
+- `level_db` is the commanded level, null until `twr.proceed` (or a level move from `review`);
+  `rung` its place in `levels_db` (null when a manual step has left the table's levels).
 - `plays`: `done` the plays judged over the run (identification not counted); `at_level` the
-  correction plays at this level and `of_level` the most it may take (`max_iterations`);
-  `playback` the playback plays done and `of_playback` the schedule's (`derived.plays_target`).
+  correction plays judged at this level (not the one in flight) and `of_level` the most it may
+  take (`max_iterations`); `playback` the playback plays done and `of_playback` the schedule's
+  (`derived.plays_target`).
 - `frozen` is true while `twr.freeze` holds the law's corrections off. `t_s` is station time.
   `alarm` is true once a play's response has left the alarm band (latched for the run).
 - `identification` and `prediction` are null until identification is done. `identification` is
@@ -3370,19 +3376,23 @@ row is still in `twr.plays`.
 
 Event topics:
 
-- `twr.state` (text): the state object on every change.
+- `twr.state` (text): the state object on every change: after every judged play (its
+  `last_play`, so a screen can append the rows from it), on every change of state or phase, and
+  after `twr.freeze` takes effect. The station time alone changing sends none.
 - `twr.log` (text): new log entries, as Random's, driver warnings included.
-- `twr.live` (binary, to every connection, 5 times a second from arm until the run has
-  finished, then once more): `{"run_id","source","state","phase","mode","t_s","level_db","rung",
+- `twr.live` (binary, to every connection without a TWR subscription of its own, as Random's and
+  Sine's live frames, 5 times a second from arm until the run has finished, then once more):
+  `{"run_id","source","state","phase","mode","t_s","level_db","rung",
   "plays","play","last","views"}`. `play` is the play in flight, `{"index","kind","iteration",
   "frames_done","frames"}`, or null between plays; `last` is the last play's
   `{"rms_error_pct","peak_error_pct","spectral_error_db","gated"}` (null before any); `views` is
   **Scope** (the control channel's most recent samples, from the station's display tap, x `Time`
   s, at most 1024 points).
-- `twr.data` (binary, to one subscribed connection): `twr.live`'s fields but `views`, and `plots`,
-  at most `rate_hz` frames a second while a plotted quantity has changed, once when
-  identification ends, once after each play, and at once on subscribe (so a screen that joins
-  late has the latest play).
+- `twr.data` (binary, to one subscribed connection, in place of `twr.live`): `twr.live`'s fields
+  but `views`, and `plots`: at its `rate_hz` while a play is in flight, whatever its plots show,
+  so `play.frames_done` moves on it; once when identification ends, once after each play, once
+  when the run has finished, and at once on subscribe (so a screen that joins late has the
+  latest play).
 
 `twr.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
 default 5; at most 64 plots, each `id` unique) or `{"default":true}` (no `twr.data`); a key a

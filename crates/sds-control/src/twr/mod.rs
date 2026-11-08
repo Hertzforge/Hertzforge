@@ -221,7 +221,12 @@ impl TwrRun {
     /// The view as published, with the station time and the play in flight as of
     /// now: a stop asked for shows as `stopping` until the run has ended.
     pub fn view(&self) -> Arc<TwrView> {
-        let v = self.shared.view();
+        self.as_of_now(self.shared.view())
+    }
+
+    /// `v`, a view the run published, with the station time and the play in flight
+    /// as of now, and a stop asked for shown as `stopping`.
+    pub fn as_of_now(&self, v: Arc<TwrView>) -> Arc<TwrView> {
         let stopping = self.shared.signals.cancelled()
             && matches!(v.state, State::Running | State::Review | State::Held);
         let running = matches!(v.state, State::Running | State::Stopping);

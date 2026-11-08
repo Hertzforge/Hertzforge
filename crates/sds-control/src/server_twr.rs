@@ -496,11 +496,12 @@ impl Service {
 
     /// The refusals a verb gets without asking the run thread: the automatic
     /// ladder, and a play in flight.
-    fn pre_verb(run: &TwrRun, verb: &str) -> Result<(), MethodError> {
-        if run.wire.mode == TwrRunMode::Auto {
+    fn pre_verb(run: &TwrRun, verb: &str, level: bool) -> Result<(), MethodError> {
+        let v = run.view();
+        // In `auto` only a level verb, and only at the hold a failed gate leaves.
+        if run.wire.mode == TwrRunMode::Auto && !(level && v.phase == "holding") {
             return Err(trun::wrong_mode(verb));
         }
-        let v = run.view();
         if run.shared.progress.now().is_some() || matches!(v.phase, "iterating" | "playing") {
             return Err(trun::wrong_state(&v, verb));
         }
@@ -509,7 +510,7 @@ impl Service {
 
     pub(super) async fn twr_iterate(&self, conn: &Conn) -> Result<Value, MethodError> {
         let run = self.controlled_twr(conn).await?;
-        Self::pre_verb(&run, "An iteration")?;
+        Self::pre_verb(&run, "An iteration", false)?;
         run.jobs
             .ask(|reply| Cmd::Iterate { reply }, wait_for(&run))
             .await?;
@@ -518,7 +519,7 @@ impl Service {
 
     pub(super) async fn twr_play(&self, conn: &Conn) -> Result<Value, MethodError> {
         let run = self.controlled_twr(conn).await?;
-        Self::pre_verb(&run, "Playback")?;
+        Self::pre_verb(&run, "Playback", false)?;
         run.jobs
             .ask(|reply| Cmd::Play { reply }, wait_for(&run))
             .await?;
@@ -549,7 +550,7 @@ impl Service {
             }
         };
         let run = self.controlled_twr(conn).await?;
-        Self::pre_verb(&run, "A level change")?;
+        Self::pre_verb(&run, "A level change", true)?;
         let level = run
             .jobs
             .ask(|reply| Cmd::Level { to, reply }, wait_for(&run))
@@ -782,15 +783,13 @@ impl Service {
         }
     }
 
-    /// Each subscribed connection whose frame is due (every one when `force`):
-    /// `scope_only` asks only of those plotting the play in flight.
-    fn twr_data_due(&self, run: &TwrRun, force: bool, scope_only: bool) {
+    /// Each subscribed connection whose frame is due (every one when `force`).
+    fn twr_data_due(&self, run: &TwrRun, force: bool) {
         let now = Instant::now();
         let due: Vec<(u64, Arc<Subscription>)> = {
             let mut displays = self.twr_displays();
             displays
                 .iter_mut()
-                .filter(|(_, d)| !scope_only || d.sub.has_scope())
                 .filter(|(_, d)| {
                     force
                         || d.last
@@ -817,7 +816,9 @@ impl Service {
         if run.id != run_id {
             return;
         }
-        let shown = run.view();
+        // The view as published, so every judged play has its own state event
+        // even when publishes arrive faster than they are sent.
+        let shown = run.as_of_now(Arc::new(v.clone()));
         let key = view::state_key(Some(&shown));
         if key != inner.twr_state_key {
             inner.twr_state_key = key;
@@ -847,13 +848,14 @@ impl Service {
         drop(inner);
         let finished = v.state == State::Finished;
         if rows_now > first_new || ident_new || finished {
-            self.twr_data_due(&run, true, false);
+            self.twr_data_due(&run, true);
         }
     }
 
     /// Publish `run`'s `twr.live` five times a second until it has finished, then
-    /// once more with the final state; and `twr.data` to the connections plotting
-    /// the play in flight, at their rate, while one is. One task per run.
+    /// once more with the final state, to the connections without a subscription of
+    /// their own; and `twr.data` to the subscribed ones at their rate while a play is
+    /// in flight. One task per run.
     fn spawn_twr_live(self: &Arc<Self>, run: Arc<TwrRun>) {
         if run
             .shared
@@ -890,10 +892,22 @@ impl Service {
                     let scope = run.scope();
                     let mut arrays = Arrays::new();
                     let data = view::live_json(&v, &scope, &mut arrays);
-                    svc.emit_binary("twr.live", data, &arrays);
+                    let seq = svc.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // For the connections without a TWR subscription of their own; a
+                    // subscribed one has its `twr.data` instead.
+                    match codec::encode(&protocol::event("twr.live", seq, data), &arrays) {
+                        Ok(frame) => {
+                            let _ = svc
+                                .events
+                                .send(Arc::new(Out::DefaultLive(Feed::Twr, frame)));
+                        }
+                        Err(e) => eprintln!("sds-control: twr.live frame not encoded: {e}"),
+                    }
                 }
+                // While a play is in flight a subscribed screen gets its frame at its
+                // rate, with the play's progress, whatever its plots show.
                 if v.play.is_some() && current {
-                    svc.twr_data_due(&run, false, true);
+                    svc.twr_data_due(&run, false);
                 }
                 if last {
                     break;
