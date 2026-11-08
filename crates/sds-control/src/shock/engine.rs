@@ -159,6 +159,12 @@ pub trait ShockEngine: Send {
     fn misses(&self) -> u32;
     /// Log lines since the last call.
     fn take_log(&mut self) -> Vec<(&'static str, String)>;
+    /// When the device started the last pulse, as the controller stamped it once
+    /// the station's clock ran: the moment the time between pulses is held from.
+    /// `None` leaves the run thread its own moment of asking for the pulse.
+    fn last_pulse_start(&self) -> Option<Instant> {
+        None
+    }
 }
 
 /// What an engine is built with: the run's signals and its progress cell, and the

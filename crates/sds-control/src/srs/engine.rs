@@ -29,6 +29,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 pub use crate::shock::engine::{ArmOutcome, Armed, EngineContext, LevelMove, Position};
 
@@ -117,6 +118,12 @@ pub trait SrsEngine: Send {
     fn misses(&self) -> u32;
     /// Log lines since the last call.
     fn take_log(&mut self) -> Vec<(&'static str, String)>;
+    /// When the device started the last pulse, as the controller stamped it once
+    /// the station's clock ran: the moment the time between pulses is held from.
+    /// `None` leaves the run thread its own moment of asking for the pulse.
+    fn last_pulse_start(&self) -> Option<Instant> {
+        None
+    }
 }
 
 /// Makes a run's engine.
