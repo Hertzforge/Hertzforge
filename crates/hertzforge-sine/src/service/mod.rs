@@ -427,6 +427,8 @@ pub struct LawTally {
     pub calls: u64,
     /// Unusable calls.
     pub misses: u64,
+    /// Unusable calls whose output the core refused (a subset of `misses`).
+    pub refused: u64,
     /// Calls a core cap bound.
     pub capped: u64,
     /// The longest call, microseconds (0 when untimed).
@@ -2745,6 +2747,9 @@ impl SineService {
             self.law_tally.calls += 1;
             if r.miss != 0 {
                 self.law_tally.misses += 1;
+                if r.miss >= 5 {
+                    self.law_tally.refused += 1;
+                }
                 misses_here += 1;
                 last_miss = Some((r.miss, r.tick));
             }

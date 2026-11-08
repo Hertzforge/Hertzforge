@@ -293,6 +293,13 @@ pub struct TickObservation {
     pub servo_faulted: bool,
     /// Whether the limit channels held the drive this tick.
     pub notch_binding: bool,
+    /// The target at the tick's frequency and level.
+    pub target: f64,
+    /// Whether the core's settle window was open (its protections not judged).
+    pub settling: bool,
+    /// The limit channels' largest reading against their limits, dB (0 at the
+    /// limit); `None` without limit channels.
+    pub limit_over_db: Option<f64>,
 }
 
 /// A callback that sees every control tick. It runs on the control thread,
@@ -2065,6 +2072,15 @@ impl SineProcessStep {
         self.trace.push(f, &self.tracked, broadband);
         if let Some(obs) = self.observer.as_mut() {
             let value = |ix: Option<usize>| ix.and_then(|i| self.law_buf.get(i)).unwrap_or(0.0);
+            let limit_over_db = self
+                .limit_channels
+                .iter()
+                .filter_map(|lc| {
+                    let lim = lc.profile.target_accel_g_pk(f)?;
+                    let t = self.tracked.get(lc.input_slot).copied()?;
+                    (lim > 0.0 && t > 0.0).then(|| 20.0 * (t / lim).log10())
+                })
+                .reduce(f64::max);
             obs(&TickObservation {
                 tick: self.tick_count,
                 freq_hz: f,
@@ -2075,6 +2091,9 @@ impl SineProcessStep {
                 servo_level_db: value(self.obs_ix.1),
                 servo_faulted: self.law_faulted,
                 notch_binding,
+                target: target_g,
+                settling,
+                limit_over_db,
             });
         }
 
