@@ -58,7 +58,11 @@ async fn controller(c: &mut Client) {
 
 /// A flat 2 g target, 100 to 2000 Hz at 1/3 octave, Q 10, wavelets, at 20480 Hz;
 /// the ladder -12, -6, 0 dB with 2, 2 and 3 pulses advancing on a pass; unpaced
-/// spacing; the default law.
+/// spacing; the default law. Identification in 0.2 s blocks (4096 points), as the
+/// law check's: the default 1024 points at this rate is shorter than the burst and
+/// its ring-out, and on this station it identifies the top bands with coherence
+/// near zero (0.05 at 2016 Hz), so the seed's first pulse sits 13 dB low there,
+/// past the abort band.
 fn config(mode: &str) -> Value {
     json!({
         "title": "Simulated SRS",
@@ -68,7 +72,7 @@ fn config(mode: &str) -> Value {
         "schedule": {"mode": mode, "levels_db": [-12, -6, 0], "pulses": [2, 2, 3],
                      "advance": "on_pass", "max_pulses_per_level": 5},
         "spacing": {"cooling_s": 0.05, "settling_s": 0, "compute_s": 0},
-        "identification": {"nfft": 1024, "review": false},
+        "identification": {"nfft": 4096, "review": false},
         "limits": {"drive_vpk_ceiling": 5, "drive_vpk_abort": 8}
     })
 }
@@ -123,7 +127,6 @@ fn within(r: &Value, db: f64) -> bool {
 /// srs-1: AUTO with the default law completes; every band within ±3 dB at full
 /// level.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (identification in volts, the seed, the law)"]
 async fn auto_with_the_default_law_completes_inside_the_band() {
     let schema = Schema::load();
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
@@ -150,7 +153,6 @@ async fn auto_with_the_default_law_completes_inside_the_band() {
 /// srs-2: MANUAL fire within ±1 dB of the table, go to a rung, an early fire
 /// refused `not_yet`, then Stop with no pulse after.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (identification in volts, the seed, the law)"]
 async fn manual_moves_and_an_early_fire_then_the_stop() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -199,7 +201,6 @@ async fn manual_moves_and_an_early_fire_then_the_stop() {
 /// srs-3: an observer's abort in the wait ends the run within a poll; nothing
 /// after.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (identification in volts, the seed, the law)"]
 async fn an_observer_abort_in_the_wait() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -230,7 +231,7 @@ async fn an_observer_abort_in_the_wait() {
 /// srs-4: a displacement ceiling under the full-level prediction aborts at the
 /// first full-level pulse, predicted, its value to three significant digits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: predicted kinematics before every pulse"]
+#[ignore = "the state's prediction stays the seed's while the law moves the table"]
 async fn a_displacement_ceiling_under_the_prediction_aborts_predicted() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -282,7 +283,6 @@ async fn a_displacement_ceiling_under_the_prediction_aborts_predicted() {
 /// srs-5: the controlling socket closed holds firing and safe-stops at the grace;
 /// separately, the service's shutdown safe-stops the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (identification in volts, the seed, the law)"]
 async fn the_controller_lost_and_the_shutdown_safe_stop() {
     let timeout = Duration::from_millis(1500);
     let svc = Service::with_options(real(timeout));
@@ -319,7 +319,6 @@ async fn the_controller_lost_and_the_shutdown_safe_stop() {
 /// srs-6: an imported law whose later calls run past their budget: three misses
 /// in a row end the run (`law_fault`, `over_budget`, 3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the law host's SRS world and the misbehaving fixture (scripts/build_laws.sh)"]
 async fn a_slow_law_ends_the_run_after_three_misses() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -344,7 +343,6 @@ async fn a_slow_law_ends_the_run_after_three_misses() {
 /// srs-7: the imported template meets srs-1's criteria; the built-in law and the
 /// imported `shock-srs-ratio` drive alike: the same outcome, pulse count and rows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the SDK template fixture, the shock-srs-ratio law file and the law host's SRS world"]
 async fn the_template_meets_the_default_and_the_built_in_law_matches_its_file() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -390,7 +388,6 @@ async fn the_template_meets_the_default_and_the_built_in_law_matches_its_file() 
 /// srs-8: exclusion against Random and classical shock both ways on the real
 /// services, and the drive verbs refused once shutdown begins.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (a configuration with control arms)"]
 async fn exclusion_and_shutting_down() {
     let svc = Service::with_options(real(Duration::from_secs(30)));
     let addr = serve(svc.clone()).await;
@@ -422,7 +419,6 @@ async fn exclusion_and_shutting_down() {
 /// srs-9: the template law with its correction off and its seed 4 dB low cannot
 /// bring the bands in: `not_converged` at the iteration limit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the SDK template fixture and the iteration limit"]
 async fn a_law_that_does_not_correct_ends_not_converged() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -447,7 +443,6 @@ async fn a_law_that_does_not_correct_ends_not_converged() {
 /// srs-10: a drive abort under the identified full-level drive ends the run before
 /// any pulse, predicted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the drive in volts, its abort predicted at proceed"]
 async fn the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -476,7 +471,6 @@ async fn the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse() {
 
 /// srs-11: AUTO pulse starts never closer than the time between pulses.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the closed loop under control (identification in volts, the seed, the law)"]
 async fn auto_pulses_are_spaced_at_the_time_between_pulses() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;

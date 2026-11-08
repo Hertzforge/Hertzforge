@@ -1674,7 +1674,7 @@ SRS_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'shock-sr
               worst=1.1, calls=10, ms=0.1, vpk=0.43),
     _srs_case('measurement noise', 'one mode, 400 Hz, Q 10, noise 30 dB under', 'within_by',
               pulses=9, first=1, worst=0.9, calls=10, ms=0.1, vpk=0.41),
-    _srs_case('level ladder', 'one mode, 400 Hz, Q 10', 'each_level_within', pulses=9, first=1,
+    _srs_case('level ladder', 'a wire', 'each_level_within', pulses=9, first=1,
               worst=0.7, calls=10, ms=0.1, vpk=0.41),
     _srs_case('identification error', 'one mode, 400 Hz, Q 10, identified gain +3 dB',
               'within_by', pulses=9, first=2, worst=0.8, calls=10, ms=0.1, vpk=0.42),

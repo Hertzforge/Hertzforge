@@ -16,13 +16,14 @@
 //! flat [`SRS_CHECK_TARGET_G`] g target on a 1/3-octave grid from 100 to
 //! 2000 Hz, Q 10, synthesized from odd-half-cycle wavelets; AUTO -12, -6 and
 //! 0 dB with 2, 2 and then the case's pulses at full level, advancing on a
-//! passing pulse, at most 5 pulses a level; the drive ceiling
+//! passing pulse, at most [`SRS_CHECK_MAX_PULSES_PER_LEVEL`] pulses a level,
+//! the abort band [`SRS_CHECK_ABORT_DB`] either way; the drive ceiling
 //! [`SRS_CHECK_DRIVE_CEILING_V`] and abort [`SRS_CHECK_DRIVE_ABORT_V`]; the
-//! identification at its defaults, then proceeding past the review hold. The
-//! spacing is the rate model's, on a virtual clock: a simulated station needs
-//! no cooling. Every case asks the same of the law first: every call answered,
-//! in time, with zero misses and zero refused outputs. Then each case asks for
-//! its [`SrsRequirement`].
+//! identification in blocks of [`SRS_CHECK_SYSID_BLOCK_S`], then proceeding
+//! past the review hold. The spacing is the rate model's, on a virtual clock:
+//! a simulated station needs no cooling. Every case asks the same of the law
+//! first: every call answered, in time, with zero misses and zero refused
+//! outputs. Then each case asks for its [`SrsRequirement`].
 //!
 //! [`LawChoice`]: hertzforge_random_laws::LawChoice
 //! [`ChoiceError::WrongTestType`]: hertzforge_random_laws::ChoiceError::WrongTestType

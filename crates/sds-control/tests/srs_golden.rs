@@ -34,6 +34,23 @@ fn read_json(name: &str) -> Value {
     serde_json::from_str(&text).unwrap()
 }
 
+/// The built-in SRS law's entry as the catalog lists it, from a catalog on an
+/// empty data folder.
+fn builtin_srs_entry() -> Value {
+    let dir = std::env::temp_dir().join(format!(
+        "sds-control-srs-golden-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let cat = hertzforge_random_laws::LawCatalog::open(&dir).unwrap();
+    let entry = sds_control::laws::entry_json(&cat.entry("srs_ratio").unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+    entry
+}
+
 fn read_bin(name: &str) -> Vec<u8> {
     std::fs::read(golden(name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
 }
@@ -500,11 +517,7 @@ fn the_imports_read_the_golden_files_to_the_golden_results() {
 #[test]
 fn the_srs_law_entry_is_the_golden_one() {
     let want = read_json("response_laws_list_shock_srs.json");
-    same(
-        &sds_control::laws::entry_json(&sds_control::laws::builtin_srs_entry()),
-        &want["result"]["laws"][0],
-        "entry",
-    );
+    same(&builtin_srs_entry(), &want["result"]["laws"][0], "entry");
     assert_eq!(want["result"]["problems"], json!([]));
 }
 
@@ -526,7 +539,9 @@ fn measured_case(
         pulses,
         full_level_pulses: 3,
         first_within_pulse: Some(first),
+        within_after_first: true,
         final_worst_band_db: Some(worst),
+        final_worst_outside_notch_db: Some(worst),
         levels: vec![(-12.0, Some(0.5)), (-6.0, Some(0.4)), (0.0, Some(worst))],
         worst_limit_over_db: limit_over,
         calls,
@@ -566,11 +581,7 @@ fn the_srs_check_report_is_the_golden_one() {
         &want["result"]["report"],
         "report",
     );
-    same(
-        &sds_control::laws::entry_json(&sds_control::laws::builtin_srs_entry()),
-        &want["result"]["law"],
-        "law",
-    );
+    same(&builtin_srs_entry(), &want["result"]["law"], "law");
 }
 
 #[test]

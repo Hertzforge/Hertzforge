@@ -535,7 +535,7 @@ pub fn kinematic_view(
 }
 
 /// The table in force: each component's frequency and drive amplitude, volts,
-/// and the last gains the law returned.
+/// and the gains applied to the table on the law's last call (after the caps).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentFigures {
     pub freqs_hz: Vec<f64>,

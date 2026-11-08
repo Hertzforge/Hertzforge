@@ -17,13 +17,9 @@ use hertzforge_station::{BackendKind, SimPlant, SimPlantSpec, StationSpec};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// The rate every check case runs at, Hz: the bench's.
+/// The rate every check case runs at, Hz: the bench's. The check's runner takes
+/// the station's rate and sizes its run to it (`hertzforge_shock_laws::srs_check_config`).
 pub const CHECK_FS_HZ: f64 = 51_200.0;
-/// The simulator's floor on every case: noise well under any pulse.
-const FLOOR_NOISE_V: f64 = 2e-5;
-/// The response the noise case's noise is referred to, g rms: the check target's
-/// full-level pulse on its one-mode plant, at the first level of its schedule.
-pub const NOISE_REFERENCE_RMS_G: f64 = 1.0;
 
 fn r(x: f64, d: i32) -> f64 {
     super::config::round(x, d)
@@ -139,16 +135,15 @@ pub fn progress_json(
     })
 }
 
-/// The simulated station a case runs on: one drive, one control input.
+/// The simulated station a case runs on: one drive, one control input, the case's
+/// test article as the check's runner states it (feedthrough 1 and the case's
+/// modes; a wire has none) and the runner's measurement noise for the case at the
+/// check's rate (`SrsCheckCase::noise_rms_g`; none otherwise).
 pub fn case_station(case: SrsCheckCase) -> StationSpec {
-    let noise = match case.noise_below_db() {
-        Some(db) => NOISE_REFERENCE_RMS_G * 10f64.powf(-db / 20.0),
-        None => FLOOR_NOISE_V,
-    };
     let base = SimPlantSpec {
         sample_rate_hz: CHECK_FS_HZ,
         resonances: Vec::new(),
-        noise_level: noise,
+        noise_level: case.noise_rms_g(CHECK_FS_HZ).unwrap_or(0.0),
         feedthrough: 1.0,
         transport_delay_samples: 0,
         seed: 0x5A5A_8001 + case as u64,
@@ -232,7 +227,7 @@ mod tests {
                 "one mode, 400 Hz, Q 10",
                 "two modes, 240 and 260 Hz, Q 30",
                 "one mode, 400 Hz, Q 10, noise 30 dB under",
-                "one mode, 400 Hz, Q 10",
+                "a wire",
                 "one mode, 400 Hz, Q 10, identified gain +3 dB",
                 "a wire, a limit channel resonating at 500 Hz",
             ]
@@ -249,5 +244,13 @@ mod tests {
             case_station(SrsCheckCase::CloseModes).sim.resonances.len(),
             2
         );
+        // The runner's article and noise, never a reading of its own.
+        for c in SrsCheckCase::ALL {
+            let s = case_station(c).sim;
+            assert_eq!(s.feedthrough, 1.0);
+            assert_eq!(s.noise_level, c.noise_rms_g(CHECK_FS_HZ).unwrap_or(0.0));
+        }
+        assert!(case_station(SrsCheckCase::Ladder).sim.resonances.is_empty());
+        assert!(case_station(SrsCheckCase::Noise).sim.noise_level > 0.0);
     }
 }

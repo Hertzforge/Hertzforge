@@ -57,7 +57,7 @@ fn not_configured() -> MethodError {
 
 /// The law a configuration's checks look up by id: the catalog's entry.
 fn law_facts(cat: &LawCatalog, id: &str) -> Option<LawFacts> {
-    laws::srs_entry(cat, id).map(|e| laws::srs_facts(&e))
+    cat.entry(id).map(|e| laws::srs_facts(&e))
 }
 
 fn law_ref(f: &LawFacts) -> LawRef {
@@ -409,7 +409,8 @@ impl Service {
         let values_of = id.clone();
         let law_values = self
             .with_catalog(move |cat| {
-                Ok(laws::srs_entry(cat, &values_of)
+                Ok(cat
+                    .entry(&values_of)
                     .map(|e| e.manifest.diagnostics)
                     .unwrap_or_default())
             })
@@ -1000,7 +1001,8 @@ impl Service {
                     .to_owned(),
                 _ => return Ok(None),
             };
-            Ok(laws::srs_entry(cat, &id)
+            Ok(cat
+                .entry(&id)
                 .filter(|e| e.world == LawWorld::ShockSrs)
                 .map(|e| e.id))
         })
@@ -1082,7 +1084,7 @@ impl Service {
             let id = facts.id.clone();
             let law = self
                 .with_catalog(move |cat| {
-                    laws::srs_entry(cat, &id)
+                    cat.entry(&id)
                         .map(|e| laws::entry_json(&e))
                         .ok_or_else(|| MethodError::internal("the built-in law left the catalog"))
                 })

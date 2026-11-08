@@ -569,6 +569,15 @@ impl ServiceEngine {
     /// state says.
     fn collect(&mut self) -> Fired {
         self.ctx.progress.end();
+        let Some(svc) = self.svc.as_mut() else {
+            return Fired::default();
+        };
+        // With capture running the controller writes each law call into the run
+        // folder; without it the records have nowhere to go and are let go here
+        // rather than held for the whole run.
+        if !svc.status().capturing {
+            let _ = svc.drain_law_records();
+        }
         let Some(svc) = self.svc.as_ref() else {
             return Fired::default();
         };
@@ -590,7 +599,7 @@ impl ServiceEngine {
         let components = svc.drive_components().map(|e| ComponentFigures {
             freqs_hz: e.component_freqs(),
             amplitude_v: e.amplitudes(),
-            gains: Vec::new(),
+            gains: svc.last_law_gains().to_vec(),
         });
         let limits = self.limit_figures(svc);
         let Some(v) = svc.pulse_view(p.seq) else {
@@ -725,6 +734,7 @@ impl SrsEngine for ServiceEngine {
             expected: self.expected.clone(),
             speed: if hardware { 0.0 } else { self.ctx.sim_speed },
         };
+        let wait = watch.clone();
         let backend: Box<dyn hertzforge_hal::Backend> =
             Box::new(Observed::new(built.backend, watch));
         let plant = HalPulsePlant::new(backend, plan.table.clone(), class).map_err(arm_refused)?;
@@ -737,6 +747,9 @@ impl SrsEngine for ServiceEngine {
         .map_err(arm_refused)?
         .with_law_factory(law);
         svc.set_cancel_handle(own);
+        // The run's stop reaches the controller's flag at every poll of its wait
+        // between pulses, as it does at every block of a fire.
+        svc.set_wait_observer(Box::new(move |_left| wait.bridge()));
         let feas = svc.assess_feasibility().map_err(arm_refused)?;
         let verdict = config::verdict(&feas);
         if svc.state() == RunState::FeasibilityBlocked {
@@ -890,8 +903,7 @@ impl SrsEngine for ServiceEngine {
     }
 
     fn predicted_vpk_at(&self, level_db: f64) -> Option<f64> {
-        let p = self.svc.as_ref()?.status().prediction?;
-        Some(p.drive_vpk * 10f64.powf((level_db - p.level_db) / 20.0))
+        self.svc.as_ref()?.predicted_drive_vpk_at(level_db)
     }
 
     fn stop(&mut self) {
@@ -933,22 +945,22 @@ impl SrsEngine for ServiceEngine {
 
     fn identification(&self) -> Option<IdentFigures> {
         let svc = self.svc.as_ref()?;
-        let cfg = self.cfg.as_deref()?;
         let st = svc.status();
         let ident = st.identification?;
-        let report = svc.report_data();
-        let (lo, hi) = (cfg.synthesis.bands.f_lo_hz, cfg.synthesis.bands.f_hi_hz);
-        let control = report.frf_summary.iter().find(|f| f.channel == "control")?;
+        let v = svc.identification_view()?;
+        let (lo, hi) = v.band_hz;
         let mut freqs = Vec::new();
         let mut gain = Vec::new();
-        for (f, m) in control.freqs_hz.iter().zip(&control.mag) {
-            if *f >= lo && *f <= hi {
-                freqs.push(*f);
-                gain.push(*m);
+        let mut coherence = Vec::new();
+        for (k, (&f, &m)) in v.freqs_hz.iter().zip(&v.h_mag).enumerate() {
+            if f >= lo && f <= hi {
+                freqs.push(f);
+                gain.push(m);
+                coherence.push(v.coherence.get(k).copied().unwrap_or(0.0));
             }
         }
-        let peak = gain.iter().copied().fold(0.0f64, f64::max);
-        let limit_frf = report
+        let limit_frf = svc
+            .report_data()
             .frf_summary
             .iter()
             .filter(|f| f.channel != "control")
@@ -960,10 +972,10 @@ impl SrsEngine for ServiceEngine {
             })
             .collect();
         Some(IdentFigures {
-            coherence: Vec::new(),
+            coherence,
             freqs_hz: freqs,
             gain,
-            floor: cfg.h_floor_frac * peak,
+            floor: v.h_floor,
             hold: ident.min_mean_coherence,
             unit: self.unit.clone(),
             limit_frf,

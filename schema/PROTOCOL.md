@@ -2264,7 +2264,7 @@ SRS shock has no trains and no gunfire bursts: every pulse is a synthesized puls
 | `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run reports the rate it ran at |
 | `acquisition.ring_out_s` | 0.05 | Seconds measured after each pulse's drive ends, 0 to 10 |
 | `acquisition.pvss` | true | Also compute each pulse's pseudo-velocity SRS |
-| `schedule` | as classical shock's | `mode`, `levels_db`, `pulses`, `start_db`, `advance` and `max_pulses_per_level` as "Classical Shock Configuration" has them. With `advance` `on_pass` a pulse passes when every band is inside the alarm band |
+| `schedule` | as classical shock's | `mode`, `levels_db`, `pulses`, `start_db`, `advance` and `max_pulses_per_level` as "Classical Shock Configuration" has them. With `advance` `on_pass` a pulse passes when every band is inside the alarm band, but for a band a limit channel holds down reading low (see "SRS Shock Pulses") |
 | `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, as classical shock's (`derived.spacing_s` is the largest) |
 | `identification.excitation` | `shaped` | `shaped`: the synthesized pulse, which puts the identification's energy where the test drives. `standard_pulse`: a short broadband pulse |
 | `identification.level_db` | -20 | The burst's level under the full-level synthesis, dB (below 0, at least -60) |
@@ -2391,7 +2391,7 @@ input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unkno
 
 `state`, `phase`, `level_db`, `rung`, `pulses`, `next_pulse_s`, `prediction`, `last_pulse`,
 `law`, `feasibility` and `end` are as "Classical Shock Run State" has them. `pulses.passed` counts
-pulses with every band inside the alarm band. `identification` is null until identification is
+the pulses that passed (`passed` in their rows). `identification` is null until identification is
 done, then the excitation, the burst's peak and its cap (volts), and its mean in-band coherence
 against the hold. `notch` is null without limit channels, then the arm-time notch: the bands it
 notched, the worst predicted exceedance before and after it (dB over the allowed level) and
@@ -2443,8 +2443,10 @@ alarm and abort bands), **Pulse** (the measured pulse), **Drive** (the drive as 
 - `peak_g`, `velocity_pk_ips` and `displacement_pk_pk_in` are the measured pulse's kinematics.
   `worst_err_db` is the band furthest from the target at the level fired and `worst_band_hz` its
   centre; `alarm_bands` and `abort_bands` count the bands outside each band of the envelope;
-  `passed` is true when no band is outside the alarm band. They are null when the pulse was not
-  measured.
+  `passed` is true when no band is outside the alarm band. A band a limit channel holds down (a band
+  the notch cut, or one within half an octave of it, where the cap holds the components that reach
+  it) that reads low does not fail the pulse; it still alarms. A band outside the abort band, or
+  reading high, always fails it. They are null when the pulse was not measured.
 - `limited_components` counts the components the limit channels' prediction capped in the gains
   this pulse played, and `worst_limit_db` is the worst predicted limit-channel exceedance for its
   drive, dB over the allowed level (both null without limit channels).
@@ -2463,7 +2465,7 @@ takes classical shock's form; `points` applies to `pulse`, `velocity` and `displ
 | `pulse` | **Pulse**, **Drive** (`spectrum`, time) | The measured pulse, g; the drive as played, V |
 | `velocity`, `displacement` | **Velocity**, **Displacement** (`spectrum`, time) | The measured pulse's |
 | `identification` | **Identification Gain**, **Coherence** (`spectrum`s) | `abs(H)` to the control channel (control unit per volt) with the floor the seed divides by at the least; the coherence with the hold |
-| `components` | **Components**, **Gains** (`spectrum`s) | Each component's drive amplitude in the table in force, V, at its frequency; the last gains the law returned (no Gains view before its first call) |
+| `components` | **Components**, **Gains** (`spectrum`s) | Each component's drive amplitude in the table in force, V, at its frequency; the gains applied to the table on the law's last call, after the service's caps (no Gains view before its first call) |
 | `limit_channels` | **Limit** *name* (`spectrum`), one per limit channel | The predicted SRS for the last pulse's drive, the bound and the bound less the headroom, g (a band with no bound is left out) |
 | `limit_frf` | **Gain** *name* (`spectrum`), one per limit channel | The drive-to-channel gain, g per volt, `Measured` or `Supplied` |
 | `law` | one `reading` | The law's reported values on its last call |
@@ -2584,13 +2586,16 @@ refused `law_check_unsupported`, naming it. A case's result:
 ```
 
 **An SRS shock law.** For a law of world `shock_srs`, `laws.check` runs the SRS check set, each
-case a whole run under the core's guards on a simulated station: a flat target on a 1/3-octave
-grid from 100 to 2000 Hz, Q 10, synthesized from wavelets. The cases: one mode at 400 Hz, Q 10;
-two close modes at 240 and 260 Hz, Q 30; one mode with measurement noise 30 dB under the response
-(each `within_by` 6: every band within ±3 dB of the target by the sixth full-level pulse and on
-every full-level pulse after it); one mode on a ladder of -12, -6 and 0 dB with manual moves
-(`each_level_within`: every band within ±3 dB after 3 pulses at each level); one mode with the
-identified gain scaled +3 dB before the seed (`within_by` 8); and a wire with one limit channel
+case a whole run under the core's guards on a simulated station at 51200 Hz: a flat target on a
+1/3-octave grid from 100 to 2000 Hz, Q 10, synthesized from wavelets; AUTO at -12, -6 and 0 dB,
+2 and 2 pulses and then the case's own at full level, advancing on a pass, at most 12 pulses a
+level, the abort band 12 dB either way, and identification in blocks of 0.2 s. The cases: one
+mode at 400 Hz, Q 10; two close modes at 240 and 260 Hz, Q 30; one mode with measurement noise
+30 dB under the identification burst's peak (each `within_by` 6: every band within ±3 dB of the
+target by the sixth full-level pulse and on every full-level pulse after it); a wire on a ladder
+of -12, -6 and 0 dB with manual moves (`each_level_within`: every band within ±3 dB after 3
+pulses at each level); one mode with the identified gain scaled +3 dB before the seed
+(`within_by` 8; a law that does not correct cannot pass it); and a wire with one limit channel
 whose supplied gain resonates at 500 Hz under a flat bound (`limit_held`: the predicted limit SRS
 at most 0.5 dB over its bound on every pulse, and the control SRS within ±3 dB outside the
 notched bands). Every case first asks that every call is answered, in time, with zero misses and

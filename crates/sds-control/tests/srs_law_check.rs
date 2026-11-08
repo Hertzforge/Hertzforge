@@ -150,7 +150,9 @@ fn measure(end: SrsCaseEnd, first: Option<u32>) -> SrsCaseMeasure {
         pulses: 5,
         full_level_pulses: 0,
         first_within_pulse: first,
+        within_after_first: first.is_some(),
         final_worst_band_db: None,
+        final_worst_outside_notch_db: None,
         levels: Vec::new(),
         worst_limit_over_db: None,
         calls: 6,
@@ -259,7 +261,6 @@ fn law_file(name: &str) -> PathBuf {
 static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the built-in law resolved and the SRS check runner"]
 async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
     let _turn = ONE_CHECK.lock().await;
     let schema = Schema::load();
@@ -284,7 +285,6 @@ async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the SRS core: the SRS law files (scripts/build_laws.sh), their host world and the SRS check runner"]
 async fn a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
 ) {
     let _turn = ONE_CHECK.lock().await;
