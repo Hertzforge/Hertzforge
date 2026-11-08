@@ -2,10 +2,21 @@
 //!
 //! # The metrics
 //!
-//! - `rms_error_pct = 100 * ||y - r_L||_2 / ||r_L||_2` over the padded window
-//!   (relative L2 error; the primary gate). Both records live on the same grid,
-//!   so residual ring-down in the pads counts as REAL error.
-//! - `peak_error_pct = 100 * max|y - r_L| / peak|r_L|`.
+//! - `rms_error_pct = 100 * ||e - mean(e)||_2 / ||r_L - mean(r_L)||_2` with
+//!   `e = y - r_L`, over the padded window (relative L2 error; the primary
+//!   gate). Both records live on the same grid, so residual ring-down in the
+//!   pads counts as REAL error.
+//! - `peak_error_pct = 100 * max|e - mean(e)| / peak|r_L - mean(r_L)|`.
+//!
+//! Both are taken about the record's mean, the 0 Hz bin of the error and of
+//! the target. A constant on the measured response is the input chain's (a
+//! DC-coupled channel's offset, measured at 0.7 mV on an NI loopback), not the
+//! plant's motion: a shaker cannot hold a constant acceleration over a record,
+//! the drive carries nothing at 0 Hz (it is built on the trusted bins), and no
+//! correction acts there (every correction band starts above 0 Hz). Counted,
+//! an offset of more than the gate's share of the target's rms holds a run at
+//! its first rung for ever, however well the law has corrected the bins it
+//! can reach.
 //! - `spectral_error_db` = mean over masked bins of `|20*log10(|Y| / |R_L|)|`,
 //!   clamped to 60 dB per bin (a zero achieved bin is "very wrong", not
 //!   infinitely wrong).
@@ -27,9 +38,10 @@ use serde::{Deserialize, Serialize};
 /// The per-iteration error metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ErrorMetrics {
-    /// `100 * ||y - r_L|| / ||r_L||` (relative L2, the gate metric).
+    /// `100 * ||e - mean(e)|| / ||r_L - mean(r_L)||`, `e = y - r_L` (relative
+    /// L2 about the record's mean, the gate metric).
     pub rms_error_pct: f64,
-    /// `100 * max|y - r_L| / peak|r_L|`.
+    /// `100 * max|e - mean(e)| / peak|r_L - mean(r_L)|`.
     pub peak_error_pct: f64,
     /// Mean masked-bin `|20 log10(|Y|/|R_L|)|`, dB (clamped 60 dB/bin).
     pub spectral_error_db: f64,
@@ -51,17 +63,28 @@ impl ErrorMetrics {
         mask: &[bool],
     ) -> ErrorMetrics {
         assert_eq!(target.len(), achieved.len());
+        // The 0 Hz bin of the error and of the target (the module docs say
+        // why neither is judged).
+        let n = target.len().max(1) as f64;
+        let t_mean = target.iter().sum::<f64>() / n;
+        let e_mean = target
+            .iter()
+            .zip(achieved.iter())
+            .map(|(&t, &a)| a - t)
+            .sum::<f64>()
+            / n;
         let mut err2 = 0.0f64;
         let mut ref2 = 0.0f64;
         let mut err_pk = 0.0f64;
         let mut ref_pk = 0.0f64;
         let mut resp2 = 0.0f64;
         for (&t, &a) in target.iter().zip(achieved.iter()) {
-            let e = a - t;
+            let e = (a - t) - e_mean;
+            let tc = t - t_mean;
             err2 += e * e;
-            ref2 += t * t;
+            ref2 += tc * tc;
             err_pk = err_pk.max(e.abs());
-            ref_pk = ref_pk.max(t.abs());
+            ref_pk = ref_pk.max(tc.abs());
             resp2 += a * a;
         }
         let rms_error_pct = if ref2 > 0.0 {
@@ -202,9 +225,11 @@ mod tests {
         let a = vec![1.1, 0.0, -1.0, 0.0];
         let d = vec![0.5; 4];
         let m = ErrorMetrics::compute(&t, &a, &d, &[], &[], &[]);
-        // ||e|| = 0.1, ||t|| = sqrt(2) -> 7.0710678%
-        assert!((m.rms_error_pct - 100.0 * 0.1 / 2f64.sqrt()).abs() < 1e-9);
-        assert!((m.peak_error_pct - 10.0).abs() < 1e-9);
+        // The error's mean is 0.025 (the target's is 0), so about it the
+        // error is [0.075, -0.025, -0.025, -0.025]: ||e|| = sqrt(0.0075),
+        // ||t|| = sqrt(2) -> 6.1237244%, and the peak 0.075 of 1 -> 7.5%.
+        assert!((m.rms_error_pct - 100.0 * (0.0075f64 / 2.0).sqrt()).abs() < 1e-9);
+        assert!((m.peak_error_pct - 7.5).abs() < 1e-9);
         assert!((m.drive_rms - 0.5).abs() < 1e-12);
     }
 

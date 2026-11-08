@@ -121,7 +121,8 @@ are the correction share, the growth limit, and a backoff for the first drive.
 
 - **The gate:** a play at or under this rms error meets the gate at its level. **Correction plays
   at one level** is how many a level may take without meeting it before the gate-fail policy
-  applies.
+  applies. The rms error compares the response with the target over the whole record, about their
+  means: a constant offset on the control input, as a DC-coupled channel carries, is not counted.
 - **What it trusts:** the correction band (inside the identification band); the coherence floor,
   under which a bin is not trusted; the inverse floor, a share of the peak gain that keeps the
   inverse from growing where the system barely answers; the reference floor, under which a bin of

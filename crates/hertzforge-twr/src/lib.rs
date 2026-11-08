@@ -14,7 +14,8 @@
 //! inverse: G(f) = conj(H) / (|H|^2 + eps)      (Tikhonov; eps from beta_floor)
 //! init:    D_0(f)     = G(f) * R_L(f)          (R_L = level-scaled target FFT)
 //! iterate: D_{n+1}(f) = D_n(f) + beta * G(f) * (R_L(f) - Y_n(f))
-//! gate:    rms_error_pct = 100 * ||y - r_L|| / ||r_L||  <= gate  -> next level
+//! gate:    rms_error_pct = 100 * ||e - mean e|| / ||r_L - mean r_L||  <= gate  -> next level
+//!          (e = y - r_L; the 0 Hz bin is not judged, see `metrics`)
 //! ```
 //!
 //! per-bin trust gating (coherence floor + reference dynamic-range floor + band

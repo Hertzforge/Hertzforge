@@ -27,6 +27,12 @@
 //!
 //! `HERTZFORGE_RECORD_TRACE=1` rewrites the file. Only do that when the run
 //! without the seam is meant to change, and say so in the commit.
+//!
+//! Re-recorded once, when the rms and peak errors came to be taken about the
+//! record's mean (`metrics`): only the plays' `rms_pct` and `peak_pct` and the
+//! one `not_converged` trip's `error_pct` moved (at most 0.034 and 0.29
+//! points, and 0.0045), and every drive hash, gate, clamp, clip, state, level
+//! and end held.
 
 mod common;
 

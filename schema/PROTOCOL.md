@@ -3364,7 +3364,9 @@ row is still in `twr.plays`.
   where it played; `iteration` its count at that level (from 1; null for a playback play).
 - `rms_error_pct`, `peak_error_pct`, `spectral_error_db` (over the trusted bins) and `gated` are
   the service's judgement; `clipped_samples` the samples the clip held, `clamped_bins` the bins
-  the law's own growth limit or the service's cap held back.
+  the law's own growth limit or the service's cap held back. The rms and peak errors compare the
+  response with the level target over the whole record, each about its mean: a constant on the
+  measured input (a DC-coupled channel's offset) is not counted, since no correction acts at 0 Hz.
 - `drive_vpk` and `response_peak` are the peaks as played and measured; `lag_frames` the play's
   fitted lag and `drift_frames` its drift from the identification's (the alignment check), each
   null until the run's alignment check has measured them.
