@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * The run's law's parameters during the run: those the law declares live can be changed while the
-	 * run runs or holds for review, and the change applies from the next tick; every other parameter
+	 * The run's law's parameters during the run: those the law declares live can be changed once the
+	 * tone is driving at the schedule, and the change applies from the next tick; every other parameter
 	 * is shown as it was set, fixed for the run. The value shown is the one in force.
 	 */
 	import { formatNumber } from '$lib/viz/format';

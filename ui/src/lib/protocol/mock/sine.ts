@@ -110,7 +110,8 @@ const SERVO_BLEND: LawEntry = {
 	diagnostics: [
 		{ key: 'servo_step_db', label: 'Servo step', unit: 'dB', help: "The servo's part of the last tick's change.", layout: null },
 		{ key: 'prediction_step_db', label: 'Prediction step', unit: 'dB', help: "The prediction's part of the last tick's change.", layout: null },
-		{ key: 'total_step_db', label: 'Total step', unit: 'dB', help: "The change the law asked for on the last tick, before the controller's caps.", layout: null }
+		{ key: 'total_step_db', label: 'Total step', unit: 'dB', help: "The change the law asked for on the last tick, before the controller's caps.", layout: null },
+		{ key: 'servo_level_db', label: 'Servo level', unit: 'dB', help: "The servo's own drive level after the last tick, in dB relative to one drive unit.", layout: null }
 	],
 	shapes: null,
 	needs: null,
@@ -434,6 +435,8 @@ interface Run {
 	notch: boolean;
 	alarm: boolean;
 	alarms: SineAlarm[];
+	/** Control rows whose overload has latched: 95 % of the abort band's top, held to the end. */
+	overloaded: Set<number>;
 	misses: number;
 	capped: number;
 	values: Record<string, number>;
@@ -786,6 +789,7 @@ export function createSineMock(host: SineMockHost): SineMock {
 			notch: false,
 			alarm: false,
 			alarms: [],
+			overloaded: new Set(),
 			misses: 0,
 			capped: 0,
 			values: {},
@@ -950,10 +954,13 @@ export function createSineMock(host: SineMockHost): SineMock {
 		const alarms: SineAlarm[] = [];
 		if (err > pt.alarm[1]) alarms.push({ kind: 'band', side: 'high', error_db: round(err, 2) });
 		else if (err < -pt.alarm[0]) alarms.push({ kind: 'band', side: 'low', error_db: round(err, 2) });
+		// a control row's overload latches once it reaches 95 % of the abort band's top
+		if (measured >= 0.95 * pt.accel_g * scale * 10 ** (pt.abort[1] / 20)) for (const row of controlRows()) r.overloaded.add(row.index);
+		for (const channel of r.overloaded) alarms.push({ kind: 'overload', channel });
 		r.alarms = alarms;
 		r.alarm = alarms.length > 0;
 		const step = round(err * -0.3, 3);
-		r.values = r.law.builtin ? { servo_step_db: round(step * (1 - w), 3), prediction_step_db: round(step * w, 3), total_step_db: step } : r.law.diagnostics.length ? { error_db: round(err, 3) } : {};
+		r.values = r.law.builtin ? { servo_step_db: round(step * (1 - w), 3), prediction_step_db: round(step * w, 3), total_step_db: step, servo_level_db: round(db20(Math.max(drive, 1e-9)), 3) } : r.law.diagnostics.length ? { error_db: round(err, 3) } : {};
 		if (drive >= r.config.limits.drive_vpk_abort) end(r, 'aborted', 'aborted', { kind: 'drive_vpk', at_hz: round(r.freq, 2), at_level_db: r.level, at_tick: Math.round(r.t / r.derived.grid.tick_s), vpk: round(drive, 4), abort_vpk: r.config.limits.drive_vpk_abort });
 	}
 
@@ -1273,7 +1280,7 @@ export function createSineMock(host: SineMockHost): SineMock {
 				phase_deg: on ? round(ph ?? 0, 1) : null,
 				rms: on ? round((amp ?? r.measured) / Math.SQRT2, 4) : null,
 				unit: row.units,
-				overload: false
+				overload: row.role === 'control' && r.overloaded.has(row.index)
 			};
 		});
 		return {
@@ -1665,7 +1672,8 @@ export function createSineMock(host: SineMockHost): SineMock {
 				const r = needRun();
 				if (typeof params.key !== 'string' || !params.key) bad('key', '"key" names a parameter of the law.');
 				if (!isNum(params.value)) bad('value', '"value" is a number.');
-				if (r.state !== 'running' && r.state !== 'review') wrongState(r, 'An adjust');
+				// the service's order: the state, then the key and value, then the law, which is built at proceed
+				if (!(r.state === 'running' && DRIVING.includes(r.phase)) && r.state !== 'review') wrongState(r, 'An adjust');
 				const key = params.key as string;
 				const value = params.value as number;
 				const decl = r.law.params.find((p) => p.key === key);
@@ -1674,6 +1682,7 @@ export function createSineMock(host: SineMockHost): SineMock {
 				if (!(r.law.live ?? []).includes(key) || !numberParam(decl!)) no('not_live', `${decl!.label} is fixed for the run; only ${(r.law.live ?? []).join(', ') || 'no parameter'} may change.`);
 				const num = decl as Extract<LawParam, { kind: 'number' | 'integer' }>;
 				if (value < num.min || value > num.max) no('out_of_range', `${num.label} is from ${num.min} to ${num.max}.`);
+				if (r.state === 'review') wrongState(r, 'An adjust');
 				if (!r.law.builtin && key === 'kp' && value > 1.5) no('law_refused', 'The law refused it: a proportional gain over 1.5 would not hold the loop.');
 				const was = r.lawLive[key];
 				r.lawLive[key] = value;

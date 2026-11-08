@@ -99,8 +99,9 @@ export interface LiveParamState {
 const isNumber = (p: LawParam): p is Extract<LawParam, { kind: 'number' }> | Extract<LawParam, { kind: 'integer' }> => p.kind === 'number' || p.kind === 'integer';
 
 /**
- * Every number parameter of the run's law, the live ones first: each live one may be changed while
- * the run is running or holding for review, by the screen in control; the others are fixed.
+ * Every number parameter of the run's law, the live ones first: each live one may be changed once
+ * the tone is driving at the schedule (the law is built when the run proceeds from identification),
+ * by the screen in control; the others are fixed.
  */
 export function liveParams(
 	law: LawEntry | null,
@@ -110,12 +111,14 @@ export function liveParams(
 ): LiveParamState[] {
 	if (!law) return [];
 	const live = new Set(law.live ?? []);
-	const open = ctx.run?.state === 'running' || ctx.run?.state === 'review';
+	const during = ctx.run?.state === 'running' || ctx.run?.state === 'review';
+	const driving = ctx.run?.state === 'running' && DRIVING_PHASES.includes(ctx.run.phase);
 	const out = law.params.filter(isNumber).map((p): LiveParamState => {
 		const isLive = live.has(p.key);
 		let reason: string | null = null;
 		if (!isLive) reason = 'Fixed for the run.';
-		else if (!open) reason = 'Changed during a run.';
+		else if (!during) reason = 'Changed during a run.';
+		else if (!driving) reason = 'Once the tone is driving at the schedule.';
 		else if (!ctx.connected) reason = 'The control service is not connected.';
 		else if (!ctx.controller) reason = 'Take control to change it.';
 		else if (ctx.busy) reason = `Waiting for ${ctx.busy}.`;

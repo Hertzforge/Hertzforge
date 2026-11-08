@@ -200,9 +200,9 @@ identification (the coherence against the one asked for, the share of the band i
 delay it measured). When the run ends, the card says how, how long the drive took to ramp down, and
 for a protection what tripped, at which frequency and level.
 
-The **parameter card** lists the run's law's parameters: a live one can be changed while the run runs
-or holds for review, and applies from the next tick; the others show the value they were set to,
-fixed for the run.
+The **parameter card** lists the run's law's parameters: a live one can be changed once the tone is
+driving at the schedule (the law is built when the run goes on from identification), and applies from
+the next tick; the others show the value they were set to, fixed for the run.
 
 The pages, each drawn from the control service's views, against frequency in a sweep or a step test
 and against time (the last minute) in a dwell:
@@ -230,7 +230,7 @@ with the controlled stop.
 | Stopped by the operator | Stop: the drive ramped down |
 | Aborted by the operator | Abort |
 | Stopped: nobody held control | No screen held control for the timeout, or the service shut down; the drive ramped down |
-| Aborted by a protection | The control point outside its abort band, the shaker's kinematics, a limit channel outside its abort band, the drive abort, a lost control point, an input's own watchdog, the change limits holding the law back too long, or a frequency the station cannot play |
+| Aborted by a protection | The control point outside its abort band, the shaker's kinematics, a limit channel outside its abort band, the drive abort, a lost control point, an input's own watchdog, or a frequency the station cannot play; or the change limits holding the law back too long, which ramps the drive down as Stop does |
 | Held at the coherence check | The identification's coherence was too low |
 | Stopped: no usable drive from the control law | The law missed too many calls in a row, or could not be built; the drive in force was held through the misses, then ramped down |
 | Stopped on a fault | The loop or the station failed |
