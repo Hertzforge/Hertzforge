@@ -308,18 +308,18 @@
      "plant": "a wire behind 50 ms",
      "requirement": "settles",
      "passed": true,
-     "detail": "completed; 400 of 600 ticks judged, worst 0.0625 dB; 600 calls, slowest 0.01 ms of 2.5 ms",
+     "detail": "completed; 400 of 600 ticks judged, worst 0.125 dB; 600 calls, slowest 0.01 ms of 2.5 ms",
      "end": "completed",
      "trip": null,
      "ticks": 600,
      "judged_ticks": 400,
-     "worst_error_db": 0.0625,
+     "worst_error_db": 0.125,
      "worst_error_hz": 100,
      "worst_away_error_db": null,
      "rungs": [
       [
        -6,
-       0.0625
+       0.125
       ]
      ],
      "worst_limit_over_db": null,

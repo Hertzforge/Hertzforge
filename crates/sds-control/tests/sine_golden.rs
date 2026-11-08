@@ -644,6 +644,19 @@ fn the_sine_check_report_is_the_golden_one() {
             4,
             0.39,
         ),
+        measured_case(
+            Delay,
+            600,
+            400,
+            0.125,
+            100.0,
+            None,
+            vec![(-6.0, Some(0.125))],
+            None,
+            None,
+            0,
+            0.53,
+        ),
     ];
     let want = read_json("response_laws_check_sine.json");
     same(

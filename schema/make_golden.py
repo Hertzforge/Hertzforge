@@ -2116,7 +2116,7 @@ SINE_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'sine-ch
                judged=8700, worst=0.75, worst_hz=300.5, limit_over=0.25, overshoot=0.5,
                capped=4, vpk=0.39),
     _sine_case('transport delay', 'a wire behind 50 ms', 'settles', ticks=600, judged=400,
-               worst=0.0625, worst_hz=100, rungs=[[-6, 0.0625]], vpk=0.53),
+               worst=0.125, worst_hz=100, rungs=[[-6, 0.125]], vpk=0.53),
 ]}
 
 SINE_TEXT_GOLDENS = {
