@@ -401,13 +401,9 @@ pub struct LevelHistoryEntry {
     pub at_tick: u64,
 }
 
-/// One point on a swept trace: the frequency and the value logged there (the
-/// tracked-vs-f and broadband-vs-f trace families).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TracePoint {
-    pub freq_hz: f64,
-    pub value: f64,
-}
+/// One point on a swept trace (defined beside the raster, which resamples it,
+/// so the control core builds without the service).
+pub use crate::sweep_raster::TracePoint;
 
 /// The per-channel final traces for the report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
