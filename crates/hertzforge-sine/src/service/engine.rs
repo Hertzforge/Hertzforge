@@ -48,8 +48,8 @@ use crate::control::{
 };
 use crate::law::servo_blend::{self, ServoBlendLaw};
 use crate::law::{
-    Hold, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, SineControlLaw, TickInputs,
-    TickOutputs,
+    Hold, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, SineControlLaw, SineOutputRule,
+    TickInputs, TickOutputs, FIRST_DRIVE_MARGIN_DB, FIRST_DRIVE_UNTRUSTED_FRACTION,
 };
 use crate::profile::SineProfile;
 use crate::scheduler::{
@@ -707,14 +707,24 @@ pub struct SineProcessStep {
     law: Box<dyn SineControlLaw + Send>,
     /// The values the law reports, by declared index; cleared before each call.
     law_buf: LawValues,
+    /// The core's guards on the law; `None` runs it with none but the law's
+    /// own (the shipped law's 1 dB clamp).
+    law_guards: Option<LawGuards>,
+    /// The clock calls are timed on, under the guards.
+    law_clock: Option<Arc<dyn LawClock>>,
     /// The time one call may take, seconds.
     law_budget_s: f64,
     /// Calls since the law was engaged (the `tick_index` it sees).
     law_tick_index: u64,
+    /// The law was stopped (a law fault or a divergence): it is not called
+    /// again.
+    law_stopped: bool,
     /// The last unusable call's fault.
     law_last_fault: Option<LawFault>,
     /// The law's own fault judgement on its last usable call.
     law_faulted: bool,
+    /// Seconds the change cap has bound without a break.
+    capped_streak_s: f64,
     /// Where the observer finds the servo's step and level among the law's
     /// values.
     obs_ix: (Option<usize>, Option<usize>),
@@ -1076,10 +1086,14 @@ impl SineProcessStep {
             thd_bank,
             law: Box::new(ServoBlendLaw::from_parts(b.servo, b.blend)),
             law_buf: LawValues::new(servo_blend::DIAGNOSTICS.len()),
+            law_guards: None,
+            law_clock: None,
             law_budget_s: f64::INFINITY,
             law_tick_index: 0,
+            law_stopped: false,
             law_last_fault: None,
             law_faulted: false,
+            capped_streak_s: 0.0,
             obs_ix: (
                 Some(servo_blend::V_SERVO_STEP),
                 Some(servo_blend::V_SERVO_LEVEL),
@@ -1395,10 +1409,8 @@ impl SineProcessStep {
         self.law_buf = LawValues::new(descriptor.diagnostics.len());
         let ix = |key: &str| descriptor.diagnostics.iter().position(|d| d == key);
         self.obs_ix = (ix("servo_step_db"), ix("servo_level_db"));
-        // The core's guards on the law are not built yet: the law runs with
-        // none but its own (the service refuses a configuration asking for
-        // them), and its calls are not timed.
-        let _ = clock;
+        self.law_guards = guards;
+        self.law_clock = Some(clock);
         self.live_keys = descriptor.live.iter().map(|l| l.key.clone()).collect();
         self.live_values = descriptor
             .live
@@ -1450,6 +1462,11 @@ impl SineProcessStep {
         let rung_scale = 10f64.powf(start_level_db / 20.0);
         let target = self.profile.target_accel_g_pk(f).unwrap_or(0.0).max(1e-12) * rung_scale;
         let prediction_db = self.feedforward.as_ref().and_then(|ff| ff.ff_db(f));
+        let timing = self
+            .law_guards
+            .as_ref()
+            .and(self.law_clock.as_deref())
+            .map(|c| (c, self.law_budget_s));
         let inputs = TickInputs {
             tick_index: 0,
             dt_s: dt,
@@ -1466,7 +1483,7 @@ impl SineProcessStep {
             notch_ceiling: None,
             settling: true,
         };
-        let (outcome, call_s) = call_law(&mut *self.law, true, &inputs, &mut self.law_buf);
+        let (outcome, call_s) = call_law(&mut *self.law, true, &inputs, &mut self.law_buf, timing);
         self.law_calls += 1;
         self.law_values = Some(self.law_buf);
         let out = outcome.inspect_err(|f| {
@@ -1474,8 +1491,19 @@ impl SineProcessStep {
             self.law_last_fault = Some(f.clone());
         })?;
         self.law_faulted = out.faulted;
-        let drive = out.drive;
-        let capped = false;
+        let mut drive = out.drive;
+        let mut capped = false;
+        if self.law_guards.is_some() {
+            let bound = prediction_db
+                .map(|db| 10f64.powf((db + start_level_db + FIRST_DRIVE_MARGIN_DB) / 20.0))
+                .unwrap_or(FIRST_DRIVE_UNTRUSTED_FRACTION * rung_scale)
+                .min(self.drive_guard.vpk_ceiling);
+            if drive > bound {
+                drive = bound;
+                capped = true;
+                self.law_capped_ticks += 1;
+            }
+        }
         self.law_records.push(LawRecord {
             tick: 0,
             freq_hz: f,
@@ -1529,12 +1557,18 @@ impl SineProcessStep {
         )
     }
 
-    /// One tick of the law: call it, count, record. Returns the drive the core takes from
+    /// One tick of the law: call it, judge the call under the guards, cap
+    /// what it asks for, count, record. Returns the drive the core takes from
     /// the law, before the notch and the drive guard.
     ///
-    /// The law's drive is taken as it is (the shipped law clamps itself to
-    /// 1 dB a tick), which is the controller's original arithmetic; a failed
-    /// call holds the drive in force.
+    /// Without guards the law's drive is taken as it is (the shipped law
+    /// clamps itself to 1 dB a tick), which is the controller's original
+    /// arithmetic. With them: a late, failed, panicked or refused call is a
+    /// miss and the drive in force is held; `max_misses` in a row take the
+    /// controlled stop. A usable call is capped to `max_step_db` either way
+    /// and `max_rise_db_per_s` up from the drive in force; the cap binding for
+    /// `divergence_s` without a break takes the controlled stop. While a
+    /// resonance search maps the plant the law's drive is never used.
     fn law_decision(
         &mut self,
         f: f64,
@@ -1561,6 +1595,11 @@ impl SineProcessStep {
             .map(|g| g.ceiling())
             .filter(|c| c.is_finite());
         self.law_tick_index += 1;
+        let timing = self
+            .law_guards
+            .as_ref()
+            .and(self.law_clock.as_deref())
+            .map(|c| (c, self.law_budget_s));
         let inputs = TickInputs {
             tick_index: self.law_tick_index,
             dt_s: dt,
@@ -1577,7 +1616,7 @@ impl SineProcessStep {
             notch_ceiling,
             settling,
         };
-        let (outcome, call_s) = call_law(&mut *self.law, false, &inputs, &mut self.law_buf);
+        let (outcome, call_s) = call_law(&mut *self.law, false, &inputs, &mut self.law_buf, timing);
         self.law_calls += 1;
         self.law_values = Some(self.law_buf);
 
@@ -1597,22 +1636,86 @@ impl SineProcessStep {
             values: LawRecord::values_of(&self.law_buf),
         };
 
-        // The law's drive as it is; a failed call holds the drive in force.
+        let Some(guards) = self.law_guards.clone() else {
+            // No guards: the law's drive as it is; a failed call holds the
+            // drive in force. The search ignores the law's drive.
+            let drive = match outcome {
+                Ok(out) => {
+                    self.law_faulted = out.faulted;
+                    record.output = out.drive;
+                    out.drive
+                }
+                Err(fault) => {
+                    record.miss = miss_code(Some(&fault));
+                    self.law_last_fault = Some(fault);
+                    in_force
+                }
+            };
+            let drive = if hold == Hold::Probe { in_force } else { drive };
+            record.applied = drive;
+            self.law_records.push(record);
+            return drive;
+        };
+
         let drive = match outcome {
-            Ok(out) => {
-                self.law_faulted = out.faulted;
-                record.output = out.drive;
-                out.drive
-            }
             Err(fault) => {
+                self.law_misses += 1;
                 record.miss = miss_code(Some(&fault));
+                self.capped_streak_s = 0.0;
+                if self.law_misses >= guards.max_misses {
+                    let consecutive = self.law_misses;
+                    self.law_last_fault = Some(fault.clone());
+                    self.law_records.push(record);
+                    self.law_stop(TripKind::LawFault { fault, consecutive }, f);
+                    return in_force;
+                }
                 self.law_last_fault = Some(fault);
                 in_force
+            }
+            Ok(out) => {
+                self.law_misses = 0;
+                self.law_faulted = out.faulted;
+                record.output = out.drive;
+                if hold == Hold::Probe {
+                    in_force
+                } else {
+                    let (capped_drive, capped) = cap_drive(in_force, out.drive, &guards, dt);
+                    record.capped = capped;
+                    if capped {
+                        self.law_capped_ticks += 1;
+                        self.capped_streak_s += dt;
+                        if self.capped_streak_s >= guards.divergence_s - 1e-12 {
+                            let capped_s = self.capped_streak_s;
+                            record.applied = in_force;
+                            self.law_records.push(record);
+                            self.law_stop(TripKind::Divergence { capped_s }, f);
+                            return in_force;
+                        }
+                    } else {
+                        self.capped_streak_s = 0.0;
+                    }
+                    capped_drive
+                }
             }
         };
         record.applied = drive;
         self.law_records.push(record);
         drive
+    }
+
+    /// The law is done: hold the drive in force, take the controlled stop
+    /// (the 120 dB/s ramp, then the drain), and do not call the law again.
+    fn law_stop(&mut self, kind: TripKind, f: f64) {
+        let record = TripRecord {
+            kind,
+            at_freq_hz: f,
+            at_level_db: self.ladder.level_db(),
+            at_tick: self.tick_count,
+        };
+        self.abort.set_controlled(record);
+        self.law_stopped = true;
+        self.stop_requested.store(true, Ordering::Release);
+        self.ramping_down = true;
     }
 
     // --- the control tick ------------------------------------------------------
@@ -1744,6 +1847,13 @@ impl SineProcessStep {
             Hold::Free
         };
         let mut requested = self.law_decision(f, dt, target_g, measured, hold, settling);
+        if self.law_stopped && self.ramping_down {
+            // The law's misses (or its divergence) took the controlled stop on
+            // this tick: nothing below runs on a drive the law no longer owns.
+            self.publish_snapshot(broadband, notch_binding, false);
+            self.reset_tick_accumulators();
+            return;
+        }
         if !requested.is_finite() || requested < 0.0 {
             requested = 0.0;
         }
@@ -2547,20 +2657,86 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 /// Call the law once (`engage` or `tick`) into a cleared values buffer.
-/// Returns the outcome and the call's time in seconds (0: not timed).
+/// Under the guards (`timing`: the clock and the budget) the call is timed,
+/// a panic is caught, and the output checked; without them it is a plain
+/// call. Returns the outcome and the call's time in seconds (0 untimed).
 fn call_law(
     law: &mut dyn SineControlLaw,
     engage: bool,
     inputs: &TickInputs<'_>,
     values: &mut LawValues,
+    timing: Option<(&dyn LawClock, f64)>,
 ) -> (Result<TickOutputs, LawFault>, f64) {
     values.clear();
-    let r = if engage {
-        law.engage(inputs, values)
-    } else {
-        law.tick(inputs, values)
+    let Some((clock, budget_s)) = timing else {
+        let r = if engage {
+            law.engage(inputs, values)
+        } else {
+            law.tick(inputs, values)
+        };
+        return (r, 0.0);
     };
-    (r, 0.0)
+    let t0 = clock.now_s();
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if engage {
+            law.engage(inputs, values)
+        } else {
+            law.tick(inputs, values)
+        }
+    }));
+    let took_s = (clock.now_s() - t0).max(0.0);
+    let r = match caught {
+        Err(p) => Err(LawFault::Crashed(panic_text(&*p))),
+        Ok(Err(fault)) => Err(fault),
+        Ok(Ok(_)) if took_s > budget_s => Err(LawFault::OverBudget { took_s, budget_s }),
+        Ok(Ok(out)) => match output_rule(&out, values) {
+            Some(rule) => Err(LawFault::BadOutput(rule)),
+            None => Ok(out),
+        },
+    };
+    (r, took_s)
+}
+
+/// The output rule a call broke, if any: the drive finite and not below
+/// zero, every value finite. (An undeclared value is refused when the law
+/// sets it.)
+fn output_rule(out: &TickOutputs, values: &LawValues) -> Option<SineOutputRule> {
+    if !out.drive.is_finite() {
+        return Some(SineOutputRule::NonFinite);
+    }
+    if out.drive < 0.0 {
+        return Some(SineOutputRule::Negative);
+    }
+    if values.iter().any(|(_, v)| !v.is_finite()) {
+        return Some(SineOutputRule::NonFinite);
+    }
+    None
+}
+
+/// Cap a law's drive against the drive in force: at most `max_step_db`
+/// either way and at most `max_rise_db_per_s * dt` up. Returns the capped
+/// drive and whether a cap bound. A change within a billionth of a dB of a
+/// cap does not count as binding (the shipped law's own 1 dB clamp lands on
+/// the default cap exactly).
+fn cap_drive(in_force: f64, proposed: f64, g: &LawGuards, dt: f64) -> (f64, bool) {
+    const EPS_DB: f64 = 1e-9;
+    if in_force.is_nan() || in_force <= 0.0 {
+        return (proposed, false);
+    }
+    let up = g.max_step_db.min(g.max_rise_db_per_s * dt);
+    let down = g.max_step_db;
+    let step_db = if proposed > 0.0 {
+        20.0 * (proposed / in_force).log10()
+    } else {
+        f64::NEG_INFINITY
+    };
+    if step_db > up + EPS_DB {
+        (in_force * 10f64.powf(up / 20.0), true)
+    } else if step_db < -(down + EPS_DB) {
+        (in_force * 10f64.powf(-down / 20.0), true)
+    } else {
+        (proposed, false)
+    }
 }
 
 /// Linear interpolation of `values` at `f` on a strictly-increasing `freqs`

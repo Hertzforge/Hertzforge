@@ -48,14 +48,15 @@
 //! buffers, the output is `Copy`, and diagnostics go into a [`LawValues`]
 //! buffer the core owns.
 //!
-//! # State of this seam
+//! # Where it is built
 //!
 //! The service builds the run's law with its factory after identification
 //! ([`crate::SineService::with_law_factory`]; without one, the built-in
-//! [`servo_blend`]) and the step calls it every tick. The guards are not built
-//! yet: the service refuses a configuration that sets
-//! [`crate::SineTestConfig::law_guards`] or
-//! [`crate::SineTestConfig::control_tick_s`].
+//! [`servo_blend`]), engages it before the engage lead-in, and the step calls
+//! it every tick under the guards the configuration sets
+//! ([`crate::SineTestConfig::law_guards`]), timed on the service's clock
+//! ([`crate::SineService::with_law_clock`]). Without guards the law runs with
+//! none but its own: the shipped law's 1 dB clamp, the original arithmetic.
 
 pub mod servo_blend;
 
