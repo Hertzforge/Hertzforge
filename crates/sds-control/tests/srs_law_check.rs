@@ -76,6 +76,12 @@ async fn the_srs_world_lists_the_built_in_law_first() {
     let laws = srs["laws"].as_array().unwrap();
     assert_eq!(laws[0]["id"], "srs_ratio");
     assert!(laws.iter().all(|l| l["world"] == "shock_srs"));
+    // The catalog's entry, once.
+    assert_eq!(
+        laws.iter().filter(|l| l["id"] == "srs_ratio").count(),
+        1,
+        "{laws:?}"
+    );
     let golden: Value = serde_json::from_str(
         &std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -87,6 +93,15 @@ async fn the_srs_world_lists_the_built_in_law_first() {
     assert_eq!(laws[0], golden["result"]["laws"][0]);
     let all = c.ok("laws.list", json!({})).await;
     schema.assert_valid(&all, Some("lawsListResult"));
+    assert_eq!(
+        all["laws"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["id"] == "srs_ratio")
+            .count(),
+        1
+    );
     let worlds: Vec<&str> = all["laws"]
         .as_array()
         .unwrap()

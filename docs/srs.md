@@ -108,8 +108,9 @@ the bands the table has and fills the rest.
   run. There are no trains or bursts in SRS shock.
 - **Levels:** from the first level to full level, 0 dB, the last, each with its pulses.
 - **When a level is done:** on passing pulses (the usual choice: a pulse passes when every band is
-  inside the alarm band, the law keeps correcting until a level's pulses pass, and too many tries at
-  one level end the run as not converged), or after its pulses, passed or not.
+  inside the alarm band, but for a band a limit channel holds down reading low; the law keeps
+  correcting until a level's pulses pass, and too many tries at one level end the run as not
+  converged), or after its pulses, passed or not.
 - **Time between pulses:** at least the largest of the cooling, settling and computing times. It
   also sets the control law's time budget, a share of it.
 
@@ -170,7 +171,9 @@ asks for: a fixture's resonance, a sensitive part of the article.
 At the seed the controller plans a notch: where a limit channel's prediction at full level would
 pass its bound, the drive is notched there, and the control SRS sits under the target in those
 bands by what the notch takes. Before each pulse it caps every component by what the predictions
-leave; a falling gain always wins. Once planned, the notch shows here and on the run: how many bands
+leave; a falling gain always wins. A band the notch cut, or one within half an octave of it, that
+reads under the target is held there on purpose: it still alarms, but it does not stop a pulse
+passing. A band over the target, or outside the abort band, still does. Once planned, the notch shows here and on the run: how many bands
 it notched and the worst prediction before and after.
 
 ## Capture
