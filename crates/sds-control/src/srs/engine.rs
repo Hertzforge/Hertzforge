@@ -106,6 +106,11 @@ pub trait SrsEngine: Send {
     fn abort(&mut self, reason: &str);
     fn position(&self) -> Position;
     fn identification(&self) -> Option<IdentFigures>;
+    /// The predicted full-level drive and response for the table in force, once
+    /// seeded; `None` leaves the state's prediction as the seed made it.
+    fn prediction(&self) -> Option<Prediction> {
+        None
+    }
     fn notch(&self) -> Option<Notch>;
     fn law_values(&self) -> Vec<LawReading>;
     /// Unusable law calls in a row now.
@@ -172,6 +177,18 @@ pub fn row_of(p: &PulseRow) -> Row {
             miss: l.miss.as_ref().map(|f| f.reason()),
             call_ms: l.call_ms,
         }),
+    }
+}
+
+/// A controller prediction on the wire.
+fn prediction_of(p: &hertzforge_srs::service::report::DrivePrediction) -> Prediction {
+    Prediction {
+        drive_vpk: p.drive_vpk,
+        drive_vpk_ceiling: p.drive_vpk_ceiling,
+        drive_vpk_abort: p.drive_vpk_abort,
+        response_peak_g: p.response_peak_g,
+        velocity_pk_ips: p.velocity_pk_ips,
+        displacement_pk_pk_in: p.displacement_pk_pk_in,
     }
 }
 
@@ -862,14 +879,7 @@ impl SrsEngine for ServiceEngine {
             .status()
             .prediction
             .ok_or_else(|| fault("the law's seed made no prediction"))?;
-        Ok(Seeded::Ready(Prediction {
-            drive_vpk: p.drive_vpk,
-            drive_vpk_ceiling: p.drive_vpk_ceiling,
-            drive_vpk_abort: p.drive_vpk_abort,
-            response_peak_g: p.response_peak_g,
-            velocity_pk_ips: p.velocity_pk_ips,
-            displacement_pk_pk_in: p.displacement_pk_pk_in,
-        }))
+        Ok(Seeded::Ready(prediction_of(&p)))
     }
 
     fn fire(&mut self) -> Result<Fired, MethodError> {
@@ -980,6 +990,15 @@ impl SrsEngine for ServiceEngine {
             unit: self.unit.clone(),
             limit_frf,
         })
+    }
+
+    fn prediction(&self) -> Option<Prediction> {
+        self.svc
+            .as_ref()?
+            .status()
+            .prediction
+            .as_ref()
+            .map(prediction_of)
     }
 
     fn notch(&self) -> Option<Notch> {

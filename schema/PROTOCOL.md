@@ -2390,7 +2390,8 @@ input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unkno
 ```
 
 `state`, `phase`, `level_db`, `rung`, `pulses`, `next_pulse_s`, `prediction`, `last_pulse`,
-`law`, `feasibility` and `end` are as "Classical Shock Run State" has them. `pulses.passed` counts
+`law`, `feasibility` and `end` are as "Classical Shock Run State" has them; `prediction` is
+the table in force's, renewed after every pulse as the law moves the table. `pulses.passed` counts
 the pulses that passed (`passed` in their rows). `identification` is null until identification is
 done, then the excitation, the burst's peak and its cap (volts), and its mean in-band coherence
 against the hold. `notch` is null without limit channels, then the arm-time notch: the bands it

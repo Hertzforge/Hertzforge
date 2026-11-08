@@ -621,6 +621,10 @@ impl Actor {
         }
         self.data.add_pulses(fired.rows, fired.figures);
         self.data.set_law(self.engine.law_values());
+        // The law moved the table: the prediction is the table in force's.
+        if let Some(p) = self.engine.prediction() {
+            self.view.prediction = Some(p);
+        }
         if let Some(end) = fired.end {
             self.end_engine(end);
             return;
