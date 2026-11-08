@@ -17,6 +17,7 @@
 //! the level).
 
 pub mod config;
+pub mod plays;
 pub mod report;
 
 use std::path::{Path, PathBuf};
@@ -27,19 +28,21 @@ use hertzforge_dsp::fft::Cplx;
 use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use serde::{Deserialize, Serialize};
 
-use crate::control::TwrLawFactory;
+use crate::control::{PlayKind, TwrLawFactory};
 use crate::grid::{irfft_half, rfft_half, RecordGrid};
 use crate::inverse::GridInverse;
 use crate::law;
-use crate::limits::FeasibilityReport;
+use crate::limits::{FeasibilityReport, LimitTrip};
 use crate::metrics::{ConvergenceHistory, ConvergenceRecord, ErrorMetrics};
 use crate::player::{ReferencePlayer, TwrPathCapabilities};
 use crate::reference::ReferenceWaveform;
 use crate::schedule::{Section, TwrLadderState, TwrRunMode};
 use crate::sysid::SysIdResult;
+use crate::trip::{TripKind, TwrTrip};
 use crate::TwrError;
 
 pub use config::TwrConfig;
+pub use plays::PlayRow;
 
 /// The service state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,10 +96,13 @@ pub enum Advanced {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TwrStatus {
     pub state: TwrState,
-    /// Honest path label (which delivery path, which plant).
+    /// Which delivery path, on which station: `host delivery on <station>`.
     pub path_label: String,
     pub level_db: f64,
     pub level_index: usize,
+    /// The table level the run is on; `None` while a manual trim has moved it
+    /// off the table's levels.
+    pub rung: Option<usize>,
     pub iterations_at_level: u32,
     pub total_iterations: usize,
     pub converged_at_level: bool,
@@ -121,10 +127,20 @@ pub struct TwrStatus {
     /// is being flattened.
     pub clipped_frac: f64,
     pub abort_reason: Option<String>,
+    /// What the core ended the run on, with its numbers. `None` while the run
+    /// is live and on every end the core did not trip: completion, a stop, and
+    /// the operator's abort.
+    pub trip: Option<TwrTrip>,
     pub feasibility_blocked: bool,
     pub adapt_frozen: bool,
     pub capturing: bool,
     pub run_clock_s: f64,
+    /// Station time: the frames the station clocked over every play and its
+    /// rest pad since the run armed, the identification included.
+    pub station_frames: u64,
+    /// `station_frames` in seconds at the rate the station runs at (the rate it
+    /// adopted, once it has said; the requested rate before).
+    pub station_s: f64,
     /// The rate the run was BUILT against (the prepared record's rate).
     pub requested_fs_hz: f64,
     /// The rate the device actually programmed, once it has said. `None`
@@ -177,6 +193,12 @@ pub struct TwrService<P: ReferencePlayer> {
     events: Vec<String>,
     run_clock_s: f64,
     capture: Option<CaptureSink>,
+    /// One row per play after the identification ([`PlayRow`]).
+    plays: Vec<PlayRow>,
+    /// Frames the station clocked over every play and pad since the run armed.
+    station_frames: u64,
+    /// What the core ended the run on, when it tripped.
+    trip: Option<TwrTrip>,
 
     // --- the control-law seam -----------------------------------------------------
     /// The factory a closed-loop run builds its control law with, at proceed.
@@ -307,6 +329,9 @@ impl<P: ReferencePlayer> TwrService<P> {
             events: Vec::new(),
             run_clock_s: 0.0,
             capture: None,
+            plays: Vec::new(),
+            station_frames: 0,
+            trip: None,
             law_factory: None,
             law_clock: Arc::new(MonotonicClock::new()),
         };
@@ -409,8 +434,19 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// the run ABORTED with a stream-error string the operator had never seen.
     /// Stop is not an abort - the operator asked, no guard tripped - so it ends
     /// `Stopped`, and the error still propagates so the unit unwinds.
+    ///
+    /// Station time moves here, on every outcome: whatever the station clocked
+    /// for the play, its rest pad and a cancelled play's frames included.
     fn play_through(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
-        match self.player.play(drive) {
+        let played = self.player.play(drive);
+        let fallback = match &played {
+            Ok(_) => drive.len(),
+            Err(TwrError::Cancelled { frames_done, .. }) => *frames_done,
+            Err(_) => 0,
+        };
+        let clocked = self.player.last_play_frames().unwrap_or(fallback);
+        self.station_frames = self.station_frames.saturating_add(clocked as u64);
+        match played {
             Err(TwrError::Cancelled {
                 frames_done,
                 frames_expected,
@@ -447,17 +483,22 @@ impl<P: ReferencePlayer> TwrService<P> {
             clipped as f64 / excitation.len() as f64
         };
         // The ranging excitation is DRIVE: the ceiling binds it too.
-        if let Some(reason) = self.config.limits.check_drive_peak(&excitation) {
-            return self.abort_with(reason);
+        if let Some(t) = self.config.limits.drive_peak_trip(&excitation) {
+            return self.trip_with(t, None);
         }
-        if let Some(reason) = self.config.limits.check_drive(&excitation) {
-            return self.abort_with(reason);
+        if let Some(t) = self.config.limits.drive_rms_trip(&excitation) {
+            return self.trip_with(t, None);
         }
         let response = match self.play_through(&excitation)? {
             Some(y) => y,
             None => {
-                return self
-                    .abort_with("sysid response not observable on this delivery path".to_string())
+                return self.trip_with(
+                    LimitTrip {
+                        kind: TripKind::NoResponse,
+                        message: "sysid response not observable on this delivery path".to_string(),
+                    },
+                    None,
+                )
             }
         };
         self.run_clock_s += excitation.len() as f64 / fs;
@@ -514,14 +555,27 @@ impl<P: ReferencePlayer> TwrService<P> {
         // caught HERE, not discovered as an unexplainable gate failure later.
         let coverage = law::mask_energy_coverage(&self.prepared.r_full, &mask);
         if coverage < self.config.law.min_masked_energy_frac {
-            return self.abort_with(format!(
+            let floor = self.config.law.min_masked_energy_frac;
+            let error_floor_pct = 100.0 * (1.0 - coverage).sqrt();
+            let message = format!(
                 "trust mask covers only {:.1}% of the target spectral energy (floor {:.1}%): \
                  reference content is outside the correctable band (band limits, coherence, \
                  or the reference floor) - the residual error can never drop below ~{:.0}%",
                 coverage * 100.0,
-                self.config.law.min_masked_energy_frac * 100.0,
-                100.0 * (1.0 - coverage).sqrt()
-            ));
+                floor * 100.0,
+                error_floor_pct
+            );
+            return self.trip_with(
+                LimitTrip {
+                    kind: TripKind::Coverage {
+                        coverage,
+                        min_band_energy: floor,
+                        error_floor_pct,
+                    },
+                    message,
+                },
+                None,
+            );
         }
         self.mask_coverage = Some(coverage);
 
@@ -571,7 +625,10 @@ impl<P: ReferencePlayer> TwrService<P> {
 
     /// Play the current drive once and check the limit engine. Shared by the
     /// iteration and playback units.
-    fn play_current(&mut self, target_l: &[f64]) -> Result<(Vec<f64>, Vec<Cplx>, usize), TwrError> {
+    ///
+    /// The played drive and response land in `last_drive` and `last_achieved`
+    /// whether or not the response check tripped.
+    fn play_current(&mut self, target_l: &[f64]) -> Result<PlayStep, TwrError> {
         let mut drive = irfft_half(&self.drive_spec, self.prepared.grid.n);
         let clipped = self.config.limits.apply_drive_clip(&mut drive);
         self.last_clipped_frac = if drive.is_empty() {
@@ -584,20 +641,23 @@ impl<P: ReferencePlayer> TwrService<P> {
             self.drive_spec = rfft_half(&drive, self.prepared.grid.n);
         }
         // THE CEILING, on the realized record and before the player sees it.
-        if let Some(reason) = self.config.limits.check_drive_peak(&drive) {
-            return Err(TwrError::Aborted(reason));
+        if let Some(t) = self.config.limits.drive_peak_trip(&drive) {
+            return Ok(PlayStep::Ended(t));
         }
-        if let Some(reason) = self.config.limits.check_drive(&drive) {
-            return Err(TwrError::Aborted(reason));
+        if let Some(t) = self.config.limits.drive_rms_trip(&drive) {
+            return Ok(PlayStep::Ended(t));
         }
+        let start_frame = self.station_frames;
         let achieved = match self.play_through(&drive)? {
             Some(y) => y,
             None => {
-                return Err(TwrError::Aborted(
-                    "response not observable on this delivery path".to_string(),
-                ))
+                return Ok(PlayStep::Ended(LimitTrip {
+                    kind: TripKind::NoResponse,
+                    message: "response not observable on this delivery path".to_string(),
+                }))
             }
         };
+        let frames = self.station_frames - start_frame;
         self.run_clock_s += drive.len() as f64 / self.player.fs_hz();
 
         let outcome = self.config.limits.check_response(target_l, &achieved);
@@ -612,28 +672,80 @@ impl<P: ReferencePlayer> TwrService<P> {
         let y_half = rfft_half(&achieved, self.prepared.grid.n);
         self.last_drive = drive;
         self.last_achieved = achieved;
-        if let Some(reason) = outcome.abort {
-            return Err(TwrError::Aborted(reason));
-        }
-        Ok((self.last_achieved.clone(), y_half, clipped))
+        Ok(PlayStep::Played(Played {
+            y_half,
+            clipped,
+            start_frame,
+            frames,
+            tripped: outcome.trip,
+        }))
+    }
+
+    /// Append the row of the play just played (its drive and response are
+    /// `last_drive` and `last_achieved`) at the level the ladder is on now, and
+    /// return its index.
+    fn push_row(
+        &mut self,
+        played: &Played,
+        kind: PlayKind,
+        iteration: Option<u32>,
+        metrics: ErrorMetrics,
+        gated: bool,
+        clamped_bins: usize,
+    ) -> u64 {
+        let peak = |v: &[f64]| v.iter().fold(0.0f64, |m, &x| m.max(x.abs()));
+        let index = self.plays.len() as u64;
+        let row = PlayRow {
+            index,
+            kind,
+            level_db: self.ladder.current_level_db(),
+            rung: self.ladder.rung(),
+            iteration,
+            metrics,
+            gated,
+            clipped_samples: played.clipped,
+            clamped_bins,
+            drive_vpk: peak(&self.last_drive),
+            response_peak: peak(&self.last_achieved),
+            lag_frames: None,
+            drift_frames: None,
+            start_frame: played.start_frame,
+            frames: played.frames,
+            at_s: self.station_seconds(played.start_frame),
+        };
+        self.plays.push(row);
+        index
     }
 
     fn do_iteration(&mut self) -> Result<Advanced, TwrError> {
         let (target_l, r_l) = self.level_target();
-        let (achieved, y_half, clipped) = match self.play_current(&target_l) {
-            Ok(v) => v,
-            Err(TwrError::Aborted(r)) => return self.abort_with(r),
-            Err(e) => return Err(e),
+        let played = match self.play_current(&target_l)? {
+            PlayStep::Ended(t) => return self.trip_with(t, None),
+            PlayStep::Played(p) => p,
         };
 
         let metrics = ErrorMetrics::compute(
             &target_l,
-            &achieved,
+            &self.last_achieved,
             &self.last_drive,
             &r_l,
-            &y_half,
+            &played.y_half,
             &self.mask,
         );
+        if let Some(t) = played.tripped.clone() {
+            // Played, measured and tripped: the play's row, then the end. The
+            // ladder does not count it and nothing is corrected from it.
+            let iteration = self.ladder.iterations_at_level().saturating_add(1);
+            let index = self.push_row(
+                &played,
+                PlayKind::Iteration,
+                Some(iteration),
+                metrics,
+                false,
+                0,
+            );
+            return self.trip_with(t, Some(index));
+        }
         let iteration = self.ladder.on_iteration();
         let level_db = self.ladder.current_level_db();
 
@@ -645,7 +757,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             clamped_bins = law::correct(
                 &mut self.drive_spec,
                 &r_l,
-                &y_half,
+                &played.y_half,
                 inv,
                 &self.mask,
                 &self.config.law,
@@ -657,21 +769,39 @@ impl<P: ReferencePlayer> TwrService<P> {
             iteration,
             metrics,
             clamped_bins,
-            clipped_samples: clipped,
+            clipped_samples: played.clipped,
         };
         self.history.push(record);
+        let index = self.push_row(
+            &played,
+            PlayKind::Iteration,
+            Some(iteration),
+            metrics,
+            converged,
+            clamped_bins,
+        );
 
         // Divergence guard.
+        let divergence_n = self.config.limits.divergence_n;
         if self.history.is_diverging(
             level_db,
             self.ladder.schedule().gate_rms_error_pct,
             self.config.limits.divergence_tol_frac,
-            self.config.limits.divergence_n,
+            divergence_n,
         ) {
-            return self.abort_with(format!(
-                "diverging at {level_db} dB: rms error rose {} consecutive iterations",
-                self.config.limits.divergence_n
-            ));
+            return self.trip_with(
+                LimitTrip {
+                    kind: TripKind::Divergence {
+                        plays: divergence_n,
+                        error_pct: metrics.rms_error_pct,
+                    },
+                    message: format!(
+                        "diverging at {level_db} dB: rms error rose {divergence_n} consecutive \
+                         iterations"
+                    ),
+                },
+                Some(index),
+            );
         }
 
         if converged {
@@ -681,8 +811,15 @@ impl<P: ReferencePlayer> TwrService<P> {
             ));
             if self.ladder.schedule().mode == TwrRunMode::Auto {
                 if let Some(step_db) = self.ladder.advance_level() {
-                    if let Err(e) = self.scale_drive_db(step_db) {
-                        return self.abort_with(format!("auto ladder advance: {e}"));
+                    if let Err(refused) = self.scale_drive_db(step_db) {
+                        // Found on the step's exact projection: nothing played.
+                        return self.trip_with(
+                            LimitTrip {
+                                kind: refused.kind,
+                                message: format!("auto ladder advance: {}", refused.error),
+                            },
+                            None,
+                        );
                     }
                 } else if self.ladder.completed() {
                     self.state = TwrState::Playing;
@@ -693,11 +830,25 @@ impl<P: ReferencePlayer> TwrService<P> {
             // MANUAL: hold converged at the level; the operator steps or starts
             // playback explicitly.
         } else if self.ladder.budget_exhausted() {
+            let max_iterations = self.ladder.schedule().max_iterations_per_level;
             return match self.ladder.schedule().on_gate_fail {
-                crate::schedule::GateFailPolicy::Abort => self.abort_with(format!(
-                    "level {level_db} dB failed to gate within {} iterations",
-                    self.ladder.schedule().max_iterations_per_level
-                )),
+                crate::schedule::GateFailPolicy::Abort => {
+                    let gate_pct = self.ladder.schedule().gate_rms_error_pct;
+                    self.trip_with(
+                        LimitTrip {
+                            kind: TripKind::NotConverged {
+                                iterations: max_iterations,
+                                error_pct: metrics.rms_error_pct,
+                                gate_pct,
+                            },
+                            message: format!(
+                                "level {level_db} dB failed to gate within {max_iterations} \
+                                 iterations"
+                            ),
+                        },
+                        Some(index),
+                    )
+                }
                 crate::schedule::GateFailPolicy::Hold => {
                     self.state = TwrState::Holding;
                     self.log(&format!(
@@ -712,18 +863,31 @@ impl<P: ReferencePlayer> TwrService<P> {
 
     fn do_play(&mut self) -> Result<Advanced, TwrError> {
         let (target_l, r_l) = self.level_target();
-        let (achieved, y_half, clipped) = match self.play_current(&target_l) {
-            Ok(v) => v,
-            Err(TwrError::Aborted(r)) => return self.abort_with(r),
-            Err(e) => return Err(e),
+        let played = match self.play_current(&target_l)? {
+            PlayStep::Ended(t) => return self.trip_with(t, None),
+            PlayStep::Played(p) => p,
         };
+        if let Some(t) = played.tripped.clone() {
+            // Played, measured and tripped: the play's row, then the end.
+            let metrics = ErrorMetrics::compute(
+                &target_l,
+                &self.last_achieved,
+                &self.last_drive,
+                &r_l,
+                &played.y_half,
+                &self.mask,
+            );
+            let index = self.push_row(&played, PlayKind::Playback, None, metrics, false, 0);
+            return self.trip_with(t, Some(index));
+        }
         // Optional continued adaptation during playback (default OFF).
+        let mut clamped_bins = 0usize;
         if self.config.adapt_during_playback && !self.adapt_frozen {
             let inv = self.inv.as_ref().expect("playing implies inverse");
-            law::correct(
+            clamped_bins = law::correct(
                 &mut self.drive_spec,
                 &r_l,
-                &y_half,
+                &played.y_half,
                 inv,
                 &self.mask,
                 &self.config.law,
@@ -732,10 +896,10 @@ impl<P: ReferencePlayer> TwrService<P> {
         // Keep the metrics stream alive for the UI during playback.
         let metrics = ErrorMetrics::compute(
             &target_l,
-            &achieved,
+            &self.last_achieved,
             &self.last_drive,
             &r_l,
-            &y_half,
+            &played.y_half,
             &self.mask,
         );
         self.history.push(ConvergenceRecord {
@@ -743,8 +907,18 @@ impl<P: ReferencePlayer> TwrService<P> {
             iteration: 0, // 0 marks a playback play, not a correction pass
             metrics,
             clamped_bins: 0,
-            clipped_samples: clipped,
+            clipped_samples: played.clipped,
         });
+        // Judged against the same gate as the ladder, without moving it.
+        let gated = metrics.rms_error_pct <= self.ladder.schedule().gate_rms_error_pct;
+        self.push_row(
+            &played,
+            PlayKind::Playback,
+            None,
+            metrics,
+            gated,
+            clamped_bins,
+        );
 
         self.plays_completed += 1;
         let target = self.config.run.plays_target(self.prepared.section_s);
@@ -764,9 +938,26 @@ impl<P: ReferencePlayer> TwrService<P> {
         })
     }
 
+    /// End the run on a trip the core found: the trip is recorded with the play
+    /// it judged and the level now, and the sentence becomes the abort reason.
+    fn trip_with(&mut self, t: LimitTrip, play: Option<u64>) -> Result<Advanced, TwrError> {
+        let trip = TwrTrip {
+            kind: t.kind,
+            play,
+            at_level_db: self.ladder.current_level_db(),
+        };
+        self.end_with(Some(trip), t.message)
+    }
+
+    /// End the run with no trip: the operator's abort.
     fn abort_with(&mut self, reason: String) -> Result<Advanced, TwrError> {
+        self.end_with(None, reason)
+    }
+
+    fn end_with(&mut self, trip: Option<TwrTrip>, reason: String) -> Result<Advanced, TwrError> {
         self.log(&format!("ABORT: {reason}"));
         self.abort_reason = Some(reason);
+        self.trip = trip;
         self.state = TwrState::Aborted;
         let _ = self.player.stop();
         self.player_armed = false;
@@ -785,17 +976,21 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// The projection is EXACT, not an estimate: scaling every bin by `s`
     /// scales the time record by exactly `s`, so the realized peak after the
     /// step is `peak(irfft(drive_spec)) * s` with no play required.
-    fn scale_drive_db(&mut self, step_db: f64) -> Result<(), TwrError> {
+    fn scale_drive_db(&mut self, step_db: f64) -> Result<(), StepRefused> {
         let s = 10f64.powf(step_db / 20.0);
         if !self.drive_spec.is_empty() {
             let realized = irfft_half(&self.drive_spec, self.prepared.grid.n);
             let peak_after = realized.iter().fold(0.0f64, |m, &v| m.max(v.abs())) * s;
-            if let Some(reason) = self.config.limits.check_peak_value(peak_after) {
+            if let Some(t) = self.config.limits.peak_value_trip(peak_after, true) {
+                let reason = t.message;
                 self.log(&format!("level step {step_db:+.1} dB REFUSED: {reason}"));
-                return Err(TwrError::State(format!(
-                    "level step {step_db:+.1} dB refused: {reason}. The level and the drive \
-                     are unchanged"
-                )));
+                return Err(StepRefused {
+                    kind: t.kind,
+                    error: TwrError::State(format!(
+                        "level step {step_db:+.1} dB refused: {reason}. The level and the drive \
+                         are unchanged"
+                    )),
+                });
             }
         }
         for c in self.drive_spec.iter_mut() {
@@ -817,7 +1012,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// reached.
     pub fn step_level_up(&mut self) -> Result<(), TwrError> {
         self.require_live()?;
-        self.scale_drive_db(crate::schedule::MANUAL_STEP_DB)?;
+        self.scale_drive_db(crate::schedule::MANUAL_STEP_DB)
+            .map_err(|r| r.error)?;
         self.ladder.step_up();
         self.unhold();
         Ok(())
@@ -826,7 +1022,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// Manual -1 dB trim.
     pub fn step_level_down(&mut self) -> Result<(), TwrError> {
         self.require_live()?;
-        self.scale_drive_db(-crate::schedule::MANUAL_STEP_DB)?;
+        self.scale_drive_db(-crate::schedule::MANUAL_STEP_DB)
+            .map_err(|r| r.error)?;
         self.ladder.step_down();
         self.unhold();
         Ok(())
@@ -838,7 +1035,7 @@ impl<P: ReferencePlayer> TwrService<P> {
         // The step is COMPUTED before it is taken, so a ceiling refusal does
         // not leave the ladder somewhere the drive never followed it to.
         let step = self.ladder.jump_step_to(i)?;
-        self.scale_drive_db(step)?;
+        self.scale_drive_db(step).map_err(|r| r.error)?;
         let applied = self.ladder.jump_to_level(i)?;
         debug_assert!((applied - step).abs() < 1e-12, "jump step disagreed");
         self.unhold();
@@ -934,8 +1131,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// property imported from a module that has one).
     ///
     /// What it clears: the FRF and its inverse, the trust mask, the drive
-    /// spectrum, the convergence history, the ladder position, the alarm and
-    /// abort latches. What it keeps: the config, the prepared reference, the
+    /// spectrum, the convergence history, the plays table, station time, the
+    /// ladder position, the alarm and abort latches and the trip. What it keeps: the config, the prepared reference, the
     /// feasibility verdict and its override-ack (the operator already answered
     /// that question, and re-asking it would train them to click through).
     /// A cancel raised by an earlier stop is NOT cleared here: the player
@@ -959,6 +1156,9 @@ impl<P: ReferencePlayer> TwrService<P> {
         self.abort_reason = None;
         self.adapt_frozen = false;
         self.last_clipped_frac = 0.0;
+        self.plays.clear();
+        self.station_frames = 0;
+        self.trip = None;
         self.state = if self.feasibility.blocked && self.override_ack.is_none() {
             TwrState::FeasibilityBlocked
         } else {
@@ -1049,28 +1249,32 @@ impl<P: ReferencePlayer> TwrService<P> {
         &self.prepared.prepared_reference
     }
 
-    /// The honesty banner: WHICH path, on WHICH station, with WHAT evidence.
-    ///
-    /// All three are derived, none is a constant. The string this replaces was
-    /// hardcoded "acceptance = Sim convergence (real delegated drive pending the arm
-    /// capture)" and it shipped in the panel long after TWR had run on NI - a
-    /// claim about a station the run might not be on and a gap that was no
-    /// longer the live one. The current gap IS worth naming: ZERO TWR
-    /// replication iterations have run on hardware (the 2026-07-30 sweep called
-    /// `run_to_completion(1)`, which from Configured is the sysid pass and
-    /// nothing else), so the posture is "chassis gate pending" until the chassis
-    /// gate's rows pass twice and the result is recorded.
+    /// The status label: which delivery path, on which station, as the player
+    /// states them (`host delivery on HERTZFORGE-SIM`). Derived, never a
+    /// constant, so it cannot name a station the run is not on. The report's
+    /// note is the same sentence.
     fn honest_path_label(&self) -> String {
         let station = self
             .player
             .station_label()
             .unwrap_or_else(|| "an unnamed station".to_string());
-        format!(
-            "{:?} delivery on {station}; host-owned iterative inverse-FRF law (it runs \
-             BETWEEN plays, on every path); evidence: CHASSIS GATE PENDING - no TWR \
-             replication iteration has yet run on hardware",
-            self.player.path()
-        )
+        let delivery = match self.player.path() {
+            crate::player::TwrPath::HostBackend => "host",
+            crate::player::TwrPath::Delegated => "delegated",
+        };
+        format!("{delivery} delivery on {station}")
+    }
+
+    /// The rate station time is counted at: the rate the station adopted, once
+    /// it has said, and the requested rate before.
+    fn station_rate_hz(&self) -> f64 {
+        self.player
+            .actual_fs_hz()
+            .unwrap_or_else(|| self.player.fs_hz())
+    }
+
+    fn station_seconds(&self, frames: u64) -> f64 {
+        frames as f64 / self.station_rate_hz()
     }
 
     /// Take what the player's display tap has collected since the last drain
@@ -1126,6 +1330,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             path_label: self.honest_path_label(),
             level_db: self.ladder.current_level_db(),
             level_index: self.ladder.level_index(),
+            rung: self.ladder.rung(),
             iterations_at_level: self.ladder.iterations_at_level(),
             total_iterations: self
                 .history
@@ -1143,10 +1348,13 @@ impl<P: ReferencePlayer> TwrService<P> {
             alarm_active: self.alarm_latched,
             clipped_frac: self.last_clipped_frac,
             abort_reason: self.abort_reason.clone(),
+            trip: self.trip.clone(),
             feasibility_blocked: self.state == TwrState::FeasibilityBlocked,
             adapt_frozen: self.adapt_frozen,
             capturing: self.capture.is_some(),
             run_clock_s: self.run_clock_s,
+            station_frames: self.station_frames,
+            station_s: self.station_seconds(self.station_frames),
             requested_fs_hz: self.player.fs_hz(),
             actual_fs_hz: self.player.actual_fs_hz(),
         }
@@ -1188,6 +1396,50 @@ impl<P: ReferencePlayer> TwrService<P> {
             .enumerate()
             .map(|(k, &(re, im))| (k as f64 * df, (re * re + im * im).sqrt()))
             .collect()
+    }
+
+    /// FRF phase on the sysid grid beside [`Self::frf_mag`]: `(freq_hz,
+    /// degrees)`, in `[-180, 180]`. The identification's own convention: a
+    /// response that lags its drive has a negative phase (a delay of `d` frames
+    /// reads `-360 f d / fs`, wrapped).
+    pub fn frf_phase_deg(&self) -> Vec<(f64, f64)> {
+        let Some(s) = self.sysid.as_ref() else {
+            return Vec::new();
+        };
+        let df = s.df();
+        s.h.iter()
+            .enumerate()
+            .map(|(k, &(re, im))| (k as f64 * df, im.atan2(re).to_degrees()))
+            .collect()
+    }
+
+    /// The trust mask as a curve on the record grid: `(freq_hz, 1.0)` on a bin
+    /// the correction trusts (in the correction band, the reference within its
+    /// floor, the coherence at or over its floor), `(freq_hz, 0.0)` elsewhere.
+    /// Empty until the identification has built it.
+    pub fn trust_mask(&self) -> Vec<(f64, f64)> {
+        self.mask
+            .iter()
+            .enumerate()
+            .map(|(k, &m)| (self.prepared.grid.freq(k), if m { 1.0 } else { 0.0 }))
+            .collect()
+    }
+
+    /// The plays table, oldest first: one row per play after the
+    /// identification ([`PlayRow`]).
+    pub fn plays(&self) -> &[PlayRow] {
+        &self.plays
+    }
+
+    /// Station time, frames: what the station clocked over every play and pad
+    /// since the run armed.
+    pub fn station_frames(&self) -> u64 {
+        self.station_frames
+    }
+
+    /// What the core ended the run on, when it tripped.
+    pub fn trip(&self) -> Option<&TwrTrip> {
+        self.trip.as_ref()
     }
 
     /// Coherence on the sysid grid: `(freq_hz, gamma^2)` (trace 984).
@@ -1268,6 +1520,33 @@ impl<P: ReferencePlayer> TwrService<P> {
     pub(crate) fn override_ack(&self) -> Option<&str> {
         self.override_ack.as_deref()
     }
+}
+
+/// What playing the current drive came to.
+enum PlayStep {
+    /// The play ended the run without a judgement: the drive was refused
+    /// before it reached the station, or the path returned no response.
+    Ended(LimitTrip),
+    /// The drive played and the response was measured.
+    Played(Played),
+}
+
+/// A play that was played and measured. Its drive and response are the
+/// service's `last_drive` and `last_achieved`.
+struct Played {
+    y_half: Vec<Cplx>,
+    clipped: usize,
+    start_frame: u64,
+    frames: u64,
+    /// The response check's trip, when it tripped.
+    tripped: Option<LimitTrip>,
+}
+
+/// A level step the ceiling refused: the trip's numbers, and the refusal the
+/// level verbs return.
+struct StepRefused {
+    kind: TripKind,
+    error: TwrError,
 }
 
 #[cfg(test)]

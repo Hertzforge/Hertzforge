@@ -205,6 +205,17 @@ pub trait ReferencePlayer {
         None
     }
 
+    /// Frames the station clocked on the last `play()`: the record and its rest
+    /// pad on a play that completed, the frames read back before the cancel on
+    /// one that was cancelled. `None` = this path cannot say, and the service
+    /// counts the record's own length (or a cancel's `frames_done`).
+    ///
+    /// Station time is the sum of these over the run, which is why it counts
+    /// the pad: the pad is clocked out like any other frame.
+    fn last_play_frames(&self) -> Option<usize> {
+        None
+    }
+
     /// Drain the DRIVER's own diagnostics (underruns, rate coercions) since the
     /// last call, so a host can journal them.
     ///
@@ -347,6 +358,9 @@ pub struct BackendReferencePlayer<B: Backend> {
     /// Frames the device accepted before `start()` on the last play (the
     /// commit depth `play_block_wise` is seeded with).
     last_committed: usize,
+    /// Frames read back on the last play, the rest pad included: what the
+    /// station clocked ([`ReferencePlayer::last_play_frames`]).
+    last_played: usize,
     /// The display tap (off unless a caller asks for one).
     ///
     /// SHARED since the daemon host landed, and that is what makes daemon-side time streaming
@@ -468,6 +482,7 @@ impl<B: Backend> BackendReferencePlayer<B> {
             drive_scratch: Vec::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             last_committed: 0,
+            last_played: 0,
             tap: None,
             play_observer: None,
         })
@@ -792,6 +807,7 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// plant output while `drive[k]` was commanded. Everything downstream - the
     /// FRF, the coherence gate, the inverse update - assumes that pairing.
     fn play_cycle(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
+        self.last_played = 0;
         if !self.configured {
             return Err(TwrError::State("play() before arm()".into()));
         }
@@ -860,6 +876,9 @@ impl<B: Backend> BackendReferencePlayer<B> {
                 }
             },
         );
+
+        // What the station clocked, on every path: the frames read back.
+        self.last_played = raw.len();
 
         // PARK, on every path including cancel. A cancelled play must not leave
         // a started task behind it, and on the cancel path this call IS the
@@ -1108,6 +1127,10 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
 
     fn committed_frames(&self) -> Option<usize> {
         Some(self.last_committed)
+    }
+
+    fn last_play_frames(&self) -> Option<usize> {
+        Some(self.last_played)
     }
 
     fn take_driver_warnings(&mut self) -> Vec<String> {

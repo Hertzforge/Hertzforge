@@ -15,7 +15,7 @@ use crate::service::{TwrService, TwrState, TwrStatus};
 pub struct Honesty {
     pub path: TwrPath,
     pub capabilities: TwrPathCapabilities,
-    /// The acceptance statement - Sim-validated, real delegated drive pending.
+    /// The status label, verbatim: which delivery path, on which station.
     pub note: String,
 }
 
@@ -74,10 +74,8 @@ impl TwrReport {
             honesty: Honesty {
                 path,
                 capabilities: TwrPathCapabilities::for_path(path),
-                // The SAME derived sentence the live banner carries, so the
-                // report and the panel cannot drift apart. It used to be a
-                // second hardcoded copy naming a station the run might not be
-                // on and a gap that was no longer the live one.
+                // The SAME derived sentence the status label carries, so the
+                // report and the panel cannot drift apart.
                 note: status.path_label.clone(),
             },
             reference_label: svc.config().reference.label.clone(),

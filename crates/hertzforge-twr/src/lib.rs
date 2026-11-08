@@ -41,6 +41,7 @@
 //!   (once / loop N / duration; section from-to).
 //! - [`limits`] - response abort envelope, drive clip/RMS ceilings, feasibility
 //!   hard-block + override-ack.
+//! - [`trip`] - why the core ended a run itself, by kind with its numbers.
 //! - [`player`] - the Backend-agnostic drive-delivery seam (direct
 //!   Backend playout, NOT through `hertzforge_engine::Engine`).
 //! - [`service`] - the run orchestration state machine + status/report surface.
@@ -56,6 +57,7 @@ pub mod reference;
 pub mod schedule;
 pub mod service;
 pub mod sysid;
+pub mod trip;
 
 pub use control::{
     PlayInputs, PlayKind, PlayOutputs, TwrControl, TwrLaw, TwrLawFactory, TwrLawSetup, TwrPlant,
@@ -70,8 +72,9 @@ pub use player::{BackendReferencePlayer, ReferencePlayer, TwrPath};
 pub use reference::{ReferenceWaveform, WaveformError};
 pub use schedule::{RunSchedule, Section, TwrLadderState, TwrLevelSchedule};
 pub use service::config::TwrConfig;
-pub use service::{TwrService, TwrState, TwrStatus};
+pub use service::{PlayRow, TwrService, TwrState, TwrStatus};
 pub use sysid::{Excitation, SysIdConfig, SysIdResult};
+pub use trip::{TripKind, TwrTrip};
 
 /// The module-wide error type.
 #[derive(Debug, Clone, PartialEq)]
