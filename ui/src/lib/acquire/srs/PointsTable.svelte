@@ -34,7 +34,8 @@
 	const tableErrors = $derived(errs(prefix));
 </script>
 
-<table class="aq-table pts" data-testid={testid} aria-label={label}>
+<div class="ptable" data-testid={testid}>
+<table class="aq-table pts" aria-label={label}>
 	<thead>
 		<tr>
 			<th class="r">{columns[0].label}, {columns[0].unit}</th>
@@ -71,6 +72,7 @@
 </table>
 <button class="btn sm ghost add" disabled={locked} onclick={() => rows.push(make(rows.at(-1)))} data-testid="{testid}-add">Add Row</button>
 <Findings items={tableErrors.map((message) => ({ level: 'error' as const, message }))} />
+</div>
 
 <style>
 	.pts {

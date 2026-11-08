@@ -57,7 +57,7 @@
 				<tbody>
 					{#each pulses as p (p.index)}
 						{@const on = picked.includes(p.index)}
-						<tr class:on class:fail={p.passed === false} data-testid="srs-pulse-{p.index}" onclick={(e) => (e.target as HTMLElement).tagName !== 'INPUT' && ontoggle(p.index)}>
+						<tr class:on class:fail={p.passed === false} data-testid="srs-pulse-{p.index}" data-at={p.at_s} onclick={(e) => (e.target as HTMLElement).tagName !== 'INPUT' && ontoggle(p.index)}>
 							<td><input type="checkbox" checked={on} aria-label="Lay pulse {pulseNumber(p.index)} over the plots" onchange={() => ontoggle(p.index)} data-testid="srs-overlay-{p.index}" /></td>
 							<td class="num">{pulseNumber(p.index)}</td>
 							<td class="num r">{db(p.commanded_db)}{#if Math.abs(p.commanded_db - p.scheduled_db) > 0.05}<span class="sub"> of {db(p.scheduled_db)}</span>{/if}</td>
