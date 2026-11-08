@@ -300,6 +300,7 @@ def test_a_finding_in_a_log_with_no_test_belongs_to_the_log(keeper):
 
 def test_a_log_is_started_and_opened_at_a_path_from_home(tmp_path, monkeypatch):
     monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
     keeper = run_logs.Keeper()
     assert keeper.new('~/from_home.hflog', 'Home')['log']['title'] == 'Home'
     keeper.close()
