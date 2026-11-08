@@ -261,14 +261,17 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	shutting_down: 'The Control Service Is Shutting Down'
 };
 
-/** Refusals of one test type's own methods (classical shock's), beside the shared ones. */
+/** Refusals of one test type's own methods (classical shock's, Sine's, TWR's), beside the shared ones. */
 const MORE_REFUSAL_TITLES: Record<string, string> = {
 	not_yet: 'Not Yet',
 	wrong_mode: 'Not in This Ladder Mode',
 	drive_ceiling: 'Over the Drive Abort',
 	not_a_sweep: 'Not a Sweep',
 	out_of_band: 'Outside the Band',
-	adjust_refused: 'Parameter Not Changed'
+	adjust_refused: 'Parameter Not Changed',
+	reference_unreadable: 'The Reference Could Not Be Read',
+	not_converged: 'The Level Has Not Met Its Gate',
+	coherence_hold: 'Held at the Coherence Floor'
 };
 
 /** Why a live law parameter was not changed (`adjust_refused`'s `why`). */
@@ -352,7 +355,19 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 			if (has('mode')) out.push(`Ladder mode: ${String(detail.mode)}`);
 			break;
 		case 'drive_ceiling':
-			if (has('vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive abort is ${String(detail.abort_vpk ?? '-')} V pk`);
+			// TWR has no drive abort: its refusal names the ceiling.
+			if (has('vpk') && has('ceiling_vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive ceiling is ${String(detail.ceiling_vpk)} V pk`);
+			else if (has('vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive abort is ${String(detail.abort_vpk ?? '-')} V pk`);
+			break;
+		case 'not_converged':
+			if (has('gate_pct')) out.push(`Gate: ${String(detail.gate_pct)}% rms error`);
+			break;
+		case 'coherence_hold':
+			if (has('coherence_mean') && has('min_mean_coherence')) out.push(`Mean coherence ${String(detail.coherence_mean)}, under ${String(detail.min_mean_coherence)}`);
+			break;
+		case 'reference_unreadable':
+			if (has('line')) out.push(`Line ${String(detail.line)}`);
+			if (has('path')) out.push(`File: ${String(detail.path)}`);
 			break;
 		case 'not_a_sweep':
 			if (has('test')) out.push(`Test: ${String(detail.test)}`);
@@ -382,11 +397,13 @@ export interface Refusal {
 
 export function toRefusal(verb: string, err: unknown): Refusal {
 	if (err instanceof RequestError) {
+		// A drive-ceiling refusal that names the ceiling (TWR's) is over the ceiling, not an abort.
+		const ceiling = (err.reason as string | undefined) === 'drive_ceiling' && err.detail?.ceiling_vpk !== undefined;
 		return {
 			verb,
 			reason: err.reason ?? null,
 			code: err.code,
-			title: refusalTitle(err.reason, err.code),
+			title: ceiling ? 'Over the Drive Ceiling' : refusalTitle(err.reason, err.code),
 			message: err.message,
 			facts: refusalFacts(err.reason, err.detail),
 			detail: err.detail
