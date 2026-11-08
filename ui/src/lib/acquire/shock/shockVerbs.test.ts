@@ -193,6 +193,13 @@ describe('the pages and the pulses laid over them', () => {
 		]);
 		expect(PAGE_QUANTITIES.identification).toEqual(['identification', 'spectrum']);
 		expect(shockSubscribeParams([], 2)).toEqual({ default: true });
+		// Only the time histories take a point count; the service refuses it on any other plot.
+		const sent = shockSubscribeParams([...shockPagePlots(layout.pages[3], 800), ...shockPagePlots(layout.pages[0], 800)], 2);
+		expect('plots' in sent && sent.plots).toEqual([
+			{ id: 'sp-4:identification', quantity: 'identification' },
+			{ id: 'sp-4:spectrum', quantity: 'spectrum' },
+			{ id: 'sp-1:pulse', quantity: 'pulse', points: 800 }
+		]);
 		expect(shockLayoutFromSaved(shockLayoutToSaved(layout))).toEqual(layout);
 		expect(shockLayoutFromSaved('{"version":1,"pages":[]}')).toBeNull();
 	});
