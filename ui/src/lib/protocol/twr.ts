@@ -398,7 +398,7 @@ export type TwrLawFaultReason =
 	| 'first_drive';
 
 export type TwrTrip = { play: number | null; at_level_db: number | null } & (
-	| { kind: 'envelope'; in_play: boolean; worst_frac: number; abort_frac: number; samples: number }
+	| { kind: 'envelope'; in_play: boolean; worst_frac: number; abort_frac: number; samples: number; at_sample: number }
 	| { kind: 'drive_vpk'; vpk: number; ceiling_vpk: number; predicted: boolean }
 	| { kind: 'drive_rms'; vrms: number; limit_vrms: number }
 	| { kind: 'response_rms'; rms: number; limit: number }
@@ -443,11 +443,13 @@ export interface TwrIdentificationFacts {
 	excitation: TwrExcitation;
 	drive_vrms: number;
 	drive_vpk: number;
-	coherence_mean: number;
+	/** The mean in-band coherence measured; null at a hold for the lag (no coherence measured). */
+	coherence_mean: number | null;
 	min_mean_coherence: number;
-	/** The trusted bins' coverage of the reference's energy. */
-	coverage: number;
-	lag_frames: number;
+	/** The trusted bins' coverage of the reference's energy; null at the coherence hold. */
+	coverage: number | null;
+	/** Null when no lag was found. */
+	lag_frames: number | null;
 	lag_source: 'measured' | 'derived';
 	passed: boolean;
 }
@@ -486,10 +488,10 @@ export interface TwrPlayRow {
 	clamped_bins: number;
 	drive_vpk: number;
 	response_peak: number;
-	/** The play's fitted lag, frames. */
-	lag_frames: number;
-	/** Its drift from the identification's lag, frames. */
-	drift_frames: number;
+	/** The play's fitted lag, frames; null until the run's alignment check has measured it. */
+	lag_frames: number | null;
+	/** Its drift from the identification's lag, frames; null until measured, as `lag_frames`. */
+	drift_frames: number | null;
 	start_frame: number;
 	frames: number;
 	/** The play's start, station time. */

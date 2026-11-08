@@ -11,6 +11,8 @@
 	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
 	import SrsScreen from '$lib/acquire/srs/SrsScreen.svelte';
 	import SineScreen from '$lib/acquire/sine/SineScreen.svelte';
+	import TwrScreen from '$lib/acquire/twr/TwrScreen.svelte';
+	import { TWR_STATE_WORDS } from '$lib/acquire/twr/twrWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
@@ -31,7 +33,9 @@
 						? STATE_WORDS[app.srs.status.state]
 						: app.sine.isLive && app.sine.status
 							? STATE_WORDS[app.sine.status.state]
-							: null
+							: app.twr.isLive && app.twr.status
+								? TWR_STATE_WORDS[app.twr.status.state]
+								: null
 	);
 </script>
 
@@ -47,6 +51,8 @@
 	<SrsScreen {app} />
 {:else if tests.screen === 'sine'}
 	<SineScreen {app} />
+{:else if tests.screen === 'twr'}
+	<TwrScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

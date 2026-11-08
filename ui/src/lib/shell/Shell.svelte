@@ -93,6 +93,9 @@
 			} else if (app.sine.actions.abort.enabled) {
 				e.preventDefault();
 				void app.sine.abort();
+			} else if (app.twr.actions.abort.enabled) {
+				e.preventDefault();
+				void app.twr.abort();
 			}
 			return;
 		}
