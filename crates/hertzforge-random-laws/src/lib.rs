@@ -52,9 +52,9 @@ mod ratio;
 pub use adapter::{law_fault, WasmControlLaw, WasmLawFactory};
 pub use builtin::{BuiltinLaw, DEFAULT_LAW_ID};
 pub use catalog::{
-    classical_builtin_manifest, srs_builtin_manifest, CatalogEntry, CatalogError, CatalogProblem,
-    CheckStatus, LawCatalog, LawWorld, CLASSICAL_BUILTIN_ID, LAWS_DIR, MAX_LAW_FILE_BYTES,
-    SRS_BUILTIN_ID,
+    classical_builtin_manifest, sine_builtin_live, sine_builtin_manifest, srs_builtin_manifest,
+    CatalogEntry, CatalogError, CatalogProblem, CheckStatus, LawCatalog, LawWorld,
+    CLASSICAL_BUILTIN_ID, LAWS_DIR, MAX_LAW_FILE_BYTES, SINE_BUILTIN_ID, SRS_BUILTIN_ID,
 };
 pub use check::{may_arm_on_hardware, ArmRefusal, CheckCase, CheckRecord, CHECK_FORMAT};
 pub use choice::{ChoiceError, LawChoice};
