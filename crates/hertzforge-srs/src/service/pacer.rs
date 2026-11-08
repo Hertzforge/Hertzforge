@@ -23,9 +23,11 @@ pub trait PulsePacer: Send {
     /// not repaid by a shorter next gap.
     fn sleep_until(&mut self, deadline_s: f64);
 
-    /// The timestamp recorded for the start of a pulse. A virtual clock
-    /// charges itself the time the fire that follows would take here; a real
-    /// one just reads the clock.
+    /// The timestamp recorded for the start of a pulse, read once the device's
+    /// clock is running (`PulsePlant::fire_timed`), so the time between pulses
+    /// holds between the device's own starts. A virtual clock charges itself
+    /// the time the rest of the fire would take here; a real one just reads the
+    /// clock.
     fn pulse_start_s(&mut self) -> f64 {
         self.now_s()
     }

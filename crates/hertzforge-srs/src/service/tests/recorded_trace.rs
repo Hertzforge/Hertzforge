@@ -63,11 +63,12 @@ impl PulsePlant for Tap {
     fn ensure_open(&mut self) -> Result<(), String> {
         self.inner.ensure_open()
     }
-    fn fire(
+    fn fire_timed(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+        started: &mut dyn FnMut(),
     ) -> Result<FiredResponses, PlantError> {
         self.fired.lock().unwrap().push(Fired {
             len: drive_g.len(),
@@ -75,7 +76,8 @@ impl PulsePlant for Tap {
             peak: drive_g.iter().fold(0.0f64, |m, v| m.max(v.abs())),
             fnv: fnv(drive_g),
         });
-        self.inner.fire(drive_g, ring_out_samples, cancel)
+        self.inner
+            .fire_timed(drive_g, ring_out_samples, cancel, started)
     }
     fn stop(&mut self) -> Result<(), String> {
         self.inner.stop()

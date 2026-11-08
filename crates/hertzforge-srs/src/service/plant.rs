@@ -152,11 +152,41 @@ pub trait PulsePlant {
     /// `cancel`, when `Some`, is read once per block BEFORE more drive is offered;
     /// observed `true` returns [`PlantError::Cancelled`] with the committed-queue
     /// arithmetic. `None` never reads a flag.
+    ///
+    /// The same as [`Self::fire_timed`] with nobody asking when the device started.
     fn fire(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+    ) -> Result<FiredResponses, PlantError> {
+        self.fire_timed(drive_g, ring_out_samples, cancel, &mut || {})
+    }
+
+    /// [`Self::fire`], calling `started` once, as soon as the device's start call
+    /// has returned and before the play.
+    ///
+    /// # Why the moment matters
+    ///
+    /// The service holds the time between pulses from this call. A start call
+    /// returns once the device's clock is running, so the record's first sample
+    /// is out at or before `started` runs, and the next pulse's start call cannot
+    /// be issued until the time between pulses after it: the floor holds between
+    /// the device's own starts. A stamp taken before the shot's bring-up (the arm
+    /// and the pre-start commit, whose length varies from shot to shot on a real
+    /// device) let two physical starts come closer than the floor by however much
+    /// the second bring-up was shorter than the first: 4.986 s against a 5 s
+    /// floor, timed on the bench by an instrument on its own clock.
+    ///
+    /// A plant with no device beneath it calls `started` first. A fire that fails
+    /// before the device starts never calls it; the service then stamps the pulse
+    /// when the fire returns, which is late but never early.
+    fn fire_timed(
+        &mut self,
+        drive_g: &[f64],
+        ring_out_samples: usize,
+        cancel: Option<&AtomicBool>,
+        started: &mut dyn FnMut(),
     ) -> Result<FiredResponses, PlantError>;
 
     /// PARK the plant: stop the device task and unreserve it, leaving the plant
@@ -478,11 +508,12 @@ impl<B: Backend> PulsePlant for HalPulsePlant<B> {
         Ok(())
     }
 
-    fn fire(
+    fn fire_timed(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+        started: &mut dyn FnMut(),
     ) -> Result<FiredResponses, PlantError> {
         if !self.opened {
             return Err(PlantError::Failed("plant not open (arm first)".into()));
@@ -560,6 +591,8 @@ impl<B: Backend> PulsePlant for HalPulsePlant<B> {
             .start()
             .map_err(|e| PlantError::Failed(e.to_string()))?;
         self.armed = false;
+        // The clock is running, so the pulse has started (`fire_timed`'s docs).
+        started();
 
         let control_slot = self.control_slot;
         let monitor_slots = &self.monitor_slots;

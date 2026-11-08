@@ -363,6 +363,10 @@ pub trait Backend: Send {
         acq: &AcquisitionConfig,
     ) -> Result<ConfiguredActual, HalError>;
     fn arm(&mut self) -> Result<(), HalError>;
+    /// Start the clocked tasks. Returns once the device's sample clock is
+    /// running, so the first clocked sample is out at or before the return: a
+    /// caller that times a pulse from the return is never early. Pulse modules
+    /// hold the time between pulses from that moment.
     fn start(&mut self) -> Result<(), HalError>;
     fn stop(&mut self) -> Result<(), HalError>;
     /// Pull the next block of input samples (channel-interleaved f32) into `out`.

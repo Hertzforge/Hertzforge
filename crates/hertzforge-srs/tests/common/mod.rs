@@ -70,12 +70,14 @@ impl PulsePlant for Linear {
     fn ensure_open(&mut self) -> Result<(), String> {
         Ok(())
     }
-    fn fire(
+    fn fire_timed(
         &mut self,
         drive: &[f64],
         ring_out_samples: usize,
         _cancel: Option<&AtomicBool>,
+        started: &mut dyn FnMut(),
     ) -> Result<FiredResponses, PlantError> {
+        started();
         self.fired.lock().unwrap().push(drive.to_vec());
         let mut control: Vec<f64> = drive.iter().map(|v| v * self.gain).collect();
         control.resize(drive.len() + ring_out_samples, 0.0);

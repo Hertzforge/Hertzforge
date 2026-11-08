@@ -599,12 +599,14 @@ impl PulsePlant for MockPlant {
         self.spy.parked.store(false, Ordering::Relaxed);
         Ok(())
     }
-    fn fire(
+    fn fire_timed(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+        started: &mut dyn FnMut(),
     ) -> Result<FiredResponses, PlantError> {
+        started();
         let n = self.spy.fires.fetch_add(1, Ordering::Relaxed);
         self.spy
             .last_drive_len

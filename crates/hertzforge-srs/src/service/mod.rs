@@ -1431,22 +1431,37 @@ impl SrsShockService {
                 if !self.check_drive_before_fire(c, &full, &mut fire_scale, level_db, pulse_seq) {
                     return Ok(false);
                 }
-                at_s = Some(
-                    self.pacer
-                        .get_mut()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .pulse_start_s(),
-                );
-                self.last_pulse_start_s = at_s;
             }
 
             let drive: Vec<f64> = full.iter().map(|&v| v * fire_scale).collect();
             let ring = self.ring_out_samples;
             let cancel = Arc::clone(&self.cancel);
+            // The pulse's start is stamped once the device's clock runs, not before
+            // its bring-up, so the time between pulses holds between the device's
+            // own starts (`PulsePlant::fire_timed`). Only the closed loop paces.
+            let paced = closed.is_some();
+            let mut started_at = None;
+            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
             let FirePath::Host(p) = &mut self.path else {
                 unreachable!("path checked above");
             };
-            let fired = match p.fire(&drive, ring, Some(&cancel)) {
+            let fired = p.fire_timed(&drive, ring, Some(&cancel), &mut || {
+                if paced && started_at.is_none() {
+                    started_at = Some(pacer.pulse_start_s());
+                }
+            });
+            if paced {
+                // A fire that never said its device started is stamped now: late,
+                // never early.
+                at_s = Some(started_at.unwrap_or_else(|| {
+                    self.pacer
+                        .get_mut()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .pulse_start_s()
+                }));
+                self.last_pulse_start_s = at_s;
+            }
+            let fired = match fired {
                 Ok(f) => f,
                 Err(cancelled @ PlantError::Cancelled { .. }) => {
                     // A CLEAN stop, not a trip: no protection engine fired, the
