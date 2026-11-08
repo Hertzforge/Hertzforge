@@ -237,6 +237,38 @@ pub struct ControlSnapshot {
     pub law_values: Option<LawValues>,
 }
 
+/// What one control tick decided, for an observer ([`TickObserver`]).
+///
+/// The numbers the drive decision rests on: the drive committed this tick, the
+/// amplitude servo's own step and level, and what it measured against. Taken
+/// at the end of a tick that ran control (not on a ramp-down or a tripped
+/// tick).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TickObservation {
+    /// The control-tick index.
+    pub tick: u64,
+    /// The frequency the tick's amplitudes were measured at, Hz.
+    pub freq_hz: f64,
+    /// The scheduled level after the tick, dB.
+    pub level_db: f64,
+    /// The control composite the tick acted on.
+    pub measured: f64,
+    /// The drive committed this tick, drive units peak.
+    pub drive: f64,
+    /// The amplitude servo's step this tick, dB.
+    pub servo_step_db: f64,
+    /// The amplitude servo's own level after the tick, dB re one drive unit.
+    pub servo_level_db: f64,
+    /// The amplitude servo's fault latch after the tick.
+    pub servo_faulted: bool,
+    /// Whether the limit channels held the drive this tick.
+    pub notch_binding: bool,
+}
+
+/// A callback that sees every control tick. It runs on the control thread,
+/// once per tick: it must not block, and should not allocate.
+pub type TickObserver = Box<dyn FnMut(&TickObservation) + Send>;
+
 /// The shared status cell.
 #[derive(Debug, Default)]
 pub struct StatusCell {
@@ -764,6 +796,9 @@ pub struct SineProcessStep {
     law_misses: u32,
     law_capped_ticks: u64,
     law_values: Option<LawValues>,
+    /// A test's or a diagnostic's view of every control tick
+    /// ([`SineProcessStep::observe_ticks`]).
+    observer: Option<TickObserver>,
 
     // --- shared surfaces ------------------------------------------------------
     status: Arc<StatusCell>,
@@ -1031,6 +1066,7 @@ impl SineProcessStep {
             law_misses: 0,
             law_capped_ticks: 0,
             law_values: None,
+            observer: None,
             status,
             trace,
             mailbox,
@@ -1224,6 +1260,12 @@ impl SineProcessStep {
             return 0.0;
         }
         20.0 * (from_scale / RAMP_FLOOR_SCALE).log10() / RAMP_DB_PER_S
+    }
+
+    /// See every control tick that runs control ([`TickObservation`]). For tests
+    /// and diagnostics; production runs install none.
+    pub fn observe_ticks(&mut self, observer: TickObserver) {
+        self.observer = Some(observer);
     }
 
     /// Whether a stop/abort ramp is in progress.
@@ -1602,6 +1644,19 @@ impl SineProcessStep {
         // 17. Publish the snapshot + the swept trace points.
         self.publish_snapshot(broadband, notch_binding, alarm_active);
         self.trace.push(f, &self.tracked, broadband);
+        if let Some(obs) = self.observer.as_mut() {
+            obs(&TickObservation {
+                tick: self.tick_count,
+                freq_hz: f,
+                level_db: self.ladder.level_db(),
+                measured,
+                drive: self.current_drive_scale,
+                servo_step_db,
+                servo_level_db: 20.0 * self.servo.drive_scale().log10(),
+                servo_faulted: self.servo.faulted(),
+                notch_binding,
+            });
+        }
 
         // Remember whether this tick was an RSTD probe so the NEXT tick can
         // detect the probe -> Dwell transition and re-open the settle window.

@@ -401,6 +401,9 @@ pub struct SineService {
     law_factory: Option<std::sync::Arc<dyn SineLawFactory>>,
     /// The clock law calls are timed on.
     law_clock: std::sync::Arc<dyn LawClock>,
+    /// A tick observer to hand the step when it is built
+    /// ([`SineService::with_tick_observer`]).
+    tick_observer: Option<engine::TickObserver>,
 }
 
 impl SineService {
@@ -570,6 +573,7 @@ impl SineService {
             gate_passed: None,
             law_factory: None,
             law_clock: std::sync::Arc::new(MonotonicClock::new()),
+            tick_observer: None,
         })
     }
 
@@ -588,6 +592,14 @@ impl SineService {
     /// Stored only: nothing reads it until the law seam is built.
     pub fn with_law_clock(mut self, clock: std::sync::Arc<dyn LawClock>) -> Self {
         self.law_clock = clock;
+        self
+    }
+
+    /// See every control tick of the run ([`engine::TickObservation`]): handed
+    /// to the step when the loop engages. For tests and diagnostics; it runs on
+    /// the control thread and must not block.
+    pub fn with_tick_observer(mut self, observer: engine::TickObserver) -> Self {
+        self.tick_observer = Some(observer);
         self
     }
 
@@ -2562,7 +2574,10 @@ impl SineService {
                 .unwrap_or(self.block_frames)
                 .max(1),
         };
-        let (step, handles) = SineProcessStep::new(build);
+        let (mut step, handles) = SineProcessStep::new(build);
+        if let Some(obs) = self.tick_observer.take() {
+            step.observe_ticks(obs);
+        }
         handles
             .display
             .set_input_indices(&self.input_channel_indices(n_input));
