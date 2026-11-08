@@ -174,7 +174,7 @@ fn law_file(name: &str) -> PathBuf {
 static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
+async fn the_built_in_sine_law_passes_every_case_and_is_not_recorded() {
     let _turn = ONE_CHECK.lock().await;
     let schema = Schema::load();
     let addr = serve(service()).await;
@@ -204,7 +204,7 @@ async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
+async fn a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
 ) {
     let _turn = ONE_CHECK.lock().await;
     let svc = Service::with_options(options(
