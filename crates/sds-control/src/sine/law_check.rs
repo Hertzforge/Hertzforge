@@ -133,6 +133,8 @@ pub fn case_station(case: SineCheckCase) -> Result<StationSpec, String> {
         max_output_channels: 1,
         shared_clock: true,
         plant: SimPlant::Resonators,
+        // The simulator's own output lookahead, as the runner's station has it.
+        output_lookahead_frames: None,
     };
     let sim = match spec.station {
         SineCheckStation::Resonators { modes, feedthrough } => SimPlantSpec {

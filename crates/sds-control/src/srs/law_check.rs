@@ -151,6 +151,8 @@ pub fn case_station(case: SrsCheckCase) -> StationSpec {
         max_output_channels: 1,
         shared_clock: true,
         plant: SimPlant::Resonators,
+        // The simulator's own output lookahead, as the runner's station has it.
+        output_lookahead_frames: None,
     };
     let sim = match case.plant() {
         SrsCheckPlant::Wire => base,
