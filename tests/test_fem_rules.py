@@ -99,7 +99,7 @@ def test_a_lump_on_a_nearly_massless_beam_solves_dense_as_sparse():
     model = _tip_mass_rod(1e-3)
     dense = model.eigensolution(num_modes=3, fixed=['0'], solver='dense')
     sparse = model.eigensolution(num_modes=3, fixed=['0'], solver='sparse')
-    assert dense.frequency == pytest.approx(sparse.frequency, rel=1e-4)
+    assert dense.frequency == pytest.approx(sparse.frequency, rel=1e-7)
     assert dense.frequency[2] == pytest.approx(3.0927, abs=1e-3), 'the closed form'
 
 
