@@ -400,24 +400,75 @@ impl SrsShockService {
             measured: &zeros,
             commanded_scale: start_scale,
         };
-        self.call_law(LawCall::Seed, &inputs, component_hz)
+        self.call_law(LawCall::Seed, &inputs, component_hz, 1.0)
+    }
+
+    /// What the limit cap multiplies the last pulse's predictions by, with
+    /// `control`: the highest level the run is scheduled to reach over the
+    /// level the pulse fired at (at least 1). The cap then holds the table to
+    /// what the limit channels can take at that level, so the gains do not
+    /// climb back over the notch at the lower levels and pass the bound when
+    /// the ladder reaches the top. Without `control` it is 1: the cap reads the
+    /// prediction at the level fired, as it always has.
+    pub(super) fn limit_reference_scale(&self, level_scale: f64) -> f64 {
+        if self.cfg.control.is_none() || level_scale <= 0.0 {
+            return 1.0;
+        }
+        (db_scale(self.top_level_db()) / level_scale).max(1.0)
+    }
+
+    /// The pulse's pass, for the ladder and its row: no band outside the alarm
+    /// band. With `control`, a band the arm-time notch cut that reads low is
+    /// not held against the pulse: the limit channels hold it there on
+    /// purpose. A band reading high, or outside the abort band, still fails.
+    pub(super) fn judged_pass(
+        &self,
+        check: &super::config::EnvelopeCheck,
+        measured: &[f64],
+        level_scale: f64,
+    ) -> bool {
+        if check.aborted() {
+            return false;
+        }
+        if self.cfg.control.is_none() {
+            return !check.alarmed();
+        }
+        let notched: Vec<usize> = self
+            .arm_notch_report
+            .as_ref()
+            .map(|r| r.notched_bands.iter().map(|b| b.band_index).collect())
+            .unwrap_or_default();
+        check.alarm_bands.iter().all(|&b| {
+            let t = self.target_full.get(b).copied().unwrap_or(0.0) * level_scale;
+            let m = measured.get(b).copied().unwrap_or(0.0);
+            notched.contains(&b) && m < t
+        })
     }
 
     /// Call the law once and take its output through the core's checks and
     /// caps. The seed is not capped (its gains are the starting gains); an
     /// iteration's gains are capped by the per-pulse rise limit (a refusal)
-    /// and by the limit channels' predictions (`min(law gain, cap)`).
+    /// and by the limit channels' predictions (`min(law gain, cap)`), each
+    /// prediction multiplied by `limit_ref_scale` first (1 without `control`;
+    /// see [`Self::limit_reference_scale`]).
     pub(super) fn call_law(
         &mut self,
         which: LawCall,
         inputs: &SrsInputs<'_>,
         component_hz: &[f64],
+        limit_ref_scale: f64,
     ) -> LawOutcome {
         let clock = Arc::clone(&self.law_clock);
         let preds: Vec<Vec<f64>> = self
             .last_predicted_limit_srs
             .iter()
-            .map(|(_, p)| p.clone())
+            .map(|(_, p)| {
+                if limit_ref_scale == 1.0 {
+                    p.clone()
+                } else {
+                    p.iter().map(|v| v * limit_ref_scale).collect()
+                }
+            })
             .collect();
         let Some(run) = self.law_run.as_mut() else {
             return LawOutcome::Ended(LawFault::Failed("the law was not built".into()), 1);

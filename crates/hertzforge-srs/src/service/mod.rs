@@ -1698,7 +1698,8 @@ impl SrsShockService {
                 measured: &measured_srs,
                 commanded_scale: fire_scale_for_law,
             };
-            match self.call_law(LawCall::Iterate, &inputs, &comp_freqs) {
+            let limit_ref = self.limit_reference_scale(level_scale);
+            match self.call_law(LawCall::Iterate, &inputs, &comp_freqs, limit_ref) {
                 LawOutcome::Used(gains) => {
                     let engine = self.engine.as_mut().expect("engine present while firing");
                     for (j, &g) in gains.iter().enumerate() {
@@ -1732,7 +1733,7 @@ impl SrsShockService {
             return Ok(false);
         }
 
-        let passed = !check.alarmed() && !check.aborted();
+        let passed = self.judged_pass(&check, &measured_srs, level_scale);
         let ladder = self.ladder.as_mut().expect("ladder present while firing");
         let before_db = ladder.current_level_db();
         let tick = if closed.is_some() {
@@ -1808,7 +1809,7 @@ impl SrsShockService {
             commanded_db: facts.commanded_db,
             limit_scale: facts.limit_scale,
             drive_vpk: facts.drive_vpk,
-            passed: judged.map(|c| !c.alarmed() && !c.aborted()),
+            passed: judged.map(|c| self.judged_pass(c, measured_srs, scale)),
             worst_band_hz: worst_band.and_then(|b| self.band_freqs.get(b).copied()),
             worst_limit_db: facts.worst_limit_db,
             law: facts.law.clone(),
