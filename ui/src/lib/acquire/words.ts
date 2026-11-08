@@ -214,7 +214,9 @@ export const LOG_WORDS: Record<LogKind, string> = {
 	alarm: 'Alarm',
 	overload: 'Overload',
 	trip: 'Trip',
-	note: 'Note'
+	note: 'Note',
+	pulse: 'Pulse',
+	law: 'Control Law'
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -245,11 +247,30 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	table_invalid: 'The Channel Table Has Errors',
 	config_invalid: 'The Setup Has Errors',
 	shaker_record_invalid: 'The Shaker Record Does Not Read',
+	setup_invalid: 'The Setup Has Errors',
+	gate_failed: 'Identification Failed a Gate',
+	prediction_exceeded: 'A Drive Is Predicted Over Its Ceiling',
+	law_import_failed: 'The Law Was Not Imported',
+	catalog_unavailable: 'The Law Catalog Cannot Be Read',
+	law_unknown: 'The Law Is Not in the Catalog',
+	law_params_invalid: 'The Law Parameters Are Not Valid',
+	law_check_unsupported: 'This Law Cannot Be Checked Here',
+	law_check_running: 'A Law Check Is Already Running',
+	law_check_not_recorded: 'The Check Was Not Recorded',
+	law_not_checked: 'The Law Has Not Passed Its Check',
 	shutting_down: 'The Control Service Is Shutting Down'
+};
+
+/** Refusals of one test type's own methods (classical shock's), beside the shared ones. */
+const MORE_REFUSAL_TITLES: Record<string, string> = {
+	not_yet: 'Not Yet',
+	wrong_mode: 'Not in This Ladder Mode',
+	drive_ceiling: 'Over the Drive Abort'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {
 	if (reason && reason in REFUSAL_TITLES) return REFUSAL_TITLES[reason as RefusalReason];
+	if (reason && reason in MORE_REFUSAL_TITLES) return MORE_REFUSAL_TITLES[reason];
 	switch (code) {
 		case 'timeout':
 			return 'No Answer in Time';
@@ -312,6 +333,15 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 			break;
 		case 'bad_params':
 			if (has('param')) out.push(`Parameter: ${String(detail.param)}`);
+			break;
+		case 'not_yet':
+			if (has('seconds')) out.push(`Ready in ${String(detail.seconds)} s`);
+			break;
+		case 'wrong_mode':
+			if (has('mode')) out.push(`Ladder mode: ${String(detail.mode)}`);
+			break;
+		case 'drive_ceiling':
+			if (has('vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive abort is ${String(detail.abort_vpk ?? '-')} V pk`);
 			break;
 	}
 	return out;

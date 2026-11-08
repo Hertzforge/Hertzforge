@@ -753,3 +753,60 @@ fn the_first_fault_is_the_one_reported() {
     shared.fault("write failed (consequence)");
     assert_eq!(shared.fault_text().as_deref(), Some("disk full"));
 }
+
+// --- binary records ---------------------------------------------------------------
+
+/// A binary record round-trips, an appended record grows by its chunks with the
+/// sidecar rewritten each time, and no temporary file is left behind.
+#[test]
+fn binary_records_round_trip_and_append() {
+    let dir = tmp("binary-records");
+    let payload: Vec<u8> = (0..=255u8).collect();
+    let header = serde_json::json!({"kind": "test", "len": 256});
+    let path = write_binary_record(&dir, "one", &header, &payload).unwrap();
+    assert!(path.ends_with("one.bin"));
+    let (side, back) = read_binary_record(&dir, "one").unwrap();
+    assert_eq!(back, payload);
+    assert_eq!(side["len"], 256);
+    for k in 0..3u8 {
+        let side = serde_json::json!({"chunks": k + 1});
+        append_binary_record(&dir, "grow", &side, &[k; 4]).unwrap();
+    }
+    let (side, back) = read_binary_record(&dir, "grow").unwrap();
+    assert_eq!(back, vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]);
+    assert_eq!(side["chunks"], 3);
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn indexed_records_append_lines_and_read_back_every_chunk() {
+    let dir = tmp("indexed-records");
+    for k in 0..4u8 {
+        let mut index = serde_json::Map::new();
+        index.insert("entry".into(), serde_json::Value::from(k));
+        let off =
+            append_indexed_record(&dir, "calls", &index, &vec![k; usize::from(k) + 1]).unwrap();
+        assert_eq!(off, (0..k).map(|j| u64::from(j) + 1).sum::<u64>());
+    }
+    let back = read_indexed_record(&dir, "calls").unwrap();
+    assert_eq!(back.len(), 4);
+    for (k, (index, chunk)) in back.iter().enumerate() {
+        assert_eq!(index["entry"], k as u64);
+        assert_eq!(chunk, &vec![k as u8; k + 1]);
+    }
+    // A line naming bytes past the payload (a torn write) ends the read there.
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(dir.join("calls.jsonl"))
+        .unwrap();
+    use std::io::Write as _;
+    writeln!(f, "{{\"entry\":9,\"offset_bytes\":10,\"len_bytes\":99}}").unwrap();
+    assert_eq!(read_indexed_record(&dir, "calls").unwrap().len(), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -83,7 +83,9 @@ interface types {
         kind: param-kind,
     }
 
-    /// One named number a law reports each loop, for display and records.
+    /// One named value a law reports each loop, for display and records: a
+    /// number for a single-output law; for a multiple-output law, values in
+    /// the layout its manifest gives (random-mimo.wit).
     record diagnostic-spec {
         /// Same rules as a parameter key.
         key: string,

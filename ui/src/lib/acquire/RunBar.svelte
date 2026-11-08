@@ -7,13 +7,13 @@
 	 */
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProvenanceBadge from '$lib/shell/ProvenanceBadge.svelte';
-	import type { ActionId } from './actions';
+	import type { Snippet } from 'svelte';
+	import type { ActionId, RunBarHost } from './actions';
 	import StateChip from './StateChip.svelte';
-	import type { AcquireState } from './store.svelte';
 	import { clock, db, phaseWord } from './words';
 
 	interface Props {
-		acq: AcquireState;
+		acq: RunBarHost;
 		/** Open the acknowledgement dialog for arming past a feasibility exceedance. */
 		onoverride: () => void;
 		abortKeys: string;
@@ -23,8 +23,12 @@
 		 * window.
 		 */
 		compact?: boolean;
+		/** A test type's own verbs, after the shared ones (classical shock's Fire and level moves). */
+		verbs?: Snippet;
+		/** A test type's own numbers in place of the time at level (classical shock's pulse counts). */
+		nums?: Snippet;
 	}
-	let { acq, onoverride, abortKeys, compact = false }: Props = $props();
+	let { acq, onoverride, abortKeys, compact = false, verbs, nums }: Props = $props();
 
 	const run = $derived(acq.run);
 	const frame = $derived(acq.frame);
@@ -84,9 +88,9 @@
 <section class="runbar" class:compact aria-label="Run control" data-testid="run-bar">
 	<div class="status">
 		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" measured={acq.frame !== null} />{/if}
-		<StateChip {run} />
+		<StateChip {run} words={acq.outcomeWords} />
 		{#if run && run.state !== 'unconfigured'}
-			<span class="phase" data-testid="run-phase">{phaseWord(run.phase)}</span>
+			<span class="phase" data-testid="run-phase">{acq.phaseWords?.[run.phase] ?? phaseWord(run.phase)}</span>
 		{/if}
 		<dl class="nums">
 			<div>
@@ -103,10 +107,14 @@
 					{/if}
 				</dd>
 			</div>
-			<div>
-				<dt>At Level</dt>
-				<dd class="num">{clock(atLevel)}{#if remaining !== null}<span class="left">, {clock(remaining)} left</span>{/if}</dd>
-			</div>
+			{#if nums}
+				{@render nums()}
+			{:else}
+				<div>
+					<dt>At Level</dt>
+					<dd class="num">{clock(atLevel)}{#if remaining !== null}<span class="left">, {clock(remaining)} left</span>{/if}</dd>
+				</div>
+			{/if}
 			{#if run?.run_id}
 				<div class="runid">
 					<dt>Run</dt>
@@ -164,6 +172,8 @@
 			{@render verb('proceed', 'Proceed', 'play', () => acq.proceed(), 'act-proceed')}
 			{@render verb('reset', 'New Run', 'reset', () => acq.reset(), 'act-reset')}
 		</div>
+
+		{#if verbs}{@render verbs()}{/if}
 
 		{#if a.mode.visible}
 			<div class="ladder">
@@ -274,20 +284,21 @@
 		min-width: 0;
 	}
 
-	.nums div {
+	/* A test type's own numbers come from its screen, so the rules reach them globally. */
+	.nums > :global(div) {
 		display: flex;
 		align-items: baseline;
 		gap: 6px;
 		min-width: 0;
 	}
 
-	.nums dt {
+	.nums :global(dt) {
 		font-size: var(--text-2xs);
 		color: var(--text-3);
 		white-space: nowrap;
 	}
 
-	.nums dd {
+	.nums :global(dd) {
 		margin: 0;
 		font-size: var(--text-sm);
 		color: var(--text-1);

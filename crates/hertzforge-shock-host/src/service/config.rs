@@ -10,6 +10,7 @@
 //! the tolerance standard, the drive-limit CEILINGS (ceilings are
 //! test scope, not channel identity), the train/gunfire settings - lives HERE.
 
+use crate::law::ClassicalControl;
 use crate::spec::ClassicalPulseSpec;
 use crate::tolerance::ToleranceStandard;
 use hertzforge_shaker_db::{MovingMass, ShakerRecord};
@@ -165,6 +166,13 @@ pub struct ClassicalTestConfig {
     pub capture: CaptureRules,
     /// User-defined metadata.
     pub metadata: Vec<MetaField>,
+    /// The closed loop: identification, the law's guards and caps, the drive
+    /// ceiling and abort in volts. `None` is the open loop (the reference in g
+    /// written as volts), kept for the old daemon host and the recorded trace
+    /// only; the control service always sets it. Left out of the serialized
+    /// settings when `None`, so an open-loop record is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ClassicalControl>,
 }
 
 impl ClassicalTestConfig {
@@ -198,6 +206,7 @@ impl ClassicalTestConfig {
             abort_on_tolerance_failure: true,
             capture: CaptureRules::default(),
             metadata: MetaField::defaults(),
+            control: None,
         }
     }
 
@@ -280,6 +289,9 @@ impl ClassicalTestConfig {
                 "residual_disp_tol_in must be finite and > 0 (got {})",
                 self.residual_disp_tol_in
             )));
+        }
+        if let Some(c) = &self.control {
+            c.validate(self.fs_hz).map_err(ConfigError::BadConfig)?;
         }
         Ok(())
     }
@@ -373,6 +385,31 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let back: ClassicalTestConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, c);
+    }
+
+    #[test]
+    fn an_open_loop_config_serializes_as_before_and_a_closed_loop_one_round_trips() {
+        // `control: None` adds nothing to the settings record, so open-loop
+        // records and their readers are unchanged.
+        let open = serde_json::to_value(cfg()).unwrap();
+        assert!(open.get("control").is_none(), "{open}");
+        let back: ClassicalTestConfig = serde_json::from_value(open).unwrap();
+        assert_eq!(back.control, None);
+
+        let mut c = cfg();
+        c.control = Some(ClassicalControl::new(c.fs_hz, 0.5, 0.8));
+        c.validate().unwrap();
+        let json = serde_json::to_string(&c).unwrap();
+        let back: ClassicalTestConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn a_bad_closed_loop_setting_is_refused_by_validate() {
+        let mut c = cfg();
+        c.control = Some(ClassicalControl::new(c.fs_hz, 0.5, 0.4));
+        let e = c.validate().unwrap_err();
+        assert!(e.to_string().contains("drive_vpk_abort"), "{e}");
     }
 
     #[test]

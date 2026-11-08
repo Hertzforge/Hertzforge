@@ -1,0 +1,42 @@
+{
+ "type": "response",
+ "id": 52,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "points": 1024
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "table",
+    "quantity": "pulses"
+   }
+  ],
+  "quantities": [
+   "pulse",
+   "velocity",
+   "displacement",
+   "srs",
+   "spectrum",
+   "identification",
+   "law",
+   "readings",
+   "pulses"
+  ]
+ }
+}

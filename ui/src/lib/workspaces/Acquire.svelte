@@ -7,6 +7,8 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import RandomScreen from '$lib/acquire/RandomScreen.svelte';
+	import MimoRandomScreen from '$lib/acquire/mimo/MimoRandomScreen.svelte';
+	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
@@ -16,13 +18,25 @@
 	let { app }: Props = $props();
 
 	const tests = $derived(app.tests);
-	const liveWord = $derived(app.acquire.isLive && app.acquire.run ? STATE_WORDS[app.acquire.run.state] : null);
+	const liveWord = $derived(
+		app.acquire.isLive && app.acquire.run
+			? STATE_WORDS[app.acquire.run.state]
+			: app.mimo.isLive && app.mimo.status
+				? STATE_WORDS[app.mimo.status.state]
+				: app.shock.isLive && app.shock.status
+					? STATE_WORDS[app.shock.status.state]
+					: null
+	);
 </script>
 
 {#if tests.deciding}
 	<p class="waiting" role="status" data-testid="acquire-waiting">Waiting for the control service</p>
 {:else if tests.screen === 'random'}
 	<RandomScreen {app} />
+{:else if tests.screen === 'mimo_random'}
+	<MimoRandomScreen {app} />
+{:else if tests.screen === 'shock'}
+	<ShockScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

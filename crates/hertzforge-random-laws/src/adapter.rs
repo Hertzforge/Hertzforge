@@ -50,7 +50,11 @@ pub fn law_fault(e: &LawError) -> LawFault {
             LawFault::BadOutput(output_fault(*rule), detail.clone())
         }
         LawError::Poisoned(first) => LawFault::Crashed(first.clone()),
-        LawError::Compile(_)
+        // A multiple-output law's refused output: a single-output law never
+        // returns one.
+        LawError::BadMimoOutput { .. }
+        | LawError::BadClassicalOutput { .. }
+        | LawError::Compile(_)
         | LawError::NotALaw(_)
         | LawError::ManifestInvalid(_)
         | LawError::ParamInvalid { .. }

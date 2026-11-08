@@ -3,18 +3,20 @@
 	 * The run's state as a shape, a word and a color together. Running pulses; a finished run shows
 	 * its outcome, and every outcome but a completed schedule or the operator's stop reads as an abort.
 	 */
-	import type { RandomState } from '$lib/protocol/types';
+	import type { RunHead } from './actions';
 	import { OUTCOME_WORDS, outcomeTone, STATE_WORDS } from './words';
 
 	interface Props {
-		run: RandomState | null;
+		run: RunHead | null;
+		/** A test type's own words for its outcomes (classical shock's); the shared ones otherwise. */
+		words?: Record<string, string>;
 	}
-	let { run }: Props = $props();
+	let { run, words }: Props = $props();
 
 	const state = $derived(run?.state ?? 'unconfigured');
 	const outcome = $derived(run?.end?.outcome ?? null);
 	const tone = $derived(outcome ? outcomeTone(outcome) : null);
-	const word = $derived(state === 'finished' && outcome ? OUTCOME_WORDS[outcome] : STATE_WORDS[state]);
+	const word = $derived(state === 'finished' && outcome ? (words?.[outcome] ?? OUTCOME_WORDS[outcome] ?? outcome) : STATE_WORDS[state]);
 	const shape = $derived.by(() => {
 		if (state === 'finished') return tone === 'pass' ? 'check' : tone === 'info' ? 'square' : 'octagon';
 		return state;

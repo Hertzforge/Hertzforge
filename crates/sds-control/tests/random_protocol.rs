@@ -517,6 +517,65 @@ async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
     assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
 }
 
+/// The end of an AUTO schedule takes the shutdown ramp, as Stop does
+/// (2026-11-07, Windows NI bench over SSH: a completed run cut the drive from
+/// full level inside one 0.1 s DMM block, leaving a 0.13 V DC step, where Stop
+/// and the safe stop walked down over the 3 s ramp). Red before the fix: the run
+/// went from full level to finished with no stopping frames.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_end_of_the_schedule_ramps_down_and_reads_completed() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        1.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let mut config = sim_config("auto", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 2.0);
+    config["control"]["shutdown_ramp_s"] = json!(2.0);
+    config["control"]["soft_start_db"] = json!(0);
+    configured(&mut c, config).await;
+    c.ok("random.start", json!({})).await;
+    c.wait_phase("full_level", LONG).await;
+
+    let t0 = Instant::now();
+    let mut seen: Vec<(f64, f64)> = Vec::new();
+    let end = loop {
+        let left = (t0 + LONG).saturating_duration_since(Instant::now());
+        let Some(m) = c.read(left).await else {
+            panic!("the run did not finish");
+        };
+        if m["type"] == "event" && m["topic"] == "random.state" && m["data"]["state"] == "finished"
+        {
+            break m["data"].clone();
+        }
+        if let Some(e) = c.events.last() {
+            if e.topic() == "random.live" && e.data()["state"] == "stopping" {
+                if let Some(l) = e.data()["level_db"].as_f64() {
+                    seen.push((t0.elapsed().as_secs_f64(), l));
+                }
+            }
+        }
+    };
+    println!("live levels while the schedule ended: {seen:?}");
+    let mut distinct: Vec<f64> = seen.iter().map(|(_, l)| *l).collect();
+    distinct.dedup();
+    assert!(
+        distinct.len() >= 4,
+        "the end of the schedule did not walk the level down: {seen:?}"
+    );
+    let lowest = distinct.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(
+        lowest < -10.0,
+        "the ramp only reached {lowest:.1} dB: {seen:?}"
+    );
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    assert_eq!(end["end"]["level_db"], 0, "{end}");
+    let message = end["end"]["message"].as_str().unwrap_or_default();
+    assert!(message.starts_with("Test complete"), "{end}");
+}
+
 /// The end says where the stop began, not where the ramp-down finished
 /// (2026-11-01, bench finding 3): a stop at -6 dB ends "at -6.0 dB" with
 /// end.level_db -6, and so does the safe stop. Red before the fix: -46 dB, the

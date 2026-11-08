@@ -1,0 +1,153 @@
+{
+ "type": "event",
+ "topic": "mimo_random.status",
+ "seq": 77,
+ "data": {
+  "run_id": "m-0003",
+  "state": "running",
+  "phase": "engaged",
+  "title": "Two-Axis Random",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 8192,
+   "n_pts": 4096,
+   "df_hz": 2,
+   "lines": 8,
+   "loop_s": 2.25,
+   "actual": false
+  },
+  "clock": null,
+  "shape": {
+   "controls": 2,
+   "drives": 2,
+   "space": "physical",
+   "dofs": null,
+   "shape": "square",
+   "labels": [
+    "Control X",
+    "Control Y"
+   ],
+   "drive_labels": [
+    "Shaker X",
+    "Shaker Y"
+   ],
+   "bands": [
+    {
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    },
+    {
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    }
+   ]
+  },
+  "mode": "auto",
+  "levels_db": [
+   -6,
+   0
+  ],
+  "level_db": -6,
+  "elapsed_s": 31.5,
+  "at_level_s": 4.5,
+  "remaining_at_level_s": 5.5,
+  "loop": 14,
+  "alarm": false,
+  "control_error_db": [
+   0.42,
+   -0.31
+  ],
+  "gates": {
+   "coherence_min": 0.962,
+   "coherence_floor": 0.5,
+   "condition_max": 12.5,
+   "condition_limit": 1000,
+   "passed": true,
+   "coherence": [
+    0.962,
+    0.981
+   ]
+  },
+  "caps": [
+   1,
+   0.875
+  ],
+  "drive_rms_v": [
+   0.412,
+   0.388
+  ],
+  "law": {
+   "id": "pinv_closed",
+   "name": "pseudo-inverse, closed loop",
+   "version": "1.0.0",
+   "sha256": null
+  },
+  "faults": [],
+  "override": null,
+  "overrides": [],
+  "prediction": {
+   "iteration": 1,
+   "law": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null
+   },
+   "drive_rms_v": [
+    0.82,
+    0.77
+   ],
+   "ceiling_vrms": [
+    2,
+    2
+   ],
+   "error_db": [
+    0.5,
+    -0.5
+   ],
+   "drives_pass": true,
+   "has_achievable": false,
+   "unreachable_db": [
+    0,
+    0
+   ],
+   "drive_accel": [
+    1.25,
+    1.1
+   ],
+   "accel_control": [
+    0,
+    1
+   ],
+   "feasibility": [
+    {
+     "verdict": "pass",
+     "message": ""
+    },
+    {
+     "verdict": "not_evaluated",
+     "message": "no shaker record"
+    }
+   ]
+  },
+  "excluded": [],
+  "end": null
+ }
+}

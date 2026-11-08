@@ -763,10 +763,14 @@ impl Actor {
                 self.view.loops += 1;
                 self.view.drive_level_db = Some(base);
                 // The controller started its own controlled stop (its control law
-                // stopped producing a usable drive): show the ramp-down as one.
+                // stopped producing a usable drive, or the schedule held full level
+                // for its duration): show the ramp-down as one.
                 let law_stop = more
                     && self.view.state == State::Running
-                    && self.svc.as_ref().and_then(law_fault_trip).is_some();
+                    && self
+                        .svc
+                        .as_ref()
+                        .is_some_and(|s| law_fault_trip(s).is_some() || s.schedule_complete());
                 if law_stop {
                     if let Some(svc) = self.svc.as_ref() {
                         self.view.level_db = Some(svc.commanded_level_db());
@@ -809,6 +813,18 @@ impl Actor {
                     }
                     None => self.fault("the controller ended the run without a trip record"),
                 }
+            }
+            // The schedule held full level for its duration and the shutdown ramp
+            // has taken the drive down: a completion, whoever pressed Stop during
+            // that ramp.
+            RunState::Stopped if svc.schedule_complete() => {
+                let s = self.plan.config.full_level_s;
+                self.end(
+                    "completed",
+                    "stopped",
+                    None,
+                    Some(format!("Test complete: {} s held at full level.", num(s))),
+                );
             }
             RunState::Stopped if self.view.state == State::Stopping => {
                 self.end(self.stop_outcome, "stopped", None, None);
@@ -1145,7 +1161,7 @@ impl Actor {
         // stop's ramp starts from it and a trip records it; the level the drive
         // reached by the end of a ramp-down is not where the operator stopped.
         let requested = match outcome {
-            "operator_stop" | "safe_stop" => self
+            "operator_stop" | "safe_stop" | "completed" => self
                 .svc
                 .as_ref()
                 .and_then(|s| s.stop_requested_db())

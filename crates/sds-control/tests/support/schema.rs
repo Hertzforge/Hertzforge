@@ -1,8 +1,8 @@
 //! A checker for `schema/protocol.schema.json`: the JSON Schema 2020-12 keywords the
 //! protocol schema uses, and nothing else. A keyword it does not implement fails the
 //! check loudly rather than passing silently, so a schema that grows a keyword
-//! cannot make these tests vacuous. (`pattern` is used once, on analysis operation
-//! ids, which the control service never sends.)
+//! cannot make these tests vacuous. `pattern` is checked for the few patterns the
+//! schema uses, matched by hand; a new pattern fails loudly too.
 
 use serde_json::Value;
 use std::path::PathBuf;
@@ -227,6 +227,13 @@ impl Schema {
                     }
                 }
                 "then" | "else" => {}
+                "pattern" => {
+                    if let Some(text) = inst.as_str() {
+                        if !pattern_matches(v.as_str().unwrap(), text) {
+                            errs.push(format!("{path}: {text:?} does not match {v}"));
+                        }
+                    }
+                }
                 k if ANNOTATIONS.contains(&k) => {}
                 other => panic!("the schema checker does not implement \"{other}\" (at {path})"),
             }
@@ -258,5 +265,32 @@ fn same(a: &Value, b: &Value) -> bool {
             x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w)))
         }
         _ => a == b,
+    }
+}
+
+/// The patterns the protocol schema uses, matched by hand (no regular-expression
+/// engine here). Any other pattern fails loudly.
+fn pattern_matches(pattern: &str, text: &str) -> bool {
+    let word = |p: &str| {
+        !p.is_empty()
+            && p.bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+    };
+    match pattern {
+        "^[0-9a-f]{64}$" => {
+            text.len() == 64
+                && text
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }
+        "^[a-z][a-z0-9_]*$" => {
+            text.bytes().next().is_some_and(|c| c.is_ascii_lowercase()) && word(text)
+        }
+        "^[a-z0-9_]+(\\.[a-z0-9_]+)+$" => {
+            let parts: Vec<&str> = text.split('.').collect();
+            parts.len() >= 2 && parts.iter().all(|p| word(p))
+        }
+        "\\S" => text.chars().any(|c| !c.is_whitespace()),
+        other => panic!("the schema checker does not implement the pattern {other}"),
     }
 }

@@ -78,12 +78,15 @@ impl Role {
 }
 
 /// One x-y curve. `edges` set means the values are binned (`shape: "steps"`).
+/// `y_min` set means the curve is an envelope of a decimated one: `y` is the
+/// largest value in each point's interval and `y_min` the smallest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Series {
     pub name: String,
     pub role: Role,
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+    pub y_min: Option<Vec<f64>>,
     pub edges: Option<Vec<f64>>,
 }
 
@@ -94,6 +97,7 @@ impl Series {
             role,
             x,
             y,
+            y_min: None,
             edges: None,
         }
     }
@@ -145,6 +149,9 @@ pub fn spectrum(
             e.insert("role".into(), Value::from(s.role.as_str()));
             e.insert("x".into(), arrays.push_f64(s.x));
             e.insert("y".into(), arrays.push_f64(s.y));
+            if let Some(y_min) = s.y_min {
+                e.insert("y_min".into(), arrays.push_f64(y_min));
+            }
             if let Some(edges) = s.edges {
                 e.insert("shape".into(), Value::from("steps"));
                 e.insert("edges".into(), arrays.push_f64(edges));
