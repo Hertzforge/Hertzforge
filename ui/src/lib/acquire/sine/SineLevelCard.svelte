@@ -7,7 +7,7 @@
 	 * and, once the run ends, how and why. Every number is the service's; shape and word carry each
 	 * state, color only follows.
 	 */
-	import type { SineConfig, SineLive, SineState } from '$lib/protocol/sine';
+	import type { SineConfig, SineLiveHead, SineState } from '$lib/protocol/sine';
 	import { formatNumber } from '$lib/viz/format';
 	import { clock, db } from '../words';
 	import { errorWords, hz, identificationWords, progressOf, sineLevelStatus, sineTripFacts, sweepWords, SINE_TRIP_WORDS } from './sineWords';
@@ -15,8 +15,8 @@
 	interface Props {
 		/** The state with the live frame laid over it. */
 		status: SineState | null;
-		/** The live frame, when it is this run's. */
-		live: SineLive | null;
+		/** The last frame's numbers, when they are this run's. */
+		live: SineLiveHead | null;
 		config?: SineConfig | null;
 		compact?: boolean;
 	}

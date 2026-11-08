@@ -24,7 +24,7 @@ import {
 	type SineDryRunResult,
 	type SineFrequencyResult,
 	type SineLevelResult,
-	type SineLive,
+	type SineLiveHead,
 	type SineLogEvent,
 	type SineLogResult,
 	type SineModeResult,
@@ -139,7 +139,11 @@ export class SineStore {
 
 	// ---- from the service ------------------------------------------------------------------
 	status = $state.raw<SineState | null>(null);
-	live = $state.raw<SineLive | null>(null);
+	/**
+	 * The run's numbers from the last frame: `sine.live` on the default subscription, or this
+	 * screen's own `sine.data` once it has subscribed to plots (the service then sends no `sine.live`).
+	 */
+	live = $state.raw<SineLiveHead | null>(null);
 	/** What the service holds: the configuration of the present run. */
 	served = $state.raw<SineConfigResult | null>(null);
 	/** The dry run of the draft's setup, and the key of the setup it checked. */
@@ -191,12 +195,14 @@ export class SineStore {
 			}
 		}
 		this.control.on(SINE_TOPICS.state, (d) => this.onStatus(d as unknown as SineState));
-		this.control.on(SINE_TOPICS.live, (d) => {
-			const l = d as unknown as SineLive;
+		const onFrame = (d: Record<string, unknown>) => {
+			const l = d as unknown as SineLiveHead;
 			if (this.status?.run_id && l.run_id !== this.status.run_id) return;
 			this.live = l;
 			this.liveNewer = true;
-		});
+		};
+		this.control.on(SINE_TOPICS.live, onFrame);
+		this.control.on(SINE_TOPICS.data, onFrame);
 		this.control.on(SINE_TOPICS.log, (d) => {
 			const e = d as unknown as SineLogEvent;
 			if (this.status?.run_id && e.run_id !== this.status.run_id) return;
@@ -326,8 +332,8 @@ export class SineStore {
 		};
 	}
 
-	/** The live frame, when it is this run's. */
-	get frameOfRun(): SineLive | null {
+	/** The last frame's numbers, when they are this run's. */
+	get frameOfRun(): SineLiveHead | null {
 		const s = this.status;
 		const l = this.live;
 		return s && l && l.run_id === s.run_id ? l : null;
