@@ -8,13 +8,15 @@
 
 	interface Props {
 		run: RunHead | null;
+		/** A test type's own words for its outcomes (classical shock's); the shared ones otherwise. */
+		words?: Record<string, string>;
 	}
-	let { run }: Props = $props();
+	let { run, words }: Props = $props();
 
 	const state = $derived(run?.state ?? 'unconfigured');
 	const outcome = $derived(run?.end?.outcome ?? null);
 	const tone = $derived(outcome ? outcomeTone(outcome) : null);
-	const word = $derived(state === 'finished' && outcome ? OUTCOME_WORDS[outcome] : STATE_WORDS[state]);
+	const word = $derived(state === 'finished' && outcome ? (words?.[outcome] ?? OUTCOME_WORDS[outcome] ?? outcome) : STATE_WORDS[state]);
 	const shape = $derived.by(() => {
 		if (state === 'finished') return tone === 'pass' ? 'check' : tone === 'info' ? 'square' : 'octagon';
 		return state;

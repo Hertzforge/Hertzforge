@@ -288,12 +288,94 @@ The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnosti
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove
 the path a law file takes.
 
+## Classical shock laws
+
+A classical shock law closes the loop between pulses. The controller identifies the system with
+band-limited random in volts, inverts the identified plant, and calls the law: once for the first
+drive, then after each pulse has been fired, measured and judged. The law returns the next drive
+record at full level, in volts; the controller scales it to the scheduled level, checks it, brings
+it to rest at both ends and plays it. The specification's section 8 states the world in full.
+
+What differs from a Random law:
+
+- **The drive is a whole record**, phase included, not a spectrum the controller randomizes. Every
+  record is `record_len` samples (a power of two) at `fs_hz`, starting with the quiet lead-in.
+- **Everything is at full level.** The reference is the full-level compensated pulse; the response
+  the law sees is the last pulse referred to full level by the scale the controller commanded,
+  limits included. A law never sees the level and cannot change it.
+- **The plant comes with the setup**: `H`, coherence, the controller's regularized inverse and the
+  bins it trusts. A law may use the inverse as it is, or build its own from `H`.
+- **Spectra are one-sided under the negative-exponent transform.** `shock::rfft_half` and
+  `shock::irfft_half` in the SDK are that pair.
+
+### Writing a classical law in Rust
+
+Implement `ShockClassicalLaw` (`describe`, `new`, `seed`, `iterate`) and export it with
+`export_classical_law!`. The template is `crates/hertzforge-law-sdk/template/shock-classical`: the
+frequency-domain correction written plainly, with three parameters.
+
+| Key | What it does |
+|---|---|
+| `beta` | The fraction of each pulse's error corrected before the next pulse |
+| `correct` | Off: the first drive is held for the whole run |
+| `model_error_db` | Scales the law's own copy of the plant's inverse, for seeing how the controller's guards respond: +4 dB drives 1.6 times hot (the overshoot abort), +8 dB 2.5 times (the first-drive bound), -6 dB half as hard (with `correct` off, the run ends not converged) |
+
+Build it with `cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with a classical law's drive
+
+Every one of these holds whatever the law returns:
+
+- the drive's peak in volts against the drive ceiling (scaled to it) and the drive abort (refused),
+  before every pulse, and at proceed for the highest level the run is scheduled to reach;
+- the response the plant predicts against the drive limit and the shaker's velocity and
+  displacement ratings, before every pulse;
+- the length, finite values and declared values of every output;
+- at full level, the drive's peak and every bin may rise at most 10 dB a pulse (by default) over the
+  drive in force; the first drive's predicted response at most twice the reference's peak;
+- every record tapers to rest at both ends;
+- a late, failed, crashed or refused call is a miss and the next pulse refires the drive in force;
+  three in a row end the run;
+- a measured overshoot over twice the standard's amplitude tolerance aborts at any level; a failed
+  pulse at full level aborts, except an undershoot; five pulses at one level without a pass, or the
+  error rising on three pulses in a row, end the run.
+
+### Checking a classical shock law before hardware
+
+As for a MIMO law, an imported classical law must pass the check before it may drive hardware.
+Each case is a whole run on a simulated station: AUTO from -12 dB to full level, one pulse a rung
+and three at full level, advancing on a passing pulse, MIL-STD-810 Method 516, a 1 g half-sine of
+11 ms unless the case says otherwise.
+
+| Case | Plant | Asks for |
+|---|---|---|
+| flat | A wire | Every pulse passes, the first included |
+| one mode | 400 Hz, Q 10 | A pass by pulse 3 at the first rung; every full-level pulse passes |
+| station plant | 200 and 550 Hz, Q 2.5; a 6 ms haversine | As one mode |
+| transport delay | One mode behind 2 ms | As one mode |
+| identification error | A wire; the identified gain scaled +3 dB before inversion | A pass within eight pulses at the first rung. A law that does not correct sits 29% low and cannot pass |
+| measurement noise | One mode, noise 30 dB under the first rung's pulse | A pass by pulse 4; every full-level pulse passes |
+| anti-resonance | A 30 dB notch at 300 Hz under the coherence floor | Survive: complete, or be ended by the controller's own judgement (not converged, divergence); never over the drive ceiling, never an overshoot |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law passes every case; a law that holds its first drive fails the identification-error
+case.
+
+### The built-in classical law
+
+`fd_correct`, the frequency-domain correction: the plant's inverse applied to the reference, then
+after each pulse a fraction `beta` (default 0.5) of the inverse times the error, on the bins the
+controller trusts, each bin's rise held to `max_db_per_pulse` (default 6 dB), the first pulse
+optionally `initial_backoff_db` under the prediction. It is time waveform replication's iteration
+bin for bin, runs natively, and is also the law file `laws/shock-fdc`; the two give the same run.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
 checks its manifest) and copies it into the `laws` folder of the local data root, named by the
-SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output and multiple-output laws are listed apart,
-each on its own test type's screens, and a law chosen for the other test type is refused. The data
+SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output Random, multiple-output Random and
+classical shock laws are listed apart, each on its own test type's screens, and a law chosen for
+another test type is refused. The data
 root is the folder Hertzforge keeps its runs in, on the local disk.
 
 The simulator runs any law. Hardware runs a built-in law, or an imported law only when a check

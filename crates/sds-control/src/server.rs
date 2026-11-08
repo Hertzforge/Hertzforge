@@ -41,6 +41,9 @@ use tokio_tungstenite::tungstenite::Message;
 #[path = "server_mimo.rs"]
 mod mimo_methods;
 
+#[path = "server_shock.rs"]
+mod shock_methods;
+
 /// Display event topic of the `sim.*` runs.
 pub const DISPLAY_TOPIC: &str = "random.display";
 /// Display event period (5 per second), for `random.display` and `random.live`.
@@ -62,7 +65,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 10] = [
+const DRIVE_METHODS: [&str; 17] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -73,6 +76,13 @@ const DRIVE_METHODS: [&str; 10] = [
     "mimo_random.proceed",
     "mimo_random.override",
     "mimo_random.exclude",
+    "shock.arm",
+    "shock.start",
+    "shock.proceed",
+    "shock.fire",
+    "shock.level",
+    "shock.train",
+    "shock.burst",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -85,7 +95,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_random.report, mimo_random.subscribe, mimo_random.identification.save, \
     mimo_random.identification.load, mimo_random.reference.build_breakpoints, \
     mimo_random.reference.build_rigid_body, mimo_random.reference.validate, \
-    mimo_random.reference.import, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
+    mimo_random.reference.import, shock.configure, shock.config, shock.preview, shock.arm, \
+    shock.start, shock.proceed, shock.fire, shock.level, shock.train, shock.burst, shock.stop, \
+    shock.abort, shock.reset, shock.clear, shock.state, shock.log, shock.subscribe, \
+    shock.pulses, shock.pulse, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -126,6 +139,10 @@ pub struct ServiceOptions {
     /// through [`crate::mimo::adapter::ServiceDriver`]). Tests that need no real run
     /// give [`simulated_mimo_driver`].
     pub mimo_driver: Option<DriverFactory>,
+    /// Makes the engine of a classical shock run (`None`: the controller's
+    /// classical shock service, [`crate::shock::engine::ServiceEngine`]). Tests that
+    /// need no real run give [`simulated_shock_engine`].
+    pub shock_engine: Option<crate::shock::engine::EngineFactory>,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -139,6 +156,13 @@ pub fn simulated_mimo_driver(speed: f64) -> DriverFactory {
     })
 }
 
+/// The simulated classical shock engine ([`crate::shock::sim::SimulatedEngine`]):
+/// for wire tests that exercise the protocol without the controller's service. A run
+/// never uses it unless given it here.
+pub fn simulated_shock_engine() -> crate::shock::engine::EngineFactory {
+    Arc::new(|ctx| Box::new(crate::shock::sim::SimulatedEngine::new(ctx.clone())))
+}
+
 impl Default for ServiceOptions {
     fn default() -> Self {
         ServiceOptions {
@@ -150,6 +174,7 @@ impl Default for ServiceOptions {
             sim_speed: 1.0,
             bind: format!("ws://{}:{}/", crate::DEFAULT_HOST, crate::DEFAULT_PORT),
             mimo_driver: None,
+            shock_engine: None,
         }
     }
 }
@@ -160,6 +185,7 @@ impl Default for ServiceOptions {
 pub enum Feed {
     Random,
     Mimo,
+    Shock,
 }
 
 /// A frame for every connection.
@@ -239,6 +265,15 @@ struct Inner {
     /// The MIMO setup and its run, beside `random`: one test at a time across both.
     mimo: Option<Arc<MimoRun>>,
     mimo_runs: u64,
+    /// The classical shock configuration and its run, beside the others.
+    shock: Option<Arc<crate::shock::ShockRun>>,
+    shock_runs: u64,
+    /// The last `shock.state` sent, how much of the run's log, how many of its
+    /// pulses, and whether its identification has been plotted.
+    shock_state_key: String,
+    shock_log_sent: (String, u64),
+    shock_rows_sent: u64,
+    shock_ident_sent: bool,
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -256,9 +291,16 @@ impl Inner {
         self.mimo.as_ref().is_some_and(|m| m.is_live())
     }
 
-    /// Any run live, Random or MIMO: what the session's orphan clock guards.
+    fn shock_live(&self) -> bool {
+        self.shock
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
+    /// Any run live, Random, MIMO or classical shock: what the session's orphan
+    /// clock guards.
     fn any_live(&self) -> bool {
-        self.random_live() || self.mimo_live()
+        self.random_live() || self.mimo_live() || self.shock_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -295,6 +337,21 @@ impl Inner {
                 .with_detail(json!({"run_id": m.id})));
             }
         }
+        if let Some(s) = &self.shock {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Classical shock run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -324,6 +381,13 @@ pub struct Service {
     displays: std::sync::Mutex<HashMap<ConnId, Display>>,
     /// The connections with a MIMO display subscription.
     mimo_displays: std::sync::Mutex<HashMap<ConnId, mimo_methods::MimoDisplay>>,
+    /// The connections with a classical shock display subscription.
+    shock_displays: std::sync::Mutex<HashMap<ConnId, shock_methods::ShockDisplay>>,
+    /// Classical shock runs' publishes, in order.
+    shock_notify: mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::shock::view::ShockView>>,
+    shock_notices: std::sync::Mutex<
+        Option<mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::shock::view::ShockView>>>,
+    >,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -356,6 +420,7 @@ impl Service {
     pub fn with_options(opts: ServiceOptions) -> Arc<Service> {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (notify, notices) = mpsc::unbounded_channel();
+        let (shock_notify, shock_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -365,6 +430,12 @@ impl Service {
                 runs: 0,
                 mimo: None,
                 mimo_runs: 0,
+                shock: None,
+                shock_runs: 0,
+                shock_state_key: String::new(),
+                shock_log_sent: (String::new(), 0),
+                shock_rows_sent: 0,
+                shock_ident_sent: false,
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -378,6 +449,9 @@ impl Service {
             background: AtomicBool::new(false),
             displays: std::sync::Mutex::new(HashMap::new()),
             mimo_displays: std::sync::Mutex::new(HashMap::new()),
+            shock_displays: std::sync::Mutex::new(HashMap::new()),
+            shock_notify,
+            shock_notices: std::sync::Mutex::new(Some(shock_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -437,6 +511,7 @@ impl Service {
         match feed {
             Feed::Random => self.displays().contains_key(&conn),
             Feed::Mimo => self.mimo_displays().contains_key(&conn),
+            Feed::Shock => self.shock_displays().contains_key(&conn),
         }
     }
 
@@ -522,6 +597,15 @@ impl Service {
                 }
             });
         }
+        let shock_notices = self.shock_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = shock_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.shock_changed(&run_id, &view).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -585,8 +669,19 @@ impl Service {
                     });
                 }
             }
-            if let Some(run) = inner.random.clone() {
-                drop(inner);
+            let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
+            let random = inner.random.clone();
+            drop(inner);
+            if let Some(s) = shock {
+                shock_methods::stop_shock(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(run) = random {
                 stop_run(
                     &run,
                     "safe_stop",
@@ -611,9 +706,35 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim) = {
+        let (random, sim, shock) = {
             let inner = self.inner.lock().await;
-            (inner.random.clone(), inner.sim.run.clone())
+            (
+                inner.random.clone(),
+                inner.sim.run.clone(),
+                inner.shock.clone(),
+            )
+        };
+        // A classical shock run takes its controlled stop: nothing more fires, the
+        // pulse in flight finishes. Should it still be live well after, it is aborted.
+        let shock_said = match shock.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                shock_methods::stop_shock(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true)
+                    .await;
+                let asked = Instant::now();
+                while s.view().state.is_live() {
+                    if asked.elapsed() > Duration::from_secs(30) {
+                        shock_methods::stop_shock(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // A `sim.*` demonstration run is simulated end to end; it is stopped so the
         // process ends tidily.
@@ -621,7 +742,9 @@ impl Service {
             sim.request_stop();
             let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
         }
-        let run = random.filter(|r| r.view().state.is_live())?;
+        let Some(run) = random.filter(|r| r.view().state.is_live()) else {
+            return shock_said;
+        };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
                 c.control.shutdown_ramp_s
@@ -668,8 +791,19 @@ impl Service {
     pub async fn disconnected(&self, conn: &Conn, goodbye: bool) {
         self.displays().remove(&conn.id);
         self.mimo_displays().remove(&conn.id);
+        self.shock_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
+            // Nobody holds control now: a classical shock run fires nothing more
+            // until control is claimed again (or the orphan clock stops it).
+            if let Some(s) = &inner.shock {
+                if s.view().state.is_live() {
+                    s.hold(true);
+                    let name = inner.session.client_name(conn.id, &conn.peer);
+                    s.shared
+                        .add_log("note", format!("{name} left control; firing is held"));
+                }
+            }
             if let Some(m) = &inner.mimo {
                 let name = inner.session.client_name(conn.id, &conn.peer);
                 let how = if goodbye {
@@ -722,6 +856,10 @@ impl Service {
             "mimo_random.reference.build_breakpoints"
             | "mimo_random.reference.validate"
             | "mimo_random.reference.import" => self.mimo_reference(method, params).await,
+            "shock.configure" => self.shock_configure(conn, params).await,
+            "shock.config" => Ok(self.shock_config().await),
+            "shock.preview" => self.shock_preview(params).await,
+            "shock.pulse" => self.shock_pulse(params).await,
             _ => self
                 .call_plain(conn, method, params)
                 .await
@@ -755,8 +893,14 @@ impl Service {
                 let mut inner = self.inner.lock().await;
                 let now = Instant::now();
                 let live = inner.any_live();
+                let held = inner.session.holder_conn() == Some(conn.id);
                 if inner.session.release(conn.id, now, live) {
                     self.session_changed(&inner);
+                }
+                if let Some(s) = inner.shock.as_ref().filter(|_| held) {
+                    if s.view().state.is_live() {
+                        s.hold(true);
+                    }
                 }
                 Ok(json!({"role": "observer", "orphan_s": inner.session.orphan_s(now, live)}))
             }
@@ -801,9 +945,32 @@ impl Service {
                 self.mimo_identification(conn, params, false).await
             }
             "mimo_random.identification.load" => self.mimo_identification(conn, params, true).await,
+            "shock.arm" => self.shock_arm(conn, params, false).await,
+            "shock.start" => self.shock_arm(conn, params, true).await,
+            "shock.proceed" => self.shock_proceed(conn).await,
+            "shock.fire" => self.shock_fire(conn).await,
+            "shock.level" => self.shock_level(conn, params).await,
+            "shock.train" => self.shock_train(conn, params).await,
+            "shock.burst" => self.shock_burst(conn).await,
+            "shock.stop" => self.shock_end(conn, false).await,
+            "shock.abort" => self.shock_end(conn, true).await,
+            "shock.reset" => self.shock_reset(conn).await,
+            "shock.clear" => self.shock_clear(conn).await,
+            "shock.state" => Ok(self.shock_state_now().await),
+            "shock.log" => self.shock_log(params).await,
+            "shock.subscribe" => self.shock_subscribe(conn, params).await,
+            "shock.pulses" => self.shock_pulses(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
-            "laws.check" => self.laws_check(conn, params).await,
+            "laws.check" => match self.classical_law_id(conn, params).await {
+                Some(id) => {
+                    let mut p = params.clone();
+                    p.remove("path");
+                    p.insert("id".into(), Value::from(id));
+                    self.shock_laws_check(conn, &p).await
+                }
+                None => self.laws_check(conn, params).await,
+            },
             other => Err(MethodError::new(
                 ErrorCode::UnknownMethod,
                 format!("the control service has no method \"{other}\"; it serves {METHODS}"),
@@ -834,6 +1001,14 @@ impl Service {
             if let Some(m) = &inner.mimo {
                 let who = inner.session.client_name(conn.id, &conn.peer);
                 m.with(|d| d.controller_back(&who));
+            }
+        }
+        if let Some(s) = &inner.shock {
+            if s.shared.signals.held() {
+                s.hold(false);
+                let who = inner.session.client_name(conn.id, &conn.peer);
+                s.shared
+                    .add_log("note", format!("{who} holds control; firing resumes"));
             }
         }
         self.session_changed(&inner);
@@ -1234,7 +1409,7 @@ impl Service {
             if v.state.is_busy() || (!start && v.state == State::Armed) {
                 inner.run_active()?;
             }
-            if inner.mimo_live() {
+            if inner.mimo_live() || inner.shock_live() {
                 inner.run_active()?;
             }
             if inner.sim_running() {
@@ -1507,7 +1682,7 @@ impl Service {
         request.validate().map_err(MethodError::bad_request)?;
 
         let mut inner = self.inner.lock().await;
-        if inner.mimo_live() {
+        if inner.mimo_live() || inner.shock_live() {
             inner.run_active()?;
         }
         if let Some(r) = &inner.random {

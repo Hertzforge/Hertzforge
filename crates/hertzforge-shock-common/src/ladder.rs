@@ -33,6 +33,41 @@ pub const DEFAULT_PULSES_PER_LEVEL: u32 = 1;
 /// The manual step size in dB: the operator nudges `+/- 1 dB`.
 pub const MANUAL_STEP_DB: f64 = 1.0;
 
+/// The default number of pulses at one level without a passing pulse (AUTO
+/// with [`LadderAdvance::OnPass`]), or failing pulses in a row at one MANUAL
+/// level, before a closed-loop run ends as not converged.
+pub const DEFAULT_MAX_PULSES_PER_LEVEL: u32 = 5;
+
+/// When the AUTO ladder moves to the next level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LadderAdvance {
+    /// After the level's pulse count, whatever the pulses' verdicts (the
+    /// open-loop ladder, and SRS).
+    #[default]
+    Count,
+    /// Only on a passing pulse: a level's pulse count counts passing pulses,
+    /// and [`ShockLevelSchedule::max_pulses_per_level`] pulses at one level
+    /// without a pass end the run. For a closed loop, where early pulses are
+    /// how the law learns.
+    OnPass,
+}
+
+impl LadderAdvance {
+    /// True for [`LadderAdvance::Count`], the default.
+    pub fn is_count(&self) -> bool {
+        *self == LadderAdvance::Count
+    }
+}
+
+fn default_max_pulses_per_level() -> u32 {
+    DEFAULT_MAX_PULSES_PER_LEVEL
+}
+
+fn is_default_max_pulses_per_level(n: &u32) -> bool {
+    *n == DEFAULT_MAX_PULSES_PER_LEVEL
+}
+
 /// How the run advances through levels, mirroring Random's `RunMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShockRunMode {
@@ -62,6 +97,20 @@ pub struct ShockLevelSchedule {
     /// Pulses fired per table level in AUTO (one entry per table level, or a single
     /// value applied to every level if length 1). Mirrors Random's `dwell_s`.
     pub pulses_per_level: Vec<u32>,
+    /// When AUTO moves to the next level (default [`LadderAdvance::Count`]).
+    /// Left out of the serialized schedule at its default, so a schedule
+    /// written before it existed reads and writes the same bytes.
+    #[serde(default, skip_serializing_if = "LadderAdvance::is_count")]
+    pub advance: LadderAdvance,
+    /// Pulses at one level without a pass (AUTO, [`LadderAdvance::OnPass`]),
+    /// or failing pulses in a row at one MANUAL level, before a closed-loop
+    /// run ends as not converged (default [`DEFAULT_MAX_PULSES_PER_LEVEL`]).
+    /// Left out of the serialized schedule at its default.
+    #[serde(
+        default = "default_max_pulses_per_level",
+        skip_serializing_if = "is_default_max_pulses_per_level"
+    )]
+    pub max_pulses_per_level: u32,
 }
 
 impl ShockLevelSchedule {
@@ -72,6 +121,8 @@ impl ShockLevelSchedule {
             start_db: DEFAULT_START_LEVEL_DB,
             table_db: DEFAULT_LEVEL_TABLE_DB.to_vec(),
             pulses_per_level: vec![DEFAULT_PULSES_PER_LEVEL],
+            advance: LadderAdvance::Count,
+            max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
         }
     }
 
@@ -82,6 +133,8 @@ impl ShockLevelSchedule {
             start_db: DEFAULT_START_LEVEL_DB,
             table_db: DEFAULT_LEVEL_TABLE_DB.to_vec(),
             pulses_per_level: vec![DEFAULT_PULSES_PER_LEVEL],
+            advance: LadderAdvance::Count,
+            max_pulses_per_level: DEFAULT_MAX_PULSES_PER_LEVEL,
         }
     }
 
@@ -157,6 +210,28 @@ pub struct ShockLadderState {
     /// True once the run has walked off the top of the table (AUTO reached full and
     /// completed its pulses). The service uses this to schedule a clean stop.
     completed: bool,
+    /// Pulses at the current level since its last passing pulse (or since the
+    /// level was entered). Counted only by [`ShockLadderState::on_pulse_judged`].
+    #[serde(default)]
+    without_pass: u32,
+}
+
+/// What one judged pulse did to the ladder ([`ShockLadderState::on_pulse_judged`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LadderTick {
+    /// The level stays.
+    Held,
+    /// AUTO moved to the next level.
+    Advanced,
+    /// AUTO completed its top level.
+    Completed,
+    /// `max_pulses_per_level` pulses at this level without a pass (AUTO with
+    /// [`LadderAdvance::OnPass`]), or failing pulses in a row at this level
+    /// (MANUAL): the run does not converge.
+    NotConverged {
+        /// The pulses counted against the limit.
+        pulses: u32,
+    },
 }
 
 impl ShockLadderState {
@@ -183,6 +258,7 @@ impl ShockLadderState {
             pulses_at_level: 0,
             manual_offset_db: manual_offset,
             completed: false,
+            without_pass: 0,
         })
     }
 
@@ -242,16 +318,87 @@ impl ShockLadderState {
         }
     }
 
+    /// Pulses at the current level since its last passing pulse, or since the
+    /// level was entered.
+    pub fn pulses_without_pass(&self) -> u32 {
+        self.without_pass
+    }
+
+    /// Tick the ladder after one pulse fired at the current level and was
+    /// judged, for a closed-loop run: the schedule's [`LadderAdvance`] and
+    /// [`ShockLevelSchedule::max_pulses_per_level`] apply.
+    ///
+    /// - AUTO, [`LadderAdvance::Count`]: as [`Self::on_pulse_fired`]; no
+    ///   per-level limit.
+    /// - AUTO, [`LadderAdvance::OnPass`]: only a passing pulse counts toward the
+    ///   level's pulse count; `max_pulses_per_level` pulses at the level without
+    ///   a pass do not converge.
+    /// - MANUAL: counts the pulse; `max_pulses_per_level` failing pulses in a
+    ///   row at one level do not converge.
+    ///
+    /// [`Self::on_pulse_fired`] is the open loop's tick and is unchanged.
+    pub fn on_pulse_judged(&mut self, passed: bool) -> LadderTick {
+        let max = self.schedule.max_pulses_per_level.max(1);
+        if passed {
+            self.without_pass = 0;
+        } else {
+            self.without_pass = self.without_pass.saturating_add(1);
+        }
+        let before = self.level_index;
+        match (self.schedule.mode, self.schedule.advance) {
+            (ShockRunMode::Auto, LadderAdvance::Count) => {
+                self.on_pulse_fired();
+                if self.completed {
+                    return LadderTick::Completed;
+                }
+                if self.level_index != before {
+                    self.without_pass = 0;
+                    return LadderTick::Advanced;
+                }
+                LadderTick::Held
+            }
+            (ShockRunMode::Auto, LadderAdvance::OnPass) => {
+                if !passed {
+                    if self.without_pass >= max {
+                        return LadderTick::NotConverged {
+                            pulses: self.without_pass,
+                        };
+                    }
+                    return LadderTick::Held;
+                }
+                self.on_pulse_fired();
+                if self.completed {
+                    return LadderTick::Completed;
+                }
+                if self.level_index != before {
+                    return LadderTick::Advanced;
+                }
+                LadderTick::Held
+            }
+            (ShockRunMode::Manual, _) => {
+                self.pulses_at_level = self.pulses_at_level.saturating_add(1);
+                if self.without_pass >= max {
+                    return LadderTick::NotConverged {
+                        pulses: self.without_pass,
+                    };
+                }
+                LadderTick::Held
+            }
+        }
+    }
+
     /// Nudge the commanded level up by [`MANUAL_STEP_DB`]. Allowed in any
     /// mode (the operator can trim even during an AUTO run); it moves the manual
     /// offset, leaving the table index and AUTO progression intact.
     pub fn step_up(&mut self) {
         self.manual_offset_db += MANUAL_STEP_DB;
+        self.without_pass = 0;
     }
 
     /// Nudge the commanded level down by [`MANUAL_STEP_DB`].
     pub fn step_down(&mut self) {
         self.manual_offset_db -= MANUAL_STEP_DB;
+        self.without_pass = 0;
     }
 
     /// Jump directly to table level `i`, clearing any manual offset and
@@ -268,6 +415,7 @@ impl ShockLadderState {
         self.manual_offset_db = 0.0;
         self.pulses_at_level = 0;
         self.completed = false;
+        self.without_pass = 0;
         Ok(())
     }
 }

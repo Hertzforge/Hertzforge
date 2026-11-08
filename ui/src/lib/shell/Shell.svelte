@@ -84,6 +84,9 @@
 			if (app.acquire.actions.abort.enabled) {
 				e.preventDefault();
 				void app.acquire.abort();
+			} else if (app.shock.actions.abort.enabled) {
+				e.preventDefault();
+				void app.shock.abort();
 			}
 			return;
 		}

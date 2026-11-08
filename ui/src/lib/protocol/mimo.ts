@@ -326,7 +326,8 @@ export interface MimoReportResult {
 
 // --- the law catalog -----------------------------------------------------------------------
 
-export type LawWorld = 'single' | 'mimo';
+/** Which test a law is for: single-output Random, MIMO Random, or classical shock. */
+export type LawWorld = 'single' | 'mimo' | 'shock_classical';
 
 export type LawParam = { key: string; label: string; help: string } & (
 	| { kind: 'number' | 'per_channel'; unit: string; min: number; max: number; step: number; default: number }

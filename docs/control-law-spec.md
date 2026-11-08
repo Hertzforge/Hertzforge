@@ -1,9 +1,9 @@
 # Control law plug-ins: specification
 
 **Status: draft for comment.** Interface version 0.1. Both Random worlds, single-output
-(section 6) and MIMO (section 7), are implemented: the host loads them and the built-in laws run
-through them. While the interface is 0.x it may still change (R15). Comments are wanted on every
-part, and on the questions still open (section 10).
+(section 6) and MIMO (section 7), and classical shock (section 8) are implemented: the host loads
+them and the built-in laws run through them. While the interface is 0.x it may still change (R15). Comments are wanted on every
+part, and on the questions still open (section 11).
 
 ## 1. Purpose
 
@@ -61,7 +61,7 @@ reports divergent lines), but never suppress one.
 | R10 | **State.** A law keeps its state in the resource the core constructs for each run. Nothing carries over between runs. |
 | R11 | **Parameters.** Only the declared kinds in section 5. The core validates every value against the declaration before the law is constructed. There are no free-form strings for a law to parse. |
 | R12 | **Identity and records.** A law file is identified by the SHA-256 of its bytes. Every run records the law's name, version, hash and parameter values, the law file itself, and each loop's law inputs and outputs. |
-| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). |
+| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). A classical shock law is checked on seven simulated test articles, each a whole run under the core's guards (section 8; the guide's "Checking a classical shock law before hardware"). |
 | R14 | **Licensing.** A law file is a separate work loaded at run time; its author chooses its license. Laws shipped with Hertzforge are MIT. |
 | R15 | **Versioning.** While the interface is 0.x it may change. From 1.0, minor versions only add, and the controller loads the current and the previous major version. |
 
@@ -266,18 +266,82 @@ change of the loop as diagnostics; the closed-loop laws also count the clamped f
 was published as an unstable draft no host loaded and no law could be built against;
 `random-single` is unchanged, so every single-output law file keeps loading (R15).
 
-## 8. Later test types
+## 8. Classical shock (`shock-classical`)
+
+A classical shock law closes the loop between pulses: it proposes the next drive record, and the
+controller checks it, scales it to the scheduled level, plays it, measures and judges the pulse,
+and calls the law again. The world is `wit/control-law/shock-classical.wit`.
+
+**When it runs.** Once after system identification (`seed`), then once after each fired, measured
+and judged pulse (`iterate`), on the run's thread and never while a pulse plays. A train or a
+gunfire burst fires the drive in force with no call inside it. Each call has a budget of a fraction
+of the minimum time between pulses (`law_budget`, default 0.25: 250 ms at the default 1.0 s floor);
+a law file's host deadline is the same number.
+
+**What it sees.** Fixed for the run: the rate and the record length (a power of two), the
+correction band, the full-level reference on the grid (the compensated pulse with its quiet
+margins; the main pulse's first sample and length), the identified plant on the grid's bins
+(`H` in EU per volt, coherence, the controller's regularized inverse
+`conj(H) / (|H|^2 + epsilon)` with its epsilon, and the bins the controller trusts: in the band,
+coherence at or over its floor, reference within its dynamic-range floor) and the drive ceiling.
+Each call: the pulse index, the last response referred to full level by the scale the controller
+actually commanded, the drive as played referred the same way, the controller's verdict (passed,
+RMS error in percent, peak ratio, velocity-change ratio) and whether the controller scaled that
+pulse down. Spectra are one-sided under the negative-exponent transform; the controller forms the
+plant in that convention.
+
+**What it returns.** The next full-level drive in volts, `record-len` finite samples, and up to
+eight values its manifest declares. It does not decide the level, the ladder, when a pulse fires,
+the spacing, a train, the polarity, the verdict or any abort.
+
+**What the controller enforces, for every law.**
+
+| Guard | Rule |
+|---|---|
+| Drive in volts | From the identified plant. Identification is band-limited random at a stated V rms, its peak held under the drive ceiling |
+| Drive ceiling and abort | On the commanded record before it plays: over the abort it is refused and the run aborts (`drive_vpk`); over the ceiling it is scaled to it and the action logged. At proceed, the drive at the highest level the run is scheduled to reach over the abort ends the run before any pulse (`predicted`); a level move that would pass it is refused |
+| Predicted response | Through `H` before every pulse: its peak against the drive limit, its velocity and displacement against the shaker's ratings (`kinematic`, `predicted`) |
+| At rest | The outer half of each quiet margin tapers to zero, so every record starts and ends at 0 V |
+| Output checks | Length, finite, at most eight declared values |
+| Change caps | At full level, the drive's peak and any bin may rise at most `max_peak_rise_db` and `max_bin_rise_db` (default 10 dB each) over the drive in force, never tighter than the built-in's own limit plus 1 dB; bins under -40 dB of the largest count as that small |
+| First drive | The seed's predicted response peak at most `first_drive_ratio` (default 2) times the reference's |
+| Misses | A late, failed, crashed or refused call is a miss; the next pulse refires the drive in force. `law_misses` (default 3) in a row take the controlled stop (`law_fault`); a seed miss fires nothing |
+| Measured pulse | Overshoot over `1 + overshoot_abort` times commanded aborts at any level (default twice the standard's amplitude tolerance); a tolerance failure aborts at full level (`full_level`, the default) or at every level (`every_level`), never for an undershoot |
+| Convergence | `max_pulses_per_level` (default 5) pulses at one level without a pass, or failing in a row at one manual level, end the run `not_converged`, as does the run's `max_pulses` (default 100); the error rising more than 1 dB on `divergence_pulses` (default 3) pulses in a row at one level trips `divergence` |
+
+**The built-in law, `fd_correct`.** The frequency-domain correction time waveform replication
+uses, applied to the compensated pulse: `D0 = G R` on the trusted bins, then `D += beta G (R - Y)`
+after each pulse, each bin's growth limited per pulse; the drive is the inverse transform of `D`.
+Parameters `beta` (0.05 to 1, default 0.5), `max_db_per_pulse` (1 to 9, default 6) and
+`initial_backoff_db` (0 to 12, default 0). Its seed and correction are time waveform replication's
+bin for bin; it runs natively and as the law file `laws/shock-fdc`, and the two give the same run.
+
+**Records.** At the seed the run folder gets `law.json` (the law's identity and parameters, the
+guards and the caps); every call goes to `law_pulses` (an index line per call: pulse, seed or
+iteration, used or the miss reason, call time, capped bins, verdict, values; the response, the
+drive in and the drive out as `f32` in the payload), written between pulses. The report carries
+the law's name, version and short hash and the guard counts.
+
+**The check.** Seven simulated test articles, each a whole run under these guards: a wire (every
+pulse passes), one mode (400 Hz, Q 10), the simulated station's plant (200 and 550 Hz, Q 2.5) with
+a 6 ms haversine, one mode behind a 2 ms delay (each a pass by pulse 3 and every full-level pulse),
+an identification error (the identified gain +3 dB: a pass within eight pulses at the first rung),
+measurement noise (a pass by pulse 4) and a 30 dB notch at 300 Hz under the coherence floor
+(survive). Every case asks every call answered in time, with no miss and no refused output.
+
+## 9. Later test types
 
 Each test type gets its own world, built on the same mechanism.
 
 | Test type | When the law runs | Note |
 |---|---|---|
-| Shock, SRS | Between pulses | Slack time budget |
+| Classical shock | Between pulses | Built: section 8 |
+| SRS | Between pulses | Slack time budget |
 | Time waveform replication | Between passes | Slack time budget |
 | Sine | Every servo update | Far more frequent than Random, so the budget is tight; to be measured before deciding how much of the sine servo can be changed |
 | MIMO variants of the above | As above | After MIMO Random |
 
-## 9. Writing a law
+## 10. Writing a law
 
 Hertzforge publishes a Rust crate for law authors (the interface bindings for both worlds, plus
 helpers such as the default level servo and, for MIMO, the controller's own matrix types and
@@ -286,7 +350,7 @@ per-line linear algebra), a template project, and a worked example for each worl
 against the WIT files can produce a law file (C and C++ can, for example); only Rust is supported
 for now. A law should pass `law check` before it is used on hardware.
 
-## 10. Open questions for reviewers
+## 11. Open questions for reviewers
 
 1. **MIMO inputs.** *Answered:* the inputs of section 7. The large optional ones (the last drive,
    the response-drive cross spectrum, the identification response, drive and noise) are declared in

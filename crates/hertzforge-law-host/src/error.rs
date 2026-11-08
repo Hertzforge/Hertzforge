@@ -70,6 +70,17 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// A classical shock law returned a result that breaks the output rules:
+    /// a drive of the wrong length, a value that is not a finite number, too
+    /// many values, or a value the manifest does not declare (or reported
+    /// twice). The change caps and every other protection of the drive belong
+    /// to the controller.
+    BadClassicalOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: ClassicalOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -115,6 +126,34 @@ pub enum MimoOutputRule {
     Diagnostics,
 }
 
+/// The output rules a classical shock law's result is checked against, in the
+/// order they are checked ([`LawError::BadClassicalOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassicalOutputRule {
+    /// The drive has `record-len` samples.
+    WrongLength,
+    /// Every drive sample and every value is a finite number.
+    NonFinite,
+    /// At most [`crate::shock_classical::MAX_CLASSICAL_VALUES`] values.
+    TooManyValues,
+    /// Every value is declared by the manifest and reported once.
+    UndeclaredValue,
+}
+
+impl ClassicalOutputRule {
+    /// The stable wire and record name, the controller's own for the same
+    /// rule: `wrong_length`, `non_finite`, `too_many_values`,
+    /// `undeclared_value`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClassicalOutputRule::WrongLength => "wrong_length",
+            ClassicalOutputRule::NonFinite => "non_finite",
+            ClassicalOutputRule::TooManyValues => "too_many_values",
+            ClassicalOutputRule::UndeclaredValue => "undeclared_value",
+        }
+    }
+}
+
 impl LawError {
     /// Whether this error leaves the instance unusable.
     pub fn poisons(&self) -> bool {
@@ -154,7 +193,9 @@ impl fmt::Display for LawError {
                  {limit_bytes} bytes"
             ),
             LawError::Law(s) => write!(f, "the law returned an error: {s}"),
-            LawError::BadOutput { detail, .. } | LawError::BadMimoOutput { detail, .. } => {
+            LawError::BadOutput { detail, .. }
+            | LawError::BadMimoOutput { detail, .. }
+            | LawError::BadClassicalOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(

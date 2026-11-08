@@ -147,6 +147,9 @@ export interface RunBarHost {
 	busy: string | null;
 	source: { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null;
 	elapsed: number | null;
+	/** A test type's own words for its outcomes and phases; the shared words otherwise. */
+	outcomeWords?: Record<string, string>;
+	phaseWords?: Record<string, string>;
 	release(): unknown;
 	claim(): unknown;
 	apply(): unknown;

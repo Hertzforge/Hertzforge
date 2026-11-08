@@ -7,6 +7,7 @@ use crate::error::LawError;
 use crate::mimo::LoadedMimoLaw;
 use crate::mimo_bindings::RandomMimoPre;
 use crate::sandbox::{self, HostState, Sandbox};
+use crate::shock_classical::{LoadedClassicalLaw, ShockClassicalPre};
 use crate::ticker::Ticker;
 use crate::types::{
     DiagnosticSpec, GuestOutput, LawIdentity, LoopInputs, LoopOutputs, Manifest, Param, Setup,
@@ -109,6 +110,8 @@ pub enum AnyLaw {
     Single(LoadedLaw),
     /// A multiple-output Random law (the `random-mimo` world).
     Mimo(LoadedMimoLaw),
+    /// A classical shock law (the `shock-classical` world).
+    ShockClassical(LoadedClassicalLaw),
 }
 
 impl AnyLaw {
@@ -117,14 +120,17 @@ impl AnyLaw {
         match self {
             AnyLaw::Single(l) => l.identity(),
             AnyLaw::Mimo(l) => l.identity(),
+            AnyLaw::ShockClassical(l) => l.identity(),
         }
     }
 
-    /// The world the file implements: `random-single` or `random-mimo`.
+    /// The world the file implements: `random-single`, `random-mimo` or
+    /// `shock-classical`.
     pub fn world(&self) -> &'static str {
         match self {
             AnyLaw::Single(_) => crate::WORLD,
             AnyLaw::Mimo(_) => crate::MIMO_WORLD,
+            AnyLaw::ShockClassical(_) => crate::CLASSICAL_WORLD,
         }
     }
 }
@@ -201,19 +207,44 @@ impl LawHost {
         }
     }
 
-    /// Compile a law file of either kind and read its manifest: the world it
+    /// Compile a classical shock law file and read its manifest: as
+    /// [`Self::load`], for the `shock-classical` world. Fails with
+    /// [`LawError::NotALaw`] when the component is not a `shock-classical`
+    /// law, and [`LawError::ManifestInvalid`] when the manifest breaks a rule
+    /// (including declaring more values than a classical law may report).
+    pub fn load_classical(&self, bytes: &[u8]) -> Result<LoadedClassicalLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match ShockClassicalPre::new(pre.clone()) {
+            Ok(c) => LoadedClassicalLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if RandomSinglePre::new(pre.clone()).is_ok() || RandomMimoPre::new(pre).is_ok() {
+                    "it is a Random law, not a classical shock law (the shock-classical world)"
+                        .into()
+                } else {
+                    chain(&e)
+                },
+            )),
+        }
+    }
+
+    /// Compile a law file of any kind and read its manifest: the world it
     /// implements decides which. Fails with [`LawError::NotALaw`] when it
-    /// implements neither, naming why for both.
+    /// implements none, naming why for each.
     pub fn load_any(&self, bytes: &[u8]) -> Result<AnyLaw, LawError> {
         let (sha256, pre) = self.compile(bytes)?;
         let single_err = match RandomSinglePre::new(pre.clone()) {
             Ok(single) => return self.read_single(sha256, single).map(AnyLaw::Single),
             Err(e) => chain(&e),
         };
-        match RandomMimoPre::new(pre) {
-            Ok(mimo) => LoadedMimoLaw::read(self, sha256, mimo).map(AnyLaw::Mimo),
+        let mimo_err = match RandomMimoPre::new(pre.clone()) {
+            Ok(mimo) => return LoadedMimoLaw::read(self, sha256, mimo).map(AnyLaw::Mimo),
+            Err(e) => chain(&e),
+        };
+        match ShockClassicalPre::new(pre) {
+            Ok(c) => LoadedClassicalLaw::read(self, sha256, c).map(AnyLaw::ShockClassical),
             Err(e) => Err(LawError::NotALaw(format!(
-                "not a single-output law ({single_err}) and not a multiple-output law ({})",
+                "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}) \
+                 and not a classical shock law ({})",
                 chain(&e)
             ))),
         }
@@ -353,7 +384,7 @@ impl LoadedLaw {
 }
 
 #[derive(Clone, Copy)]
-enum LoopCall {
+pub(crate) enum LoopCall {
     Seed,
     Iterate,
 }

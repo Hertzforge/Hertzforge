@@ -13,6 +13,8 @@
  *   full level, controlled stop, abort and protection trips) streaming `random.state`,
  *   `random.live` and `random.log`, and to a screen that subscribes (`random.subscribe`), its own
  *   `random.data` with only the plots it asked for.
+ * - Classical shock (`shock.*` and the classical world of `laws.*`; `./shock`), on the same run
+ *   slot and controller seat.
  *
  * Every value it produces is simulated. Its NI devices are driver-simulated unless a test asks
  * otherwise, so in the shell everything it sends is tagged `SIM`.
@@ -63,6 +65,7 @@ import type {
 	View
 } from '../types';
 import { MockConnection, MockError, type MockServer } from './socket';
+import { createShockMock } from './shock';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -774,7 +777,9 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	let seatTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
-	const orphanS = () => (seatDeadline !== null && isLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
+	/** A run of any test type is live (the seat's countdown runs for every one). */
+	const anyLive = () => isLive() || shock.isLive();
+	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
 	/** Every connection gets its own copy, with its own role. */
@@ -801,6 +806,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		seatDeadline = null;
 		if (seat && seat.conn === null) seat = null;
 		if (!seat && random && isLive()) requestStop(random, 'safe_stop');
+		if (!seat) shock.seatExpired();
 		sessionChanged();
 	}
 
@@ -819,6 +825,25 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	function clientName(conn: MockConnection): string {
 		return seat?.conn === conn ? `${seat.name} (controller)` : `${names.get(conn) ?? 'a client'} (observer)`;
 	}
+
+	// ---- classical shock, on the same run slot and seat -----------------------------------------
+	const shock = createShockMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : null),
+		broadcast: (topic, data) => broadcast(topic, data),
+		connections: () => connections,
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		feasibilityExceeds: options.feasibilityExceeds ?? false
+	});
 
 	// ---- stations and the channel table -------------------------------------------------------
 	let selection: Selection = { kind: 'sim', devices: [] };
@@ -1577,6 +1602,12 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	function notWhileLive(what: string) {
 		if (random && isLive()) refuse('refused', 'run_active', `Run ${random.id} is ${random.state}; stop it before ${what}.`, { run_id: random.id });
+		notWhileShock(what);
+	}
+
+	function notWhileShock(what: string) {
+		const id = shock.liveId();
+		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
 	function notWhileSim() {
@@ -1600,6 +1631,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		detach: (c) => {
 			connections.delete(c);
 			subs.delete(c);
+			shock.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1610,12 +1642,14 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			}
 		},
 		methods: {
+			...shock.methods,
 			// ---- sim.* (superseded for running tests; kept for the Simulate workspace) ----------
 			'sim.profiles': () => ({ profiles: PROFILES.map(({ id, title, summary }) => ({ id, title, summary })) }),
 			'sim.state': () => ({ state: simState, run_id: simRun?.id ?? lastSimId }),
 			'sim.start': (params) => {
 				if (simRun) throw new MockError('refused', 'A simulation is already running; stop it before starting another.');
 				if (random && isLive()) refuse('refused', 'run_active', `Run ${random.id} holds the station; stop it before starting a simulation.`, { run_id: random.id });
+				notWhileShock('starting a simulation');
 				const profile = PROFILES.find((p) => p.id === params.profile);
 				if (!profile) throw new MockError('not_found', `No profile named "${String(params.profile)}"; sim.profiles lists them.`);
 				const level = Number(params.level_db);
@@ -1659,7 +1693,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				if (seat?.conn === conn) {
 					seat = null;
 					disarmSeatClock();
-					if (isLive()) armSeatClock();
+					if (anyLive()) armSeatClock();
 					sessionChanged();
 				}
 				return { role: 'observer', orphan_s: orphanS() };
@@ -1769,6 +1803,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const r = needRun();
 				if (r.state === 'finished') refuse('refused', 'run_finished', 'This run has finished; reset or configure again to run.', { outcome: r.end?.outcome });
 				if (busy(r)) notWhileLive('starting again');
+				notWhileShock('starting');
 				notWhileSim();
 				if (r.state === 'configured' || r.state === 'blocked') arm(r, undefined);
 				start(r);

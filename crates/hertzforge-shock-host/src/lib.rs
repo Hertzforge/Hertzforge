@@ -18,6 +18,11 @@
 //!   standards' dV acceptance, time-integral of the measured pulse vs nominal),
 //!   and (c) the pulse-substitution dV-equivalence check plus the standalone
 //!   [`spec::substitute_amplitude_for_velocity_change`] design helper.
+//! - [`law`] - the classical control-law seam: [`law::ClassicalLaw`] and
+//!   [`law::ClassicalLawFactory`], what a law sees and returns
+//!   ([`law::ClassicalLawSetup`], [`law::PulseInputs`], [`law::PulseOutputs`],
+//!   [`law::Verdict`]), and [`law::ClassicalControl`], the closed-loop settings
+//!   carried in [`ClassicalTestConfig::control`].
 //! - [`service`] - the CLASSICAL-SHOCK run service:
 //!   [`service::ClassicalShockService`] orchestrates feasibility ->
 //!   arm -> per-level firing (the level ladder) -> the per-pulse pipeline
@@ -41,6 +46,7 @@
 //! Units are the in/g/lbf system throughout.
 #![allow(dead_code)]
 
+pub mod law;
 pub mod service;
 pub mod spec;
 pub mod tolerance;
@@ -48,14 +54,22 @@ pub mod tolerance;
 // Curated re-exports so downstream services and the UI bind against one path.
 // The delegated shock crate mirrors this list verbatim, which keeps its import
 // paths compiling.
+pub use law::{
+    ClassicalControl, ClassicalLaw, ClassicalLawFactory, ClassicalLawSetup, ClassicalPlant,
+    FdCorrectFactory, FdCorrectLaw, Polarity, PulseInputs, PulseOutputs, ToleranceAbort, Verdict,
+};
 pub use service::config::{CaptureRules, ClassicalTestConfig, ConfigError, GunfireSpec, MetaField};
 pub use service::firer::{BackendPulseFirer, PulseFirer};
-pub use service::report::{Honesty, PulseRow, ReportData, RunState, Status, TripKind, TripRecord};
+pub use service::report::{
+    ConvergenceLimit, DrivePrediction, HeldReason, Honesty, IdentificationSummary, LawStatus,
+    PulseLawCall, PulseRow, PulseView, ReportData, RunState, Status, ToleranceBand, TripKind,
+    TripRecord,
+};
 pub use service::{ClassicalShockService, ServiceError};
 pub use spec::{
     substitute_amplitude_for_velocity_change, ClassicalPulseSpec, ClassicalShape, SpecError,
 };
 pub use tolerance::{
-    check_tolerance, EnvelopeCheck, SubstitutionCheck, ToleranceParams, ToleranceReport,
-    ToleranceStandard, VelocityChangeCheck,
+    check_tolerance, tolerance_band, EnvelopeCheck, SubstitutionCheck, ToleranceParams,
+    ToleranceReport, ToleranceStandard, VelocityChangeCheck,
 };

@@ -35,7 +35,7 @@ impl Service {
     }
 
     /// Run `f` on the law catalog, opening it on first use.
-    async fn with_catalog<T: Send + 'static>(
+    pub(super) async fn with_catalog<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut LawCatalog) -> Result<T, MethodError> + Send + 'static,
     ) -> Result<T, MethodError> {

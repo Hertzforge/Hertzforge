@@ -116,7 +116,7 @@ impl LawCatalog {
         if entry.world != LawWorld::Single {
             return Err(ChoiceError::WrongTestType {
                 id: choice.id.clone(),
-                law_is_for: "multiple-output Random",
+                law_is_for: entry.world.test_type(),
             });
         }
         let params = resolve_params(&entry.manifest, &choice.params, cfg.control.channels.len())
@@ -155,6 +155,10 @@ impl LawCatalog {
                 Some(AnyLaw::Mimo(_)) => Err(ChoiceError::WrongTestType {
                     id: choice.id.clone(),
                     law_is_for: "multiple-output Random",
+                }),
+                Some(AnyLaw::ShockClassical(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "classical shock",
                 }),
                 None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
             },
