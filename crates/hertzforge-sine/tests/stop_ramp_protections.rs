@@ -260,6 +260,8 @@ fn cfg() -> SineTestConfig {
         control_tick_frames: BLOCK,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 

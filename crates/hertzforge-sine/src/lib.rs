@@ -36,11 +36,16 @@
 //! cycles, step-sine, the RSTD search/settle/capture/dwell orchestration, and the
 //! level ladder.
 //!
+//! The [`law`] module is the control-law seam: what a Sine law sees each tick
+//! and returns, the factory that builds it, and the guards the core runs every
+//! law under. It is the native side of the `sine-single` world.
+//!
 //! Pure library: no I/O beyond what serde does; no `unwrap`/`expect`/`panic!` in
 //! library paths (validation returns errors).
 
 pub mod control;
 pub mod feasibility;
+pub mod law;
 pub mod profile;
 pub mod scheduler;
 pub mod service;
@@ -52,6 +57,11 @@ pub use control::{
     FeedforwardConfig, FeedforwardTable, LimitChannelTick, NotchGovernor, NotchGovernorConfig,
 };
 pub use feasibility::assess_sine;
+pub use law::{
+    Hold, Identification, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, LiveParam,
+    MonotonicClock, ParamSetting, SineControlLaw, SineLawFactory, SineLawSetup, SineOutputRule,
+    TickInputs, TickOutputs,
+};
 pub use profile::{
     accel_g_pk_of, crossover_hz, displacement_in_pp_from_accel, import_with_report, pct_to_db,
     velocity_ips_pk_from_accel, ProfileError, ProfileRow, ProfileWarning, Quantity, SineProfile,

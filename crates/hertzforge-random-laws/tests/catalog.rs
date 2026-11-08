@@ -502,3 +502,26 @@ fn srs_shock_laws_have_their_own_list_the_built_in_first() {
     ));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_sine_world_is_named_and_lists_nothing_until_its_laws_are_served() {
+    assert_eq!(LawWorld::Sine.as_str(), "sine");
+    assert_eq!(LawWorld::Sine.test_type(), "Sine");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-sine-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let cat = open(&root);
+    assert!(cat.entries_for(LawWorld::Sine).is_empty());
+    assert!(cat.sine_entries().is_empty());
+    // No other world's list gains or loses anything.
+    assert!(cat
+        .entries()
+        .iter()
+        .chain(cat.mimo_entries().iter())
+        .chain(cat.shock_classical_entries().iter())
+        .chain(cat.shock_srs_entries().iter())
+        .all(|e| e.world != LawWorld::Sine));
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -30,6 +30,8 @@ hertzforge-reference = { path = "crates/hertzforge-reference" }
 hertzforge-sdm = { path = "crates/hertzforge-sdm" }
 hertzforge-law-host = { path = "crates/hertzforge-law-host" }
 hertzforge-shaker-db = { path = "crates/hertzforge-shaker-db" }
+hertzforge-sine = { path = "crates/hertzforge-sine" }
+hertzforge-sine-laws = { path = "crates/hertzforge-sine-laws" }
 hertzforge-shock-common = { path = "crates/hertzforge-shock-common" }
 hertzforge-shock-host = { path = "crates/hertzforge-shock-host" }
 hertzforge-shock-law-math = { path = "crates/hertzforge-shock-law-math" }

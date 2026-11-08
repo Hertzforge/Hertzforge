@@ -1401,6 +1401,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-sine-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-hal",
+ "hertzforge-random-laws",
+ "hertzforge-sine",
+]
+
+[[package]]
 name = "hertzforge-srs"
 version = "0.1.0"
 dependencies = [
@@ -2323,6 +2332,8 @@ dependencies = [
  "hertzforge-shock-host",
  "hertzforge-shock-law-math",
  "hertzforge-shock-laws",
+ "hertzforge-sine",
+ "hertzforge-sine-laws",
  "hertzforge-srs",
  "hertzforge-station",
  "hertzforge-twr",

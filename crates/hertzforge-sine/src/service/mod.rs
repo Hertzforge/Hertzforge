@@ -27,6 +27,7 @@ pub mod ring;
 
 use crate::control::{BlendConfig, BlendLaw, DriveGuard, FeedforwardTable, NotchGovernor};
 use crate::feasibility::assess_sine;
+use crate::law::{LawClock, MonotonicClock, SineLawFactory};
 use crate::profile::SineProfile;
 use crate::scheduler::{BidirSweep, DwellRun, LadderPlan, RstdPlan, StepSine};
 use config::{
@@ -385,6 +386,15 @@ pub struct SineService {
     sysid_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The drive->response pipeline lag the sysID measured, in frames.
     sysid_lag_frames: usize,
+
+    // --- the control-law seam -----------------------------------------------------
+    /// The factory the run builds its control law with, after identification.
+    /// `None`: the built-in law. Stored, not yet called: the seam that calls it
+    /// is not built, and [`SineService::new`] refuses a configuration that asks
+    /// for the core's law guards.
+    law_factory: Option<std::sync::Arc<dyn SineLawFactory>>,
+    /// The clock law calls are timed on.
+    law_clock: std::sync::Arc<dyn LawClock>,
 }
 
 impl SineService {
@@ -419,6 +429,16 @@ impl SineService {
     ) -> Result<Self, ServiceError> {
         let caps = backend.caps();
         cfg.validate()?;
+        // The law seam is a contract only so far: a configuration that asks for
+        // the core's law guards, or for a tick in seconds at the adopted rate,
+        // must not quietly run without them.
+        if cfg.law_guards.is_some() || cfg.control_tick_s.is_some() {
+            return Err(ServiceError::Config(ConfigError::BadConfig(
+                "the core's control-law guards (law_guards) and a control tick in seconds \
+                 (control_tick_s) are not built yet; this service runs only without them"
+                    .into(),
+            )));
+        }
         table
             .validate()
             .map_err(|e| ServiceError::Config(ConfigError::BadTable(e.to_string())))?;
@@ -540,7 +560,32 @@ impl SineService {
             device_parked: false,
             sysid_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sysid_lag_frames: 0,
+            law_factory: None,
+            law_clock: std::sync::Arc::new(MonotonicClock::new()),
         })
+    }
+
+    /// Install the factory the run builds its control law with. Without one the
+    /// run uses the built-in law.
+    ///
+    /// Stored only: nothing calls it until the law seam is built.
+    pub fn with_law_factory(mut self, factory: std::sync::Arc<dyn SineLawFactory>) -> Self {
+        self.law_factory = Some(factory);
+        self
+    }
+
+    /// Install the clock law calls are timed on (a test clock makes a law
+    /// "slow" deterministically).
+    ///
+    /// Stored only: nothing reads it until the law seam is built.
+    pub fn with_law_clock(mut self, clock: std::sync::Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
+    }
+
+    /// Whether a law factory has been installed ([`Self::with_law_factory`]).
+    pub fn has_law_factory(&self) -> bool {
+        self.law_factory.is_some()
     }
 
     /// The acquisition block this station should REQUEST at configure.

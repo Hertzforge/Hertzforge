@@ -59,28 +59,33 @@ pub enum LawWorld {
     ShockClassical,
     /// SRS shock (`shock-srs`).
     ShockSrs,
+    /// Single-output Sine (`sine-single`). Listed with no entries until its
+    /// built-in law and its law files are served.
+    Sine,
 }
 
 impl LawWorld {
-    /// The stable wire name: `single`, `mimo`, `shock_classical` or
-    /// `shock_srs`.
+    /// The stable wire name: `single`, `mimo`, `shock_classical`,
+    /// `shock_srs` or `sine`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
             LawWorld::Mimo => "mimo",
             LawWorld::ShockClassical => "shock_classical",
             LawWorld::ShockSrs => "shock_srs",
+            LawWorld::Sine => "sine",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random", "classical shock" or "SRS shock".
+    /// "multiple-output Random", "classical shock", "SRS shock" or "Sine".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
             LawWorld::Mimo => "multiple-output Random",
             LawWorld::ShockClassical => "classical shock",
             LawWorld::ShockSrs => "SRS shock",
+            LawWorld::Sine => "Sine",
         }
     }
 }
@@ -432,6 +437,13 @@ impl LawCatalog {
             .collect()
     }
 
+    /// Every Sine law. None yet: the built-in `servo_blend` and `sine-single`
+    /// law files are listed here once they are served (the built-in first,
+    /// then the imported files by name, version and hash).
+    pub fn sine_entries(&self) -> Vec<CatalogEntry> {
+        Vec::new()
+    }
+
     /// Every law of `world`.
     pub fn entries_for(&self, world: LawWorld) -> Vec<CatalogEntry> {
         match world {
@@ -439,6 +451,7 @@ impl LawCatalog {
             LawWorld::Mimo => self.mimo_entries(),
             LawWorld::ShockClassical => self.shock_classical_entries(),
             LawWorld::ShockSrs => self.shock_srs_entries(),
+            LawWorld::Sine => self.sine_entries(),
         }
     }
 

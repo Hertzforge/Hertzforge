@@ -1,0 +1,178 @@
+package hertzforge:control-law@0.1.0;
+
+// Sine: one drive, one tone, one amplitude decision per control tick.
+//
+// - The drive. The core's oscillator plays one tone. Its frequency, sweep
+//   rate and direction, its phase (kept continuous), the level schedule and
+//   any second reference output are the core's. A law decides one number each
+//   tick: the tone's amplitude, in drive units peak (volts peak on hardware).
+// - Units. `target`, `measured` and `channel-amplitude` are in the control
+//   channels' units, peak (EU pk, g pk for an accelerometer). The identified
+//   gain is in EU pk per drive unit pk. `prediction-db` and `level-db` are
+//   decibels: `prediction-db` relative to one drive unit, `level-db` relative
+//   to the full-level profile.
+// - Level. `target` is the profile at the present frequency at the present
+//   level: a rung change is a target change the law follows, within the
+//   core's caps. The identification's `target` is at full level.
+// - Cadence. A law is called once per control tick on the controller's
+//   real-time thread (`engage` for the first tick after identification,
+//   `tick` for every one after it). Each call has a time budget the core sets
+//   from the tick; a call past it is not used. A law is not called while the
+//   drive ramps down.
+// - Holds. `hold` says why the core holds the drive this tick: `notch` while
+//   a limit channel holds the control point down (the law must not raise it),
+//   `probe` while a resonance search maps the plant at a fixed drive (the law
+//   is still called so its state keeps up, and its output is not used).
+// - The core's word is final. After every call the core caps the drive's
+//   change per tick and its rise per second, applies the limit channels'
+//   ceiling and the drive ceiling, and aborts on the drive abort. A refused
+//   output, a failed call or a late one is a miss: the drive in force is held,
+//   and a run of misses ends the run with the core's controlled stop.
+//
+// This world is a draft until Sine is merged, and frozen then.
+
+/// Types for single-output Sine.
+interface sine-types {
+    use types.{manifest, diagnostic-value};
+
+    /// Why the core holds the drive this tick.
+    enum hold {
+        /// Nothing holds it: the law's drive is used, within the core's caps.
+        free,
+        /// A limit channel holds the control point down. The law must not
+        /// raise the drive; the core holds it at the notch ceiling.
+        notch,
+        /// A resonance search maps the plant at a fixed drive. The law's
+        /// output is not used.
+        probe,
+    }
+
+    /// The system identification, on its own frequency grid. Every list has
+    /// one value per grid frequency.
+    record identification {
+        /// The grid, Hz, ascending.
+        frequency-hz: list<f64>,
+        /// |H|, control units peak per drive unit peak.
+        gain: list<f64>,
+        /// Ordinary coherence, 0 to 1.
+        coherence: list<f64>,
+        /// Whether the core trusts the estimate at this frequency (its
+        /// coherence and gain floors). `prediction-db` is absent where it does
+        /// not.
+        trusted: list<bool>,
+        /// The full-level target at each grid frequency, control units peak.
+        target: list<f64>,
+    }
+
+    /// What a Sine law is built for: fixed for the run.
+    record sine-setup {
+        /// How many control channels the composite is built from. Every
+        /// per-channel parameter carries this many values.
+        control-channels: u32,
+        /// The control tick, seconds.
+        tick-s: f64,
+        /// The band the run sweeps or dwells in, Hz.
+        band-lo-hz: f64,
+        band-hi-hz: f64,
+        /// The drive ceiling, drive units peak. The core never plays more.
+        drive-ceiling: f64,
+        identification: identification,
+    }
+
+    /// Everything a Sine law sees on one tick.
+    record tick-inputs {
+        /// Ticks since the law was built: 0 at `engage`.
+        tick-index: u64,
+        /// Seconds since the last call.
+        dt-s: f64,
+        /// The tone's frequency this tick, Hz.
+        frequency-hz: f64,
+        /// The sweep rate, Hz per second, signed: positive sweeping up,
+        /// negative sweeping down, 0 at a dwell or while the sweep is held.
+        sweep-rate-hz-per-s: f64,
+        /// The scheduled level, dB relative to the full-level profile.
+        level-db: f64,
+        /// The profile at this frequency at this level, control units peak.
+        target: f64,
+        /// The measured composite of the control channels, control units peak.
+        measured: f64,
+        /// Each control channel's tracked amplitude, control units peak, in
+        /// control-set order.
+        channel-amplitude: list<f64>,
+        /// Each control channel's tracked phase against the drive, degrees.
+        channel-phase-deg: list<f64>,
+        /// The drive in force, as actually played, drive units peak.
+        drive: f64,
+        /// The core's plant-inverse drive at this frequency at full level, dB
+        /// relative to one drive unit, from the identification. Absent where
+        /// the identification is not trusted.
+        prediction-db: option<f64>,
+        hold: hold,
+        /// The limit channels' ceiling on the drive this tick, drive units
+        /// peak; absent when no limit channel binds.
+        notch-ceiling: option<f64>,
+        /// Whether the core's settle window is open (after a level change, at
+        /// the start, after a resonance search): its protections are not
+        /// judged yet.
+        settling: bool,
+    }
+
+    /// One tick's result.
+    record tick-outputs {
+        /// The tone's amplitude this tick, drive units peak: finite and at
+        /// least 0.
+        drive: f64,
+        /// The law's own judgement that it is faulted. Shown and recorded;
+        /// the core never relies on it.
+        faulted: bool,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+    }
+
+    /// What a Sine law says about itself.
+    record sine-manifest {
+        /// Name, version, author, summary, parameters and diagnostics, as for
+        /// every law.
+        law: manifest,
+        /// The keys of the number parameters the operator may change during a
+        /// run (`adjust`). Each is a declared number parameter, at most once.
+        live: list<string>,
+    }
+}
+
+/// A single-output Sine law: its state lives in one `law` resource, built
+/// once per run, after system identification.
+interface sine-single-law {
+    use types.{param};
+    use sine-types.{sine-setup, tick-inputs, tick-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: sine-setup, params: list<param>) -> result<law, string>;
+
+        /// The first tick after identification: return the starting drive.
+        engage: func(inputs: tick-inputs) -> result<tick-outputs, string>;
+
+        /// One control tick: return the drive.
+        tick: func(inputs: tick-inputs) -> result<tick-outputs, string>;
+
+        /// The operator changed a live parameter. The core has checked the
+        /// key is declared live and the value is within its declared range;
+        /// the value applies from the next tick. An error keeps the value in
+        /// force and refuses the change with the given reason.
+        adjust: func(p: param) -> result<_, string>;
+    }
+}
+
+/// The world a single-output Sine law file implements.
+world sine-single {
+    use sine-types.{sine-manifest};
+
+    /// The law's name, version, parameters, diagnostics and live parameters.
+    export describe: func() -> sine-manifest;
+
+    export sine-single-law;
+}

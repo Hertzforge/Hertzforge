@@ -130,6 +130,8 @@ fn sweep_cfg(band: (f64, f64), rate: SweepRate, profile: SineProfile) -> SineTes
         control_tick_frames: 64,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 
