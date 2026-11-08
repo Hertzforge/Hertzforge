@@ -1106,7 +1106,16 @@ impl WireSine {
         let builtin = facts.builtin && facts.id == hertzforge_sine::law::SERVO_BLEND_ID;
         let (blend_w, compression) = if builtin {
             let w = self.builtin_number(facts, "blend_w", 0.5);
-            let c = match self.law.params.get("compression").and_then(Value::as_str) {
+            // Given, else the default the law's manifest declares: the law is
+            // built at it, and the settle window reads it from here.
+            let declared = facts.params.iter().find_map(|p| match &p.kind {
+                hertzforge_law_host::ParamKind::Choice(s) if p.key == "compression" => {
+                    Some(s.default.as_str())
+                }
+                _ => None,
+            });
+            let named = self.law.params.get("compression").and_then(Value::as_str);
+            let c = match named.or(declared) {
                 Some("fast") => CompressionPreset::Fast,
                 Some("custom") => CompressionPreset::Custom {
                     ki: self.builtin_number(facts, "ki", 2.0),
