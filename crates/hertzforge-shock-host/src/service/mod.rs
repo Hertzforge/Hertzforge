@@ -1070,6 +1070,16 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         Some((prev + spacing - now).max(0.0))
     }
 
+    /// Seconds since the last pulse started, on the pacer: since the device's
+    /// clock ran for it ([`FireControl::started`]). `None` before the first
+    /// pulse. A host that keeps its own countdown counts it from here, so its
+    /// display and the service's wait agree.
+    pub fn since_last_pulse_start_s(&self) -> Option<f64> {
+        let prev = self.last_pulse_wall_s?;
+        let now = self.pacer.lock().unwrap_or_else(|e| e.into_inner()).now_s();
+        Some((now - prev).max(0.0))
+    }
+
     /// Fire the CONFIGURED pulse train at the
     /// current level. See [`Self::fire_train_with`].
     pub fn fire_train(&mut self) -> Result<TrainPlan, ServiceError> {

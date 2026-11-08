@@ -150,7 +150,9 @@ struct Actor {
     lock: Option<hertzforge_station::lock::LockGuard>,
     started: Option<Instant>,
     ended_at: Option<f64>,
-    /// When the last pulse started: the next is due a spacing later.
+    /// When the last pulse started, as the engine stamped it once the device's
+    /// clock ran (this thread's own moment of asking when the engine keeps none):
+    /// the next is due a spacing later.
     last_start: Option<Instant>,
     seeded: bool,
     stop_outcome: &'static str,
@@ -637,6 +639,11 @@ impl Actor {
         let Some(r) = self.call("a pulse", f) else {
             return;
         };
+        // The controller's own start time for the pulse: the next is due the time
+        // between pulses after the device started, not after this thread asked.
+        if let Some(t) = self.engine.last_pulse_start() {
+            self.last_start = Some(t);
+        }
         let fired = match r {
             Ok(f) => f,
             Err(e) => {

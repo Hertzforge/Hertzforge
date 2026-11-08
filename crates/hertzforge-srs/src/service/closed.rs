@@ -252,6 +252,17 @@ impl SrsShockService {
         Some((prev + control.min_spacing_s() - now).max(0.0))
     }
 
+    /// Seconds since the last pulse started, on the pacer: since the device's
+    /// clock ran for it (`PulsePlant::fire_timed`). `None` without `control` or
+    /// before the first pulse. A host that keeps its own countdown counts it
+    /// from here, so its display and the core's wait agree.
+    pub fn since_last_pulse_start_s(&self) -> Option<f64> {
+        self.cfg.control.as_ref()?;
+        let prev = self.last_pulse_start_s?;
+        let now = self.pacer.lock().unwrap_or_else(|e| e.into_inner()).now_s();
+        Some((now - prev).max(0.0))
+    }
+
     /// The drive's peak, volts, if the table in force fired at `level_db` (with
     /// the between-pulse monitors' trim). `None` without `control` or before
     /// the law is seeded.

@@ -1045,4 +1045,12 @@ impl SrsEngine for ServiceEngine {
     fn take_log(&mut self) -> Vec<(&'static str, String)> {
         std::mem::take(&mut self.log)
     }
+
+    fn last_pulse_start(&self) -> Option<Instant> {
+        // The age first, then the instant: the instant read after the age can
+        // only make the start later, never earlier, so a countdown from it is
+        // never short.
+        let age = self.svc.as_ref()?.since_last_pulse_start_s()?;
+        Instant::now().checked_sub(std::time::Duration::from_secs_f64(age))
+    }
 }
