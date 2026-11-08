@@ -497,8 +497,8 @@ fn notch_engages_at_least_once_under_a_limiting_profile() {
 }
 
 /// **The counterfactual.** With the governor REMOVED, the same profile drives the
-/// protected channel MORE THAN TWICE as far past its bound. The gap between the two
-/// excursions is the notch's measured effect on the drive.
+/// protected channel far past its abort edge and the run trips on it; with the
+/// governor the channel is held at its limit and never reaches that edge.
 ///
 /// The measurement is the limit channel's reading at the moment it tripped, taken from
 /// the service's own `TripKind::LimitChannel` record - the channel the governor exists
@@ -507,19 +507,17 @@ fn notch_engages_at_least_once_under_a_limiting_profile() {
 /// before either loop has reacted, so the peak is dominated by a moment that predates
 /// the governor's first decision and would not discriminate.
 ///
-/// # What this test does NOT claim
+/// # What changed, and why the claim is stronger now
 ///
-/// Both arms trip. The governor is a smoothed ceiling on the drive, not an
-/// instantaneous clamp, so it does not prevent the opening transient from crossing the
-/// bound - the abort remains the backstop, and that ordering is correct. What the
-/// governor changes, measurably, is HOW FAR past the bound the protected channel gets:
-/// barely over it when governed, more than double it when not. Claiming the notch
-/// prevents the trip outright would be claiming something this fixture does not show.
+/// The governor used to hold the channel AT its abort edge, the same number the
+/// limit-channel abort trips on, so both arms tripped and the claim was only how far
+/// past the edge each got. It now holds the channel at its LIMIT (the level the
+/// profile states, `LIMIT_G`), with the abort edge 6 dB above, so the governed arm
+/// does not trip at all.
 ///
 /// Red-mutation: disable the notch in the notched arm - pass `notch: None` in
 /// [`notch_step`] regardless of `with_notch`, or make `NotchGovernor::ceiling` return
-/// `f64::INFINITY` - and the two arms become the same run, so the excursion ratio
-/// collapses to 1 and the assertion reds.
+/// `f64::INFINITY` - and the notched arm trips on the limit channel like the other.
 #[test]
 fn the_notch_measurably_reduces_the_drive_versus_no_notch() {
     let notched = run_fixture(true);
@@ -535,48 +533,29 @@ fn the_notch_measurably_reduces_the_drive_versus_no_notch() {
         "the no-notch arm must not report binding - it has no governor"
     );
 
-    // Setup validity: BOTH arms must have over-tested the LIMIT channel, which is what
-    // makes this a profile that approaches the limit at all. A run that ended any other
-    // way (a low-side under-test, a servo fault, a clean finish) is not the fixture
-    // this test is about, and the comparison below would be measuring something else.
-    let notched_excursion = limit_excursion(&notched.trip).unwrap_or_else(|| {
-        panic!(
-            "notched arm did not trip on the limit channel: {:?}",
-            notched.trip
-        )
-    });
+    // The governed arm never reached the protected channel's abort edge.
+    assert!(
+        limit_excursion(&notched.trip).is_none(),
+        "the governed arm tripped on the limit channel: {:?} (peak commanded drive {:.4}, \
+         against {:.4} ungoverned)",
+        notched.trip,
+        notched.peak_drive,
+        free.peak_drive,
+    );
+    // Setup validity: without the governor the same profile over-tests the LIMIT
+    // channel past its abort edge, which is what makes this a profile that
+    // approaches the limit at all.
     let free_excursion = limit_excursion(&free.trip).unwrap_or_else(|| {
         panic!(
             "no-notch arm did not trip on the limit channel: {:?}",
             free.trip
         )
     });
-
-    // The governed arm was held essentially AT the bound: it crossed, because a smoothed
-    // ceiling cannot undo an opening transient, but only just.
-    assert!(
-        notched_excursion < 1.25,
-        "the governed arm should sit essentially at the limit bound; it reached \
-         {notched_excursion:.3}x it. Peak commanded drive was {:.4}.",
-        notched.peak_drive,
-    );
-    // The ungoverned arm ran far past it.
     assert!(
         free_excursion > 1.5,
         "the un-notched arm should over-test the limit channel substantially; it only \
-         reached {free_excursion:.3}x the bound, so there was little for the governor \
-         to prevent and the ratio below would prove little"
-    );
-
-    // THE measurement: the governor more than halved how far past its bound the
-    // protected channel got. The notch is the ONLY difference between the two runs.
-    assert!(
-        notched_excursion * 1.5 < free_excursion,
-        "the notch did not measurably reduce the drive at the protected channel: \
-         governed excursion {notched_excursion:.3}x the bound vs ungoverned \
-         {free_excursion:.3}x. (Peak commanded drive: governed {:.4}, ungoverned {:.4}.)",
-        notched.peak_drive,
-        free.peak_drive,
+         reached {free_excursion:.3}x its abort edge, so there was little for the \
+         governor to prevent"
     );
 }
 

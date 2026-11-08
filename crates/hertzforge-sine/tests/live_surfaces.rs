@@ -288,13 +288,27 @@ fn every_enabled_input_is_read_in_table_order() {
         st.drive_vpk
     );
     let limit = &st.inputs[2];
-    assert_eq!(limit.limit, Some(100.0 * 10f64.powf(3.0 / 20.0)));
+    // The limit the notch holds the channel to: its profile's level.
+    assert_eq!(limit.limit, Some(100.0));
     assert!(st.cola_vpk.is_none());
     let id = st.identification.expect("identification ran");
     assert_eq!(id.gate_coherence, 0.0);
     assert!(id.passed && id.band_coherence > 0.9);
     assert!(id.trusted_fraction > 0.5 && id.trusted_fraction <= 1.0);
-    assert!(st.law.is_none(), "no law is built yet");
+    let law = st.law.expect("the built-in law");
+    assert_eq!((law.id.as_str(), law.sha256), ("servo_blend", None));
+    assert!(law.calls > 100 && law.misses == 0);
+    let keys: Vec<&str> = law.values.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "servo_step_db",
+            "prediction_step_db",
+            "total_step_db",
+            "servo_level_db"
+        ]
+    );
+    assert_eq!(law.live, vec![("blend_w".to_string(), 0.5)]);
 }
 
 /// The phase of a reference input, which the Sim plays the commanded drive, is

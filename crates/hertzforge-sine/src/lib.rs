@@ -44,10 +44,12 @@
 //! library paths (validation returns errors).
 
 pub mod control;
+#[cfg(feature = "service")]
 pub mod feasibility;
 pub mod law;
 pub mod profile;
 pub mod scheduler;
+#[cfg(feature = "service")]
 pub mod service;
 pub mod sweep_raster;
 
@@ -56,6 +58,7 @@ pub use control::{
     BlendLaw, CompositeMode, CompressionPreset, ControlError, DriveGuard, DriveVerdict,
     FeedforwardConfig, FeedforwardTable, LimitChannelTick, NotchGovernor, NotchGovernorConfig,
 };
+#[cfg(feature = "service")]
 pub use feasibility::assess_sine;
 pub use law::{
     Hold, Identification, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, LiveParam,
@@ -73,24 +76,28 @@ pub use scheduler::{
     StepSineConfig, StepSineProgress, StepSpacing, SweepDirection, SweepProgress, SweepState,
     SweepTarget,
 };
+#[cfg(feature = "service")]
 pub use service::config::{
     CaptureConfig, CaptureRule, ColaConfig, ColaWaveform, ConfigError, ControlChannel, ControlSet,
     LimitProfile, MetaField, SineMode, SineTestConfig,
 };
+#[cfg(feature = "service")]
 pub use service::display::{
     SineCurves, SineDisplay, SineInputCurves, DISPLAY_GRID_POINTS, DISPLAY_HISTORY_POINTS,
     DISPLAY_HISTORY_S,
 };
+#[cfg(feature = "service")]
 pub use service::report::{
     ChannelRow, ChannelTrace, EventKind, EventLog, FeasibilityDigest, FrfDisplay, Honesty,
     LevelHistoryEntry, ReportData, RunSettings, RunState, SineIdentificationFacts,
-    SineInputReading, SineLawStatus, SineStatus, TracePoint, TripKind, TripRecord,
+    SineInputReading, SineLawStatus, SineStatus, TripKind, TripRecord,
 };
+#[cfg(feature = "service")]
 pub use service::{
     RunMode, ServiceError, SineDisplayChannel, SineDisplaySnapshot, SineService,
     SineSnapshotPayload,
 };
-pub use sweep_raster::{resample_at, SweepRaster, SWEEP_RASTER_POINTS};
+pub use sweep_raster::{resample_at, SweepRaster, TracePoint, SWEEP_RASTER_POINTS};
 
 /// Re-export the hertzforge-dsp sweep-rate law so config authors have one import path
 /// for the whole sine config surface (it appears in [`BidirSweepConfig::rate`]

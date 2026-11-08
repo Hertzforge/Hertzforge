@@ -256,6 +256,23 @@ pub enum EventKind {
         to_hz: f64,
         reason: String,
     },
+    /// The run's control law was built.
+    LawBuilt {
+        id: String,
+        name: String,
+        version: String,
+        sha256: Option<String>,
+    },
+    /// A live parameter of the law was changed.
+    LawAdjust { key: String, from: f64, to: f64 },
+    /// The law gave unusable calls in the last batch: `count` of them, the
+    /// last for `reason`, `consecutive` in a row at its end.
+    LawMisses {
+        reason: String,
+        count: u64,
+        consecutive: u32,
+        at_tick: u64,
+    },
     /// A freeform note (an honesty caveat surfaced during the run).
     Note { text: String },
 }
@@ -401,13 +418,9 @@ pub struct LevelHistoryEntry {
     pub at_tick: u64,
 }
 
-/// One point on a swept trace: the frequency and the value logged there (the
-/// tracked-vs-f and broadband-vs-f trace families).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TracePoint {
-    pub freq_hz: f64,
-    pub value: f64,
-}
+/// One point on a swept trace (defined beside the raster, which resamples it,
+/// so the control core builds without the service).
+pub use crate::sweep_raster::TracePoint;
 
 /// The per-channel final traces for the report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -454,6 +467,32 @@ pub struct ReportData {
     pub metadata: Vec<(String, String)>,
     /// The honest limitations.
     pub honesty: Honesty,
+    /// The run's control law and how it did; `None` before a law was built.
+    #[serde(default)]
+    pub law: Option<LawSummary>,
+}
+
+/// The report's line on the run's control law, and the core's counts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LawSummary {
+    /// Name, version and a short hash for a law file: the report's one line.
+    pub line: String,
+    /// The catalog id.
+    pub id: String,
+    /// Calls recorded.
+    pub calls: u64,
+    /// Unusable calls over the run.
+    pub misses: u64,
+    /// Unusable calls in a row at the end.
+    pub misses_at_end: u32,
+    /// Ticks a core cap bound.
+    pub capped_ticks: u64,
+    /// The longest call, microseconds (0 when the calls were not timed).
+    pub worst_call_us: f64,
+    /// The last unusable call's reason.
+    pub last_fault: Option<String>,
+    /// The guards the run ran the law under; `None`: none but the law's own.
+    pub guards: Option<crate::law::LawGuards>,
 }
 
 /// The one status snapshot the UI polls. serde-serializable; everything the live
@@ -561,8 +600,8 @@ pub struct SineInputReading {
     pub rms: f64,
     /// For a control row, its overload latch; `false` otherwise.
     pub overload: bool,
-    /// For a limit channel, its bound at the tone's frequency (the limit
-    /// profile's abort edge), the channel's unit, peak.
+    /// For a limit channel, its limit at the tone's frequency (the level its
+    /// profile states, which the notch holds it to), the channel's unit, peak.
     pub limit: Option<f64>,
 }
 

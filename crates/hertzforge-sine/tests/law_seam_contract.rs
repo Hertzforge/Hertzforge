@@ -1,10 +1,7 @@
-//! The control-law seam as a contract: the service stores a law factory and a
-//! clock without calling either, and refuses a configuration that asks for the
-//! core's law guards or a tick in seconds, until the seam is built.
-//!
-//! The refusal matters for the same reason SRS's did: a configuration that asks
-//! for the guards (the per-tick cap, the rise cap, the call budget, the miss
-//! limit) must not quietly run the servo without them.
+//! The control-law seam as a contract: the service builds its law from the
+//! factory it is given after identification, accepts the core's law guards
+//! and a tick in seconds (converted at the adopted rate), and ends a run whose
+//! law cannot be built before anything is driven at test level.
 
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_dsp::tracking::BandwidthMode;
@@ -139,23 +136,55 @@ impl SineLawFactory for NeverBuilds {
     }
 }
 
-fn refused_as_not_built(r: Result<SineService, ServiceError>) {
-    match r {
-        Err(ServiceError::Config(e)) => assert!(e.to_string().contains("not built"), "{e}"),
-        Err(e) => panic!("refused for the wrong reason: {e}"),
-        Ok(_) => panic!("a configuration asking for the law seam was accepted"),
-    }
+#[test]
+fn the_law_guards_and_a_tick_in_seconds_are_accepted_and_the_tick_converted() {
+    let mut c = cfg();
+    c.law_guards = Some(LawGuards::default());
+    c.control_tick_s = Some(0.01);
+    c.control_tick_frames = 1;
+    let mut s = build(c).expect("the guards and a tick in seconds build");
+    s.assess_feasibility().unwrap();
+    s.arm().unwrap();
+    // 10 ms at 16384 Hz is 164 frames, whatever the frame count said.
+    let note = s
+        .log()
+        .events()
+        .iter()
+        .find_map(|e| match &e.kind {
+            hertzforge_sine::EventKind::Note { text } if text.starts_with("control tick") => {
+                Some(text.clone())
+            }
+            _ => None,
+        })
+        .expect("the conversion is logged");
+    assert!(note.contains("164 frames"), "{note}");
+    s.run_sysid(4096).unwrap();
+    assert!(s.coherence_gate().unwrap());
+    s.run_batches(8192).unwrap();
+    let t = s.live_status().t_s * FS;
+    assert_eq!(t.round() as u64 % 164, 0, "ticks of 164 frames: {t}");
 }
 
 #[test]
-fn the_law_guards_and_a_tick_in_seconds_are_refused_until_the_seam_is_built() {
-    let mut c = cfg();
-    c.law_guards = Some(LawGuards::default());
-    refused_as_not_built(build(c));
-
-    let mut c = cfg();
-    c.control_tick_s = Some(0.01);
-    refused_as_not_built(build(c));
+fn a_law_that_cannot_be_built_ends_the_run_before_it_drives() {
+    let mut s = build(cfg())
+        .expect("builds")
+        .with_law_factory(Arc::new(NeverBuilds))
+        .with_law_clock(Arc::new(MonotonicClock::new()));
+    assert!(s.has_law_factory());
+    s.assess_feasibility().unwrap();
+    s.arm().unwrap();
+    s.run_sysid(4096).unwrap();
+    assert!(s.coherence_gate().unwrap(), "the gate itself passed");
+    assert_eq!(s.state(), RunState::Aborted);
+    match &s.trip().expect("a trip").kind {
+        hertzforge_sine::TripKind::LawFault { fault, consecutive } => {
+            assert_eq!((fault.reason(), *consecutive), ("error", 1));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(s.drive_is_zero(), "nothing was driven");
+    assert_eq!(s.live_status().t_s, 0.0, "the loop never ran");
 }
 
 #[test]
@@ -176,16 +205,6 @@ fn guards_out_of_range_are_refused_by_the_config_check_first() {
         .validate()
         .expect_err("a tick under the built-in law's shortest");
     assert!(e.to_string().contains("control_tick_s"), "{e}");
-}
-
-#[test]
-fn without_them_the_service_builds_as_before_and_stores_a_factory_and_a_clock() {
-    let s = build(cfg())
-        .expect("the run without the seam builds")
-        .with_law_factory(Arc::new(NeverBuilds))
-        .with_law_clock(Arc::new(MonotonicClock::new()));
-    assert!(s.has_law_factory());
-    assert_eq!(s.state(), RunState::Idle);
 }
 
 #[test]

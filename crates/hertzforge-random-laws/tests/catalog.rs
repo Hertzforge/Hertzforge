@@ -504,7 +504,7 @@ fn srs_shock_laws_have_their_own_list_the_built_in_first() {
 }
 
 #[test]
-fn the_sine_world_is_named_and_lists_nothing_until_its_laws_are_served() {
+fn the_sine_world_lists_its_built_in_first_with_its_live_parameters() {
     assert_eq!(LawWorld::Sine.as_str(), "sine");
     assert_eq!(LawWorld::Sine.test_type(), "Sine");
     let root = std::env::temp_dir().join(format!(
@@ -512,16 +512,49 @@ fn the_sine_world_is_named_and_lists_nothing_until_its_laws_are_served() {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&root);
-    let cat = open(&root);
-    assert!(cat.entries_for(LawWorld::Sine).is_empty());
-    assert!(cat.sine_entries().is_empty());
-    // No other world's list gains or loses anything.
+    let mut cat = open(&root);
+    let sine = cat.entries_for(LawWorld::Sine);
+    assert_eq!(sine, cat.sine_entries());
+    assert_eq!(sine.len(), 1, "the built-in alone in an empty catalog");
+    let b = &sine[0];
+    assert_eq!((b.id.as_str(), b.builtin), ("servo_blend", true));
+    assert_eq!(b.identity.name, "Servo blend");
+    assert_eq!(b.live, vec!["blend_w".to_string()]);
+    let keys: Vec<&str> = b.manifest.params.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["blend_w", "compression", "ki", "max_rate_db_per_s", "kp"]
+    );
+    assert_eq!(b.manifest.diagnostics.len(), 4);
+    assert_eq!(cat.entry("servo_blend").as_ref(), Some(b));
+    // No other world's list gains or loses anything, and only Sine lists live
+    // parameters.
     assert!(cat
         .entries()
         .iter()
         .chain(cat.mimo_entries().iter())
         .chain(cat.shock_classical_entries().iter())
         .chain(cat.shock_srs_entries().iter())
-        .all(|e| e.world != LawWorld::Sine));
+        .all(|e| e.world != LawWorld::Sine && e.live.is_empty()));
+
+    // An imported Sine law file lists after the built-in, with its own live
+    // parameters, and a single-output Random choice of it is refused.
+    let entry = cat
+        .import(&law_file("law_fixture_sine_template"))
+        .expect("the Sine law file imports");
+    assert_eq!(entry.world, LawWorld::Sine);
+    assert_eq!(entry.live, vec!["ki".to_string()]);
+    let ids: Vec<String> = cat.sine_entries().into_iter().map(|e| e.id).collect();
+    assert_eq!(ids, ["servo_blend".to_string(), entry.id.clone()]);
+    assert!(cat.sine_law(&entry.id).is_some());
+    assert!(cat.srs_law(&entry.id).is_none());
+    let mut cfg = ladder_cfg();
+    assert!(matches!(
+        cat.resolve(&LawChoice::new(entry.id.clone(), Vec::new()), &mut cfg),
+        Err(ChoiceError::WrongTestType {
+            law_is_for: "Sine",
+            ..
+        })
+    ));
     let _ = std::fs::remove_dir_all(root);
 }
