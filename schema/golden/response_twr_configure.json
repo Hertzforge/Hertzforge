@@ -1,0 +1,114 @@
+{
+ "type": "response",
+ "id": 81,
+ "result": {
+  "state": {
+   "run_id": "twr-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Replication R1",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 12800,
+    "record_len": 4096,
+    "df_hz": 3.125,
+    "record_s": 0.32,
+    "section_start": 512,
+    "section_len": 2048,
+    "actual": false
+   },
+   "clock": null,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -9,
+    -6,
+    -3,
+    0
+   ],
+   "level_db": null,
+   "rung": null,
+   "plays": {
+    "done": 0,
+    "at_level": 0,
+    "of_level": 8,
+    "playback": 0,
+    "of_playback": 375
+   },
+   "frozen": false,
+   "t_s": null,
+   "alarm": false,
+   "identification": null,
+   "prediction": null,
+   "last_play": null,
+   "law": {
+    "id": "twr_correct",
+    "name": "frequency-domain correction",
+    "version": "0.1.0",
+    "sha256": null,
+    "misses": 0
+   },
+   "feasibility": null,
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 12800,
+    "record_len": 4096,
+    "df_hz": 3.125,
+    "record_s": 0.32,
+    "section_start": 512,
+    "section_len": 2048,
+    "actual": false
+   },
+   "section": {
+    "peak": 0.254232,
+    "rms": 0.14249,
+    "duration_s": 0.16
+   },
+   "kinematics": {
+    "peak_accel": 0.254232,
+    "peak_velocity_ips": 0.0902058,
+    "disp_pkpk_in": 0.000781673,
+    "kinematics_hp_hz": 5
+   },
+   "coverage": {
+    "band_hz": [
+     20,
+     2000
+    ],
+    "ref_floor_db": 50,
+    "fraction": 0.999267,
+    "error_floor_pct": 2.708
+   },
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The section at full level is within its kinematic ceilings.",
+    "checks": [
+     {
+      "name": "disp_pkpk_in",
+      "value": 0.000781673,
+      "limit": 1,
+      "pass": true
+     }
+    ]
+   },
+   "reference": {
+    "sha256": "e551d2f9d33365529136c42ebd2fb483eae302569d52f0f8b085d4370d32c27e",
+    "name": "r1",
+    "fs_hz": 12800,
+    "units": "g",
+    "resampled": false
+   },
+   "call_budget_s": 1,
+   "plays_target": 375,
+   "identification_s": 4
+  },
+  "warnings": []
+ }
+}

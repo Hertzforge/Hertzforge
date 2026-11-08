@@ -872,93 +872,127 @@ impl Prepared {
         }
     }
 
-    /// The preview's views: Section (the full-level record, time), Spectrum
-    /// (`abs(R)` on the record grid with the band and the reference floor),
-    /// Velocity and Displacement (time), each min/max-decimated to `points`.
-    pub fn views(&self, points: usize, arrays: &mut Arrays) -> Vec<Value> {
+    /// The figures the preview's views are laid out from: the record, its
+    /// spectrum from DC to half the rate, the reference floor, and the velocity
+    /// and displacement integrated after the kinematics high-pass.
+    pub fn figures(&self) -> PreviewFigures {
         let fs = self.grid.fs_hz;
-        let n = self.target.len();
-        let t = || time_axis(0, n, fs);
-        let time_x = Axis::new("Time", Some("s"), Scale::Linear);
-        let section = views::spectrum(
-            arrays,
-            "Section",
-            &time_x,
-            &Axis::new("Reference", Some(&self.units), Scale::Linear),
-            vec![time_series(
-                "Reference",
-                Role::Reference,
-                t(),
-                &self.target,
-                Some(points),
-            )],
-            Some("time"),
-        );
-        // The spectrum from DC to half the rate, decimated as an envelope, with
-        // the band's edges and the reference floor as tolerance lines.
-        let freqs: Vec<f64> = (0..self.spectrum.len())
+        let freqs_hz: Vec<f64> = (0..self.spectrum.len())
             .map(|k| self.grid.freq(k))
             .collect();
-        let mut spec = time_series(
-            "Reference",
-            Role::Reference,
-            freqs.clone(),
-            &self.spectrum,
-            Some(points),
-        );
-        spec.name = "Reference".into();
         let peak = (0..self.spectrum.len())
-            .filter(|&k| freqs[k] >= self.band_hz.0 && freqs[k] <= self.band_hz.1)
+            .filter(|&k| freqs_hz[k] >= self.band_hz.0 && freqs_hz[k] <= self.band_hz.1)
             .map(|k| self.spectrum[k])
             .fold(0.0f64, f64::max);
-        let floor = peak * 10f64.powf(-self.ref_floor_db / 20.0);
-        let spectrum = views::spectrum(
-            arrays,
-            "Spectrum",
-            &Axis::new("Frequency", Some("Hz"), Scale::Linear),
-            &Axis::new("Magnitude", Some(&self.units), Scale::Log),
-            vec![
-                spec,
-                crate::views::Series::new(
-                    "Reference floor",
-                    Role::Tolerance,
-                    vec![self.band_hz.0, self.band_hz.1],
-                    vec![floor, floor],
-                ),
-            ],
-            Some("frequency"),
-        );
         let hp = self.kinematics_hp_hz;
-        let vel = hertzforge_dsp::integrate::accel_to_velocity(&self.target, fs, hp);
-        let disp = hertzforge_dsp::integrate::velocity_to_displacement(&vel, fs, hp);
-        let velocity = views::spectrum(
-            arrays,
-            "Velocity",
-            &time_x,
-            &Axis::new("Velocity", Some("in/s"), Scale::Linear),
-            vec![time_series(
-                "Velocity",
-                Role::Reference,
-                t(),
-                &vel,
-                Some(points),
-            )],
-            Some("time"),
-        );
-        let displacement = views::spectrum(
-            arrays,
-            "Displacement",
-            &time_x,
-            &Axis::new("Displacement", Some("in"), Scale::Linear),
-            vec![time_series(
-                "Displacement",
-                Role::Reference,
-                t(),
-                &disp,
-                Some(points),
-            )],
-            Some("time"),
-        );
-        vec![section, spectrum, velocity, displacement]
+        let velocity = hertzforge_dsp::integrate::accel_to_velocity(&self.target, fs, hp);
+        let displacement = hertzforge_dsp::integrate::velocity_to_displacement(&velocity, fs, hp);
+        PreviewFigures {
+            fs_hz: fs,
+            units: self.units.clone(),
+            target: self.target.clone(),
+            freqs_hz,
+            spectrum: self.spectrum.clone(),
+            band_hz: self.band_hz,
+            floor: peak * 10f64.powf(-self.ref_floor_db / 20.0),
+            velocity,
+            displacement,
+        }
     }
+
+    /// The preview's views, each min/max-decimated to `points`.
+    pub fn views(&self, points: usize, arrays: &mut Arrays) -> Vec<Value> {
+        preview_views(&self.figures(), Some(points), arrays)
+    }
+}
+
+/// What a preview's views show.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviewFigures {
+    pub fs_hz: f64,
+    pub units: String,
+    /// The full-level record, from its first sample.
+    pub target: Vec<f64>,
+    pub freqs_hz: Vec<f64>,
+    /// `abs(R)` on `freqs_hz`.
+    pub spectrum: Vec<f64>,
+    pub band_hz: (f64, f64),
+    /// The reference floor, `abs(R)`.
+    pub floor: f64,
+    pub velocity: Vec<f64>,
+    pub displacement: Vec<f64>,
+}
+
+/// The preview's views: Section (the full-level record, time), Spectrum
+/// (`abs(R)` on the record grid, with the reference floor across the correction
+/// band), Velocity and Displacement (time), each min/max-decimated to `points`.
+pub fn preview_views(f: &PreviewFigures, points: Option<usize>, arrays: &mut Arrays) -> Vec<Value> {
+    let n = f.target.len();
+    let t = || time_axis(0, n, f.fs_hz);
+    let time_x = Axis::new("Time", Some("s"), Scale::Linear);
+    let section = views::spectrum(
+        arrays,
+        "Section",
+        &time_x,
+        &Axis::new("Reference", Some(&f.units), Scale::Linear),
+        vec![time_series(
+            "Reference",
+            Role::Reference,
+            t(),
+            &f.target,
+            points,
+        )],
+        Some("time"),
+    );
+    let spectrum = views::spectrum(
+        arrays,
+        "Spectrum",
+        &Axis::new("Frequency", Some("Hz"), Scale::Linear),
+        &Axis::new("Magnitude", Some(&f.units), Scale::Log),
+        vec![
+            time_series(
+                "Reference",
+                Role::Reference,
+                f.freqs_hz.clone(),
+                &f.spectrum,
+                points,
+            ),
+            crate::views::Series::new(
+                "Reference floor",
+                Role::Tolerance,
+                vec![f.band_hz.0, f.band_hz.1],
+                vec![f.floor, f.floor],
+            ),
+        ],
+        Some("frequency"),
+    );
+    let velocity = views::spectrum(
+        arrays,
+        "Velocity",
+        &time_x,
+        &Axis::new("Velocity", Some("in/s"), Scale::Linear),
+        vec![time_series(
+            "Velocity",
+            Role::Reference,
+            t(),
+            &f.velocity,
+            points,
+        )],
+        Some("time"),
+    );
+    let displacement = views::spectrum(
+        arrays,
+        "Displacement",
+        &time_x,
+        &Axis::new("Displacement", Some("in"), Scale::Linear),
+        vec![time_series(
+            "Displacement",
+            Role::Reference,
+            t(),
+            &f.displacement,
+            points,
+        )],
+        Some("time"),
+    );
+    vec![section, spectrum, velocity, displacement]
 }

@@ -989,19 +989,22 @@ pub fn law_views(
         series,
         None,
     );
-    let last = called.last().and_then(|p| p.law.as_ref());
+    // The values of the last call that was used: a missed call has none.
+    let last = called
+        .iter()
+        .rev()
+        .filter_map(|p| p.law.as_ref())
+        .find(|l| l.used);
     let mut rows_out: Vec<ReadingRow> = specs
         .iter()
-        .map(|s| {
-            let v = last
-                .and_then(|l| l.values.iter().find(|(k, _)| k == &s.key))
-                .map_or(f64::NAN, |v| sig(v.1, 6));
-            ReadingRow::number(
+        .filter_map(|s| {
+            let v = last.and_then(|l| l.values.iter().find(|(k, _)| k == &s.key))?;
+            Some(ReadingRow::number(
                 &s.label,
-                v,
+                sig(v.1, 6),
                 (!s.unit.is_empty()).then_some(s.unit.as_str()),
                 Status::Info,
-            )
+            ))
         })
         .collect();
     rows_out.push(ReadingRow::number(
@@ -1014,7 +1017,7 @@ pub fn law_views(
             Status::Warn
         },
     ));
-    vec![law, views::reading("Law Values", rows_out)]
+    vec![law, reading("Law Values", rows_out)]
 }
 
 /// The Scope view: the control channel during the play in flight; `None` between
@@ -1040,6 +1043,30 @@ pub fn scope_view(v: &TwrView, s: &Scope, points: usize, arrays: &mut Arrays) ->
         )],
         Some("time"),
     ))
+}
+
+/// A `reading` view whose numbers are written as the binary frames' headers write
+/// them: a whole number as an integer, so every language's writer gives the same
+/// bytes.
+fn reading(title: &str, rows: Vec<ReadingRow>) -> Value {
+    let rows: Vec<Value> = rows
+        .into_iter()
+        .map(|r| {
+            let mut e = Map::new();
+            e.insert("label".into(), Value::from(r.label));
+            e.insert(
+                "value".into(),
+                match r.value {
+                    views::RowValue::Number(x) => num(x),
+                    views::RowValue::Text(s) => Value::from(s),
+                },
+            );
+            e.insert("unit".into(), r.unit.map_or(Value::Null, Value::from));
+            e.insert("status".into(), Value::from(r.status.as_str()));
+            Value::Object(e)
+        })
+        .collect();
+    json!({"view": "reading", "title": title, "rows": rows})
 }
 
 /// The run's numbers, as a reading.
@@ -1116,7 +1143,7 @@ pub fn readings_view(v: &TwrView) -> Value {
             Status::Info,
         ));
     }
-    views::reading("Run", rows)
+    reading("Run", rows)
 }
 
 /// The Plays table.

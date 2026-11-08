@@ -284,7 +284,7 @@ impl ServiceEngine {
         }
         self.log_seen = events.len();
         for w in svc.take_driver_warnings() {
-            self.log.push(("driver", w));
+            self.log.push(("note", format!("driver: {w}")));
         }
     }
 

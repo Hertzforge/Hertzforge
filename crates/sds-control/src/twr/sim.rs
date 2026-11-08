@@ -96,9 +96,9 @@ impl SimulatedEngine {
 
     /// The full-level section's peak: on the simulated wire, 1 V a unit.
     fn full_vpk(&self) -> f64 {
-        self.prepared
-            .as_ref()
-            .map_or(0.0, |p| p.target.iter().fold(0.0f64, |m, &v| m.max(v.abs())))
+        self.prepared.as_ref().map_or(0.0, |p| {
+            p.target.iter().fold(0.0f64, |m, &v| m.max(v.abs()))
+        })
     }
 
     /// Play `frames` frames and the rest pad in blocks, reading the cancel flag at
