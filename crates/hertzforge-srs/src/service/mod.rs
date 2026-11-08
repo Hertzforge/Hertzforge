@@ -330,14 +330,6 @@ impl SrsShockService {
         data_root: Option<PathBuf>,
     ) -> Result<Self, ServiceError> {
         cfg.validate()?;
-        if cfg.control.is_some() {
-            return Err(ServiceError::Config(ConfigError::BadConfig(
-                "closed-loop SRS control (the drive in volts with its ceiling and abort, \
-                 pacing between pulses and a chosen control law) is not built yet; this \
-                 service runs only without `control`"
-                    .into(),
-            )));
-        }
         table.validate().map_err(|e| {
             ServiceError::Config(ConfigError::BadConfig(format!("channel table: {e}")))
         })?;
