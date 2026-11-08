@@ -169,6 +169,13 @@ pub struct NiBackend {
     /// engine's timebase; a plot moving while this is flat is a bug.
     frames_read: u64,
     frames_written: u64,
+    /// Frames accepted into the AO task since its generation began: since the
+    /// tasks were built, or since the AO task was last stopped (frames primed
+    /// into the parked task before the next start belong to that start). The
+    /// device's generated count restarts at every start, so this, not
+    /// `frames_written`, is what it reaches once everything written has
+    /// played: the shutdown taper's wait target.
+    generation_frames_written: u64,
     epoch: u32,
     faulted: bool,
 
@@ -339,6 +346,7 @@ impl NiBackend {
             regen_mode_readback: None,
             frames_read: 0,
             frames_written: 0,
+            generation_frames_written: 0,
             epoch: 0,
             faulted: false,
             overload_latched: false,
@@ -559,6 +567,8 @@ impl NiBackend {
             self.ao = None;
             self.ai = None;
         }
+        // No task, no generation.
+        self.generation_frames_written = 0;
         // No task, no host loop: release the 1 ms timer (close, Drop, a rebuild,
         // and the abort path all come through here).
         #[cfg(windows)]
@@ -1079,8 +1089,9 @@ impl NiBackend {
         });
         if let TaperWait::TimedOut { generated } = wait {
             self.warnings.push(format!(
-                "shutdown taper did not finish generating within {:.0} ms ({generated}/{target} \
-                 frames); the drive is being cut mid-taper",
+                "shutdown taper did not finish generating within {:.0} ms ({generated} of the \
+                 {target} frames written since the device started); the drive is being cut \
+                 mid-taper",
                 budget.as_secs_f64() * 1e3
             ));
             self.taper_cut_short = true;
@@ -1089,13 +1100,20 @@ impl NiBackend {
 
     /// The device's generation count at which the last frame written, the
     /// taper's last, has reached the pin: what the taper's wait waits for.
+    /// This generation's frames only, because the device counts from its own
+    /// start: a module that starts the device for every record (TWR plays,
+    /// pulse shots) would otherwise wait, from its second record on, for a
+    /// count no generation reaches, run the whole budget, and call a finished
+    /// taper cut short (measured on the NI loopback 2026-11-08: 10 559 of
+    /// 129 343).
     fn taper_generation_target(&self) -> u64 {
-        self.frames_written
+        self.generation_frames_written
     }
 
     /// Account for `frames` the device's output buffer accepted.
     fn note_frames_accepted(&mut self, frames: usize) {
         self.frames_written += frames as u64;
+        self.generation_frames_written += frames as u64;
     }
 
     /// After a shutdown taper that did NOT complete, and only then: put every AO
@@ -1738,6 +1756,9 @@ impl Backend for NiBackend {
                     let _ = d.task_control(ai, val::TASK_UNRESERVE);
                 }
             }
+            // The generation is over: the unreserve dropped whatever was still
+            // queued, and the next start counts from zero.
+            self.generation_frames_written = 0;
             // Only when the taper above was cut short; a completed taper skips it.
             if std::mem::take(&mut self.taper_cut_short) {
                 self.zero_outputs_after_cut_taper();
