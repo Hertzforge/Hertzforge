@@ -32,6 +32,9 @@ WHOLE_FILES = frozenset({
 
 #: path: the exact text in it that may hold the name
 ALLOWED = {
+    'ACKNOWLEDGMENTS.md': ("- **Visual Dynamics**, Brandon Zwink's structural dynamics toolset",),
+    'site/public/credits.html': (
+        "<li><strong>Visual Dynamics</strong>, Brandon Zwink's structural dynamics toolset",),
     'README.md': ('If you used Visual Dynamics, your `.vdyn` projects open here.',),
     'THIRD_PARTY_NOTICES.md': (
         '## Code and data from Visual Dynamics',
