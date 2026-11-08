@@ -1109,12 +1109,19 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
         vectors = vectors @ ritz
         k_v = stiffness @ vectors
         m_v = mass @ vectors
+        # each mode's own Rayleigh quotient, not the Ritz eigenvalue: eigh's
+        # round-off scales with the block's largest eigenvalue, and on a
+        # nearly massless beam, whose guard modes sit near infinity, a
+        # repeated pair stalled at a residual of 1e-4 and split by as much
+        # on one platform and not another (2026-11-08)
+        eigenvalues = np.einsum('ij,ij->j', vectors, k_v) / np.einsum('ij,ij->j', vectors, m_v)
         residuals = (np.linalg.norm(k_v - m_v * eigenvalues, axis=0)
                      / np.linalg.norm(k_v - sigma * m_v, axis=0))
         before, worst = worst, float(residuals[:wanted].max())
         if worst < POLISH_RESIDUAL or worst > 0.5 * before:
             break
-    return eigenvalues, vectors, residuals
+    order = np.argsort(eigenvalues, kind='stable')
+    return eigenvalues[order], vectors[:, order], residuals[order]
 
 
 class NotConverged(Exception):
