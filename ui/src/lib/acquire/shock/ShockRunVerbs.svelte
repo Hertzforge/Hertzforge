@@ -101,6 +101,8 @@
 	}
 
 	.lv {
+		/* The level never shrinks under its words ("-12.0 dB"): a min-width alone lets a flex item shrink to it. */
+		flex: none;
 		min-width: 7ch;
 		white-space: nowrap;
 		text-align: center;
