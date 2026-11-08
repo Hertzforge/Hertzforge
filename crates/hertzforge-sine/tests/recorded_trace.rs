@@ -28,6 +28,13 @@
 //! Falsified once (session log 2026-11-08, Sine core): the servo's
 //! proportional gain 0.3 changed to 0.31 in the service's servo build breaks
 //! every run's hash.
+//!
+//! Re-recorded once for the build, not the run (session log 2026-11-08, Sine
+//! integration): this crate is optimized in the workspace's dev profile, and
+//! the optimized maths rounds a last bit differently, as the release build
+//! always has. Two runs moved, the fast sweep and the slow bar, by at most
+//! 5.7e-15 relative on any sampled value; every run's end, trip and tick and
+//! notch counts are the same, and the other four runs byte for byte.
 
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_dsp::tracking::BandwidthMode;

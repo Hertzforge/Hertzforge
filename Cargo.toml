@@ -88,3 +88,8 @@ opt-level = 3
 
 [profile.dev.package.hertzforge-mimo-random]
 opt-level = 3
+
+# The Sine core: its law check's seven cases took 24.2 s unoptimized on the ten-core Mac and
+# 14.6 s with this.
+[profile.dev.package.hertzforge-sine]
+opt-level = 3
