@@ -2340,18 +2340,26 @@ impl SineProcessStep {
                 self.stop_requested.store(true, Ordering::Release);
                 self.ramping_down = true;
             }
-            Command::Hold => match &mut self.scheduler {
-                SchedulerState::Sweep(s) => s.hold(),
-                SchedulerState::Dwell(d) => d.hold(),
-                SchedulerState::StepSine(s) => s.hold(),
-                SchedulerState::Rstd(r) => r.hold(),
-            },
-            Command::Resume => match &mut self.scheduler {
-                SchedulerState::Sweep(s) => s.resume(),
-                SchedulerState::Dwell(d) => d.resume(),
-                SchedulerState::StepSine(s) => s.resume(),
-                SchedulerState::Rstd(r) => r.resume(),
-            },
+            // The hold stops the level clock with the test's: a rung that lasts
+            // so many seconds does not count them while the run is held.
+            Command::Hold => {
+                match &mut self.scheduler {
+                    SchedulerState::Sweep(s) => s.hold(),
+                    SchedulerState::Dwell(d) => d.hold(),
+                    SchedulerState::StepSine(s) => s.hold(),
+                    SchedulerState::Rstd(r) => r.hold(),
+                }
+                self.ladder.hold();
+            }
+            Command::Resume => {
+                match &mut self.scheduler {
+                    SchedulerState::Sweep(s) => s.resume(),
+                    SchedulerState::Dwell(d) => d.resume(),
+                    SchedulerState::StepSine(s) => s.resume(),
+                    SchedulerState::Rstd(r) => r.resume(),
+                }
+                self.ladder.resume();
+            }
             Command::Reverse => {
                 if let SchedulerState::Sweep(s) = &mut self.scheduler {
                     s.reverse();

@@ -120,7 +120,10 @@ fn a_held_run_does_not_count_its_rung_seconds() {
     pump(&mut s, 2.0);
     let held = s.live_status();
     assert!(held.held);
-    assert_eq!(held.rung_index, 0, "the one-second rung advanced while held");
+    assert_eq!(
+        held.rung_index, 0,
+        "the one-second rung advanced while held"
+    );
     assert!(
         held.at_level_s < 0.35,
         "the rung clock ran while held: {} s",
