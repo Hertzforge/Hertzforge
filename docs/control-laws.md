@@ -3,8 +3,8 @@
 A control law is the math the controller runs once per loop to decide the next drive. Hertzforge
 loads control laws from files, so a law can be written, built and shared without rebuilding
 Hertzforge. This page is a guide for someone writing one, for the test types with a law
-interface: single-output Random, and multiple-output (MIMO) Random, classical shock and SRS shock,
-which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
+interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock and
+Sine, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -451,12 +451,105 @@ gain at its frequency, then after each pulse is scaled by the target over the me
 the band nearest it, limited to `max_db_per_pulse` (default 3 dB) either way. It runs natively, and
 is also the law file `laws/shock-srs-ratio`; the two give the same run.
 
+## Sine laws
+
+A Sine law decides one number every control tick (10 ms by default): the amplitude of the one tone
+the controller plays, in drive units peak (volts peak on hardware). The controller keeps the
+frequency, the sweep and its direction, the tone's phase, the level schedule and the second
+reference output; the law is called once for the starting drive after identification (`engage`)
+and then once a tick (`tick`), on the controller's real-time thread, with a quarter of the tick as
+its budget. The specification's section 10 states the world in full.
+
+What differs from the other worlds:
+
+- **One number per tick, on the real-time thread.** A Sine law runs a hundred times a second, and a
+  late call is not used. Keep a tick's work small and bounded; do the heavy work in the
+  constructor, which is given the whole identification.
+- **The prediction comes with every tick.** `prediction_db` is the controller's plant-inverse drive
+  at this frequency at full level, from the identification, in dB relative to one drive unit; it
+  is absent where the controller does not trust the identification. The built-in law follows its
+  change from tick to tick; a law may use it or not.
+- **The target is at the present level.** A level change is a change of target, and a law follows
+  it within the controller's caps.
+- **`drive` is what was played.** It can be under what the law asked on the tick before: the caps,
+  the ceilings and the notch hold the drive down without saying so in `hold`. A law that keeps a
+  level of its own should follow `drive` down, as the built-in law does, or a long clamp winds that
+  level up.
+- **Holds.** `hold` is `notch` while a limit channel holds the drive down (the controller holds it
+  at the notch ceiling, so a law cannot raise it) and `probe` while a resonance search maps the
+  plant (the law is still called, and its drive is not used).
+- **Live parameters.** A number parameter the manifest lists as `live` can be changed while the
+  test runs; the controller checks the value against its declared range and calls `adjust`, and
+  the value applies from the next tick.
+
+### Writing a Sine law in Rust
+
+Implement `SineSingleLaw` (`describe`, `new`, `engage`, `tick`, and `adjust` for live parameters)
+and export it with `export_sine_law!`; build the manifest with `SineManifestBuilder`, which takes
+the live keys. The template is `crates/hertzforge-law-sdk/template/sine-pi`: a
+proportional-integral loop on the error in dB that follows the prediction from tick to tick.
+
+| Key | What it does |
+|---|---|
+| `kp` | Proportional gain on the change of the error |
+| `ki` | Integral gain on the error, per second; live |
+| `follow` | How much of the prediction's change from tick to tick the drive follows |
+| `max_step_db` | The most the law moves the drive in one tick |
+| `start_offset_db` | Scales the law's own first drive, for seeing how the controller's guards respond: +4 dB starts 4 dB high, and the law brings it back |
+
+Build it with `cargo build --target wasm32-wasip2 --release`. A law written against the
+controller's own native seam (`hertzforge_sine::law`) can be carried across the interface with
+`sine::native` in the SDK, as the built-in law's file is.
+
+### What the controller does with a Sine law's drive
+
+Every one of these holds whatever the law returns:
+
+- a drive that is not a finite number at least zero, or a value that is not finite or not
+  declared, is refused;
+- a call past its budget, a failed call, a panic or a refused output is a miss and the drive in
+  force is held; three in a row end the run with the controlled stop (the 120 dB/s ramp);
+- the drive moves at most 1 dB a tick and rises at most 240 dB a second (by default); a cap that
+  binds for a second without a break ends the run (`divergence`);
+- the first drive is at most the prediction plus 6 dB, or 0.05 of the start level's scale without
+  one;
+- the notch ceiling holds the drive under the limit channels (each held at its limit, its abort edge
+  above), and the drive ceiling, the drive abort, the alarm and abort bands and the kinematic
+  monitor apply as on every Sine run.
+
+### Checking a Sine law before hardware
+
+As for the other worlds, an imported Sine law must pass the check before it may drive hardware.
+Each case is a whole run on a simulated station at 16384 Hz and a 10 ms tick: a flat 1 g target,
+identification at -20 dB, the abort band 12 dB either way.
+
+| Case | Plant and run | Asks for |
+|---|---|---|
+| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1.5 dB through the resonance (every judged tick within 30 Hz of it) |
+| fast sweep | The same at 6 oct/min | Within 5 dB through the resonance; within 2 dB more than 30 Hz from it |
+| close modes | 240 and 260 Hz, Q 30; 2 oct/min | Within 2 dB |
+| anti-resonance | A flat plant cut 30 dB at 300 Hz, its coherence there under the trust floor; 2 oct/min | The run completes, or ends on the controller's own divergence trip; the drive never over the ceiling |
+| measurement noise | One mode; noise 30 dB under the response; a 30 s dwell at 250 Hz | Within 1.5 dB |
+| level ladder | -20, -12, -6 and 0 dB moved by hand at a 250 Hz dwell, 10 s each, and one live change | Every rung within 1 dB after its settle window |
+| limit channel | One mode, and a limit channel reading up to 4 times the control at the mode under a flat 2 g limit | The limit channel at most 0.5 dB over its limit; the control at most 1 dB over its target after the notch releases |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law passes every case; a law that misbehaves fails.
+
+### The built-in Sine law
+
+`servo_blend`: an amplitude servo (proportional-integral on the error in dB) moves its own level
+each tick, and the drive moves by that step plus `blend_w` (default 0.5, live) times the
+prediction's change, at most 1 dB a tick. `compression` sets the servo's speed: slow (integral gain
+2, at most 20 dB/s), fast (6, 60 dB/s) or custom. It runs natively, and is also the law file
+`laws/sine-servo`; the two give the same run.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
 checks its manifest) and copies it into the `laws` folder of the local data root, named by the
-SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output Random, multiple-output Random and
-classical shock laws are listed apart, each on its own test type's screens, and a law chosen for
+SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output Random, multiple-output Random,
+classical shock, SRS shock and Sine laws are listed apart, each on its own test type's screens, and a law chosen for
 another test type is refused. The data
 root is the folder Hertzforge keeps its runs in, on the local disk.
 
@@ -476,8 +569,8 @@ Laws are separate files loaded at run time, so their authors can license them as
 
 ## The interface version
 
-The interface is `hertzforge:control-law@0.1.0`, with four worlds: `random-single`,
-`random-mimo`, `shock-classical` and `shock-srs`. While it is at 0.x it may change between releases, and a law must be built against
+The interface is `hertzforge:control-law@0.1.0`, with five worlds: `random-single`,
+`random-mimo`, `shock-classical`, `shock-srs` and `sine-single`. While it is at 0.x it may change between releases, and a law must be built against
 the version the host loads.
 
 ## Building and testing in this repository
