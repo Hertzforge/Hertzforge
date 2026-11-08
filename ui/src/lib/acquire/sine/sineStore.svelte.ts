@@ -165,6 +165,8 @@ export class SineStore {
 	#refusal = $state.raw<Refusal | null>(null);
 	syncError = $state<string | null>(null);
 
+	/** Which came last for this run: the live frame (true) or the state. */
+	private liveNewer = $state(false);
 	private checkSeq = 0;
 	private validateSeq = 0;
 	private logRun: string | null = null;
@@ -193,6 +195,7 @@ export class SineStore {
 			const l = d as unknown as SineLive;
 			if (this.status?.run_id && l.run_id !== this.status.run_id) return;
 			this.live = l;
+			this.liveNewer = true;
 		});
 		this.control.on(SINE_TOPICS.log, (d) => {
 			const e = d as unknown as SineLogEvent;
@@ -297,11 +300,15 @@ export class SineStore {
 		return this.served?.config ?? null;
 	}
 
-	/** The latest numbers: the state with the live frame for this run laid over it. */
+	/**
+	 * The latest numbers: the state, with this run's live frame laid over it when the frame came
+	 * after it. A state that came after the frame (a hold, a change of phase) is the run's word until
+	 * the next frame.
+	 */
 	get now(): SineState | null {
 		const s = this.status;
 		const l = this.live;
-		if (!s || !l || l.run_id !== s.run_id) return s;
+		if (!s || !l || l.run_id !== s.run_id || !this.liveNewer) return s;
 		return {
 			...s,
 			state: l.state,
@@ -386,7 +393,9 @@ export class SineStore {
 	/** The level the drive is at now, from the live frame, for the bar's level readout. */
 	get frame(): { level_db: number | null; at_level_s: number | null; remaining_at_level_s: number | null } | null {
 		const l = this.frameOfRun;
-		return l ? { level_db: l.level_db, at_level_s: this.status?.at_level_s ?? null, remaining_at_level_s: null } : null;
+		// After the run ends the frame holds the ramp's last level; the bar shows the level commanded.
+		if (!l || this.status?.state === 'finished') return null;
+		return { level_db: l.level_db, at_level_s: this.status?.at_level_s ?? null, remaining_at_level_s: null };
 	}
 
 	/** The run bar's words for Sine's outcomes and phases. */
@@ -488,24 +497,9 @@ export class SineStore {
 	private onStatus(s: SineState) {
 		const was = this.status;
 		this.status = s;
-		// The state is newer than the live frame held: its words go over the frame's until the next one.
-		const l = this.live;
-		if (l && l.run_id === s.run_id) {
-			if (s.state === 'unconfigured' || s.state === 'configured' || s.state === 'armed' || s.state === 'blocked') this.live = null;
-			else
-				this.live = {
-					...l,
-					state: s.state,
-					phase: s.phase,
-					mode: s.mode ?? l.mode,
-					held: s.held,
-					alarm: s.alarm,
-					notch: s.notch,
-					commanded_db: s.level_db ?? l.commanded_db,
-					direction: s.direction ?? l.direction,
-					sweeps: s.sweeps ?? l.sweeps
-				};
-		}
+		// The state is newer than the live frame held: it is the run's word until the next frame.
+		this.liveNewer = false;
+		if (this.live && this.live.run_id === s.run_id && (s.state === 'unconfigured' || s.state === 'configured' || s.state === 'armed' || s.state === 'blocked')) this.live = null;
 		if (s.run_id !== this.logRun) void this.loadLog(s.run_id);
 		if (was?.run_id !== s.run_id && s.run_id) void this.readServed();
 		// The run went live from this screen or another: the run is the next thing to watch.
@@ -599,7 +593,8 @@ export class SineStore {
 		if (!res.profile) return false;
 		const p = this.setup.profile;
 		const read = profileDraftOf({ ...res.profile, alarm_db: p.alarm_db, abort_db: p.abort_db }, p);
-		this.setup.profile = { ...p, rows: read.rows, label: res.profile.label || p.label };
+		// The rows replace the profile, so its name is theirs (none when they give none); the bands stay.
+		this.setup.profile = { ...p, rows: read.rows, label: res.profile.label ?? '' };
 		return true;
 	}
 

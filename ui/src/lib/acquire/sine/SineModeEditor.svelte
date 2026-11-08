@@ -68,7 +68,7 @@
 			</div>
 			{#if t.kind === 'sweep'}
 				{@const s = t.sweep}
-				<div class="aq-group">
+				<div class="aq-group sep">
 					<h3>Sweep</h3>
 					<div class="aq-fields">
 						<div class="sel">
@@ -115,7 +115,7 @@
 				</div>
 			{:else}
 				{@const st = t.step}
-				<div class="aq-group">
+				<div class="aq-group sep">
 					<h3>Steps</h3>
 					<div class="aq-fields">
 						<NumberField id="nm-spo" label="Steps an octave" step={1} min={0} bind:value={st.steps_per_octave} errors={errs('test.steps_per_octave')} disabled={locked} testid="sine-steps-per-octave" />
@@ -220,5 +220,11 @@
 		.cols {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+	/* A group after fields or a table is set off as one after another group is. */
+	.sep {
+		margin-top: var(--sp-5);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--line-1);
 	}
 </style>

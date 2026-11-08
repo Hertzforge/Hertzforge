@@ -73,7 +73,7 @@
 			<p class="aq-lead aq-small spaced">Each row holds from its frequency to the next row's. Neighbours of one quantity are joined on log-log axes; where the quantity changes, the left row's value holds up to the next row. Values are in the row's own unit: g peak, in/s peak, or in peak to peak.</p>
 			<SineProfileTable rows={p.rows} prefix="profile.rows" errors={E} warnings={W} {locked} testid="sine-profile-rows" label="Profile rows" />
 
-			<div class="aq-group">
+			<div class="aq-group sep">
 				<h3>Bands</h3>
 				<p class="aq-lead aq-small">How far below and above the profile the control point may read: past the alarm band the run warns, past the abort band it stops. A row with bands of its own uses them from that row to the next.</p>
 				<div class="aq-fields">
@@ -201,5 +201,11 @@
 		.cols {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+	/* A group after fields or a table is set off as one after another group is. */
+	.sep {
+		margin-top: var(--sp-5);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--line-1);
 	}
 </style>

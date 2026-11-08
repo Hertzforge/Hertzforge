@@ -111,7 +111,7 @@
 			<Findings items={errs('control.weights').map((message) => ({ level: 'error' as const, message }))} />
 			{#if !controlRows.length}<p class="aq-small aq-muted">The channel table has no enabled control row yet.</p>{/if}
 
-			<div class="aq-group">
+			<div class="aq-group sep">
 				<h3>Tracking Filter</h3>
 				<p class="aq-lead aq-small">Each input is read at the tone's frequency through a narrow filter that follows the tone. Narrow is steady and slow to follow a fast sweep; wide follows fast and lets more noise in.</p>
 				<div class="aq-fields">
@@ -160,7 +160,7 @@
 				<button class="btn ghost sm" aria-expanded={advanced} onclick={() => (advanced = !advanced)} data-testid="sine-guards-open">{advanced ? 'Hide' : 'Show'}</button>
 				<button class="btn ghost sm" onclick={usual} disabled={locked}>Usual Values</button>
 			</div>
-			<p class="aq-lead aq-small">A law gives one amplitude a tick, a number at or above zero. The core then limits how far it may move, keeps it under the limit channels and the drive ceiling, and stops the run when the law keeps failing.</p>
+			<p class="aq-lead aq-small lead">A law gives one amplitude a tick, a number at or above zero. The core then limits how far it may move, keeps it under the limit channels and the drive ceiling, and stops the run when the law keeps failing.</p>
 			{#if advanced || guardFindings}
 				<div class="aq-fields">
 					{#each GUARDS as s (s.key)}
@@ -205,5 +205,15 @@
 		.cols {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+	/* A group after fields or a table is set off as one after another group is. */
+	.sep {
+		margin-top: var(--sp-5);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--line-1);
+	}
+
+	.lead {
+		margin: 0 0 var(--sp-3);
 	}
 </style>

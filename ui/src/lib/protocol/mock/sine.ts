@@ -876,9 +876,9 @@ export function createSineMock(host: SineMockHost): SineMock {
 	function endMessage(outcome: SineOutcome, trip: SineTrip | null, by?: string): string {
 		switch (outcome) {
 			case 'completed':
-				return 'The schedule finished; the drive ramped down.';
+				return 'The schedule finished.';
 			case 'operator_stop':
-				return `Stopped by ${by ?? 'the operator'}; the drive ramped down.`;
+				return `Stopped by ${by ?? 'the operator'}.`;
 			case 'operator_abort':
 				return `Aborted by ${by ?? 'the operator'}.`;
 			case 'safe_stop':

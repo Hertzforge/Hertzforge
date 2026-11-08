@@ -14,7 +14,7 @@
 	import type { LawEntry, LawParam } from '$lib/protocol/mimo';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import { CHECK_WORDS, lawParamDescriptor, lawParamError, shortHash, type LawErrors, type LawValue } from './lawForm';
+	import { CHECK_WORDS, lawParamDescriptor, lawParamError, liveParamLabels, shortHash, type LawErrors, type LawValue } from './lawForm';
 
 	interface Props {
 		/** The laws offered, in the catalog's order. */
@@ -51,7 +51,7 @@
 	let importOpen = $state(false);
 
 	const descriptors = $derived((law?.params ?? []).map(lawParamDescriptor).filter((p) => p !== null));
-	const liveLabels = $derived(live === undefined ? null : (law?.params ?? []).filter((p) => live.includes(p.key)).map((p) => p.label));
+	const liveLabels = $derived(liveParamLabels(law, live));
 	const extras = $derived((law?.params ?? []).filter((p) => p.kind === 'per_channel' || p.kind === 'curve'));
 	const errs = (k: string) => errors[k] ?? [];
 

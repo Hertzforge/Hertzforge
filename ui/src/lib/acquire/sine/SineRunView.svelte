@@ -62,6 +62,7 @@
 	data-phase={status?.phase ?? ''}
 	data-hz={live?.frequency_hz ?? status?.frequency_hz ?? ''}
 	data-t={live?.t_s ?? ''}
+	data-frame-held={live ? String(live.held) : ''}
 	data-held={status?.held ? 'true' : 'false'}
 	data-direction={status?.direction ?? ''}
 	data-level={live?.level_db ?? ''}

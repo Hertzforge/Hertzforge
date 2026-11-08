@@ -157,20 +157,21 @@ export function sineLevelStatus(s: SineState | null, live: SineLiveHead | null, 
 		case 'running':
 			break;
 	}
-	const phase = f?.phase ?? s?.phase;
+	// The state and the frame have been laid over each other by recency; the frame adds the level
+	// the drive is at now and the sweep's rate, which the state does not carry.
+	const phase = s?.phase ?? f?.phase;
 	if (phase === 'sysid') return { mark: 'identify', text: 'Identifying the system with a noise burst', tone: 'info' };
 	if (phase === 'coherence_gate') return { mark: 'identify', text: 'Checking the coherence', tone: 'info' };
-	const freq = f?.frequency_hz ?? s?.frequency_hz ?? null;
-	const held = f?.held ?? s?.held ?? false;
-	if (held) return { mark: 'hold', text: `Holding at ${hz(freq)}`, tone: 'info' };
-	if (f?.notch ?? s?.notch) return { mark: 'control', text: limitingWords(limitChannelsOf(config)), tone: 'warn' };
+	const freq = s?.frequency_hz ?? f?.frequency_hz ?? null;
+	if (s?.held ?? f?.held) return { mark: 'hold', text: `Holding at ${hz(freq)}`, tone: 'info' };
+	if (s?.notch ?? f?.notch) return { mark: 'control', text: limitingWords(limitChannelsOf(config)), tone: 'warn' };
 	const level = f?.level_db ?? s?.level_db ?? null;
-	const commanded = f?.commanded_db ?? s?.level_db ?? null;
+	const commanded = s?.level_db ?? f?.commanded_db ?? null;
 	if (f && level !== null && commanded !== null && Math.abs(level - commanded) > 0.05) return { mark: 'ramp', text: `Ramping to ${db(commanded)} at ${hz(freq)}`, tone: 'info' };
 	const atLevel = phase === 'full_level' ? `at full level, ${db(level)}` : `at ${db(level)}`;
-	const test = f?.test ?? s?.test ?? null;
+	const test = s?.test ?? f?.test ?? null;
 	if (test === 'sweep') {
-		const dir = f?.direction ?? s?.direction;
+		const dir = s?.direction ?? f?.direction;
 		const rate = rateWords(f, config?.test);
 		return { mark: 'control', text: `Sweeping ${dir === 'down' ? 'down' : 'up'}${rate ? ` at ${rate}` : ''} ${atLevel}`, tone: 'pass' };
 	}

@@ -51,12 +51,12 @@
 	<div class="stack">
 		<section class="aq-panel" aria-labelledby="nl-drive" data-testid="sine-drive-limits">
 			<div class="aq-head"><h2 id="nl-drive">Drive</h2><span class="aq-sub">In volts peak at the amplifier's input.</span></div>
-			<p class="aq-lead aq-small">There is no default for either: give the values for your amplifier. They hold for identification and for every tick of the run.</p>
+			<p class="aq-lead aq-small lead">There is no default for either: give the values for your amplifier. They hold for identification and for every tick of the run.</p>
 			<div class="aq-fields">
 				<NumberField id="nl-ceil" label="Drive ceiling" unit="V pk" step={0.1} min={0} max={10} bind:value={lim.drive_vpk_ceiling} errors={errs('limits.drive_vpk_ceiling')} disabled={locked} testid="sine-drive-ceiling" help="The drive is held at or under it, whatever the law asks." />
 				<NumberField id="nl-abort" label="Drive abort" unit="V pk" step={0.1} min={0} max={10} bind:value={lim.drive_vpk_abort} errors={errs('limits.drive_vpk_abort')} disabled={locked} testid="sine-drive-abort" help="At least the ceiling. A drive at or over it aborts the run." />
 			</div>
-			<div class="aq-group">
+			<div class="aq-group sep">
 				<h3>Controlled Stop</h3>
 				{#if dry}
 					<p class="aq-small" data-testid="sine-stop-ramp">The drive ramps down at <span class="num">{formatNumber(dry.stop_ramp_db_per_s, 4)} dB a second</span>; from the drive ceiling that takes <span class="num">{formatNumber(dry.safe_stop_s, 3)} s</span> of station time. The ramp is the service's own and is not set here.</p>
@@ -80,7 +80,7 @@
 				<span class="aq-spacer"></span>
 				<button class="btn sm" disabled={locked || !inputs.length} title={inputs.length ? 'Add a limit channel' : 'The channel table has no enabled input other than the control rows.'} onclick={() => sine.addLimitChannel()} data-testid="sine-limit-add">Add Channel</button>
 			</div>
-			<p class="aq-lead aq-small">Where a limit channel would pass its bound, the drive is held down there (a notch), and the control point may read under its profile. A limit channel outside its own abort band stops the run.</p>
+			<p class="aq-lead aq-small lead">Where a limit channel would pass its bound, the drive is held down there (a notch), and the control point may read under its profile. A limit channel outside its own abort band stops the run.</p>
 			{#each lim.channels as ch, i (i)}
 				<div class="aq-group lc" data-testid="sine-limit-{i}">
 					<div class="lchead">
@@ -103,7 +103,7 @@
 			{/each}
 			<Findings items={errs('limits.channels').map((message) => ({ level: 'error' as const, message }))} />
 			{#if lim.channels.length}
-				<div class="aq-group">
+				<div class="aq-group sep">
 					<h3>Notch <button class="btn ghost sm" aria-expanded={notchOpen} onclick={() => (notchOpen = !notchOpen)} data-testid="sine-notch-open">{notchOpen ? 'Hide' : 'Show'}</button></h3>
 					{#if notchOpen}
 						<div class="aq-fields">
@@ -264,5 +264,15 @@
 		.cols {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+	/* A group after fields or a table is set off as one after another group is. */
+	.sep {
+		margin-top: var(--sp-5);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--line-1);
+	}
+
+	.lead {
+		margin: 0 0 var(--sp-3);
 	}
 </style>

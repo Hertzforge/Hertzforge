@@ -8,7 +8,7 @@
 	 */
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import { newRow, QUANTITIES, quantityUnit, type SineRowDraft } from './sineSetup';
+	import { newRow, QUANTITIES, type SineRowDraft } from './sineSetup';
 
 	interface Props {
 		rows: SineRowDraft[];
@@ -45,8 +45,8 @@
 		<thead>
 			<tr>
 				<th class="num">Frequency, Hz</th>
-				<th>Quantity</th>
 				<th class="num">{valueWord}</th>
+				<th>Unit</th>
 				{#if bands}<th>Own bands</th>{/if}
 				<th aria-label="Remove"></th>
 			</tr>
@@ -57,13 +57,13 @@
 					<td class="num">
 						<NumberField id="{testid}-{i}-f" label="Row {i + 1}, frequency" compact step={10} min={0} value={row.freq_hz} onchange={(v) => (row.freq_hz = v ?? NaN)} errors={errs(`${prefix}.${i}.freq_hz`)} disabled={locked} testid="{testid}-{i}-freq_hz" />
 					</td>
-					<td>
-						<select class="field" aria-label="Row {i + 1}, quantity" bind:value={row.quantity} disabled={locked} data-testid="{testid}-{i}-quantity">
-							{#each QUANTITIES as q (q.id)}<option value={q.id}>{q.label}</option>{/each}
-						</select>
-					</td>
 					<td class="num">
-						<NumberField id="{testid}-{i}-v" label="Row {i + 1}, {valueWord.toLowerCase()}" compact unit={quantityUnit(row.quantity)} step={row.quantity === 'disp_pp_in' ? 0.001 : 0.1} min={0} value={row.value} onchange={(v) => (row.value = v ?? NaN)} errors={errs(`${prefix}.${i}.value`)} disabled={locked} testid="{testid}-{i}-value" />
+						<NumberField id="{testid}-{i}-v" label="Row {i + 1}, {valueWord.toLowerCase()}" compact step={row.quantity === 'disp_pp_in' ? 0.001 : 0.1} min={0} value={row.value} onchange={(v) => (row.value = v ?? NaN)} errors={errs(`${prefix}.${i}.value`)} disabled={locked} testid="{testid}-{i}-value" />
+					</td>
+					<td>
+						<select class="field qty" aria-label="Row {i + 1}, quantity" title={QUANTITIES.find((q) => q.id === row.quantity)?.label} bind:value={row.quantity} disabled={locked} data-testid="{testid}-{i}-quantity">
+							{#each QUANTITIES as q (q.id)}<option value={q.id}>{q.unit}</option>{/each}
+						</select>
 					</td>
 					{#if bands}
 						<td>
@@ -104,6 +104,10 @@
 		gap: var(--sp-2);
 		min-width: 0;
 		overflow-x: auto;
+	}
+
+	.qty {
+		min-width: 8.5em;
 	}
 
 	.own {

@@ -80,7 +80,7 @@
 		</div>
 
 		{#if s.mode === 'auto'}
-			<div class="aq-group">
+			<div class="aq-group sep">
 				<h3>How Long Each Level Holds</h3>
 				<div class="aq-fields">
 					{#each [['per_level', 'Each level but the last'], ['full_level', 'Full level']] as [key, label] (key)}
@@ -105,7 +105,7 @@
 
 	<section class="aq-panel" aria-labelledby="ns-id" data-testid="sine-identification">
 		<div class="aq-head"><h2 id="ns-id">Identification</h2><span class="aq-sub">Before any level, at a low drive.</span></div>
-		<p class="aq-lead aq-small">The control service plays a white-noise burst under full level and measures how each control channel answers, and the delay between the drive and the response. The control law's first drive comes from that gain at the start frequency. Nothing is driven at test level until identification is done.</p>
+		<p class="aq-lead aq-small lead">The control service plays a white-noise burst under full level and measures how each control channel answers, and the delay between the drive and the response. The control law's first drive comes from that gain at the start frequency. Nothing is driven at test level until identification is done.</p>
 		<div class="aq-fields">
 			<NumberField id="ns-lv" label="Burst level under full" unit="dB" step={1} max={0} min={-60} bind:value={id.level_db} errors={errs('identification.level_db')} disabled={locked} testid="sine-id-level" help="From -60 to 0 dB. Usual: -20 dB." />
 			<NumberField id="ns-gate" label="Coherence it must reach" step={0.05} min={0} max={1} bind:value={id.gate_coherence} errors={errs('identification.gate_coherence')} disabled={locked} testid="sine-id-gate" help="Over the band. Under it the run is held and never drives at test level. Usual: 0.5." />
@@ -171,5 +171,15 @@
 		.cols {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+	/* A group after fields or a table is set off as one after another group is. */
+	.sep {
+		margin-top: var(--sp-5);
+		padding-top: var(--sp-4);
+		border-top: 1px solid var(--line-1);
+	}
+
+	.lead {
+		margin: 0 0 var(--sp-3);
 	}
 </style>
