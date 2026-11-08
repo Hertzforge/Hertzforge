@@ -74,7 +74,9 @@ pub use backend::{DeviceIdentity, NiBackend};
 pub use clock::{
     resolve_clock, selftest_clock_row, ClockKey, ClockRow, ProvenClockConfig, PROVEN_SHARED_CLOCK,
 };
-pub use config::{plan_from_table, plan_from_table_on, AiAssign, AiInterface, AoAssign, NiConfig};
+pub use config::{
+    plan_from_table, plan_from_table_on, AiAssign, AiDeviceLimit, AiInterface, AoAssign, NiConfig,
+};
 pub use enumerate::{enumerate, enumerate_with, SysQuery};
 pub use error::NiError;
 pub use timing::{FamilyKind, TimingFamily, TimingFamilyMap};

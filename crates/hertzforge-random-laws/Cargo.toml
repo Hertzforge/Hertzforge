@@ -11,11 +11,19 @@ publish = false
 # file as a Random control law under the run core's guards, the choice of law
 # for a run, and the check records that decide whether a law may drive
 # hardware. `hertzforge-random` itself does not depend on the law host (or on
-# Wasmtime); this crate joins the two.
+# Wasmtime); this crate joins the two. Multiple-output laws are listed and
+# resolved here too: the four built-in MIMO laws and imported `random-mimo`
+# law files.
 [dependencies]
 hertzforge-random = { path = "../hertzforge-random" }
 hertzforge-law-host = { path = "../hertzforge-law-host" }
 hertzforge-law-ratio-math = { path = "../hertzforge-law-ratio-math" }
+# The built-in multiple-output laws and the MIMO law boundary they implement.
+hertzforge-mimo-laws = { path = "../hertzforge-mimo-laws" }
+# The built-in classical shock law's declaration (`fd_correct`'s parameters and
+# values), for its catalog entry. Plain math, no controller crate.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
+hertzforge-sdm = { path = "../hertzforge-sdm" }
 # `default_data_root()`: law files live in the local data root, never in a
 # synced folder.
 hertzforge-capture = { path = "../hertzforge-capture" }

@@ -24,6 +24,8 @@ pub struct Event {
     pub decoded: Option<Decoded>,
     /// When it was read.
     pub at: Instant,
+    /// The frame's size on the socket, bytes.
+    pub bytes: usize,
 }
 
 impl Event {
@@ -59,6 +61,12 @@ pub fn options(
         capture_root: Some(dir),
         sim_speed: speed,
         bind: "ws://127.0.0.1:0/".into(),
+        // The protocol tests run MIMO on the simulated driver; the wire runs on the
+        // controller's service set their own (tests/mimo_service.rs).
+        mimo_driver: Some(server::simulated_mimo_driver(speed)),
+        // Classical shock likewise runs on the simulated engine here; the wire runs
+        // on the controller's service set their own (tests/shock_sim_run.rs).
+        shock_engine: Some(server::simulated_shock_engine()),
     }
 }
 
@@ -109,6 +117,7 @@ impl Client {
                         msg: v.clone(),
                         decoded: None,
                         at: Instant::now(),
+                        bytes: t.len(),
                     });
                 }
                 Some(v)
@@ -121,6 +130,7 @@ impl Client {
                     msg: v.clone(),
                     decoded: Some(decoded),
                     at: Instant::now(),
+                    bytes: b.len(),
                 });
                 Some(v)
             }
@@ -173,11 +183,31 @@ impl Client {
         if let Some(i) = self.events.iter().position(&pred) {
             return i;
         }
-        let deadline = Instant::now() + wait;
+        let start = Instant::now();
+        let deadline = start + wait;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                panic!("no event for {what} within {wait:?}");
+                // Say what was seen, so a run that ended some other way (a fault, a
+                // refusal, a stop) is told apart from one that never answered.
+                let seen = self.events.len();
+                let last = self
+                    .events
+                    .iter()
+                    .rev()
+                    .find(|e| e.topic().ends_with(".status") || e.topic().ends_with(".state"))
+                    .or(self.events.last())
+                    .map(|e| {
+                        let mut data = e.data().to_string();
+                        data.truncate(6000);
+                        format!(
+                            "the last {} at +{:.1}s: {data}",
+                            e.topic(),
+                            e.at.duration_since(start).as_secs_f64()
+                        )
+                    })
+                    .unwrap_or_else(|| "no events at all".into());
+                panic!("no event for {what} within {wait:?}; {seen} events seen, {last}");
             }
             if self.read(left).await.is_some() {
                 if let Some(i) = self.events.iter().position(&pred) {

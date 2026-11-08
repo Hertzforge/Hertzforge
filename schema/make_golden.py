@@ -431,6 +431,907 @@ TEXT_GOLDENS = {
 }
 
 
+# --- MIMO Random and the law catalog (PROTOCOL.md, "MIMO Random", "Control Laws") ---
+
+#: Eight lines of a 6.25 Hz grid and a two-channel reference on them: each PSD
+#: 0.04, the cross spectrum 0.012 + 0.016j (coherence 0.25, phase 53.13 degrees),
+#: packed as the upper triangle of each line, row by row: G00, G01, G11.
+MIMO_LINES = [100.0 + 6.25 * k for k in range(8)]
+MIMO_RE = [0.04, 0.012, 0.04] * 8
+MIMO_IM = [0.0, 0.016, 0.0] * 8
+
+MIMO_SETUP = {
+    'title': 'Two-Axis Random',
+    'channels': {
+        'controls': [{'channel': 1, 'alarm_db': [3, 3], 'abort_db': [6, 6]},
+                     {'channel': 2, 'alarm_db': [3, 3], 'abort_db': [6, 6]}],
+        'drives': [{'channel': 3, 'ceiling_vrms': 2, 'abort_vrms': None},
+                   {'channel': 4, 'ceiling_vrms': 2, 'abort_vrms': 3}],
+    },
+    'space': {'kind': 'physical'},
+    'reference': {'kind': 'inline', 'freqs_hz': MIMO_LINES, 'n': 2, 're': MIMO_RE, 'im': MIMO_IM},
+    'law': {'id': 'pinv_closed', 'params': {'convergence': 0.5}},
+    'estimation': {'fs_hz': 8192, 'n_pts': 4096, 'frames_per_loop': 8, 'window': 'hann',
+                   'overlap': 0.5, 'memory_loops': 4},
+    'identification': {'level_db': -20, 'frames': 32, 'noise_frames': 16, 'coherence_floor': 0.5,
+                       'condition_limit': 1000, 'review': True},
+    'control': {'frf': 'hold', 'level_ramp_s': 3, 'shutdown_ramp_s': 3, 'max_loops_out': 5},
+    'schedule': {'mode': 'auto', 'levels': [{'db': -6, 'dwell_s': 10}, {'db': 0}],
+                 'full_level_s': 60},
+    'backend': {'kind': 'sim'},
+}
+
+MIMO_LAW_REF = {'id': 'pinv_closed', 'name': 'pseudo-inverse, closed loop', 'version': '1.0.0',
+                'sha256': None}
+
+MIMO_SHAPE = {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None, 'shape': 'square',
+              'labels': ['Control X', 'Control Y'], 'drive_labels': ['Shaker X', 'Shaker Y'],
+              'bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
+
+MIMO_GRID = {'fs_hz': 8192, 'n_pts': 4096, 'df_hz': 2, 'lines': 8, 'loop_s': 2.25, 'actual': False}
+
+
+def _mimo_state(**over) -> dict:
+    state = {
+        'run_id': 'm-0003', 'state': 'configured', 'phase': 'idle', 'title': 'Two-Axis Random',
+        'source': 'SIM', 'station': {'kind': 'sim', 'class': 'sim', 'devices': []},
+        'grid': MIMO_GRID, 'clock': None, 'shape': MIMO_SHAPE, 'mode': 'auto',
+        'levels_db': [-6, 0], 'level_db': None, 'elapsed_s': None, 'at_level_s': None,
+        'remaining_at_level_s': None, 'loop': 0, 'alarm': False, 'control_error_db': [],
+        'gates': None, 'caps': [], 'drive_rms_v': [], 'law': MIMO_LAW_REF, 'faults': [],
+        'override': None, 'overrides': [], 'prediction': None, 'excluded': [], 'end': None,
+    }
+    state.update(over)
+    return state
+
+
+def _mimo_validation(errors=(), law_admitted=True) -> dict:
+    return {
+        'ok': not errors, 'errors': list(errors), 'warnings': [],
+        'shape': {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None,
+                  'shape': 'square'},
+        'transforms': {'response': None, 'drive': None},
+        'reference': {'source': 'inline', 'lines': 8, 'n': 2, 'band_hz': [100, 143.75],
+                      'min_eigenvalue_ratio': 0, 'rank_min': 2, 'rank_max': 2,
+                      'repaired_lines': 0},
+        'feasibility': [
+            {'channel': ch, 'ceiling_vrms': 2, 'verdict': 'not_evaluated', 'predicted_vrms': None,
+             'message': 'The drive this test needs is predicted after system identification, '
+                        'before the loop engages.'} for ch in (3, 4)],
+        'law': {**MIMO_LAW_REF, 'admitted': law_admitted},
+    }
+
+
+MIMO_GATES = {'coherence_min': 0.962, 'coherence_floor': 0.5, 'condition_max': 12.5,
+              'condition_limit': 1000, 'passed': True, 'coherence': [0.962, 0.981]}
+
+MIMO_RUNNING = _mimo_state(
+    state='running', phase='engaged', level_db=-6, elapsed_s=31.5, at_level_s=4.5,
+    remaining_at_level_s=5.5, loop=14, control_error_db=[0.42, -0.31], gates=MIMO_GATES,
+    caps=[1, 0.875], drive_rms_v=[0.412, 0.388],
+    prediction={'iteration': 1, 'law': MIMO_LAW_REF, 'drive_rms_v': [0.82, 0.77],
+                'ceiling_vrms': [2, 2], 'error_db': [0.5, -0.5], 'drives_pass': True,
+                'has_achievable': False, 'unreachable_db': [0, 0], 'drive_accel': [1.25, 1.1],
+                'accel_control': [0, 1],
+                'feasibility': [{'verdict': 'pass', 'message': ''},
+                                {'verdict': 'not_evaluated', 'message': 'no shaker record'}]})
+
+LAW_PINV_CLOSED = {'id': 'pinv_closed',
+     'world': 'mimo',
+     'builtin': True,
+     'name': 'pseudo-inverse, closed loop',
+     'version': '1.0.0',
+     'author': 'Hertzforge',
+     'summary': 'Starts from the regularized pseudo-inverse drive, then each loop corrects a '
+                "lower-triangular factor of the reference from the measured error (Smallwood's "
+                'coupling-matrix correction), autospectra first in channel order, each factor '
+                'diagonal and each drive PSD held to a per-loop limit, the sources held to the '
+                "plant's rank. Every drive is positive semi-definite by construction.",
+     'sha256': None,
+     'check': {'status': 'built_in',
+               'date': None,
+               'tool_version': None,
+               'cases': [],
+               'hardware': True,
+               'message': 'Built in: cleared for hardware.'},
+     'params': [{'key': 'regularization',
+                 'label': 'Regularization',
+                 'help': 'How the inverse of the plant treats weak directions. Truncated drops '
+                         'singular values below the amount times the largest; Tikhonov damps every '
+                         'one with the amount times the largest as the damping; none inverts every '
+                         'singular value above the numerical floor.',
+                 'kind': 'choice',
+                 'options': ['truncated', 'tikhonov', 'none'],
+                 'default': 'truncated'},
+                {'key': 'regularization_amount',
+                 'label': 'Regularization amount',
+                 'help': 'Relative to the largest singular value on each line. For truncation, '
+                         "1e-3 keeps the inverse's condition number under 1,000. Ignored with no "
+                         'regularization.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0,
+                 'max': 1,
+                 'step': 0.0001,
+                 'default': 0.001},
+                {'key': 'convergence',
+                 'label': 'Convergence factor',
+                 'help': "The fraction of each loop's correction applied. 1 applies it whole; "
+                         'smaller values converge more slowly and average estimation noise.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0.1,
+                 'max': 1,
+                 'step': 0.05,
+                 'default': 0.5},
+                {'key': 'cap_up_db',
+                 'label': 'Largest rise per loop',
+                 'help': "The most any drive's PSD, or any factor diagonal's square, may rise in "
+                         "one loop. Never looser than the controller's own cap.",
+                 'kind': 'number',
+                 'unit': 'dB',
+                 'min': 0.1,
+                 'max': 3.5,
+                 'step': 0.1,
+                 'default': 3.5},
+                {'key': 'cap_down_db',
+                 'label': 'Largest fall per loop',
+                 'help': "The most any drive's PSD, or any factor diagonal's square, may fall in "
+                         "one loop. Never looser than the controller's own cap.",
+                 'kind': 'number',
+                 'unit': 'dB',
+                 'min': 0.1,
+                 'max': 6,
+                 'step': 0.1,
+                 'default': 6},
+                {'key': 'rank_tolerance',
+                 'label': 'Rank tolerance',
+                 'help': 'Singular values of the plant above this fraction of the largest count '
+                         'toward its rank. The reference factor keeps no more independent sources '
+                         'than the rank.',
+                 'kind': 'number',
+                 'unit': '',
+                 'min': 0,
+                 'max': 0.1,
+                 'step': 1e-06,
+                 'default': 1e-06},
+                {'key': 'weighting',
+                 'label': 'Error weighting',
+                 'help': "How the least-squares inverse weighs each control's error when there are "
+                         'more controls than drives: equally, or relative to its reference PSD so '
+                         'a quiet control counts as much as a loud one. No effect on a square '
+                         'plant.',
+                 'kind': 'choice',
+                 'options': ['none', 'reference'],
+                 'default': 'none'}],
+     'diagnostics': [{'key': 'condition',
+                      'label': 'Condition number',
+                      'unit': '',
+                      'help': 'Largest over smallest singular value of the plant on each line '
+                              '(weighted when the law weights). 0 out of band; 1e300 on a singular '
+                              'line.',
+                      'layout': 'per_line'},
+                     {'key': 'kept',
+                      'label': 'Singular values kept',
+                      'unit': '',
+                      'help': 'How many singular values of the plant the inverse used on each '
+                              'line.',
+                      'layout': 'per_line'},
+                     {'key': 'correction_db',
+                      'label': 'Largest drive change',
+                      'unit': 'dB',
+                      'help': "The largest change of any drive's PSD on any line from the law's "
+                              'previous drive. 0 at the seed.',
+                      'layout': 'scalar'},
+                     {'key': 'clamped',
+                      'label': 'Clamped factor diagonals',
+                      'unit': '',
+                      'help': 'Diagonal elements of the reference factor whose correction this '
+                              'loop was held to the per-loop limit, over all lines.',
+                      'layout': 'scalar'}],
+     'shapes': ['square', 'more_controls_than_drives', 'fewer_controls_than_drives'],
+     'needs': []}
+
+#: A law file imported from the operator's folder, not yet checked.
+LAW_IMPORTED = {
+    'id': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+    'world': 'mimo', 'builtin': False, 'name': 'notch-aware pseudo-inverse', 'version': '0.2.0',
+    'author': 'A. Contributor', 'summary': 'A pseudo-inverse law that holds notched lines.',
+    'sha256': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+    'check': {'status': 'unchecked', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': False,
+              'message': 'This control law has not been checked on the simulator; check it '
+                         'before it drives hardware.'},
+    'params': [{'key': 'gain', 'label': 'Loop gain', 'help': 'The fraction of each correction '
+                'applied.', 'kind': 'number', 'unit': '', 'min': 0.1, 'max': 1, 'step': 0.05,
+                'default': 0.5}],
+    'diagnostics': [{'key': 'held', 'label': 'Held lines', 'unit': '',
+                     'help': 'Lines held this loop.', 'layout': 'scalar'}],
+    'shapes': ['square', 'more_controls_than_drives'],
+    'needs': ['last_drive'],
+}
+
+_TRIP_CAP = ('The change cap held drive 4 back on 721 lines for 5 loops in a row: the control '
+             'law asked for more change than the core allows.')
+
+
+def _check_case(name, plant, requirement, outcome, conv, at_full, final, line, settle, *,
+                trip=None, capped=0, calls=3, ms=7.4, gate=True):
+    """One case of a `laws.check` report, its `detail` in the controller's words."""
+    gate_words = '' if gate else '; identification gate overridden for the check'
+    detail = (f'{outcome}; {calls} calls, slowest {ms} ms of 2125 ms; 0 drive-lines repaired, '
+              f'{capped} capped{gate_words}')
+    return {
+        'name': name, 'plant': plant, 'passed': True, 'detail': detail,
+        'loops_to_converge': conv, 'loops_at_full': at_full, 'final_error_db': final,
+        'worst_line_db': line, 'settle_db': settle, 'requirement': requirement, 'trip': trip,
+        'misses': 0, 'rejected': 0, 'repaired_lines': 0, 'capped_lines': capped, 'calls': calls,
+        'worst_call_ms': ms, 'budget_ms': 2125, 'gate_passed': gate,
+    }
+
+
+def _within(final, line):
+    return (f'within +/- 1 dB 1 loop after full level (worst control {final} dB, worst line '
+            f'{line} dB)')
+
+
+#: `laws.check` on the imported law: the report (the open-loop law file's check, its
+#: figures rounded; on the ill-conditioned plant the core's own judgement ended the run,
+#: which that case allows) and one progress event. The Rust golden test rebuilds both
+#: from the same figures through the controller's own serializers.
+LAW_CHECK_REPORT = {'passed': True, 'recorded': True, 'tool_version': 'mimo-check 1', 'cases': [
+    _check_case('modal 4 x 4', 'modal-4x4', 'converge', _within('0.46', '4.26'), 1, 1, 0.46,
+                4.26, None),
+    _check_case('modal 12 x 6', 'modal-12x6', 'settle',
+                'settled after 20 loops at full level (worst control 1.98 dB, last changes under '
+                '0.01 dB)', None, 20, 1.98, 11.06, 0.01, calls=22, ms=32.9),
+    _check_case('ill-conditioned 12 x 6', 'modal-12x6-ill', 'survive',
+                f'every call answered; the core ended the run by its own judgement ({_TRIP_CAP})',
+                None, 2, 6.32, 10.55, None, trip=_TRIP_CAP, capped=7210, calls=5, ms=32.3,
+                gate=False),
+    _check_case('rigid plate 12 x 6', 'rigid-plate-12x6', 'settle', _within('0.62', '2.79'), 1, 1,
+                0.62, 2.79, None, ms=5.7),
+    _check_case('measurement noise 4 x 4', 'modal-4x4', 'converge', _within('0.77', '5.29'), 1, 1,
+                0.77, 5.29, None),
+    _check_case('level ladder 12 x 6', 'modal-12x6', 'settle', _within('0.36', '4.02'), 1, 1,
+                0.36, 4.02, None, calls=6, ms=31.7),
+]}
+LAW_CHECK_EVENT = {'law_id': '9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b',
+                   'index': 2, 'of': 6, 'case': 'ill-conditioned 12 x 6', 'state': 'done',
+                   'result': LAW_CHECK_REPORT['cases'][2]}
+LAW_CHECKED = {**LAW_IMPORTED, 'check': {
+    'status': 'passed', 'date': '2026-11-03T15:42:07Z', 'tool_version': 'mimo-check 1',
+    'cases': [{'name': c['name'], 'passed': c['passed'], 'detail': c['detail']}
+              for c in LAW_CHECK_REPORT['cases']],
+    'hardware': True,
+    'message': 'Checked against the simulated test articles and passed: cleared for hardware.',
+}}
+
+MIMO_TEXT_GOLDENS = {
+    'request_mimo_random_setup': {
+        'type': 'request', 'id': 31, 'method': 'mimo_random.setup',
+        'params': {'setup': MIMO_SETUP},
+    },
+    'response_mimo_random_setup': {
+        'type': 'response', 'id': 31,
+        'result': {'state': _mimo_state(), 'validation': _mimo_validation()},
+    },
+    'response_error_setup_invalid': {
+        'type': 'response', 'id': 32,
+        'error': {'code': 'bad_request', 'reason': 'setup_invalid',
+                  'message': 'The MIMO setup has 1 error; correct it and send it again.',
+                  'detail': _mimo_validation(errors=[
+                      {'reason': 'control_unknown_channel', 'channel': 9,
+                       'message': 'Channel 9 is not an enabled control row of the channel '
+                                  'table; set its role to control, or remove it from the '
+                                  'setup.'}])},
+    },
+    'event_mimo_random_status': {
+        'type': 'event', 'topic': 'mimo_random.status', 'seq': 77, 'data': MIMO_RUNNING,
+    },
+    'request_mimo_random_override': {
+        'type': 'request', 'id': 33, 'method': 'mimo_random.override',
+        'params': {'ack': 'Coherence is low below 30 Hz where the fixture is stiff; accepted.'},
+    },
+    # A prediction over a drive ceiling holds the run until it too is acknowledged.
+    'request_mimo_random_override_prediction': {
+        'type': 'request', 'id': 39, 'method': 'mimo_random.override',
+        'params': {'ack': 'Drive 2 is predicted 0.4 dB over its ceiling; the ceiling holds it '
+                          'and the error is accepted for this run.',
+                   'reason': 'prediction_exceeded'},
+    },
+    # Virtual control with a tolerance band per degree of freedom, and every
+    # optional setup field the run service takes.
+    'request_mimo_random_setup_virtual': {
+        'type': 'request', 'id': 40, 'method': 'mimo_random.setup',
+        'params': {'setup': {
+            **MIMO_SETUP,
+            'channels': {
+                'controls': [{'channel': 1}, {'channel': 2}],
+                'drives': [{'channel': 3, 'ceiling_vrms': 2, 'abort_vrms': None, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5},
+                           {'channel': 4, 'ceiling_vrms': 2, 'abort_vrms': 3, 'peak_v': 6,
+                            'shaker': None, 'moving_mass_lb': 12.5}],
+                'limits': [{'channel': 5, 'ceiling': 0.04, 'abort_margin_db': 3}],
+                'article_mass_lb': 40,
+            },
+            'space': {'kind': 'virtual', 'dofs': ['Sum', 'Difference'],
+                      'response_transform': {'rows': 2, 'cols': 2, 'values': [0.5, 0.5, 1, -1]},
+                      'drive_transform': None,
+                      'dof_bands': [{'alarm_db': [2, 2], 'abort_db': [4, 4]},
+                                    {'alarm_db': [3, 3], 'abort_db': [6, 6]}]},
+            'control': {'frf': 'update', 'frf_blend': 0.25, 'level_ramp_s': 3,
+                        'shutdown_ramp_s': 3, 'max_loops_out': 5, 'cap_up_db': 2,
+                        'cap_down_db': 4, 'law_budget': 0.2, 'law_misses': 2},
+        }},
+    },
+    # A control with low coherence taken out of control at the gate, kept as a monitor.
+    'request_mimo_random_exclude': {
+        'type': 'request', 'id': 42, 'method': 'mimo_random.exclude',
+        'params': {'controls': [1],
+                   'ack': 'Control Y sits on a fixture node; kept as a monitor for this run.'},
+    },
+    # The achievable reference on the Predict page, as a block of the grid.
+    'request_mimo_random_subscribe_pred_sdm': {
+        'type': 'request', 'id': 41, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 2, 'plots': [
+            {'id': 'ach', 'quantity': 'pred_sdm', 'block': [0, 1], 'points': 256},
+            {'id': 'acc', 'quantity': 'pred_drive_accel', 'diagonal': True},
+        ]},
+    },
+    'response_mimo_random_report': {
+        'type': 'response', 'id': 34,
+        'result': {'report': {
+            'run_id': 'm-0003', 'title': 'Two-Axis Random', 'source': 'SIM', 'grid': MIMO_GRID,
+            'shape': MIMO_SHAPE, 'law': MIMO_LAW_REF, 'loops': 52,
+            'controls': [
+                {'label': 'Control X', 'rms': 0.5821, 'reference_rms': 0.5657, 'error_db': 0.25},
+                {'label': 'Control Y', 'rms': 0.5528, 'reference_rms': 0.5657, 'error_db': -0.2},
+            ],
+            'drives': [
+                {'channel': 3, 'label': 'Shaker X', 'rms_v': 0.8231, 'ceiling_vrms': 2,
+                 'min_cap': 0.875},
+                {'channel': 4, 'label': 'Shaker Y', 'rms_v': 0.7764, 'ceiling_vrms': 2,
+                 'min_cap': 1},
+            ],
+            'gates': MIMO_GATES, 'override': None, 'overrides': [],
+            'end': {'outcome': 'completed', 'message': 'The schedule finished.', 'at_s': 102.5,
+                    'level_db': 0, 'trip': None},
+        }},
+    },
+    'request_laws_list': {
+        'type': 'request', 'id': 35, 'method': 'laws.list', 'params': {'world': 'mimo'},
+    },
+    'response_laws_list': {
+        'type': 'response', 'id': 35,
+        'result': {'laws': [LAW_PINV_CLOSED], 'problems': [
+            {'file': '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.wasm',
+             'reason': 'its contents have the SHA-256 '
+                       'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210, not '
+                       'the one it is named by'}]},
+    },
+    'request_laws_import': {
+        'type': 'request', 'id': 36, 'method': 'laws.import',
+        'params': {'path': '/home/operator/laws/notch_pinv.wasm'},
+    },
+    'response_laws_import': {
+        'type': 'response', 'id': 36, 'result': {'law': LAW_IMPORTED},
+    },
+    'request_laws_check': {
+        'type': 'request', 'id': 39, 'method': 'laws.check',
+        'params': {'path': '/home/operator/laws/notch_pinv.wasm', 'params': {'gain': 0.5}},
+    },
+    'response_laws_check': {
+        'type': 'response', 'id': 39,
+        'result': {'law': LAW_CHECKED, 'report': LAW_CHECK_REPORT},
+    },
+    'event_laws_check': {
+        'type': 'event', 'topic': 'laws.check', 'seq': 412, 'data': LAW_CHECK_EVENT,
+    },
+    'request_mimo_random_identification_load': {
+        'type': 'request', 'id': 38, 'method': 'mimo_random.identification.load',
+        'params': {'path': '/home/operator/hertzforge/identification/two_axis'},
+    },
+    'response_mimo_random_identification_load': {
+        'type': 'response', 'id': 38,
+        'result': {'identification': {
+            'path': '/home/operator/hertzforge/identification/two_axis',
+            'setup_hash': '9f3c2a7e5b1d0c84', 'frames': 64, 'level_db': -20.3,
+            'drive_vrms': [0.0512, 0.0498]}},
+    },
+    # The error heatmap's two modes: the dB error and the coherence error.
+    'request_mimo_random_subscribe_coh_error': {
+        'type': 'request', 'id': 37, 'method': 'mimo_random.subscribe',
+        'params': {'rate_hz': 5, 'plots': [
+            {'id': 'heat', 'quantity': 'error_db', 'rows': 'all', 'points': 512},
+            {'id': 'coh_heat', 'quantity': 'coh_error', 'rows': 'all', 'points': 512},
+        ]},
+    },
+}
+
+
+def _mimo_data_build() -> tuple[dict, dict]:
+    """`mimo_random.data` for a subscription of a 2 by 2 block of the spectral matrix
+    (packed, three lines), one coherence pair (four lines) and the error heatmap (two
+    rows by four columns, f32): what the service's builders give for that run (the
+    Rust golden test builds it so)."""
+    arrays: dict = {}
+
+    def push(dtype, shape, values):
+        ident = f'a{len(arrays)}'
+        arrays[ident] = (dtype, shape, values)
+        return {'$array': ident}
+
+    freq = {'label': 'Frequency', 'unit': 'Hz', 'scale': 'log'}
+    sdm_lines = MIMO_LINES[:3]
+    sdm = {'view': 'sdm', 'title': 'Spectral Matrix', 'channels': ['Control X', 'Control Y'],
+           'packing': 'upper', 'unit': 'g²/Hz', 'x': freq,
+           'x_values': push('f64', [3], sdm_lines)}
+    sdm['measured'] = {'re': push('f64', [3, 3], MIMO_DATA_RE), 'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    sdm['reference'] = {'re': push('f64', [3, 3], MIMO_DATA_REF_RE),
+                        'im': push('f64', [3, 3], MIMO_DATA_IM)}
+    coh_lines = MIMO_LINES[:4]
+    series = []
+    for name, role, y in (('Measured', 'measured', MIMO_DATA_COH), ('Reference', 'reference', [0.25] * 4)):
+        series.append({'name': name, 'role': role, 'x': push('f64', [4], coh_lines),
+                       'y': push('f64', [4], y)})
+    coh = {'view': 'spectrum', 'title': 'Coherence: Control X, Control Y', 'x': freq,
+           'y': {'label': 'Coherence', 'unit': None, 'scale': 'linear'}, 'series': series,
+           'link': 'frequency'}
+    heat = {'view': 'heatmap', 'title': 'Control Error',
+            'rows': {'label': 'Control', 'ticks': ['Control X', 'Control Y']},
+            'x': freq, 'x_values': push('f64', [4], coh_lines),
+            'values': push('f32', [2, 4], MIMO_DATA_HEAT),
+            'value': {'label': 'Error', 'unit': 'dB'},
+            'row_bands': [{'alarm_db': [3, 3], 'abort_db': [6, 6]}] * 2}
+    labels = ['Control X', 'Control Y']
+    message = {
+        'type': 'event', 'topic': 'mimo_random.data', 'seq': 120,
+        'data': {
+            'run_id': 'm-0003', 'source': 'SIM', 'state': 'running', 'phase': 'full_level',
+            'loop': 30, 'elapsed_s': 70.5, 'level_db': 0,
+            'plots': [
+                {'id': 'grid', 'quantity': 'sdm', 'selector': {'block': [0, 1]}, 'labels': labels,
+                 'views': [sdm]},
+                {'id': 'coh01', 'quantity': 'coh', 'selector': {'pair': [0, 1]}, 'labels': labels,
+                 'views': [coh]},
+                {'id': 'heat', 'quantity': 'error_db', 'selector': {'rows': 'all'},
+                 'labels': labels, 'views': [heat]},
+            ],
+        },
+    }
+    return message, arrays
+
+
+#: The block's packed lines (G00, G01, G11 per line), every value exact in binary.
+MIMO_DATA_RE = [0.0390625, 0.01171875, 0.041015625] * 3
+MIMO_DATA_IM = [0.0, 0.015625, 0.0] * 3
+MIMO_DATA_REF_RE = [0.0390625, 0.01171875, 0.0390625] * 3
+MIMO_DATA_COH = [0.25, 0.2421875, 0.25, 0.234375]
+MIMO_DATA_HEAT = [0.5, -0.25, 0.125, 0.0, -0.5, 0.25, 0.375, -0.125]
+
+
+# --- classical shock (PROTOCOL.md, "Classical Shock") ---
+#
+# The configuration golden is the contract's example with every field given; its
+# `derived` is what the control service computes for it (the Rust golden test
+# recomputes it). The binary goldens carry short records whose values are exact in
+# binary, laid out as the service's view builders lay them out (each series' x then
+# y, every array numbered in traversal order).
+
+SHOCK_SHAKER = {
+    'name': 'Bench shaker', 'manufacturer': '', 'model': '', 'notes': '',
+    'force_random': None, 'force_sine': {'value': 2000, 'basis': 'Peak'},
+    'force_shock': {'value': 4000, 'basis': 'Peak'},
+    'max_velocity_ips': {'value': 70, 'basis': 'Peak'},
+    'max_displacement_in_pp': {'value': 1, 'basis': 'Peak'},
+    'max_accel_bare_g': {'value': 100, 'basis': 'Peak'},
+    'armature_mass_lb': 45, 'overturning_moment_limit_lbf_in': None, 'custom': [],
+}
+
+SHOCK_CONFIG = {
+    'title': 'Half-Sine 20 g 11 ms',
+    'pulse': {'shape': 'half_sine', 'amplitude_g': 20, 'duration_ms': 11, 'polarity': 'positive',
+              'rise_frac': None, 'fall_frac': None,
+              'compensation': {'shape': 'rectangular', 'pre_frac': 4, 'post_frac': 4,
+                               'symmetric': True}},
+    'standard': {'name': 'mil_std_810_516', 'tolerance_abort': 'full_level',
+                 'overshoot_abort': None},
+    'acquisition': {'fs_hz': 51200,
+                    'srs': {'f_lo_hz': 20, 'f_hi_hz': 2000, 'bands_per_octave': 3,
+                            'band_tol_db': 3},
+                    'pvss': False},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -9, -6, -3, 0], 'pulses': [1, 1, 1, 1, 3],
+                 'start_db': -12, 'advance': 'on_pass', 'max_pulses_per_level': 5},
+    'spacing': {'cooling_s': 1, 'settling_s': 0.5, 'compute_s': 0.25},
+    'identification': {'drive_vrms': 0.05, 'duration_s': 4, 'nfft': 2048, 'band_hz': [5, 5000],
+                       'min_mean_coherence': 0.8, 'review': True},
+    'control': {'law': {'id': 'fd_correct', 'params': {'beta': 0.5}},
+                'band_hz': [5, 5000], 'coherence_floor': 0.9, 'tikhonov_floor': 0.05,
+                'ref_floor_db': 50, 'min_band_energy': 0.9, 'law_budget': 0.25, 'law_misses': 3,
+                'max_pulses': 100, 'max_peak_rise_db': 10, 'max_bin_rise_db': 10,
+                'first_drive_ratio': 2, 'divergence_pulses': 3},
+    'limits': {'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8, 'peak_accel_g': None,
+               'monitors': [{'channel': 2, 'unit': 'A', 'peak_ceiling': 40,
+                             'kind': 'between_pulse'}]},
+    'feasibility': {'shaker': SHOCK_SHAKER,
+                    'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
+                                       'fixturing': 10, 'test_article': 12},
+                    'residual_velocity_ips': 0.1, 'residual_disp_in': 0.001},
+    'train': {'count': 5, 'spacing_s': 6},
+    'gunfire': {'rounds_per_min': 30, 'rounds': 3},
+    'capture': {'auto_start': False, 'run_name': 'classical_shock'},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
+                 {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
+                 {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
+                 {'key': 'operator', 'label': 'Operator', 'value': ''}],
+}
+
+SHOCK_DERIVED = {
+    'grid': {'fs_hz': 51200, 'record_len': 8192, 'actual': False},
+    'reference': {'peak_g': 20, 'velocity_change_ips': 53.9588,
+                  'displacement_pk_pk_in': 0.687732, 'main_start': 2534, 'main_len': 563},
+    'quiet_window': {'worst_frac': 0.0795, 'limit_frac': 0.15, 'inside': True},
+    'spacing_s': 1, 'call_budget_s': 0.25,
+    'feasibility': {'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."},
+}
+
+SHOCK_LAW_REF = {'id': 'fd_correct', 'name': 'frequency-domain correction', 'version': '0.1.0',
+                 'sha256': None, 'misses': 0}
+SHOCK_LEVELS = [-12, -9, -6, -3, 0]
+SHOCK_STATION = {'kind': 'sim', 'class': 'sim', 'devices': []}
+
+
+def _shock_state(**over) -> dict:
+    s = {
+        'run_id': 's-0001', 'state': 'configured', 'phase': 'idle',
+        'title': SHOCK_CONFIG['title'], 'source': 'SIM', 'station': SHOCK_STATION,
+        'grid': SHOCK_DERIVED['grid'], 'clock': None, 'mode': 'auto', 'levels_db': SHOCK_LEVELS,
+        'level_db': None, 'rung': None,
+        'pulses': {'fired': 0, 'passed': 0, 'at_level': 0, 'of_level': 0},
+        'next_pulse_s': None, 'elapsed_s': None, 'alarm': False, 'identification': None,
+        'prediction': None, 'last_pulse': None, 'law': SHOCK_LAW_REF, 'feasibility': None,
+        'end': None,
+    }
+    s.update(over)
+    return s
+
+
+#: The third pulse of the golden run: -6 dB, passed, the law's call used.
+SHOCK_ROW = {
+    'index': 2, 'origin': 'ladder', 'scheduled_db': -6, 'commanded_db': -6, 'limit_scale': 1,
+    'drive_vpk': 0.2, 'peak_g': 9.98, 'peak_ratio': 0.998, 'error_pct': 1.9,
+    'velocity_change_ips': 27.02, 'velocity_change_ratio': 1.0014,
+    'verdicts': {'envelope': True, 'velocity': True, 'substitution': True}, 'passed': True,
+    'srs': {'bands': 21, 'passed_bands': 21}, 'at_s': 9.75,
+    'law': {'used': True, 'miss': None, 'capped_bins': 0, 'peak_capped': False, 'call_ms': 1.4},
+}
+
+SHOCK_RUNNING = _shock_state(
+    run_id='s-0003', state='running', phase='waiting',
+    grid={'fs_hz': 51200, 'record_len': 8192, 'actual': True}, clock='shared',
+    level_db=-6, rung=2, pulses={'fired': 3, 'passed': 3, 'at_level': 1, 'of_level': 1},
+    next_pulse_s=0.6, elapsed_s=12.5,
+    identification={'drive_vrms': 0.05, 'drive_vpk': 0.21, 'coherence_mean': 0.998,
+                    'min_mean_coherence': 0.8, 'passed': True},
+    prediction={'drive_vpk': 0.4, 'drive_vpk_ceiling': 0.5, 'drive_vpk_abort': 0.8,
+                'response_peak_g': 20.1, 'velocity_pk_ips': 27.3, 'displacement_pk_pk_in': 0.69},
+    last_pulse=SHOCK_ROW,
+    feasibility={'verdict': 'pass', 'message': "The pulse is within the shaker's ratings."})
+
+#: The live frame mid-fire: a pulse playing at -6 dB.
+SHOCK_LIVE = {
+    'run_id': 's-0003', 'source': 'SIM', 'state': 'running', 'phase': 'firing', 'mode': 'auto',
+    'level_db': -6, 'rung': 2, 'pulses': {'fired': 3, 'passed': 3, 'at_level': 1, 'of_level': 1},
+    'next_pulse_s': None, 'fire': {'done': 2048, 'of': 8192},
+}
+
+#: Eight samples at 1 kHz, the main pulse from the third (t = 0), and the band over six.
+SHOCK_FS = 1000.0
+SHOCK_START = -2
+SHOCK_REF = [0.0, -0.5, 0.0, 7.5, 10.0, 7.5, 0.0, -0.5]
+SHOCK_BAND_START = 1
+SHOCK_BAND_HI = [1.5, 1.5, 9.0, 11.5, 9.0, 1.5]
+SHOCK_BAND_LO = [-1.5, -1.5, 6.0, 8.5, 6.0, -1.5]
+SHOCK_MEASURED = [0.0, -0.25, 0.25, 7.25, 9.75, 7.75, 0.25, -0.5]
+SHOCK_DRIVE = [0.0, -0.0125, 0.0, 0.1875, 0.25, 0.1875, 0.0, -0.0125]
+SHOCK_SRS_F = [100.0, 200.0, 400.0]
+SHOCK_SRS_REF = [12.5, 15.0, 11.0]
+SHOCK_SRS_HI = [17.5, 21.0, 15.5]
+SHOCK_SRS_LO = [9.0, 10.5, 7.75]
+SHOCK_SRS_MEAS = [12.25, 15.5, 10.5]
+SHOCK_ID_F = [100.0, 200.0, 300.0]
+SHOCK_ID_GAIN = [0.5, 1.0, 0.75]
+SHOCK_ID_PHASE = [-10.0, -20.0, -30.0]
+SHOCK_ID_COH = [0.99, 0.5, 0.98]
+SHOCK_ID_TRUSTED = [True, False, True]
+SHOCK_ID_FLOOR = 0.9
+
+
+def _times(start: int, n: int) -> list:
+    return [(start + i) / SHOCK_FS for i in range(n)]
+
+
+class _Arr:
+    """Arrays numbered as the service numbers them: `a0`, `a1`, ... in push order."""
+
+    def __init__(self):
+        self.arrays: dict = {}
+
+    def push(self, values, dtype='f64'):
+        ident = f'a{len(self.arrays)}'
+        self.arrays[ident] = (dtype, [len(values)], list(values))
+        return {'$array': ident}
+
+    def series(self, name, role, x, y):
+        return {'name': name, 'role': role, 'x': self.push(x), 'y': self.push(y)}
+
+
+def _axis(label, unit, scale):
+    return {'label': label, 'unit': unit, 'scale': scale}
+
+
+_TIME = _axis('Time', 's', 'linear')
+_FREQ = _axis('Frequency', 'Hz', 'log')
+
+
+def _spectrum(title, x, y, series, link):
+    return {'view': 'spectrum', 'title': title, 'x': x, 'y': y, 'series': series, 'link': link}
+
+
+def _shock_pulse_view(a: _Arr, measured=True) -> dict:
+    n = len(SHOCK_REF)
+    series = [a.series('Reference', 'reference', _times(SHOCK_START, n), SHOCK_REF)]
+    bt = _times(SHOCK_START + SHOCK_BAND_START, len(SHOCK_BAND_HI))
+    series.append(a.series('Tolerance high', 'tolerance', bt, SHOCK_BAND_HI))
+    series.append(a.series('Tolerance low', 'tolerance', bt, SHOCK_BAND_LO))
+    if measured:
+        series.append(a.series('Measured', 'measured', _times(SHOCK_START, n), SHOCK_MEASURED))
+    return _spectrum('Pulse', _TIME, _axis('Acceleration', 'g', 'linear'), series, 'time')
+
+
+def _shock_drive_view(a: _Arr) -> dict:
+    return _spectrum('Drive', _TIME, _axis('Drive', 'V', 'linear'),
+                     [a.series('Drive', 'drive', _times(SHOCK_START, len(SHOCK_DRIVE)),
+                               SHOCK_DRIVE)], 'time')
+
+
+def _shock_srs_view(a: _Arr) -> dict:
+    return _spectrum('SRS', _axis('Natural frequency', 'Hz', 'log'),
+                     _axis('Peak acceleration', 'g', 'log'),
+                     [a.series('Reference', 'reference', SHOCK_SRS_F, SHOCK_SRS_REF),
+                      a.series('Band high', 'tolerance', SHOCK_SRS_F, SHOCK_SRS_HI),
+                      a.series('Band low', 'tolerance', SHOCK_SRS_F, SHOCK_SRS_LO),
+                      a.series('Measured', 'measured', SHOCK_SRS_F, SHOCK_SRS_MEAS)],
+                     'frequency')
+
+
+def _shock_kinematic_view(a: _Arr, title: str, unit: str, values: list) -> dict:
+    return _spectrum(title, _TIME, _axis(title, unit, 'linear'),
+                     [a.series('Reference', 'reference', _times(SHOCK_START, len(values)),
+                               values)], 'time')
+
+
+def _shock_identification_views(a: _Arr) -> list:
+    gain = _spectrum('Identification Gain', _FREQ, _axis('Gain', 'g/V', 'log'),
+                     [a.series('Gain', 'measured', SHOCK_ID_F, SHOCK_ID_GAIN)], 'frequency')
+    phase = _spectrum('Identification Phase', _FREQ, _axis('Phase', 'deg', 'linear'),
+                      [a.series('Phase', 'measured', SHOCK_ID_F, SHOCK_ID_PHASE)], 'frequency')
+    tx = [f for f, t in zip(SHOCK_ID_F, SHOCK_ID_TRUSTED) if t]
+    ty = [c for c, t in zip(SHOCK_ID_COH, SHOCK_ID_TRUSTED) if t]
+    ends = [SHOCK_ID_F[0], SHOCK_ID_F[-1]]
+    coh = _spectrum('Coherence', _FREQ, _axis('Coherence', None, 'linear'),
+                    [a.series('Coherence', 'measured', SHOCK_ID_F, SHOCK_ID_COH),
+                     a.series('Trusted bins', 'other', tx, ty),
+                     a.series('Floor', 'tolerance', ends, [SHOCK_ID_FLOOR] * 2)], 'frequency')
+    return [gain, phase, coh]
+
+
+SHOCK_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
+    {'label': 'Corrected bins', 'value': 412.0, 'unit': 'bins', 'status': 'info'},
+    {'label': 'Bins at the rise limit', 'value': 3.0, 'unit': 'bins', 'status': 'info'},
+    {'label': 'Drive change', 'value': 0.42, 'unit': 'dB', 'status': 'info'},
+]}
+
+#: The run's reading as the service writes it for the golden state, between pulses.
+SHOCK_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Level', 'value': -6.0, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Pulses fired', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Pulses passed', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Last peak', 'value': 9.98, 'unit': 'g', 'status': 'pass'},
+    {'label': 'Last error', 'value': 1.9, 'unit': '%', 'status': 'info'},
+    {'label': 'Last drive peak', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Next pulse', 'value': 0.6, 'unit': 's', 'status': 'info'},
+]}
+
+SHOCK_PULSES_TABLE = {
+    'view': 'table', 'title': 'Pulses',
+    'columns': ['Pulse', 'Origin', 'Level (dB)', 'Peak (g)', 'Error (%)',
+                'Velocity change (in/s)', 'Envelope', 'Velocity', 'Substitution', 'Passed'],
+    'rows': [['3', 'ladder', '-6', '9.98', '1.9', '27.02', 'pass', 'pass', 'pass', 'pass']],
+}
+
+SHOCK_SUBSCRIBE_PLOTS = [
+    {'id': 'pulse', 'quantity': 'pulse', 'points': 1024},
+    {'id': 'id', 'quantity': 'identification'},
+    {'id': 'law', 'quantity': 'law'},
+    {'id': 'run', 'quantity': 'readings'},
+    {'id': 'table', 'quantity': 'pulses'},
+]
+SHOCK_QUANTITIES = ['pulse', 'velocity', 'displacement', 'srs', 'spectrum', 'identification',
+                    'law', 'readings', 'pulses']
+
+
+def _shock_pulse_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [_shock_pulse_view(a), _shock_drive_view(a), _shock_srs_view(a)]
+    message = {'type': 'event', 'topic': 'shock.pulse', 'seq': 141,
+               'data': {'run_id': 's-0003', 'pulse': SHOCK_ROW, 'views': views}}
+    return message, a.arrays
+
+
+def _shock_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 'pulse', 'quantity': 'pulse', 'views': [_shock_pulse_view(a), _shock_drive_view(a)]},
+        {'id': 'id', 'quantity': 'identification', 'views': _shock_identification_views(a)},
+        {'id': 'law', 'quantity': 'law', 'views': [SHOCK_LAW_READING]},
+        {'id': 'run', 'quantity': 'readings', 'views': [SHOCK_RUN_READING]},
+        {'id': 'table', 'quantity': 'pulses', 'views': [SHOCK_PULSES_TABLE]},
+    ]
+    data = {k: v for k, v in SHOCK_LIVE.items()}
+    data.update({'phase': 'waiting', 'next_pulse_s': 0.6, 'fire': None, 'plots': plots})
+    message = {'type': 'event', 'topic': 'shock.data', 'seq': 142, 'data': data}
+    return message, a.arrays
+
+
+#: The preview of the short record: its facts and its three views.
+SHOCK_PREVIEW_FACTS = {'peak_g': 10, 'velocity_change_ips': 9.6522,
+                       'displacement_pk_pk_in': 0.0123, 'main_start': 2, 'main_len': 3}
+SHOCK_PREVIEW_QUIET = {'worst_frac': 0.05, 'limit_frac': 0.15, 'inside': True}
+SHOCK_PREVIEW_VEL = [0.0, -0.096522, -0.193044, 1.25, 4.6, 7.9, 9.65, 9.6522]
+SHOCK_PREVIEW_DISP = [0.0, 0.0, -0.0001, -0.0002, 0.0026, 0.0089, 0.0123, 0.0122]
+
+
+def _shock_preview_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [_shock_pulse_view(a, measured=False),
+             _shock_kinematic_view(a, 'Velocity', 'in/s', SHOCK_PREVIEW_VEL),
+             _shock_kinematic_view(a, 'Displacement', 'in', SHOCK_PREVIEW_DISP)]
+    message = {'type': 'response', 'id': 53,
+               'result': {'derived': {'reference': SHOCK_PREVIEW_FACTS,
+                                      'quiet_window': SHOCK_PREVIEW_QUIET},
+                          'views': views}}
+    return message, a.arrays
+
+
+#: The built-in classical law's catalog entry, from its own declaration.
+LAW_FD_CORRECT = {
+    'id': 'fd_correct', 'world': 'shock_classical', 'builtin': True,
+    'name': 'frequency-domain correction', 'version': '0.1.0',
+    'author': 'Hertzforge contributors',
+    'summary': 'Starts from the inverse of the identified plant applied to the reference pulse, '
+               'then after each pulse corrects the drive spectrum by a fraction of the inverse '
+               'times the error, on the bins the controller trusts. Each bin\'s growth is '
+               'limited per pulse.',
+    'sha256': None,
+    'check': {'status': 'built_in', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': True, 'message': 'Built in: cleared for hardware.'},
+    'params': [
+        {'key': 'beta', 'label': 'Correction gain',
+         'help': "The fraction of each pulse's error corrected before the next pulse. 1 "
+                 'corrects the whole error at once; smaller values settle more gently when the '
+                 'plant estimate is uncertain.',
+         'kind': 'number', 'unit': '', 'min': 0.05, 'max': 1, 'step': 0.05, 'default': 0.5},
+        {'key': 'max_db_per_pulse', 'label': 'Largest rise per pulse',
+         'help': 'The most any one frequency of the drive may grow from one pulse to the next. '
+                 'A frequency may always fall.',
+         'kind': 'number', 'unit': 'dB', 'min': 1, 'max': 9, 'step': 0.5, 'default': 6},
+        {'key': 'initial_backoff_db', 'label': 'First pulse backoff',
+         'help': 'How far under the predicted drive the first pulse starts. The correction '
+                 'brings the level up over the next pulses.',
+         'kind': 'number', 'unit': 'dB', 'min': 0, 'max': 12, 'step': 1, 'default': 0}],
+    'diagnostics': [
+        {'key': 'corrected_bins', 'label': 'Corrected bins', 'unit': 'bins',
+         'help': 'Bins whose drive the law moved on this call.', 'layout': None},
+        {'key': 'clamped_bins', 'label': 'Bins at the rise limit', 'unit': 'bins',
+         'help': 'Bins whose rise the law held to its largest rise per pulse on this call.',
+         'layout': None},
+        {'key': 'drive_change_db', 'label': 'Drive change', 'unit': 'dB',
+         'help': "The drive's peak against the last drive's, in dB (0 at the seed).",
+         'layout': None}],
+    'shapes': None, 'needs': None,
+}
+
+
+def _shock_case(name, plant, requirement, *, pulses, first, full, full_passed, calls, ms,
+                vpk, end='completed', trip=None, capped=0, passed=True, detail=None):
+    if detail is None:
+        detail = (f'{end}; {pulses} pulses, the first pass at pulse {first}; '
+                  f'{full_passed} of {full} full-level pulses passed; {calls} calls, '
+                  f'slowest {ms} ms of 250 ms')
+    return {'name': name, 'plant': plant, 'requirement': requirement, 'passed': passed,
+            'detail': detail, 'end': end, 'trip': trip, 'pulses': pulses,
+            'first_pass_pulse': first, 'full_level_pulses': full,
+            'full_level_passed': full_passed, 'misses': 0, 'refused': 0, 'capped_bins': capped,
+            'calls': calls, 'worst_call_ms': ms, 'budget_ms': 250, 'max_drive_vpk': vpk}
+
+
+#: `laws.check` on the built-in law: a check is not recorded for a built-in law.
+SHOCK_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'shock-classical-check 1',
+                      'cases': [
+    _shock_case('flat', 'a wire', 'every_pulse', pulses=7, first=1, full=3, full_passed=3,
+                calls=8, ms=1.1, vpk=0.4),
+    _shock_case('one mode', 'one mode, 400 Hz, Q 10', 'pass_by', pulses=8, first=2, full=3,
+                full_passed=3, calls=9, ms=1.2, vpk=0.41),
+    _shock_case('station plant', 'two modes, 200 and 550 Hz, Q 2.5', 'pass_by', pulses=8,
+                first=2, full=3, full_passed=3, calls=9, ms=1.2, vpk=0.47),
+    _shock_case('transport delay', 'one mode, 400 Hz, Q 10, behind 2 ms', 'pass_by', pulses=9,
+                first=3, full=3, full_passed=3, calls=10, ms=1.3, vpk=0.42),
+    _shock_case('identification error', 'a wire, identified gain +3 dB', 'pass_by', pulses=8,
+                first=2, full=3, full_passed=3, calls=9, ms=1.1, vpk=0.4),
+    _shock_case('measurement noise', 'one mode, 400 Hz, Q 10, noise 30 dB under', 'pass_by',
+                pulses=9, first=3, full=3, full_passed=3, calls=10, ms=1.2, vpk=0.41),
+    _shock_case('anti-resonance', 'a 30 dB notch at 300 Hz', 'survive', pulses=7, first=1,
+                full=3, full_passed=3, calls=8, ms=1.2, vpk=0.44, capped=12),
+]}
+
+SHOCK_TEXT_GOLDENS = {
+    'request_shock_configure': {
+        'type': 'request', 'id': 51, 'method': 'shock.configure',
+        'params': {'config': SHOCK_CONFIG},
+    },
+    'response_shock_configure': {
+        'type': 'response', 'id': 51,
+        'result': {'state': _shock_state(), 'derived': SHOCK_DERIVED, 'warnings': []},
+    },
+    'event_shock_state': {
+        'type': 'event', 'topic': 'shock.state', 'seq': 140, 'data': SHOCK_RUNNING,
+    },
+    'request_shock_subscribe': {
+        'type': 'request', 'id': 52, 'method': 'shock.subscribe',
+        'params': {'rate_hz': 2, 'plots': SHOCK_SUBSCRIBE_PLOTS},
+    },
+    'response_shock_subscribe': {
+        'type': 'response', 'id': 52,
+        'result': {'default': False, 'rate_hz': 2, 'plots': SHOCK_SUBSCRIBE_PLOTS,
+                   'quantities': SHOCK_QUANTITIES},
+    },
+    'request_shock_fire': {
+        'type': 'request', 'id': 54, 'method': 'shock.fire', 'params': {},
+    },
+    'request_shock_level': {
+        'type': 'request', 'id': 55, 'method': 'shock.level', 'params': {'rung': 4},
+    },
+    'response_laws_list_shock_classical': {
+        'type': 'response', 'id': 56,
+        'result': {'laws': [LAW_FD_CORRECT], 'problems': []},
+    },
+    'response_laws_check_shock_classical': {
+        'type': 'response', 'id': 57,
+        'result': {'law': LAW_FD_CORRECT, 'report': SHOCK_CHECK_REPORT},
+    },
+    'response_error_shock_config_invalid': {
+        'type': 'response', 'id': 58,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 2 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'out_of_range', 'field': 'limits.drive_vpk_abort',
+                       'message': 'The drive abort is 0.4; it is above the drive ceiling of 0.5 '
+                                  'V and at most 10 V'},
+                      {'reason': 'spacing_below_floor', 'field': 'train.spacing_s',
+                       'message': '0.5 s between pulses is below the floor of 1 s (the largest '
+                                  'of the cooling, settling and compute times).'}],
+                      'warnings': [
+                      {'reason': 'quiet_window_exceeded', 'field': 'pulse.compensation',
+                       'message': "The compensation reaches 24.7% of the peak in the standard's "
+                                  'quiet window, whose tolerance is 15%: the reference itself '
+                                  'would fail the amplitude check there. Longer or rectangular '
+                                  'shoulders sit lower.'}]}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -483,6 +1384,9 @@ def main() -> None:
 
     # one connection's subscribed data: a control, a response and a time plot
     write('event_random_data', random_data(), random_data_arrays())
+
+    # one connection's MIMO data: a packed matrix block, a coherence pair, a heatmap
+    write('event_mimo_random_data', *_mimo_data_build())
 
     # a waterfall of two records; f32 values with u32 offsets. No NaN gap:
     # the expected JSON must parse in JavaScript, which has no NaN literal
@@ -543,7 +1447,14 @@ def main() -> None:
         {'type': 'response', 'id': 8,
          'error': {'code': 'not_found', 'message': "No operation named 'random.nope'; catalog.list names the ones that exist."}}) + '\n')
 
-    for name, message in TEXT_GOLDENS.items():
+    # classical shock: the live frame (no arrays), a pulse, a subscription's data, a preview
+    write('event_shock_live', {'type': 'event', 'topic': 'shock.live', 'seq': 139,
+                               'data': SHOCK_LIVE}, {})
+    write('event_shock_pulse', *_shock_pulse_build())
+    write('event_shock_data', *_shock_data_build())
+    write('response_shock_preview', *_shock_preview_build())
+
+    for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

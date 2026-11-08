@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 38,
+ "method": "mimo_random.identification.load",
+ "params": {
+  "path": "/home/operator/hertzforge/identification/two_axis"
+ }
+}
