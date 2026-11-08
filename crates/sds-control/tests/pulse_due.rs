@@ -9,6 +9,13 @@
 //! itself). Here the simulated engines are wrapped so that their device starts
 //! [`LATE`] after each ask and they say when; the countdown after a pulse and the
 //! moment the next ask is let through must both count from that start.
+//!
+//! And in `auto` the thread asks for the next pulse the engine's lead AHEAD of
+//! its due time: the controller brings the shot up (about 125 ms a shot on the
+//! NI bench) and waits out the rest itself, so only the start lands on the due
+//! time. Asked at the due time, every interval ran long by the bring-up. The
+//! engines wrapped for that model the controller: a [`BRING_UP`] after each
+//! ask, then the wait to the time between pulses after their last start.
 
 mod support;
 
@@ -25,6 +32,12 @@ const LONG: Duration = Duration::from_secs(30);
 const SPACING_S: f64 = 1.0;
 /// From the ask to the device's start.
 const LATE: Duration = Duration::from_millis(300);
+/// The time between pulses in the `auto` runs, seconds.
+const AUTO_SPACING_S: f64 = 0.6;
+/// The bring-up the `auto` engines model, after each ask.
+const BRING_UP: Duration = Duration::from_millis(120);
+/// How far ahead of the due time the `auto` engines ask to be called.
+const LEAD: Duration = Duration::from_millis(300);
 
 type Times = Arc<Mutex<Vec<Instant>>>;
 
@@ -55,18 +68,56 @@ async fn controller(c: &mut Client) {
         .await;
 }
 
-/// The asks and the device's starts, as the wrapped engine saw them.
-#[derive(Clone, Default)]
+/// The asks and the device's starts, as the wrapped engine saw them, and how
+/// the engine behaves.
+#[derive(Clone)]
 struct Seen {
     asked: Times,
     started: Times,
+    /// From an ask to the end of the shot's bring-up.
+    bring_up: Duration,
+    /// The time between pulses the engine waits out itself after the bring-up,
+    /// from its last start, as the controller does; `None` starts at once.
+    floor: Option<Duration>,
+    /// How far ahead of the due time the engine asks to be called.
+    lead: Duration,
 }
 
 impl Seen {
-    /// An ask, then the device's start [`LATE`] after it.
+    /// The device starts [`LATE`] after each ask.
+    fn late() -> Seen {
+        Seen {
+            asked: Times::default(),
+            started: Times::default(),
+            bring_up: LATE,
+            floor: None,
+            lead: Duration::ZERO,
+        }
+    }
+
+    /// A [`BRING_UP`] after each ask, then the wait to [`AUTO_SPACING_S`] after
+    /// the last start; asks to be called [`LEAD`] ahead.
+    fn ahead() -> Seen {
+        Seen {
+            floor: Some(Duration::from_secs_f64(AUTO_SPACING_S)),
+            bring_up: BRING_UP,
+            lead: LEAD,
+            ..Seen::late()
+        }
+    }
+
+    /// An ask, the bring-up, the wait if any, then the device's start.
     fn ask_then_start(&self) -> Instant {
         self.asked.lock().unwrap().push(Instant::now());
-        std::thread::sleep(LATE);
+        std::thread::sleep(self.bring_up);
+        let last = self.started.lock().unwrap().last().copied();
+        if let (Some(floor), Some(last)) = (self.floor, last) {
+            let due = last + floor;
+            let now = Instant::now();
+            if due > now {
+                std::thread::sleep(due - now);
+            }
+        }
         let t = Instant::now();
         self.started.lock().unwrap().push(t);
         t
@@ -150,6 +201,9 @@ mod srs_late {
         }
         fn last_pulse_start(&self) -> Option<Instant> {
             self.last
+        }
+        fn lead(&self) -> std::time::Duration {
+            self.seen.lead
         }
     }
 }
@@ -239,6 +293,9 @@ mod shock_late {
         fn last_pulse_start(&self) -> Option<Instant> {
             self.last
         }
+        fn lead(&self) -> std::time::Duration {
+            self.seen.lead
+        }
     }
 }
 
@@ -291,7 +348,7 @@ fn assert_counts_from_the_start(seen: &Seen, waiting: &Value, accepted: Instant,
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn srs_counts_the_next_pulse_from_the_devices_start() {
-    let seen = Seen::default();
+    let seen = Seen::late();
     let mut o = options(
         no_driver(),
         0.0,
@@ -330,7 +387,7 @@ async fn srs_counts_the_next_pulse_from_the_devices_start() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn classical_counts_the_next_pulse_from_the_devices_start() {
-    let seen = Seen::default();
+    let seen = Seen::late();
     let mut o = options(
         no_driver(),
         0.0,
@@ -373,4 +430,96 @@ async fn classical_counts_the_next_pulse_from_the_devices_start() {
     let accepted = first_accepted(&mut c, "shock.fire", json!({})).await;
     assert_counts_from_the_start(&seen, &waiting, accepted, "shock.train then shock.fire");
     c.ok("shock.stop", json!({})).await;
+}
+
+/// The starts of an `auto` run are the time between pulses apart, give or take
+/// the scheduler, not that plus the bring-up.
+fn assert_paced(seen: &Seen, what: &str) {
+    let starts = seen.started.lock().unwrap().clone();
+    assert!(starts.len() >= 4, "{what}: {} pulses", starts.len());
+    let gaps: Vec<f64> = starts
+        .windows(2)
+        .map(|w| (w[1] - w[0]).as_secs_f64())
+        .collect();
+    for g in &gaps {
+        assert!(
+            *g >= AUTO_SPACING_S - 0.002 && *g <= AUTO_SPACING_S + 0.040,
+            "{what}: pulse starts {gaps:?} s apart against {AUTO_SPACING_S} s; a bring-up of \
+             {BRING_UP:?} after the due time makes them {} s",
+            AUTO_SPACING_S + BRING_UP.as_secs_f64()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn srs_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time() {
+    let seen = Seen::ahead();
+    let mut o = options(
+        no_driver(),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    );
+    let s = seen.clone();
+    o.srs_engine = Some(Arc::new(move |ctx| {
+        Box::new(srs_late::Late::new(ctx, s.clone()))
+    }));
+    let addr = serve(Service::with_options(o)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let cfg = json!({
+        "title": "SRS ahead",
+        "target": {"kind": "flat", "accel_g": 50},
+        "bands": {"f_lo_hz": 100, "f_hi_hz": 2000},
+        "acquisition": {"fs_hz": 20480},
+        "schedule": {"mode": "auto", "levels_db": [-12, -6, 0], "pulses": [2, 2, 2]},
+        "spacing": {"cooling_s": AUTO_SPACING_S, "settling_s": 0, "compute_s": 0},
+        "identification": {"nfft": 1024, "review": false},
+        "limits": {"drive_vpk_ceiling": 5, "drive_vpk_abort": 8}
+    });
+    c.ok("srs.configure", json!({"config": cfg})).await;
+    c.ok("srs.start", json!({})).await;
+    let i = c
+        .wait_for("the run's end", LONG, |e| {
+            e.topic() == "srs.state" && e.data()["state"] == "finished"
+        })
+        .await;
+    assert_eq!(c.events[i].data()["end"]["outcome"], "completed");
+    assert_paced(&seen, "srs auto");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn classical_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time() {
+    let seen = Seen::ahead();
+    let mut o = options(
+        no_driver(),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    );
+    let s = seen.clone();
+    o.shock_engine = Some(Arc::new(move |ctx| {
+        Box::new(shock_late::Late::new(ctx, s.clone()))
+    }));
+    let addr = serve(Service::with_options(o)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let cfg = json!({
+        "title": "Shock ahead",
+        "pulse": {"shape": "half_sine", "amplitude_g": 20, "duration_ms": 11},
+        "acquisition": {"fs_hz": 20480},
+        "schedule": {"mode": "auto", "levels_db": [-12, -9, -6, -3, 0], "pulses": [1, 1, 1, 1, 1]},
+        "spacing": {"cooling_s": AUTO_SPACING_S, "settling_s": 0, "compute_s": 0},
+        "identification": {"duration_s": 0.5, "nfft": 2048, "review": false},
+        "limits": {"drive_vpk_ceiling": 0.5, "drive_vpk_abort": 0.8}
+    });
+    c.ok("shock.configure", json!({"config": cfg})).await;
+    c.ok("shock.start", json!({})).await;
+    let i = c
+        .wait_for("the run's end", LONG, |e| {
+            e.topic() == "shock.state" && e.data()["state"] == "finished"
+        })
+        .await;
+    assert_eq!(c.events[i].data()["end"]["outcome"], "completed");
+    assert_paced(&seen, "classical auto");
 }

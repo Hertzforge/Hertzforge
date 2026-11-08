@@ -224,3 +224,9 @@ sds-control  test:srs_sim_run  exclusion_and_shutting_down
 sds-control  test:srs_sim_run  a_law_that_does_not_correct_ends_not_converged
 sds-control  test:srs_sim_run  the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse
 sds-control  test:srs_sim_run  auto_pulses_are_spaced_at_the_time_between_pulses
+
+# The run threads' pulse timing against fake engines that sleep real time
+sds-control  test:pulse_due  srs_counts_the_next_pulse_from_the_devices_start
+sds-control  test:pulse_due  classical_counts_the_next_pulse_from_the_devices_start
+sds-control  test:pulse_due  srs_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time
+sds-control  test:pulse_due  classical_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time

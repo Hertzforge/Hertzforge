@@ -165,6 +165,13 @@ pub trait ShockEngine: Send {
     fn last_pulse_start(&self) -> Option<Instant> {
         None
     }
+    /// How far ahead of a pulse's due time the run thread asks for it in `auto`:
+    /// the controller brings the shot up (arms the station, commits the record)
+    /// and waits out the rest of the time between pulses itself, so only the
+    /// start lands on the due time. Zero asks at the due time.
+    fn lead(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 /// What an engine is built with: the run's signals and its progress cell, and the
