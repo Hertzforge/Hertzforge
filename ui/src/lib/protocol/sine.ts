@@ -122,7 +122,7 @@ export type SineTest = SineSweepTest | SineDwellTest | SineStepTest | SineRstdTe
 export type SineTestKind = SineTest['kind'];
 
 export interface SineAcquisition {
-	/** Null: the station's own rate. */
+	/** The rate asked of the station, 1000 to 204800 Hz; null asks for 16384 Hz. */
 	fs_hz?: number | null;
 	/** Default 10; converted to whole frames at the rate the station adopts. */
 	tick_ms?: number;
@@ -227,6 +227,7 @@ export interface SineConfig {
 	cola?: SineCola;
 	feasibility?: SineFeasibility | null;
 	capture?: SineCapture;
+	/** Random's fields; `label` is the key when absent. */
 	metadata?: { key: string; label?: string; value: string }[];
 }
 
