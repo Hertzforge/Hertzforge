@@ -19,6 +19,7 @@
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_hal::Backend;
 use hertzforge_random_laws::{CheckCase, CheckRecord};
+use hertzforge_sine::law::servo_blend::ServoBlendParams;
 use hertzforge_sine::law::LawGuards;
 use hertzforge_sine::service::config::{
     ControlChannel, ControlSet, LimitProfile, SineMode, SineTestConfig,
@@ -750,7 +751,17 @@ pub fn run_check_case(
     backend: Box<dyn Backend>,
 ) -> Result<SineCaseMeasure, CheckRunError> {
     let fs_hz = backend.caps().sample_rate_hz;
-    let cfg = sine_check_config(case, fs_hz);
+    let mut cfg = sine_check_config(case, fs_hz);
+    // The built-in runs under its own blend and compression, as the control
+    // service writes them into a run's configuration (the settle window reads
+    // the compression); a law file runs under the configuration's.
+    let described = factory.describe();
+    if described.sha256.is_none() && described.id == hertzforge_sine::law::SERVO_BLEND_ID {
+        if let Ok(p) = ServoBlendParams::from_settings(&described.params) {
+            cfg.blend_w = p.blend_w;
+            cfg.compression = p.compression;
+        }
+    }
     let levels = case.levels_db().to_vec();
     let full_db = *levels.last().unwrap_or(&0.0);
     let tick_s = cfg.control_tick_frames as f64 / fs_hz;
