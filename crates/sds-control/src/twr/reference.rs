@@ -538,7 +538,11 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), MethodError> {
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    // A temporary name of its own for every write, so two imports of one record
+    // at once never write the same temporary file.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp{}-{n}", std::process::id()));
     std::fs::write(&tmp, bytes)
         .and_then(|()| std::fs::rename(&tmp, path))
         .map_err(|e| {

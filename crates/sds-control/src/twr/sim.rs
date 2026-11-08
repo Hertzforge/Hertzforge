@@ -175,7 +175,8 @@ impl SimulatedEngine {
 
 impl TwrEngine for SimulatedEngine {
     fn arm(&mut self, plan: ArmPlan) -> Result<ArmOutcome, MethodError> {
-        let _ = plan.law?;
+        // No law runs here: the simulated plays follow their own rule.
+        let _ = plan.law;
         let cfg = plan.cfg.clone();
         let fs = cfg.shape.fs_for(plan.stored.fs_hz);
         let band = cfg.shape.band(cfg.sysid_band_hz);

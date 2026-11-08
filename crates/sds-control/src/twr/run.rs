@@ -340,10 +340,9 @@ impl Actor {
                 Err(e) => {
                     let _ = reply.send(Err(e));
                 }
-                Ok(()) => {
-                    let _ = reply.send(Ok(()));
-                    self.play_once();
-                }
+                // The answer goes once the play shows as in flight, so a second
+                // verb sent on it is refused rather than queued behind it.
+                Ok(()) => self.play_once(Some(reply)),
             },
             Cmd::Play { reply } => {
                 let r = self.play_cmd();
@@ -640,7 +639,7 @@ impl Actor {
             Waited::Interrupted => {}
             Waited::Due => {
                 if self.view.state == State::Running {
-                    self.play_once();
+                    self.play_once(None);
                 }
             }
         }
@@ -694,7 +693,7 @@ impl Actor {
         Ok(())
     }
 
-    fn play_once(&mut self) {
+    fn play_once(&mut self, reply: Option<Reply<()>>) {
         let pos = self.engine.position();
         let index = self.data.row_count();
         let starting = Starting {
@@ -708,6 +707,9 @@ impl Actor {
             if pos.playing { "playing" } else { "iterating" },
         );
         self.publish();
+        if let Some(reply) = reply {
+            let _ = reply.send(Ok(()));
+        }
         let r = self.call("a play", |e| e.play());
         self.data.end_play(self.engine.frames_clocked());
         let Some(r) = r else {
