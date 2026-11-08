@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use hertzforge_shock_common::law_guard::{LawFault, LawValue};
+
 use crate::control::PlayKind;
 use crate::metrics::ErrorMetrics;
 
@@ -53,4 +55,30 @@ pub struct PlayRow {
     pub frames: u64,
     /// `start_frame` in seconds at the rate the station runs at.
     pub at_s: f64,
+    /// The control law's call behind the drive this play played: the seed
+    /// before the first, then the call after the play before it. `None`
+    /// without a control law, and for a play with no call behind it (a gated
+    /// level carried forward, or adaptation frozen).
+    pub law: Option<PlayLawCall>,
+}
+
+/// One control-law call, as the row of the play its drive played on shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayLawCall {
+    /// The call's drive is the one this play played. False after a miss: the
+    /// drive in force replayed.
+    pub used: bool,
+    /// Why the call was not used.
+    pub miss: Option<LawFault>,
+    /// How long the call took, milliseconds.
+    pub call_ms: f64,
+    /// The rise of the drive's peak over the drive before it, dB (`None` at the
+    /// seed, and when the call gave no drive to compare).
+    pub peak_rise_db: Option<f64>,
+    /// The largest rise of any drive bin over the drive before it, dB.
+    pub bin_rise_db: Option<f64>,
+    /// The drive's predicted response peak over the level target's.
+    pub predicted_peak_ratio: Option<f64>,
+    /// The values the law reported.
+    pub values: Vec<LawValue>,
 }

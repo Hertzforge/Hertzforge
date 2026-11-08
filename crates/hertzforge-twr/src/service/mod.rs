@@ -44,7 +44,7 @@ use crate::trip::{TripKind, TwrTrip};
 use crate::TwrError;
 
 pub use config::TwrConfig;
-pub use plays::PlayRow;
+pub use plays::{PlayLawCall, PlayRow};
 
 /// The service state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -751,6 +751,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             start_frame: played.start_frame,
             frames: played.frames,
             at_s: self.station_seconds(played.start_frame),
+            law: None,
         };
         self.plays.push(row);
         index
@@ -1666,6 +1667,11 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// proceed.
     pub fn law_descriptor(&self) -> Option<&hertzforge_shock_common::law_guard::LawDescriptor> {
         self.closed_run().map(|run| &run.descriptor)
+    }
+
+    /// The report's law line; `None` before a law is built.
+    pub(crate) fn law_report_line(&self) -> Option<report::LawReportLine> {
+        None
     }
 
     /// The peak of the drive in force at the present level, volts: what the
