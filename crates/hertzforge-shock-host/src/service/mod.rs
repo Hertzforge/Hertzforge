@@ -299,10 +299,11 @@ pub struct ClassicalShockService<F: PulseFirer> {
     /// Each fired pulse's drive as played and how it was judged, for
     /// [`ClassicalShockService::pulse_view`].
     played: Vec<PlayedPulse>,
-    /// Wall time of the last pulse START, on the pacer's epoch. The deadline for
-    /// the next pulse is this plus the realized spacing - measured, not
-    /// accumulated. `None` from arm until the first pulse (the first pulse after
-    /// arm never waits, on either the ladder or a train).
+    /// Wall time of the last pulse START, on the pacer's epoch, stamped once the
+    /// device's clock is running ([`FireControl::started`]). The deadline for the
+    /// next pulse is this plus the realized spacing - measured, not accumulated.
+    /// `None` from arm until the first pulse (the first pulse after arm never
+    /// waits, on either the ladder or a train).
     last_pulse_wall_s: Option<f64>,
     /// The HOST's cancel flag: TRUE means STOP AT THE NEXT BOUNDARY.
     ///
@@ -972,8 +973,6 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 return Ok(false);
             }
         }
-        self.last_pulse_wall_s = Some(self.pacer_mut().pulse_start_s());
-        self.last_spacing_s = Some(spacing);
         self.fire_one(level, spacing, true, PulseOrigin::Ladder)
     }
 
@@ -1147,7 +1146,9 @@ impl<F: PulseFirer> ClassicalShockService<F> {
     /// enforces nothing. The pulse `k+1` deadline is `wall_time_of_pulse_k +
     /// realized_spacing_s`, measured, not accumulated - so a slow fire shows up
     /// as an overrun in [`TrainRecord::wall_times_s`] instead of being hidden by
-    /// a shortened next gap.
+    /// a shortened next gap. The first pulse's deadline is the start of the pulse
+    /// before the train (a ladder pulse or another train's last) plus the floor:
+    /// a train asked for straight after a pulse waits that out too.
     fn fire_train_spec(
         &mut self,
         spec: TrainSpec,
@@ -1181,31 +1182,34 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         let mut wall_times_s = Vec::with_capacity(plan.count as usize);
         let mut cancelled = false;
         for i in 0..plan.count {
-            if i > 0 {
-                // The inter-pulse gap, in real time, off the last pulse's OWN
-                // wall timestamp. `wait_until` returns false when the host
-                // lowered `should_continue` - the burst ends HERE, between
-                // pulses, with nothing queued at the device.
-                let deadline = wall_times_s[wall_times_s.len() - 1] + plan.realized_spacing_s;
-                if !self.wait_until(deadline, should_continue) {
-                    cancelled = true;
-                    break;
-                }
-            } else if !self.keep_going(should_continue) {
-                // Lowered before the first pulse: fire nothing.
+            // The inter-pulse gap, in real time, off the last pulse's OWN start
+            // stamp: the realized spacing inside the train, and the floor into
+            // it. `wait_until` returns false when the host lowered
+            // `should_continue` - the burst ends HERE, between pulses, with
+            // nothing queued at the device. Lowered before the first pulse, it
+            // fires nothing.
+            let gap = if i > 0 {
+                plan.realized_spacing_s
+            } else {
+                plan.floor_s
+            };
+            let go = match self.last_pulse_wall_s {
+                Some(prev) => self.wait_until(prev + gap, should_continue),
+                // The first pulse after arm: nothing to be spaced from.
+                None => self.keep_going(should_continue),
+            };
+            if !go {
                 cancelled = true;
                 break;
             }
-            let fired_at_wall_s = self.pacer_mut().pulse_start_s();
-            // Shared with the AUTO ladder: a ladder pulse after a burst
-            // waits out the floor from the burst's LAST pulse, not from arm.
-            self.last_pulse_wall_s = Some(fired_at_wall_s);
-            self.last_spacing_s = Some(plan.realized_spacing_s);
             let n = self.pulses_fired;
             let running = self.fire_one(level, plan.realized_spacing_s, false, origin)?;
             if self.pulses_fired > n {
                 pulse_numbers.push(n);
-                wall_times_s.push(fired_at_wall_s);
+                // The pulse's own start, stamped once the device's clock ran.
+                // Shared with the AUTO ladder: a ladder pulse after a burst
+                // waits out the floor from the burst's LAST pulse, not from arm.
+                wall_times_s.push(self.last_pulse_wall_s.unwrap_or(0.0));
             }
             if !running {
                 break;
@@ -1266,6 +1270,51 @@ impl<F: PulseFirer> ClassicalShockService<F> {
                 self.pacer_mut().sleep_until(now + CANCEL_POLL_S);
             }
         }
+    }
+
+    /// Fire one pulse record and stamp its start: [`Self::last_pulse_wall_s`]
+    /// (with `spacing_s` as [`Self::last_spacing_s`]) is read off the pacer once
+    /// the device's clock is running ([`FireControl::started`]), so the next
+    /// pulse's deadline counts from the device's own start. A firer that never
+    /// says it started (a failure before the start, or a firer with no hook) is
+    /// stamped when it returns: late, never early.
+    ///
+    /// The host's live channels go with the fire: the cancel flag and the block
+    /// observer. The observer is moved out and back so the borrow checker sees
+    /// one mutable path into `self` at a time; a fire that panicked would drop
+    /// the observer, and a dropped observer is a tap that stops beating rather
+    /// than one that reports stale progress.
+    pub(super) fn fire_paced(
+        &mut self,
+        drive: &[f64],
+        commanded_db: f64,
+        spacing_s: f64,
+    ) -> Result<Option<Vec<f64>>, ServiceError> {
+        let cancel = Arc::clone(&self.cancel);
+        let mut observer = self.block_observer.take();
+        let mut started_at = None;
+        let fired = {
+            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
+            let mut started = || {
+                if started_at.is_none() {
+                    started_at = Some(pacer.pulse_start_s());
+                }
+            };
+            let mut ctl = FireControl {
+                cancel: Some(cancel.as_ref()),
+                observer: observer.as_deref_mut(),
+                started: Some(&mut started),
+            };
+            self.firer.fire(drive, commanded_db, &mut ctl)
+        };
+        self.block_observer = observer;
+        let at = match started_at {
+            Some(t) => t,
+            None => self.pacer_mut().pulse_start_s(),
+        };
+        self.last_pulse_wall_s = Some(at);
+        self.last_spacing_s = Some(spacing_s);
+        fired
     }
 
     /// The per-pulse pipeline (see the module docs). `spacing_s` is charged to
@@ -1349,22 +1398,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             .map(|&v| v * total_scale)
             .collect();
         let fired_at_s = self.run_clock_s;
+        let fired = self.fire_paced(&drive, commanded_db, spacing_s);
         let fired_at_wall_s = self.last_pulse_wall_s.unwrap_or(0.0);
-        // The host's live channels for THIS fire (the cancel flag + the block observer).
-        // The observer is moved out and back so the borrow checker sees one
-        // mutable path into `self` at a time; a fire that panicked would drop
-        // the observer, and a dropped observer is a tap that stops beating
-        // rather than one that reports stale progress.
-        let cancel = Arc::clone(&self.cancel);
-        let mut observer = self.block_observer.take();
-        let fired = {
-            let mut ctl = FireControl {
-                cancel: Some(cancel.as_ref()),
-                observer: observer.as_deref_mut(),
-            };
-            self.firer.fire(&drive, commanded_db, &mut ctl)
-        };
-        self.block_observer = observer;
 
         // DRIVER DIAGNOSTICS, drained after EVERY fire including a failed one:
         // the NI backend has always collected DAQmx underruns and

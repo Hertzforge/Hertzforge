@@ -192,6 +192,7 @@ impl<F: PulseFirer> ClassicalShockService<F> {
             let mut ctl = FireControl {
                 cancel: Some(cancel.as_ref()),
                 observer: observer.as_deref_mut(),
+                started: None,
             };
             self.firer.fire(&drive, 0.0, &mut ctl)
         };
@@ -879,17 +880,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
         // 3. Fire the grid record in volts.
         let drive: Vec<f64> = drive_full.iter().map(|&v| v * total_scale).collect();
         let fired_at_s = self.run_clock_s;
+        let fired = self.fire_paced(&drive, commanded_db, spacing_s);
         let fired_at_wall_s = self.last_pulse_wall_s.unwrap_or(0.0);
-        let cancel = Arc::clone(&self.cancel);
-        let mut observer = self.block_observer.take();
-        let fired = {
-            let mut ctl = FireControl {
-                cancel: Some(cancel.as_ref()),
-                observer: observer.as_deref_mut(),
-            };
-            self.firer.fire(&drive, commanded_db, &mut ctl)
-        };
-        self.block_observer = observer;
         let pulse_no = self.pulses_fired;
         self.drain_warnings(Some(pulse_no));
         let record = match fired {

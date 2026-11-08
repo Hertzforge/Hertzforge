@@ -119,14 +119,29 @@ pub struct FireControl<'a> {
     /// elided object-lifetime bound of `'a` would force `'a = 'static` at the
     /// call site and the borrow could never be released.
     pub observer: Option<&'a mut (dyn FnMut(usize, usize) + Send + 'static)>,
+    /// Called once, as soon as the device's start call has returned and before
+    /// the play. The service stamps the pulse's start here.
+    ///
+    /// A start call returns once the device's clock is running, so the record's
+    /// first sample is out at or before this call, and the service issues the
+    /// next start call no sooner than the time between pulses after it: the
+    /// floor holds between the device's own starts. A stamp taken before the
+    /// shot's arm and pre-start commit, whose length varies from shot to shot on
+    /// a real device, let two physical starts come closer than the floor (4.984 s
+    /// against a 5 s floor, timed on the bench by an instrument on its own
+    /// clock). A firer with no device beneath it calls this first; one that never
+    /// calls it is stamped when its fire returns, which is late but never early.
+    pub started: Option<&'a mut dyn FnMut()>,
 }
 
 impl<'a> FireControl<'a> {
-    /// No cancel channel and no observer - the plain synchronous fire.
+    /// No cancel channel, no observer and no start hook - the plain synchronous
+    /// fire.
     pub fn none() -> Self {
         FireControl {
             cancel: None,
             observer: None,
+            started: None,
         }
     }
 
@@ -135,6 +150,7 @@ impl<'a> FireControl<'a> {
         FireControl {
             cancel,
             observer: None,
+            started: None,
         }
     }
 }
@@ -602,7 +618,9 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
     ///    shoulders is a few thousand frames) and a record LONGER than it needs no
     ///    special handling either: the device takes what it has room for and the
     ///    play loop re-offers the rest, in order.
-    /// 3. `start()` - output and input release together.
+    /// 3. `start()` - output and input release together. Once it returns the
+    ///    clock is running, and `ctl.started` is called: the service stamps the
+    ///    pulse's start there.
     /// 4. `play_block_wise` over the WHOLE record, told how many frames are
     ///    already at the device (`committed_frames`). It skips the
     ///    committed prefix on the write side and still reads back exactly the
@@ -654,6 +672,10 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
         self.backend.arm().map_err(hal_err)?;
         let committed = self.commit_whole_record()?;
         self.backend.start().map_err(hal_err)?;
+        // The clock is running, so the pulse has started (`FireControl::started`).
+        if let Some(started) = ctl.started.as_mut() {
+            started();
+        }
 
         // 4: play the record, reading back exactly `record_frames`.
         let mut measured = Vec::with_capacity(record_frames);
