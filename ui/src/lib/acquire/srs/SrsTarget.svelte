@@ -26,7 +26,9 @@
 	const E = $derived(srs.fieldErrors);
 	const errs = (k: string) => E[k] ?? [];
 	const synthesis = $derived(srs.synthesis);
-	const views = $derived((synthesis?.views ?? []).filter((v) => v.view === 'spectrum' && /^(target|synthesis)$/i.test(v.title)));
+	// The dry run of the whole setup draws a per-band envelope; the preview draws the pair for every band.
+	const dryViews = $derived(srs.check && srs.checkedKey === srs.key ? srs.check.views : []);
+	const views = $derived(((dryViews.length ? dryViews : synthesis?.views) ?? []).filter((v) => v.view === 'spectrum' && /^(target|synthesis)$/i.test(v.title)));
 	const bands = $derived(srs.bandsHz);
 	let path = $state('');
 	let reading = $state(false);
@@ -114,9 +116,9 @@
 		</section>
 	</div>
 
-	<section class="aq-panel preview" aria-labelledby="rt-prev" data-testid="srs-target-preview" data-state={srs.previewBusy ? 'busy' : synthesis ? 'ok' : 'none'}>
+	<section class="aq-panel preview" aria-labelledby="rt-prev" data-testid="srs-target-preview" data-state={srs.previewBusy ? 'busy' : synthesis || views.length ? 'ok' : 'none'}>
 		<div class="aq-head"><h2 id="rt-prev">The Target on Its Grid</h2><span class="aq-sub">A computation by the control service, never a measurement.</span></div>
-		{#if synthesis}
+		{#if views.length}
 			<div class="plots">
 				{#each views as v, i (i)}
 					<div class="plot" data-testid="srs-target-view-{i}"><ViewRenderer view={v} minHeight={220} /></div>

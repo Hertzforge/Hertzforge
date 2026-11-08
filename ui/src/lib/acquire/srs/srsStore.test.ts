@@ -158,11 +158,13 @@ describe('the SRS shock store', () => {
 	});
 
 	it('plans the limit notch after the review, and holds components back for the limit channels', async () => {
-		const { srs } = await screen();
+		const { acq, srs } = await screen();
+		acq.addRow('monitor');
+		const fixture = acq.rows.at(-1)!.index;
 		ready(srs);
 		srs.setup.identification.review = false;
 		srs.setup.limit_channels.enabled = true;
-		srs.setup.limit_channels.channels = [{ channel: 1, bound: { kind: 'flat', accel_g: 50, bounds_g: [] }, frf: { supplied: true, points: [{ freq_hz: 100, mag: 1 }, { freq_hz: 500, mag: 4 }, { freq_hz: 2000, mag: 1 }] } }];
+		srs.setup.limit_channels.channels = [{ channel: fixture, bound: { kind: 'flat', accel_g: 50, bounds_g: [] }, frf: { supplied: true, points: [{ freq_hz: 100, mag: 1 }, { freq_hz: 500, mag: 4 }, { freq_hz: 2000, mag: 1 }] } }];
 		expect(await srs.apply()).toBe(true);
 		await srs.start();
 		await until(() => srs.pulses.length >= 1);

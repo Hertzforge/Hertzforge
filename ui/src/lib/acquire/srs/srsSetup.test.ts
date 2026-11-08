@@ -181,7 +181,12 @@ describe('what the editor names before anything is sent', () => {
 		d.limit_channels.channels[1].bound.bounds_g = [];
 		d.limits.monitors[0].channel = 2;
 		const e = localErrors(d, ROWS);
-		expect(e['limit_channels.channels.2.channel']).toEqual(['Channel 9 is not an enabled input of the channel table.']);
+		expect(e['limit_channels.channels.2.channel']).toEqual(['Channel 9 is not an enabled input of the channel table; enable it, or supply its gain.']);
+		// with a supplied gain, any row but the control row
+		d.limit_channels.channels[2].frf = { supplied: true, points: [{ freq_hz: 100, mag: 1 }, { freq_hz: 1000, mag: 2 }] };
+		expect(localErrors(d, ROWS)['limit_channels.channels.2.channel']).toBeUndefined();
+		d.limit_channels.channels[2].channel = 1;
+		expect(localErrors(d, ROWS)['limit_channels.channels.2.channel']).toEqual(['Channel 1 is the control channel; a limit channel is another input.']);
 		expect(e['limit_channels.channels.2.bound']).toEqual(['Enter a number.']);
 		expect(e['limit_channels.channels.1.bound']?.[0]).toMatch(/band grid/);
 		expect(e['limits.monitors.0.channel']).toEqual(['Channel 2 is not an enabled input of the channel table.']);
@@ -191,7 +196,17 @@ describe('what the editor names before anything is sent', () => {
 
 	it('asks the preview only for a target and grid that hold numbers', () => {
 		const d = defaultSrsSetup();
-		expect(previewParams(d)).toEqual({ target: { kind: 'breakpoints', points: [[100, 40], [1000, 100], [2500, 100]] }, bands: d.bands, synthesis: toSrsConfig(d, LAW).synthesis, fs_hz: 51200 });
+		expect(previewParams(d)).toEqual({
+			target: { kind: 'breakpoints', points: [[100, 40], [1000, 100], [2500, 100]] },
+			bands: d.bands,
+			synthesis: toSrsConfig(d, LAW).synthesis,
+			envelope: { alarm_db: [3, 3], abort_db: [9, 6], per_band: null },
+			fs_hz: 51200
+		});
+		// a per-band envelope is drawn from the dry run: the preview carries the pair for every band
+		d.envelope.per_band = true;
+		d.envelope.bands = [{ alarm_db: [1, 1], abort_db: [2, 2] }];
+		expect(previewParams(d)?.envelope?.per_band).toBeNull();
 		d.bands.q = NaN;
 		expect(previewParams(d)).toBeNull();
 		d.bands.q = 10;

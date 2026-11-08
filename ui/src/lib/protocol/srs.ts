@@ -273,6 +273,8 @@ export interface SrsPreviewParams {
 	target: SrsTarget;
 	bands: SrsBands;
 	synthesis?: SrsSynthesis;
+	/** The alarm and abort bands the Target view draws. */
+	envelope?: SrsEnvelope;
 	fs_hz?: number;
 }
 

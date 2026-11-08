@@ -391,7 +391,11 @@ export function fromSrsConfig(c: SrsConfig): SrsDraft {
 	};
 }
 
-/** What `srs.preview` is asked for the draft's target, or null while it holds no numbers. */
+/**
+ * What `srs.preview` is asked for the draft's target, or null while it holds no numbers. The
+ * envelope it draws is the pair for every band: a per-band envelope is fitted to the grid the
+ * preview itself gives, so it is drawn from the dry run of the whole setup instead.
+ */
 export function previewParams(d: SrsDraft): SrsPreviewParams | null {
 	const nums = [d.bands.f_lo_hz, d.bands.f_hi_hz, d.bands.bands_per_octave, d.bands.q, d.acquisition.fs_hz, d.synthesis.max_iters, d.synthesis.tol_db, d.synthesis.max_gain_db_per_iter];
 	if (d.target.kind === 'flat') nums.push(d.target.accel_g);
@@ -404,8 +408,10 @@ export function previewParams(d: SrsDraft): SrsPreviewParams | null {
 		if (!rows.length) return null;
 		for (const r of rows) for (const v of Object.values(r)) if (typeof v === 'number') nums.push(v);
 	}
+	const env = d.envelope;
+	nums.push(env.alarm_db[0], env.alarm_db[1], env.abort_db[0], env.abort_db[1]);
 	if (!nums.every(Number.isFinite)) return null;
-	return { target: targetOf(d), bands: bandsOf(d), synthesis: synthesisOf(d), fs_hz: d.acquisition.fs_hz };
+	return { target: targetOf(d), bands: bandsOf(d), synthesis: synthesisOf(d), envelope: { alarm_db: pair(env.alarm_db), abort_db: pair(env.abort_db), per_band: null }, fs_hz: d.acquisition.fs_hz };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -576,6 +582,8 @@ export function localErrors(d: SrsDraft, rows: ChannelRow[] = []): FieldErrors {
 	need(out, 'limits.abort_factor', lim.abort_factor);
 	for (const k of ['accel_g', 'velocity_ips', 'disp_pp_in'] as const) needOptional(out, `limits.kinematic.${k}`, lim.kinematic[k]);
 	const enabledInput = (index: number) => !rows.length || rows.some((r) => r.index === index && r.enabled && r.role !== 'drive');
+	const control = runChannels(rows).control?.index ?? null;
+	const anyRow = (index: number) => !rows.length || rows.some((r) => r.index === index);
 	lim.monitors.forEach((m, i) => {
 		need(out, `limits.monitors.${i}.peak_ceiling`, m.peak_ceiling);
 		if (!enabledInput(m.channel)) add(out, `limits.monitors.${i}.channel`, `Channel ${m.channel} is not an enabled input of the channel table.`);
@@ -585,7 +593,10 @@ export function localErrors(d: SrsDraft, rows: ChannelRow[] = []): FieldErrors {
 		need(out, 'limit_channels.headroom_db', lc.headroom_db);
 		if (!lc.channels.length) add(out, 'limit_channels.channels', 'Add a limit channel, or turn limit channels off.');
 		lc.channels.forEach((ch, i) => {
-			if (!enabledInput(ch.channel)) add(out, `limit_channels.channels.${i}.channel`, `Channel ${ch.channel} is not an enabled input of the channel table.`);
+			// any row but the control row; one whose gain is measured, an enabled input
+			if (ch.channel === control) add(out, `limit_channels.channels.${i}.channel`, `Channel ${ch.channel} is the control channel; a limit channel is another input.`);
+			else if (ch.frf.supplied ? !anyRow(ch.channel) : !enabledInput(ch.channel))
+				add(out, `limit_channels.channels.${i}.channel`, ch.frf.supplied ? `Channel ${ch.channel} is not a row of the channel table.` : `Channel ${ch.channel} is not an enabled input of the channel table; enable it, or supply its gain.`);
 			if (ch.bound.kind === 'flat') need(out, `limit_channels.channels.${i}.bound`, ch.bound.accel_g);
 			else if (!ch.bound.bounds_g.length) add(out, `limit_channels.channels.${i}.bound`, 'The per-band bound is filled once the control service has given the band grid.');
 			else if (ch.bound.bounds_g.some((b) => b !== null && !Number.isFinite(b))) add(out, `limit_channels.channels.${i}.bound`, 'Enter a number for each band, or no bound.');

@@ -152,10 +152,10 @@ function srsView(title: string, bands: number[], target: number[], alarm: [numbe
 	const at = (db: number, sign: number) => f64(t.map((v) => v * 10 ** ((sign * db) / 20)));
 	const series: Series[] = [
 		{ name: 'Target', role: 'reference', x, y: f64(t) },
-		{ name: 'Alarm over', role: 'tolerance', x, y: at(alarm[1], 1) },
-		{ name: 'Alarm under', role: 'tolerance', x, y: at(alarm[0], -1) },
-		{ name: 'Abort over', role: 'abort', x, y: at(abort[1], 1) },
-		{ name: 'Abort under', role: 'abort', x, y: at(abort[0], -1) }
+		{ name: 'Alarm high', role: 'tolerance', x, y: at(alarm[1], 1) },
+		{ name: 'Alarm low', role: 'tolerance', x, y: at(alarm[0], -1) },
+		{ name: 'Abort high', role: 'abort', x, y: at(abort[1], 1) },
+		{ name: 'Abort low', role: 'abort', x, y: at(abort[0], -1) }
 	];
 	if (measured) series.push({ name: measuredName, role: 'measured', x, y: f64(measured) });
 	return { view: 'spectrum', title, x: freqAxis, y: srsAxis, series, link: 'srs' };
@@ -198,7 +198,7 @@ function integrate(t_ms: Float64Array, y: Float64Array, k: number): Float64Array
 const peak = (y: Float64Array) => y.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 const span = (y: Float64Array) => y.reduce((m, v) => Math.max(m, v), -Infinity) - y.reduce((m, v) => Math.min(m, v), Infinity);
 
-function timeViews(w: Wave, title = 'Pulse', name = 'Synthesis'): SpectrumView[] {
+function timeViews(w: Wave, title = 'Pulse', name = 'Synthesized'): SpectrumView[] {
 	const v = integrate(w.t_ms, w.a, G_IPS2);
 	const d = integrate(w.t_ms, v, 1);
 	const role = name === 'Measured' ? ('measured' as const) : ('reference' as const);
@@ -268,7 +268,21 @@ function synthesize(target: SrsTarget, bands: SrsBands, synthesis: SrsSynthesis 
 			synthesis: { engine, components: comps, iters: converged ? 6 : (synthesis?.max_iters ?? 50), converged, worst_err_db: round(Math.min(tol, 1.2) * 0.8, 2), duration_s: round(w.duration_s, 4) },
 			reference: { peak_g: round(peak(w.a), 3), velocity_pk_ips: round(peak(v), 3), displacement_pk_pk_in: round(span(d), 4), residual_velocity_ips: 0, residual_disp_in: 0 }
 		},
-		views: [srsView('Target', centres, tg, alarm, abort, 1), { ...srsView('Synthesis', centres, tg, alarm, abort, 1, fit, 'Synthesis'), title: 'Synthesis' }, ...timeViews(w)]
+		views: [
+			srsView('Target', centres, tg, alarm, abort, 1),
+			{
+				view: 'spectrum',
+				title: 'Synthesis',
+				x: freqAxis,
+				y: srsAxis,
+				series: [
+					{ name: 'Target', role: 'reference', x: f64(centres), y: f64(tg) },
+					{ name: 'Synthesis', role: 'other', x: f64(centres), y: f64(fit) }
+				],
+				link: 'srs'
+			},
+			...timeViews(w)
+		]
 	};
 }
 
@@ -500,11 +514,11 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 		const engine = syn.engine ?? 'wavsyn';
 		errors.push(...checkComponents(syn.components, engine, item));
 		if (syn.max_iters !== undefined && !(Number.isInteger(syn.max_iters) && syn.max_iters >= 1 && syn.max_iters <= 1000)) errors.push(item('out_of_range', 'The synthesis passes are a whole number from 1 to 1000.', 'config.synthesis.max_iters'));
-		if (syn.tol_db !== undefined && !(syn.tol_db > 0)) errors.push(item('out_of_range', 'The synthesis tolerance is above 0 dB.', 'config.synthesis.tol_db'));
+		if (syn.tol_db !== undefined && !(syn.tol_db > 0 && syn.tol_db <= 20)) errors.push(item('out_of_range', 'The synthesis tolerance is above 0 and at most 20 dB.', 'config.synthesis.tol_db'));
 		if (syn.max_gain_db_per_iter !== undefined && !(syn.max_gain_db_per_iter > 0 && syn.max_gain_db_per_iter <= 20)) errors.push(item('out_of_range', "A pass's largest move is above 0 and at most 20 dB.", 'config.synthesis.max_gain_db_per_iter'));
 		const { alarm, abort } = envelopeOf(config);
-		for (const [name, v] of [['alarm_db', alarm], ['abort_db', abort]] as const) if (!(v[0] > 0 && v[1] > 0)) errors.push(item('out_of_range', 'Each side of the envelope is above 0 dB.', `config.envelope.${name}`));
-		if (alarm[0] > abort[0] || alarm[1] > abort[1]) warnings.push(item('alarm_wider_than_abort', 'The alarm band is wider than the abort band on one side: a band would abort before it alarms.', 'config.envelope.alarm_db'));
+		for (const [name, v] of [['alarm_db', alarm], ['abort_db', abort]] as const) if (!(v[0] > 0 && v[1] > 0 && v[0] <= 60 && v[1] <= 60)) errors.push(item('out_of_range', 'Each side of the envelope is above 0 and at most 60 dB.', `config.envelope.${name}`));
+		if (alarm[0] > abort[0] || alarm[1] > abort[1]) errors.push(item('alarm_wider_than_abort', 'The abort band is at least as wide as the alarm band on each side: a band would abort before it alarms.', 'config.envelope.abort_db'));
 		const centres = errors.some((e) => e.field?.startsWith('config.bands')) ? [] : bandCentres(config.bands);
 		const perBand = config.envelope?.per_band;
 		if (Array.isArray(perBand) && centres.length && perBand.length !== centres.length) errors.push(item('per_band_length_mismatch', `The per-band envelope has ${perBand.length} entries; the grid has ${centres.length} bands.`, 'config.envelope.per_band'));
@@ -519,7 +533,10 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 		if (!(lim.drive_vpk_ceiling > 0 && lim.drive_vpk_ceiling <= 10)) errors.push(item('out_of_range', 'The drive ceiling is above 0 and at most 10 V pk.', 'config.limits.drive_vpk_ceiling'));
 		if (!(lim.drive_vpk_abort > lim.drive_vpk_ceiling && lim.drive_vpk_abort <= 10)) errors.push(item('out_of_range', 'The drive abort is above the drive ceiling and at most 10 V pk.', 'config.limits.drive_vpk_abort'));
 		if (id.max_vpk != null && !(id.max_vpk > 0 && id.max_vpk <= lim.drive_vpk_ceiling)) errors.push(item('out_of_range', "The burst's cap is above 0 and at most the drive ceiling.", 'config.identification.max_vpk'));
-		if (lim.abort_factor !== undefined && !(lim.abort_factor >= 1)) errors.push(item('out_of_range', 'The abort factor is at least 1.', 'config.limits.abort_factor'));
+		if (lim.abort_factor !== undefined && !(lim.abort_factor >= 1 && lim.abort_factor <= 100)) errors.push(item('out_of_range', 'The abort factor is from 1 to 100.', 'config.limits.abort_factor'));
+		for (const [k, v] of Object.entries(lim.kinematic ?? {})) if (v !== null && v !== undefined && !(v > 0)) errors.push(item('out_of_range', 'A kinematic ceiling is above 0, or none.', `config.limits.kinematic.${k}`));
+		const headroom = config.limit_channels?.headroom_db;
+		if (headroom !== undefined && !(headroom >= 0 && headroom <= 40)) errors.push(item('out_of_range', 'The headroom is from 0 to 40 dB.', 'config.limit_channels.headroom_db'));
 		const rise = config.control?.max_gain_rise_db;
 		if (rise !== undefined && !(rise > 0 && rise <= 20)) errors.push(item('out_of_range', "A gain's rise cap is above 0 and at most 20 dB.", 'config.control.max_gain_rise_db'));
 		const rows = host.rows();
@@ -529,8 +546,11 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 		(lim.monitors ?? []).forEach((m, i) => {
 			if (!input(m.channel)) errors.push(item('limit_unknown_channel', `Channel ${m.channel} is not an enabled input of the channel table.`, `config.limits.monitors[${i}].channel`));
 		});
+		const control = rows.find((r) => r.enabled && r.role === 'control')?.index ?? null;
 		(config.limit_channels?.channels ?? []).forEach((c, i) => {
-			if (!input(c.channel)) errors.push(item('limit_unknown_channel', `Channel ${c.channel} is not an enabled input of the channel table.`, `config.limit_channels.channels[${i}].channel`));
+			// any row but the control row; one with no supplied gain, an enabled input to measure it from
+			if (c.channel === control || !rows.some((r) => r.index === c.channel)) errors.push(item('limit_unknown_channel', `Channel ${c.channel} is not a row of the channel table other than the control row.`, `config.limit_channels.channels[${i}].channel`));
+			else if (!c.frf && !input(c.channel)) errors.push(item('limit_no_frf', `Channel ${c.channel} has no supplied gain and is not an enabled input to measure one from.`, `config.limit_channels.channels[${i}]`));
 			if (c.bound.kind === 'per_band' && centres.length && c.bound.bounds_g.length !== centres.length) errors.push(item('per_band_length_mismatch', `The bound has ${c.bound.bounds_g.length} entries; the grid has ${centres.length} bands.`, `config.limit_channels.channels[${i}].bound`));
 			if (c.frf && (c.frf.freqs_hz.length < 2 || c.frf.freqs_hz.length !== c.frf.mag.length)) errors.push(item('out_of_range', 'A supplied gain has at least two points, one magnitude for each frequency.', `config.limit_channels.channels[${i}].frf`));
 		});
@@ -573,7 +593,7 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 		const startDb = config.schedule.mode === 'manual' ? (config.schedule.start_db ?? levels[0]) : levels[0];
 		const n = synth.bands.length;
 		return {
-			id: `r-${String(++runCount).padStart(4, '0')}`,
+			id: `srs-${String(++runCount).padStart(4, '0')}`,
 			config: structuredClone(config),
 			derived,
 			synth,
@@ -922,47 +942,42 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 		const top = mag.reduce((m, v) => Math.max(m, v), 0);
 		floor.fill(top * frac);
 		return [
-			{ view: 'spectrum', title: 'Identification Gain', x: freqAxis, y: { label: '|H|', unit: 'g/V', scale: 'log' }, series: [{ name: '|H|', role: 'measured', x: f, y: mag }, { name: 'Floor', role: 'limit', x: f, y: floor }], link: 'frequency' },
-			{ view: 'spectrum', title: 'Coherence', x: freqAxis, y: { label: 'Coherence', unit: null, scale: 'linear' }, series: [{ name: 'Coherence', role: 'measured', x: f, y: coh }, { name: 'Hold', role: 'limit', x: f, y: hold }], link: 'frequency' }
+			{ view: 'spectrum', title: 'Identification Gain', x: freqAxis, y: { label: '|H|', unit: 'g/V', scale: 'log' }, series: [{ name: 'Gain', role: 'measured', x: f, y: mag }, { name: 'Floor', role: 'tolerance', x: f, y: floor }], link: 'frequency' },
+			{ view: 'spectrum', title: 'Coherence', x: freqAxis, y: { label: 'Coherence', unit: null, scale: 'linear' }, series: [{ name: 'Coherence', role: 'measured', x: f, y: coh }, { name: 'Hold', role: 'tolerance', x: f, y: hold }], link: 'frequency' }
 		];
 	}
 
-	function componentsView(r: Run): View {
+	/** The table in force, and the law's last gains once it has been called. */
+	function componentsViews(r: Run): View[] {
 		const x = f64(r.synth.bands);
 		const full = r.prediction?.drive_vpk ?? 0.4;
 		const amp = f64(r.synth.target.map((t, k) => (full * t * r.gains[k]) / Math.max(1, r.synth.target.reduce((s, v) => s + v, 0))));
-		return {
-			view: 'spectrum',
-			title: 'Components',
-			x: freqAxis,
-			y: { label: 'Amplitude', unit: 'V', scale: 'log' },
-			series: [
-				{ name: 'Drive amplitude', role: 'drive', x, y: amp },
-				{ name: 'Last gains', role: 'other', x, y: f64(r.gains) }
-			],
-			link: 'srs'
-		};
+		const table: View = { view: 'spectrum', title: 'Components', x: freqAxis, y: { label: 'Amplitude', unit: 'V', scale: 'log' }, series: [{ name: 'Drive amplitude', role: 'drive', x, y: amp }], link: 'srs' };
+		if (!r.rows.length) return [table];
+		return [table, { view: 'spectrum', title: 'Gains', x: freqAxis, y: { label: 'Gain', unit: null, scale: 'log' }, series: [{ name: 'Last gains', role: 'other', x, y: f64(r.gains) }], link: 'srs' }];
 	}
 
 	function limitViews(r: Run, q: 'limit_channels' | 'limit_frf'): View[] {
 		const chans = r.config.limit_channels?.channels ?? [];
 		const headroom = r.config.limit_channels?.headroom_db ?? 1;
 		const x = f64(r.synth.bands);
+		// a limit channel is named by its row's description, or ch<index> without one
+		const nameOf = (index: number) => host.rows().find((row) => row.index === index)?.description.trim() || `ch${index}`;
 		return chans.map((c) => {
 			if (q === 'limit_frf') {
 				const freqs = c.frf ? f64(c.frf.freqs_hz) : x;
 				const mag = c.frf ? f64(c.frf.mag) : f64(r.synth.bands.map((f) => 1 + 3 / (1 + ((f - 500) / 60) ** 2)));
-				return { view: 'spectrum', title: `Channel ${c.channel} Gain`, x: freqAxis, y: { label: 'Gain', unit: 'g/V', scale: 'log' }, series: [{ name: c.frf ? 'Supplied' : 'Measured', role: c.frf ? 'reference' : 'measured', x: freqs, y: mag }], link: 'frequency' } as SpectrumView;
+				return { view: 'spectrum', title: `Gain ${nameOf(c.channel)}`, x: freqAxis, y: { label: 'Gain', unit: 'g/V', scale: 'log' }, series: [{ name: c.frf ? 'Supplied' : 'Measured', role: c.frf ? 'reference' : 'measured', x: freqs, y: mag }], link: 'frequency' } as SpectrumView;
 			}
 			const bound = r.synth.bands.map((_, k) => (c.bound.kind === 'flat' ? c.bound.accel_g : (c.bound.bounds_g[k] ?? NaN)));
 			const pred = r.synth.bands.map((f, k) => (Number.isFinite(bound[k]) ? bound[k] * 10 ** ((-headroom - 0.6 - 2 * Math.abs(Math.log2(f / 500))) / 20) : NaN));
 			return {
 				view: 'spectrum',
-				title: `Channel ${c.channel}`,
+				title: `Limit ${nameOf(c.channel)}`,
 				x: freqAxis,
 				y: srsAxis,
 				series: [
-					{ name: 'Predicted', role: 'measured', x, y: f64(pred) },
+					{ name: 'Predicted', role: 'other', x, y: f64(pred) },
 					{ name: 'Bound', role: 'limit', x, y: f64(bound) },
 					{ name: 'Bound less headroom', role: 'tolerance', x, y: f64(bound.map((b) => b * 10 ** (-headroom / 20))) }
 				],
@@ -987,7 +1002,7 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 			case 'identification':
 				return r.identification ? identificationViews(r) : [];
 			case 'components':
-				return [componentsView(r)];
+				return componentsViews(r);
 			case 'limit_channels':
 				return fired ? limitViews(r, 'limit_channels') : [];
 			case 'limit_frf':
@@ -1128,11 +1143,12 @@ export function createSrsMock(host: SrsMockHost): SrsMock {
 				const synthesis = (isObject(params.synthesis) ? params.synthesis : undefined) as SrsSynthesis | undefined;
 				const fs = typeof params.fs_hz === 'number' ? params.fs_hz : 51200;
 				const item = (reason: SrsReportItem['reason'], message: string, field: string): SrsReportItem => ({ reason, message, field });
+				const env = (isObject(params.envelope) ? params.envelope : {}) as { alarm_db?: [number, number]; abort_db?: [number, number] };
 				const errors = [...checkBands(bands, fs, 'bands', item)];
 				if (!errors.length) errors.push(...checkTarget(target, bands, 'target', item));
 				errors.push(...checkComponents(synthesis?.components, synthesis?.engine ?? 'wavsyn', item));
 				if (errors.length) bad((errors[0].field ?? 'target').replace(/^config\./, ''), errors[0].message);
-				const s = synthesize(target, bands, synthesis, [3, 3], [9, 6]);
+				const s = synthesize(target, bands, synthesis, env.alarm_db ?? [3, 3], env.abort_db ?? [9, 6]);
 				return { derived: s.derived, views: s.views };
 			},
 			'srs.target.import': (params) => {
