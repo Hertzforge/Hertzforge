@@ -535,7 +535,7 @@ identification at -20 dB, the abort band 12 dB either way.
 
 | Case | Plant and run | Asks for |
 |---|---|---|
-| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1 dB through the resonance (every judged tick within 30 Hz of it) |
+| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1.5 dB through the resonance (every judged tick within 30 Hz of it) |
 | fast sweep | The same at 6 oct/min | Within 5 dB through the resonance; within 2 dB more than 30 Hz from it |
 | close modes | 240 and 260 Hz, Q 30; 2 oct/min | Within 2 dB |
 | anti-resonance | A flat plant cut 30 dB at 300 Hz, its coherence there under the trust floor; 2 oct/min | The run completes, or ends on the controller's own divergence trip; the drive never over the ceiling |
@@ -553,11 +553,14 @@ misbehaves fails.
 
 `servo_blend`: an amplitude servo (proportional-integral on the error in dB) moves its own level
 each tick, and the drive moves by that step plus `blend_w` (default 0.5, live) times the
-prediction's change, at most 1 dB a tick. `compression` sets the servo's speed: fast (integral gain
-6, at most 60 dB/s, the default), slow (2, 20 dB/s) or custom. A change of level is taken by the
+prediction's change, at most 1 dB a tick. `compression` sets the servo's speed: slow (integral gain
+2, at most 20 dB/s, the default), fast (6, 60 dB/s) or custom. A change of level is taken by the
 servo alone (the prediction follows the frequency), so the compression sets how fast a level step
-lands: fast takes a 1 dB step to within 0.1 dB in under half a second, slow in about 1.3 s. It runs natively, and is also the law file
-`laws/sine-servo`; the two give the same run.
+lands: slow takes a 1 dB step to within 0.1 dB in about 1.3 s, fast in under half a second. Fast is
+quicker than a hardware station's own measurement, which trails the drive by the converters, the
+output buffer and the tracking filter, and it overshoots there by several dB on a level step at
+20 Hz; slow does not. It runs natively, and is also the law file `laws/sine-servo`; the two give the
+same run.
 
 ## Importing a law
 

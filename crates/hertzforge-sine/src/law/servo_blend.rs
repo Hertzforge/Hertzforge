@@ -123,7 +123,7 @@ pub const KNOBS: &[Knob] = &[
                at most 60 dB/s), or custom with the two values below.",
         kind: KnobKind::Choice {
             options: COMPRESSION_OPTIONS,
-            default: "fast",
+            default: "slow",
         },
         live: false,
     },
@@ -636,7 +636,7 @@ mod tests {
         assert_eq!(mine, declared);
         assert_eq!(
             ServoBlendParams::default().compression,
-            CompressionPreset::Fast
+            CompressionPreset::Slow
         );
     }
 

@@ -42,7 +42,7 @@
        "fast",
        "custom"
       ],
-      "default": "fast"
+      "default": "slow"
      },
      {
       "key": "ki",

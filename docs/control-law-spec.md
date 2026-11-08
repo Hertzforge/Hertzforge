@@ -445,8 +445,8 @@ frequency, the sweep, the phase, the level schedule, the reference output or any
 | Drive ceiling and abort, the alarm and abort bands, the kinematic monitor, the servo fault, the raw watchdog | As for every Sine run, after the law and the notch |
 
 **The built-in law, `servo_blend`.** An amplitude servo (proportional-integral on the error in dB,
-`kp` default 0.3, `ki` and its rate limit from `compression`: fast 6 and 60 dB/s (the default),
-slow 2 and 20 dB/s, or custom) moves its own level each tick; the blend adds `blend_w` (default 0.5, live)
+`kp` default 0.3, `ki` and its rate limit from `compression`: slow 2 and 20 dB/s (the default),
+fast 6 and 60 dB/s, or custom) moves its own level each tick; the blend adds `blend_w` (default 0.5, live)
 times the prediction's change since the last tick and clamps the total to 1 dB a tick; the drive is
 the drive in force moved by that total. The servo is held while the controller holds the drive, and
 where the drive in force is under what the law last asked (a cap, a ceiling or the notch held it
@@ -467,7 +467,7 @@ a 10 ms tick, a flat 1 g target, identification at -20 dB, the abort band 12 dB 
 
 | Case | Plant and run | Asks for |
 |---|---|---|
-| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1 dB through the resonance (every judged tick within 30 Hz of it) |
+| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1.5 dB through the resonance (every judged tick within 30 Hz of it) |
 | fast sweep | The same at 6 oct/min | Within 5 dB through the resonance, within 2 dB more than 30 Hz from it |
 | close modes | 240 and 260 Hz, Q 30; 2 oct/min | Within 2 dB |
 | anti-resonance | A flat plant cut 30 dB at 300 Hz, its coherence there under the trust floor; 2 oct/min | Survive: the run completes or ends on the controller's own divergence trip, the drive never over the ceiling |

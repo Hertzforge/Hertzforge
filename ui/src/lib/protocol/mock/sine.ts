@@ -102,7 +102,7 @@ const SERVO_BLEND: LawEntry = {
 	check: builtIn,
 	params: [
 		{ key: 'blend_w', label: 'Prediction weight', help: "How much of each tick's change follows the identification's prediction of the drive (1) rather than the servo on the measured error (0). It can be changed while the test runs.", kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 0.5 },
-		{ key: 'compression', label: 'Compression', help: 'How fast the servo corrects: slow (integral gain 2, at most 20 dB/s), fast (6, at most 60 dB/s), or custom with the two values below.', kind: 'choice', options: ['slow', 'fast', 'custom'], default: 'fast' },
+		{ key: 'compression', label: 'Compression', help: 'How fast the servo corrects: slow (integral gain 2, at most 20 dB/s), fast (6, at most 60 dB/s), or custom with the two values below.', kind: 'choice', options: ['slow', 'fast', 'custom'], default: 'slow' },
 		{ key: 'ki', label: 'Integral gain', help: "The servo's integral gain, with custom compression.", kind: 'number', unit: '', min: 0.1, max: 20, step: 0.1, default: 2 },
 		{ key: 'max_rate_db_per_s', label: 'Largest servo rate', help: 'The fastest the servo moves the drive, with custom compression.', kind: 'number', unit: 'dB/s', min: 1, max: 240, step: 1, default: 20 },
 		{ key: 'kp', label: 'Proportional gain', help: "The servo's proportional gain on the error in dB.", kind: 'number', unit: '', min: 0, max: 2, step: 0.05, default: 0.3 }

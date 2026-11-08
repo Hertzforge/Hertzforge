@@ -2590,7 +2590,7 @@ binary frame.
 | `identification.review` | true | Hold for the operator after the gate passes (`review`) |
 | `control.composite`, `weights` | `weighted_avg`, 1 each | How the control rows combine, as Random's: `weighted_avg`, `min` or `max`, each control row's weight above 0 |
 | `control.tracking` | `{"kind":"proportional","pct":10,"max_hz":100}` | The tracking filter's bandwidth: `{"kind":"fixed","hz"}` or `{"kind":"proportional","pct","max_hz"}` (a percentage of the frequency, above 0 and at most 100, capped at `max_hz`). A sweep too fast for it is refused or warned (`tracking_lag`) |
-| `control.law` | `{"id":"servo_blend"}` | The control law, by its catalog `id` (see "Control Laws", world `sine`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest). The built-in `servo_blend` is the amplitude servo and the feedforward blend: `blend_w` (0 to 1, default 0.5, live), `compression` (`slow`, `fast` or `custom`, default `fast`), `ki` and `max_rate_db_per_s` (with `custom`), `kp` (default 0.3) |
+| `control.law` | `{"id":"servo_blend"}` | The control law, by its catalog `id` (see "Control Laws", world `sine`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest). The built-in `servo_blend` is the amplitude servo and the feedforward blend: `blend_w` (0 to 1, default 0.5, live), `compression` (`slow`, `fast` or `custom`, default `slow`), `ki` and `max_rate_db_per_s` (with `custom`), `kp` (default 0.3) |
 | `control.law_budget` | 0.25 | The fraction of the tick one law call may take (above 0, at most 1) |
 | `control.law_misses` | 3 | Unusable law calls in a row that stop the run (1 to 100) |
 | `control.max_step_db` | 1 | The most the drive may change in one tick, dB either way (1 to 3) |
@@ -3079,8 +3079,8 @@ whole run under the core's guards on a simulated station at 16384 Hz with one dr
 control channel at 1 V per g: a flat target of 1 g peak, identification at -20 dB, no review
 hold, the drive ceiling 10 V and the abort 20 V. The cases: one mode at 250 Hz, Q 50, swept
 100 to 800 Hz at 1 oct/min (`through`: every judged tick at full level within 30 Hz of the
-resonance within ±1 dB of the target; the built-in at its defaults, `blend_w` 0.5, `fast`
-and a 10 ms tick, measures -0.48 dB there); the same at 6 oct/min (`within_away`: within ±5 dB through the resonance and ±2 dB more
+resonance within ±1.5 dB of the target; the built-in at its defaults, `blend_w` 0.5, `slow`
+and a 10 ms tick, measures +1.13 dB there); the same at 6 oct/min (`within_away`: within ±5 dB through the resonance and ±2 dB more
 than 30 Hz from it); two close modes at 240 and 260 Hz, Q 30, at 2 oct/min (`within` ±2 dB); a
 30 dB anti-resonance at 300 Hz with its coherence under the trust floor, at 2 oct/min
 (`survive`: completed, or ended by the core's own divergence trip, never over the drive

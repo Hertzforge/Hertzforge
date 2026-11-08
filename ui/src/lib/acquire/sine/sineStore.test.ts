@@ -81,7 +81,7 @@ describe('the Sine store', () => {
 		expect(sine.sineLaws.map((l) => l.id)).toEqual(['servo_blend']);
 		expect(sine.law?.name).toBe('Servo blend');
 		expect(sine.law?.live).toEqual(['blend_w']);
-		expect(sine.setup.law.params).toEqual({ blend_w: 0.5, compression: 'fast', ki: 2, max_rate_db_per_s: 20, kp: 0.3 });
+		expect(sine.setup.law.params).toEqual({ blend_w: 0.5, compression: 'slow', ki: 2, max_rate_db_per_s: 20, kp: 0.3 });
 	});
 
 	it('imports a Sine law file and shows its parameters from its manifest; another world is not chosen', async () => {
