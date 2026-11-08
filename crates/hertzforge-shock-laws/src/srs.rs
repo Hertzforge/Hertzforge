@@ -62,6 +62,9 @@ pub fn resolve_srs(
     match catalog.entry(&choice.id) {
         None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
         Some(entry) => match entry.world {
+            LawWorld::ShockSrs => Err(ChoiceError::BadConfig(
+                "SRS shock law files are not built yet".into(),
+            )),
             LawWorld::Single | LawWorld::Mimo | LawWorld::ShockClassical => {
                 Err(ChoiceError::WrongTestType {
                     id: choice.id.clone(),

@@ -56,25 +56,30 @@ pub enum LawWorld {
     Mimo,
     /// Classical shock (`shock-classical`).
     ShockClassical,
+    /// SRS shock (`shock-srs`).
+    ShockSrs,
 }
 
 impl LawWorld {
-    /// The stable wire name: `single`, `mimo` or `shock_classical`.
+    /// The stable wire name: `single`, `mimo`, `shock_classical` or
+    /// `shock_srs`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
             LawWorld::Mimo => "mimo",
             LawWorld::ShockClassical => "shock_classical",
+            LawWorld::ShockSrs => "shock_srs",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random" or "classical shock".
+    /// "multiple-output Random", "classical shock" or "SRS shock".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
             LawWorld::Mimo => "multiple-output Random",
             LawWorld::ShockClassical => "classical shock",
+            LawWorld::ShockSrs => "SRS shock",
         }
     }
 }
@@ -375,6 +380,8 @@ impl LawCatalog {
             LawWorld::Single => self.entries(),
             LawWorld::Mimo => self.mimo_entries(),
             LawWorld::ShockClassical => self.shock_classical_entries(),
+            // No SRS law is listed yet.
+            LawWorld::ShockSrs => Vec::new(),
         }
     }
 

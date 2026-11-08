@@ -1083,6 +1083,16 @@ fn srs_wire_state(
                     .unwrap_or_else(|| "a protection tripped".into())
             ),
         ),
+        // A closed-loop run's ends. This host builds only runs without
+        // `control`, which never reach them.
+        SrsRunState::Held => (
+            hertzforge_protocol::RunState::Stopped,
+            "held: identification held the run before any pulse".into(),
+        ),
+        SrsRunState::NotConverged => (
+            hertzforge_protocol::RunState::Stopped,
+            "not_converged: the iteration limit ended the run".into(),
+        ),
     }
 }
 
@@ -1318,6 +1328,7 @@ fn translate_srs(p: &SrsProfile) -> Result<SrsTestConfig, ProtocolError> {
         // This host runs SRS as it always has: the synthesis in g written as
         // volts, no closed-loop settings.
         control: None,
+        components: None,
     };
     cfg.validate().map_err(|e| ProtocolError::InvalidArgument {
         message: e.to_string(),

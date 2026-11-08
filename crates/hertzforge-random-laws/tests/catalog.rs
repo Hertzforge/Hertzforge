@@ -457,3 +457,17 @@ fn classical_shock_laws_have_their_own_list_the_built_in_first() {
     ));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_srs_shock_world_has_its_names_and_no_laws_yet() {
+    assert_eq!(LawWorld::ShockSrs.as_str(), "shock_srs");
+    assert_eq!(LawWorld::ShockSrs.test_type(), "SRS shock");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-srs-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let cat = open(&root);
+    assert!(cat.entries_for(LawWorld::ShockSrs).is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}

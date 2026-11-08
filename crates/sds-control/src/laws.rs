@@ -19,6 +19,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::Single => "single",
         LawWorld::Mimo => "mimo",
         LawWorld::ShockClassical => "shock_classical",
+        LawWorld::ShockSrs => "shock_srs",
     }
 }
 
@@ -276,6 +277,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::Single => Err("single-output Random"),
             LawWorld::Mimo => Err("multiple-output Random"),
             LawWorld::ShockClassical => Ok(()),
+            LawWorld::ShockSrs => Err("SRS shock"),
         },
         params: e.manifest.params.clone(),
     }

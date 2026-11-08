@@ -1085,3 +1085,63 @@ fn closed_loop_control_is_refused_until_the_loop_is_built() {
     ));
     assert_eq!(s.state(), RunState::Idle);
 }
+
+// ===========================================================================
+// The pulse as played: its row and its views
+// ===========================================================================
+
+#[test]
+fn a_pulse_row_and_its_view_describe_the_pulse_as_played() {
+    let spy = Arc::new(PlantSpy::default());
+    let mut cfg = mock_cfg();
+    cfg.review_after_sysid = false;
+    cfg.sysid = None;
+    cfg.schedule.start_db = -6.0;
+    cfg.schedule.table_db = vec![-6.0];
+    let mut s = mock_service(cfg, MockPlant::new(Arc::clone(&spy), 20_000.0, 20_000.0));
+    s.assess_feasibility().unwrap();
+    s.arm().unwrap();
+    assert!(s.pulse_view(0).is_none(), "nothing fired yet");
+    let table = s.drive_components().unwrap().synthesize(20_000.0);
+    assert!(s.fire_pulse().unwrap());
+
+    let row = s.report_data().pulses[0].clone();
+    assert_eq!(row.scheduled_db, -6.0);
+    assert!(
+        (row.commanded_db + 6.0).abs() < 1e-12,
+        "{}",
+        row.commanded_db
+    );
+    assert_eq!(row.limit_scale, 1.0);
+    let half = 10f64.powf(-6.0 / 20.0);
+    let want_peak = table.iter().fold(0.0f64, |m, v| m.max(v.abs())) * half;
+    assert!((row.drive_vpk.unwrap() - want_peak).abs() < 1e-12);
+    assert_eq!(row.passed, Some(true), "the wide envelope passes");
+    assert_eq!(
+        row.worst_band_hz,
+        row.worst_band.map(|b| s.band_freqs()[b]),
+        "the worst band's centre"
+    );
+    assert_eq!(row.worst_limit_db, None, "no limit channels");
+    assert_eq!(row.law, None, "no law call on a run without control");
+    assert_eq!(s.status().pulses_passed, 1);
+
+    let v = s.pulse_view(0).expect("the fired pulse's views");
+    assert_eq!(v.pulse, 0);
+    assert_eq!(v.band_hz, s.band_freqs().to_vec());
+    assert_eq!(v.measured_srs, s.last_measured_srs().unwrap().to_vec());
+    assert_eq!(v.drive.len(), table.len(), "the drive before its ring-out");
+    assert!((v.drive.iter().fold(0.0f64, |m, x| m.max(x.abs())) - want_peak).abs() < 1e-12);
+    // The unity mock plays the drive back as the response.
+    assert_eq!(&v.measured[..v.drive.len()], &v.drive[..]);
+    assert_eq!(v.velocity_ips.len(), v.measured.len());
+    assert_eq!(v.displacement_in.len(), v.measured.len());
+    for (b, &t) in v.target_srs.iter().enumerate() {
+        assert!((t - s.target_full()[b] * half).abs() < 1e-9);
+        let (lo, hi) = v.alarm[b];
+        assert!(lo < t && t < hi);
+        let (alo, ahi) = v.abort[b];
+        assert!(alo <= lo && hi <= ahi);
+    }
+    assert!(s.pulse_view(1).is_none());
+}

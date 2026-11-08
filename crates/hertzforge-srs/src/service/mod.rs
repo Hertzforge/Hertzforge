@@ -72,10 +72,9 @@ use crate::control::SrsLawFactory;
 use crate::iterate::{synthesize_to_target, SynthesisEngine};
 use crate::law::{LawLimits, SrsSynthesisLaw};
 use crate::limit::{predict_response_srs, LimitChannel, PredictiveNotch};
-use crate::table::{DampedSineTable, WaveletTable};
 use config::{
-    ConfigError, EngineKind, FrfSpec, LimitTarget, ShockCaptureTrigger, SrsEnvelope, SrsTestConfig,
-    SysIdExcitation,
+    ConfigError, EngineKind, EnvelopeCheck, FrfSpec, LimitTarget, ShockCaptureTrigger, SrsEnvelope,
+    SrsTestConfig, SysIdExcitation,
 };
 use hertzforge_capture::{default_data_root, save_snapshot, CaptureConfig, CaptureSink, Mark};
 use hertzforge_channel_table::ChannelTable;
@@ -90,9 +89,10 @@ use hertzforge_shock_common::{
 use plant::{FirePath, PlantError};
 use report::{
     BandResult, DelegatedFireLog, EventKind, EventLog, FeasibilityDigest, FrfSummary, Honesty,
-    LevelHistoryEntry, LimitReport, PulseRow, ReportData, RunSettings, RunState, Status, TripKind,
-    TripRecord,
+    LevelHistoryEntry, LimitReport, NotchSummary, PulseLawCall, PulseRow, PulseView, ReportData,
+    RunSettings, RunState, Status, TripKind, TripRecord,
 };
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -133,6 +133,36 @@ impl From<ConfigError> for ServiceError {
     fn from(e: ConfigError) -> Self {
         ServiceError::Config(e)
     }
+}
+
+/// How many fired pulses the service keeps the drive and the measured SRS of,
+/// for [`SrsShockService::pulse_view`].
+pub const PULSE_VIEWS_KEPT: usize = 64;
+
+/// What the service kept of one fired pulse for its views.
+#[derive(Debug, Clone)]
+struct PlayedPulse {
+    seq: u64,
+    level_db: f64,
+    commanded_db: f64,
+    /// The ladder's linear level.
+    level_scale: f64,
+    /// The drive as played, before its ring-out.
+    drive: Vec<f64>,
+    /// The measured control SRS at the run's Q.
+    measured_srs: Vec<f64>,
+}
+
+/// The facts of a pulse as played that its row carries.
+#[derive(Debug, Clone, Default)]
+struct PlayedFacts {
+    commanded_db: f64,
+    limit_scale: f64,
+    drive_vpk: Option<f64>,
+    worst_limit_db: Option<f64>,
+    limited_components: usize,
+    law: Option<PulseLawCall>,
+    at_s: Option<f64>,
 }
 
 /// A measured drive->channel FRF from the reduced-level system ID.
@@ -235,6 +265,13 @@ pub struct SrsShockService {
     law_factory: Option<Arc<dyn SrsLawFactory>>,
     /// The clock law calls are timed on.
     law_clock: Arc<dyn LawClock>,
+
+    // --- the pulse views ------------------------------------------------------------
+    /// The most recent [`PULSE_VIEWS_KEPT`] fired pulses' drives and SRS.
+    played: VecDeque<PlayedPulse>,
+    /// Components the limit cap held back in the gains in force: what the
+    /// next pulse plays.
+    played_limited: usize,
 }
 
 impl SrsShockService {
@@ -318,6 +355,8 @@ impl SrsShockService {
             noted_no_frf_prediction: false,
             law_factory: None,
             law_clock: Arc::new(MonotonicClock::new()),
+            played: VecDeque::new(),
+            played_limited: 0,
         };
         // Path honesty is logged up front, not discovered mid-run.
         let honesty = Honesty::for_path(svc.path.drive_path());
@@ -955,20 +994,10 @@ impl SrsShockService {
 
     // --- arming the drive -----------------------------------------------------------
 
-    /// The default (pre-iteration) component table for the configured engine: one
-    /// component per band.
+    /// The (pre-iteration) component table: the configured one, or one component
+    /// per band for the configured engine.
     fn default_engine(&self) -> Result<SynthesisEngine, ServiceError> {
-        let frac = self.cfg.fraction.into();
-        Ok(match self.cfg.engine {
-            EngineKind::Wavsyn => SynthesisEngine::Wavsyn(
-                WaveletTable::default_over_band(self.cfg.f_lo_hz, self.cfg.f_hi_hz, frac)
-                    .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?,
-            ),
-            EngineKind::Seds => SynthesisEngine::Seds(
-                DampedSineTable::default_over_band(self.cfg.f_lo_hz, self.cfg.f_hi_hz, frac)
-                    .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?,
-            ),
-        })
+        Ok(self.cfg.seed_table()?)
     }
 
     /// Synthesize-and-arm: seed the DRIVE table from the model (FRF feedforward on
@@ -1196,7 +1225,7 @@ impl SrsShockService {
 
         // --- synthesize + fire (path split) ------------------------------------
         let is_host = self.path.drive_path().is_host();
-        let (control, monitors, fire_scale_for_law) = if is_host {
+        let (control, monitors, fire_scale_for_law, played_drive) = if is_host {
             let engine = self
                 .engine
                 .as_ref()
@@ -1307,7 +1336,7 @@ impl SrsShockService {
                 })
                 .collect();
 
-            (fired.control_g, fired.monitors, fire_scale)
+            (fired.control_g, fired.monitors, fire_scale, Some(drive))
         } else {
             // Path A: absolute-scalar fire; no host drive, law, or predictions.
             let FirePath::Delegated(dev) = &mut self.path else {
@@ -1325,7 +1354,7 @@ impl SrsShockService {
                 scale: level_scale,
                 level_db,
             });
-            (control, Vec::new(), level_scale)
+            (control, Vec::new(), level_scale, None)
         };
 
         // --- ingest (SRS + kinematics + PVSS on ingest) ----------------
@@ -1350,6 +1379,30 @@ impl SrsShockService {
         // is at the pinned shock-common Q=10 convention; identical at the default).
         let measured_srs = srs_analyze(&control, self.fs_hz, &self.band_freqs, self.cfg.q);
 
+        // What the pulse played, for its row and its views.
+        let facts = PlayedFacts {
+            commanded_db: 20.0 * fire_scale_for_law.log10(),
+            limit_scale: fire_scale_for_law / level_scale,
+            drive_vpk: played_drive
+                .as_ref()
+                .map(|d| d.iter().fold(0.0f64, |m, &v| m.max(v.abs()))),
+            worst_limit_db: self.worst_limit_exceedance_db(),
+            limited_components: self.played_limited,
+            law: None,
+            at_s: None,
+        };
+        if self.played.len() == PULSE_VIEWS_KEPT {
+            self.played.pop_front();
+        }
+        self.played.push_back(PlayedPulse {
+            seq,
+            level_db,
+            commanded_db: facts.commanded_db,
+            level_scale,
+            drive: played_drive.unwrap_or_default(),
+            measured_srs: measured_srs.clone(),
+        });
+
         // --- kinematic ceilings (pure-integrator kinematics) -------
         let kin = self.store.get(seq).map(|r| r.kinematics);
         if let Some(k) = kin {
@@ -1369,12 +1422,13 @@ impl SrsShockService {
             for (axis, value, limit) in checks {
                 if let Some(lim) = limit {
                     if value > lim {
-                        self.push_pulse_row(seq, level_db, &measured_srs, 0, 0, 0);
+                        self.push_pulse_row(seq, level_db, &measured_srs, None, &facts);
                         self.abort(
                             TripKind::Kinematic {
                                 axis: axis.into(),
                                 value,
                                 limit: lim,
+                                predicted: false,
                             },
                             level_db,
                             seq,
@@ -1392,14 +1446,7 @@ impl SrsShockService {
         self.alarm_active = check.alarmed();
         if check.aborted() {
             let worst_band = check.worst_band.unwrap_or(0);
-            self.push_pulse_row(
-                seq,
-                level_db,
-                &measured_srs,
-                check.alarm_bands.len(),
-                check.abort_bands.len(),
-                0,
-            );
+            self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
             self.abort(
                 TripKind::Envelope {
                     abort_bands: check.abort_bands.len(),
@@ -1433,7 +1480,7 @@ impl SrsShockService {
                 if action.enforcement == MonitorEnforcement::Enforced {
                     if let Some(peak) = action.measured_peak_eu {
                         if peak >= self.cfg.drive_abort_factor * action.peak_ceiling {
-                            self.push_pulse_row(seq, level_db, &measured_srs, 0, 0, 0);
+                            self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
                             self.abort(
                                 TripKind::DriveBreach {
                                     channel: action.channel.clone(),
@@ -1497,17 +1544,12 @@ impl SrsShockService {
                 engine.scale_amplitude(j, g);
             }
         }
+        // The next pulse plays the gains just capped.
+        self.played_limited = limited_components;
 
         // --- bookkeeping + ladder ---------------------------------------------
         self.last_measured_srs = Some(measured_srs.clone());
-        self.push_pulse_row(
-            seq,
-            level_db,
-            &measured_srs,
-            check.alarm_bands.len(),
-            0,
-            limited_components,
-        );
+        self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
         self.log.push(EventKind::PulseFired {
             seq,
             level_db,
@@ -1539,14 +1581,15 @@ impl SrsShockService {
         Ok(true)
     }
 
+    /// Add the pulse's row. `judged` is the envelope's verdict on it (`None`
+    /// when the pulse ended before the envelope was judged).
     fn push_pulse_row(
         &mut self,
         seq: u64,
         level_db: f64,
         measured_srs: &[f64],
-        alarm_bands: usize,
-        abort_bands: usize,
-        limited_components: usize,
+        judged: Option<&EnvelopeCheck>,
+        facts: &PlayedFacts,
     ) {
         let kin = self.store.get(seq).map(|r| r.kinematics);
         let (mut worst, mut worst_band) = (None::<f64>, None::<usize>);
@@ -1569,10 +1612,87 @@ impl SrsShockService {
             pk_pk_disp_in: kin.map(|k| k.pk_pk_disp_in).unwrap_or(0.0),
             worst_err_db: worst,
             worst_band,
-            alarm_bands,
-            abort_bands,
-            limited_components,
+            alarm_bands: judged.map_or(0, |c| c.alarm_bands.len()),
+            abort_bands: judged.map_or(0, |c| c.abort_bands.len()),
+            limited_components: facts.limited_components,
+            scheduled_db: level_db,
+            commanded_db: facts.commanded_db,
+            limit_scale: facts.limit_scale,
+            drive_vpk: facts.drive_vpk,
+            passed: judged.map(|c| !c.alarmed() && !c.aborted()),
+            worst_band_hz: worst_band.and_then(|b| self.band_freqs.get(b).copied()),
+            worst_limit_db: facts.worst_limit_db,
+            law: facts.law.clone(),
+            at_s: facts.at_s,
         });
+    }
+
+    /// The worst predicted limit-channel exceedance for the last pulse's drive,
+    /// dB over the allowed level (`bound` less the headroom); `None` without
+    /// limit channels or a comparable prediction.
+    fn worst_limit_exceedance_db(&self) -> Option<f64> {
+        let headroom_db = self.cfg.limits.as_ref().map_or(0.0, |l| l.headroom_db);
+        let headroom_lin = 10.0_f64.powf(-headroom_db / 20.0);
+        let mut worst: Option<f64> = None;
+        for (ch, (_, pred)) in self
+            .limit_channels
+            .iter()
+            .zip(&self.last_predicted_limit_srs)
+        {
+            for (&bound, &p) in ch.limit_srs.iter().zip(pred) {
+                if !bound.is_finite() || p <= 0.0 {
+                    continue;
+                }
+                let db = 20.0 * (p / (bound * headroom_lin)).log10();
+                worst = Some(worst.map_or(db, |w: f64| w.max(db)));
+            }
+        }
+        worst
+    }
+
+    /// One fired pulse's views (see [`PulseView`]): `None` for a pulse not
+    /// fired, or older than the last [`PULSE_VIEWS_KEPT`].
+    pub fn pulse_view(&self, pulse: u64) -> Option<PulseView> {
+        let p = self.played.iter().find(|p| p.seq == pulse)?;
+        let rec = self.store.get(pulse)?;
+        let series = hertzforge_dsp::shock::pulse_kinematic_series(&rec.time_history, rec.fs_hz);
+        let target: Vec<f64> = self
+            .target_full
+            .iter()
+            .map(|&t| t * p.level_scale)
+            .collect();
+        let band = |lo_db: f64, hi_db: f64, t: f64| {
+            (t * 10f64.powf(-lo_db / 20.0), t * 10f64.powf(hi_db / 20.0))
+        };
+        let alarm = self
+            .envelope
+            .bands
+            .iter()
+            .zip(&target)
+            .map(|(b, &t)| band(b.alarm_lo_db, b.alarm_hi_db, t))
+            .collect();
+        let abort = self
+            .envelope
+            .bands
+            .iter()
+            .zip(&target)
+            .map(|(b, &t)| band(b.abort_lo_db, b.abort_hi_db, t))
+            .collect();
+        Some(PulseView {
+            pulse,
+            fs_hz: rec.fs_hz,
+            level_db: p.level_db,
+            commanded_db: p.commanded_db,
+            band_hz: self.band_freqs.clone(),
+            measured_srs: p.measured_srs.clone(),
+            target_srs: target,
+            alarm,
+            abort,
+            measured: rec.time_history.clone(),
+            drive: p.drive.clone(),
+            velocity_ips: series.velocity_ips,
+            displacement_in: series.disp_in,
+        })
     }
 
     // --- level control (AUTO ladder + MANUAL +/- 1 dB) -----------------
@@ -1988,6 +2108,22 @@ impl SrsShockService {
             capturing: self.capture.is_some(),
             band_coherence: self.control_frf.as_ref().map_or(0.0, |f| f.band_coherence),
             capture_trigger: self.cfg.capture.trigger,
+            next_pulse_s: None,
+            pulses_passed: self
+                .pulse_rows
+                .iter()
+                .filter(|r| r.passed == Some(true))
+                .count() as u64,
+            identification: None,
+            prediction: None,
+            notch: self.arm_notch_report.as_ref().map(|r| NotchSummary {
+                notched_bands: r.notched_bands.len(),
+                worst_before_db: r.worst_exceedance_before_db,
+                worst_after_db: r.worst_exceedance_after_db,
+                converged: r.converged,
+            }),
+            law: None,
+            held: None,
         }
     }
 }
