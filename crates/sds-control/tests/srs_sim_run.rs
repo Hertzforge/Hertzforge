@@ -229,9 +229,10 @@ async fn an_observer_abort_in_the_wait() {
 }
 
 /// srs-4: a displacement ceiling under the full-level prediction aborts at the
-/// first full-level pulse, predicted, its value to three significant digits.
+/// first full-level pulse, predicted. The law moves the table between pulses, so
+/// the value is the prediction for the table in force then, which the state
+/// carries: the full-level prediction is the table in force's, not the seed's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "the state's prediction stays the seed's while the law moves the table"]
 async fn a_displacement_ceiling_under_the_prediction_aborts_predicted() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -269,10 +270,13 @@ async fn a_displacement_ceiling_under_the_prediction_aborts_predicted() {
     assert_eq!(trip["axis"], "displacement");
     assert_eq!(trip["predicted"], true);
     assert_eq!(trip["at_level_db"], 0);
+    // The state's prediction is the one the trip was judged on.
+    let predicted = end["prediction"]["displacement_pk_pk_in"].as_f64().unwrap();
     assert!(
-        (trip["value"].as_f64().unwrap() / x0 - 1.0).abs() < 0.03,
-        "{trip}"
+        (trip["value"].as_f64().unwrap() / predicted - 1.0).abs() < 0.005,
+        "{trip} against the state's {predicted}"
     );
+    assert!(trip["value"].as_f64().unwrap() > 0.9 * x0, "{trip}");
     let rows = rows(&mut c).await;
     assert!(
         rows.iter().all(|r| r["scheduled_db"] != 0),
