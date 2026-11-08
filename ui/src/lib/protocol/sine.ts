@@ -122,7 +122,7 @@ export type SineTest = SineSweepTest | SineDwellTest | SineStepTest | SineRstdTe
 export type SineTestKind = SineTest['kind'];
 
 export interface SineAcquisition {
-	/** Null: the station's own rate. */
+	/** The rate asked of the station, 1000 to 204800 Hz; null asks for 16384 Hz. */
 	fs_hz?: number | null;
 	/** Default 10; converted to whole frames at the rate the station adopts. */
 	tick_ms?: number;
@@ -227,6 +227,7 @@ export interface SineConfig {
 	cola?: SineCola;
 	feasibility?: SineFeasibility | null;
 	capture?: SineCapture;
+	/** Random's fields; `label` is the key when absent. */
 	metadata?: { key: string; label?: string; value: string }[];
 }
 
@@ -588,6 +589,11 @@ export interface SineLiveChannel {
 	/** Broadband rms in the row's unit. */
 	rms: number | null;
 	unit: string;
+	/**
+	 * For a control row: true once its tracked amplitude has reached 95 % of the top of the
+	 * profile's abort band at the present frequency and level, then true to the end of the run.
+	 * False for every other row. It is not an input-range latch.
+	 */
 	overload: boolean;
 }
 
@@ -667,7 +673,7 @@ export interface SineData extends SineLiveHead {
 /** A Sine law's catalog entry: `world` is `sine` and only it carries `live`. */
 export type SineLawEntry = LawEntry & { world: 'sine'; live: string[] };
 
-export type SineCheckRequirement = 'within' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held';
+export type SineCheckRequirement = 'within' | 'through' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held';
 
 /** One simulated test article's result in a Sine law check. */
 export interface SineLawCheckCase {

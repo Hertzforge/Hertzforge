@@ -12,6 +12,7 @@
 	import MimoRunView from '$lib/acquire/mimo/views/MimoRunView.svelte';
 	import ShockRunView from '$lib/acquire/shock/ShockRunView.svelte';
 	import SrsRunView from '$lib/acquire/srs/SrsRunView.svelte';
+	import SineRunView from '$lib/acquire/sine/SineRunView.svelte';
 	import { runBandsOf, runGeometryOf } from '$lib/acquire/mimo/runFrame';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { theme } from '$lib/theme/theme.svelte';
@@ -26,14 +27,16 @@
 	const mimoRun = $derived(app.config.popoutTest === 'mimo_random');
 	const shockRun = $derived(app.config.popoutTest === 'shock');
 	const srsRun = $derived(app.config.popoutTest === 'srs');
+	const sineRun = $derived(app.config.popoutTest === 'sine');
 	const mimo = $derived(app.mimo);
 	const shock = $derived(app.shock);
 	const srs = $derived(app.srs);
+	const sine = $derived(app.sine);
 	const views = $derived(app.mimoViews);
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
-	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : 'Random');
-	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : display.page.name);
+	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : 'Random');
+	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
@@ -59,6 +62,11 @@
 				if (srs.actions.abort.enabled) {
 					e.preventDefault();
 					void srs.abort();
+				}
+			} else if (sineRun) {
+				if (sine.actions.abort.enabled) {
+					e.preventDefault();
+					void sine.abort();
 				}
 			} else if (acq.actions.abort.enabled) {
 				e.preventDefault();
@@ -92,7 +100,7 @@
 		</div>
 	</header>
 	<div class="top">
-		<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : acq} onoverride={() => {}} {abortKeys} compact />
+		<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : acq} onoverride={() => {}} {abortKeys} compact />
 	</div>
 	<div class="body">
 		{#if mimoRun}
@@ -101,6 +109,8 @@
 			<ShockRunView {shock} views={app.shockViews} compact onpopout={(id) => app.openDisplayWindow(id, 'shock')} />
 		{:else if srsRun}
 			<SrsRunView {srs} views={app.srsViews} compact onpopout={(id) => app.openDisplayWindow(id, 'srs')} />
+		{:else if sineRun}
+			<SineRunView {sine} views={app.sineViews} compact onpopout={(id) => app.openDisplayWindow(id, 'sine')} />
 		{:else}
 			<RunView {acq} {display} compact onpopout={(id) => app.openDisplayWindow(id)} />
 		{/if}

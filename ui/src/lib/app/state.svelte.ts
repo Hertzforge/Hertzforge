@@ -15,6 +15,8 @@ import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
+import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
+import { SineViewsState } from '$lib/acquire/sine/sineViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -1579,6 +1581,10 @@ export class AppState {
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
 	readonly srsViews: SrsViewsState;
+	/** Sine's setup and run; the station and table are the Acquire store's. */
+	readonly sine: SineStore;
+	/** The Sine run's pages and this window's subscription. */
+	readonly sineViews: SineViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -1601,6 +1607,7 @@ export class AppState {
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			testType: 'random',
@@ -1628,6 +1635,12 @@ export class AppState {
 			showing: () => srsPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'srs' && this.srs.step === 'run'),
 			page: srsPopout ? config.page : null
 		});
+		const sinePopout = config.popout && config.popoutTest === 'sine';
+		this.sineViews = new SineViewsState(this.control, {
+			setupTitle: () => this.sine.status?.title ?? (config.popout ? null : this.sine.setup.title),
+			showing: () => sinePopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'sine' && this.sine.step === 'run'),
+			page: sinePopout ? config.page : null
+		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
 
@@ -1653,7 +1666,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -1670,6 +1683,7 @@ export class AppState {
 		const mimo = this.config.popoutTest === 'mimo_random';
 		const shock = this.config.popoutTest === 'shock';
 		const srs = this.config.popoutTest === 'srs';
+		const sine = this.config.popoutTest === 'sine';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -1689,17 +1703,23 @@ export class AppState {
 					if (this.control.status === 'open') void this.srs.sync();
 				});
 			}
+			if (sine) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.sine.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
 		else if (srs) this.srsViews.watch();
+		else if (sine) this.sineViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -1726,6 +1746,8 @@ export class AppState {
 		if (onShock || this.shock.isLive) return this.shock.source;
 		const onSrs = this.workspace === 'acquire' && this.tests.screen === 'srs';
 		if (onSrs || this.srs.isLive) return this.srs.source;
+		const onSine = this.workspace === 'acquire' && this.tests.screen === 'sine';
+		if (onSine || this.sine.isLive) return this.sine.source;
 		return null;
 	}
 
@@ -1763,6 +1785,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.srs.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.sine.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -1772,11 +1797,13 @@ export class AppState {
 		this.mimo.watch();
 		this.shock.watch();
 		this.srs.watch();
+		this.sine.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
 		this.shockViews.watch();
 		this.srsViews.watch();
+		this.sineViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}
