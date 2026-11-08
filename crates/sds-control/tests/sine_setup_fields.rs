@@ -682,3 +682,24 @@ fn the_tick_converts_at_the_rate_and_a_law_file_needs_eight_ms() {
     assert_eq!(config::tick_frames(16_384.0, 10.0), 164);
     assert_eq!(config::tick_frames(17_066.666_666_7, 10.0), 171);
 }
+
+#[test]
+fn a_one_level_dwell_needs_no_time_at_the_levels_before_full_level() {
+    // The time at each level before the last is the default `{"sweeps": 1}`; with one level it
+    // is never used, so a dwell that gives only its full-level time configures.
+    let mut c = golden();
+    c["test"] = json!({"kind": "dwell", "freq_hz": 100, "end": {"seconds": 30}});
+    c["schedule"] = json!({"mode": "auto", "levels_db": [0], "start_db": 0,
+                           "full_level": {"seconds": 30}});
+    assert!(refusals(&c, 1).is_empty(), "{:?}", refusals(&c, 1));
+    // Starting at the last level of several leaves the levels before it unused too.
+    c["schedule"] = json!({"mode": "auto", "levels_db": [-6, 0], "start_db": 0,
+                           "full_level": {"seconds": 30}});
+    assert!(refusals(&c, 1).is_empty(), "{:?}", refusals(&c, 1));
+    // With a level still to come, the time there is needed and a sweep count is refused.
+    c["schedule"] = json!({"mode": "auto", "levels_db": [-6, 0], "start_db": -6,
+                           "full_level": {"seconds": 30}});
+    assert!(refusals(&c, 1)
+        .iter()
+        .any(|(r, f)| r == "out_of_range" && f == "schedule.per_level.sweeps"));
+}
