@@ -261,8 +261,15 @@ pub enum SimPlant {
     /// A standard cross-coupled modal plant: every drive reaches every input.
     Modal(SimStandardPlant),
     /// A plant that plays this FRF matrix (line `k` at `k * df_hz`), measured or
-    /// computed, by block convolution.
-    Frf { stack: MatrixStack, df_hz: f64 },
+    /// computed, by block convolution. The convolution's partition, `block_frames`
+    /// samples (a power of two), is also the latency it adds; `None` takes the
+    /// simulator's default. A short partition keeps a test article's own latency
+    /// out of an identification with short FFT blocks.
+    Frf {
+        stack: MatrixStack,
+        df_hz: f64,
+        block_frames: Option<usize>,
+    },
 }
 
 impl Default for SimPlantSpec {
@@ -675,9 +682,17 @@ fn build_sim(plant: &SimPlantSpec) -> StationBackend {
     let sized = match &plant.plant {
         SimPlant::Resonators => None,
         SimPlant::Modal(p) => Some(p.build().model),
-        SimPlant::Frf { stack, df_hz } => Some(hertzforge_hal_sim::PlantModel::Frf(
-            hertzforge_hal_sim::FrfPlant::new(stack.clone(), *df_hz),
-        )),
+        SimPlant::Frf {
+            stack,
+            df_hz,
+            block_frames,
+        } => {
+            let mut frf = hertzforge_hal_sim::FrfPlant::new(stack.clone(), *df_hz);
+            if let Some(b) = block_frames {
+                frf.block_frames = *b;
+            }
+            Some(hertzforge_hal_sim::PlantModel::Frf(frf))
+        }
     };
     if let Some(model) = sized {
         cfg = cfg
@@ -1125,7 +1140,11 @@ mod tests {
         let spec = StationSpec {
             sim: SimPlantSpec {
                 sample_rate_hz: fs,
-                plant: SimPlant::Frf { stack, df_hz: 2.0 },
+                plant: SimPlant::Frf {
+                    stack,
+                    df_hz: 2.0,
+                    block_frames: None,
+                },
                 ..SimPlantSpec::default()
             },
             ..StationSpec::default()
@@ -1135,6 +1154,42 @@ mod tests {
         st.backend
             .configure(&table(12, 6), &acq)
             .expect("the stack is 12 by 6");
+
+        // An FRF plant's partition is its added latency: a one-by-one wire plays an
+        // impulse back that many samples late.
+        let late = |block_frames: Option<usize>| {
+            let wire = MatrixStack::identity(1025, 1);
+            let spec = StationSpec {
+                sim: SimPlantSpec {
+                    sample_rate_hz: fs,
+                    noise_level: 0.0,
+                    plant: SimPlant::Frf {
+                        stack: wire,
+                        df_hz: fs / 2048.0,
+                        block_frames,
+                    },
+                    ..SimPlantSpec::default()
+                },
+                ..StationSpec::default()
+            };
+            let mut st = try_build_station_backend(BackendKind::Sim, &spec).expect("builds");
+            st.backend.open().unwrap();
+            st.backend.configure(&table(1, 1), &acq).expect("1 by 1");
+            st.backend.arm().unwrap();
+            st.backend.start().unwrap();
+            let mut buf = [0.0f32; 1];
+            (0..1024)
+                .find(|&s| {
+                    st.backend
+                        .write_drive(&[if s == 0 { 1.0 } else { 0.0 }])
+                        .unwrap();
+                    st.backend.read_input(&mut buf).unwrap();
+                    buf[0].abs() > 0.5
+                })
+                .expect("the impulse comes back")
+        };
+        let default_late = late(None);
+        assert_eq!(late(Some(16)), default_late - 256 + 16);
     }
 
     /// The counting wrapper every station is handed out in forwards the trait's

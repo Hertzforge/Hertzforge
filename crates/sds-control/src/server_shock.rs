@@ -16,7 +16,7 @@ use crate::shock::view::{self, LawRef, ShockView, State, StationRef};
 use crate::shock::{RunData, ShockRun};
 use crate::station::{self, Selection, StationPlan};
 use crate::table;
-use hertzforge_random_laws::{may_arm_on_hardware, LawCatalog};
+use hertzforge_random_laws::{may_arm_on_hardware, LawCatalog, LawWorld};
 use hertzforge_shock_common::ShockRunMode;
 use hertzforge_shock_host::ClassicalLawFactory;
 use serde_json::{json, Map, Value};
@@ -47,16 +47,9 @@ fn not_configured() -> MethodError {
     )
 }
 
-/// The law a configuration's checks look up by id: the catalog's entry, or the
-/// built-in law from its own declaration.
+/// The law a configuration's checks look up by id: the catalog's entry.
 fn law_facts(cat: &LawCatalog, id: &str) -> Option<LawFacts> {
-    match cat.entry(id) {
-        Some(e) => Some(laws::classical_facts(&e)),
-        None if id == hertzforge_shock_laws::DEFAULT_CLASSICAL_LAW_ID => {
-            Some(laws::builtin_classical_facts())
-        }
-        None => None,
-    }
+    cat.entry(id).map(|e| laws::classical_facts(&e))
 }
 
 fn law_ref(f: &LawFacts) -> LawRef {
@@ -373,6 +366,16 @@ impl Service {
         };
         let id = run.wire.law.id.clone();
         let wire = run.wire.clone();
+        let values_of = id.clone();
+        let law_values = self
+            .with_catalog(move |cat| {
+                Ok(cat
+                    .entry(&values_of)
+                    .map(|e| e.manifest.diagnostics)
+                    .unwrap_or_default())
+            })
+            .await
+            .unwrap_or_default();
         let law: Result<Arc<dyn ClassicalLawFactory>, MethodError> = self
             .with_catalog(move |cat| {
                 if let Some(entry) = cat.entry(&id) {
@@ -415,6 +418,7 @@ impl Service {
             capture_root: self.opts.capture_root.clone(),
             bind: self.opts.bind.clone(),
             law,
+            law_values,
         })
     }
 
@@ -1014,35 +1018,43 @@ pub(super) async fn stop_shock(
 }
 
 impl Service {
-    /// `laws.list`, with the classical shock world: the built-in classical law first,
-    /// listed from its own declaration.
-    pub(super) async fn shock_laws_list(
+    /// The catalog id of the classical shock law `laws.check` names, by its `id` or
+    /// the `path` of its file (imported first, for the controller only, as the
+    /// check itself would), or `None` when it names no classical law: the Random
+    /// check then answers, refusing what it cannot check by name.
+    pub(super) async fn classical_law_id(
         &self,
+        conn: &Conn,
         params: &Map<String, Value>,
-    ) -> Result<Value, MethodError> {
-        let world = protocol::named_str(params, "world")?;
-        match world {
-            Some("shock_classical") => {
-                let mut all = self.laws_list(&Map::new()).await?;
-                if let Some(laws) = all.get_mut("laws") {
-                    *laws = json!([laws::builtin_classical_entry_json()]);
-                }
-                Ok(all)
+    ) -> Option<String> {
+        let id = params.get("id").and_then(Value::as_str).map(str::to_owned);
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if path.is_some() {
+            let inner = self.inner.lock().await;
+            if id.is_some() || inner.session.require_controller(conn.id).is_err() {
+                return None;
             }
-            None => {
-                let mut all = self.laws_list(params).await?;
-                if let Some(Value::Array(laws)) = all.get_mut("laws") {
-                    laws.push(laws::builtin_classical_entry_json());
-                }
-                Ok(all)
-            }
-            Some("single") | Some("mimo") => self.laws_list(params).await,
-            Some(_) => Err(MethodError::bad_params(
-                "world",
-                "\"world\" is \"single\", \"mimo\" or \"shock_classical\", or absent for every \
-                 world",
-            )),
         }
+        self.with_catalog(move |cat| {
+            let id = match (id, path) {
+                (Some(id), None) => id,
+                (None, Some(p)) => laws::import(cat, &p)?["law"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                _ => return Ok(None),
+            };
+            Ok(cat
+                .entry(&id)
+                .filter(|e| e.world == LawWorld::ShockClassical)
+                .map(|e| e.id))
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     /// `laws.check` of a classical shock law: every case of the classical check on its
@@ -1110,7 +1122,15 @@ impl Service {
         let passed = !results.is_empty() && results.iter().all(|(_, v)| v.passed);
         let cases: Vec<Value> = results.iter().map(|(j, _)| j.clone()).collect();
         let (law, recorded) = if facts.builtin {
-            (laws::builtin_classical_entry_json(), false)
+            let id = facts.id.clone();
+            let law = self
+                .with_catalog(move |cat| {
+                    cat.entry(&id)
+                        .map(|e| laws::entry_json(&e))
+                        .ok_or_else(|| MethodError::internal("the built-in law left the catalog"))
+                })
+                .await?;
+            (law, false)
         } else {
             let sha = facts.sha256.clone();
             let verdicts: Vec<_> = results.into_iter().map(|(_, v)| v).collect();
@@ -1133,10 +1153,4 @@ impl Service {
             "report": crate::shock::law_check::report_json(&cases, passed, recorded),
         }))
     }
-}
-
-/// Whether `laws.check` names a classical shock law.
-pub(super) fn names_shock_law(params: &Map<String, Value>) -> bool {
-    params.get("id").and_then(Value::as_str)
-        == Some(hertzforge_shock_laws::DEFAULT_CLASSICAL_LAW_ID)
 }

@@ -60,7 +60,7 @@ export interface TestType {
 export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'random', group: 'single', title: 'Random', summary: 'Broadband random vibration shaped to a target spectrum and held for a set time.', ready: true },
 	{ id: 'sine', group: 'single', title: 'Sine', summary: 'One frequency at a time, swept across a range or held, at a controlled amplitude.', ready: false },
-	{ id: 'shock', group: 'single', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: false },
+	{ id: 'shock', group: 'single', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: true },
 	{ id: 'srs', group: 'single', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: false },
 	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: false },
 	{ id: 'explorer', group: 'single', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: false },

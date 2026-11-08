@@ -960,12 +960,17 @@ impl Service {
             "shock.log" => self.shock_log(params).await,
             "shock.subscribe" => self.shock_subscribe(conn, params).await,
             "shock.pulses" => self.shock_pulses(params).await,
-            "laws.list" => self.shock_laws_list(params).await,
+            "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
-            "laws.check" if shock_methods::names_shock_law(params) => {
-                self.shock_laws_check(conn, params).await
-            }
-            "laws.check" => self.laws_check(conn, params).await,
+            "laws.check" => match self.classical_law_id(conn, params).await {
+                Some(id) => {
+                    let mut p = params.clone();
+                    p.remove("path");
+                    p.insert("id".into(), Value::from(id));
+                    self.shock_laws_check(conn, &p).await
+                }
+                None => self.laws_check(conn, params).await,
+            },
             other => Err(MethodError::new(
                 ErrorCode::UnknownMethod,
                 format!("the control service has no method \"{other}\"; it serves {METHODS}"),

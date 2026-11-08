@@ -2,10 +2,10 @@
 //! controller's own classical shock service: the sds-control Sim station (200 and
 //! 550 Hz at Q 2.5), unpaced, through a WebSocket client.
 //!
-//! Every run here needs the closed loop (identification, the drive in volts, the
-//! law and its guards), so each is ignored until the controller's service runs
-//! `control: Some`; `cargo test -p sds-control --test shock_sim_run -- --ignored`
-//! runs them. The law files are the ones scripts/build_laws.sh builds.
+//! Every run here is the closed loop (identification, the drive in volts, the law
+//! and its guards). The law files are the ones scripts/build_laws.sh builds; the
+//! template's law is built from the SDK template's own source as the law host's
+//! `shock-template` fixture.
 
 mod support;
 
@@ -118,7 +118,6 @@ async fn import(c: &mut Client, name: &str) -> String {
 /// AUTO with the default law completes; every full-level pulse passes; the
 /// first pass by pulse 3; full-level error at most 5 %.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn auto_with_the_default_law_completes_inside_the_standard() {
     let schema = Schema::load();
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
@@ -141,7 +140,6 @@ async fn auto_with_the_default_law_completes_inside_the_standard() {
 
 /// MANUAL fire, two steps, a rung, two fires, an early fire refused, Stop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn manual_moves_and_an_early_fire_then_the_stop() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -199,7 +197,6 @@ async fn manual_moves_and_an_early_fire_then_the_stop() {
 
 /// An observer's abort in the wait ends the run at once; nothing after.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn an_observer_abort_in_the_wait() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -227,7 +224,6 @@ async fn an_observer_abort_in_the_wait() {
 /// A shaker displacement limit under the full-level prediction aborts at the
 /// first full-level pulse, predicted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn a_displacement_limit_under_the_prediction_aborts_predicted() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -272,7 +268,6 @@ async fn a_displacement_limit_under_the_prediction_aborts_predicted() {
 /// The controlling socket closed holds firing and safe-stops at the grace;
 /// separately, the service's shutdown safe-stops the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn the_controller_lost_and_the_shutdown_safe_stop() {
     let timeout = Duration::from_millis(1500);
     let svc = Service::with_options(real(timeout));
@@ -306,10 +301,11 @@ async fn the_controller_lost_and_the_shutdown_safe_stop() {
     assert_eq!(s["end"]["outcome"], "safe_stop");
 }
 
-/// An imported law that sleeps after its seed: three misses refiring the
-/// drive in force, then `law_fault`, `over_budget`, 3.
+/// An imported law whose first correction answers and every later one runs
+/// past its budget: three misses in a row end the run (`law_fault`,
+/// `over_budget`, 3), and the two misses before the last each refire the drive
+/// in force.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn a_slow_law_ends_the_run_after_three_misses() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -323,8 +319,15 @@ async fn a_slow_law_ends_the_run_after_three_misses() {
     assert_eq!(end["end"]["outcome"], "law_fault", "{end}");
     assert_eq!(end["end"]["trip"]["reason"], "over_budget");
     assert_eq!(end["end"]["trip"]["consecutive"], 3);
+    assert_eq!(end["law"]["misses"], 3, "{end}");
     let rows = rows(&mut c).await;
-    for r in &rows[1..4] {
+    assert_eq!(
+        rows.len(),
+        4,
+        "the seed's pulse, the corrected one, then two refires"
+    );
+    assert_eq!(rows[1]["law"]["used"], true, "{}", rows[1]);
+    for r in &rows[2..4] {
         assert_eq!(r["law"]["used"], false, "{r}");
         assert_eq!(r["law"]["miss"], "over_budget");
     }
@@ -333,7 +336,6 @@ async fn a_slow_law_ends_the_run_after_three_misses() {
 /// The built-in law against the imported `shock-fdc`: the same outcome and
 /// pulse count, drives within relative 1e-9.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn the_built_in_law_and_its_law_file_drive_alike() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -375,7 +377,6 @@ async fn the_built_in_law_and_its_law_file_drive_alike() {
 /// Exclusion against Random and MIMO both ways on the real services, and the
 /// drive verbs refused once shutdown begins.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn exclusion_and_shutting_down() {
     let svc = Service::with_options(real(Duration::from_secs(30)));
     let addr = serve(svc.clone()).await;
@@ -407,12 +408,11 @@ async fn exclusion_and_shutting_down() {
 /// The template law with its correction off and its model 6 dB low cannot
 /// pass: `not_converged` at pulse 5, -12 dB.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn a_law_that_does_not_correct_ends_not_converged() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
-    let law = import(&mut c, "shock_classical_template").await;
+    let law = import(&mut c, "law_fixture_shock_template").await;
     let mut cfg = config("auto");
     cfg["control"] =
         json!({"law": {"id": law, "params": {"correct": false, "model_error_db": -6}}});
@@ -426,16 +426,15 @@ async fn a_law_that_does_not_correct_ends_not_converged() {
 }
 
 /// A drive abort under the identified full-level drive ends the run before
-/// any pulse, predicted.
+/// any pulse, predicted. The identification plays well under the ceiling (the
+/// full-level drive of this 1 g pulse is about 2.1 V pk on the Sim station).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the closed-loop classical shock core"]
 async fn the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse() {
     let addr = serve(Service::with_options(real(Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
     let mut cfg = config("auto");
-    cfg["limits"] = json!({"drive_vpk_ceiling": 0.001, "drive_vpk_abort": 0.002});
-    cfg["identification"]["drive_vrms"] = json!(0.0002);
+    cfg["limits"] = json!({"drive_vpk_ceiling": 0.5, "drive_vpk_abort": 0.6});
     let id = run_id(&mut c, cfg).await;
     c.ok("shock.start", json!({})).await;
     let end = wait_end(&mut c, &id).await;
@@ -443,5 +442,14 @@ async fn the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse() {
     assert_eq!(end["end"]["trip"]["kind"], "drive_vpk");
     assert_eq!(end["end"]["trip"]["predicted"], true);
     assert_eq!(end["end"]["trip"]["pulse"], 0);
+    assert_eq!(end["end"]["trip"]["abort_vpk"], 0.6);
+    assert!(end["end"]["trip"]["vpk"].as_f64().unwrap() > 0.6, "{end}");
+    assert!(
+        end["end"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("at full level; the drive abort is 0.6 V pk"),
+        "{end}"
+    );
     assert_eq!(end["pulses"]["fired"], 0);
 }

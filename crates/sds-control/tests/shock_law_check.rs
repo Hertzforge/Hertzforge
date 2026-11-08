@@ -1,11 +1,11 @@
 //! Classical shock laws on the wire: the catalog's classical world, `laws.check`'s
-//! refusals, each check case in the protocol's words, and, once the controller's
-//! classical check runs, the built-in law passing it, the misbehaving fixture
-//! failing it, a law file's result recorded against its hash, and an unchecked law
-//! file refused at a hardware arm.
+//! refusals, each check case in the protocol's words, the built-in law passing the
+//! check, the misbehaving fixture failing it, a law file's result recorded against
+//! its hash, and an unchecked law file refused at a hardware arm.
 
 mod support;
 
+use hertzforge_hal::{DiscoveredChannel, DiscoveredDevice};
 use hertzforge_random_laws::CheckCase;
 use hertzforge_shock_laws::{ClassicalCaseEnd, ClassicalCaseMeasure, ClassicalCheckCase};
 use hertzforge_station::StationBuildError;
@@ -72,7 +72,15 @@ async fn the_classical_world_lists_the_built_in_law_first() {
     let laws = shock["laws"].as_array().unwrap();
     assert_eq!(laws[0]["id"], "fd_correct");
     assert!(laws.iter().all(|l| l["world"] == "shock_classical"));
-    assert_eq!(laws[0], sds_control::laws::builtin_classical_entry_json());
+    let golden: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../schema/golden/response_laws_list_shock_classical.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(laws[0], golden["result"]["laws"][0]);
     let all = c.ok("laws.list", json!({})).await;
     schema.assert_valid(&all, Some("lawsListResult"));
     let worlds: Vec<&str> = all["laws"]
@@ -82,6 +90,13 @@ async fn the_classical_world_lists_the_built_in_law_first() {
         .map(|l| l["world"].as_str().unwrap())
         .collect();
     assert!(worlds.contains(&"shock_classical") && worlds.contains(&"mimo"));
+    let fdc = all["laws"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["id"] == "fd_correct")
+        .count();
+    assert_eq!(fdc, 1, "the built-in classical law is listed once");
     let mimo = c.ok("laws.list", json!({"world": "mimo"})).await;
     assert!(mimo["laws"]
         .as_array()
@@ -235,9 +250,13 @@ fn law_file(name: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{file} is not built; run scripts/build_laws.sh"))
 }
 
+/// One law check runs at a time in a service process (`law_check_running`), and
+/// the tests that run one share this process: they take turns.
+static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the controller's classical check runner"]
 async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
+    let _turn = ONE_CHECK.lock().await;
     let schema = Schema::load();
     let svc = Service::with_options(options(
         no_driver(),
@@ -265,15 +284,18 @@ async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the controller's classical check runner and the classical law host"]
 async fn a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
 ) {
-    let svc = Service::with_options(options(
-        no_driver(),
+    let _turn = ONE_CHECK.lock().await;
+    // The controller's own engine, so an arm reaches the station.
+    let mut o = options(
+        FixedScanner(Ok(test_rig())),
         0.0,
         Duration::from_secs(30),
         Duration::from_secs(5),
-    ));
+    );
+    o.shock_engine = None;
+    let svc = Service::with_options(o);
     let addr = serve(svc).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
@@ -301,15 +323,66 @@ async fn a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_can
     assert_eq!(good["report"]["passed"], true, "{good}");
     assert_eq!(good["law"]["check"]["status"], "passed");
     assert_eq!(good["law"]["check"]["hardware"], true);
-    // An unchecked copy cannot arm on a hardware station (refused before any
-    // hardware is touched).
+    // On a hardware station a law whose check failed cannot arm: refused before
+    // any hardware is touched. The law that passed gets past that gate to the
+    // station's own refusal (no driver can open the test rig's devices).
+    c.ok(
+        "station.select",
+        json!({"kind": "ni", "devices": ["TestRig9Mod1", "TestRig9Mod2"]}),
+    )
+    .await;
+    let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    let bound = |index: u32, role: &str, device: &str, channel: &str| {
+        let mut r = row(index, role);
+        r["physical"] = json!({"device": device, "channel": channel});
+        r
+    };
+    c.ok(
+        "channels.set",
+        json!({"revision": rev, "channels": [
+            bound(1, "control", "TestRig9Mod1", "ai0"),
+            bound(2, "drive", "TestRig9Mod2", "ao0"),
+        ]}),
+    )
+    .await;
     let unchecked = bad["law"]["id"].as_str().unwrap().to_owned();
     let mut cfg = config();
     cfg["control"] = json!({"law": {"id": unchecked}});
     c.ok("shock.configure", json!({"config": cfg})).await;
     let e = c.refused("shock.arm", json!({})).await;
+    assert_eq!(e["reason"], "law_not_checked", "{e}");
+    let checked = good["law"]["id"].as_str().unwrap().to_owned();
+    let mut cfg = config();
+    cfg["control"] = json!({"law": {"id": checked}});
+    c.ok("shock.configure", json!({"config": cfg})).await;
+    let e = c.refused("shock.arm", json!({})).await;
     assert!(
-        e["reason"] == "law_not_checked" || e["reason"] == "arm_refused",
+        e["reason"] == "arm_refused" || e["reason"] == "ni_driver_unavailable",
         "{e}"
     );
+}
+
+/// A fictional NI rig: one input module, one output module, no driver to open
+/// them.
+fn test_rig() -> Vec<DiscoveredDevice> {
+    let dev = |id: &str, product: &str, n_in: usize, n_out: usize, slot: Option<u32>| {
+        let mut d = DiscoveredDevice::new(id, product);
+        d.serial = format!("T-{id}");
+        if slot.is_some() {
+            d.parent = Some("TestRig9".into());
+            d.slot = slot;
+        }
+        d.inputs = (0..n_in)
+            .map(|k| DiscoveredChannel::new(format!("{id}/ai{k}"), format!("ai{k}")))
+            .collect();
+        d.outputs = (0..n_out)
+            .map(|k| DiscoveredChannel::new(format!("{id}/ao{k}"), format!("ao{k}")))
+            .collect();
+        d
+    };
+    vec![
+        dev("TestRig9", "test chassis", 0, 0, None),
+        dev("TestRig9Mod1", "test input module", 4, 0, Some(1)),
+        dev("TestRig9Mod2", "test output module", 0, 4, Some(2)),
+    ]
 }

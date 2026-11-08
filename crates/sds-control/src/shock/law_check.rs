@@ -21,15 +21,24 @@ use std::sync::Arc;
 
 /// The rate every check case runs at, Hz: the bench's.
 pub const CHECK_FS_HZ: f64 = 51_200.0;
-/// The FRF line spacing of the anti-resonance plant, Hz.
-const NOTCH_DF_HZ: f64 = 5.0;
-/// The anti-resonance's pole damping; its zeros are damped less by the notch depth.
-const NOTCH_POLE_DAMPING: f64 = 0.1;
+/// The FRF line spacing of the anti-resonance plant, Hz: the check's rate over a
+/// power of two, so the simulator plays the stack exactly at its lines.
+const NOTCH_DF_HZ: f64 = CHECK_FS_HZ / 8192.0;
+/// The anti-resonance plant's convolution partition, samples, which is also the
+/// latency it adds: short against the identification's FFT blocks, so the
+/// simulator's own latency does not cost the identification its coherence.
+const NOTCH_BLOCK_FRAMES: usize = 16;
+/// The quality factor of the anti-resonance's peaking section.
+const NOTCH_Q: f64 = 5.0;
 /// The simulator's floor on every case: noise well under any pulse.
 const FLOOR_NOISE_V: f64 = 2e-5;
-/// The response the noise case's noise is set under, volts at the input: the
-/// full-level pulse's peak on a one-to-one wire at the check's amplitude.
-pub const CHECK_RESPONSE_PEAK_V: f64 = 1.0;
+/// The anti-resonance's noise, volts: enough that the notch's own bins identify
+/// under the coherence floor, so the core does not trust them.
+const NOTCH_NOISE_V: f64 = 2e-3;
+/// The rung the noise case's noise is referred to, dB: the first. The envelope is
+/// judged sample by sample, so noise a given depth under the full-level pulse is
+/// that much less under the first rung's.
+const NOISE_REFERENCE_DB: f64 = -12.0;
 
 fn r(x: f64, d: i32) -> f64 {
     super::config::round(x, d)
@@ -158,8 +167,15 @@ pub fn progress_json(
 
 /// The simulated station a case runs on: one drive, one control input.
 pub fn case_station(case: ClassicalCheckCase) -> StationSpec {
+    // The noise case's noise is set under the RMS of the check pulse's main
+    // pulse at the first rung (a half-sine's RMS is its peak over the root of 2).
     let noise = match case.noise_below_db() {
-        Some(db) => CHECK_RESPONSE_PEAK_V * 10f64.powf(-db / 20.0),
+        Some(db) => {
+            let main_rms = hertzforge_shock_laws::CHECK_PULSE_G / 2f64.sqrt()
+                * 10f64.powf(NOISE_REFERENCE_DB / 20.0);
+            main_rms * 10f64.powf(-db / 20.0)
+        }
+        None if matches!(case.plant(), ClassicalCheckPlant::Notch { .. }) => NOTCH_NOISE_V,
         None => FLOOR_NOISE_V,
     };
     let base = SimPlantSpec {
@@ -194,6 +210,7 @@ pub fn case_station(case: ClassicalCheckCase) -> StationSpec {
             plant: SimPlant::Frf {
                 stack: notch_stack(f_hz, depth_db),
                 df_hz: NOTCH_DF_HZ,
+                block_frames: Some(NOTCH_BLOCK_FRAMES),
             },
             ..base
         },
@@ -204,19 +221,23 @@ pub fn case_station(case: ClassicalCheckCase) -> StationSpec {
     }
 }
 
-/// A one-by-one FRF with a notch of `depth_db` at `f_hz`: a second-order section
-/// whose zeros are damped less than its poles by the depth.
+/// A one-by-one FRF with a notch of `depth_db` at `f_hz`: a peaking section of
+/// quality factor [`NOTCH_Q`] cut by `depth_db`, causal and short, at the check's
+/// rate.
 fn notch_stack(f_hz: f64, depth_db: f64) -> MatrixStack {
     let lines = (CHECK_FS_HZ / 2.0 / NOTCH_DF_HZ) as usize + 1;
-    let zeta_p = NOTCH_POLE_DAMPING;
-    let zeta_z = zeta_p * 10f64.powf(-depth_db / 20.0);
-    let w0 = 2.0 * std::f64::consts::PI * f_hz;
+    let a = 10f64.powf(-depth_db / 40.0);
+    let w0 = std::f64::consts::TAU * f_hz / CHECK_FS_HZ;
+    let alpha = w0.sin() / (2.0 * NOTCH_Q);
+    let (b0, b1, b2) = (1.0 + alpha * a, -2.0 * w0.cos(), 1.0 - alpha * a);
+    let (a0, a1, a2) = (1.0 + alpha / a, -2.0 * w0.cos(), 1.0 - alpha / a);
     let data = (0..lines)
         .map(|k| {
-            let w = 2.0 * std::f64::consts::PI * k as f64 * NOTCH_DF_HZ;
-            let s = C64::new(0.0, w);
-            let num = s * s + s * (2.0 * zeta_z * w0) + w0 * w0;
-            let den = s * s + s * (2.0 * zeta_p * w0) + w0 * w0;
+            let w = std::f64::consts::TAU * k as f64 * NOTCH_DF_HZ / CHECK_FS_HZ;
+            let z1 = C64::new(w.cos(), -w.sin());
+            let z2 = z1 * z1;
+            let num = C64::new(b0, 0.0) + z1 * b1 + z2 * b2;
+            let den = C64::new(a0, 0.0) + z1 * a1 + z2 * a2;
             num / den
         })
         .collect();

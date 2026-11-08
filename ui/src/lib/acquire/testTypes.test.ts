@@ -39,16 +39,16 @@ describe('the test types', () => {
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the twelve test types one plain line, and only Random and MIMO Random can be chosen', () => {
+	it('gives each of the twelve test types one plain line, and only Random, Classical Shock and MIMO Random can be chosen', () => {
 		expect(TEST_TYPES).toHaveLength(12);
-		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'mimo_random']);
+		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'shock', 'mimo_random']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);
 			// What the test is, never a note to developers.
 			expect(t.summary).not.toMatch(/\b[QM]\d+\b|#\d+|todo|tbd|port|issue|milestone/i);
 		}
 		const { view } = viewOf(null);
-		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'mimo_random']);
+		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'shock', 'mimo_random']);
 		expect(TEST_TYPES.filter((t) => !t.ready).every((t) => view.whyNot(t.id) === 'Coming')).toBe(true);
 	});
 });

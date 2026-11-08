@@ -277,7 +277,10 @@ fn trace(out: &mut String, tag: &str, s: &Svc, fires: &Fires) {
 }
 
 /// A serde value as space-free `key=value` tokens, numbers in shortest
-/// round-trip form, so the rounding comparison can read each one.
+/// round-trip form, so the rounding comparison can read each one. An object's
+/// keys are written sorted: the workspace builds `serde_json` with
+/// `preserve_order` (field order) and this package alone builds it without
+/// (sorted), and the trace must read the same either way.
 fn flat(key: &str, v: &serde_json::Value) -> String {
     use serde_json::Value;
     match v {
@@ -285,11 +288,14 @@ fn flat(key: &str, v: &serde_json::Value) -> String {
             let (name, inner) = m.iter().next().unwrap();
             format!("{key}={name} {}", flat(key, inner))
         }
-        Value::Object(m) => m
-            .iter()
-            .map(|(k, x)| flat(&format!("{key}.{k}"), x))
-            .collect::<Vec<_>>()
-            .join(" "),
+        Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort();
+            keys.iter()
+                .map(|k| flat(&format!("{key}.{k}"), &m[k.as_str()]))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
         Value::Number(n) => match n.as_f64() {
             Some(f) if !n.is_u64() && !n.is_i64() => format!("{key}={f:?}"),
             _ => format!("{key}={n}"),

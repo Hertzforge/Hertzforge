@@ -151,8 +151,9 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
 /// reviewed the same way: pure math on the stacks, no backend, synthetic plants
 /// in its tests. So was the classical shock set (2026-11-07): the built-in law's
-/// math, the choice and check of a law, the `shock-fdc` law file and the
-/// `shock-misbehave` host fixture.
+/// math, the choice and check of a law, the `shock-fdc` law file, and the
+/// `shock-misbehave` and `shock-template` host fixtures (the latter the SDK
+/// template's own law source, built in this workspace).
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
@@ -174,6 +175,7 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
     "law-fixture-shock-misbehave",
+    "law-fixture-shock-template",
 ];
 
 struct Package {

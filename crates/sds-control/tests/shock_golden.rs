@@ -33,6 +33,23 @@ fn read_json(name: &str) -> Value {
     serde_json::from_str(&text).unwrap()
 }
 
+/// The built-in classical law's entry as the catalog lists it, from a catalog on
+/// an empty data folder.
+fn builtin_classical_entry() -> Value {
+    let dir = std::env::temp_dir().join(format!(
+        "sds-control-golden-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let cat = hertzforge_random_laws::LawCatalog::open(&dir).unwrap();
+    let entry = sds_control::laws::entry_json(&cat.entry("fd_correct").unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+    entry
+}
+
 fn read_bin(name: &str) -> Vec<u8> {
     std::fs::read(golden(name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
 }
@@ -439,7 +456,7 @@ fn the_fire_and_level_requests_parse() {
 fn the_classical_law_entry_is_the_golden_one() {
     let want = read_json("response_laws_list_shock_classical.json");
     same(
-        &sds_control::laws::builtin_classical_entry_json(),
+        &builtin_classical_entry(),
         &want["result"]["laws"][0],
         "entry",
     );
@@ -504,11 +521,7 @@ fn the_classical_check_report_is_the_golden_one() {
         &want["result"]["report"],
         "report",
     );
-    same(
-        &sds_control::laws::builtin_classical_entry_json(),
-        &want["result"]["law"],
-        "law",
-    );
+    same(&builtin_classical_entry(), &want["result"]["law"], "law");
 }
 
 #[test]

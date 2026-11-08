@@ -1,14 +1,13 @@
 //! Every field of the classical shock configuration on the wire reaches the
-//! controller's `ClassicalTestConfig` and its `ClassicalControl` (or, for the
-//! ladder's advance rule and its per-level limit, the parsed configuration they
-//! travel in), and each refusal comes back by name with the field it is about.
+//! controller's `ClassicalTestConfig` and its `ClassicalControl`, and each refusal
+//! comes back by name with the field it is about.
 //!
 //! Each case sets one wire field to a value no default has and reads it back from
 //! the built configuration, so a field the conversion drops fails its own case.
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_dsp::shock::CompensationShape;
-use hertzforge_shock_common::{DriveMonitorKind, ShockRunMode, Spacing};
+use hertzforge_shock_common::{DriveMonitorKind, LadderAdvance, ShockRunMode, Spacing};
 use hertzforge_shock_host::{
     ClassicalShape, ClassicalTestConfig, Polarity, ToleranceAbort, ToleranceStandard,
 };
@@ -455,8 +454,12 @@ fn every_wire_field_reaches_the_controllers_configuration() {
 fn the_ladders_advance_rule_and_per_level_limit_and_the_law_reach_the_run() {
     let w = parse_with("schedule.advance", json!("count"));
     assert_eq!(w.advance, Advance::Count);
+    assert_eq!(w.build().schedule.advance, LadderAdvance::Count);
+    let w = parse_with("schedule.advance", json!("on_pass"));
+    assert_eq!(w.build().schedule.advance, LadderAdvance::OnPass);
     let w = parse_with("schedule.max_pulses_per_level", json!(7));
     assert_eq!(w.max_pulses_per_level, 7);
+    assert_eq!(w.build().schedule.max_pulses_per_level, 7);
     // The wire's defaults: advance on count, five pulses a level.
     let mut c = golden_config();
     c["schedule"].as_object_mut().unwrap().remove("advance");

@@ -2265,16 +2265,17 @@ check set, each case a whole run under the core's guards on a simulated station:
 `[-12, -9, -6, -3, 0]` dB with `[1, 1, 1, 1, 3]` pulses, advancing on a passing pulse, at most 5
 pulses a level, MIL-STD-810 Method 516, a half-sine of 11 ms unless the case says otherwise. The
 cases: a wire (`every_pulse`: the first pulse and every pulse pass); one mode at 400 Hz, Q 10;
-the simulated station's plant (200 and 550 Hz, Q 2.5) with a terminal-peak sawtooth of 6 ms; one
+the simulated station's plant (200 and 550 Hz, Q 2.5) with a haversine of 6 ms; one
 mode behind a 2 ms delay (each `pass_by` 3: a pass by pulse 3 at the first level, and every
 full-level pulse passes); a wire with the identified gain scaled +3 dB before inversion (`pass_by`
-5, within the first level; a law that does not correct cannot pass it); one mode with
-measurement noise 30 dB under the response (`pass_by` 4); and a 30 dB notch at 300 Hz with its
-coherence under the floor (`survive`: completed, or ended by the core's own judgement, never over
-the drive ceiling and never an overshoot abort). Every case first asks that every call is
-answered, in time, with zero misses and zero refused outputs. A classical law is named by `id`;
-`params` are checked against its manifest (`law_params_invalid`), and a case that cannot be run at
-all is refused `law_check_unsupported`, naming it. A case's result:
+8, with 8 pulses allowed at the first level; a law that does not correct cannot pass it); one mode
+with measurement noise 30 dB under the first level's pulse (`pass_by` 4); and a 30 dB notch at
+300 Hz with its coherence under the floor (`survive`: completed, or ended by the core's own
+judgement, never over the drive ceiling and never an overshoot abort). Every case first asks that
+every call is answered, in time, with zero misses and zero refused outputs. A classical law is
+named by `id`, or by the `path` of its file (imported first), as a MIMO law is; `params` are
+checked against its manifest (`law_params_invalid`), and a case that cannot be run at all is
+refused `law_check_unsupported`, naming it. A case's result:
 
 ```
 {"name":"one mode","plant":"one mode, 400 Hz, Q 10","requirement":"pass_by","passed":true,

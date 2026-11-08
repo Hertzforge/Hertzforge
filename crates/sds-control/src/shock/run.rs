@@ -50,6 +50,8 @@ pub struct ArmContext {
     pub capture_root: Option<PathBuf>,
     pub bind: String,
     pub law: Result<Arc<dyn ClassicalLawFactory>, MethodError>,
+    /// The values the law reports, as its manifest declares them.
+    pub law_values: Vec<hertzforge_law_host::DiagnosticSpec>,
 }
 
 /// A request to the run thread.
@@ -434,6 +436,7 @@ impl Actor {
             capture_root: ctx.capture_root,
             bind: ctx.bind,
             law: ctx.law,
+            law_values: ctx.law_values,
             ack: ack.clone(),
         };
         let Some(r) = self.call("arm", |e| e.arm(plan)) else {
@@ -779,7 +782,7 @@ impl Actor {
             return;
         }
         let phase = match outcome {
-            "aborted" | "operator_abort" | "fault" => "aborted",
+            "aborted" | "operator_abort" | "fault" | "law_fault" => "aborted",
             "held" => "held",
             _ => "stopped",
         };

@@ -17,7 +17,7 @@ use hertzforge_law_host::{ParamKind, ParamSpec};
 use hertzforge_shaker_db::{FeasibilityReport, MovingMass, ShakerRecord};
 use hertzforge_shock_common::{
     pulse_feasibility, DriveLimit, DriveMonitor, DriveMonitorKind, DrivePath,
-    FeasibilityTolerances, RateModel, ShockLevelSchedule, ShockRunMode, TrainSpec,
+    FeasibilityTolerances, LadderAdvance, RateModel, ShockLevelSchedule, ShockRunMode, TrainSpec,
 };
 use hertzforge_shock_host::{
     CaptureRules, ClassicalControl, ClassicalPulseSpec, ClassicalShape, ClassicalTestConfig,
@@ -1057,16 +1057,19 @@ impl WireShock {
         }
     }
 
-    /// The controller's schedule. How the AUTO ladder advances
-    /// ([`WireShock::advance`]) and the pulses allowed at one level
-    /// ([`WireShock::max_pulses_per_level`]) travel beside it, into the
-    /// schedule's own fields where the controller has them.
+    /// The controller's schedule, with how the AUTO ladder advances and the
+    /// pulses allowed at one level without a pass.
     pub fn schedule(&self) -> ShockLevelSchedule {
         ShockLevelSchedule {
             mode: self.mode,
             start_db: self.start_db,
             table_db: self.levels_db.clone(),
             pulses_per_level: self.pulses.clone(),
+            advance: match self.advance {
+                Advance::Count => LadderAdvance::Count,
+                Advance::OnPass => LadderAdvance::OnPass,
+            },
+            max_pulses_per_level: self.max_pulses_per_level,
         }
     }
 

@@ -166,8 +166,14 @@ impl SimulatedEngine {
         };
         let figures = PulseFigures {
             drive,
-            velocity: Some((vel.iter().map(|v| v * MEASURED_RATIO).collect(), vel)),
-            displacement: Some((disp.iter().map(|v| v * MEASURED_RATIO).collect(), disp)),
+            velocity: Some((
+                vel.clone(),
+                vel.iter().map(|v| v * MEASURED_RATIO).collect(),
+            )),
+            displacement: Some((
+                disp.clone(),
+                disp.iter().map(|v| v * MEASURED_RATIO).collect(),
+            )),
             time: figures,
             srs: None,
             spectrum: None,

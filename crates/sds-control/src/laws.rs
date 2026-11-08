@@ -1,7 +1,8 @@
 //! The control-law catalog on the wire (schema/PROTOCOL.md, "Control Laws"):
 //! `laws.list` and `laws.import`, for single-output and multiple-output Random
-//! alike. The catalog is the controller's own (`hertzforge-random-laws`): the
-//! built-in laws, and the law files imported into the local data root.
+//! and classical shock alike. The catalog is the controller's own
+//! (`hertzforge-random-laws`): the built-in laws, and the law files imported into
+//! the local data root.
 
 use crate::protocol::{num, ErrorCode, MethodError};
 use hertzforge_law_host::{DiagnosticKind, ParamKind, ParamSpec};
@@ -17,6 +18,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
     match w {
         LawWorld::Single => "single",
         LawWorld::Mimo => "mimo",
+        LawWorld::ShockClassical => "shock_classical",
     }
 }
 
@@ -157,14 +159,14 @@ pub fn entry_json(e: &CatalogEntry) -> Value {
     })
 }
 
-/// The `laws.list` result for `world` (`None`: both worlds, single-output first).
+/// The `laws.list` result for `world` (`None`: every world, single-output Random
+/// first, then multiple-output Random, then classical shock).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
-    if world != Some(LawWorld::Mimo) {
-        laws.extend(catalog.entries().iter().map(entry_json));
-    }
-    if world != Some(LawWorld::Single) {
-        laws.extend(catalog.mimo_entries().iter().map(entry_json));
+    for w in [LawWorld::Single, LawWorld::Mimo, LawWorld::ShockClassical] {
+        if world.is_none_or(|x| x == w) {
+            laws.extend(catalog.entries_for(w).iter().map(entry_json));
+        }
     }
     json!({
         "laws": laws,
@@ -181,9 +183,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         None => Ok(None),
         Some("single") => Ok(Some(LawWorld::Single)),
         Some("mimo") => Ok(Some(LawWorld::Mimo)),
+        Some("shock_classical") => Ok(Some(LawWorld::ShockClassical)),
         Some(_) => Err(MethodError::bad_params(
             "world",
-            "\"world\" is \"single\" or \"mimo\", or absent for both",
+            "\"world\" is \"single\", \"mimo\" or \"shock_classical\", or absent for every \
+             world",
         )),
     }
 }
@@ -243,64 +247,20 @@ pub fn law_info(e: &CatalogEntry) -> crate::mimo::setup::LawInfo {
     }
 }
 
-/// The parameters the built-in classical law declares, as the law host's specs.
-pub fn builtin_classical_params() -> Vec<ParamSpec> {
-    hertzforge_shock_law_math::classical::KNOBS
-        .iter()
-        .map(|k| ParamSpec {
-            key: k.key.to_owned(),
-            label: k.label.to_owned(),
-            help: k.help.to_owned(),
-            kind: ParamKind::Number(hertzforge_law_host::NumberSpec {
-                unit: k.unit.to_owned(),
-                min: k.min,
-                max: k.max,
-                step: k.step,
-                default: k.default,
-            }),
-        })
-        .collect()
-}
-
 /// The built-in classical law, `fd_correct`, as a classical configuration's checks
-/// see it.
+/// see it, from the catalog's own manifest of it (for a check with no catalog at
+/// hand, as `shock.preview`'s).
 pub fn builtin_classical_facts() -> crate::shock::config::LawFacts {
-    use hertzforge_shock_law_math::classical;
+    let m = hertzforge_random_laws::classical_builtin_manifest();
     crate::shock::config::LawFacts {
-        id: classical::ID.to_owned(),
-        name: classical::NAME.to_owned(),
-        version: classical::VERSION.to_owned(),
+        id: hertzforge_random_laws::CLASSICAL_BUILTIN_ID.to_owned(),
+        name: m.name,
+        version: m.version,
         sha256: String::new(),
         builtin: true,
         world: Ok(()),
-        params: builtin_classical_params(),
+        params: m.params,
     }
-}
-
-/// The built-in classical law's catalog entry on the wire: built in, cleared for
-/// hardware, its parameters and the values it reports from its own declaration.
-pub fn builtin_classical_entry_json() -> Value {
-    use hertzforge_shock_law_math::{classical, AUTHOR};
-    json!({
-        "id": classical::ID,
-        "world": "shock_classical",
-        "builtin": true,
-        "name": classical::NAME,
-        "version": classical::VERSION,
-        "author": AUTHOR,
-        "summary": classical::SUMMARY,
-        "sha256": null,
-        "check": {
-            "status": "built_in", "date": null, "tool_version": null, "cases": [],
-            "hardware": true, "message": "Built in: cleared for hardware.",
-        },
-        "params": builtin_classical_params().iter().map(param_json).collect::<Vec<_>>(),
-        "diagnostics": classical::DIAGNOSTICS.iter().map(|d| json!({
-            "key": d.key, "label": d.label, "unit": d.unit, "help": d.help, "layout": null,
-        })).collect::<Vec<_>>(),
-        "shapes": null,
-        "needs": null,
-    })
 }
 
 /// A catalog entry as a classical configuration's checks see it: a Random law is
@@ -315,6 +275,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
         world: match e.world {
             LawWorld::Single => Err("single-output Random"),
             LawWorld::Mimo => Err("multiple-output Random"),
+            LawWorld::ShockClassical => Ok(()),
         },
         params: e.manifest.params.clone(),
     }
