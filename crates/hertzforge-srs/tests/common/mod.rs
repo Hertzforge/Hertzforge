@@ -29,6 +29,8 @@ pub type Fired = Arc<Mutex<Vec<Vec<f64>>>>;
 pub struct Linear {
     pub gain: f64,
     pub noise: f64,
+    /// The rate, Hz ([`FS`] unless set).
+    pub fs: f64,
     state: u64,
     pub fired: Fired,
 }
@@ -38,6 +40,7 @@ impl Linear {
         Linear {
             gain,
             noise: 0.0,
+            fs: FS,
             state: 0x2545_f491_4f6c_dd1d,
             fired: Arc::new(Mutex::new(Vec::new())),
         }
@@ -62,7 +65,7 @@ impl Linear {
 
 impl PulsePlant for Linear {
     fn fs_hz(&self) -> f64 {
-        FS
+        self.fs
     }
     fn ensure_open(&mut self) -> Result<(), String> {
         Ok(())

@@ -90,3 +90,27 @@ fn a_band_the_notch_holds_low_does_not_fail_the_pulse() {
         }
     }
 }
+
+#[test]
+fn at_another_rate_a_band_beside_the_notch_held_low_does_not_fail_the_pulse() {
+    // At 20 480 Hz the notch cuts 400 and 504 Hz only, and the cap, which
+    // works over half an octave either side of each component, holds 635 Hz
+    // low too. The run still completes, and the bands it holds read low.
+    let mut plant = Linear::new(1.0);
+    plant.fs = 20_480.0;
+    let mut s = service(limited(), plant);
+    assert_eq!(run(&mut s), RunState::Stopped, "trip: {:?}", s.trip());
+    let notched: Vec<f64> = s
+        .arm_notch_report()
+        .unwrap()
+        .notched_bands
+        .iter()
+        .map(|b| b.band_freq_hz.round())
+        .collect();
+    assert!(!notched.contains(&635.0), "{notched:?}");
+    let r = s.report_data();
+    let bands = s.band_freqs().to_vec();
+    let b635 = bands.iter().position(|f| f.round() == 635.0).unwrap();
+    assert!(r.band_results[b635].err_db.unwrap() < -3.0);
+    assert_eq!(r.pulses.last().unwrap().passed, Some(true));
+}
