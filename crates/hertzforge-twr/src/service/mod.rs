@@ -287,8 +287,11 @@ impl<P: ReferencePlayer> TwrService<P> {
         // frequency. Leaving it unstated made the gate vacuously green on the
         // chassis, which is the shape that declares a mode on a sweep that could
         // not have failed. The record was prepared against
-        // `player.fs_hz()`, the REQUESTED rate; the gate compares that against
-        // what the device actually programs, and the 9234 coerces.
+        // `player.fs_hz()`, the REQUESTED rate (the rate the player asks the
+        // device for at arm, the run's own when the caller stated one); the gate
+        // compares that against what the device actually programs, and the 9234
+        // coerces. So the record, its section and the grid are all at one rate,
+        // and a device that adopts another is refused rather than re-gridded.
         player.set_reference_rate_hz(r.fs_hz);
 
         let ladder = TwrLadderState::new(config.schedule.clone())?;
@@ -399,6 +402,47 @@ impl<P: ReferencePlayer> TwrService<P> {
         self.override_ack = Some(ack.to_string());
         self.state = TwrState::Configured;
         self.log(&format!("feasibility override acknowledged: {ack:?}"));
+        Ok(())
+    }
+
+    /// Bring the delivery path up for the run without playing anything: the
+    /// player's arm (open, configure at the requested rate, adopt the rate the
+    /// device programs, consult the arm gate, park). Idempotent once up.
+    ///
+    /// # Why a host calls it before the first `advance()`
+    ///
+    /// The identification arms the path itself when nothing has, so a host
+    /// that never calls this still runs. But then the device's answer - the
+    /// rate it adopted, and the gate's refusal when that rate is not the
+    /// record's - first exists in the middle of a unit of work, after the host
+    /// has told its operator the run is armed. Calling this as the host arms
+    /// puts the refusal where the operator asked to arm, by its reason, with
+    /// nothing played; and it makes the rate a host reports at arm the rate
+    /// the station runs at.
+    ///
+    /// Refused while a feasibility block stands (nothing is opened for a run
+    /// that may not arm), and outside `Configured` when the path is down.
+    pub fn arm_station(&mut self) -> Result<(), TwrError> {
+        if self.player_armed {
+            return Ok(());
+        }
+        match self.state {
+            TwrState::Configured => {}
+            TwrState::FeasibilityBlocked => {
+                return Err(TwrError::State(
+                    "feasibility-blocked: override-ack or fix the reference/ceilings before the \
+                     station is brought up"
+                        .into(),
+                ))
+            }
+            s => {
+                return Err(TwrError::State(format!(
+                    "the station is brought up from Configured only (state {s:?})"
+                )))
+            }
+        }
+        self.player.arm()?;
+        self.player_armed = true;
         Ok(())
     }
 

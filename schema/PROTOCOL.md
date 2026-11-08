@@ -3106,7 +3106,7 @@ parameter for a wrong shape (`reference.sha256` that is not 64 lowercase hexadec
 | `prep.taper_frac` | 0.02 | A cosine taper at each end, a fraction of the reference (above 0, at most 0.5); null for none |
 | `section` | the whole reference | The samples of the prepared reference to replicate: `start` and `len` |
 | `pads.pre`, `pads.post` | 512, 1024 | Quiet samples before and after the section on the record (drive pre-ring and ring-down room). The record is the section and the pads padded to a power of two, at most 1048576 samples (`record_too_long`) |
-| `acquisition.fs_hz` | the reference's rate | The rate requested of the station; the run reports the rate it ran at |
+| `acquisition.fs_hz` | the reference's rate | The rate requested of the station. The record and its section are prepared at it, and a station that runs at another rate is refused at arm (`arm_refused`); the run reports the rate it ran at |
 | `identification.excitation` | `random` | `random` (band-limited, flat) or `log_chirp` |
 | `identification.drive_vrms` | 0.05 | Its drive, volts rms; its peak is held under the drive ceiling and the clip |
 | `identification.duration_s`, `nfft` | 4, 2048 | Its length, seconds, and the block it is estimated in (a power of two, at least 64, at most half the samples) |
@@ -3170,16 +3170,17 @@ warnings `reference_resampled`.
 
 ### Running a TWR Test
 
-- **`twr.arm`** builds the station, prepares the record at the rate the station states and
-  checks feasibility. Nothing is driven. A section over a feasibility ceiling is refused
+- **`twr.arm`** builds the station, prepares the record at the rate the run asks
+  (`acquisition.fs_hz`) and checks feasibility. A section over a feasibility ceiling is refused
   `feasibility_exceeded` and the state becomes `blocked`; `twr.arm` with a non-empty
   `override_ack` arms past it (`override_not_needed` when nothing blocks). An imported law without
   a passed check for its exact file is refused `law_not_checked` on a hardware station, as is one
   whose passed check is of an earlier check version than the one in force (its `detail` names
-  both: `{"tool_version","current"}`). The station's own refusals are Random's. The station is
-  opened, its rate adopted and its arm gate
-  passed as identification starts; a gate that refuses ends the run `fault` before anything is
-  driven.
+  both: `{"tool_version","current"}`). Then the station is opened at the rate asked, the rate it
+  programs is adopted and its arm gate passed. Nothing is driven. A station that programs another
+  rate than the record's is refused `arm_refused` (the message names both rates), as is one the
+  driver cannot open; the run's state is unchanged. The station's other refusals are Random's. The
+  armed `grid` (`actual` true) is the station's rate and the record at it.
 - **`twr.start`** from `configured` arms first. It runs identification (`phase` `sysid`): the
   excitation at `drive_vrms`, measuring the plant and its coherence on the identification grid,
   and the response's lag behind the drive by cross-correlation. A mean in-band coherence under

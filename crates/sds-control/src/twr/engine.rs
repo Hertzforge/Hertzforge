@@ -54,8 +54,15 @@ pub struct ArmPlan {
 
 /// An armed station's facts.
 pub struct Armed {
+    /// The rate the station adopted.
     pub fs_hz: f64,
+    /// The record every play is played and measured as, at that rate: its length
+    /// and its section. All three are the engine's, never the configure-time grid's
+    /// counts beside the engine's rate (the mix bench T0 reported: 51 200 Hz beside
+    /// a 51 200-sample section configured at 12 800 Hz).
     pub record_len: usize,
+    pub section_start: usize,
+    pub section_len: usize,
     pub station: StationRef,
     pub feasibility: (&'static str, String),
     /// Held while the run is live on hardware.
@@ -144,8 +151,9 @@ pub struct Position {
 /// What a run's engine does. Every call is made on the run thread; a play blocks
 /// it for the whole record and reads [`Signals::cancel`] at every block.
 pub trait TwrEngine: Send {
-    /// Feasibility, the station and the record at the station's rate. Nothing is
-    /// driven.
+    /// Feasibility, the station brought up at the rate the run asked, and the record
+    /// at that rate. A station that adopts another rate is refused (`arm_refused`).
+    /// Nothing is driven.
     fn arm(&mut self, plan: ArmPlan) -> Result<ArmOutcome, MethodError>;
     /// Identification: one cancellable play.
     fn identify(&mut self) -> Result<Identified, MethodError>;
@@ -203,6 +211,17 @@ fn arm_refused(words: impl std::fmt::Display) -> MethodError {
         "arm_refused",
         format!("The station refused to arm: {words}"),
     )
+}
+
+/// The station's own refusal as the run arms, in the controller's words: the arm
+/// gate's reason (the rate policy's, when the station adopted another rate than the
+/// record's) or the driver's, without the core's error-kind prefix.
+fn station_refused(e: TwrError) -> MethodError {
+    let words = match &e {
+        TwrError::State(s) | TwrError::Play(s) | TwrError::Config(s) => s.as_str(),
+        _ => return arm_refused(e),
+    };
+    arm_refused(words.strip_prefix("arm refused: ").unwrap_or(words))
 }
 
 fn fault(words: impl std::fmt::Display) -> MethodError {
@@ -707,9 +726,17 @@ impl TwrEngine for ServiceEngine {
         if let Some(wrap) = self.wrap_station.as_ref() {
             backend = wrap(backend);
         }
+        // THE RATE THE RUN ASKED, the one its configuration derived the record at
+        // (`acquisition.fs_hz`, or the reference's own). The player asks the station
+        // for it and the core prepares the record at it. The station's caps state
+        // the rate it was BUILT at, which on NI is the chassis's 51 200 Hz whatever
+        // the run asked: requested from the caps, a run asked at 12 800 Hz ran at
+        // 51 200 Hz (bench T0, 2026-11-08).
+        let asked = plan.cfg.shape.fs_for(plan.stored.fs_hz);
         let player =
             BackendReferencePlayer::new(Observed::new(backend, watch), plan.table.clone(), class)
                 .map_err(arm_refused)?
+                .with_requested_rate_hz(asked)
                 .with_cancel_flag(own)
                 .with_display_tap(TAP_SAMPLES)
                 .with_play_observer(observer);
@@ -727,14 +754,23 @@ impl TwrEngine for ServiceEngine {
                 None => return Ok(ArmOutcome::Blocked(verdict)),
             }
         }
+        // THE STATION, brought up here and not as identification starts: open,
+        // configure at the asked rate, adopt the rate it programs, the arm gate,
+        // park. A station that adopts a rate other than the record's is refused
+        // here by the rate policy (`arm_refused`), before anything plays, and the
+        // grid this arm reports is at the rate the station runs at.
+        svc.arm_station().map_err(station_refused)?;
         let grid = svc.grid().clone();
+        let adopted = svc.status().actual_fs_hz.unwrap_or(grid.fs_hz);
         self.cfg = Some(plan.cfg.clone());
         self.capture_root = plan.capture_root.clone();
         self.svc = Some(svc);
         self.forward_log();
         Ok(ArmOutcome::Armed(Box::new(Armed {
-            fs_hz: grid.fs_hz,
+            fs_hz: adopted,
             record_len: grid.n,
+            section_start: grid.pad_pre,
+            section_len: grid.section_len,
             station: StationRef {
                 kind: if matches!(plan.station, StationPlan::Sim { .. }) {
                     "sim"

@@ -500,11 +500,13 @@ impl Actor {
                         .add_log("override", format!("operator acknowledgement: {ack}"));
                 }
                 self.view.feasibility = Some(a.feasibility.clone());
+                // The armed grid is the engine's whole: its rate beside the
+                // configure-time section counts is the grid bench T0 was shown.
                 self.view.grid = Grid {
                     fs_hz: a.fs_hz,
                     record_len: a.record_len,
-                    section_start: self.view.grid.section_start,
-                    section_len: self.view.grid.section_len,
+                    section_start: a.section_start,
+                    section_len: a.section_len,
                     actual: true,
                 };
                 self.view.clock = Some("shared");

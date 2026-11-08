@@ -144,7 +144,8 @@ pub trait ReferencePlayer {
 
     /// Playout sample rate, Hz - the rate a caller can ask for BEFORE arming,
     /// i.e. the REQUESTED rate. The prepared reference is built against it (the
-    /// service validates; the RESAMPLE prep op is the explicit remedy).
+    /// service validates; the RESAMPLE prep op is the explicit remedy), and it is
+    /// the rate the player asks the device for when it arms.
     fn fs_hz(&self) -> f64;
 
     /// The rate the hardware actually programmed, once it has said. `None`
@@ -362,6 +363,21 @@ pub struct BackendReferencePlayer<B: Backend> {
     /// Enabled DRIVE rows in the table. One today; more than one is
     /// refused at `open_and_configure` rather than written mono.
     n_drive: usize,
+    /// The rate the RUN asks the device for, when the caller states one
+    /// ([`BackendReferencePlayer::with_requested_rate_hz`]). `None` asks for the
+    /// rate the backend's caps state.
+    ///
+    /// # Why the caps rate is not the request
+    ///
+    /// A backend's caps state the rate it was BUILT at, which is not the rate a
+    /// run wants: an NI task is built at the 9234's native 51 200 Hz so `open()`
+    /// is legal, and the acquisition seam exists so each run states its own rate
+    /// at `configure`. Asking for the caps rate put a run asked at 12 800 Hz on
+    /// the chassis at 51 200 Hz (bench T0, 2026-11-08): the service prepared the
+    /// record at the caps rate, the gate compared that rate with itself, and
+    /// nothing refused. The simulator never showed it, because the service
+    /// builds the simulated station at the asked rate.
+    requested_fs_hz: Option<f64>,
     /// The rate the prepared reference RECORD was generated at, when the caller
     /// states it. `None` = not stated, and the arm gate then has no claim to
     /// check - it must never invent one. Set it via
@@ -519,6 +535,7 @@ impl<B: Backend> BackendReferencePlayer<B> {
             control_slot: control_slot.unwrap_or(0),
             quiet_frames: DEFAULT_QUIET_FRAMES,
             n_drive,
+            requested_fs_hz: None,
             reference_rate_hz: None,
             configured: false,
             actual_fs_hz: None,
@@ -543,6 +560,18 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// rate. Without it the gate has no claim to check.
     pub fn with_reference_rate_hz(mut self, hz: f64) -> Self {
         self.reference_rate_hz = Some(hz);
+        self
+    }
+
+    /// Ask the device for `hz` when the path comes up, rather than for the rate
+    /// the backend's caps state. It is also [`ReferencePlayer::fs_hz`], so the
+    /// service prepares the record at it, and the device must then program it:
+    /// a device that adopts another rate is refused at arm by the rate policy,
+    /// never re-gridded at the rate it runs at. Without it the request is the
+    /// caps rate, which on an NI station is the rate the task was built at, not
+    /// the rate the run asked (bench T0, 2026-11-08).
+    pub fn with_requested_rate_hz(mut self, hz: f64) -> Self {
+        self.requested_fs_hz = Some(hz);
         self
     }
 
@@ -753,9 +782,28 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// per-play cycle commits real drive before `start`, which satisfies the
     /// same driver rule with the record instead of with silence ("the first thing
     /// written after the clock starts must be real drive").
+    ///
+    /// **A refused bring-up leaves the station CLOSED.** Past `open()` every
+    /// refusal (the rate policy's, the width, the driver's) closes the backend
+    /// before it returns, so a refused run holds nothing open and the same arm
+    /// asked again meets the same refusal, not "already open".
     pub fn open_and_configure(&mut self) -> Result<(), TwrError> {
         self.backend.open().map_err(hal_err)?;
-        let fs = self.backend.caps().sample_rate_hz;
+        let up = self.configure_gate_and_park();
+        if up.is_err() {
+            self.configured = false;
+            let _ = self.backend.close();
+        }
+        up
+    }
+
+    /// [`BackendReferencePlayer::open_and_configure`] past `open()`.
+    fn configure_gate_and_park(&mut self) -> Result<(), TwrError> {
+        // THE REQUEST is the rate the run asked, the one the service prepared the
+        // record at: `fs_hz()`, never the caps rate on its own. The caps state the
+        // rate the backend was BUILT at, and asking for it is what ran bench T0 at
+        // 51 200 Hz for a run asked at 12 800 Hz.
+        let fs = ReferencePlayer::fs_hz(self);
         // The block is REQUESTED here and the backend's answer is what the play
         // actually runs at.
         let want_block = self
@@ -794,8 +842,10 @@ impl<B: Backend> BackendReferencePlayer<B> {
             // The reference RECORD is a sampled waveform, so it is genuinely
             // rate-bearing: playing it at a different rate rescales the whole
             // test in frequency. This is the module the rate policy exists for,
-            // so this arm is never `None` in a run - the service states it.
-            self.reference_rate_hz,
+            // so this arm is never `None` in a run - the service states it. A
+            // stated REQUEST is a claim too, for a caller with no record yet: a
+            // run that asked a rate and got another is refused, not re-gridded.
+            self.reference_rate_hz.or(self.requested_fs_hz),
             actual.actual_rate_hz,
         )
         .map_err(|reason| TwrError::State(format!("arm refused: {reason}")))?;
@@ -1223,8 +1273,11 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
         TwrPath::HostBackend
     }
 
+    /// The rate the run asked ([`BackendReferencePlayer::with_requested_rate_hz`]),
+    /// or the caps rate when none was stated.
     fn fs_hz(&self) -> f64 {
-        self.backend.caps().sample_rate_hz
+        self.requested_fs_hz
+            .unwrap_or_else(|| self.backend.caps().sample_rate_hz)
     }
 
     fn lag_provenance(&self) -> Option<LagSource> {

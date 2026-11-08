@@ -266,23 +266,17 @@ async fn a_misbehaving_twr_law_fails_a_good_one_is_recorded_and_an_unchecked_one
     assert_eq!(e["reason"], "law_not_checked", "{e}");
     c.ok("twr.configure", json!({"config": cfg(&good["law"]["id"])}))
         .await;
-    // The checked law passes the gate: the run arms on the hardware station, which
-    // opens as identification starts, and there the rig's missing driver ends the
-    // run before anything is driven.
-    let armed = c.ok("twr.arm", json!({})).await;
-    assert_eq!(
-        (armed["state"].as_str(), armed["source"].as_str()),
-        (Some("armed"), Some("HARDWARE")),
-        "{armed}"
+    // The checked law passes the gate to the station's own refusal: the station is
+    // brought up as the run arms (open, configure at the asked rate, the arm gate),
+    // and there the rig's missing driver refuses the arm before anything is driven.
+    let e = c.refused("twr.arm", json!({})).await;
+    assert_eq!(e["reason"], "arm_refused", "{e}");
+    assert!(
+        e["message"]
+            .as_str()
+            .is_some_and(|m| m.starts_with("The station refused to arm: ")),
+        "{e}"
     );
-    c.ok("twr.start", json!({})).await;
-    let i = c
-        .wait_for("the station's refusal", Duration::from_secs(30), |e| {
-            e.topic() == "twr.state" && e.data()["state"] == "finished"
-        })
-        .await;
-    let end = c.events[i].data()["end"].clone();
-    assert_eq!(end["outcome"], "fault", "{end}");
     assert_eq!(c.ok("twr.plays", json!({})).await["plays"], json!([]));
     c.ok("twr.clear", json!({})).await;
 

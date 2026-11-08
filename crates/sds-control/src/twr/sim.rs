@@ -190,6 +190,7 @@ impl TwrEngine for SimulatedEngine {
         self.level_db = cfg.levels_db.first().copied().unwrap_or(0.0);
         self.rung = Some(0);
         let record_len = prepared.grid.n;
+        let (section_start, section_len) = (prepared.grid.pad_pre, prepared.grid.section_len);
         self.prepared = Some(prepared);
         self.cfg = Some(cfg);
         self.log
@@ -197,6 +198,8 @@ impl TwrEngine for SimulatedEngine {
         Ok(ArmOutcome::Armed(Box::new(Armed {
             fs_hz: fs,
             record_len,
+            section_start,
+            section_len,
             station: StationRef {
                 kind: "sim",
                 class: "sim",
