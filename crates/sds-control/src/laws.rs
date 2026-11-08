@@ -444,73 +444,19 @@ pub fn twr_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
 /// The built-in TWR law's id.
 pub use hertzforge_twr_laws::DEFAULT_TWR_LAW_ID as TWR_BUILTIN_ID;
 
-#[allow(clippy::too_many_arguments)]
-fn number(
-    key: &str,
-    label: &str,
-    help: &str,
-    unit: &str,
-    min: f64,
-    max: f64,
-    step: f64,
-    default: f64,
-) -> ParamSpec {
-    ParamSpec {
-        key: key.into(),
-        label: label.into(),
-        help: help.into(),
-        kind: ParamKind::Number(hertzforge_law_host::NumberSpec {
-            unit: unit.into(),
-            min,
-            max,
-            step,
-            default,
-        }),
-    }
-}
-
-/// The built-in TWR law as a TWR configuration's checks see it, while the catalog
-/// does not list it: its identity and the parameters it is run with.
+/// The built-in TWR law as a TWR configuration's checks see it when the catalog
+/// cannot be opened: its identity and parameters from its own manifest (the
+/// catalog lists the same entry first).
 pub fn builtin_twr_facts() -> crate::shock::config::LawFacts {
+    let m = hertzforge_random_laws::twr_builtin_manifest();
     crate::shock::config::LawFacts {
         id: TWR_BUILTIN_ID.to_owned(),
-        name: "frequency-domain correction".into(),
-        version: "0.1.0".into(),
+        name: m.name.clone(),
+        version: m.version.clone(),
         sha256: String::new(),
         builtin: true,
         world: Ok(()),
-        params: vec![
-            number(
-                "beta",
-                "Correction gain",
-                "The fraction of each play's error corrected before the next play.",
-                "",
-                0.05,
-                1.0,
-                0.05,
-                0.5,
-            ),
-            number(
-                "max_db_per_iter",
-                "Largest rise per play",
-                "The most any one frequency of the drive may grow from one play to the next.",
-                "dB",
-                1.0,
-                9.0,
-                0.5,
-                6.0,
-            ),
-            number(
-                "initial_backoff_db",
-                "First play backoff",
-                "How far under the predicted drive the first play starts.",
-                "dB",
-                0.0,
-                12.0,
-                1.0,
-                0.0,
-            ),
-        ],
+        params: m.params.clone(),
     }
 }
 

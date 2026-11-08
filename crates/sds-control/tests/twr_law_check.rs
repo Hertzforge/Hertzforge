@@ -159,7 +159,6 @@ fn law_file(name: &str) -> PathBuf {
 static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the catalog's twr_correct, its factory and the check runner"]
 async fn the_built_in_twr_law_passes_every_case_and_is_not_recorded() {
     let _turn = ONE_CHECK.lock().await;
     let schema = Schema::load();
@@ -193,7 +192,6 @@ async fn the_built_in_twr_law_passes_every_case_and_is_not_recorded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the twr-single world in the law host, its guests and the check runner"]
 async fn a_misbehaving_twr_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
 ) {
     let _turn = ONE_CHECK.lock().await;
@@ -204,6 +202,7 @@ async fn a_misbehaving_twr_law_fails_a_good_one_is_recorded_and_an_unchecked_one
         Duration::from_secs(5),
     );
     o.twr_engine = None;
+    let data_root = o.data_root.clone();
     let addr = serve(Service::with_options(o)).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
@@ -267,11 +266,93 @@ async fn a_misbehaving_twr_law_fails_a_good_one_is_recorded_and_an_unchecked_one
     assert_eq!(e["reason"], "law_not_checked", "{e}");
     c.ok("twr.configure", json!({"config": cfg(&good["law"]["id"])}))
         .await;
+    // The checked law passes the gate: the run arms on the hardware station, which
+    // opens as identification starts, and there the rig's missing driver ends the
+    // run before anything is driven.
+    let armed = c.ok("twr.arm", json!({})).await;
+    assert_eq!(
+        (armed["state"].as_str(), armed["source"].as_str()),
+        (Some("armed"), Some("HARDWARE")),
+        "{armed}"
+    );
+    c.ok("twr.start", json!({})).await;
+    let i = c
+        .wait_for("the station's refusal", Duration::from_secs(30), |e| {
+            e.topic() == "twr.state" && e.data()["state"] == "finished"
+        })
+        .await;
+    let end = c.events[i].data()["end"].clone();
+    assert_eq!(end["outcome"], "fault", "{end}");
+    assert_eq!(c.ok("twr.plays", json!({})).await["plays"], json!([]));
+    c.ok("twr.clear", json!({})).await;
+
+    // A record of an earlier check: the same file, passed, but at a check the
+    // current one has replaced, is refused by name with both versions.
+    let sha = good["law"]["id"].as_str().unwrap().to_owned();
+    let record = data_root.join("laws").join(format!("{sha}.check.json"));
+    let mut r: Value = serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+    assert_eq!(r["tool_version"], "twr-check 1");
+    r["tool_version"] = json!("twr-check 0");
+    std::fs::write(&record, serde_json::to_vec(&r).unwrap()).unwrap();
+    drop(c);
+    let mut o = options(
+        FixedScanner(Ok(test_rig())),
+        0.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    );
+    o.twr_engine = None;
+    o.data_root = data_root.clone();
+    o.capture_root = Some(data_root.clone());
+    let addr = serve(Service::with_options(o)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let law = c.ok("laws.list", json!({"world": "twr"})).await["laws"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == sha)
+        .cloned()
+        .unwrap();
+    assert_eq!(law["check"]["hardware"], false, "{law}");
+    c.ok(
+        "station.select",
+        json!({"kind": "ni", "devices": ["TestRig9Mod1", "TestRig9Mod2"]}),
+    )
+    .await;
+    let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    c.ok(
+        "channels.set",
+        json!({"revision": rev, "channels": [
+            bound(1, "control", "TestRig9Mod1", "ai0"),
+            bound(2, "drive", "TestRig9Mod2", "ao0"),
+        ]}),
+    )
+    .await;
+    let sha_ref = c
+        .ok(
+            "twr.reference.import",
+            json!({"text": text, "fs_hz": 12800}),
+        )
+        .await["reference"]["sha256"]
+        .clone();
+    c.ok(
+        "twr.configure",
+        json!({"config": {"reference": {"sha256": sha_ref}, "control": {"law": {"id": sha}},
+                          "limits": {"drive_vpk_ceiling": 0.5}}}),
+    )
+    .await;
     let e = c.refused("twr.arm", json!({})).await;
-    assert!(
-        e["reason"] == "arm_refused" || e["reason"] == "ni_driver_unavailable",
+    assert_eq!(e["reason"], "law_not_checked", "{e}");
+    assert_eq!(
+        (
+            e["detail"]["tool_version"].as_str(),
+            e["detail"]["current"].as_str()
+        ),
+        (Some("twr-check 0"), Some("twr-check 1")),
         "{e}"
     );
+    let _ = std::fs::remove_dir_all(&data_root);
 }
 
 /// A fictional NI rig: one input module, one output module, no driver to open them.

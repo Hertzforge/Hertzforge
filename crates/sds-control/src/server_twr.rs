@@ -375,16 +375,41 @@ impl Service {
         let (facts, law) = self
             .with_catalog(move |cat| {
                 if let Some(entry) = cat.entry(&id) {
-                    if hardware && may_arm_on_hardware(&entry).is_err() {
-                        return Err(MethodError::named(
-                            ErrorCode::Refused,
-                            "law_not_checked",
-                            format!(
-                                "The control law \"{}\" has no passed check for this file; run \
-                                 laws.check on it before it drives hardware.",
-                                entry.identity.name
-                            ),
-                        ));
+                    if hardware {
+                        match may_arm_on_hardware(&entry) {
+                            Ok(()) => {}
+                            // Passed, but at a check the current one has replaced.
+                            Err(hertzforge_random_laws::ArmRefusal::CheckOutdated {
+                                tool_version,
+                                current,
+                            }) => {
+                                return Err(MethodError::named(
+                                    ErrorCode::Refused,
+                                    "law_not_checked",
+                                    format!(
+                                        "The control law \"{}\" passed {tool_version}, which \
+                                         {current} has replaced; run laws.check on it again before \
+                                         it drives hardware.",
+                                        entry.identity.name
+                                    ),
+                                )
+                                .with_detail(json!({
+                                    "tool_version": tool_version,
+                                    "current": current,
+                                })));
+                            }
+                            Err(_) => {
+                                return Err(MethodError::named(
+                                    ErrorCode::Refused,
+                                    "law_not_checked",
+                                    format!(
+                                        "The control law \"{}\" has no passed check for this \
+                                         file; run laws.check on it before it drives hardware.",
+                                        entry.identity.name
+                                    ),
+                                ));
+                            }
+                        }
                     }
                 }
                 let lf = laws::twr_lookup(Some(cat), &id).ok_or_else(|| {

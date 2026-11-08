@@ -653,7 +653,6 @@ fn the_subscription_parses_to_the_golden_result() {
 }
 
 #[test]
-#[ignore = "needs the TWR core: the catalog's built-in twr_correct entry"]
 fn the_twr_law_entry_is_the_golden_one() {
     let dir = scratch();
     let cat = hertzforge_random_laws::LawCatalog::open(&dir).unwrap();

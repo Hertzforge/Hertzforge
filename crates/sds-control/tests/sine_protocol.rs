@@ -275,7 +275,8 @@ async fn the_law_catalog_lists_the_sine_world_with_its_live_parameters() {
         .iter()
         .map(|l| l["world"].as_str().unwrap())
         .collect();
-    assert_eq!(worlds.last(), Some(&"sine"));
+    // Sine's built-in comes after every older world's, and TWR's after it.
+    assert_eq!(&worlds[worlds.len() - 2..], &["sine", "twr"]);
     assert!(all["laws"]
         .as_array()
         .unwrap()

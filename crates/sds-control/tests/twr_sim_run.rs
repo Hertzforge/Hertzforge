@@ -1,8 +1,8 @@
 //! TWR end to end through the wire on the controller's own service: the real
 //! `TwrService`, unpaced, on the control service's simulated station, through a
-//! loopback WebSocket client (the plan's sim-1 to sim-5 and sim-9). Judged on the
-//! service's own stamps (`t_s`, `start_frame`, `end.at_s`), never on when a frame
-//! arrived.
+//! loopback WebSocket client (the plan's sim-1 to sim-7 and sim-9; sim-8, the
+//! exclusion, is `twr_protocol.rs`'s). Judged on the service's own stamps (`t_s`,
+//! `start_frame`, `end.at_s`), never on when a frame arrived.
 
 mod support;
 
@@ -10,6 +10,7 @@ use hertzforge_station::StationBuildError;
 use sds_control::server::{Service, ServiceOptions};
 use sds_control::station::FixedScanner;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::time::Duration;
 use support::schema::Schema;
 use support::{options, serve, Client};
@@ -92,7 +93,6 @@ async fn wait_twr(c: &mut Client, what: &str, pred: impl Fn(&Value) -> bool) -> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the law seam under control and its guards"]
 async fn sim_1_an_auto_run_completes_with_every_level_gated() {
     let schema = Schema::load();
     let addr = serve(Service::with_options(opts(0.0, Duration::from_secs(30)))).await;
@@ -131,7 +131,6 @@ async fn sim_1_an_auto_run_completes_with_every_level_gated() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the law seam under control and its guards"]
 async fn sim_2_manual_verbs_then_a_stop_inside_a_play() {
     let addr = serve(Service::with_options(opts(1.0, Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -189,7 +188,6 @@ async fn sim_2_manual_verbs_then_a_stop_inside_a_play() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the law seam under control and its guards"]
 async fn sim_3_an_observer_aborts_inside_a_play_within_a_block() {
     let addr = serve(Service::with_options(opts(1.0, Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -210,7 +208,6 @@ async fn sim_3_an_observer_aborts_inside_a_play_within_a_block() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the predicted full-level drive at proceed"]
 async fn sim_4_a_ceiling_under_the_full_level_drive_ends_auto_and_refuses_manual() {
     let addr = serve(Service::with_options(opts(0.0, Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -244,7 +241,6 @@ async fn sim_4_a_ceiling_under_the_full_level_drive_ends_auto_and_refuses_manual
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the law seam under control and its guards"]
 async fn sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop() {
     let svc = Service::with_options(opts(1.0, Duration::from_millis(2000)));
     let addr = serve(svc.clone()).await;
@@ -277,7 +273,6 @@ async fn sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the TWR core: the review hold in the core"]
 async fn sim_9_a_drive_too_low_for_the_coherence_holds_until_reset() {
     let addr = serve(Service::with_options(opts(0.0, Duration::from_secs(30)))).await;
     let mut c = Client::connect(addr).await;
@@ -294,4 +289,139 @@ async fn sim_9_a_drive_too_low_for_the_coherence_holds_until_reset() {
         "coherence_hold"
     );
     assert_eq!(c.ok("twr.reset", json!({})).await["state"], "configured");
+}
+
+/// The law file `<name>.wasm` built by scripts/build_laws.sh.
+fn law_file(name: &str) -> String {
+    let file = format!("{name}.wasm");
+    let exe = std::env::current_exe().unwrap();
+    let p: PathBuf = exe
+        .ancestors()
+        .skip(1)
+        .take(4)
+        .map(|d| d.join("wasm32-wasip2").join("release").join(&file))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| panic!("{file} is not built; run scripts/build_laws.sh"));
+    p.display().to_string()
+}
+
+/// An AUTO run of `cfg` to its end: the end and the plays.
+async fn run_to_end(c: &mut Client, cfg: Value) -> (Value, Vec<Value>) {
+    c.ok("twr.configure", json!({"config": cfg})).await;
+    c.ok("twr.start", json!({})).await;
+    let end = wait_twr(c, "finished", |d| d["state"] == "finished").await;
+    let rows = c.ok("twr.plays", json!({})).await["plays"]
+        .as_array()
+        .unwrap()
+        .clone();
+    c.ok("twr.clear", json!({})).await;
+    c.events.clear();
+    (end, rows)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sim_6_a_law_past_its_budget_misses_three_times_then_the_run_ends() {
+    let addr = serve(Service::with_options(opts(0.0, Duration::from_secs(30)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sha = import(&mut c).await;
+    let law = c
+        .ok(
+            "laws.import",
+            json!({"path": law_file("law_fixture_twr_misbehave")}),
+        )
+        .await["law"]["id"]
+        .clone();
+    // No play can gate, so the law is called after every play: its first
+    // correction answers, every later one runs past the budget.
+    let mut cfg = config(&sha, "auto");
+    cfg["control"] = json!({"law": {"id": law, "params": {"mode": "sleep_after"}},
+                            "law_budget": 0.05, "law_misses": 3});
+    cfg["schedule"]["gate_pct"] = json!(0.001);
+    let (end, rows) = run_to_end(&mut c, cfg).await;
+    assert_eq!(end["end"]["outcome"], "law_fault", "{end}");
+    let trip = &end["end"]["trip"];
+    assert_eq!(
+        (trip["kind"].as_str(), trip["reason"].as_str()),
+        (Some("law_fault"), Some("over_budget")),
+        "{trip}"
+    );
+    assert_eq!(trip["consecutive"], 3, "{trip}");
+    // The seed's play, the answered correction's, then the drive in force
+    // replayed through the misses that left a play behind them.
+    let missed: Vec<&Value> = rows.iter().filter(|r| r["law"]["used"] == false).collect();
+    assert!(!missed.is_empty(), "{rows:?}");
+    for r in &missed {
+        assert_eq!(r["law"]["miss"], "over_budget", "{r}");
+        let i = r["index"].as_u64().unwrap() as usize;
+        let before = rows[i - 1]["drive_vpk"].as_f64().unwrap();
+        let now = r["drive_vpk"].as_f64().unwrap();
+        assert!(
+            (now - before).abs() <= 1e-9 * before,
+            "play {i} replays the drive in force: {before} then {now}"
+        );
+    }
+    assert!(rows.iter().all(|r| r["level_db"] == -12), "{rows:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sim_7_the_template_replicates_and_the_built_in_matches_its_law_file() {
+    let addr = serve(Service::with_options(opts(0.0, Duration::from_secs(30)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sha = import(&mut c).await;
+    let template = c
+        .ok(
+            "laws.import",
+            json!({"path": law_file("law_fixture_twr_template")}),
+        )
+        .await["law"]["id"]
+        .clone();
+    let mut cfg = config(&sha, "auto");
+    cfg["control"] = json!({"law": {"id": template}});
+    let (end, rows) = run_to_end(&mut c, cfg).await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    for level in [-12.0, -6.0, 0.0] {
+        assert!(
+            rows.iter()
+                .any(|r| r["level_db"] == level && r["gated"] == true && r["kind"] == "iteration"),
+            "{level} dB gated by the template"
+        );
+    }
+    assert!(rows
+        .iter()
+        .filter(|r| r["kind"] == "playback")
+        .all(|r| r["rms_error_pct"].as_f64().unwrap() <= 10.0));
+
+    // The built-in against the same law built as a file: one door, one outcome.
+    let file = c
+        .ok(
+            "laws.import",
+            json!({"path": law_file("hertzforge_law_twr_correct")}),
+        )
+        .await["law"]["id"]
+        .clone();
+    let params = json!({"beta": 0.5, "max_db_per_iter": 6, "initial_backoff_db": 6});
+    let mut native = config(&sha, "auto");
+    native["control"] = json!({"law": {"id": "twr_correct", "params": params}});
+    let mut wasm = native.clone();
+    wasm["control"]["law"]["id"] = file;
+    let (a_end, a) = run_to_end(&mut c, native).await;
+    let (b_end, b) = run_to_end(&mut c, wasm).await;
+    assert_eq!(a_end["end"]["outcome"], b_end["end"]["outcome"]);
+    assert_eq!(a.len(), b.len(), "the same play count");
+    assert!(
+        a.iter().any(|r| r["law"]["used"] == true),
+        "the backoff makes the law correct: {a:?}"
+    );
+    for (x, y) in a.iter().zip(&b) {
+        for key in ["drive_vpk", "rms_error_pct", "response_peak"] {
+            let (p, q) = (x[key].as_f64().unwrap(), y[key].as_f64().unwrap());
+            assert!(
+                (p - q).abs() <= 1e-9 * p.abs().max(1e-12),
+                "play {}: {key} {p} against {q}",
+                x["index"]
+            );
+        }
+    }
 }

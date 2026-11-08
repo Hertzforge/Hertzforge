@@ -890,7 +890,7 @@ plain words: it never names a protocol method.
 | `adjust_refused` | `refused` | `sine.adjust` of a parameter that is not one of the law's live parameters, or out of its range, or that the law refused | `key`, `why` (`unknown_key`, `not_live`, `out_of_range` or `law_refused`) |
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
-| `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm`, `sine.arm` or `twr.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
+| `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm`, `sine.arm` or `twr.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared), or for `twr.arm` a passed check of an earlier check version; run `laws.check` first | `twr.arm` with an earlier check: `tool_version`, `current` |
 | `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, and `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
@@ -3174,8 +3174,10 @@ warnings `reference_resampled`.
   checks feasibility. Nothing is driven. A section over a feasibility ceiling is refused
   `feasibility_exceeded` and the state becomes `blocked`; `twr.arm` with a non-empty
   `override_ack` arms past it (`override_not_needed` when nothing blocks). An imported law without
-  a passed check for its exact file is refused `law_not_checked` on a hardware station. The
-  station's own refusals are Random's. The station is opened, its rate adopted and its arm gate
+  a passed check for its exact file is refused `law_not_checked` on a hardware station, as is one
+  whose passed check is of an earlier check version than the one in force (its `detail` names
+  both: `{"tool_version","current"}`). The station's own refusals are Random's. The station is
+  opened, its rate adopted and its arm gate
   passed as identification starts; a gate that refuses ends the run `fault` before anything is
   driven.
 - **`twr.start`** from `configured` arms first. It runs identification (`phase` `sysid`): the
@@ -3196,8 +3198,10 @@ warnings `reference_resampled`.
   tapers the outer half of each pad to zero so the play starts and ends at rest, and refuses a
   drive over the ceiling. It plays the whole record; each block is checked as it arrives against
   the abort band, and the debounce count outside it cancels the play with the station's own stop
-  (`aborted`, `envelope`, `in_play: true`). After the play the response is aligned at the run's
-  lag, and the play's own lag is fitted from its phase against the drive on the trusted bins: a
+  (`aborted`, `envelope`, `in_play: true`; the play has no row). After the play the response is
+  aligned at the run's lag, and the play's own lag is fitted by cross-correlating the response
+  with the response the identified plant predicts to the drive as played, on the trusted bins,
+  within 16 frames either way: a
   drift over `alignment_frames` ends the run (`aborted`, `alignment`) before any correction from
   that play. Then the play is judged (the metrics, the envelope, the response rms) and gated at
   its level.
@@ -3310,8 +3314,9 @@ clock. The safe stop's countdown (`orphan_s`) is the only number timed by the se
 | `fault` | The run or the station failed, or the delivery path returned no response to judge; `message` is the controller's words |
 
 `trip` is null unless `outcome` is `aborted`, `not_converged` or `law_fault`; it has `kind`,
-`play` (the row the trip judged; null at identification and when a drive was refused before it
-played), `at_level_db` and its kind's facts. `predicted: true` marks a trip found on a prediction
+`play` (the row the trip judged, or for a play the in-play envelope check cut short the index it
+would have had; null at identification and when a drive was refused before it played),
+`at_level_db` and its kind's facts. `predicted: true` marks a trip found on a prediction
 before a play, so nothing was driven for it. A law whose first drive is refused ends
 `law_fault` with the reason `first_drive`.
 
@@ -3363,9 +3368,10 @@ row is still in `twr.plays`.
   null until the run's alignment check has measured them.
 - `start_frame` is the station frame the play started at and `frames` the frames the station
   clocked for it (the record and its rest pad); `at_s` its start in station time.
-- A play that was played and measured has a row, the one a response check ended the run on
-  included (not gated). A drive refused before it played, and a play a stop or an abort
-  cancelled, have none; the cancelled play's frames still count in station time.
+- A play that was played and measured has a row, the one a response check after the play ended
+  the run on included (not gated). A drive refused before it played, a play the in-play envelope
+  check cut short, and a play a stop or an abort cancelled, have none; their frames still count in
+  station time.
 - `law` is the call that produced the drive this play played (`used` false and `miss` the reason
   when the drive in force was replayed after a miss): its time, the peak and worst bin rise it
   asked for over the drive before it, dB, its predicted peak over the level target's, and the

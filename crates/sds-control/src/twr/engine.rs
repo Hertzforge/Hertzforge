@@ -12,8 +12,8 @@
 use super::config::{excitation_name, WireTwr};
 use super::reference::Stored;
 use super::view::{
-    IdentFacts, IdentFigures, MaskFigures, PlayRecords, PlayRow, Prediction, Spectra, StationRef,
-    Trip, TripFacts,
+    IdentFacts, IdentFigures, LawCall, MaskFigures, PlayRecords, PlayRow, Prediction, Spectra,
+    StationRef, Trip, TripFacts,
 };
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::pulse::observe::{Observed, Watch};
@@ -611,7 +611,15 @@ pub fn row_of(p: &hertzforge_twr::PlayRow) -> PlayRow {
         start_frame: p.start_frame,
         frames: p.frames,
         at_s: p.at_s,
-        law: None,
+        law: p.law.as_ref().map(|c| LawCall {
+            used: c.used,
+            miss: c.miss.as_ref().map(|f| f.reason()),
+            call_ms: c.call_ms,
+            peak_rise_db: c.peak_rise_db,
+            bin_rise_db: c.bin_rise_db,
+            predicted_peak_ratio: c.predicted_peak_ratio,
+            values: c.values.iter().map(|v| (v.key.clone(), v.value)).collect(),
+        }),
     }
 }
 
@@ -771,8 +779,18 @@ impl TwrEngine for ServiceEngine {
     }
 
     fn proceed(&mut self) -> Result<Proceeded, MethodError> {
-        // The core seeds its drive at the end of identification today; once it
-        // holds at review itself, this is where the law is built and seeded.
+        // Under a law the core holds at its review after a passing
+        // identification; proceeding builds the law and seeds it there, and in
+        // AUTO checks the full level's predicted drive against the ceiling.
+        if self.svc()?.state() == TwrState::Review {
+            let r = self.svc()?.proceed();
+            self.forward_log();
+            if let Err(e) = r {
+                if self.ended().is_none() {
+                    return Err(fault(e));
+                }
+            }
+        }
         if let Some(end) = self.ended() {
             return Ok(Proceeded::Ended(end));
         }
@@ -893,10 +911,13 @@ impl TwrEngine for ServiceEngine {
         }
     }
 
-    fn predicted_vpk_at(&self, _level_db: f64) -> Option<f64> {
-        // The drive in force is the core's; until it states its peak, there is no
-        // prediction to give.
-        None
+    fn predicted_vpk_at(&self, level_db: f64) -> Option<f64> {
+        // The core states the drive in force at the present level; another level
+        // carries it by the exact ratio, as the core's level moves do.
+        let svc = self.svc.as_ref()?;
+        let now = svc.status().level_db;
+        svc.drive_in_force_vpk()
+            .map(|v| v * 10f64.powf((level_db - now) / 20.0))
     }
 
     fn freeze(&mut self, frozen: bool) {
@@ -1020,7 +1041,7 @@ impl TwrEngine for ServiceEngine {
     }
 
     fn misses(&self) -> u32 {
-        0
+        self.svc.as_ref().map_or(0, |s| s.law_misses_in_a_row())
     }
 
     fn frames_clocked(&self) -> u64 {
