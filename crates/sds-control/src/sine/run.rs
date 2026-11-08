@@ -724,6 +724,22 @@ impl Actor {
             return;
         }
         self.identification = self.identification_figures();
+        // The review hold is where the identification is read, before the tone
+        // runs: the figures the views are drawn from carry it from here on.
+        let mut figures = self
+            .view
+            .figures
+            .as_deref()
+            .cloned()
+            .unwrap_or_else(|| Figures {
+                against_time: matches!(
+                    self.plan.config.test,
+                    WireTest::Dwell { .. } | WireTest::Rstd { .. }
+                ),
+                ..Figures::default()
+            });
+        figures.identification = self.identification.clone();
+        self.view.figures = Some(Arc::new(figures));
         self.set(State::Running, "coherence_gate");
         self.publish();
         let Some(svc) = self.svc.as_mut() else { return };
