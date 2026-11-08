@@ -99,6 +99,12 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // and check of a law (`hertzforge-sine-laws`), which runs a check case on the
     // backend it is handed and names none. Written here, so on LAW_CRATES.
     "hertzforge-sine-laws",
+    // The TWR laws, reviewed 2026-11-08 as the Sine and shock law crates were: the
+    // choice and check of a law (`hertzforge-twr-laws`), which runs a check case on
+    // the backend it is handed and names none. Its `[dependencies]` are
+    // `hertzforge-twr`, `hertzforge-random-laws` and `hertzforge-hal`, all on this
+    // list. Written here, so on LAW_CRATES.
+    "hertzforge-twr-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -179,7 +185,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// `srs-template` host fixtures. So was the Sine set (2026-11-08): the choice and
 /// check of a law (`hertzforge-sine-laws`, written with the contracts), and, before
 /// they exist, the `sine-servo` law file and the `sine-misbehave` and
-/// `sine-template` host fixtures.
+/// `sine-template` host fixtures. So was the TWR set (2026-11-08): the choice and
+/// check of a law (`hertzforge-twr-laws`, written with the contracts), and, before
+/// they exist, the `twr-correct` law file and the `twr-misbehave` and
+/// `twr-template` host fixtures.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
@@ -195,11 +204,13 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-shock-fdc",
     "hertzforge-law-shock-srs-ratio",
     "hertzforge-law-sine-servo",
+    "hertzforge-law-twr-correct",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
     "hertzforge-shock-law-math",
     "hertzforge-shock-laws",
     "hertzforge-sine-laws",
+    "hertzforge-twr-laws",
     "law-fixture-bad-manifest",
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
@@ -209,6 +220,8 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-sine-template",
     "law-fixture-srs-misbehave",
     "law-fixture-srs-template",
+    "law-fixture-twr-misbehave",
+    "law-fixture-twr-template",
 ];
 
 struct Package {

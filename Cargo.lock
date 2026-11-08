@@ -1483,6 +1483,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-twr-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-random-laws",
+ "hertzforge-shock-common",
+ "hertzforge-twr",
+]
+
+[[package]]
 name = "hound"
 version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2367,6 +2378,7 @@ dependencies = [
  "hertzforge-srs",
  "hertzforge-station",
  "hertzforge-twr",
+ "hertzforge-twr-laws",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
