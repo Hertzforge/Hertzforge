@@ -141,15 +141,29 @@ pub struct Step {
 }
 
 /// The law's state for one run.
-// The seed and the update read the grids and the identified gains; until they
-// are written nothing does.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SrsRatio {
     params: SrsRatioParams,
     band_hz: Vec<f64>,
     component_hz: Vec<f64>,
+    /// For each component, the band nearest its frequency.
+    nearest: Vec<usize>,
     component_gain: Option<Vec<f64>>,
+}
+
+/// The index of the band in `band_hz` nearest `f_hz` (the first on a tie; 0
+/// for an empty grid).
+pub fn nearest_band(band_hz: &[f64], f_hz: f64) -> usize {
+    let mut best = 0usize;
+    let mut best_d = f64::INFINITY;
+    for (i, &fb) in band_hz.iter().enumerate() {
+        let d = (fb - f_hz).abs();
+        if d < best_d {
+            best_d = d;
+            best = i;
+        }
+    }
+    best
 }
 
 impl SrsRatio {
@@ -177,11 +191,27 @@ impl SrsRatio {
                     component_hz.len()
                 ));
             }
+            if let Some(j) = h.iter().position(|&g| !(g.is_finite() && g > 0.0)) {
+                return Err(format!(
+                    "the identified gain at component {j} is {}; it must be above zero",
+                    h[j]
+                ));
+            }
+        }
+        if !(params.max_db_per_pulse.is_finite() && params.max_db_per_pulse > 0.0) {
+            return Err(format!(
+                "max_db_per_pulse is {}; it must be above zero",
+                params.max_db_per_pulse
+            ));
         }
         Ok(SrsRatio {
             params,
             band_hz: band_hz.to_vec(),
             component_hz: component_hz.to_vec(),
+            nearest: component_hz
+                .iter()
+                .map(|&f| nearest_band(band_hz, f))
+                .collect(),
             component_gain: component_gain.map(<[f64]>::to_vec),
         })
     }
@@ -196,13 +226,24 @@ impl SrsRatio {
         self.component_hz.len()
     }
 
-    /// The starting gains, before any pulse has fired.
+    /// The starting gains, before any pulse has fired: `1 / |H(fc)|` per
+    /// component, or 1 where the run identified nothing.
     pub fn seed(&mut self) -> Result<Step, String> {
-        Err("the SRS ratio law is not built yet".into())
+        let gains = match &self.component_gain {
+            Some(h) => h.iter().map(|&g| 1.0 / g).collect(),
+            None => vec![1.0; self.component_hz.len()],
+        };
+        Ok(Step {
+            gains,
+            report: StepReport::default(),
+        })
     }
 
     /// The next gains, from the `target` at the scale the last pulse was
-    /// commanded at and the last pulse's `measured` SRS, both on the band grid.
+    /// commanded at and the last pulse's `measured` SRS, both on the band grid:
+    /// per component, the target over the measured response at its nearest
+    /// band, held at 1 where either is not above zero, clamped to
+    /// `max_db_per_pulse` either way.
     pub fn iterate(&mut self, target: &[f64], measured: &[f64]) -> Result<Step, String> {
         let bands = self.band_hz.len();
         if target.len() != bands || measured.len() != bands {
@@ -212,7 +253,46 @@ impl SrsRatio {
                 measured.len()
             ));
         }
-        Err("the SRS ratio law is not built yet".into())
+        let max_lin = 10.0_f64.powf(self.params.max_db_per_pulse / 20.0);
+        let min_lin = 1.0 / max_lin;
+        let mut clamped = 0usize;
+        let gains = self
+            .nearest
+            .iter()
+            .map(|&b| {
+                let (tgt, meas) = (target[b], measured[b]);
+                // No trusted ratio on a dead band: hold.
+                let ratio = if meas > 0.0 && tgt > 0.0 {
+                    tgt / meas
+                } else {
+                    1.0
+                };
+                let g = ratio.clamp(min_lin, max_lin);
+                if (g - ratio).abs() > 1e-12 {
+                    clamped += 1;
+                }
+                g
+            })
+            .collect();
+        // The band furthest from its target.
+        let mut worst: Option<(f64, usize)> = None;
+        for b in 0..bands {
+            let (tgt, meas) = (target[b], measured[b]);
+            if tgt > 0.0 && meas > 0.0 {
+                let db = 20.0 * (meas / tgt).log10();
+                if worst.is_none_or(|(w, _)| db.abs() > w.abs()) {
+                    worst = Some((db, b));
+                }
+            }
+        }
+        Ok(Step {
+            gains,
+            report: StepReport {
+                worst_band_error_db: worst.map_or(0.0, |(db, _)| db),
+                worst_band_hz: worst.map_or(0.0, |(_, b)| self.band_hz[b]),
+                clamped_components: clamped,
+            },
+        })
     }
 }
 
@@ -240,24 +320,59 @@ mod tests {
     }
 
     #[test]
-    fn new_refuses_mismatched_grids_and_the_unbuilt_calls_say_so() {
+    fn new_refuses_mismatched_grids_and_unusable_gains() {
         let bands = [100.0, 125.0, 160.0];
         let comps = [100.0, 160.0];
         let p = SrsRatioParams::default();
         assert!(SrsRatio::new(p, &[], &comps, None).is_err());
         assert!(SrsRatio::new(p, &bands, &[], None).is_err());
         assert!(SrsRatio::new(p, &bands, &comps, Some(&[1.0])).is_err());
+        assert!(SrsRatio::new(p, &bands, &comps, Some(&[1.0, 0.0])).is_err());
+        assert!(SrsRatio::new(p, &bands, &comps, Some(&[1.0, f64::NAN])).is_err());
+        let zero = SrsRatioParams {
+            max_db_per_pulse: 0.0,
+        };
+        assert!(SrsRatio::new(zero, &bands, &comps, None).is_err());
         let mut law = SrsRatio::new(p, &bands, &comps, Some(&[1.0, 2.0])).unwrap();
         assert_eq!(law.components(), 2);
-        assert!(law.seed().unwrap_err().contains("not built"));
         assert!(law
             .iterate(&[1.0; 2], &[1.0; 3])
             .unwrap_err()
             .contains("bands"));
-        assert!(law
-            .iterate(&[1.0; 3], &[1.0; 3])
-            .unwrap_err()
-            .contains("not built"));
+    }
+
+    #[test]
+    fn the_seed_inverts_the_identified_gain_or_holds_without_one() {
+        let bands = [100.0, 125.0, 160.0];
+        let comps = [100.0, 130.0, 160.0];
+        let p = SrsRatioParams::default();
+        let mut law = SrsRatio::new(p, &bands, &comps, Some(&[0.5, 2.0, 4.0])).unwrap();
+        let s = law.seed().unwrap();
+        assert_eq!(s.gains, vec![2.0, 0.5, 0.25]);
+        assert_eq!(s.report, StepReport::default());
+        let mut blind = SrsRatio::new(p, &bands, &comps, None).unwrap();
+        assert_eq!(blind.seed().unwrap().gains, vec![1.0; 3]);
+    }
+
+    #[test]
+    fn each_component_follows_its_nearest_band_clamped_and_a_dead_band_holds() {
+        let bands = [100.0, 200.0, 400.0];
+        // 130 Hz is nearest 100; 310 nearest 400; 205 nearest 200.
+        let comps = [130.0, 205.0, 310.0];
+        let p = SrsRatioParams::default(); // 3 dB
+        let mut law = SrsRatio::new(p, &bands, &comps, None).unwrap();
+        let target = [10.0, 10.0, 10.0];
+        // Band 0 reads 1 dB low; band 1 reads 10 dB high (clamped to -3 dB);
+        // band 2 is dead.
+        let measured = [10.0 * 10f64.powf(-1.0 / 20.0), 10.0 * 10f64.powf(0.5), 0.0];
+        let s = law.iterate(&target, &measured).unwrap();
+        assert!((s.gains[0] - 10f64.powf(1.0 / 20.0)).abs() < 1e-12);
+        assert!((s.gains[1] - 10f64.powf(-3.0 / 20.0)).abs() < 1e-12);
+        assert_eq!(s.gains[2], 1.0, "a dead band holds");
+        assert_eq!(s.report.clamped_components, 1);
+        assert!((s.report.worst_band_error_db - 10.0).abs() < 1e-9);
+        assert_eq!(s.report.worst_band_hz, 200.0);
+        assert_eq!(nearest_band(&bands, 150.0), 0, "a tie goes to the first");
     }
 
     #[test]

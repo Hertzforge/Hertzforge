@@ -1404,6 +1404,7 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-shaker-db",
  "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
  "serde",
  "serde_json",
 ]
