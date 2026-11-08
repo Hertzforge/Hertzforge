@@ -40,3 +40,5 @@ serde_json = "1"
 [dev-dependencies]
 # The Sim plant the acceptance test converges against.
 hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+# The recorded trace hashes each play's drive record.
+sha2 = "0.10"
