@@ -323,13 +323,14 @@ pub enum TwrCaseEnd {
     /// The core's divergence judgement ended it.
     Divergence,
     /// A protection aborted it; the trip kind's wire name (`envelope`,
-    /// `drive_vpk`, `alignment`, ...).
+    /// `drive_vpk`, `alignment`, `coverage`, ...).
     Aborted(String),
     /// The law's misses, or a refused first drive, ended it; the reason's wire
     /// name.
     LawFault(String),
-    /// The identification held the run: its coherence, or the trust mask's
-    /// coverage of the reference.
+    /// The coherence hold held the run after identification (its coherence,
+    /// or a correlation with no peak). The trust mask's coverage floor ends a
+    /// run [`TwrCaseEnd::Aborted`] with the trip `coverage`.
     Held,
     /// The run failed; the controller's words.
     Fault(String),
