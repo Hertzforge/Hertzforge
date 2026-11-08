@@ -325,6 +325,7 @@ fn running() -> SineView {
         ("servo_step_db".into(), 0.015625),
         ("prediction_step_db".into(), 0.0078125),
         ("total_step_db".into(), 0.0234375),
+        ("servo_level_db".into(), -12.5),
     ];
     v.law = Some(law);
     v.feasibility = Some(("pass", "The profile is within the shaker's ratings.".into()));
@@ -530,6 +531,7 @@ fn measured_case(
         budget_ms: 2.5,
         max_drive_vpk: vpk,
         drive_ceiling_vpk: 10.0,
+        worst_rise_db: 0.5,
     };
     let v = CheckCase {
         name: case.name().into(),

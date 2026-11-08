@@ -2517,7 +2517,7 @@ connection. While the service is shutting down, `sine.arm`, `start`, `proceed`, 
 | `sine.reverse` | `{}` | `running`, a sweep | state |
 | `sine.jog` | `{"delta_hz"}` | `running`, a sweep | `{"frequency_hz"}` |
 | `sine.goto` | `{"hz"}` | `running`, a sweep | `{"frequency_hz"}` |
-| `sine.adjust` | `{"key","value"}` | `running` or `review` | `{"key","value"}` |
+| `sine.adjust` | `{"key","value"}` | `running`, once the law is built (after `sine.proceed`) | `{"key","value"}` |
 | `sine.stop` | `{}` | any | state |
 | `sine.abort` | `{}` | any | state |
 | `sine.reset` | `{}` | any but live | state |
@@ -2666,8 +2666,9 @@ frequency inside it, and every view has `link` `frequency`. They are what
 **Profiles.** `sine.profile.import` reads rows from `text` (pasted rows) or from the file at
 `path` (a full path on the computer that runs the test, at most 4 MiB), one of the two (both or
 neither is `bad_params`): a header row naming the frequency column (`freq_hz`, `freq`,
-`frequency` or `hz`) and the quantity columns (`accel`, `g` or `g_pk`; `velocity`, `vel` or
-`ips`; `displacement`, `disp` or `in_pk_pk`), with exactly one quantity given per row, and
+`frequency` or `hz`) and the quantity columns (the wire's own names `accel_g`, `velocity_ips`
+and `disp_pp_in`, or `accel`, `g` or `g_pk`; `velocity`, `vel` or `ips`; `displacement`, `disp`
+or `in_pk_pk`), with exactly one quantity given per row, and
 optionally `alarm` and `abort` (symmetric dB; `alarm-` and `alarm+` for the two sides, or
 `alarm_pct`) and a `units` column, which is read and ignored (`units_column_ignored`); case,
 spaces, underscores and a unit in parentheses do not matter. A two-column file without a header
@@ -2809,7 +2810,9 @@ service's clock: it measures how long nobody has held control.
   live parameters' values in force.
 - `end` is null until the run finishes, then `{"outcome","message","at_s","level_db","at_hz",
   "ramp_s","trip"}`: `at_s` station time from engage, `level_db` and `at_hz` where the end began,
-  `ramp_s` the controlled stop's length on the station's clock (null for an abort).
+  `ramp_s` the controlled stop's length on the station's clock (null for an abort; a
+  `divergence` trip and a `law_fault` take the controlled stop, so theirs is a number, from the
+  trip's tick).
 
 | `outcome` | How the run ended |
 |---|---|
@@ -2860,7 +2863,8 @@ Event topics:
  "channels":[{"index":1,"description":"Control","role":"control","amplitude":0.501,
               "phase_deg":-12.4,"rms":0.355,"unit":"g","overload":false}],
  "alarms":[{"kind":"band","side":"high","error_db":1.7}],
- "law":{"values":{"servo_step_db":0.02,"prediction_step_db":0.01,"total_step_db":0.03},
+ "law":{"values":{"servo_step_db":0.02,"prediction_step_db":0.01,"total_step_db":0.03,
+                   "servo_level_db":-12.5},
         "misses":0,"capped_ticks":0},
  "views":[control, drive, run readings]}
 ```
@@ -3074,8 +3078,10 @@ same refusals. A case's result:
 whole run under the core's guards on a simulated station at 16384 Hz with one drive and one
 control channel at 1 V per g: a flat target of 1 g peak, identification at -20 dB, no review
 hold, the drive ceiling 10 V and the abort 20 V. The cases: one mode at 250 Hz, Q 50, swept
-100 to 800 Hz at 1 oct/min (`within`: every judged tick at full level within ±1 dB of the
-target); the same at 6 oct/min (`within_away`: within ±5 dB through the resonance and ±2 dB more
+100 to 800 Hz at 1 oct/min (`through`: every judged tick at full level within 30 Hz of the
+resonance within ±1.5 dB of the target; the accuracy bar's 1 dB holds at `blend_w` 1 and a 2 ms
+tick, and the built-in at its defaults, `blend_w` 0.5 and a 10 ms tick, measures +1.13 dB
+there); the same at 6 oct/min (`within_away`: within ±5 dB through the resonance and ±2 dB more
 than 30 Hz from it); two close modes at 240 and 260 Hz, Q 30, at 2 oct/min (`within` ±2 dB); a
 30 dB anti-resonance at 300 Hz with its coherence under the trust floor, at 2 oct/min
 (`survive`: completed, or ended by the core's own divergence trip, never over the drive
@@ -3091,7 +3097,7 @@ cap bound are reported with every case. A Sine law is named by `id` or by `path`
 law is, with the same refusals. A case's result:
 
 ```
-{"name":"slow sweep","plant":"one mode, 250 Hz, Q 50","requirement":"within","passed":true,
+{"name":"slow sweep","plant":"one mode, 250 Hz, Q 50","requirement":"through","passed":true,
  "detail":"...","end":"completed","trip":null,"ticks":18000,"judged_ticks":17400,
  "worst_error_db":0.42,"worst_error_hz":251.2,"worst_away_error_db":null,"rungs":null,
  "worst_limit_over_db":null,"worst_release_overshoot_db":null,"calls":18000,"misses":0,

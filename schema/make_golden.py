@@ -1861,7 +1861,7 @@ SINE_CHANNELS = [
 ]
 
 SINE_LAW_LIVE = {'values': {'servo_step_db': 0.015625, 'prediction_step_db': 0.0078125,
-                            'total_step_db': 0.0234375},
+                            'total_step_db': 0.0234375, 'servo_level_db': -12.5},
                  'misses': 0, 'capped_ticks': 2}
 
 SINE_HEAD = {
@@ -1929,6 +1929,7 @@ SINE_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
     {'label': 'Servo step', 'value': 0.015625, 'unit': 'dB', 'status': 'info'},
     {'label': 'Prediction step', 'value': 0.0078125, 'unit': 'dB', 'status': 'info'},
     {'label': 'Total step', 'value': 0.0234375, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Servo level', 'value': -12.5, 'unit': 'dB', 'status': 'info'},
     {'label': 'Unusable calls in a row', 'value': 0, 'unit': None, 'status': 'pass'},
     {'label': 'Ticks a cap bound', 'value': 2, 'unit': None, 'status': 'info'},
 ]}
@@ -2076,6 +2077,10 @@ LAW_SERVO_BLEND = {
          'help': "The prediction's part of the last tick's change.", 'layout': None},
         {'key': 'total_step_db', 'label': 'Total step', 'unit': 'dB',
          'help': "The change the law asked for on the last tick, before the controller's caps.",
+         'layout': None},
+        {'key': 'servo_level_db', 'label': 'Servo level', 'unit': 'dB',
+         'help': "The servo's own drive level after the last tick, in dB relative to one drive "
+                 'unit.',
          'layout': None}],
     'shapes': None, 'needs': None, 'live': ['blend_w'],
 }
@@ -2094,7 +2099,7 @@ def _sine_case(name, plant, requirement, *, ticks, judged, worst, worst_hz, away
 
 
 SINE_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'sine-check 1', 'cases': [
-    _sine_case('slow sweep', 'one mode, 250 Hz, Q 50', 'within', ticks=18000, judged=17400,
+    _sine_case('slow sweep', 'one mode, 250 Hz, Q 50', 'through', ticks=18000, judged=17400,
                worst=0.42, worst_hz=251.25, vpk=0.41),
     _sine_case('fast sweep', 'one mode, 250 Hz, Q 50', 'within_away', ticks=3000, judged=2900,
                worst=3.5, worst_hz=249.5, away=0.75, vpk=0.43),

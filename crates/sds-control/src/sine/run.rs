@@ -34,6 +34,7 @@ use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_sine::service::report::EventKind;
+use hertzforge_sine::service::AdjustRefusal;
 use hertzforge_sine::{
     RunMode, RunState, ServiceError, SineDisplay, SineLawFactory, SineService, SineStatus,
     SweepRate, TripKind, TripRecord,
@@ -240,11 +241,6 @@ pub struct RunPlan {
     pub capture_root: Option<PathBuf>,
     /// The orphan timeout, for the safe stop's message.
     pub timeout_s: f64,
-    /// Build the controller's configuration without the law seam's two fields
-    /// (the guards and the tick in seconds): the controller as it was before the
-    /// seam. Only this module's own tests set it.
-    #[cfg(test)]
-    pub legacy_core: bool,
 }
 
 /// The run thread's state.
@@ -563,26 +559,12 @@ impl Actor {
 
     /// The controller's configuration for the station's table.
     fn controller_config(&self, table: &ChannelTable) -> hertzforge_sine::SineTestConfig {
-        #[allow(unused_mut)]
-        let mut cfg = self.plan.config.build(table, &self.plan.law);
-        #[cfg(test)]
-        if self.plan.legacy_core {
-            cfg.law_guards = None;
-            cfg.control_tick_s = None;
-        }
-        cfg
+        self.plan.config.build(table, &self.plan.law)
     }
 
     /// Feasibility, the station and the arm gate. Nothing is driven.
     fn arm(&mut self, ack: Option<String>, ctx: ArmContext) -> Result<(), MethodError> {
-        #[cfg(test)]
-        let law = if self.plan.legacy_core {
-            None
-        } else {
-            Some(ctx.law?)
-        };
-        #[cfg(not(test))]
-        let law = Some(ctx.law?);
+        let law = ctx.law?;
         let cfg = self.controller_config(&ctx.table);
         let table = ctx.table.clone();
         let station = station::build(&ctx.station, &*ctx.scanner)?;
@@ -628,10 +610,7 @@ impl Actor {
                 self.plan.config.fs_hz(),
             ))
         };
-        let mut svc = match law {
-            Some(f) => svc.with_law_factory(f),
-            None => svc,
-        };
+        let mut svc = svc.with_law_factory(law);
         svc.set_run_mode(self.view.mode)
             .map_err(|e| arm_refused(e.to_string()))?;
         if let Ok(mut c) = self.shared.sysid_cancel.lock() {
@@ -1503,12 +1482,25 @@ impl Actor {
                 format!("{}'s {} {why}", facts.name, spec.label),
             ));
         }
+        let view = &self.view;
         let svc = self
             .svc
-            .as_ref()
-            .ok_or_else(|| wrong_state(&self.view, "Adjusting a law parameter"))?;
-        adjust_core(svc, facts, key, value)
-            .map_err(|why| adjust_refused(key, "law_refused", why))?;
+            .as_mut()
+            .ok_or_else(|| wrong_state(view, "Adjusting a law parameter"))?;
+        let value = match svc.adjust(key, value) {
+            Ok(v) => v,
+            // The law is built at proceed: before it there is nothing to change.
+            Err(AdjustRefusal::NotEngaged) => {
+                return Err(wrong_state(view, "Adjusting a law parameter"))
+            }
+            Err(r) => {
+                return Err(adjust_refused(
+                    key,
+                    r.why(),
+                    format!("{}'s {}: {r}.", facts.name, spec.label),
+                ))
+            }
+        };
         if let Some(l) = self.view.law.as_mut() {
             match l.live.iter_mut().find(|(k, _)| k == key) {
                 Some(slot) => slot.1 = value,
@@ -1603,11 +1595,24 @@ impl Actor {
         let trip = svc.trip().cloned();
         let t_end = svc.live_status().t_s;
         match (state, trip) {
-            (RunState::Stopped, Some(t)) if matches!(t.kind, TripKind::LawFault { .. }) => {
+            // The law's own ends (a fault, or the change cap bound too long) take the
+            // controlled stop: the ramp ran from the trip's tick to the end.
+            (RunState::Stopped | RunState::Aborted, Some(t))
+                if matches!(
+                    t.kind,
+                    TripKind::LawFault { .. } | TripKind::Divergence { .. }
+                ) =>
+            {
                 let (json, message) = trip_facts(&t, &self.view.control_unit);
                 self.shared.add_log("trip", message.clone());
-                let ramp = self.stop_at_t.map(|s| (t_end - s).max(0.0));
-                self.end("law_fault", "stopped", Some(json), Some(message), ramp);
+                let t_trip = t.at_tick as f64 * self.view.grid.tick_s();
+                let ramp = Some((t_end - t_trip).max(0.0));
+                let outcome = if matches!(t.kind, TripKind::LawFault { .. }) {
+                    "law_fault"
+                } else {
+                    "aborted"
+                };
+                self.end(outcome, "stopped", Some(json), Some(message), ramp);
             }
             (RunState::Aborted, Some(t)) => {
                 let (json, message) = trip_facts(&t, &self.view.control_unit);
@@ -1713,7 +1718,9 @@ impl Actor {
             _ => "The run ended.".to_owned(),
         });
         self.forward_log_now();
-        if matches!(outcome, "aborted" | "operator_abort" | "fault") {
+        let unramped =
+            ramp_s.is_none() && matches!(outcome, "aborted" | "operator_abort" | "fault");
+        if unramped {
             self.shared.signal.store(ABORT, Ordering::SeqCst);
         }
         if let Some(svc) = self.svc.as_mut() {
@@ -1727,11 +1734,7 @@ impl Actor {
             at_s: self.view.t_s,
             level_db: level,
             at_hz,
-            ramp_s: if matches!(outcome, "aborted" | "operator_abort" | "fault") {
-                None
-            } else {
-                ramp_s
-            },
+            ramp_s: if unramped { None } else { ramp_s },
             trip,
         });
         self.set(State::Finished, phase);
@@ -1803,6 +1806,13 @@ impl Actor {
                 )),
                 EventKind::RstdBandExit => Some(("note", "the resonance left the band".to_owned())),
                 EventKind::Trip { .. } => None,
+                // The view carries the law that was built; an operator's change is
+                // logged where the verb is taken.
+                EventKind::LawBuilt { .. } | EventKind::LawAdjust { .. } => None,
+                EventKind::LawMisses { reason, count, .. } => Some((
+                    "law",
+                    format!("the law gave {count} unusable calls, the last for {reason}"),
+                )),
                 EventKind::CaptureStart { run_dir, .. } => {
                     Some(("note", format!("recording to {run_dir}")))
                 }
@@ -1838,16 +1848,6 @@ impl Actor {
 }
 
 /// A live parameter's change at the controller.
-fn adjust_core(svc: &SineService, facts: &LawFacts, key: &str, value: f64) -> Result<(), String> {
-    if facts.builtin && key == "blend_w" {
-        return svc.set_w(value).map_err(|e| e.to_string());
-    }
-    Err(format!(
-        "{} cannot change \"{key}\" while the test runs.",
-        facts.name
-    ))
-}
-
 /// The control rows' unit, for the views and messages.
 fn control_unit(table: &ChannelTable) -> String {
     table
@@ -2115,7 +2115,6 @@ mod tests {
             sim_speed: 0.0,
             capture_root: Some(std::env::temp_dir().join("sds-sine-run-tests")),
             timeout_s: 30.0,
-            legacy_core: true,
         };
         let thread = spawn(plan, initial, shared.clone(), rx).unwrap();
         let _ = table;
@@ -2133,7 +2132,12 @@ mod tests {
             scanner: Arc::new(DriverScanner),
             data_root: std::env::temp_dir().join("sds-sine-run-tests"),
             bind: "ws://127.0.0.1:0/".into(),
-            law: Err(MethodError::internal("no law in these tests")),
+            law: Ok(Arc::new(
+                hertzforge_sine::law::servo_blend::ServoBlendFactory::new(
+                    hertzforge_sine::law::servo_blend::ServoBlendParams::default(),
+                )
+                .unwrap(),
+            )),
         }
     }
 

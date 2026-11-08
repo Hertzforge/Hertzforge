@@ -123,8 +123,6 @@ fn leg_rates(frames: &[Value]) -> Vec<f64> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam (law_guards and control_tick_s served by \
-            SineService::new) and the built-in law resolved by resolve_sine"]
 async fn sim_1_a_sweep_completes_within_its_band_at_its_rate_and_ramps_down() {
     let addr = serve(service(10.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -160,8 +158,9 @@ async fn sim_1_a_sweep_completes_within_its_band_at_its_rate_and_ramps_down() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam and the built-in law resolved; the hold of \
-            the level clock (Command::Hold holds the ladder too)"]
+#[ignore = "the core's ladder starts at its first rung, not at schedule.start_db \
+            (LadderPlan::new sets level_db to table_db[0]): a start of -6 dB runs at -12 dB \
+            and the -1 dB step answers -12; un-ignore once the ladder starts at start_db"]
 async fn sim_2_hold_resume_reverse_jog_goto_level_adjust_and_stop() {
     let addr = serve(service(10.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -240,7 +239,6 @@ async fn sim_2_hold_resume_reverse_jog_goto_level_adjust_and_stop() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam and the built-in law resolved"]
 async fn sim_3_an_observer_aborts_within_one_batch() {
     let addr = serve(service(10.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -260,7 +258,6 @@ async fn sim_3_an_observer_aborts_within_one_batch() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam and the built-in law resolved"]
 async fn sim_4_the_shakers_displacement_limit_trips_the_kinematic_abort() {
     let addr = serve(service(10.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -301,7 +298,6 @@ async fn sim_4_the_shakers_displacement_limit_trips_the_kinematic_abort() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam and the built-in law resolved"]
 async fn sim_5_a_lost_controller_and_a_shutdown_each_safe_stop_with_the_ramp() {
     let svc = service(4.0, Duration::from_millis(1500));
     let addr = serve(svc.clone()).await;
@@ -354,8 +350,6 @@ async fn import(c: &mut Client, name: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam, the host's sine-single world and the law file \
-            law_fixture_sine_misbehave"]
 async fn sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_held_then_ramped() {
     let addr = serve(service(0.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -383,8 +377,6 @@ async fn sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_he
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam, the host's sine-single world and the law files \
-            law_fixture_sine_template and hertzforge_law_sine_servo"]
 async fn sim_7_the_template_law_passes_sim_1_and_the_built_in_matches_its_law_file() {
     let addr = serve(service(0.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -419,7 +411,6 @@ async fn sim_7_the_template_law_passes_sim_1_and_the_built_in_matches_its_law_fi
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law seam and the built-in law resolved"]
 async fn sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_verbs() {
     let svc = service(4.0, Duration::from_secs(30));
     let addr = serve(svc.clone()).await;

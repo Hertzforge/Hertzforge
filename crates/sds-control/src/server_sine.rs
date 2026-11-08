@@ -238,8 +238,6 @@ impl Service {
             sim_speed: self.opts.sim_speed,
             capture_root: self.opts.capture_root.clone(),
             timeout_s: self.opts.timeout.as_secs_f64(),
-            #[cfg(test)]
-            legacy_core: false,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         srun::spawn(plan, initial.clone(), shared.clone(), rx)

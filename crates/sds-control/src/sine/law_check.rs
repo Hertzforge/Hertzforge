@@ -3,17 +3,18 @@
 //! station factory, each case run under the core's guards by the controller's own
 //! check runner, and the result on the wire.
 //!
-//! What a case asks and how a run is judged are the controller's
-//! (`hertzforge_sine_laws::SineCheckCase`, `judge_sine`); this module builds each
-//! case's simulated station from the case's own methods and says the result in the
-//! protocol's words.
+//! What a case asks, the station it runs on and how a run is judged are the
+//! controller's (`hertzforge_sine_laws::SineCheckCase`, `sine_check_station`,
+//! `judge_sine`); this module builds each case's simulated station through the
+//! station factory and says the result in the protocol's words.
 
 use crate::protocol::{num, opt_num, ErrorCode, MethodError};
 use hertzforge_random_laws::{CheckCase, CheckRecord, CHECK_FORMAT};
+use hertzforge_sdm::{MatrixStack, C64};
 use hertzforge_sine::SineLawFactory;
 use hertzforge_sine_laws::{
-    SineCaseEnd, SineCaseMeasure, SineCheckCase, SineCheckPlant, SINE_CHECK_FS_HZ,
-    SINE_CHECK_VERSION,
+    sine_check_station, SineCaseEnd, SineCaseMeasure, SineCheckCase, SineCheckStation,
+    SINE_CHECK_FS_HZ, SINE_CHECK_VERSION,
 };
 use hertzforge_station::{BackendKind, SimPlant, SimPlantSpec, StationSpec};
 use serde_json::{json, Value};
@@ -114,45 +115,54 @@ pub fn progress_json(
     })
 }
 
-/// The simulated station a case runs on, from the case's own methods: one drive,
-/// one control input (two with a limit channel), the case's modes on a feedthrough
-/// of 1, at the check's rate. The test articles the resonator bank cannot play (an
-/// anti-resonance, a limit channel's own gain) and the measurement noise follow the
-/// check runner's own station facts; until the runner states them the case is
-/// refused by name.
+/// The simulated station a case runs on, from the check runner's own facts
+/// (`sine_check_station`): the resonator bank on its stated feedthrough, or the FRF
+/// plant (an anti-resonance, a limit channel with its own gain), with the case's
+/// measurement noise, one drive and the case's inputs, at the check's rate.
 pub fn case_station(case: SineCheckCase) -> Result<StationSpec, String> {
-    if case.limit().is_some() || case.noise_below_db().is_some() {
-        return Err(format!(
-            "the check's runner does not yet state the station for case \"{}\"",
-            case.name()
-        ));
-    }
+    let spec = sine_check_station(case, SINE_CHECK_FS_HZ);
     let base = SimPlantSpec {
         sample_rate_hz: SINE_CHECK_FS_HZ,
         resonances: Vec::new(),
-        noise_level: 0.0,
-        feedthrough: 1.0,
+        noise_level: spec.noise_rms_g,
+        feedthrough: 0.0,
         transport_delay_samples: 0,
-        seed: 0x5A5A_9001 + case as u64,
-        max_input_channels: 1,
+        seed: 0x51E5_5EED,
+        // The simulator's default, as the runner's own reference station has it.
+        max_input_channels: 8,
         max_output_channels: 1,
         shared_clock: true,
         plant: SimPlant::Resonators,
     };
-    let sim = match case.plant() {
-        SineCheckPlant::OneMode { f_hz, q } => SimPlantSpec {
-            resonances: vec![(f_hz, q)],
+    let sim = match spec.station {
+        SineCheckStation::Resonators { modes, feedthrough } => SimPlantSpec {
+            resonances: modes,
+            feedthrough,
             ..base
         },
-        SineCheckPlant::TwoModes { f_hz, q } => SimPlantSpec {
-            resonances: vec![(f_hz[0], q), (f_hz[1], q)],
-            ..base
-        },
-        SineCheckPlant::AntiResonance { .. } => {
-            return Err(format!(
-                "the check's runner does not yet state the station for case \"{}\"",
-                case.name()
-            ))
+        SineCheckStation::Frf {
+            df_hz,
+            lines,
+            block_frames,
+        } => {
+            let n_lines = lines.first().map_or(0, Vec::len);
+            if n_lines == 0 {
+                return Err(format!("case \"{}\" states no plant lines", case.name()));
+            }
+            let mut stack = MatrixStack::zeros(n_lines, lines.len(), 1);
+            for (i, ch) in lines.iter().enumerate() {
+                for (k, &(re, im)) in ch.iter().enumerate() {
+                    stack.set(k, i, 0, C64::new(re, im));
+                }
+            }
+            SimPlantSpec {
+                plant: SimPlant::Frf {
+                    stack,
+                    df_hz,
+                    block_frames: Some(block_frames),
+                },
+                ..base
+            }
         }
     };
     Ok(StationSpec {
@@ -227,7 +237,18 @@ mod tests {
         );
         let s = case_station(SineCheckCase::CloseModes).unwrap().sim;
         assert_eq!(s.resonances, vec![(240.0, 30.0), (260.0, 30.0)]);
+        assert_eq!(s.feedthrough, hertzforge_sine_laws::SINE_CHECK_FEEDTHROUGH);
         assert_eq!(s.sample_rate_hz, SINE_CHECK_FS_HZ);
-        assert!(case_station(SineCheckCase::AntiResonance).is_err());
+        // The test articles the resonator bank cannot play are the runner's FRF plants.
+        for case in [SineCheckCase::AntiResonance, SineCheckCase::Notch] {
+            let s = case_station(case).unwrap().sim;
+            assert!(matches!(s.plant, SimPlant::Frf { .. }), "{}", case.name());
+        }
+        // Every case has a station, and the noise case its stated noise.
+        for case in SineCheckCase::ALL {
+            assert!(case_station(case).is_ok(), "{}", case.name());
+        }
+        let noise = case_station(SineCheckCase::Noise).unwrap().sim.noise_level;
+        assert_eq!(Some(noise), SineCheckCase::Noise.noise_rms_g());
     }
 }

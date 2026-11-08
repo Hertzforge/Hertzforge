@@ -99,6 +99,13 @@
       "unit": "dB",
       "help": "The change the law asked for on the last tick, before the controller's caps.",
       "layout": null
+     },
+     {
+      "key": "servo_level_db",
+      "label": "Servo level",
+      "unit": "dB",
+      "help": "The servo's own drive level after the last tick, in dB relative to one drive unit.",
+      "layout": null
      }
     ],
     "shapes": null,

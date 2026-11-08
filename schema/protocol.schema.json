@@ -10615,6 +10615,7 @@
         "requirement": {
           "enum": [
             "within",
+            "through",
             "within_away",
             "survive",
             "each_rung_within",

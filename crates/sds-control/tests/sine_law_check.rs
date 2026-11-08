@@ -106,6 +106,7 @@ fn measure(end: SineCaseEnd) -> SineCaseMeasure {
         budget_ms: 2.5,
         max_drive_vpk: 0.4,
         drive_ceiling_vpk: 10.0,
+        worst_rise_db: 0.5,
     }
 }
 
@@ -173,8 +174,6 @@ fn law_file(name: &str) -> PathBuf {
 static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the built-in law resolved (resolve_sine) and the check's runner \
-            (run_check_case), with the station facts of the noise, anti-resonance and limit cases"]
 async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
     let _turn = ONE_CHECK.lock().await;
     let schema = Schema::load();
@@ -205,8 +204,6 @@ async fn the_built_in_law_passes_every_case_and_is_not_recorded() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs the Sine core: the law files law_fixture_sine_misbehave and \
-            law_fixture_sine_template, the host's sine-single world, and the check's runner"]
 async fn a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware(
 ) {
     let _turn = ONE_CHECK.lock().await;
