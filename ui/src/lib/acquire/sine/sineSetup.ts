@@ -6,8 +6,9 @@
  * ramp, the tracking check), and this module only carries the operator's choices.
  *
  * Numbers are held as numbers; a field that holds no number is NaN, which `localErrors` names
- * before anything is sent. A choice the wire leaves to the station (the rate) is null. The drive
- * ceiling and the drive abort have no default anywhere: the setup asks for both.
+ * before anything is sent. The rate is null when the usual one (16384 Hz) is wanted, and a sweep's
+ * start is null for the band's low edge. The drive ceiling and the drive abort have no default
+ * anywhere: the setup asks for both.
  *
  * A profile row keeps the profile's own units: g peak, in/s peak or in peak to peak. The editor
  * keeps every test kind's settings, so a change of kind loses nothing; the wire carries the chosen
