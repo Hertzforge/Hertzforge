@@ -1,0 +1,17 @@
+[package]
+name = "law-fixture-sine-template"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A test fixture: the Sine template's law
+# (`crates/hertzforge-law-sdk/template/sine-pi`), compiled from the template's
+# own source as a law file of this workspace, so the controller's tests and the
+# bench run the code a law author copies with its dependencies under the
+# workspace's lockfile. Built to WebAssembly by scripts/build_laws.sh.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../../hertzforge-law-sdk" }
