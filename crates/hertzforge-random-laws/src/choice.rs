@@ -164,6 +164,10 @@ impl LawCatalog {
                     id: choice.id.clone(),
                     law_is_for: "SRS shock",
                 }),
+                Some(AnyLaw::Sine(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "Sine",
+                }),
                 None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
             },
         }
