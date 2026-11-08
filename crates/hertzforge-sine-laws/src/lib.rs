@@ -18,8 +18,9 @@
 //! The law catalog, check records and the arming rule are
 //! `hertzforge-random-laws`'s, shared by every world.
 //!
-//! Not built yet: [`resolve_sine`] refuses every law, [`run_check_case`]
-//! refuses every case, and [`judge_sine`] passes none.
+//! A law file runs as the core's law through [`WasmSineLaw`] (the host's
+//! deadline on every call is the core's own call budget); the built-in is the
+//! native `servo_blend` ([`BuiltinSineFactory`]).
 //!
 //! [`SineLawFactory`]: hertzforge_sine::SineLawFactory
 //! [`LawChoice`]: hertzforge_random_laws::LawChoice
@@ -31,10 +32,18 @@
 
 mod check;
 mod choice;
+mod wasm;
 
 pub use check::{
-    judge_sine, run_check_case, CheckRunError, SineCaseEnd, SineCaseMeasure, SineCheckCase,
-    SineCheckLimit, SineCheckMode, SineCheckPlant, SineRequirement, SINE_CHECK_DRIVE_ABORT_V,
-    SINE_CHECK_DRIVE_CEILING_V, SINE_CHECK_FS_HZ, SINE_CHECK_TARGET_G, SINE_CHECK_VERSION,
+    judge_sine, run_check_case, sine_check_config, sine_check_record, sine_check_station,
+    sine_check_table, trip_name, CheckRunError, SineCaseEnd, SineCaseMeasure, SineCheckCase,
+    SineCheckLimit, SineCheckMode, SineCheckPlant, SineCheckStation, SineCheckStationSpec,
+    SineRequirement, SINE_CHECK_ABORT_DB, SINE_CHECK_ANTI_RESONANCE_NOISE_G,
+    SINE_CHECK_DRIVE_ABORT_V, SINE_CHECK_DRIVE_CEILING_V, SINE_CHECK_FEEDTHROUGH, SINE_CHECK_FS_HZ,
+    SINE_CHECK_NOISE_FLOOR_G, SINE_CHECK_RELEASE_WATCH_S, SINE_CHECK_SEED, SINE_CHECK_SYSID_DB,
+    SINE_CHECK_TARGET_G, SINE_CHECK_TICK_S, SINE_CHECK_VERSION,
 };
-pub use choice::{default_sine_choice, resolve_sine, DEFAULT_SINE_LAW_ID};
+pub use choice::{
+    builtin_sine_params, default_sine_choice, resolve_sine, BuiltinSineFactory, DEFAULT_SINE_LAW_ID,
+};
+pub use wasm::{sine_law_fault, WasmSineLaw, WasmSineLawFactory};
