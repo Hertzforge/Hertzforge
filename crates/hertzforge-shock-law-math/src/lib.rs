@@ -1,4 +1,5 @@
-//! The math of the shock control laws: each law's declaration (name, version,
+//! The math of the shock and time waveform replication control laws: each
+//! law's declaration (name, version,
 //! parameters, the values it reports) and its arithmetic, with nothing around
 //! it.
 //!
@@ -8,6 +9,9 @@
 //!   plant times the reference, then a correction of the drive spectrum by a
 //!   fraction of the inverse times the error after each pulse, on the bins the
 //!   core trusts, with the growth of each bin limited per pulse.
+//! - [`twr`]: `twr_correct`, the built-in time waveform replication law: the
+//!   same correction over a whole replication record between plays, which
+//!   starts from the drive as played when the core clipped it.
 //! - [`srs`]: `srs_ratio`, the built-in SRS shock law. It seeds each
 //!   synthesis component from the inverse of the identified gain at its
 //!   frequency, then after each pulse scales it by the target over the
@@ -36,6 +40,7 @@
 pub mod classical;
 pub mod spectrum;
 pub mod srs;
+pub mod twr;
 
 /// A complex value as `(re, im)`, the workspace's own representation.
 pub use hertzforge_dsp::fft::Cplx;

@@ -215,3 +215,109 @@ fn on_random_spectra_the_seed_and_corrections_are_time_waveform_replications() {
     }
     assert!(clamped > 0, "the fixture never engaged the growth clamp");
 }
+
+/// The TWR built-in's id is the core's.
+#[test]
+fn the_built_in_id_is_the_cores() {
+    assert_eq!(
+        hertzforge_shock_law_math::twr::ID,
+        hertzforge_twr::control::TWR_CORRECT_ID
+    );
+}
+
+/// The TWR built-in, clip adoption included, is time waveform replication's
+/// clip-then-measure: when a play's drive was clipped, time waveform
+/// replication replaces its drive spectrum with the clipped record's before it
+/// corrects, and the law adopts the drive as played. Bit for bit, up to the
+/// transform convention, at two parameter sets, the clip engaged on most
+/// plays.
+#[test]
+fn a_clipped_play_is_corrected_as_time_waveform_replication_corrects_it() {
+    use hertzforge_shock_law_math::twr::{TwrCorrect, TwrCorrectParams};
+    let grid = RecordGrid::new(8192.0, 3000, 500, 500);
+    let n = grid.n;
+    let g = vec![(2.0 / 4.01, 0.0); grid.n_bins()];
+    let inv = GridInverse {
+        g: g.clone(),
+        coherence: vec![0.99; g.len()],
+        eps: 0.01,
+        hmax_inband: 2.0,
+    };
+    let section: Vec<f64> = (0..3000)
+        .map(|i| {
+            let t = i as f64 / 3000.0;
+            if (0.4..0.6).contains(&t) {
+                (std::f64::consts::PI * (t - 0.4) / 0.2).sin()
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let reference = grid.window_from_section(&section);
+    let mask: Vec<bool> = (0..grid.n_bins())
+        .map(|k| (20.0..=2000.0).contains(&grid.freq(k)))
+        .collect();
+    let mut clipped_plays = 0;
+    for params in [
+        TwrCorrectParams::default(),
+        TwrCorrectParams {
+            beta: 0.75,
+            max_db_per_iter: 2.0,
+            initial_backoff_db: 0.0,
+        },
+    ] {
+        let cfg = LawConfig {
+            beta: params.beta,
+            max_db_per_iter: params.max_db_per_iter,
+            ..LawConfig::default()
+        };
+        let r_twr = rfft_half(&reference, n);
+        let scale = 10f64.powf(-params.initial_backoff_db / 20.0);
+        let mut d_twr = initial_drive(&r_twr, &inv, &mask);
+        for c in d_twr.iter_mut() {
+            c.0 *= scale;
+            c.1 *= scale;
+        }
+        let g_world: Vec<Cplx> = g.iter().map(|&(re, im)| (re, -im)).collect();
+        let mut law = TwrCorrect::new(params, n, &reference, &g_world, &mask).unwrap();
+        let seed = law.seed().unwrap();
+        assert_conjugates(law.drive_spectrum(), &d_twr, "seed");
+        // The core clips at a third of the seed's peak; this plant halves what
+        // it is asked (H = 2 identified, 1 measured), so the law keeps asking
+        // for more.
+        let clip = seed.drive.iter().fold(0.0f64, |m, v| m.max(v.abs())) / 3.0;
+        let mut asked = seed.drive;
+        for p in 0..5 {
+            let played: Vec<f64> = asked.iter().map(|v| v.clamp(-clip, clip)).collect();
+            let was_clipped = played != asked;
+            // Time waveform replication's service: the record it plays, and its
+            // spectrum replaced by the clipped record's.
+            let mut drive_twr = irfft_half(&d_twr, n);
+            assert_same_record(&asked, &drive_twr, &format!("{params:?}: play {p} asked"));
+            for v in drive_twr.iter_mut() {
+                *v = v.clamp(-clip, clip);
+            }
+            if was_clipped {
+                d_twr = rfft_half(&drive_twr, n);
+                clipped_plays += 1;
+            }
+            let y: Vec<f64> = played.iter().map(|v| 1.0 * v).collect();
+            let y_twr = rfft_half(&y, n);
+            let clamped = correct(&mut d_twr, &r_twr, &y_twr, &inv, &mask, &cfg);
+            let step = law
+                .iterate(&y, was_clipped.then_some(played.as_slice()))
+                .unwrap();
+            assert_conjugates(
+                law.drive_spectrum(),
+                &d_twr,
+                &format!("{params:?}: play {p}"),
+            );
+            assert_eq!(
+                step.report.clamped_bins, clamped,
+                "{params:?}: play {p} clamps"
+            );
+            asked = step.drive;
+        }
+    }
+    assert!(clipped_plays >= 6, "{clipped_plays} plays clipped");
+}
