@@ -2724,8 +2724,10 @@ warnings `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag` (advisor
   its drive is not used.
 - **`sine.level`** and **`sine.mode`** are `random.level` and `random.mode` for Sine, with the
   same refusals (`manual_mode_required`, `not_a_rung`): `delta_db` steps the scheduled level by
-  that many dB, `to_db` moves it to a level of the schedule, and the result is the scheduled
-  level once the service has taken the change. A level change is a change of target: the law
+  that many dB, held between the schedule's lowest and highest levels, `to_db` moves it to a
+  level of the schedule, and the result is the scheduled level once the service has taken the
+  change (a step past either end answers with the end it stopped at). Every level change
+  re-opens the settle window (see `sine.goto`). A level change is a change of target: the law
   follows it within the service's caps.
 - **`sine.hold`** freezes the test's progress: the sweep, dwell and level clocks stop and the
   tone stays at its frequency and level, still under control (`held` true). **`sine.resume`**
@@ -2737,6 +2739,10 @@ warnings `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag` (advisor
   `delta_hz`, stopping at the band's edge, and **`sine.goto`** moves it to `hz` (refused
   `out_of_band` outside the band); each answers with the frequency applied, and the tone moves
   without a break in phase. All three are sweeps only, refused `not_a_sweep` in another test.
+  A jog and a go to re-open the settle window, as a level change does: for 40 dB at the
+  compression's rate limit plus 0.3 s (2.3 s at `slow`), the band, servo-fault and kinematic
+  aborts are off and only the drive ceiling and the drive abort bound the drive, while the
+  response comes onto the band at the new frequency.
 - **`sine.adjust`** changes a live parameter of the run's law: a number parameter the law
   declares live, within its declared range. It applies from the next tick and is logged (`law`).
   Refused `adjust_refused`, with `detail.why` `unknown_key`, `not_live`, `out_of_range` or
@@ -2874,9 +2880,13 @@ Event topics:
   `cola_vpk` the reference output's (null without COLA).
 - `channels` lists every enabled input in table order: its tracked amplitude at the tone's
   frequency (peak), its phase against the drive, degrees, its broadband rms, its unit, and
-  `overload` as Random's.
+  `overload`: for a control row, true once its tracked amplitude has reached 95 % of the top
+  of the profile's abort band at the present frequency and level, and then true to the end of
+  the run; false for every other row. It is not Random's input-range latch: it says the control
+  point came near its abort bound.
 - `alarms` lists what holds now: `{"kind":"band","side","error_db"}` and
-  `{"kind":"overload","channel"}`. An alarm warns; it does not stop the run.
+  `{"kind":"overload","channel"}` (from the latch above, so it stays once raised). An alarm
+  warns; it does not stop the run.
 - `law` is the law's values on its last call, by the keys its manifest declares, its unusable
   calls in a row and the ticks a cap has bound; null until the law is built.
 - `views` are **Control** (`spectrum`, y `Amplitude` in the control unit, log: `Control`
