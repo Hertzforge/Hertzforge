@@ -265,7 +265,18 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 const MORE_REFUSAL_TITLES: Record<string, string> = {
 	not_yet: 'Not Yet',
 	wrong_mode: 'Not in This Ladder Mode',
-	drive_ceiling: 'Over the Drive Abort'
+	drive_ceiling: 'Over the Drive Abort',
+	not_a_sweep: 'Not a Sweep',
+	out_of_band: 'Outside the Band',
+	adjust_refused: 'Parameter Not Changed'
+};
+
+/** Why a live law parameter was not changed (`adjust_refused`'s `why`). */
+const ADJUST_WHY: Record<string, string> = {
+	unknown_key: 'The law has no parameter by that name.',
+	not_live: 'That parameter is fixed for the run.',
+	out_of_range: "The value is outside the parameter's range.",
+	law_refused: 'The control law refused the value.'
 };
 
 export function refusalTitle(reason: string | null | undefined, code?: string): string {
@@ -342,6 +353,16 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 			break;
 		case 'drive_ceiling':
 			if (has('vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive abort is ${String(detail.abort_vpk ?? '-')} V pk`);
+			break;
+		case 'not_a_sweep':
+			if (has('test')) out.push(`Test: ${String(detail.test)}`);
+			break;
+		case 'out_of_band':
+			if (Array.isArray(detail.band_hz)) out.push(`Band: ${String(detail.band_hz[0])} to ${String(detail.band_hz[1])} Hz`);
+			break;
+		case 'adjust_refused':
+			if (has('key')) out.push(`Parameter: ${String(detail.key)}`);
+			if (has('why')) out.push(ADJUST_WHY[String(detail.why)] ?? String(detail.why));
 			break;
 	}
 	return out;

@@ -110,9 +110,9 @@ async fn the_srs_world_lists_the_built_in_law_first() {
         .collect();
     assert!(worlds.contains(&"shock_srs") && worlds.contains(&"shock_classical"));
     assert_eq!(
-        worlds.last(),
+        worlds.iter().rev().find(|w| **w != "sine"),
         Some(&"shock_srs"),
-        "SRS shock's laws come last"
+        "SRS shock's laws come last but Sine's"
     );
     let n = all["laws"]
         .as_array()

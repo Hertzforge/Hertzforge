@@ -132,7 +132,7 @@ pub fn resolve_srs(
                 let params = law.resolve_params(&choice.params).map_err(bad)?;
                 Ok(Arc::new(WasmSrsLawFactory::new(law.clone(), params)))
             }
-            LawWorld::Single | LawWorld::Mimo | LawWorld::ShockClassical => {
+            LawWorld::Single | LawWorld::Mimo | LawWorld::ShockClassical | LawWorld::Sine => {
                 Err(ChoiceError::WrongTestType {
                     id: choice.id.clone(),
                     law_is_for: entry.world.test_type(),

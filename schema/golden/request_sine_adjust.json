@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 74,
+ "method": "sine.adjust",
+ "params": {
+  "key": "blend_w",
+  "value": 0.2
+ }
+}

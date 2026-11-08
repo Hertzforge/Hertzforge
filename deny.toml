@@ -86,6 +86,7 @@ deny = [
     "hertzforge-recorder",
     "hertzforge-shock-host",
     "hertzforge-sine",
+    "hertzforge-sine-laws",
     "hertzforge-srs",
     "hertzforge-twr",
   ] },

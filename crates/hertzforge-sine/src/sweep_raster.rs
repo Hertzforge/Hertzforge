@@ -31,7 +31,15 @@
 //! no way to say "logarithmic"), and changing it would be a wire change, not a
 //! packer change.
 
-use crate::service::report::TracePoint;
+use serde::{Deserialize, Serialize};
+
+/// One point on a swept trace: the frequency and the value logged there (the
+/// tracked-vs-f and broadband-vs-f trace families).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TracePoint {
+    pub freq_hz: f64,
+    pub value: f64,
+}
 
 /// Points on the sweep raster.
 ///

@@ -1,13 +1,13 @@
 /**
- * The pages of a pulse-by-pulse run (classical shock, SRS shock), shared by both: a set of page
- * kinds and the quantities each draws, the plain-data form a layout is saved in, what a window
- * subscribes to, and the pulses an operator picks in the pulse table to lay over a page. Each test
- * type names its own pages and quantities in a `PulsePageSet`; nothing here computes a
- * measurement: an overlay only places the service's own series side by side, each named for its
- * pulse.
+ * The pages of a pulse-by-pulse run (classical shock, SRS shock), shared by both and by Sine's
+ * fixed pages: a set of page kinds and the quantities each draws, the plain-data form a layout is
+ * saved in, what a window subscribes to, and the pulses an operator picks in the pulse table to lay
+ * over a page. Each test type names its own pages and quantities in a `PulsePageSet`; nothing here
+ * computes a measurement: an overlay only places the service's own series side by side, each named
+ * for its pulse.
  */
 
-import type { Series, SpectrumView, View } from '$lib/protocol/types';
+import type { ChannelSelector, Series, SpectrumView, View } from '$lib/protocol/types';
 import { pointsForWidth } from '../display/mimoLayout';
 
 /** One page of a run view. */
@@ -30,6 +30,8 @@ export interface PulsePlotSpec<Q extends string = string> {
 	id: string;
 	quantity: Q;
 	points: number;
+	/** The channels asked for, on a quantity that takes them (a page set's `channelQuantities`). */
+	channels?: ChannelSelector;
 }
 
 /** A test type's pages: their kinds, words and quantities, and the subscription's rules. */
@@ -48,17 +50,24 @@ export interface PulsePageSet<K extends string, Q extends string> {
 	rates: readonly number[];
 	defaultRate: number;
 	maxPages: number;
+	/** The pages a new layout starts with, in order; every kind when absent. */
+	defaults?: readonly K[];
+	/** The quantities that take a channel selector; none when absent. */
+	channelQuantities?: readonly Q[];
+	/** The channels each page asks for on those quantities; every input when a page names none. */
+	channels?: Partial<Record<K, ChannelSelector>>;
 }
 
 /** Pulses laid over a page at once. */
 export const MAX_OVERLAY = 6;
 
 export function defaultPulseLayout<K extends string>(set: PulsePageSet<K, string>): PulseLayout<K> {
+	const kinds = set.defaults ?? set.kinds;
 	return {
 		version: 1,
 		rate: set.defaultRate,
-		serial: set.kinds.length,
-		pages: set.kinds.map((kind, i) => ({ id: `${set.prefix}-${i + 1}`, name: set.words[kind], kind }))
+		serial: kinds.length,
+		pages: kinds.map((kind, i) => ({ id: `${set.prefix}-${i + 1}`, name: set.words[kind], kind }))
 	};
 }
 
@@ -68,15 +77,25 @@ export const pulsePlotId = (page: { id: string }, part: string) => `${page.id}:$
 /** Everything a page subscribes to, at its drawn width (CSS pixels). */
 export function pulsePagePlots<K extends string, Q extends string>(set: PulsePageSet<K, Q>, page: PulsePageSpec<K>, width = 900, pixelRatio = 1): PulsePlotSpec<Q>[] {
 	const points = pointsForWidth(width, pixelRatio);
-	return set.quantities[page.kind].map((quantity) => ({ id: pulsePlotId(page, quantity), quantity, points }));
+	return set.quantities[page.kind].map((quantity) => {
+		const spec: PulsePlotSpec<Q> = { id: pulsePlotId(page, quantity), quantity, points };
+		if (set.channelQuantities?.includes(quantity)) spec.channels = set.channels?.[page.kind] ?? 'all';
+		return spec;
+	});
 }
 
 /**
  * What a window sends: its plots, or the default subscription when it shows none. A point count
- * goes with the time histories only; the service refuses it on any other plot.
+ * goes with the time histories only, and a channel selector with the plots that carry one; the
+ * service refuses either on any other plot.
  */
 export function pulseSubscribeParams<Q extends string>(set: { timeQuantities: readonly Q[] }, plots: PulsePlotSpec<Q>[], rate: number): Record<string, unknown> {
-	const wanted = plots.map((p) => (set.timeQuantities.includes(p.quantity) ? { id: p.id, quantity: p.quantity, points: p.points } : { id: p.id, quantity: p.quantity }));
+	const wanted = plots.map((p) => {
+		const out: Record<string, unknown> = { id: p.id, quantity: p.quantity };
+		if (p.channels !== undefined) out.channels = Array.isArray(p.channels) ? [...p.channels] : p.channels;
+		if (set.timeQuantities.includes(p.quantity)) out.points = p.points;
+		return out;
+	});
 	return wanted.length ? { rate_hz: rate, plots: wanted } : { default: true };
 }
 

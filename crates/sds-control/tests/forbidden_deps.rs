@@ -87,6 +87,18 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // handed, and holds the Sim only as a dev-dependency. Its delegated fire path is
     // never constructed by this crate.
     "hertzforge-srs",
+    // Sine behind the wire's `sine.*` methods, reviewed 2026-11-08: the Sine profile
+    // grammar, schedulers, control core and run service (`hertzforge-sine`, MIT,
+    // imported), reached first through the Sine law choice and check in
+    // `hertzforge-sine-laws`. Its `[dependencies]` are crates already on this list
+    // and name no backend: the run service is handed a `Box<dyn Backend>` by the
+    // station factory, and the Sim is a dev-dependency only. Its law seam calls a
+    // factory the control service installs and holds no law host of its own.
+    "hertzforge-sine",
+    // The Sine laws, reviewed 2026-11-08 as the shock law crates were: the choice
+    // and check of a law (`hertzforge-sine-laws`), which runs a check case on the
+    // backend it is handed and names none. Written here, so on LAW_CRATES.
+    "hertzforge-sine-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -164,7 +176,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// template's own law source, built in this workspace). The SRS shock set was
 /// listed the same way when its contracts were written (2026-11-07), before the
 /// crates exist: the `shock-srs-ratio` law file and the `srs-misbehave` and
-/// `srs-template` host fixtures.
+/// `srs-template` host fixtures. So was the Sine set (2026-11-08): the choice and
+/// check of a law (`hertzforge-sine-laws`, written with the contracts), and, before
+/// they exist, the `sine-servo` law file and the `sine-misbehave` and
+/// `sine-template` host fixtures.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
@@ -179,15 +194,19 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-sdk",
     "hertzforge-law-shock-fdc",
     "hertzforge-law-shock-srs-ratio",
+    "hertzforge-law-sine-servo",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
     "hertzforge-shock-law-math",
     "hertzforge-shock-laws",
+    "hertzforge-sine-laws",
     "law-fixture-bad-manifest",
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
+    "law-fixture-sine-misbehave",
+    "law-fixture-sine-template",
     "law-fixture-srs-misbehave",
     "law-fixture-srs-template",
 ];

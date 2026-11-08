@@ -1,10 +1,10 @@
 # Control law plug-ins: specification
 
 **Status: draft for comment.** Interface version 0.1. Both Random worlds, single-output
-(section 6) and MIMO (section 7), classical shock (section 8) and SRS shock (section 9) are
-implemented: the host loads them and the built-in laws run through them. While the interface is 0.x
-it may still change (R15). Comments are wanted on every part, and on the questions still open
-(section 12).
+(section 6) and MIMO (section 7), classical shock (section 8), SRS shock (section 9) and
+single-output Sine (section 10) are implemented: the host loads them and the built-in laws run
+through them. While the interface is 0.x it may still change (R15). Comments are wanted on every
+part, and on the questions still open (section 13).
 
 ## 1. Purpose
 
@@ -62,7 +62,7 @@ reports divergent lines), but never suppress one.
 | R10 | **State.** A law keeps its state in the resource the core constructs for each run. Nothing carries over between runs. |
 | R11 | **Parameters.** Only the declared kinds in section 5. The core validates every value against the declaration before the law is constructed. There are no free-form strings for a law to parse. |
 | R12 | **Identity and records.** A law file is identified by the SHA-256 of its bytes. Every run records the law's name, version, hash and parameter values, the law file itself, and each loop's law inputs and outputs. |
-| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). A classical shock law is checked on seven simulated test articles, each a whole run under the core's guards (section 8; the guide's "Checking a classical shock law before hardware"), and an SRS shock law on six (section 9; the guide's "Checking an SRS shock law before hardware"). |
+| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). A classical shock law is checked on seven simulated test articles, each a whole run under the core's guards (section 8; the guide's "Checking a classical shock law before hardware"), an SRS shock law on six (section 9; the guide's "Checking an SRS shock law before hardware"), and a Sine law on seven (section 10; the guide's "Checking a Sine law before hardware"). |
 | R14 | **Licensing.** A law file is a separate work loaded at run time; its author chooses its license. Laws shipped with Hertzforge are MIT. |
 | R15 | **Versioning.** While the interface is 0.x it may change. From 1.0, minor versions only add, and the controller loads the current and the previous major version. |
 
@@ -396,7 +396,92 @@ under a flat bound (the prediction at most 0.5 dB over the bound on every pulse,
 within 3 dB outside the bands the limit holds down). Every case asks every call answered in time,
 with no miss and no refused output.
 
-## 10. Later test types
+## 10. Single-output Sine (`sine-single`)
+
+A Sine law decides one number per control tick: the amplitude of the one tone the controller plays,
+in drive units peak (volts peak on hardware). The controller keeps the tone's frequency, the sweep
+and its direction, its phase (continuous), the level schedule, the second reference output and
+every protection. The world is `wit/control-law/sine-single.wit`.
+
+**When it runs.** Once per control tick on the controller's real-time thread: `engage` once, after
+system identification and before anything is driven at test level, for the starting drive; `tick`
+on every tick after it. The tick is `tick_ms` (default 10 ms), whole frames at the rate the station
+adopted; a built-in law may run at a 2 ms tick, a law file at no less than 8 ms. Each call has a
+budget of `law_budget` (default 0.25) of the tick, 2.5 ms at 10 ms; a law file's host deadline is
+the same number, checked on each of the host's 1 ms epoch ticks, so a late call is stopped one or
+two epoch ticks past its budget, inside its control tick. The law is not called while the drive
+ramps down. A number parameter the manifest lists as `live` can be changed by the operator during a
+run (`adjust`): the controller checks the key and the value's declared range first, and the value
+applies from the next tick.
+
+**What it sees.** Fixed for the run: the control channels in the composite, the tick, the band, the
+drive ceiling, and the identification on its own grid (`|H|` in control units peak per drive unit
+peak, coherence, the controller's trust mask, the full-level target at each grid frequency). Each
+tick: its index (0 at engage), the time since the last call, the frequency, the sweep rate (signed;
+0 at a dwell or while held), the scheduled level, the target at this frequency and level, the
+measured composite, each control channel's tracked amplitude and phase against the drive, the drive
+in force as played, the prediction (`prediction-db`: the controller's plant-inverse drive at this
+frequency at full level, dB relative to one drive unit; absent where the identification is not
+trusted), why the controller holds the drive (`free`, `notch`, `probe`), the notch ceiling, and
+whether the settle window is open.
+
+**What it returns.** The drive, finite and at least zero, its own fault judgement (shown and
+recorded, never relied on), and up to eight values its manifest declares. It does not decide the
+frequency, the sweep, the phase, the level schedule, the reference output or any abort.
+
+**What the controller enforces, for every law.**
+
+| Guard | Rule |
+|---|---|
+| Output checks | A drive that is not a finite number at least zero, a value that is not finite or not declared: refused, a miss |
+| Time budget | Each call timed against `law_budget` of the tick; a late call is a miss |
+| Misses | A late, failed, panicked or refused call is a miss: the drive in force is held. A usable call resets the count; `law_misses` (default 3) in a row take the controlled stop (120 dB/s of station time, then the drain) and the run ends `law_fault`. The law is not called again |
+| Change cap | At most `max_step_db` (default 1 dB, 1 to 3) from the drive in force in one tick, either way |
+| Rise cap | At most `max_rise_db_per_s` (default 240 dB/s) up |
+| Divergence | The change or rise cap binding for `divergence_s` (default 1 s) without a break takes the same controlled stop, trip `divergence` |
+| First drive | At most the prediction at the start frequency and level plus 6 dB, and never over the ceiling; without a trusted prediction there, at most 0.05 times the start level's scale |
+| Holds | While a limit channel holds the drive (`notch`) the notch ceiling applies after the law, so the law cannot raise it; while a resonance search maps the plant (`probe`) the law's drive is not used |
+| Notch | A limit channel is held at its limit (the level its profile states); its abort edge above that ends the run |
+| Drive ceiling and abort, the alarm and abort bands, the kinematic monitor, the servo fault, the raw watchdog | As for every Sine run, after the law and the notch |
+
+**The built-in law, `servo_blend`.** An amplitude servo (proportional-integral on the error in dB,
+`kp` default 0.3, `ki` and its rate limit from `compression`: slow 2 and 20 dB/s (the default),
+fast 6 and 60 dB/s, or custom) moves its own level each tick; the blend adds `blend_w` (default 0.5, live)
+times the prediction's change since the last tick and clamps the total to 1 dB a tick; the drive is
+the drive in force moved by that total. The servo is held while the controller holds the drive, and
+where the drive in force is under what the law last asked (a cap, a ceiling or the notch held it
+down), the servo's level follows it down, so a long clamp does not wind the servo up. The first drive is the prediction at the start level (0.05 drive units at the start level without one).
+It reports the servo's step, the prediction's step, the total and the servo's own level, dB. It runs
+natively and as the law file `laws/sine-servo`, and the two give the same run.
+
+**Records.** At engage, with a capture running, the run folder gets `law.json` (the law's identity,
+parameters, values, live parameters and the guards); every call goes to `law_ticks.bin`, 136-byte
+little-endian records described by `law_ticks.json` beside it (tick, frequency, target, measured,
+the drive in force, the prediction, the hold, used or the miss reason, capped, the call's
+microseconds, the law's drive, the drive the controller took, the eight values), written between
+batches, never on the loop thread. The report carries the law's name, version and short hash and
+the guard counts.
+
+**The check.** Eight simulated test articles, each a whole run under these guards at 16384 Hz and
+a 10 ms tick, a flat 1 g target, identification at -20 dB, the abort band 12 dB either way:
+
+| Case | Plant and run | Asks for |
+|---|---|---|
+| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1.5 dB through the resonance (every judged tick within 30 Hz of it) |
+| fast sweep | The same at 6 oct/min | Within 5 dB through the resonance, within 2 dB more than 30 Hz from it |
+| close modes | 240 and 260 Hz, Q 30; 2 oct/min | Within 2 dB |
+| anti-resonance | A flat plant cut 30 dB at 300 Hz, its coherence there under the trust floor; 2 oct/min | Survive: the run completes or ends on the controller's own divergence trip, the drive never over the ceiling |
+| measurement noise | One mode; noise 30 dB under the full-level response; a 30 s dwell at 250 Hz | Within 1.5 dB |
+| level ladder | One mode; -20, -12, -6 and 0 dB moved by hand, 10 s each, at a 250 Hz dwell, one live change to the middle of a live parameter's range | Every rung within 1 dB after its settle window |
+| limit channel | One mode, and a limit channel reading up to 4 times the control at the mode under a flat 2 g limit; 2 oct/min | The limit channel at most 0.5 dB over its limit; the control at most 1 dB over its target after the notch releases |
+| transport delay | A flat wire (1 g per volt) that plays the drive 50 ms late, a hardware station's measured lag rounded up (819 samples); engaged at -6 dB, a 6 s dwell at 100 Hz | The run completes, and every tick from 2 s after the engage on is within 0.5 dB of the target (`settles`) |
+
+The other stations have no lag. A judged tick is one at full level (or, for the ladder, at a rung)
+outside the settle window and not held by the notch; for the transport delay case, every tick from
+2 s after the engage, settle window or not. Every case also asks that every call is answered in time with no miss and no
+refused output, and reports the slowest call and the capped ticks.
+
+## 11. Later test types
 
 Each test type gets its own world, built on the same mechanism.
 
@@ -405,10 +490,10 @@ Each test type gets its own world, built on the same mechanism.
 | Classical shock | Between pulses | Built: section 8 |
 | SRS shock | Between pulses | Built: section 9 |
 | Time waveform replication | Between passes | Slack time budget |
-| Sine | Every servo update | Far more frequent than Random, so the budget is tight; to be measured before deciding how much of the sine servo can be changed |
+| Sine | Every control tick | Built: section 10 |
 | MIMO variants of the above | As above | After MIMO Random |
 
-## 11. Writing a law
+## 12. Writing a law
 
 Hertzforge publishes a Rust crate for law authors (the interface bindings for both worlds, plus
 helpers such as the default level servo and, for MIMO, the controller's own matrix types and
@@ -417,7 +502,7 @@ per-line linear algebra), a template project, and a worked example for each worl
 against the WIT files can produce a law file (C and C++ can, for example); only Rust is supported
 for now. A law should pass `law check` before it is used on hardware.
 
-## 12. Open questions for reviewers
+## 13. Open questions for reviewers
 
 1. **MIMO inputs.** *Answered:* the inputs of section 7. The large optional ones (the last drive,
    the response-drive cross spectrum, the identification response, drive and noise) are declared in

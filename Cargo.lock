@@ -1175,6 +1175,7 @@ version = "0.1.0"
 dependencies = [
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
+ "hertzforge-sine",
  "wit-bindgen",
 ]
 
@@ -1192,6 +1193,14 @@ version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "hertzforge-law-sine-servo"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-sine",
 ]
 
 [[package]]
@@ -1275,6 +1284,7 @@ dependencies = [
  "hertzforge-random",
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
+ "hertzforge-sine",
  "serde",
  "serde_json",
 ]
@@ -1398,6 +1408,20 @@ dependencies = [
  "hertzforge-shaker-db",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "hertzforge-sine-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-module-abi",
+ "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "hertzforge-sine",
 ]
 
 [[package]]
@@ -1696,6 +1720,20 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-shock-template"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-misbehave"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-template"
 version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
@@ -2323,6 +2361,8 @@ dependencies = [
  "hertzforge-shock-host",
  "hertzforge-shock-law-math",
  "hertzforge-shock-laws",
+ "hertzforge-sine",
+ "hertzforge-sine-laws",
  "hertzforge-srs",
  "hertzforge-station",
  "hertzforge-twr",

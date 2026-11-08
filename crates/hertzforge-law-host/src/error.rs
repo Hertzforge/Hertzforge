@@ -92,6 +92,16 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// A Sine law returned a result that breaks the output rules: a drive
+    /// that is not a finite number or is below zero, too many values, or a
+    /// value the manifest does not declare (or reported twice). The change
+    /// and rise caps and every other protection belong to the controller.
+    BadSineOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: SineOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -196,6 +206,33 @@ impl SrsOutputRule {
     }
 }
 
+/// The output rules a Sine law's result is checked against, in the order
+/// they are checked ([`LawError::BadSineOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SineOutputRule {
+    /// The drive and every value are finite numbers.
+    NonFinite,
+    /// The drive is at least zero.
+    Negative,
+    /// At most [`crate::sine::MAX_SINE_VALUES`] values.
+    TooManyValues,
+    /// Every value is declared by the manifest and reported once.
+    UndeclaredValue,
+}
+
+impl SineOutputRule {
+    /// The stable wire and record name, the controller's own for the same
+    /// rule: `non_finite`, `negative`, `too_many_values`, `undeclared_value`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SineOutputRule::NonFinite => "non_finite",
+            SineOutputRule::Negative => "negative",
+            SineOutputRule::TooManyValues => "too_many_values",
+            SineOutputRule::UndeclaredValue => "undeclared_value",
+        }
+    }
+}
+
 impl LawError {
     /// Whether this error leaves the instance unusable.
     pub fn poisons(&self) -> bool {
@@ -238,7 +275,8 @@ impl fmt::Display for LawError {
             LawError::BadOutput { detail, .. }
             | LawError::BadMimoOutput { detail, .. }
             | LawError::BadClassicalOutput { detail, .. }
-            | LawError::BadSrsOutput { detail, .. } => {
+            | LawError::BadSrsOutput { detail, .. }
+            | LawError::BadSineOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(

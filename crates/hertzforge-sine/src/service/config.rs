@@ -12,6 +12,7 @@
 //! objects from these plain records at `arm`.
 
 use crate::control::{CompositeMode, CompressionPreset, FeedforwardConfig, NotchGovernorConfig};
+use crate::law::{LawGuards, MIN_TICK_S_BUILTIN};
 use crate::profile::SineProfile;
 use crate::scheduler::{BidirSweepConfig, DwellPlan, LadderConfig, RstdConfig, StepSineConfig};
 use hertzforge_dsp::tracking::BandwidthMode;
@@ -308,6 +309,23 @@ pub struct SineTestConfig {
     /// User metadata carried into the report.
     #[serde(default)]
     pub metadata: Vec<MetaField>,
+    /// The core's guards on the control law ([`crate::law`]): the per-tick
+    /// change cap, the rise cap, the call budget, the miss limit and the
+    /// divergence time. `None` is the run as it was before the law seam (the
+    /// servo and blend with their own clamp and nothing else), kept for the old
+    /// daemon host and the recorded trace; the control service always sets it.
+    ///
+    /// Not built yet: [`super::SineService::new`] refuses `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub law_guards: Option<LawGuards>,
+    /// The control tick in seconds. When set, the service converts it to
+    /// frames at the rate the station ANSWERED at arm and it replaces
+    /// [`Self::control_tick_frames`]; `None` keeps `control_tick_frames` as
+    /// given.
+    ///
+    /// Not built yet: [`super::SineService::new`] refuses `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_tick_s: Option<f64>,
 }
 
 fn default_review_hold() -> bool {
@@ -615,6 +633,16 @@ impl SineTestConfig {
                 "COLA volts_pk must be > 0 when enabled (got {})",
                 self.cola.volts_pk
             )));
+        }
+        if let Some(g) = &self.law_guards {
+            g.validate().map_err(ConfigError::BadConfig)?;
+        }
+        if let Some(t) = self.control_tick_s {
+            if !(t.is_finite() && (MIN_TICK_S_BUILTIN..=1.0).contains(&t)) {
+                return Err(ConfigError::BadConfig(format!(
+                    "control_tick_s must be {MIN_TICK_S_BUILTIN} to 1 s when set (got {t})"
+                )));
+            }
         }
         Ok(())
     }

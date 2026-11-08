@@ -1,0 +1,18 @@
+[package]
+name = "hertzforge-law-sine-servo"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The built-in Sine law, `servo_blend`, as a law file. It is the controller's own
+# `hertzforge_sine::law::servo_blend::ServoBlendLaw` (the control core, built
+# without the run service), so the native law and the law file are one
+# implementation, with the manifest built from the same declaration as the
+# controller's catalog entry. Built to a law file by `scripts/build_laws.sh`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
+hertzforge-sine = { path = "../../crates/hertzforge-sine", default-features = false }

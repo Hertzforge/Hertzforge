@@ -230,3 +230,44 @@ sds-control  test:pulse_due  srs_counts_the_next_pulse_from_the_devices_start
 sds-control  test:pulse_due  classical_counts_the_next_pulse_from_the_devices_start
 sds-control  test:pulse_due  srs_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time
 sds-control  test:pulse_due  classical_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time
+
+# Sine laws: the host's deadline on a Sine law file, and a law file call's time
+# against its budget at the default tick
+hertzforge-law-host  test:sine_host  a_spinning_sine_law_is_stopped_within_two_epoch_ticks_of_its_budget
+hertzforge-law-host  test:sine_host  a_late_sine_law_is_stopped_within_its_tick_budget_and_stays_stopped
+hertzforge-law-host  test:sine_host  each_misbehaviour_is_a_named_error
+hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_tick_is_well_inside_its_budget
+
+# The template law file on a simulated station with the NI chassis's output queue: each run goes
+# through the law host, whose call deadline is on the wall clock, so a starved call is a miss
+hertzforge-sine-laws  test:template_lag  a_first_drive_four_db_high_comes_back_without_a_trip
+hertzforge-sine-laws  test:template_lag  the_default_start_at_20_hz_at_full_level_holds_until_the_measurement_comes_up
+hertzforge-sine-laws  test:template_lag  the_default_start_on_a_ladder_sweep_completes_within_its_band
+
+# The Sine service end to end over its socket and on its run thread: runs on the
+# simulated station paced to the wall clock, waited on against wall-clock
+# deadlines, with the orphan timeout, the shutdown and the stop ramp on the real
+# clock; and the law check's whole runs
+sds-control  lib  sine::run::tests::a_dwell_refuses_the_sweep_verbs_by_name
+sds-control  lib  sine::run::tests::a_run_goes_from_start_to_completed_with_the_ramp_on_the_stations_clock
+sds-control  lib  sine::run::tests::a_stop_ramps_down_and_ends_operator_stop_at_the_level_it_was_asked
+sds-control  lib  sine::run::tests::an_abort_ends_without_the_ramp
+sds-control  lib  sine::run::tests::the_capture_run_name_reaches_the_controllers_capture
+sds-control  lib  sine::run::tests::the_identification_is_drawn_at_the_review_hold
+sds-control  lib  sine::run::tests::the_review_hold_waits_for_proceed_and_the_sweep_verbs_act
+sds-control  test:sine_protocol  a_live_srs_run_refuses_a_sine_configure_and_start
+sds-control  test:sine_protocol  a_subscription_parses_to_its_result_and_refuses_what_a_quantity_does_not_take
+sds-control  test:sine_protocol  configure_its_dry_run_the_configuration_reset_and_clear
+sds-control  test:sine_protocol  shutdown_refuses_the_drive_verbs_and_leaves_hold_stop_and_abort
+sds-control  test:sine_protocol  the_law_catalog_lists_the_sine_world_with_its_live_parameters
+sds-control  test:sine_protocol  the_sweep_verbs_and_the_adjustments_are_refused_by_name_before_the_run_is_asked
+sds-control  test:sine_sim_run  sim_1_a_sweep_completes_within_its_band_at_its_rate_and_ramps_down
+sds-control  test:sine_sim_run  sim_2_hold_resume_reverse_jog_goto_level_adjust_and_stop
+sds-control  test:sine_sim_run  sim_3_an_observer_aborts_within_one_batch
+sds-control  test:sine_sim_run  sim_4_the_shakers_displacement_limit_trips_the_kinematic_abort
+sds-control  test:sine_sim_run  sim_5_a_lost_controller_and_a_shutdown_each_safe_stop_with_the_ramp
+sds-control  test:sine_sim_run  sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_held_then_ramped
+sds-control  test:sine_sim_run  sim_7_the_template_law_passes_sim_1_and_the_built_in_matches_its_law_file
+sds-control  test:sine_sim_run  sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_verbs
+sds-control  test:sine_law_check  a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware
+sds-control  test:sine_law_check  the_built_in_sine_law_passes_every_case_and_is_not_recorded

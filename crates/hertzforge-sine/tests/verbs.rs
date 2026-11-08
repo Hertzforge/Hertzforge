@@ -106,6 +106,8 @@ fn cfg(mode: SineMode, table_db: Vec<f64>, rung_s: f64) -> SineTestConfig {
         control_tick_frames: 64,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 

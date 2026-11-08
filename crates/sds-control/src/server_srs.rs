@@ -495,7 +495,7 @@ impl Service {
                 )
                 .with_detail(json!({"outcome": v.end.as_ref().map(|e| e.outcome)})));
             }
-            if inner.random_live() || inner.mimo_live() || inner.shock_live() {
+            if inner.random_live() || inner.mimo_live() || inner.shock_live() || inner.sine_live() {
                 inner.run_active()?;
             }
             if v.state.is_busy() || (!start && v.state == State::Armed) {
