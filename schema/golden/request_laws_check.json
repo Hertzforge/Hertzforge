@@ -1,0 +1,11 @@
+{
+ "type": "request",
+ "id": 39,
+ "method": "laws.check",
+ "params": {
+  "path": "/home/operator/laws/notch_pinv.wasm",
+  "params": {
+   "gain": 0.5
+  }
+ }
+}

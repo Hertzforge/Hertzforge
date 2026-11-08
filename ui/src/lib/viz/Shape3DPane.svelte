@@ -24,7 +24,7 @@
 	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
 	 * a drag still turns the view.
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, type Snippet } from 'svelte';
 	import {
 		AmbientLight,
 		BufferAttribute,
@@ -71,6 +71,13 @@
 		mode?: number;
 		/** Index into `view.overlays`, drawn over the mode; none when null. */
 		overlay?: number | null;
+		/**
+		 * Each node's own color, sRGB 0 to 1, f32 [N, 3], in place of the travel colormap: a view
+		 * that colors its nodes by another quantity (a run's control error). Updated in place.
+		 */
+		colors?: Float32Array | null;
+		/** The legend drawn in place of the travel colormap's, with `colors`. */
+		legend?: Snippet;
 		/** The result the view belongs to, which its playback `link` is scoped to. */
 		scope?: string;
 		/** Run the view's `pick` operation with these params added: what a click chose. */
@@ -79,7 +86,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, scope, onpick, ongizmo }: Props = $props();
+	let { view, mode = $bindable(0), overlay = null, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
 
 	// kept across the view each drag answers with
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
@@ -385,7 +392,18 @@
 		colors[3 * n + 2] = srgbToLinear(rgb[2]);
 	}
 
+	/** The caller's own node colors, over whatever the shape or the motion painted. */
+	function paintColors() {
+		if (!renderer || !colors) return;
+		const out = colorAttr.array as Float32Array;
+		const n = Math.min(out.length, colors.length);
+		for (let i = 0; i < n; i++) out[i] = srgbToLinear(colors[i]);
+		colorAttr.needsUpdate = true;
+		dirty = true;
+	}
+
 	function loadMode() {
+		if (renderer && !current) paintColors();
 		if (!renderer || !current) return;
 		const re = current.shape;
 		const im = current.shape_imag;
@@ -401,6 +419,7 @@
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		dirty = true;
+		paintColors();
 	}
 
 	/**
@@ -854,6 +873,11 @@
 	});
 
 	$effect(() => {
+		void colors;
+		paintColors();
+	});
+
+	$effect(() => {
 		if (!renderer) return;
 		for (const m of [surface.material as MeshLambertMaterial]) {
 			m.wireframe = wireframe;
@@ -1216,7 +1240,9 @@
 	</div>
 
 	<div class="bottom">
-		{#if moves && colored}
+		{#if colors && legend}
+			<div class="legend" aria-label="Color legend">{@render legend()}</div>
+		{:else if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
 				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}

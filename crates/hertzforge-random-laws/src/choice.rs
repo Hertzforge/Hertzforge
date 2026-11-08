@@ -3,10 +3,10 @@
 
 use crate::adapter::WasmLawFactory;
 use crate::builtin::{BuiltinLaw, DEFAULT_LAW_ID};
-use crate::catalog::LawCatalog;
+use crate::catalog::{LawCatalog, LawWorld};
 use crate::ratio::NativeRatioFactory;
 use hertzforge_law_host::validate::resolve_params;
-use hertzforge_law_host::{LawError, Param, ParamValue};
+use hertzforge_law_host::{AnyLaw, LawError, Param, ParamValue};
 use hertzforge_law_ratio_math::RatioParams;
 use hertzforge_random::service::config::RandomTestConfig;
 use hertzforge_random::service::law::{HinvLawFactory, LawFactory};
@@ -55,6 +55,14 @@ pub enum ChoiceError {
     },
     /// The values fit their declarations but not the law together.
     BadConfig(String),
+    /// The law is for the other test type: a multiple-output law chosen for a
+    /// single-output run, or the other way round.
+    WrongTestType {
+        /// The law's id.
+        id: String,
+        /// What the law is for, in words.
+        law_is_for: &'static str,
+    },
 }
 
 impl fmt::Display for ChoiceError {
@@ -65,6 +73,9 @@ impl fmt::Display for ChoiceError {
                 write!(f, "control law parameter `{key}`: {reason}")
             }
             ChoiceError::BadConfig(s) => write!(f, "control law settings: {s}"),
+            ChoiceError::WrongTestType { id, law_is_for } => {
+                write!(f, "control law `{id}` is for {law_is_for}")
+            }
         }
     }
 }
@@ -102,6 +113,12 @@ impl LawCatalog {
         let entry = self
             .entry(&choice.id)
             .ok_or_else(|| ChoiceError::UnknownLaw(choice.id.clone()))?;
+        if entry.world != LawWorld::Single {
+            return Err(ChoiceError::WrongTestType {
+                id: choice.id.clone(),
+                law_is_for: entry.world.test_type(),
+            });
+        }
         let params = resolve_params(&entry.manifest, &choice.params, cfg.control.channels.len())
             .map_err(|e| match e {
                 LawError::ParamInvalid { key, reason } => ChoiceError::BadParam { key, reason },
@@ -133,12 +150,18 @@ impl LawCatalog {
                 }
                 Ok(Arc::new(NativeRatioFactory::new(rp)))
             }
-            None => {
-                let imported = self
-                    .imported_law(&choice.id)
-                    .ok_or_else(|| ChoiceError::UnknownLaw(choice.id.clone()))?;
-                Ok(Arc::new(WasmLawFactory::new(imported.law.clone(), params)))
-            }
+            None => match self.imported_law(&choice.id).map(|i| &i.law) {
+                Some(AnyLaw::Single(law)) => Ok(Arc::new(WasmLawFactory::new(law.clone(), params))),
+                Some(AnyLaw::Mimo(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "multiple-output Random",
+                }),
+                Some(AnyLaw::ShockClassical(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "classical shock",
+                }),
+                None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
+            },
         }
     }
 }

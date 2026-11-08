@@ -6,12 +6,20 @@ license = "MIT"
 publish = false
 
 # The guest side of the control-law interface: what a law author depends on
-# to build a law file. Generates the bindings for the `random-single` world
-# of `wit/control-law/` and wraps them in the `RandomLaw` trait and the
-# `export_law!` macro. Builds for the host too (so the workspace lints it and
-# a law's math can be unit-tested natively); a law file is built with
+# to build a law file. Generates the bindings for the `random-single`,
+# `random-mimo` and `shock-classical` worlds of `wit/control-law/` and wraps them
+# in the `RandomLaw`, `RandomMimoLaw` and `ShockClassicalLaw` traits and the
+# `export_law!`, `export_mimo_law!` and `export_classical_law!` macros. Builds for the host too (so the workspace lints it and a law's math
+# can be unit-tested natively); a law file is built with
 # `cargo build --target wasm32-wasip2 --release`.
 [dependencies]
 # 0.61 parses WIT with the same wasm-tools line (0.258) as Wasmtime 49, so
 # the build holds one copy of the parser. No async, no flags types.
 wit-bindgen = { version = "0.61", default-features = false, features = ["macros", "realloc", "std"] }
+# The spectral density matrix stacks and the MIMO law boundary a multiple-output
+# law is written against, shared with the controller.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+# A classical shock law's transforms (`shock::rfft_half`, `shock::irfft_half`)
+# in the world's convention, and the built-in law's arithmetic for the law file
+# that wraps it. Plain math that builds for `wasm32-wasip2`.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }

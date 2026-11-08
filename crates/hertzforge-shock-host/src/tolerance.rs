@@ -321,6 +321,39 @@ pub fn check_tolerance(
     }
 }
 
+/// The tolerance band `check_tolerance` judges against, for drawing: the
+/// nominal main pulse at `reference_spec`'s amplitude starting at record sample
+/// `main_start`, plus and minus the standard's amplitude tolerance, and zero
+/// plus and minus it in the quiet windows either side.
+pub fn tolerance_band(
+    reference_spec: &ClassicalPulseSpec,
+    fs_hz: f64,
+    standard: ToleranceStandard,
+    main_start: i64,
+) -> crate::service::report::ToleranceBand {
+    let p = standard.params();
+    let nominal = if reference_spec.validate().is_ok() && fs_hz > 0.0 {
+        reference_spec.main_pulse(fs_hz)
+    } else {
+        Vec::new()
+    };
+    let n_nom = nominal.len();
+    let w_pre = ((n_nom as f64) * p.window_pre_frac).round() as usize;
+    let w_post = ((n_nom as f64) * p.window_post_frac).round() as usize;
+    let tol = p.amp_tol_frac_of_peak * reference_spec.amplitude_g;
+    let center: Vec<f64> = std::iter::repeat_n(0.0, w_pre)
+        .chain(nominal.iter().copied())
+        .chain(std::iter::repeat_n(0.0, w_post))
+        .collect();
+    crate::service::report::ToleranceBand {
+        start: main_start - w_pre as i64,
+        main_start,
+        main_len: n_nom,
+        lower: center.iter().map(|c| c - tol).collect(),
+        upper: center.iter().map(|c| c + tol).collect(),
+    }
+}
+
 /// Align `nominal` to `measured` by maximizing the raw cross-correlation over
 /// all integer lags (nominal fully-before to fully-after the record). Returns
 /// the lag: the measured index where `nominal[0]` best sits (may be negative if

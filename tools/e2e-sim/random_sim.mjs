@@ -10,7 +10,7 @@
 // minutes, because the simulator runs in real time. It is not part of `npm --prefix ui test`.
 //
 // 0. Acquire opens on the test-type chooser, in three sections (Single Output, MIMO, Data
-//    Acquisition), with Random the only test type offered and the keyboard moving across the
+//    Acquisition), with Random, Classical Shock and MIMO Random offered and the keyboard moving across the
 //    sections; each screen picks Random there.
 //    The workspace rail minimizes and stays minimized across a reload.
 // 1. One screen takes control, selects the simulator, sets the channel table (a control input, a
@@ -294,16 +294,15 @@ try {
 	const sections = await a.locator('[data-testid^="test-group-"] h2').allInnerTexts();
 	// A test type still to come cannot be opened (forced past the browser's own refusal to click it).
 	await tid(a, 'test-type-sine').click({ force: true });
-	await tid(a, 'test-type-mimo_random').click({ force: true });
 	const stayed = await tid(a, 'test-type-chooser').isVisible();
 	const inGroup = (g) => cards.filter((c) => c.group === g).map((c) => c.id).join();
 	check(
-		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random the only type offered, the rest "Coming"',
+		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random, Classical Shock and MIMO Random offered, the rest "Coming"',
 		sections.map((t) => t.toLowerCase()).join('|') === 'single output|mimo|data acquisition' &&
 			inGroup('single') === 'random,sine,shock,srs,twr,explorer' &&
 			inGroup('mimo') === 'mimo_random,mimo_shock,mimo_sine,mimo_mixed,mimo_twr' &&
 			inGroup('acquisition') === 'recorder' &&
-			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random' &&
+			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random,shock,mimo_random' &&
 			cards.filter((c) => !c.offered).every((c) => /\bcoming\b/i.test(c.text)) &&
 			stayed,
 		`${sections.join(' | ')}: ${cards.map((c) => `${c.id} ${c.offered ? 'offered' : 'coming'}`).join(', ')}`

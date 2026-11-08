@@ -1,0 +1,307 @@
+{
+ "type": "event",
+ "topic": "mimo_random.data",
+ "seq": 120,
+ "data": {
+  "run_id": "m-0003",
+  "source": "SIM",
+  "state": "running",
+  "phase": "full_level",
+  "loop": 30,
+  "elapsed_s": 70.5,
+  "level_db": 0,
+  "plots": [
+   {
+    "id": "grid",
+    "quantity": "sdm",
+    "selector": {
+     "block": [
+      0,
+      1
+     ]
+    },
+    "labels": [
+     "Control X",
+     "Control Y"
+    ],
+    "views": [
+     {
+      "view": "sdm",
+      "title": "Spectral Matrix",
+      "channels": [
+       "Control X",
+       "Control Y"
+      ],
+      "packing": "upper",
+      "unit": "g²/Hz",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "x_values": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5
+       ]
+      },
+      "measured": {
+       "re": {
+        "dtype": "f64",
+        "shape": [
+         3,
+         3
+        ],
+        "values": [
+         0.0390625,
+         0.01171875,
+         0.041015625,
+         0.0390625,
+         0.01171875,
+         0.041015625,
+         0.0390625,
+         0.01171875,
+         0.041015625
+        ]
+       },
+       "im": {
+        "dtype": "f64",
+        "shape": [
+         3,
+         3
+        ],
+        "values": [
+         0.0,
+         0.015625,
+         0.0,
+         0.0,
+         0.015625,
+         0.0,
+         0.0,
+         0.015625,
+         0.0
+        ]
+       }
+      },
+      "reference": {
+       "re": {
+        "dtype": "f64",
+        "shape": [
+         3,
+         3
+        ],
+        "values": [
+         0.0390625,
+         0.01171875,
+         0.0390625,
+         0.0390625,
+         0.01171875,
+         0.0390625,
+         0.0390625,
+         0.01171875,
+         0.0390625
+        ]
+       },
+       "im": {
+        "dtype": "f64",
+        "shape": [
+         3,
+         3
+        ],
+        "values": [
+         0.0,
+         0.015625,
+         0.0,
+         0.0,
+         0.015625,
+         0.0,
+         0.0,
+         0.015625,
+         0.0
+        ]
+       }
+      }
+     }
+    ]
+   },
+   {
+    "id": "coh01",
+    "quantity": "coh",
+    "selector": {
+     "pair": [
+      0,
+      1
+     ]
+    },
+    "labels": [
+     "Control X",
+     "Control Y"
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Coherence: Control X, Control Y",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Coherence",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          106.25,
+          112.5,
+          118.75
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.25,
+          0.2421875,
+          0.25,
+          0.234375
+         ]
+        }
+       },
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          106.25,
+          112.5,
+          118.75
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.25,
+          0.25,
+          0.25,
+          0.25
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "heat",
+    "quantity": "error_db",
+    "selector": {
+     "rows": "all"
+    },
+    "labels": [
+     "Control X",
+     "Control Y"
+    ],
+    "views": [
+     {
+      "view": "heatmap",
+      "title": "Control Error",
+      "rows": {
+       "label": "Control",
+       "ticks": [
+        "Control X",
+        "Control Y"
+       ]
+      },
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "x_values": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "values": {
+       "dtype": "f32",
+       "shape": [
+        2,
+        4
+       ],
+       "values": [
+        0.5,
+        -0.25,
+        0.125,
+        0.0,
+        -0.5,
+        0.25,
+        0.375,
+        -0.125
+       ]
+      },
+      "value": {
+       "label": "Error",
+       "unit": "dB"
+      },
+      "row_bands": [
+       {
+        "alarm_db": [
+         3,
+         3
+        ],
+        "abort_db": [
+         6,
+         6
+        ]
+       },
+       {
+        "alarm_db": [
+         3,
+         3
+        ],
+        "abort_db": [
+         6,
+         6
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

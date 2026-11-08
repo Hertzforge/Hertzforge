@@ -52,7 +52,7 @@
 //! (`crate::control_thread`).
 
 use crate::clock::{provisional_abort_latency, resolve_clock, ClockKey, ProvisionalAbortLatency};
-use crate::config::{AiInterface, NiConfig};
+use crate::config::{AiDeviceLimit, AiInterface, NiConfig};
 use crate::error::NiError;
 use crate::ffi::{self, val, Driver, Task, WarningLog};
 use hertzforge_channel_table::ChannelTable;
@@ -584,6 +584,27 @@ impl NiBackend {
         self.devices.iter().find(|d| d.id == dev)
     }
 
+    /// Each input device's measuring limit, read from the driver. A device whose
+    /// ranges cannot be read is left out, with a warning, so its rows go
+    /// unchecked rather than refused.
+    fn ai_device_limits(&self) -> Result<Vec<AiDeviceLimit>, NiError> {
+        let d = self.drv()?;
+        let mut out = Vec::new();
+        for dev in self.cfg.input_devices() {
+            let product = self
+                .identity(&dev)
+                .map(|i| i.product.clone())
+                .unwrap_or_default();
+            match d.dev_ai_voltage_rngs(&dev) {
+                Ok(r) => out.extend(AiDeviceLimit::from_ranges(&dev, &product, &r)),
+                Err(e) => self.warnings.push(format!(
+                    "{dev}: input ranges not readable ({e}); its rows' ranges were not checked"
+                )),
+            }
+        }
+        Ok(out)
+    }
+
     /// The chassis every device in the task set shares, if there is exactly one.
     ///
     /// A cross-chassis set has no single `ai/SampleClock` terminal to route to,
@@ -624,6 +645,8 @@ impl NiBackend {
         self.cfg.validate()?;
         self.clear_tasks();
         self.read_device_identity()?;
+        let limits = self.ai_device_limits()?;
+        self.cfg.validate_ai_ranges(&limits)?;
 
         self.sensitivity_mv_per_eu = self
             .cfg

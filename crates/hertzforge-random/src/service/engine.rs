@@ -457,20 +457,26 @@ impl std::fmt::Display for GridRefusal {
 pub type BlockObserver = std::sync::Arc<dyn Fn(&[f32], usize) + Send + Sync>;
 
 struct PlaybackStep {
+    /// The pre-synthesized drive record, `n_out` interleaved outputs per frame.
     drive: Vec<f64>,
+    /// Outputs per frame: the engine's `out_channels`. One for single-output
+    /// Random; the multiple-output service plays one stream per drive.
+    n_out: usize,
     /// The drive level ramp and the level this segment's drive was synthesized
     /// at: each output block is scaled by the ramp's walk from that level
     /// (`super::ramp`). `None`: the record plays as synthesized.
     ramp: Option<(std::sync::Arc<super::ramp::DriveRamp>, f64, f64)>,
-    /// Sum over the emitted samples of the ramp's power gain (gain squared)
+    /// Sum over the emitted frames of the ramp's power gain (gain squared)
     /// relative to the synthesis level, for [`SegmentResult::drive_power_gain`].
     gain2_sum: f64,
     gain2_n: usize,
+    /// Next frame of the record to play.
     pos: usize,
     n_ch: usize,
     /// Interleaved recorded response: `n_ch` samples per frame.
     interleaved: Vec<f64>,
-    drive_peak: f64,
+    /// Peak absolute sample emitted, per output.
+    drive_peaks: Vec<f64>,
     /// Per-tick display tap. `None` = nothing observes.
     observer: Option<BlockObserver>,
     /// Frames emitted as ZERO because the tick count outran the synthesized drive
@@ -481,16 +487,18 @@ struct PlaybackStep {
 }
 
 impl PlaybackStep {
-    fn new(drive: Vec<f64>, n_ch: usize) -> Self {
+    fn new(drive: Vec<f64>, n_ch: usize, n_out: usize) -> Self {
+        let n_out = n_out.max(1);
         PlaybackStep {
             drive,
+            n_out,
             ramp: None,
             gain2_sum: 0.0,
             gain2_n: 0,
             pos: 0,
             n_ch: n_ch.max(1),
             interleaved: Vec::new(),
-            drive_peak: 0.0,
+            drive_peaks: vec![0.0; n_out],
             observer: None,
             zero_filled: 0,
         }
@@ -507,6 +515,10 @@ impl PlaybackStep {
         } else {
             self.gain2_sum / self.gain2_n as f64
         }
+    }
+
+    fn drive_peak(&self) -> f64 {
+        self.drive_peaks.iter().copied().fold(0.0, f64::max)
     }
 
     fn with_ramp(
@@ -526,36 +538,42 @@ impl ProcessStep for PlaybackStep {
             .checked_div(n_frames)
             .unwrap_or(self.n_ch)
             .max(1);
+        let n_out = self.n_out;
         drive_out.clear();
-        drive_out.reserve(n_frames);
+        drive_out.reserve(n_frames * n_out);
         for f in 0..n_frames {
             // Record every input channel for this frame (interleaved), up to n_ch.
             for c in 0..self.n_ch.min(in_ch) {
                 self.interleaved.push(input[f * in_ch + c] as f64);
             }
-            // Emit the next pre-synthesized drive sample (zero past the end).
-            let d = match self.drive.get(self.pos) {
-                Some(&v) => v,
+            // Emit the next pre-synthesized drive frame, one sample per output
+            // (zero past the end). The engine takes `n_frames * out_channels`
+            // samples per tick: one stream per output, never one stream spread
+            // across them.
+            let base = self.pos * n_out;
+            match self.drive.get(base..base + n_out) {
+                Some(frame) => drive_out.extend(frame.iter().map(|&v| v as f32)),
                 None => {
                     self.zero_filled += 1;
-                    0.0
+                    drive_out.extend(std::iter::repeat_n(0.0f32, n_out));
                 }
-            };
+            }
             self.pos += 1;
-            drive_out.push(d as f32);
         }
         // The level ramp, per output block (bench finding 2, 2026-11-01).
         if let Some((ramp, base_db, fs_hz)) = &self.ramp {
-            let (_end, g2) = super::ramp::scale_block(ramp, *base_db, *fs_hz, drive_out);
+            let (_end, g2) = super::ramp::scale_frames(ramp, *base_db, *fs_hz, drive_out, n_out);
             self.gain2_sum += g2;
         } else {
             self.gain2_sum += n_frames as f64;
         }
         self.gain2_n += n_frames;
-        for d in drive_out.iter() {
-            let a = f64::from(d.abs());
-            if a > self.drive_peak {
-                self.drive_peak = a;
+        for frame in drive_out.chunks(n_out) {
+            for (peak, d) in self.drive_peaks.iter_mut().zip(frame) {
+                let a = f64::from(d.abs());
+                if a > *peak {
+                    *peak = a;
+                }
             }
         }
         // Display tap: hand this tick's freshly acquired block out
@@ -617,8 +635,11 @@ pub struct SegmentResult {
     pub interleaved: Vec<f64>,
     /// Number of input channels in the interleave.
     pub n_ch: usize,
-    /// Peak absolute drive sample emitted.
+    /// Peak absolute drive sample emitted, over every output.
     pub drive_peak: f64,
+    /// Peak absolute drive sample emitted, per output in drive-row order (one
+    /// entry for single-output Random).
+    pub drive_peaks: Vec<f64>,
     /// The engine's raw-ring watchdog trip, if this segment aborted on a tri-field
     /// breach. The engine's [`AbortWatchdog`] is the PRIMARY kinematic abort (it reads
     /// the raw ring before any decimation and is faster than a post-segment check); the
@@ -696,6 +717,8 @@ pub struct PlantLoop {
     ecfg: EngineConfig,
     window_len: u64,
     n_ch: usize,
+    /// Outputs per frame (the enabled Drive rows; at least one).
+    n_out: usize,
     /// The station class this loop armed against, captured at `open()` from the
     /// same value handed to the arm gate. It is what decides whether a
     /// `SchedulingFault` is a harness artifact or a real fault - see
@@ -753,6 +776,49 @@ impl PlantLoop {
         cfg: &mut LoopConfig,
         table: ChannelTable,
     ) -> Result<Self, String> {
+        Self::open_inner(backend, station, cfg, table, false)
+    }
+
+    /// As [`PlantLoop::open`], for a test type that drives every enabled Drive row
+    /// with its own stream: each segment's record and lead-in are interleaved, one
+    /// sample per drive row per frame in table order ([`DriveSynth::segment_factored`]
+    /// builds them). Single-output Random never calls this; it keeps the refusal of
+    /// [`PlantLoop::open`].
+    pub fn open_outputs(
+        backend: Box<dyn Backend>,
+        station: hertzforge_module_abi::StationClass,
+        cfg: &mut LoopConfig,
+        table: ChannelTable,
+    ) -> Result<Self, String> {
+        Self::open_inner(backend, station, cfg, table, true)
+    }
+
+    fn open_inner(
+        backend: Box<dyn Backend>,
+        station: hertzforge_module_abi::StationClass,
+        cfg: &mut LoopConfig,
+        table: ChannelTable,
+        multiple_outputs: bool,
+    ) -> Result<Self, String> {
+        // Single-output Random drives ONE output: `PlaybackStep` emits one drive
+        // sample per frame, while the engine below is sized for every enabled
+        // Drive row. Two rows would spread one stream across both outputs and
+        // drop half the frames with nothing to say so. Refused here, before any
+        // device is opened, until the drive path is generalized for
+        // multiple-output control (which has its own test type).
+        let drive_rows = table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .count();
+        if drive_rows > 1 && !multiple_outputs {
+            return Err(format!(
+                "arm refused: this test type drives one output, and the channel table \
+                 enables {drive_rows} drive rows; disable all but one, or choose a \
+                 multiple-output test type"
+            ));
+        }
+
         let mut backend = backend;
         backend.open().map_err(|e| format!("open: {e:?}"))?;
 
@@ -779,7 +845,7 @@ impl PlantLoop {
         let acq = hertzforge_hal::AcquisitionConfig::new(cfg.fs_hz, cfg.block_frames.max(1));
         let actual = backend
             .configure(&table, &acq)
-            .map_err(|e| format!("configure: {e:?}"))?;
+            .map_err(|e| format!("configure: {e}"))?;
 
         // ADOPT WHAT THE DEVICE PROGRAMMED, before anything is derived from `cfg`.
         //
@@ -908,6 +974,7 @@ impl PlantLoop {
             table,
             ecfg,
             n_ch,
+            n_out: n_drive,
             station,
             adoption,
             pipeline_lag_frames,
@@ -946,7 +1013,10 @@ impl PlantLoop {
             return 0;
         }
         let caps = self.backend.caps();
-        if caps.max_output_channels != 1 {
+        // A lead-in is a whole stream per output: offered only when the backend
+        // declares exactly this loop's output count (one for single-output
+        // Random, which keeps its behavior exactly).
+        if caps.max_output_channels as usize != self.n_out {
             return 0;
         }
         caps.output_buffer
@@ -1006,6 +1076,11 @@ impl PlantLoop {
     /// The number of enabled non-drive input channels (interleave width).
     pub fn n_input_channels(&self) -> usize {
         self.n_ch
+    }
+
+    /// The number of outputs each frame carries (the enabled Drive rows).
+    pub fn n_outputs(&self) -> usize {
+        self.n_out
     }
 
     /// The station's per-input overload flags, in frame order
@@ -1114,10 +1189,15 @@ impl PlantLoop {
                     .output_buffer
                     .map(|c| c.min_lookahead_frames as usize)
                     .unwrap_or(0);
-                let head_cap = leadin.len().saturating_sub(hold_back);
-                let head: Vec<f32> = leadin[..head_cap].iter().map(|&v| v as f32).collect();
-                while prefilled_frames < head.len() {
-                    match self.backend.write_drive(&head[prefilled_frames..]) {
+                let n_out = self.n_out;
+                let leadin_frames = leadin.len() / n_out;
+                let head_cap = leadin_frames.saturating_sub(hold_back);
+                let head: Vec<f32> = leadin[..head_cap * n_out]
+                    .iter()
+                    .map(|&v| v as f32)
+                    .collect();
+                while prefilled_frames < head_cap {
+                    match self.backend.write_drive(&head[prefilled_frames * n_out..]) {
                         Ok(0) | Err(_) => break, // start()'s top-up decides
                         Ok(frames) => prefilled_frames += frames,
                     }
@@ -1175,14 +1255,14 @@ impl PlantLoop {
                 // write did not land keeps the engine-managed zero behavior.
                 engine.mark_output_prefilled();
                 let reserve: Vec<Vec<f32>> = leadin
-                    .iter()
+                    .chunks_exact(self.n_out)
                     .skip(prefilled_frames)
-                    .map(|&v| vec![v as f32])
+                    .map(|frame| frame.iter().map(|&v| v as f32).collect())
                     .collect();
                 engine.adopt_output_queue(reserve);
             }
             self.output_primed = true;
-            let mut step = PlaybackStep::new(drive.clone(), self.n_ch)
+            let mut step = PlaybackStep::new(drive.clone(), self.n_ch, self.n_out)
                 .with_observer(self.block_observer.clone())
                 .with_ramp(self.drive_ramp.clone(), self.fs_hz);
             let mut sink = VecCaptureSink::new();
@@ -1204,10 +1284,12 @@ impl PlantLoop {
                     continue;
                 }
                 let drive_power_gain = step.power_gain();
+                let drive_peak = step.drive_peak();
                 return SegmentResult {
                     interleaved: step.interleaved,
                     n_ch: self.n_ch,
-                    drive_peak: step.drive_peak,
+                    drive_peak,
+                    drive_peaks: step.drive_peaks,
                     // A scheduling fault is not a limit breach.
                     watchdog_trip: None,
                     faulted: Some(format!(
@@ -1246,10 +1328,12 @@ impl PlantLoop {
             // late samples, coercions). Previously collected and unreachable.
             let driver_warnings = self.backend.take_warnings();
             let drive_power_gain = step.power_gain();
+            let drive_peak = step.drive_peak();
             return SegmentResult {
                 interleaved: step.interleaved,
                 n_ch: self.n_ch,
-                drive_peak: step.drive_peak,
+                drive_peak,
+                drive_peaks: step.drive_peaks,
                 watchdog_trip,
                 faulted,
                 zero_filled: step.zero_filled,
@@ -1319,19 +1403,121 @@ fn fault_message(reason: &StopReason) -> Option<String> {
     }
 }
 
+/// One factor of a drive spectral matrix per line: `L` with `L L^H = G_dd`, for
+/// [`DriveSynth::segment_factored`]. Complex values as `(re, im)`, row-major
+/// within a line (row = output, column = independent source), lines in order:
+/// `data[(line * outputs + d) * sources + j]`. Lines outside the band are zero.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DriveFactor {
+    pub lines: usize,
+    pub outputs: usize,
+    pub sources: usize,
+    pub data: Vec<(f64, f64)>,
+}
+
+impl DriveFactor {
+    /// All zeros (silence on every output).
+    pub fn zeros(lines: usize, outputs: usize, sources: usize) -> Self {
+        DriveFactor {
+            lines,
+            outputs,
+            sources,
+            data: vec![(0.0, 0.0); lines * outputs * sources],
+        }
+    }
+
+    fn line_is_zero(&self, line: usize) -> bool {
+        let per = self.outputs * self.sources;
+        self.data[line * per..(line + 1) * per]
+            .iter()
+            .all(|&(re, im)| re == 0.0 && im == 0.0)
+    }
+}
+
+/// The per-line random phases of a multiple-output synthesis: one independent
+/// unit-magnitude phase per line per source per frame, shared by every output so
+/// the outputs keep the cross spectra their factor carries. SplitMix64; seeded per
+/// run, so a run's drive is reproducible from its recorded seed.
+#[derive(Debug, Clone)]
+struct PhaseSource {
+    state: u64,
+}
+
+impl PhaseSource {
+    fn new(seed: u64) -> Self {
+        PhaseSource {
+            state: seed ^ 0x6D49_4D4F_5048_4153,
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// `e^(j theta)` with `theta` uniform on `[0, 2 pi)`.
+    fn next_phase(&mut self) -> (f64, f64) {
+        let u = (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+        let theta = std::f64::consts::TAU * u;
+        (theta.cos(), theta.sin())
+    }
+}
+
 /// A continuous COLA synthesizer for the drive stream: turns a drive PSD into a
 /// window-length segment, seamless across calls (the synth state carries over).
+///
+/// It holds one square-root-Hann COLA synthesizer per output. Single-output Random
+/// uses one, through [`Self::segment`] and [`Self::leadin`], exactly as before the
+/// multiple-output path existed. The multiple-output service builds it with
+/// [`Self::with_outputs`] and plays a drive spectral matrix through
+/// [`Self::segment_factored`]: per frame and per line one vector of independent
+/// unit-magnitude random phases `z` is drawn, the line's spectrum for every output
+/// is `X = L z` with `L` the factor of the drive spectral matrix, and each output's
+/// synthesizer windows and overlap-adds its own column of that frame. Every output
+/// uses the same window, the same hop and the same frame's phases, so the
+/// cross-spectral coherence and phase between outputs are kept (D. O. Smallwood
+/// and T. L. Paez, "A Frequency Domain Method for the Generation of Partially
+/// Coherent Normal Stationary Time Domain Signals", Shock and Vibration 1 (1993)).
+/// The square-root Hann window at 50% overlap has a constant squared-window
+/// overlap sum, which is the condition independent random frames need for a
+/// stationary output.
 pub struct DriveSynth {
-    cola: ColaSynth,
+    colas: Vec<ColaSynth>,
     window_len: usize,
+    phases: PhaseSource,
 }
 
 impl DriveSynth {
     pub fn new(cfg: &LoopConfig) -> Self {
+        Self::with_outputs(cfg, 1)
+    }
+
+    /// A synthesizer for `outputs` drives (at least one). The phase source is
+    /// seeded from `cfg.cola_seed`.
+    pub fn with_outputs(cfg: &LoopConfig, outputs: usize) -> Self {
+        let outputs = outputs.max(1);
         DriveSynth {
-            cola: ColaSynth::with_seed(cfg.nfft, cfg.overlap, cfg.fs_hz, cfg.cola_seed),
+            colas: (0..outputs as u64)
+                .map(|d| {
+                    ColaSynth::with_seed(
+                        cfg.nfft,
+                        cfg.overlap,
+                        cfg.fs_hz,
+                        cfg.cola_seed.wrapping_add(d),
+                    )
+                })
+                .collect(),
             window_len: cfg.window_len(),
+            phases: PhaseSource::new(cfg.cola_seed),
         }
+    }
+
+    /// Outputs this synthesizer drives.
+    pub fn outputs(&self) -> usize {
+        self.colas.len()
     }
 
     /// Synthesize a LEAD-IN of `frames`: real drive played ahead of
@@ -1341,7 +1527,7 @@ impl DriveSynth {
     pub fn leadin(&mut self, frames: usize, psd: &[f64]) -> Vec<f64> {
         let mut out = Vec::with_capacity(frames);
         while out.len() < frames {
-            out.extend_from_slice(&self.cola.next_frame(psd));
+            out.extend_from_slice(&self.colas[0].next_frame(psd));
         }
         out.truncate(frames);
         out
@@ -1350,20 +1536,88 @@ impl DriveSynth {
     /// Scale the synthesis overlap carried into the next segment by `gain` (see
     /// `ColaSynth::scale_tail`): after a segment whose output a level ramp scaled
     /// from its synthesis level, so the next segment, synthesized at the level
-    /// the ramp reached, does not crossfade in from the old level.
+    /// the ramp reached, does not crossfade in from the old level. Every output.
     pub fn scale_carry(&mut self, gain: f64) {
-        self.cola.scale_tail(gain);
+        for c in &mut self.colas {
+            c.scale_tail(gain);
+        }
     }
 
     /// Synthesize one window-length drive segment from a one-sided drive PSD
-    /// (`nfft/2+1` bins). Seamless with the previous call.
+    /// (`nfft/2+1` bins). Seamless with the previous call. The first output.
     pub fn segment(&mut self, psd: &[f64]) -> Vec<f64> {
         let mut out = Vec::with_capacity(self.window_len);
         while out.len() < self.window_len {
-            out.extend_from_slice(&self.cola.next_frame(psd));
+            out.extend_from_slice(&self.colas[0].next_frame(psd));
         }
         out.truncate(self.window_len);
         out
+    }
+
+    /// Synthesize `frames` frames of every output from a factored drive spectral
+    /// matrix, interleaved one sample per output per frame (the layout
+    /// [`PlantLoop::open_outputs`] plays). Seamless with the previous call.
+    ///
+    /// `factor` must have `nfft/2 + 1` lines and one row per output; an error says
+    /// what does not match.
+    pub fn frames_factored(
+        &mut self,
+        frames: usize,
+        factor: &DriveFactor,
+    ) -> Result<Vec<f64>, String> {
+        let n_out = self.colas.len();
+        let nfft = self.colas[0].nfft();
+        let lines = nfft / 2 + 1;
+        if factor.lines != lines || factor.outputs != n_out || factor.sources == 0 {
+            return Err(format!(
+                "a drive factor of {} lines by {} outputs by {} sources does not fit a \
+                 synthesizer of {lines} lines and {n_out} outputs",
+                factor.lines, factor.outputs, factor.sources
+            ));
+        }
+        let active: Vec<usize> = (0..lines).filter(|&l| !factor.line_is_zero(l)).collect();
+        let hop = self.colas[0].hop();
+        let mut per_out: Vec<Vec<f64>> = vec![Vec::with_capacity(frames + hop); n_out];
+        let mut z = vec![(0.0f64, 0.0f64); factor.sources];
+        let mut spectra = vec![vec![(0.0f64, 0.0f64); lines]; n_out];
+        while per_out[0].len() < frames {
+            for s in spectra.iter_mut() {
+                s.fill((0.0, 0.0));
+            }
+            for &line in &active {
+                for zj in z.iter_mut() {
+                    *zj = self.phases.next_phase();
+                }
+                let base = line * n_out * factor.sources;
+                for (d, spec) in spectra.iter_mut().enumerate() {
+                    let row = &factor.data[base + d * factor.sources..][..factor.sources];
+                    let (mut re, mut im) = (0.0, 0.0);
+                    for (&(a, b), &(c, e)) in row.iter().zip(z.iter()) {
+                        re += a * c - b * e;
+                        im += a * e + b * c;
+                    }
+                    spec[line] = (re, im);
+                }
+            }
+            for ((cola, spec), out) in self.colas.iter_mut().zip(&spectra).zip(per_out.iter_mut()) {
+                out.extend_from_slice(&cola.next_frame_from_spectrum(spec));
+            }
+        }
+        let mut out = Vec::with_capacity(frames * n_out);
+        for f in 0..frames {
+            for stream in &per_out {
+                out.push(stream[f]);
+            }
+        }
+        // Frames synthesized past `frames` are dropped, as the single-output path
+        // truncates: a record is always a whole number of hops in practice.
+        Ok(out)
+    }
+
+    /// One window-length segment of every output from a factored drive spectral
+    /// matrix, interleaved ([`Self::frames_factored`]).
+    pub fn segment_factored(&mut self, factor: &DriveFactor) -> Result<Vec<f64>, String> {
+        self.frames_factored(self.window_len, factor)
     }
 }
 

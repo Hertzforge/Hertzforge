@@ -9,3 +9,5 @@ publish = false
 hertzforge-hal = { path = "../hertzforge-hal" }
 hertzforge-dsp = { path = "../hertzforge-dsp" }
 hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# `MatrixStack`: the FRF stacks a plant model plays and reports (its exact FRF).
+hertzforge-sdm = { path = "../hertzforge-sdm" }

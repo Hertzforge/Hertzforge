@@ -1,4 +1,6 @@
-//! Write a single-output Random control law for Hertzforge.
+//! Write a Random control law for Hertzforge: single-output ([`RandomLaw`],
+//! [`export_law!`]) or multiple-output ([`RandomMimoLaw`], [`export_mimo_law!`],
+//! the [`mimo`] module).
 //!
 //! A law is a Rust library crate built to a WebAssembly component:
 //!
@@ -38,6 +40,19 @@
 //!
 //! Because [`RandomLaw`] is a plain trait, a law's math can also be unit
 //! tested natively with `cargo test`, calling the trait methods directly.
+//!
+//! # Multiple-output Random
+//!
+//! A multiple-output law implements [`RandomMimoLaw`] and is exported with
+//! [`export_mimo_law!`]. It is written against the spectral density matrix
+//! stacks of `hertzforge-sdm` ([`mimo::HermitianStack`], [`mimo::MatrixStack`])
+//! and the native boundary [`mimo::MimoSetup`], [`mimo::MimoLoopInputs`] and
+//! [`mimo::MimoLoopOutputs`]: the SDK unpacks what the interface carries into
+//! those types and packs the drive back, so the same code runs natively inside
+//! the controller and as a law file. Its manifest is built with
+//! [`mimo::MimoManifestBuilder`], which adds the shapes the law supports, the
+//! optional inputs it needs and the layout of each diagnostic to the
+//! parameters and diagnostics every law declares.
 
 #![warn(missing_docs)]
 
@@ -58,6 +73,51 @@ pub mod __bindings {
         additional_derives: [PartialEq],
     });
 }
+
+/// The generated bindings of the `random-mimo` world. Not a stable API: use
+/// [`mimo`] and the re-exports. The shared `types` interface is the one
+/// [`__bindings`] generated, so a parameter or a manifest is one Rust type in
+/// both worlds.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __mimo_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "random-mimo",
+        pub_export_macro: true,
+        export_macro_name: "__export_random_mimo",
+        default_bindings_module: "hertzforge_law_sdk::__mimo_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
+/// The generated bindings of the `shock-classical` world. Not a stable API:
+/// use [`shock`]. The shared `types` interface is the one [`__bindings`]
+/// generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __shock_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "shock-classical",
+        pub_export_macro: true,
+        export_macro_name: "__export_shock_classical",
+        default_bindings_module: "hertzforge_law_sdk::__shock_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
+pub mod mimo;
+pub mod shock;
+
+pub use mimo::{MimoLawResource, RandomMimoLaw};
+pub use shock::{ClassicalLawResource, ShockClassicalLaw};
 
 use __bindings::exports::hertzforge::control_law::random_single_law as wit_law;
 
@@ -255,6 +315,59 @@ macro_rules! export_law {
 
         $crate::__bindings::__export_random_single!(
             __HertzforgeLawExport with_types_in $crate::__bindings
+        );
+    };
+}
+
+/// Export a [`ShockClassicalLaw`] as this crate's law. Use it once, at the
+/// crate root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_classical_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeClassicalLawExport;
+
+        impl $crate::__shock_bindings::Guest for __HertzforgeClassicalLawExport {
+            fn describe() -> $crate::Manifest {
+                <$law as $crate::ShockClassicalLaw>::describe()
+            }
+        }
+
+        impl $crate::__shock_bindings::exports::hertzforge::control_law::shock_classical_law::Guest
+            for __HertzforgeClassicalLawExport
+        {
+            type Law = $crate::ClassicalLawResource<$law>;
+        }
+
+        $crate::__shock_bindings::__export_shock_classical!(
+            __HertzforgeClassicalLawExport with_types_in $crate::__shock_bindings
+        );
+    };
+}
+
+/// Export a [`RandomMimoLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law: either this or
+/// [`export_law!`].
+#[macro_export]
+macro_rules! export_mimo_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeMimoLawExport;
+
+        impl $crate::__mimo_bindings::Guest for __HertzforgeMimoLawExport {
+            fn describe() -> $crate::mimo::MimoManifest {
+                <$law as $crate::RandomMimoLaw>::describe()
+            }
+        }
+
+        impl $crate::__mimo_bindings::exports::hertzforge::control_law::random_mimo_law::Guest
+            for __HertzforgeMimoLawExport
+        {
+            type Law = $crate::MimoLawResource<$law>;
+        }
+
+        $crate::__mimo_bindings::__export_random_mimo!(
+            __HertzforgeMimoLawExport with_types_in $crate::__mimo_bindings
         );
     };
 }
