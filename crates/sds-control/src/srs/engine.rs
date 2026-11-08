@@ -131,6 +131,11 @@ pub trait SrsEngine: Send {
     fn lead(&self) -> std::time::Duration {
         std::time::Duration::ZERO
     }
+    /// Each pulse's bring-up since the last call, timed, by pulse index, for the
+    /// service log. An engine that times nothing has none.
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        Vec::new()
+    }
 }
 
 /// Makes a run's engine.
@@ -529,6 +534,8 @@ pub struct ServiceEngine {
     rows_seen: usize,
     log_seen: usize,
     log: Vec<(&'static str, String)>,
+    /// Each pulse's bring-up not yet in the service log.
+    bring_ups: Vec<(u64, hertzforge_shock_common::BringUp)>,
 }
 
 impl ServiceEngine {
@@ -544,6 +551,7 @@ impl ServiceEngine {
             rows_seen: 0,
             log_seen: 0,
             log: Vec::new(),
+            bring_ups: Vec::new(),
         }
     }
 
@@ -617,6 +625,9 @@ impl ServiceEngine {
         for p in report.pulses.iter().skip(self.rows_seen) {
             out.rows.push(row_of(p));
             out.figures.push(self.figures_of(svc, p));
+            if let Some(b) = p.bring_up {
+                self.bring_ups.push((p.seq, b));
+            }
         }
         self.rows_seen = report.pulses.len();
         forward_log(&mut self.log_seen, &mut self.log, svc);
@@ -898,7 +909,10 @@ impl SrsEngine for ServiceEngine {
 
     fn fire(&mut self) -> Result<Fired, MethodError> {
         self.set_expected_pulse();
-        fired_or_cancelled(self.svc()?.fire_pulse())?;
+        // `go` lowers when nobody holds control: a pulse whose wait it finds
+        // lowered is parked unplayed, and the run thread asks again once it rises.
+        let go = self.ctx.signals.go.clone();
+        fired_or_cancelled(self.svc()?.fire_pulse_cancellable(Some(&go)))?;
         let mut fired = self.collect();
         if fired.end.is_none() {
             let completed = self.svc.as_ref().is_some_and(|s| {
@@ -1059,5 +1073,13 @@ impl SrsEngine for ServiceEngine {
         // never short.
         let age = self.svc.as_ref()?.since_last_pulse_start_s()?;
         Instant::now().checked_sub(std::time::Duration::from_secs_f64(age))
+    }
+
+    fn lead(&self) -> std::time::Duration {
+        crate::pulse::rails::lead_for(self.svc.as_ref().and_then(|s| s.last_bring_up()))
+    }
+
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        std::mem::take(&mut self.bring_ups)
     }
 }

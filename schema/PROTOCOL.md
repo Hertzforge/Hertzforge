@@ -2057,7 +2057,7 @@ pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled 
 | `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
 | `blocked` | `feasibility_blocked` | Feasibility exceeded; arming needs an acknowledgement |
 | `armed` | `armed` | Station open and gated; nothing driven yet |
-| `running` | `sysid`, `waiting`, `firing` | Identification; waiting out the time to the next pulse (or for `shock.fire`); a pulse playing |
+| `running` | `sysid`, `waiting`, `firing` | Identification; waiting out the time to the next pulse (or for `shock.fire`); a pulse being brought up and playing (in `auto` this begins a moment before the pulse starts, at most 1 s: the station is brought up with the pulse loaded and starts it on the time between pulses) |
 | `review` | `awaiting_review` | Identification done; nothing fires until `shock.proceed` |
 | `stopping` | `stopping` | The pulse in flight finishes; nothing more fires |
 | `finished` | `stopped`, `aborted`, `held` | Ended; `end` says how |

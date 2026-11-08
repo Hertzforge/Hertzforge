@@ -30,10 +30,10 @@ A run goes through these steps in order:
 5. **Seed.** The control law gives the first gains from the identified gain. With limit channels,
    the controller then plans a notch at full level where a limit channel's prediction would pass
    its bound. A full-level drive predicted over the drive abort ends the run before anything fires.
-6. **Pulses.** For each pulse: wait out the time between pulses; build the drive from the table at
-   the level and check it (its volts, its predicted peak and kinematics); fire; measure its SRS and
-   judge every band against the envelope at the level fired; let the law propose new gains; cap
-   them; move the ladder.
+6. **Pulses.** For each pulse: build the drive from the table at the level and check it (its
+   volts, its predicted peak and kinematics); bring the station up with the pulse loaded; wait out
+   the time between pulses; start it; measure its SRS and judge every band against the envelope at
+   the level fired; let the law propose new gains; cap them; move the ladder.
 7. **End.** The schedule completes, or the run stops, aborts, fails to converge, or the law gives
    no usable gains.
 

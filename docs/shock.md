@@ -27,9 +27,10 @@ A run goes through these steps in order:
 4. **Seed.** The control law builds the first drive from the identified system. The controller
    predicts the full-level drive and its response; a drive predicted over the drive abort ends the
    run before anything fires.
-5. **Pulses.** For each pulse: wait out the time between pulses; check the drive (its volts, its
-   predicted peak and kinematics, at rest at both ends); fire; measure and judge it against the
-   standard; let the law propose the next drive; check the law's drive; move the ladder.
+5. **Pulses.** For each pulse: check the drive (its volts, its predicted peak and kinematics, at
+   rest at both ends); bring the station up with the pulse loaded; wait out the time between
+   pulses; start it; measure and judge it against the standard; let the law propose the next
+   drive; check the law's drive; move the ladder.
 6. **End.** The schedule completes, or the run stops, aborts, fails to converge, or the law gives
    no usable drive.
 

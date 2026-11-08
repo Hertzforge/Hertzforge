@@ -253,6 +253,13 @@ impl SrsShockService {
         Some((prev + control.min_spacing_s() - now).max(0.0))
     }
 
+    /// The last pulse's bring-up, timed: the drive's checks, the arm, the
+    /// commit, the wait for the time between pulses and the start call. `None`
+    /// without `control` or before the first pulse.
+    pub fn last_bring_up(&self) -> Option<hertzforge_shock_common::BringUp> {
+        self.pulse_rows.last().and_then(|r| r.bring_up)
+    }
+
     /// Seconds since the last pulse started, on the pacer: since the device's
     /// clock ran for it (`PulsePlant::fire_timed`). `None` without `control` or
     /// before the first pulse. A host that keeps its own countdown counts it

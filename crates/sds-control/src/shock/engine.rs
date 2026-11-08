@@ -172,6 +172,11 @@ pub trait ShockEngine: Send {
     fn lead(&self) -> std::time::Duration {
         std::time::Duration::ZERO
     }
+    /// Each pulse's bring-up since the last call, timed, by pulse index, for the
+    /// service log. An engine that times nothing has none.
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        Vec::new()
+    }
 }
 
 /// What an engine is built with: the run's signals and its progress cell, and the
@@ -500,6 +505,8 @@ pub struct ServiceEngine {
     rows_seen: usize,
     log_seen: usize,
     log: Vec<(&'static str, String)>,
+    /// Each pulse's bring-up not yet in the service log.
+    bring_ups: Vec<(u64, hertzforge_shock_common::BringUp)>,
 }
 
 impl ServiceEngine {
@@ -514,6 +521,7 @@ impl ServiceEngine {
             rows_seen: 0,
             log_seen: 0,
             log: Vec::new(),
+            bring_ups: Vec::new(),
         }
     }
 
@@ -578,6 +586,9 @@ impl ServiceEngine {
         for p in report.pulses.iter().skip(self.rows_seen) {
             out.rows.push(row_of(p));
             out.figures.push(self.figures_of(svc, p));
+            if let Some(b) = p.bring_up {
+                self.bring_ups.push((p.pulse, b));
+            }
         }
         self.rows_seen = report.pulses.len();
         forward_log(&mut self.log_seen, &mut self.log, svc);
@@ -1177,5 +1188,13 @@ impl ShockEngine for ServiceEngine {
         // never short.
         let age = self.svc.as_ref()?.since_last_pulse_start_s()?;
         Instant::now().checked_sub(std::time::Duration::from_secs_f64(age))
+    }
+
+    fn lead(&self) -> std::time::Duration {
+        crate::pulse::rails::lead_for(self.svc.as_ref().and_then(|s| s.last_bring_up()))
+    }
+
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        std::mem::take(&mut self.bring_ups)
     }
 }

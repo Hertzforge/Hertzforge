@@ -30,6 +30,7 @@ use hertzforge_channel_table::ChannelTable;
 use hertzforge_shock_common::ShockRunMode;
 use hertzforge_srs::SrsLawFactory;
 use serde_json::json;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::Arc;
@@ -556,9 +557,14 @@ impl Actor {
         }
         let due = self.next_due();
         self.data.set_next_due(Some(due));
+        // Ask the engine its lead ahead of the due time: the controller brings
+        // the shot up and waits out the rest itself, so only the start lands on
+        // the due time (`rails::lead_for`). The countdown still shows the due time.
+        let lead = self.engine.lead().min(self.spacing());
+        let ask = due.checked_sub(lead).unwrap_or(due);
         let signals = self.shared.signals.clone();
         let mut gone = false;
-        let waited = rails::wait_until(due, &signals, || loop {
+        let waited = rails::wait_until(ask, &signals, || loop {
             match rx.try_recv() {
                 Ok(cmd) => {
                     self.handle(cmd);
@@ -613,6 +619,16 @@ impl Actor {
         // between pulses after the device started, not after this thread asked.
         if let Some(t) = self.engine.last_pulse_start() {
             self.last_start = Some(t);
+        }
+        // Each pulse's bring-up, one line each in the service log (standard
+        // error; not `eprintln!`, which panics once a parent's pipe is closed).
+        for (index, b) in self.engine.take_bring_ups() {
+            let _ = writeln!(
+                std::io::stderr(),
+                "sds-control: srs run {} pulse {index} bring-up: {}",
+                self.plan.run_id,
+                b.line()
+            );
         }
         let fired = match r {
             Ok(f) => f,
