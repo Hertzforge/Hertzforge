@@ -2034,6 +2034,18 @@ fn classical_wire_state(
                     .unwrap_or_else(|| "a protection tripped".into())
             ),
         ),
+        // The closed loop's states. This host builds only open-loop runs
+        // (`control: None`), so none of them is reached here; they are mapped
+        // so a status read can never be a panic.
+        ShockRunState::SysId => (hertzforge_protocol::RunState::Running, "sysid".into()),
+        ShockRunState::AwaitingReview => (
+            hertzforge_protocol::RunState::Armed,
+            "awaiting_review".into(),
+        ),
+        ShockRunState::Held | ShockRunState::NotConverged => (
+            hertzforge_protocol::RunState::Stopped,
+            format!("{:?}", st.state).to_lowercase(),
+        ),
     }
 }
 
@@ -2238,6 +2250,10 @@ pub(crate) fn level_schedule(
         start_db: w.start_db,
         table_db: w.table_db.clone(),
         pulses_per_level: w.pulses_per_level.clone(),
+        // The daemon's wire has no ladder gate: it runs the open loop, which
+        // advances on the pulse count.
+        advance: hertzforge_shock_common::LadderAdvance::Count,
+        max_pulses_per_level: hertzforge_shock_common::DEFAULT_MAX_PULSES_PER_LEVEL,
     }
 }
 

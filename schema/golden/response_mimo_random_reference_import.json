@@ -1,0 +1,35 @@
+{
+ "type": "response",
+ "id": 43,
+ "result": {
+  "ok": false,
+  "reference": null,
+  "labels": [],
+  "unit": "g",
+  "df_hz": 8,
+  "band_hz": null,
+  "lines": 0,
+  "errors": [
+   {
+    "reason": "reference_file",
+    "field": "path",
+    "message": "A .mat or .hforge specification is converted to a reference folder before it is imported here; import the folder, an .npz specification, or a CSV table."
+   }
+  ],
+  "warnings": [],
+  "psd": {
+   "violations": 0,
+   "min_eigenvalue_ratio": null,
+   "worst_hz": null,
+   "lines_hz": [],
+   "repair": null,
+   "repair_accepted": false
+  },
+  "transforms": {
+   "response": null,
+   "drive": null
+  },
+  "provenance": null,
+  "views": []
+ }
+}

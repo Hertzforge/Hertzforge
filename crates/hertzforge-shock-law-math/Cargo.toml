@@ -1,0 +1,22 @@
+[package]
+name = "hertzforge-shock-law-math"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The math of the shock control laws, with nothing around it: plain slices in and
+# plain numbers out. The law files (`laws/shock-fdc`, built to WebAssembly) and the
+# controller's built-in native laws (`hertzforge-shock-host`, `hertzforge-shock-laws`)
+# both run this code, so each built-in law and its law file are one
+# implementation. It depends only on `hertzforge-dsp`, which builds for
+# `wasm32-wasip2`, and must keep building there:
+# `cargo build -p hertzforge-shock-law-math --target wasm32-wasip2`.
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+
+[dev-dependencies]
+# The cross-check (`tests/twr_formula.rs`): the seed and the correction are time
+# waveform replication's, bin for bin. A dev-dependency only, so the library keeps
+# building for `wasm32-wasip2`.
+hertzforge-twr = { path = "../hertzforge-twr" }

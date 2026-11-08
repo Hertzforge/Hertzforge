@@ -367,6 +367,62 @@ offset), `log_size` the log file's size in bytes then, `after` and
 and of the test, and `problems` the lines before `upto` skipped as not
 entries.
 
+## `run/`, a MIMO Random Run (Proposal)
+
+*A proposal for the analysis maintainer, not yet part of schema 1.* The
+control service records a multiple-output random run in its own folder
+while it runs, and `hertzforge.io.mimo_run_convert` turns that folder
+into a `.hforge` file at the end (or afterwards, for a run that did not
+finish). The run is one group at the root:
+
+    run/              attrs: test ('mimo_random'), source ('SIM' or
+                      'HARDWARE'), run_folder, start_unix_secs,
+                      setup_hash, complete (false for a run that did
+                      not finish: what it wrote is kept, the rest left
+                      out)
+      settings        the run's settings, JSON text
+      report          the report data, JSON text (finished runs only)
+      reference/      sdm (the reference at full level), alarm_upper,
+                      alarm_lower, abort_upper, abort_lower (lines by
+                      controls, NaN where there is no line), controls
+                      (channel indexes); attrs df_hz, band, space
+      identification/ frf and g_rd (lines by responses by drives),
+                      g_cc, g_dd, noise (packed), coherence (lines by
+                      controls), condition (per line), drive_vrms;
+                      attrs setup_hash, level_db, frames, steps,
+                      lag_frames
+      loops/
+        diagonal/     loop_index, control_psd, control_error_db
+                      (loops by lines by controls, full level, NaN out
+                      of band), drive_psd (loops by lines by drives)
+        summary/      loop_index, level_db, state, law_misses, and
+                      json (each loop's whole summary line)
+        sdm/<loop>/   response_full_level, drive_full_level (packed);
+                      attrs loop_index, why (the first loop at full
+                      level, the cadence, the last loop at full level)
+      law/            attrs id, name, version, sha256, builtin,
+                      catalog_path (a law file only); params (one JSON
+                      string per parameter, `{"key","kind","value"}`),
+                      parameters (as the report prints them), file (a
+                      law file's bytes, uint8)
+        calls/        index (one JSON string per law call: seq, call
+                      'seed' or 'iterate', loop_index, response_dof,
+                      df_hz, band, outcome, diagnostics, the arrays it
+                      holds with their byte offsets, and the inputs
+                      carried from an earlier call), payload (the
+                      calls' arrays, little-endian float64, uint8);
+                      attrs format
+
+Every spectral matrix is in the controller's convention,
+`G = E[X X^H]` per line, Hermitian, and stored packed: a dataset of
+lines by `n (n + 1) / 2` complex values, the upper triangle row by row
+(`G[0,0], G[0,1], ..., G[0,n-1], G[1,1], ...`), with attributes
+`packing`, `convention` and `n`. Phases are kept as recorded; a reader
+that holds the other convention conjugates at its edge. The law calls
+are what a replay of the run feeds the law (acceptance A11 of the MIMO
+design): the arrays in each call are the law's declared inputs and its
+output drive.
+
 ## Reading One Without Hertzforge
 
 Because the layout is documented HDF5, this works:

@@ -342,7 +342,20 @@ fn event_random_data() -> (Value, Arrays) {
 }
 
 /// The text goldens of the hardware and Random control messages.
-const CONTROL_TEXT: [&str; 11] = [
+const CONTROL_TEXT: [&str; 24] = [
+    "request_mimo_random_setup",
+    "response_mimo_random_setup",
+    "response_error_setup_invalid",
+    "event_mimo_random_status",
+    "request_mimo_random_override",
+    "response_mimo_random_report",
+    "request_laws_list",
+    "response_laws_list",
+    "request_laws_import",
+    "response_laws_import",
+    "request_laws_check",
+    "response_laws_check",
+    "event_laws_check",
     "request_random_subscribe",
     "response_random_subscribe",
     "request_random_configure",

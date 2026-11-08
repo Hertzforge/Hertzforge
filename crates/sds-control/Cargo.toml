@@ -22,8 +22,37 @@ hertzforge-hal.workspace = true
 hertzforge-hal-sim.workspace = true
 hertzforge-module-abi.workspace = true
 hertzforge-random.workspace = true
+# The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+# choice. Reviewed 2026-11-03: it names no backend; its tests use the Sim as a fixture.
+hertzforge-random-laws.workspace = true
+# The law catalog's manifest types (parameters, MIMO shapes and diagnostics).
+hertzforge-law-host.workspace = true
+# Packed spectral matrix stacks and their per-line checks (ranks, eigenvalues).
+hertzforge-sdm.workspace = true
 hertzforge-shaker-db.workspace = true
+# The MIMO Random run service behind the wire's driver trait (src/mimo/adapter.rs).
+# Reviewed 2026-11-03: it reaches hardware only through the station backend it is
+# handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
+# The native reference file a MIMO setup names by path and hash, and the builders
+# and readers behind `mimo_random.reference.*` (breakpoints, rigid body, import,
+# validation), so the shell never repeats their math. Reviewed 2026-11-03: file
+# reading, validation and pure computation; it names no backend.
+hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-station.workspace = true
+# Classical shock (src/shock/): the controller's classical shock service, its
+# shared run plumbing (ladder, pulse store, drive limits, the law guards), the
+# identification and inverse it closes the loop with, and the door every
+# classical law goes through. Reviewed 2026-11-07: each reaches hardware only
+# through the station backend it is handed, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-shock-common.workspace = true
+hertzforge-shock-host.workspace = true
+hertzforge-shock-laws.workspace = true
+hertzforge-twr.workspace = true
+# The built-in classical law's declaration (its parameters and the values it
+# reports), so the wire lists and checks it without running it. Plain math.
+hertzforge-shock-law-math.workspace = true
 serde_json.workspace = true
 # `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).
 tokio = { workspace = true, features = ["signal"] }

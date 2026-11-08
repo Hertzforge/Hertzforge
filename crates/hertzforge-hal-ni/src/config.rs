@@ -377,6 +377,53 @@ impl NiConfig {
         families.refuse_split_io(&inputs, &outputs)
     }
 
+    /// Refuse an input row whose range asks its device for more volts than the
+    /// device measures.
+    ///
+    /// A row's range in volts is `Range x Sensitivity` ([`AiAssign::range_volts`]),
+    /// so a 100 g range on a 100 mV/g sensor asks for +/-10 V. Handed to a +/-5 V
+    /// module (the 9234), DAQmx accepts the channel and only refuses later, from
+    /// inside the timing call, with an attribute name and no row: the first bench
+    /// run of the desktop app (2026-11-03) stopped at Arm on exactly that. This
+    /// check names the row, the device and the largest range that fits.
+    ///
+    /// Like [`NiConfig::validate_timing`], it needs facts only the driver knows, so
+    /// it takes them as an argument: a device missing from `limits` is not checked
+    /// (no knowledge, no refusal).
+    pub fn validate_ai_ranges(&self, limits: &[AiDeviceLimit]) -> Result<(), NiError> {
+        for a in &self.ai_assignments {
+            let dev = crate::ffi::device_of(&a.physical);
+            let Some(limit) = limits.iter().find(|l| l.device == dev) else {
+                continue;
+            };
+            let asked = a.range_volts();
+            if asked <= limit.max_volts * (1.0 + 1e-9) {
+                continue;
+            }
+            let row = a
+                .table_index
+                .map(|i| format!("Input channel {i}"))
+                .unwrap_or_else(|| format!("Input {}", a.physical));
+            let fits =
+                (limit.max_volts * 1000.0 / a.sensitivity_mv_per_eu * 1000.0).floor() / 1000.0;
+            let product = if limit.product.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", limit.product)
+            };
+            return Err(NiError::config(format!(
+                "{row} needs +/-{} V (Range {} x Sensitivity {} mV per unit), but {dev}{product} \
+                 measures at most +/-{} V. Set the Range to {} or less.",
+                short(asked),
+                short(a.max_eu),
+                short(a.sensitivity_mv_per_eu),
+                short(limit.max_volts),
+                short(fits),
+            )));
+        }
+        Ok(())
+    }
+
     /// Distinct devices named by the OUTPUT assignments only.
     pub fn output_devices(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
@@ -388,6 +435,41 @@ impl NiConfig {
         }
         out
     }
+}
+
+/// The largest symmetric input range one device measures, from the driver.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiDeviceLimit {
+    /// The DAQmx device name (`cDAQ2Mod1`).
+    pub device: String,
+    /// The product name (`NI 9234`), for the message; may be empty.
+    pub product: String,
+    /// The largest `v` for which the device offers a range covering `-v..v`.
+    pub max_volts: f64,
+}
+
+impl AiDeviceLimit {
+    /// The limit from the driver's `(min, max)` range pairs, or `None` when it
+    /// reported none.
+    pub fn from_ranges(device: &str, product: &str, ranges: &[(f64, f64)]) -> Option<Self> {
+        let max_volts = ranges
+            .iter()
+            .map(|&(lo, hi)| hi.min(-lo))
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))?;
+        Some(AiDeviceLimit {
+            device: device.to_string(),
+            product: product.to_string(),
+            max_volts,
+        })
+    }
+}
+
+/// A number with at most three decimals and no trailing zeros.
+fn short(x: f64) -> String {
+    let s = format!("{x:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    s.to_string()
 }
 
 fn check_unique<'a>(it: impl Iterator<Item = &'a str>, what: &str) -> Result<(), NiError> {
@@ -1076,6 +1158,68 @@ mod tests {
         )
         .expect_err("the AO clock terminal does not cross families");
         assert!(e.to_string().contains("ai/SampleClock"), "{e}");
+    }
+
+    // --- input range against the device (2026-11-03 bench refusal) -----------
+
+    /// The NI 9234 reports one range, -5..5 V.
+    fn nine234() -> AiDeviceLimit {
+        AiDeviceLimit::from_ranges("cDAQ2Mod1", "NI 9234", &[(-5.0, 5.0)]).unwrap()
+    }
+
+    /// The bench case: 100 g at 100 mV/g is +/-10 V on a +/-5 V module. Before
+    /// this check the plan built clean and DAQmx refused at Arm with -200077
+    /// and no row named.
+    #[test]
+    fn a_row_asking_more_volts_than_its_module_measures_is_refused_by_name() {
+        let t = table(vec![iepe_row(1, 100.0, 100.0)]);
+        let cfg = plan_from_table(&t, &["cDAQ2Mod1/ai0".into()], &[]).unwrap();
+        let e = cfg
+            .validate_ai_ranges(&[nine234()])
+            .expect_err("+/-10 V on a +/-5 V module");
+        assert!(matches!(e, NiError::Config(_)), "{e:?}");
+        let m = e.to_string();
+        assert!(m.contains("Input channel 1"), "{m}");
+        assert!(m.contains("+/-10 V"), "{m}");
+        assert!(m.contains("cDAQ2Mod1 (NI 9234)"), "{m}");
+        assert!(m.contains("at most +/-5 V"), "{m}");
+        assert!(m.contains("Range to 50 or less"), "{m}");
+    }
+
+    #[test]
+    fn a_row_at_or_under_its_modules_limit_passes() {
+        // Exactly at the limit, and well under it.
+        for range in [50.0, 10.0] {
+            let t = table(vec![iepe_row(1, 100.0, range)]);
+            let cfg = plan_from_table(&t, &["cDAQ2Mod1/ai0".into()], &[]).unwrap();
+            assert!(cfg.validate_ai_ranges(&[nine234()]).is_ok(), "{range} g");
+        }
+    }
+
+    #[test]
+    fn a_device_with_no_reported_limit_is_not_checked() {
+        let t = table(vec![iepe_row(1, 100.0, 100.0)]);
+        let cfg = plan_from_table(&t, &["cDAQ2Mod1/ai0".into()], &[]).unwrap();
+        assert!(cfg.validate_ai_ranges(&[]).is_ok());
+        assert!(AiDeviceLimit::from_ranges("cDAQ2Mod1", "", &[]).is_none());
+    }
+
+    #[test]
+    fn the_limit_is_the_widest_symmetric_range_the_device_offers() {
+        // A multi-range card (6363 class): the widest symmetric range wins, and
+        // an asymmetric pair counts only as far as its narrower side.
+        let l = AiDeviceLimit::from_ranges(
+            "Dev1",
+            "PCIe-6363",
+            &[(-0.1, 0.1), (-1.0, 1.0), (-10.0, 10.0), (0.0, 20.0)],
+        )
+        .unwrap();
+        assert_eq!(l.max_volts, 10.0);
+        // The suggested range rounds down, never up past the limit.
+        let t = table(vec![iepe_row(1, 3.0, 5000.0)]);
+        let cfg = plan_from_table(&t, &["Dev1/ai0".into()], &[]).unwrap();
+        let m = cfg.validate_ai_ranges(&[l]).unwrap_err().to_string();
+        assert!(m.contains("Range to 3333.333 or less"), "{m}");
     }
 
     #[test]

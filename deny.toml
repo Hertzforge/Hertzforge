@@ -81,6 +81,8 @@ deny = [
     "hertzforge-explorer-host",
     "hertzforge-random",
     "hertzforge-random-laws",
+    "hertzforge-shock-laws",
+    "hertzforge-mimo-random",
     "hertzforge-recorder",
     "hertzforge-shock-host",
     "hertzforge-sine",
@@ -96,6 +98,12 @@ deny = [
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # paste is unmaintained (archived by its author, 2024-10), not vulnerable: a
+    # compile-time proc-macro reached only through faer's gemm kernels, and faer
+    # 0.24 has no release without it. Drop this entry when faer moves off it.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained, compile-time only, no faer release without it" },
+]
 
 [sources]
 unknown-registry = "deny"

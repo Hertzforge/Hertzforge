@@ -434,6 +434,7 @@ type FnGetDevU32Attr = unsafe extern "C" fn(*const c_char, *mut u32) -> Status;
 type FnGetDevI32Attr = unsafe extern "C" fn(*const c_char, *mut i32) -> Status;
 type FnGetDevF64Attr = unsafe extern "C" fn(*const c_char, *mut f64) -> Status;
 type FnGetDevBoolAttr = unsafe extern "C" fn(*const c_char, *mut Bool32) -> Status;
+type FnGetDevF64ArrAttr = unsafe extern "C" fn(*const c_char, *mut f64, u32) -> Status;
 
 type FnCreateTask = unsafe extern "C" fn(*const c_char, *mut TaskHandleRaw) -> Status;
 type FnTaskOnly = unsafe extern "C" fn(TaskHandleRaw) -> Status;
@@ -761,6 +762,27 @@ impl Driver {
     }
     pub fn dev_ao_max_rate(&self, dev: &str) -> Result<f64, NiError> {
         self.dev_f64("DAQmxGetDevAOMaxRate", dev)
+    }
+
+    /// The device's analog-input voltage ranges as `(min, max)` pairs, in volts.
+    /// DAQmx reports them as a flat `min0, max0, min1, max1, ...` array; 64 pairs
+    /// is far more than any NI front end offers.
+    pub fn dev_ai_voltage_rngs(&self, dev: &str) -> Result<Vec<(f64, f64)>, NiError> {
+        const SYM: &str = "DAQmxGetDevAIVoltageRngs";
+        let cdev = cstr(dev)?;
+        let mut buf = vec![0.0f64; 128];
+        // SAFETY: signature matches
+        // `int32 DAQmxGetDevAIVoltageRngs(const char[], float64*, uInt32)`.
+        let st = unsafe {
+            let f: FnGetDevF64ArrAttr = self.sym(SYM)?;
+            f(cdev.as_ptr(), buf.as_mut_ptr(), buf.len() as u32)
+        };
+        self.check(st, &format!("{SYM}({dev})"))?;
+        Ok(buf
+            .chunks_exact(2)
+            .map(|p| (p[0], p[1]))
+            .filter(|&(lo, hi)| hi > lo)
+            .collect())
     }
 
     // --- task lifecycle ------------------------------------------------------

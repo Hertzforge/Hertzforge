@@ -116,7 +116,7 @@ impl DriveRamp {
 
     /// Put the level at `level_db` now, standing still (engage, a change with no
     /// ramp, any non-driving state). Ignored once a stop is requested.
-    pub(crate) fn set(&self, level_db: f64) {
+    pub fn set(&self, level_db: f64) {
         let mut s = self.lock();
         if s.stop_from_db.is_some() {
             return;
@@ -128,7 +128,7 @@ impl DriveRamp {
 
     /// Walk to `target_db` at `rate_db_per_s` from wherever the level is. Ignored
     /// once a stop is requested: a stop is never undone by a level change.
-    pub(crate) fn ramp_to(&self, target_db: f64, rate_db_per_s: f64) {
+    pub fn ramp_to(&self, target_db: f64, rate_db_per_s: f64) {
         let mut s = self.lock();
         if s.stop_from_db.is_some() {
             return;
@@ -141,13 +141,13 @@ impl DriveRamp {
     }
 
     /// The level after `seconds` more output with no new request.
-    pub(crate) fn projected(&self, seconds: f64) -> f64 {
+    pub fn projected(&self, seconds: f64) -> f64 {
         let s = self.lock();
         walk(s.level_db, s.target_db, s.rate_db_per_s, seconds)
     }
 
     /// Advance the walk by `seconds` of output. Returns the level before and after.
-    pub(crate) fn advance(&self, seconds: f64) -> (f64, f64) {
+    pub fn advance(&self, seconds: f64) -> (f64, f64) {
         let mut s = self.lock();
         let from = s.level_db;
         s.level_db = walk(s.level_db, s.target_db, s.rate_db_per_s, seconds);
@@ -171,14 +171,32 @@ fn walk(level: f64, target: f64, rate: f64, seconds: f64) -> f64 {
 /// level the block's drive was synthesized at): the gain moves linearly in dB from
 /// the level at the block's start to the level at its end, so no block carries a
 /// step. Returns the level at the block's end and the sum of the power gains
-/// (gain squared) applied over the block's samples.
+/// (gain squared) applied over the block's samples. One output; see
+/// [`scale_frames`] for several.
+#[cfg(test)]
 pub(crate) fn scale_block(
     ramp: &DriveRamp,
     base_db: f64,
     fs_hz: f64,
     block: &mut [f32],
 ) -> (f64, f64) {
-    let n = block.len();
+    scale_frames(ramp, base_db, fs_hz, block, 1)
+}
+
+/// Scale a block of `channels` interleaved outputs per frame by the ramp's walk
+/// over it, as `scale_block` does one output: every output of a frame gets the
+/// same gain, so a level change keeps every cross spectrum's coherence and
+/// phase. Returns the level at the block's end and the sum of the power gains
+/// applied over the block's frames.
+pub(crate) fn scale_frames(
+    ramp: &DriveRamp,
+    base_db: f64,
+    fs_hz: f64,
+    block: &mut [f32],
+    channels: usize,
+) -> (f64, f64) {
+    let ch = channels.max(1);
+    let n = block.len() / ch;
     if n == 0 || fs_hz <= 0.0 {
         return (ramp.level_db(), 0.0);
     }
@@ -195,11 +213,13 @@ pub(crate) fn scale_block(
         return (l1, g * g * n as f64);
     }
     let mut g2 = 0.0;
-    for (i, x) in block.iter_mut().enumerate() {
+    for (i, frame) in block.chunks_mut(ch).enumerate() {
         let l = l0 + (l1 - l0) * (i + 1) as f64 / n as f64;
         let g = 10f64.powf((l - base_db) / 20.0);
         g2 += g * g;
-        *x = (f64::from(*x) * g) as f32;
+        for x in frame.iter_mut() {
+            *x = (f64::from(*x) * g) as f32;
+        }
     }
     (l1, g2)
 }

@@ -409,3 +409,18 @@ export function mergeErrors(a: FieldErrors, b: FieldErrors): FieldErrors {
 	for (const map of [a, b]) for (const [k, v] of Object.entries(map)) for (const m of v) if (!(out[k] ??= []).includes(m)) out[k].push(m);
 	return out;
 }
+
+/** What the profile editor reads and edits: a breakpoint table, its bands, and the findings on them. */
+export interface ProfileHost {
+	setup: { title: string; breakpoints: BreakpointDraft[]; alarm_db: BandDb; abort_db: BandDb };
+	locked: boolean;
+	fieldErrors: FieldErrors;
+	fieldWarnings: FieldErrors;
+}
+
+/** What the schedule editor reads and edits: the level schedule and the findings on it. */
+export interface ScheduleHost {
+	setup: { schedule: { mode: LadderMode; levels: LevelDraft[]; full_level_s: number } };
+	locked: boolean;
+	fieldErrors: FieldErrors;
+}
