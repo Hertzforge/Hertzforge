@@ -11,6 +11,9 @@
 //! - **The simulator's pace**: on the simulator, input is read no faster than
 //!   `speed` times real time from the fire's start, so a simulated run takes the
 //!   time a real one would.
+//! - **The abort's taper**, when the run asks for it ([`Watch::abort`]): a fire
+//!   cancelled by an abort is brought to rest by the backend's emergency stop
+//!   rather than its controlled stop.
 //!
 //! Nothing here changes a sample, a refusal or an order of calls: what the
 //! controller asks of the backend is what the backend does.
@@ -39,6 +42,10 @@ pub struct Watch {
     pub expected: Arc<AtomicU64>,
     /// Simulated seconds per wall second; 0 runs unpaced.
     pub speed: f64,
+    /// The run's abort flag, for a controller whose own stop at the end of a
+    /// cancelled fire would take the controlled stop's taper: while it is raised,
+    /// the backend's stop is its emergency stop. `None` leaves every stop as asked.
+    pub abort: Option<Arc<AtomicBool>>,
 }
 
 impl Watch {
@@ -137,7 +144,16 @@ impl Backend for Observed {
     }
 
     fn stop(&mut self) -> Result<(), HalError> {
-        let r = self.inner.stop();
+        let aborting = self
+            .watch
+            .abort
+            .as_ref()
+            .is_some_and(|a| a.load(Ordering::SeqCst));
+        let r = if aborting {
+            self.inner.emergency_stop()
+        } else {
+            self.inner.stop()
+        };
         self.started = None;
         self.watch.progress.end();
         r
@@ -193,6 +209,7 @@ mod tests {
             progress: Arc::new(Progress::default()),
             expected: Arc::new(AtomicU64::new(0)),
             speed,
+            abort: None,
         }
     }
 

@@ -64,11 +64,14 @@ hertzforge-srs.workspace = true
 # and holds the Sim only as a dev-dependency (tests/forbidden_deps.rs).
 hertzforge-sine.workspace = true
 hertzforge-sine-laws.workspace = true
-# TWR (src/twr/, to come): the door every TWR law goes through (the choice of law
+# TWR (src/twr/): the door every TWR law goes through (the choice of law
 # and the law check). The TWR service itself is `hertzforge-twr` above. Reviewed
 # 2026-11-08: it runs a check case on the backend it is handed and names none.
 hertzforge-twr-laws.workspace = true
 serde_json.workspace = true
+# A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
+# or Apache-2.0, as the reference reader already has it).
+sha2 = "0.10"
 # `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).
 tokio = { workspace = true, features = ["signal"] }
 tokio-tungstenite.workspace = true

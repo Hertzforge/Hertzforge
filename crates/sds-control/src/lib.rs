@@ -24,6 +24,9 @@
 //!   the imports, the run on the same rails and its views.
 //! - [`sine`]: Sine: its configuration, the profile's imports and views, the
 //!   run's state and live frames, its subscriptions and the law check's results.
+//! - [`twr`]: time waveform replication: its references and their preview, the
+//!   configuration, the run on the transient-run rails and its views, its
+//!   subscriptions and the law check.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -47,6 +50,7 @@ pub mod sine;
 pub mod srs;
 pub mod station;
 pub mod table;
+pub mod twr;
 pub mod views;
 
 /// Default bind address.

@@ -2411,6 +2411,7 @@ dependencies = [
  "hertzforge-twr",
  "hertzforge-twr-laws",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
 ]

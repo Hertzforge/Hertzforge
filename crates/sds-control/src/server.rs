@@ -50,6 +50,9 @@ mod srs_methods;
 #[path = "server_sine.rs"]
 mod sine_methods;
 
+#[path = "server_twr.rs"]
+mod twr_methods;
+
 /// Display event topic of the `sim.*` runs.
 pub const DISPLAY_TOPIC: &str = "random.display";
 /// Display event period (5 per second), for `random.display` and `random.live`.
@@ -71,7 +74,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 32] = [
+const DRIVE_METHODS: [&str; 38] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -104,6 +107,12 @@ const DRIVE_METHODS: [&str; 32] = [
     "sine.jog",
     "sine.goto",
     "sine.adjust",
+    "twr.arm",
+    "twr.start",
+    "twr.proceed",
+    "twr.iterate",
+    "twr.play",
+    "twr.level",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -125,8 +134,11 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
-    sine.state, sine.log, sine.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
-    sim.start, sim.stop and sim.state";
+    sine.state, sine.log, sine.subscribe, twr.configure, twr.config, twr.reference.import, \
+    twr.reference.preview, twr.arm, twr.start, twr.proceed, twr.iterate, twr.play, twr.level, \
+    twr.freeze, twr.stop, twr.abort, twr.reset, twr.clear, twr.state, twr.log, twr.subscribe, \
+    twr.plays, twr.record, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
+    sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -174,6 +186,10 @@ pub struct ServiceOptions {
     /// service, [`crate::srs::engine::ServiceEngine`]). Tests that need no real run
     /// give [`simulated_srs_engine`].
     pub srs_engine: Option<crate::srs::engine::EngineFactory>,
+    /// Makes the engine of a TWR run (`None`: the controller's TWR service,
+    /// [`crate::twr::engine::ServiceEngine`]). Tests that need no real run give
+    /// [`simulated_twr_engine`].
+    pub twr_engine: Option<crate::twr::engine::EngineFactory>,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -201,6 +217,13 @@ pub fn simulated_srs_engine() -> crate::srs::engine::EngineFactory {
     Arc::new(|ctx| Box::new(crate::srs::sim::SimulatedEngine::new(ctx.clone())))
 }
 
+/// The simulated TWR engine ([`crate::twr::sim::SimulatedEngine`]): for wire tests
+/// that exercise the protocol without the controller's service. A run never uses it
+/// unless given it here.
+pub fn simulated_twr_engine() -> crate::twr::engine::EngineFactory {
+    Arc::new(|ctx| Box::new(crate::twr::sim::SimulatedEngine::new(ctx.clone())))
+}
+
 impl Default for ServiceOptions {
     fn default() -> Self {
         ServiceOptions {
@@ -214,6 +237,7 @@ impl Default for ServiceOptions {
             mimo_driver: None,
             shock_engine: None,
             srs_engine: None,
+            twr_engine: None,
         }
     }
 }
@@ -227,6 +251,7 @@ pub enum Feed {
     Shock,
     Srs,
     Sine,
+    Twr,
 }
 
 /// A frame for every connection.
@@ -334,6 +359,14 @@ struct Inner {
     sine_runs: u64,
     sine_state_key: String,
     sine_log_sent: (String, u64),
+    /// The TWR configuration and its run, beside the others, and what of it has
+    /// been sent.
+    twr: Option<Arc<crate::twr::TwrRun>>,
+    twr_runs: u64,
+    twr_state_key: String,
+    twr_log_sent: (String, u64),
+    twr_rows_sent: u64,
+    twr_ident_sent: bool,
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -365,14 +398,19 @@ impl Inner {
         self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
-    /// Any run live, Random, MIMO, classical shock, SRS shock or Sine: what the
-    /// session's orphan clock guards.
+    fn twr_live(&self) -> bool {
+        self.twr.as_ref().is_some_and(|s| s.view().state.is_live())
+    }
+
+    /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
+    /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
         self.random_live()
             || self.mimo_live()
             || self.shock_live()
             || self.srs_live()
             || self.sine_live()
+            || self.twr_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -450,6 +488,17 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.twr {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!("TWR run {} is {}; stop it first.", s.id, v.state.name()),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -498,6 +547,11 @@ pub struct Service {
     /// Sine runs' publishes, in order.
     sine_notify: mpsc::UnboundedSender<crate::sine::run::Notice>,
     sine_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::sine::run::Notice>>>,
+    /// The connections with a TWR display subscription.
+    twr_displays: std::sync::Mutex<HashMap<ConnId, twr_methods::TwrDisplay>>,
+    /// TWR runs' publishes, in order.
+    twr_notify: mpsc::UnboundedSender<crate::twr::run::Notice>,
+    twr_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::twr::run::Notice>>>,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -533,6 +587,7 @@ impl Service {
         let (shock_notify, shock_notices) = mpsc::unbounded_channel();
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
+        let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -558,6 +613,12 @@ impl Service {
                 sine_runs: 0,
                 sine_state_key: String::new(),
                 sine_log_sent: (String::new(), 0),
+                twr: None,
+                twr_runs: 0,
+                twr_state_key: String::new(),
+                twr_log_sent: (String::new(), 0),
+                twr_rows_sent: 0,
+                twr_ident_sent: false,
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -580,6 +641,9 @@ impl Service {
             sine_displays: std::sync::Mutex::new(HashMap::new()),
             sine_notify,
             sine_notices: std::sync::Mutex::new(Some(sine_notices)),
+            twr_displays: std::sync::Mutex::new(HashMap::new()),
+            twr_notify,
+            twr_notices: std::sync::Mutex::new(Some(twr_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -642,6 +706,7 @@ impl Service {
             Feed::Shock => self.shock_displays().contains_key(&conn),
             Feed::Srs => self.srs_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
+            Feed::Twr => self.twr_displays().contains_key(&conn),
         }
     }
 
@@ -754,6 +819,15 @@ impl Service {
                 }
             });
         }
+        let twr_notices = self.twr_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = twr_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.twr_changed(&run_id, &view).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -820,8 +894,18 @@ impl Service {
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
+            let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = twr {
+                twr_methods::stop_twr(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
             if let Some(s) = sine {
                 sine_methods::stop_sine(
                     &s,
@@ -874,7 +958,7 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim, shock, srs, sine) = {
+        let (random, sim, shock, srs, sine, twr) = {
             let inner = self.inner.lock().await;
             (
                 inner.random.clone(),
@@ -882,7 +966,31 @@ impl Service {
                 inner.shock.clone(),
                 inner.srs.clone(),
                 inner.sine.clone(),
+                inner.twr.clone(),
             )
+        };
+        // A TWR run takes its controlled stop: nothing more plays, and a play in
+        // flight is cancelled at its next block and brought to rest. Should it still
+        // be live well after, it is aborted.
+        let twr_said = match twr.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                twr_methods::stop_twr(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true).await;
+                let asked = Instant::now();
+                let patience = twr_methods::wait_for(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        twr_methods::stop_twr(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // A Sine run takes its controlled stop, the 120 dB/s ramp. Should it still
         // be live well after the ramp (at least ten seconds, three batches and twice
@@ -964,7 +1072,7 @@ impl Service {
             let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
         }
         let Some(run) = random.filter(|r| r.view().state.is_live()) else {
-            return shock_said.or(srs_said).or(sine_said);
+            return shock_said.or(srs_said).or(sine_said).or(twr_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -1015,8 +1123,19 @@ impl Service {
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
+        self.twr_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
+            // Nobody holds control now: a TWR run starts no new play until control
+            // is claimed again (or the orphan clock stops it).
+            if let Some(s) = &inner.twr {
+                if s.view().state.is_live() {
+                    s.hold(true);
+                    let name = inner.session.client_name(conn.id, &conn.peer);
+                    s.shared
+                        .add_log("note", format!("{name} left control; new plays are held"));
+                }
+            }
             if let Some(s) = &inner.srs {
                 if s.view().state.is_live() {
                     s.hold(true);
@@ -1098,6 +1217,11 @@ impl Service {
             "sine.configure" => self.sine_configure(conn, params).await,
             "sine.config" => Ok(self.sine_config().await),
             "sine.profile.validate" => self.sine_profile_validate(params).await,
+            "twr.configure" => self.twr_configure(conn, params).await,
+            "twr.config" => Ok(self.twr_config().await),
+            "twr.reference.import" => self.twr_reference_import(params).await,
+            "twr.reference.preview" => self.twr_reference_preview(params).await,
+            "twr.record" => self.twr_record(params).await,
             _ => self
                 .call_plain(conn, method, params)
                 .await
@@ -1141,6 +1265,11 @@ impl Service {
                     }
                 }
                 if let Some(s) = inner.srs.as_ref().filter(|_| held) {
+                    if s.view().state.is_live() {
+                        s.hold(true);
+                    }
+                }
+                if let Some(s) = inner.twr.as_ref().filter(|_| held) {
                     if s.view().state.is_live() {
                         s.hold(true);
                     }
@@ -1237,6 +1366,21 @@ impl Service {
             "sine.state" => Ok(self.sine_state_now().await),
             "sine.log" => self.sine_log(params).await,
             "sine.subscribe" => self.sine_subscribe(conn, params).await,
+            "twr.arm" => self.twr_arm(conn, params, false).await,
+            "twr.start" => self.twr_arm(conn, params, true).await,
+            "twr.proceed" => self.twr_proceed(conn).await,
+            "twr.iterate" => self.twr_iterate(conn).await,
+            "twr.play" => self.twr_play(conn).await,
+            "twr.level" => self.twr_level(conn, params).await,
+            "twr.freeze" => self.twr_freeze(conn, params).await,
+            "twr.stop" => self.twr_end(conn, false).await,
+            "twr.abort" => self.twr_end(conn, true).await,
+            "twr.reset" => self.twr_reset(conn).await,
+            "twr.clear" => self.twr_clear(conn).await,
+            "twr.state" => Ok(self.twr_state_now().await),
+            "twr.log" => self.twr_log(params).await,
+            "twr.subscribe" => self.twr_subscribe(conn, params).await,
+            "twr.plays" => self.twr_plays(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             "laws.check" => match self.classical_law_id(conn, params).await {
@@ -1260,7 +1404,15 @@ impl Service {
                             p.insert("id".into(), Value::from(id));
                             self.sine_laws_check(conn, &p).await
                         }
-                        None => self.laws_check(conn, params).await,
+                        None => match self.twr_law_id(conn, params).await {
+                            Some(id) => {
+                                let mut p = params.clone();
+                                p.remove("path");
+                                p.insert("id".into(), Value::from(id));
+                                self.twr_laws_check(conn, &p).await
+                            }
+                            None => self.laws_check(conn, params).await,
+                        },
                     },
                 },
             },
@@ -1310,6 +1462,14 @@ impl Service {
                 let who = inner.session.client_name(conn.id, &conn.peer);
                 s.shared
                     .add_log("note", format!("{who} holds control; firing resumes"));
+            }
+        }
+        if let Some(s) = &inner.twr {
+            if s.shared.signals.held() {
+                s.hold(false);
+                let who = inner.session.client_name(conn.id, &conn.peer);
+                s.shared
+                    .add_log("note", format!("{who} holds control; plays resume"));
             }
         }
         self.session_changed(&inner);
@@ -1710,7 +1870,12 @@ impl Service {
             if v.state.is_busy() || (!start && v.state == State::Armed) {
                 inner.run_active()?;
             }
-            if inner.mimo_live() || inner.shock_live() || inner.srs_live() || inner.sine_live() {
+            if inner.mimo_live()
+                || inner.shock_live()
+                || inner.srs_live()
+                || inner.sine_live()
+                || inner.twr_live()
+            {
                 inner.run_active()?;
             }
             if inner.sim_running() {
@@ -1983,7 +2148,12 @@ impl Service {
         request.validate().map_err(MethodError::bad_request)?;
 
         let mut inner = self.inner.lock().await;
-        if inner.mimo_live() || inner.shock_live() || inner.srs_live() || inner.sine_live() {
+        if inner.mimo_live()
+            || inner.shock_live()
+            || inner.srs_live()
+            || inner.sine_live()
+            || inner.twr_live()
+        {
             inner.run_active()?;
         }
         if let Some(r) = &inner.random {
