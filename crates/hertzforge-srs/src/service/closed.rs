@@ -39,10 +39,12 @@ use crate::control::{SrsControl, SrsInputs, SrsLaw, SrsLawFactory, SrsLawSetup, 
 use crate::law::LawLimitStatus;
 use crate::limit::predict_response_waveform;
 use hertzforge_shock_common::law_guard::{
-    LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawRecordRing, LawValue, MissCounter,
+    LawCall, LawCallRecord, LawClock, LawDescriptor, LawFault, LawRecordRing, LawValue,
+    MissCounter, OutputRule, MAX_LAW_VALUES,
 };
 use hertzforge_shock_common::predict_peak_accel_g;
 use serde::{Deserialize, Serialize};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -116,8 +118,10 @@ pub(crate) fn build_law(
     factory: &dyn SrsLawFactory,
     setup: &SrsLawSetup<'_>,
 ) -> Result<Box<dyn SrsLaw + Send>, LawFault> {
-    // Held out until its test lands.
-    factory.build(setup)
+    match catch_unwind(AssertUnwindSafe(|| factory.build(setup))) {
+        Ok(r) => r,
+        Err(p) => Err(LawFault::Crashed(panic_text(p))),
+    }
 }
 
 /// Call the law once, timed on `clock` and contained. A call that returns
@@ -129,14 +133,17 @@ pub(crate) fn guarded_call(
     clock: &dyn LawClock,
     budget_s: f64,
 ) -> (Result<SrsOutputs, LawFault>, f64) {
-    // Held out until its test lands: no containment, no budget.
-    let _ = budget_s;
     let t0 = clock.now_s();
-    let r = match which {
+    let r = catch_unwind(AssertUnwindSafe(|| match which {
         LawCall::Seed => law.seed(inputs),
         LawCall::Iterate => law.iterate(inputs),
-    };
+    }));
     let took_s = (clock.now_s() - t0).max(0.0);
+    let r = match r {
+        Ok(Ok(_)) if took_s > budget_s => Err(LawFault::OverBudget { took_s, budget_s }),
+        Ok(r) => r,
+        Err(p) => Err(LawFault::Crashed(panic_text(p))),
+    };
     (r, took_s)
 }
 
@@ -158,8 +165,24 @@ pub(crate) fn check_output(
     components: usize,
     gain_rise_db: Option<f64>,
 ) -> Result<(), LawFault> {
-    // Held out until its test lands.
-    let _ = (out, components, gain_rise_db);
+    if out.gains.len() != components {
+        return Err(LawFault::BadOutput(OutputRule::WrongLength));
+    }
+    if out.gains.iter().any(|g| !g.is_finite()) || out.values.iter().any(|v| !v.value.is_finite()) {
+        return Err(LawFault::BadOutput(OutputRule::NonFinite));
+    }
+    if out.gains.iter().any(|&g| g <= 0.0) {
+        return Err(LawFault::BadOutput(OutputRule::NotPositive));
+    }
+    if out.values.len() > MAX_LAW_VALUES {
+        return Err(LawFault::BadOutput(OutputRule::TooManyValues));
+    }
+    if let Some(db) = gain_rise_db {
+        let most = 10f64.powf(db / 20.0);
+        if out.gains.iter().any(|&g| g > most) {
+            return Err(LawFault::BadOutput(OutputRule::GainRise));
+        }
+    }
     Ok(())
 }
 
@@ -241,8 +264,17 @@ impl SrsShockService {
 
     /// Refuse a level move whose drive would pass the drive abort.
     pub(super) fn check_level_move(&self, level_db: f64) -> Result<(), ServiceError> {
-        // Held out until its test lands.
-        let _ = level_db;
+        let (Some(vpk), Some(control)) = (self.predicted_drive_vpk_at(level_db), &self.cfg.control)
+        else {
+            return Ok(());
+        };
+        if vpk > control.drive_vpk_abort {
+            return Err(ServiceError::DriveCeiling {
+                level_db,
+                vpk,
+                abort_vpk: control.drive_vpk_abort,
+            });
+        }
         Ok(())
     }
 
@@ -632,9 +664,32 @@ impl SrsShockService {
     /// started, reading the cancel flag every [`CANCEL_POLL_S`]. `false` when
     /// a cancel came first (the caller must not fire).
     pub(super) fn wait_for_spacing(&mut self, spacing_s: f64) -> bool {
-        // Held out until its test lands.
-        let _ = spacing_s;
-        !self.cancel.load(Ordering::Relaxed)
+        let Some(prev) = self.last_pulse_start_s else {
+            return !self.cancel.load(Ordering::Relaxed);
+        };
+        let deadline = prev + spacing_s;
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                return false;
+            }
+            let now = self
+                .pacer
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner())
+                .now_s();
+            if let Some(obs) = self.wait_observer.as_mut() {
+                obs((deadline - now).max(0.0));
+            }
+            if now >= deadline {
+                return true;
+            }
+            let pacer = self.pacer.get_mut().unwrap_or_else(|e| e.into_inner());
+            if deadline - now <= CANCEL_POLL_S {
+                pacer.sleep_until(deadline);
+            } else {
+                pacer.sleep_until(now + CANCEL_POLL_S);
+            }
+        }
     }
 
     /// The predicted kinematics of the control response to `drive` through
@@ -702,31 +757,57 @@ impl SrsShockService {
 
     /// Hold the identification burst's peak at `cap`, volts.
     pub(super) fn hold_burst_at_cap(&mut self, burst: &mut [f64], cap: f64) {
-        // Held out until its test lands.
-        let _ = (burst, cap);
+        let pk = peak(burst);
+        if pk > cap && pk > 0.0 {
+            let s = cap / pk;
+            for v in burst.iter_mut() {
+                *v *= s;
+            }
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "the identification burst's {pk:.4} V pk is held at its {cap:.4} V pk cap"
+                ),
+            });
+        }
     }
 
     /// The coherence hold: `true`, with the run held, when the mean in-band
     /// coherence is under the floor.
     pub(super) fn coherence_holds(&mut self, mean: f64, floor: f64) -> bool {
-        // Held out until its test lands.
-        let _ = (mean, floor);
-        false
+        if mean < floor {
+            self.hold(HeldReason::LowCoherence { mean, floor });
+            true
+        } else {
+            false
+        }
     }
 
     /// At proceed: the predicted drive at the highest level the run is
     /// scheduled to reach over the drive abort ends the run before any pulse.
     /// `true` when it did.
     pub(super) fn predicted_drive_abort(&mut self) -> bool {
-        // Held out until its test lands.
+        let (Some(c), Some(p)) = (&self.cfg.control, &self.prediction) else {
+            return false;
+        };
+        if p.drive_vpk > c.drive_vpk_abort {
+            let kind = TripKind::DriveVpk {
+                vpk: p.drive_vpk,
+                abort_vpk: c.drive_vpk_abort,
+                predicted: true,
+            };
+            self.end_run(kind, RunState::Aborted);
+            return true;
+        }
         false
     }
 
     /// The run's pulse cap: `true`, with the run ended `not_converged`, when
     /// `fired` pulses have reached it.
     pub(super) fn run_pulse_cap_reached(&mut self, max_pulses: u64, fired: u64) -> bool {
-        // Held out until its test lands.
-        let _ = (max_pulses, fired);
+        if fired >= max_pulses {
+            self.end_not_converged(ConvergenceLimit::Run, fired);
+            return true;
+        }
         false
     }
 
@@ -742,16 +823,45 @@ impl SrsShockService {
         level_db: f64,
         pulse_seq: u64,
     ) -> bool {
-        // Held out until its test lands.
-        let _ = (c, full, fire_scale, level_db, pulse_seq);
+        let vpk = peak(full) * *fire_scale;
+        if vpk > c.drive_vpk_abort {
+            let kind = TripKind::DriveVpk {
+                vpk,
+                abort_vpk: c.drive_vpk_abort,
+                predicted: false,
+            };
+            self.abort(kind, level_db, pulse_seq);
+            return false;
+        }
+        if vpk > c.drive_vpk_ceiling {
+            let s = c.drive_vpk_ceiling / vpk;
+            *fire_scale *= s;
+            self.log.push(EventKind::DriveScaled {
+                scale: s,
+                reason: format!(
+                    "the drive's {vpk:.4} V pk is over the {:.4} V pk drive ceiling; scaled to it",
+                    c.drive_vpk_ceiling
+                ),
+            });
+        }
+        let drive: Vec<f64> = full.iter().map(|v| v * *fire_scale).collect();
+        if let Some((axis, value, limit)) = self.predicted_kinematic_breach(&drive) {
+            let kind = TripKind::Kinematic {
+                axis,
+                value,
+                limit,
+                predicted: true,
+            };
+            self.abort(kind, level_db, pulse_seq);
+            return false;
+        }
         true
     }
 
     /// The iteration limit at one level ended the run: `true` when it did.
     pub(super) fn iteration_limit_ends_run(&mut self, pulses: u32) -> bool {
-        // Held out until its test lands.
-        let _ = pulses;
-        false
+        self.end_not_converged(ConvergenceLimit::PerLevel, u64::from(pulses));
+        true
     }
 
     /// End the run when the misses reached the limit (the controlled stop).
