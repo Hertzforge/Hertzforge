@@ -3290,8 +3290,9 @@ clock. The safe stop's countdown (`orphan_s`) is the only number timed by the se
 - `identification` and `prediction` are null until identification is done. `identification` is
   the drive it played (rms and peak), its mean in-band coherence against the hold, the trusted
   bins' coverage of the reference, and the lag it aligns every play at, with `lag_source`
-  `measured` or `derived`. At the coherence hold `coherence_mean` and `coverage` may be null
-  (the hold's message says the measured coherence); `lag_frames` is null when no lag was found.
+  `measured` or `derived`. At the coherence hold `coverage` is null and `coherence_mean` is
+  the mean the identification measured, null when the hold is the lag's (no correlation peak, so
+  no coherence was measured); `lag_frames` is null when no lag was found.
   `prediction` is the peak of the drive in force at the present level against the ceiling: it
   follows what the law changed, never the seed alone, and is null while the service cannot state
   it.

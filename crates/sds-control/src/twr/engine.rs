@@ -590,6 +590,17 @@ pub fn end_of_trip(t: &TwrTrip, message: String) -> EngineEnd {
     }
 }
 
+/// The in-band mean coherence the core's identification refusal states ("in-band
+/// mean coherence 0.240 below floor 0.800 ..."), when it states one.
+fn held_coherence(words: &str) -> Option<f64> {
+    let at = words.find("in-band mean coherence ")? + "in-band mean coherence ".len();
+    let num: String = words[at..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    num.parse().ok().filter(|m: &f64| m.is_finite())
+}
+
 /// A core play row on the wire.
 pub fn row_of(p: &hertzforge_twr::PlayRow) -> PlayRow {
     PlayRow {
@@ -743,13 +754,23 @@ impl TwrEngine for ServiceEngine {
         self.forward_log();
         let state = self.svc()?.state();
         match (r, state) {
-            (_, TwrState::CoherenceHold) => {
+            (r, TwrState::CoherenceHold) => {
                 let min = self
                     .svc
                     .as_ref()
                     .map_or(0.0, |s| s.config().sysid.min_mean_coherence);
+                // The core keeps no estimate at the hold; its refusal says the mean
+                // it measured, which the hold's facts carry.
+                let mut facts = self.ident_facts(false);
+                if let (Some(f), Err(e)) = (facts.as_mut(), &r) {
+                    if f.coherence_mean.is_nan() {
+                        if let Some(m) = held_coherence(&e.to_string()) {
+                            f.coherence_mean = m;
+                        }
+                    }
+                }
                 Ok(Identified::Held {
-                    facts: self.ident_facts(false),
+                    facts,
                     message: format!(
                         "Identification did not reach its coherence ({} in-band mean); raise its \
                          drive or its length, or check the response path, then reset.",
@@ -1207,6 +1228,17 @@ mod tests {
             committed.iter().all(|t| !t.contains(": 0 frames")),
             "{committed:?}"
         );
+    }
+
+    #[test]
+    fn the_held_coherence_is_read_from_the_cores_words() {
+        assert_eq!(
+            held_coherence(
+                "system identification: in-band mean coherence 0.240 below floor 0.800 - raise"
+            ),
+            Some(0.24)
+        );
+        assert_eq!(held_coherence("sysid lag correlation found no peak"), None);
     }
 
     #[test]

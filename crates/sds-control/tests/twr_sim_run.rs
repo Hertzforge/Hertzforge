@@ -279,15 +279,19 @@ async fn sim_9_a_drive_too_low_for_the_coherence_holds_until_reset() {
     controller(&mut c).await;
     let sha = import(&mut c).await;
     let mut cfg = config(&sha, "auto");
-    cfg["identification"]["drive_vrms"] = json!(0.000001);
+    // Low enough that the coherence falls under its floor, high enough that the
+    // lag is still found (lower, the hold is the lag's, with no coherence measured).
+    cfg["identification"]["drive_vrms"] = json!(0.00005);
     c.ok("twr.configure", json!({"config": cfg})).await;
     c.ok("twr.start", json!({})).await;
     let held = wait_twr(&mut c, "held", |d| d["state"] == "held").await;
     assert_eq!(held["phase"], "coherence_hold");
-    assert_eq!(
-        c.refused("twr.proceed", json!({})).await["reason"],
-        "coherence_hold"
-    );
+    // The coherence the identification measured, against its floor.
+    let mean = held["identification"]["coherence_mean"].as_f64();
+    assert!(mean.is_some_and(|m| m < 0.8), "{held}");
+    let e = c.refused("twr.proceed", json!({})).await;
+    assert_eq!(e["reason"], "coherence_hold");
+    assert_eq!(e["detail"]["coherence_mean"].as_f64(), mean, "{e}");
     assert_eq!(c.ok("twr.reset", json!({})).await["state"], "configured");
 }
 
