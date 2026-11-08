@@ -32,6 +32,7 @@
 mod check;
 mod choice;
 mod srs;
+mod srs_wasm;
 mod wasm;
 
 pub use check::{
@@ -42,9 +43,13 @@ pub use check::{
 };
 pub use choice::{default_classical_choice, resolve_classical, DEFAULT_CLASSICAL_LAW_ID};
 pub use srs::{
-    default_srs_choice, judge_srs, resolve_srs, run_srs_check_case, SrsCaseEnd, SrsCaseMeasure,
-    SrsCheckCase, SrsCheckPlant, SrsRequirement, DEFAULT_SRS_LAW_ID, SRS_CHECK_VERSION,
+    default_srs_choice, judge_srs, resolve_srs, run_srs_check_case, srs_check_config,
+    srs_check_limit_frf, srs_check_record, BuiltinSrsFactory, SrsCaseEnd, SrsCaseMeasure,
+    SrsCheckCase, SrsCheckPlant, SrsRequirement, DEFAULT_SRS_LAW_ID, SRS_CHECK_DRIVE_ABORT_V,
+    SRS_CHECK_DRIVE_CEILING_V, SRS_CHECK_LEVELS_DB, SRS_CHECK_LIMIT_BOUND_G,
+    SRS_CHECK_LIMIT_HEADROOM_DB, SRS_CHECK_TARGET_G, SRS_CHECK_VERSION,
 };
+pub use srs_wasm::{srs_law_fault, WasmSrsLaw, WasmSrsLawFactory};
 pub use wasm::{classical_law_fault, WasmClassicalLaw, WasmClassicalLawFactory};
 
 /// The built-in law's factory: `fd_correct` natively, with its parameter values.

@@ -91,12 +91,18 @@ pub mod table;
 pub mod wavsyn;
 
 // Curated re-exports so downstream crates and the UI bind against one path.
-pub use control::{SrsControl, SrsInputs, SrsLaw, SrsLawFactory, SrsLawSetup, SrsOutputs};
+pub use control::{
+    SrsControl, SrsInputs, SrsLaw, SrsLawFactory, SrsLawSetup, SrsOutputs, SrsRatioFactory,
+    SrsRatioLaw,
+};
 pub use iterate::{
     synthesize_to_target, synthesize_to_target_capped, SynthesisEngine, SynthesisOpts,
     SynthesisResult,
 };
-pub use law::{LawLimitStatus, LawLimits, SrsSynthesisLaw};
+pub use law::{
+    apply_cap, predictive_cap, worst_predicted_exceedance_db, LawLimitStatus, LawLimits,
+    SrsSynthesisLaw,
+};
 pub use limit::{
     predict_response_srs, predict_response_waveform, LimitChannel, NotchError, NotchOutcome,
     NotchReport, NotchedBand, PredictiveNotch,

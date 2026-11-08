@@ -22,6 +22,7 @@ use hertzforge_law_host::{
 };
 use hertzforge_mimo_laws::BuiltinMimo;
 use hertzforge_shock_law_math::classical as fdc;
+use hertzforge_shock_law_math::srs as srsr;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -91,12 +92,45 @@ pub const CLASSICAL_BUILTIN_ID: &str = fdc::ID;
 /// `hertzforge-shock-law-math`: the same manifest its law file
 /// (`laws/shock-fdc`) describes.
 pub fn classical_builtin_manifest() -> Manifest {
+    math_manifest(
+        fdc::NAME,
+        fdc::VERSION,
+        fdc::SUMMARY,
+        fdc::KNOBS,
+        fdc::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in SRS shock law, `srs_ratio`.
+pub const SRS_BUILTIN_ID: &str = srsr::ID;
+
+/// The built-in SRS shock law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`: the same manifest its law file
+/// (`laws/shock-srs-ratio`) describes.
+pub fn srs_builtin_manifest() -> Manifest {
+    math_manifest(
+        srsr::NAME,
+        srsr::VERSION,
+        srsr::SUMMARY,
+        srsr::KNOBS,
+        srsr::DIAGNOSTICS,
+    )
+}
+
+/// A built-in shock law's manifest from its declaration.
+fn math_manifest(
+    name: &str,
+    version: &str,
+    summary: &str,
+    knobs: &[hertzforge_shock_law_math::NumberParam],
+    diagnostics: &[hertzforge_shock_law_math::DiagnosticDecl],
+) -> Manifest {
     Manifest {
-        name: fdc::NAME.into(),
-        version: fdc::VERSION.into(),
+        name: name.into(),
+        version: version.into(),
         author: hertzforge_shock_law_math::AUTHOR.into(),
-        summary: fdc::SUMMARY.into(),
-        params: fdc::KNOBS
+        summary: summary.into(),
+        params: knobs
             .iter()
             .map(|k| ParamSpec {
                 key: k.key.into(),
@@ -111,7 +145,7 @@ pub fn classical_builtin_manifest() -> Manifest {
                 }),
             })
             .collect(),
-        diagnostics: fdc::DIAGNOSTICS
+        diagnostics: diagnostics
             .iter()
             .map(|d| DiagnosticSpec {
                 key: d.key.into(),
@@ -124,9 +158,20 @@ pub fn classical_builtin_manifest() -> Manifest {
 }
 
 fn classical_builtin_entry() -> CatalogEntry {
-    let manifest = classical_builtin_manifest();
+    shock_builtin_entry(
+        CLASSICAL_BUILTIN_ID,
+        classical_builtin_manifest(),
+        LawWorld::ShockClassical,
+    )
+}
+
+fn srs_builtin_entry() -> CatalogEntry {
+    shock_builtin_entry(SRS_BUILTIN_ID, srs_builtin_manifest(), LawWorld::ShockSrs)
+}
+
+fn shock_builtin_entry(id: &str, manifest: Manifest, world: LawWorld) -> CatalogEntry {
     CatalogEntry {
-        id: CLASSICAL_BUILTIN_ID.into(),
+        id: id.into(),
         identity: LawIdentity {
             name: manifest.name.clone(),
             version: manifest.version.clone(),
@@ -136,7 +181,7 @@ fn classical_builtin_entry() -> CatalogEntry {
         manifest,
         builtin: true,
         check: CheckStatus::BuiltIn,
-        world: LawWorld::ShockClassical,
+        world,
         mimo: None,
     }
 }
@@ -374,14 +419,26 @@ impl LawCatalog {
             .collect()
     }
 
+    /// Every SRS shock law, the built-in `srs_ratio` (the default) first,
+    /// then the imported `shock-srs` law files by name, version and hash.
+    pub fn shock_srs_entries(&self) -> Vec<CatalogEntry> {
+        std::iter::once(srs_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::ShockSrs(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
     /// Every law of `world`.
     pub fn entries_for(&self, world: LawWorld) -> Vec<CatalogEntry> {
         match world {
             LawWorld::Single => self.entries(),
             LawWorld::Mimo => self.mimo_entries(),
             LawWorld::ShockClassical => self.shock_classical_entries(),
-            // No SRS law is listed yet.
-            LawWorld::ShockSrs => Vec::new(),
+            LawWorld::ShockSrs => self.shock_srs_entries(),
         }
     }
 
@@ -389,6 +446,14 @@ impl LawCatalog {
     pub fn classical_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedClassicalLaw> {
         match self.imported_law(id).map(|i| &i.law) {
             Some(AnyLaw::ShockClassical(l)) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// The imported SRS shock law file with `id` (its SHA-256).
+    pub fn srs_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedSrsLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::ShockSrs(l)) => Some(l),
             _ => None,
         }
     }
@@ -403,6 +468,9 @@ impl LawCatalog {
         }
         if id == CLASSICAL_BUILTIN_ID {
             return Some(classical_builtin_entry());
+        }
+        if id == SRS_BUILTIN_ID {
+            return Some(srs_builtin_entry());
         }
         self.imported_law(id).map(imported_entry)
     }
@@ -504,6 +572,7 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
             Some(l.manifest().clone()),
         ),
         AnyLaw::ShockClassical(l) => (l.manifest().clone(), LawWorld::ShockClassical, None),
+        AnyLaw::ShockSrs(l) => (l.manifest().clone(), LawWorld::ShockSrs, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),

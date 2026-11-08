@@ -53,6 +53,7 @@
 
 use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, LawGuards, LawValue};
 use hertzforge_shock_common::{DrivePath, RateModel};
+use hertzforge_shock_law_math::srs::{self as ratio, SrsRatio, SrsRatioParams};
 use serde::{Deserialize, Serialize};
 
 /// The identification burst's default peak, as a fraction of the drive
@@ -146,6 +147,87 @@ pub trait SrsLawFactory: Send + Sync {
 
     /// The law as the run's records name it.
     fn describe(&self) -> LawDescriptor;
+}
+
+/// The built-in law, `srs_ratio`, natively: its parameter values, and the
+/// factory the run builds it with when no other is installed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SrsRatioFactory {
+    params: SrsRatioParams,
+}
+
+impl SrsRatioFactory {
+    /// The built-in law with `params`. The values are not checked against the
+    /// declared ranges here: a run without `control` builds it from the
+    /// configuration's `synthesis.max_gain_db_per_iter`, as it always has, and
+    /// a chosen law's values are checked where the choice is resolved.
+    pub fn new(params: SrsRatioParams) -> Self {
+        SrsRatioFactory { params }
+    }
+
+    /// The parameter values.
+    pub fn params(&self) -> SrsRatioParams {
+        self.params
+    }
+}
+
+impl SrsLawFactory for SrsRatioFactory {
+    fn build(&self, setup: &SrsLawSetup<'_>) -> Result<Box<dyn SrsLaw + Send>, LawFault> {
+        SrsRatio::new(
+            self.params,
+            setup.band_hz,
+            setup.component_hz,
+            setup.component_gain,
+        )
+        .map(|math| Box::new(SrsRatioLaw { math }) as Box<dyn SrsLaw + Send>)
+        .map_err(LawFault::Failed)
+    }
+
+    fn describe(&self) -> LawDescriptor {
+        LawDescriptor {
+            id: ratio::ID.into(),
+            name: ratio::NAME.into(),
+            version: ratio::VERSION.into(),
+            sha256: None,
+            params: serde_json::json!({ ratio::KNOBS[0].key: self.params.max_db_per_pulse }),
+        }
+    }
+}
+
+/// The built-in law's state for a run: the arithmetic in
+/// `hertzforge-shock-law-math`, which the law file wraps too.
+#[derive(Debug, Clone)]
+pub struct SrsRatioLaw {
+    math: SrsRatio,
+}
+
+fn step_outputs(step: ratio::Step) -> SrsOutputs {
+    SrsOutputs {
+        values: step
+            .report
+            .values()
+            .iter()
+            .map(|&(k, v)| LawValue::new(k, v))
+            .collect(),
+        gains: step.gains,
+    }
+}
+
+impl SrsLaw for SrsRatioLaw {
+    fn name(&self) -> &str {
+        ratio::NAME
+    }
+
+    fn seed(&mut self, _inputs: &SrsInputs<'_>) -> Result<SrsOutputs, LawFault> {
+        self.math.seed().map(step_outputs).map_err(LawFault::Failed)
+    }
+
+    fn iterate(&mut self, inputs: &SrsInputs<'_>) -> Result<SrsOutputs, LawFault> {
+        self.math
+            .iterate(inputs.target, inputs.measured)
+            .map(step_outputs)
+            .map_err(LawFault::Failed)
+    }
 }
 
 /// The closed-loop settings of an SRS run: the drive ceiling and abort in

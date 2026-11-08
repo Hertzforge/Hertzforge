@@ -9,7 +9,7 @@ use crate::law::LawLimitStatus;
 use crate::limit::NotchReport;
 use crate::service::config::{MetaField, ShockCaptureTrigger, SrsToleranceBand, SysIdExcitation};
 use hertzforge_shaker_db::FeasibilityReport;
-use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, LawValue};
+use hertzforge_shock_common::law_guard::{LawCall, LawDescriptor, LawFault, LawValue};
 use hertzforge_shock_common::{DriveLimit, DrivePath, PulseRecord, ShockLevelSchedule};
 use serde::{Deserialize, Serialize};
 
@@ -337,6 +337,32 @@ pub enum EventKind {
     DelegatedFire { scale: f64, level_db: f64 },
     /// A freeform note (an honesty caveat surfaced during the run).
     Note { text: String },
+    /// Closed loop: identification finished.
+    Identified {
+        /// The burst's peak as played, volts.
+        drive_vpk: f64,
+        /// Its cap, volts.
+        max_vpk: f64,
+        /// Mean in-band coherence.
+        coherence_mean: f64,
+        /// The floor it had to reach.
+        min_mean_coherence: f64,
+    },
+    /// Closed loop: identification held the run before any pulse.
+    Held { reason: HeldReason },
+    /// The law was called: whether its output was used, and why not.
+    LawCalled {
+        /// Pulses fired before the call: 0 at the seed.
+        pulse: u64,
+        /// The seed or an iteration.
+        call: LawCall,
+        used: bool,
+        /// The miss's wire name.
+        reason: Option<String>,
+        /// The miss in words.
+        detail: Option<String>,
+        call_ms: f64,
+    },
 }
 
 /// The event log: a growing list of timestamped events.
@@ -791,6 +817,41 @@ pub struct ReportData {
     pub metadata: Vec<MetaField>,
     /// The honest limitations, path-matched.
     pub honesty: Honesty,
+    /// The law's line and its counts; `None` on a run without `control`.
+    #[serde(default)]
+    pub law: Option<LawReport>,
+}
+
+/// The report's law section: one line naming the law, and the guard counts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LawReport {
+    /// "name version (built in)", or the law file's short hash in place of
+    /// "built in".
+    pub line: String,
+    pub descriptor: LawDescriptor,
+    /// Calls, the seed included.
+    pub calls: u64,
+    /// Calls whose output was not used.
+    pub misses: u64,
+    /// Of those, outputs the core refused.
+    pub refused: u64,
+    /// Component gains the limit cap held back, over the run.
+    pub limited_components: u64,
+    /// The slowest call, ms.
+    pub worst_call_ms: f64,
+    /// One call's budget, ms.
+    pub budget_ms: f64,
+}
+
+impl LawReport {
+    /// The report's one line for a law: its name, version and a short hash
+    /// (or "built in"), as classical shock's report writes it.
+    pub fn line_for(d: &LawDescriptor) -> String {
+        match &d.sha256 {
+            Some(h) => format!("{} {} ({})", d.name, d.version, &h[..h.len().min(12)]),
+            None => format!("{} {} (built in)", d.name, d.version),
+        }
+    }
 }
 
 /// The one status snapshot the UI polls.

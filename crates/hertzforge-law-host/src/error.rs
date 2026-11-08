@@ -81,6 +81,17 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// An SRS shock law returned a result that breaks the output rules: not
+    /// one gain per component, a value that is not a finite number, a gain at
+    /// or under zero, too many values, or a value the manifest does not
+    /// declare (or reported twice). The gain caps and every other protection
+    /// of the drive belong to the controller.
+    BadSrsOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: SrsOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -154,6 +165,37 @@ impl ClassicalOutputRule {
     }
 }
 
+/// The output rules an SRS shock law's result is checked against, in the
+/// order they are checked ([`LawError::BadSrsOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SrsOutputRule {
+    /// One gain per component.
+    WrongLength,
+    /// Every gain and every value is a finite number.
+    NonFinite,
+    /// Every gain is above zero.
+    NotPositive,
+    /// At most [`crate::shock_srs::MAX_SRS_VALUES`] values.
+    TooManyValues,
+    /// Every value is declared by the manifest and reported once.
+    UndeclaredValue,
+}
+
+impl SrsOutputRule {
+    /// The stable wire and record name, the controller's own for the same
+    /// rule: `wrong_length`, `non_finite`, `not_positive`, `too_many_values`,
+    /// `undeclared_value`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SrsOutputRule::WrongLength => "wrong_length",
+            SrsOutputRule::NonFinite => "non_finite",
+            SrsOutputRule::NotPositive => "not_positive",
+            SrsOutputRule::TooManyValues => "too_many_values",
+            SrsOutputRule::UndeclaredValue => "undeclared_value",
+        }
+    }
+}
+
 impl LawError {
     /// Whether this error leaves the instance unusable.
     pub fn poisons(&self) -> bool {
@@ -195,7 +237,8 @@ impl fmt::Display for LawError {
             LawError::Law(s) => write!(f, "the law returned an error: {s}"),
             LawError::BadOutput { detail, .. }
             | LawError::BadMimoOutput { detail, .. }
-            | LawError::BadClassicalOutput { detail, .. } => {
+            | LawError::BadClassicalOutput { detail, .. }
+            | LawError::BadSrsOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(

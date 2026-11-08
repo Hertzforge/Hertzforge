@@ -45,7 +45,7 @@ const FS: f64 = 20_000.0;
 /// A plant at `FS` (shared clock so the closed loop runs without a bench loopback
 /// proof). `modes` is a `(f_n, Q)` resonance bank; empty = pure broadband
 /// feedthrough. Noise is zeroed for determinism.
-fn plant(modes: Vec<(f64, f64)>, feedthrough: f64) -> SimBackend {
+pub(super) fn plant(modes: Vec<(f64, f64)>, feedthrough: f64) -> SimBackend {
     SimConfig::new()
         .sample_rate_hz(FS)
         .resonances(modes)
@@ -58,7 +58,7 @@ fn plant(modes: Vec<(f64, f64)>, feedthrough: f64) -> SimBackend {
 
 /// A minimal SISO table: one Drive channel + one Control channel. The sim maps the
 /// Control channel to the plant response.
-fn siso_table() -> ChannelTable {
+pub(super) fn siso_table() -> ChannelTable {
     let mut t = ChannelTable::new();
     let mut drv = Channel::new(1);
     drv.role = ChannelRole::Drive;
@@ -74,7 +74,7 @@ fn siso_table() -> ChannelTable {
 /// The SISO table plus a named Monitor channel. The SimBackend maps the monitor to
 /// the SAME plant response as Control (see the module docs); the limit channel's
 /// resonant FRF is user-supplied, not measured off this tap.
-fn table_with_monitor(monitor_name: &str) -> ChannelTable {
+pub(super) fn table_with_monitor(monitor_name: &str) -> ChannelTable {
     let mut t = siso_table();
     let mut mon = Channel::new(3);
     mon.role = ChannelRole::Monitor;
@@ -100,7 +100,7 @@ fn host_service(cfg: SrsTestConfig, table: ChannelTable, backend: SimBackend) ->
 }
 
 /// A big shaker the target easily fits (feasibility passes).
-fn big_shaker() -> ShakerRecord {
+pub(super) fn big_shaker() -> ShakerRecord {
     let mut s = ShakerRecord::new("big");
     s.force_shock = Some(RatingValue::peak(100_000.0));
     s.max_velocity_ips = Some(RatingValue::peak(400.0));
@@ -110,7 +110,7 @@ fn big_shaker() -> ShakerRecord {
 
 /// Synthesis knobs with more iterations + a generous per-iter clamp so the offline
 /// model converges the flat target.
-fn tight_synth() -> SynthesisOpts {
+pub(super) fn tight_synth() -> SynthesisOpts {
     SynthesisOpts {
         max_iters: 120,
         tol_db: 1.5,
@@ -121,7 +121,7 @@ fn tight_synth() -> SynthesisOpts {
 
 /// A user-supplied resonant limit FRF: a 5x Lorentzian bump at `f0` on a unity
 /// floor (the `predictive_notch::bump_frf` fixture shape).
-fn bump_frf(f0: f64, half_width: f64) -> FrfSpec {
+pub(super) fn bump_frf(f0: f64, half_width: f64) -> FrfSpec {
     let freqs: Vec<f64> = (0..=400).map(|i| i as f64 * (FS / 2.0 / 400.0)).collect();
     let mag: Vec<f64> = freqs
         .iter()
@@ -145,8 +145,8 @@ fn worst_abs_err_db(r: &super::report::ReportData) -> f64 {
 // (a) full AUTO run converges the control SRS to the target
 // ===========================================================================
 
-#[test]
-fn a_full_auto_converges_control_srs_to_target() {
+/// Fixture (a)'s configuration.
+pub(super) fn cfg_a() -> SrsTestConfig {
     let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
     cfg.synthesis = tight_synth();
     cfg.shaker = Some(big_shaker());
@@ -162,6 +162,12 @@ fn a_full_auto_converges_control_srs_to_target() {
     // deliberate operator stop between the system ID and the first pulse. The hold
     // itself is covered by the `g_*` cases below.
     cfg.review_after_sysid = false;
+    cfg
+}
+
+#[test]
+fn a_full_auto_converges_control_srs_to_target() {
+    let cfg = cfg_a();
 
     // A pure-feedthrough unity plant: the reduced-level system ID measures |H|~=1,
     // the feedforward seed lands the first pulse near target, and the law tightens
@@ -207,8 +213,8 @@ fn a_full_auto_converges_control_srs_to_target() {
 //     predicted limit SRS under bound; control matches away from the notch
 // ===========================================================================
 
-#[test]
-fn b_limit_channel_notch_holds_predicted_srs_and_control_matches_elsewhere() {
+/// Fixture (b)'s configuration.
+pub(super) fn cfg_b() -> SrsTestConfig {
     let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
     cfg.synthesis = tight_synth();
     cfg.shaker = Some(big_shaker());
@@ -236,6 +242,12 @@ fn b_limit_channel_notch_holds_predicted_srs_and_control_matches_elsewhere() {
     cfg.schedule.pulses_per_level = vec![8];
     // BYPASS the review hold (see case (a)): this case asserts the predictive notch.
     cfg.review_after_sysid = false;
+    cfg
+}
+
+#[test]
+fn b_limit_channel_notch_holds_predicted_srs_and_control_matches_elsewhere() {
+    let cfg = cfg_b();
 
     // Flat control plant so the control loop converges; the limit resonance lives
     // entirely in the user-supplied FRF above.
@@ -329,15 +341,21 @@ fn b_limit_channel_notch_holds_predicted_srs_and_control_matches_elsewhere() {
 // (c) envelope abort on a gross over-level
 // ===========================================================================
 
+/// Fixture (c)'s configuration.
+pub(super) fn cfg_c() -> SrsTestConfig {
+    let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+    cfg.synthesis = tight_synth();
+    cfg.sysid = None;
+    cfg.shaker = Some(big_shaker());
+    cfg
+}
+
 #[test]
 fn c_envelope_abort_trips_on_gross_over_level() {
     // No system ID (unity-plant seed) + a high-gain plant (feedthrough 20x): the
     // FIRST -12 dB pulse lands far above the target, breaching the abort
     // envelope's high side.
-    let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
-    cfg.synthesis = tight_synth();
-    cfg.sysid = None;
-    cfg.shaker = Some(big_shaker());
+    let cfg = cfg_c();
 
     let mut s = host_service(cfg, siso_table(), plant(vec![], 20.0));
     let end = s.run_auto(200).unwrap();
@@ -427,8 +445,8 @@ fn d_feasibility_hard_blocks_overweight_article_and_override_arms() {
 // (e) the level ladder walks and per-level SRS improves
 // ===========================================================================
 
-#[test]
-fn e_level_ladder_walks_and_per_level_srs_improves() {
+/// Fixture (e)'s configuration.
+pub(super) fn cfg_e() -> SrsTestConfig {
     let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
     cfg.synthesis = tight_synth();
     cfg.schedule = ShockLevelSchedule::auto_default();
@@ -436,6 +454,12 @@ fn e_level_ladder_walks_and_per_level_srs_improves() {
     cfg.shaker = Some(big_shaker());
     // BYPASS the review hold (see case (a)): this case asserts the ladder walk.
     cfg.review_after_sysid = false;
+    cfg
+}
+
+#[test]
+fn e_level_ladder_walks_and_per_level_srs_improves() {
+    let cfg = cfg_e();
 
     // A mild in-band resonance (500 Hz, Q=4): the first pulse at each level is off,
     // and the per-band law tightens it pulse-over-pulse within the level.
@@ -500,7 +524,7 @@ use std::sync::Arc;
 /// What the service DID to its plant, readable from the test after the service
 /// has been dropped (which is the point of the drop-safety case).
 #[derive(Default)]
-struct PlantSpy {
+pub(super) struct PlantSpy {
     opens: AtomicUsize,
     fires: AtomicUsize,
     stops: AtomicUsize,
@@ -533,7 +557,7 @@ impl PlantSpy {
 /// A scripted [`PulsePlant`]: an ideal unity plant (the response IS the drive
 /// record) whose bring-up COERCES the sample rate, exactly as a cDAQ-9234 rounds
 /// a request up its `13.1072 MHz/(256 n)` ladder at configure.
-struct MockPlant {
+pub(super) struct MockPlant {
     spy: Arc<PlantSpy>,
     /// Reported before `ensure_open` - the REQUESTED rate.
     fs_hz: f64,
@@ -544,7 +568,7 @@ struct MockPlant {
 }
 
 impl MockPlant {
-    fn new(spy: Arc<PlantSpy>, requested_fs_hz: f64, coerced_fs_hz: f64) -> Self {
+    pub(super) fn new(spy: Arc<PlantSpy>, requested_fs_hz: f64, coerced_fs_hz: f64) -> Self {
         MockPlant {
             spy,
             fs_hz: requested_fs_hz,
@@ -619,7 +643,7 @@ impl PulsePlant for MockPlant {
 
 /// A service on the scripted plant. `cfg` is taken as given so each case states
 /// exactly the policy it is testing.
-fn mock_service(cfg: SrsTestConfig, plant: MockPlant) -> SrsShockService {
+pub(super) fn mock_service(cfg: SrsTestConfig, plant: MockPlant) -> SrsShockService {
     SrsShockService::new(
         cfg,
         siso_table(),
@@ -632,7 +656,7 @@ fn mock_service(cfg: SrsTestConfig, plant: MockPlant) -> SrsShockService {
 /// A config that fires without tripping on the ideal unity plant: one short
 /// level, a wide-open envelope (this family of cases is not about tolerance) and
 /// no shaker (feasibility NotEvaluated).
-fn mock_cfg() -> SrsTestConfig {
+pub(super) fn mock_cfg() -> SrsTestConfig {
     let mut cfg = SrsTestConfig::flat(100.0, 2000.0, 50.0);
     cfg.synthesis = tight_synth();
     cfg.schedule.start_db = 0.0;
@@ -1050,40 +1074,38 @@ impl crate::control::SrsLawFactory for NeverBuilds {
 }
 
 #[test]
-fn closed_loop_control_is_refused_until_the_loop_is_built() {
-    // The seam is a contract only: a configuration that asks for the closed
-    // loop must not quietly run the drive in g written as volts instead.
+fn a_closed_loop_configuration_builds_and_a_law_that_will_not_build_ends_the_run() {
+    // With `control` the service builds, holds for review after
+    // identification, and builds its law at proceed: a factory that refuses
+    // ends the run `law_fault` before any pulse.
     let spy = Arc::new(PlantSpy::default());
     let mut cfg = mock_cfg();
     cfg.control = Some(crate::control::SrsControl::new(0.5, 0.8));
-    let refused = SrsShockService::new(
-        cfg,
-        siso_table(),
-        FirePath::Host(Box::new(MockPlant::new(
-            Arc::clone(&spy),
-            20_000.0,
-            20_000.0,
-        ))),
-        Some(std::env::temp_dir().join(format!("hertzforge-srs-mock-{}", std::process::id()))),
+    cfg.review_after_sysid = false;
+    let mut s = mock_service(cfg, MockPlant::new(Arc::clone(&spy), 20_000.0, 20_000.0))
+        .with_law_factory(Arc::new(NeverBuilds))
+        .with_law_clock(Arc::new(
+            hertzforge_shock_common::law_guard::MonotonicClock::new(),
+        ));
+    s.assess_feasibility().unwrap();
+    s.arm().unwrap();
+    s.run_sysid().unwrap();
+    assert_eq!(
+        s.state(),
+        RunState::AwaitingReview,
+        "the closed loop always holds"
     );
-    match refused {
-        Err(ServiceError::Config(e)) => assert!(e.to_string().contains("not built"), "{e}"),
-        Err(e) => panic!("refused for the wrong reason: {e}"),
-        Ok(_) => panic!("a closed-loop configuration was accepted"),
+    assert_eq!(spy.fires(), 1, "the identification burst");
+    s.proceed_after_review().unwrap();
+    assert_eq!(s.state(), RunState::Aborted);
+    match &s.trip().unwrap().kind {
+        TripKind::LawFault { fault, consecutive } => {
+            assert_eq!(fault.reason(), "error");
+            assert_eq!(*consecutive, 1);
+        }
+        k => panic!("{k:?}"),
     }
-    assert_eq!(spy.fires(), 0);
-
-    // Without it the service builds as before, and stores a factory and a
-    // clock without calling either.
-    let s = mock_service(
-        mock_cfg(),
-        MockPlant::new(Arc::clone(&spy), 20_000.0, 20_000.0),
-    )
-    .with_law_factory(Arc::new(NeverBuilds))
-    .with_law_clock(Arc::new(
-        hertzforge_shock_common::law_guard::MonotonicClock::new(),
-    ));
-    assert_eq!(s.state(), RunState::Idle);
+    assert_eq!(spy.fires(), 1, "nothing fired after identification");
 }
 
 // ===========================================================================

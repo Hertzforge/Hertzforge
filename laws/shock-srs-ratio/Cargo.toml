@@ -1,0 +1,18 @@
+[package]
+name = "hertzforge-law-shock-srs-ratio"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The built-in SRS shock law, `srs_ratio`, as a law file. It is the
+# controller's own `hertzforge_shock_law_math::srs::SrsRatio`, so the native law
+# and the law file are one implementation, with the manifest built from the
+# same declaration as the controller's catalog entry. Built to a law file by
+# `scripts/build_laws.sh`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
+hertzforge-shock-law-math = { path = "../../crates/hertzforge-shock-law-math" }
