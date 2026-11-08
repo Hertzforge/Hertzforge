@@ -1600,10 +1600,22 @@ impl WireSine {
                 ));
             }
         }
-        for (k, rung) in [
+        // The time at each level before the last is used only when the run starts below the
+        // last level; with one level, or a start at the last, it is never read.
+        let start = self.start_level();
+        let before_last = self
+            .levels_db
+            .iter()
+            .position(|l| *l == start)
+            .is_some_and(|i| i + 1 < self.levels_db.len());
+        let rungs = [
             ("per_level", self.per_level),
             ("full_level", self.full_level),
-        ] {
+        ];
+        for (k, rung) in rungs
+            .into_iter()
+            .filter(|(k, _)| *k != "per_level" || before_last)
+        {
             let field = format!("schedule.{k}");
             match rung {
                 RungFor::Sweeps(_) if !self.test.is_sweep() => r.errors.push(Item::field(
