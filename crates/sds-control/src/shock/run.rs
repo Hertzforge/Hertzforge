@@ -227,7 +227,8 @@ impl Actor {
             self.view.elapsed_s = Some(self.ended_at.unwrap_or_else(|| t0.elapsed().as_secs_f64()));
         }
         self.view.misses = self.engine.misses();
-        if self.armed() {
+        // A finished run keeps the counts of its last pulse.
+        if self.armed() || self.view.state == State::Finished {
             let p = self.engine.position();
             self.view.level_db = Some(p.level_db);
             self.view.rung = p.rung;
