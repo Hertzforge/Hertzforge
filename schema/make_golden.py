@@ -2098,7 +2098,7 @@ def _sine_case(name, plant, requirement, *, ticks, judged, worst, worst_hz, away
             'capped_ticks': capped, 'worst_call_ms': ms, 'budget_ms': 2.5, 'max_drive_vpk': vpk}
 
 
-SINE_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'sine-check 1', 'cases': [
+SINE_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'sine-check 2', 'cases': [
     _sine_case('slow sweep', 'one mode, 250 Hz, Q 50', 'through', ticks=18000, judged=17400,
                worst=0.42, worst_hz=251.25, vpk=0.41),
     _sine_case('fast sweep', 'one mode, 250 Hz, Q 50', 'within_away', ticks=3000, judged=2900,
@@ -2115,6 +2115,8 @@ SINE_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'sine-ch
     _sine_case('limit channel', 'one mode, 250 Hz, Q 50', 'limit_held', ticks=9000,
                judged=8700, worst=0.75, worst_hz=300.5, limit_over=0.25, overshoot=0.5,
                capped=4, vpk=0.39),
+    _sine_case('transport delay', 'a wire behind 50 ms', 'settles', ticks=600, judged=400,
+               worst=0.0625, worst_hz=100, rungs=[[-6, 0.0625]], vpk=0.53),
 ]}
 
 SINE_TEXT_GOLDENS = {

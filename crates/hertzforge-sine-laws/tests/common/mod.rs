@@ -42,7 +42,12 @@ pub fn station_for(case: SineCheckCase) -> Box<dyn Backend> {
             }))
         }
     };
-    Box::new(cfg.noise_level(spec.noise_rms_g).build())
+    // The lag goes on last: it is set on whichever plant the station plays.
+    Box::new(
+        cfg.noise_level(spec.noise_rms_g)
+            .transport_delay_samples(spec.transport_delay_samples)
+            .build(),
+    )
 }
 
 /// A built law file, `<target>/wasm32-wasip2/release/<name>.wasm`.

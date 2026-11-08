@@ -280,15 +280,16 @@ def test_a_sine_law_entry_alone_carries_live_and_its_check_says_which_world(vali
     _refused(validate, {**other, 'live': []}, 'lawEntry')
     validate({'world': 'sine'}, 'lawsListParams')
     report = _text('response_laws_check_sine')['result']['report']
-    assert report['tool_version'] == 'sine-check 1' and not report['recorded']
+    assert report['tool_version'] == 'sine-check 2' and not report['recorded']
     assert [c['name'] for c in report['cases']] == [
         'slow sweep', 'fast sweep', 'close modes', 'anti-resonance', 'measurement noise',
-        'level ladder', 'limit channel']
+        'level ladder', 'limit channel', 'transport delay']
     for case in report['cases']:
         validate(case, 'sineLawCheckCase')
         _refused(validate, case, 'srsLawCheckCase')
-    event = {'law_id': 'servo_blend', 'index': 6, 'of': 7, 'case': 'limit channel',
-             'state': 'done', 'result': report['cases'][6]}
+    assert report['cases'][7]['requirement'] == 'settles'
+    event = {'law_id': 'servo_blend', 'index': 7, 'of': 8, 'case': 'transport delay',
+             'state': 'done', 'result': report['cases'][7]}
     validate(event, 'lawsCheckEvent')
 
 

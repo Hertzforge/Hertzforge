@@ -116,7 +116,7 @@
   "report": {
    "passed": true,
    "recorded": false,
-   "tool_version": "sine-check 1",
+   "tool_version": "sine-check 2",
    "cases": [
     {
      "name": "slow sweep",
@@ -302,6 +302,35 @@
      "worst_call_ms": 0.01,
      "budget_ms": 2.5,
      "max_drive_vpk": 0.39
+    },
+    {
+     "name": "transport delay",
+     "plant": "a wire behind 50 ms",
+     "requirement": "settles",
+     "passed": true,
+     "detail": "completed; 400 of 600 ticks judged, worst 0.0625 dB; 600 calls, slowest 0.01 ms of 2.5 ms",
+     "end": "completed",
+     "trip": null,
+     "ticks": 600,
+     "judged_ticks": 400,
+     "worst_error_db": 0.0625,
+     "worst_error_hz": 100,
+     "worst_away_error_db": null,
+     "rungs": [
+      [
+       -6,
+       0.0625
+      ]
+     ],
+     "worst_limit_over_db": null,
+     "worst_release_overshoot_db": null,
+     "calls": 600,
+     "misses": 0,
+     "refused": 0,
+     "capped_ticks": 0,
+     "worst_call_ms": 0.01,
+     "budget_ms": 2.5,
+     "max_drive_vpk": 0.53
     }
    ]
   }

@@ -462,7 +462,7 @@ microseconds, the law's drive, the drive the controller took, the eight values),
 batches, never on the loop thread. The report carries the law's name, version and short hash and
 the guard counts.
 
-**The check.** Seven simulated test articles, each a whole run under these guards at 16384 Hz and
+**The check.** Eight simulated test articles, each a whole run under these guards at 16384 Hz and
 a 10 ms tick, a flat 1 g target, identification at -20 dB, the abort band 12 dB either way:
 
 | Case | Plant and run | Asks for |
@@ -474,9 +474,11 @@ a 10 ms tick, a flat 1 g target, identification at -20 dB, the abort band 12 dB 
 | measurement noise | One mode; noise 30 dB under the full-level response; a 30 s dwell at 250 Hz | Within 1.5 dB |
 | level ladder | One mode; -20, -12, -6 and 0 dB moved by hand, 10 s each, at a 250 Hz dwell, one live change to the middle of a live parameter's range | Every rung within 1 dB after its settle window |
 | limit channel | One mode, and a limit channel reading up to 4 times the control at the mode under a flat 2 g limit; 2 oct/min | The limit channel at most 0.5 dB over its limit; the control at most 1 dB over its target after the notch releases |
+| transport delay | A flat wire (1 g per volt) that plays the drive 50 ms late, a hardware station's measured lag rounded up (819 samples); engaged at -6 dB, a 6 s dwell at 100 Hz | The run completes, and every tick from 2 s after the engage on is within 0.5 dB of the target (`settles`) |
 
-A judged tick is one at full level (or, for the ladder, at a rung) outside the settle window and not
-held by the notch. Every case also asks that every call is answered in time with no miss and no
+The other stations have no lag. A judged tick is one at full level (or, for the ladder, at a rung)
+outside the settle window and not held by the notch; for the transport delay case, every tick from
+2 s after the engage, settle window or not. Every case also asks that every call is answered in time with no miss and no
 refused output, and reports the slowest call and the capped ticks.
 
 ## 11. Later test types

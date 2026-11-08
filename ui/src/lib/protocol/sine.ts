@@ -673,7 +673,7 @@ export interface SineData extends SineLiveHead {
 /** A Sine law's catalog entry: `world` is `sine` and only it carries `live`. */
 export type SineLawEntry = LawEntry & { world: 'sine'; live: string[] };
 
-export type SineCheckRequirement = 'within' | 'through' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held';
+export type SineCheckRequirement = 'within' | 'through' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held' | 'settles';
 
 /** One simulated test article's result in a Sine law check. */
 export interface SineLawCheckCase {

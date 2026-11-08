@@ -3087,11 +3087,14 @@ than 30 Hz from it); two close modes at 240 and 260 Hz, Q 30, at 2 oct/min (`wit
 ceiling); the one mode with measurement noise 30 dB under the response, a 30 s dwell at 250 Hz
 (`within` ±1.5 dB); the one mode on a manual ladder of -20, -12, -6 and 0 dB at a 250 Hz dwell,
 with one live parameter changed to the middle of its range (`each_rung_within`: every judged
-tick at each level within ±1 dB after the settle window); and the one mode with a limit channel
+tick at each level within ±1 dB after the settle window); the one mode with a limit channel
 whose response rises to 4 times the control's at the resonance under a flat 2 g bound
 (`limit_held`: the limit channel never more than 0.5 dB over its bound, and the control point no
-more than 1 dB over its target when the notch releases). Every case first asks that every call
-is answered, in time, with zero misses and zero refused outputs; the worst call and the ticks a
+more than 1 dB over its target when the notch releases); and a flat wire that plays the drive
+50 ms late, a hardware station's measured lag rounded up (the other stations have none), engaged
+at -6 dB for a 6 s dwell at 100 Hz (`settles`: the run completes, and every tick from 2 s after
+the engage on, settle window or not, is within ±0.5 dB of the target). Every case first asks
+that every call is answered, in time, with zero misses and zero refused outputs; the worst call and the ticks a
 cap bound are reported with every case. A Sine law is named by `id` or by `path` as a classical
 law is, with the same refusals. A case's result:
 

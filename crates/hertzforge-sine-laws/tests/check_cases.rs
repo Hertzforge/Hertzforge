@@ -1,4 +1,4 @@
-//! The Sine check's seven cases on the simulator: the built-in law at its
+//! The Sine check's eight cases on the simulator: the built-in law at its
 //! default parameters passes every one, and the core's rise cap is at least
 //! twice the largest rise the built-in asked for on any of them.
 

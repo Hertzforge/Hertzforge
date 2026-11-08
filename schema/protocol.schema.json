@@ -10619,7 +10619,8 @@
             "within_away",
             "survive",
             "each_rung_within",
-            "limit_held"
+            "limit_held",
+            "settles"
           ]
         },
         "passed": {

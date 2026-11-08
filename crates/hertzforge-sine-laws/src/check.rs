@@ -8,7 +8,9 @@
 //! Every case asks the same of the law first: every call answered, in time,
 //! with zero misses and zero refused outputs. Then each case asks for its
 //! [`SineRequirement`]. The worst call time and the count of capped ticks are
-//! reported with every case.
+//! reported with every case. One case's station plays the drive late, by a
+//! hardware station's measured lag ([`SINE_CHECK_TRANSPORT_DELAY_S`]); the
+//! others have none.
 //!
 //! The station a case runs on is built by the controller from these methods
 //! alone ([`SineCheckCase::plant`], [`SineCheckCase::noise_below_db`],
@@ -35,7 +37,7 @@ use std::sync::{Arc, Mutex};
 
 /// The version of the Sine check written into its records. A change to the
 /// plant set or to the rules changes it.
-pub const SINE_CHECK_VERSION: &str = "sine-check 1";
+pub const SINE_CHECK_VERSION: &str = "sine-check 2";
 
 /// The rate every case runs at, Hz.
 pub const SINE_CHECK_FS_HZ: f64 = 16_384.0;
@@ -92,6 +94,12 @@ pub enum SineCheckPlant {
         /// Its depth, dB.
         depth_db: f64,
     },
+    /// A flat wire (1 g per volt) that plays the drive `delay_s` late, as a
+    /// hardware station's converters and filters do.
+    DelayedWire {
+        /// The drive-to-response lag, seconds.
+        delay_s: f64,
+    },
 }
 
 impl fmt::Display for SineCheckPlant {
@@ -103,6 +111,9 @@ impl fmt::Display for SineCheckPlant {
             }
             SineCheckPlant::AntiResonance { f_hz, depth_db } => {
                 write!(f, "a {depth_db} dB anti-resonance at {f_hz} Hz")
+            }
+            SineCheckPlant::DelayedWire { delay_s } => {
+                write!(f, "a wire behind {} ms", delay_s * 1e3)
             }
         }
     }
@@ -173,6 +184,14 @@ pub enum SineRequirement {
     /// The run ends completed, or by the core's own divergence trip; the drive
     /// never goes over the ceiling.
     Survive,
+    /// The run completes, and every tick from `after_s` after the engage on
+    /// (settle window or not) is within `db` of the target.
+    Settles {
+        /// The band, dB either way.
+        db: f64,
+        /// How long after the engage the band applies, seconds.
+        after_s: f64,
+    },
     /// At every level of the ladder, every judged tick after the settle window
     /// within `db` of the target at that level.
     EachRungWithin {
@@ -198,6 +217,7 @@ impl SineRequirement {
             SineRequirement::Through { .. } => "through",
             SineRequirement::WithinAway { .. } => "within_away",
             SineRequirement::Survive => "survive",
+            SineRequirement::Settles { .. } => "settles",
             SineRequirement::EachRungWithin { .. } => "each_rung_within",
             SineRequirement::LimitHeld { .. } => "limit_held",
         }
@@ -222,11 +242,14 @@ pub enum SineCheckCase {
     Ladder,
     /// A limit channel that binds at the resonance.
     Notch,
+    /// A flat wire behind a hardware station's lag; an engage at -6 dB and a
+    /// 6 s dwell at 100 Hz.
+    Delay,
 }
 
 impl SineCheckCase {
     /// Every case, in the order the check runs them.
-    pub const ALL: [SineCheckCase; 7] = [
+    pub const ALL: [SineCheckCase; 8] = [
         SineCheckCase::Slow,
         SineCheckCase::Fast,
         SineCheckCase::CloseModes,
@@ -234,6 +257,7 @@ impl SineCheckCase {
         SineCheckCase::Noise,
         SineCheckCase::Ladder,
         SineCheckCase::Notch,
+        SineCheckCase::Delay,
     ];
 
     /// The case's name in a record and on screen.
@@ -246,6 +270,7 @@ impl SineCheckCase {
             SineCheckCase::Noise => "measurement noise",
             SineCheckCase::Ladder => "level ladder",
             SineCheckCase::Notch => "limit channel",
+            SineCheckCase::Delay => "transport delay",
         }
     }
 
@@ -259,6 +284,9 @@ impl SineCheckCase {
             SineCheckCase::AntiResonance => SineCheckPlant::AntiResonance {
                 f_hz: 300.0,
                 depth_db: 30.0,
+            },
+            SineCheckCase::Delay => SineCheckPlant::DelayedWire {
+                delay_s: SINE_CHECK_TRANSPORT_DELAY_S,
             },
             _ => SineCheckPlant::OneMode {
                 f_hz: 250.0,
@@ -288,6 +316,10 @@ impl SineCheckCase {
                 freq_hz: 250.0,
                 seconds: 10.0,
             },
+            SineCheckCase::Delay => SineCheckMode::Dwell {
+                freq_hz: 100.0,
+                seconds: 6.0,
+            },
         }
     }
 
@@ -295,6 +327,7 @@ impl SineCheckCase {
     pub fn levels_db(self) -> &'static [f64] {
         match self {
             SineCheckCase::Ladder => &[-20.0, -12.0, -6.0, 0.0],
+            SineCheckCase::Delay => &[-6.0],
             _ => &[0.0],
         }
     }
@@ -353,6 +386,14 @@ impl SineCheckCase {
                 over_bound_db: 0.5,
                 overshoot_db: 1.0,
             },
+            // The response of a new drive arrives five ticks late: a law that
+            // reads the error before then sees a target it has not yet met and
+            // climbs. Judged from 2 s after the engage, inside the settle
+            // window, which at the slow compression is longer.
+            SineCheckCase::Delay => SineRequirement::Settles {
+                db: 0.5,
+                after_s: 2.0,
+            },
         }
     }
 }
@@ -382,7 +423,8 @@ pub struct SineCaseMeasure {
     pub ticks: u64,
     /// Ticks judged against the requirement (at full level, or at a rung,
     /// after the settle window; for [`SineRequirement::Through`], only those
-    /// near the resonance).
+    /// near the resonance; for [`SineRequirement::Settles`], every tick from
+    /// its time after the engage on).
     pub judged_ticks: u64,
     /// The judged tick furthest from the target, dB, signed; `None` when none
     /// was judged.
@@ -488,6 +530,9 @@ pub struct SineCheckStationSpec {
     /// Inputs: 1 (the control channel), or 2 (the control channel, then the
     /// limit channel).
     pub inputs: usize,
+    /// The drive-to-response lag the station plays, whole samples at the
+    /// case's rate, on every path.
+    pub transport_delay_samples: usize,
 }
 
 /// One mode's response at `f`: the constant-peak bandpass `j r / (1 - r^2 + j
@@ -508,6 +553,12 @@ impl SineCheckCase {
             .map(|db| SINE_CHECK_TARGET_G / std::f64::consts::SQRT_2 * 10f64.powf(-db / 20.0))
     }
 }
+
+/// The transport delay case's drive-to-response lag, seconds: a hardware
+/// station's measured lag (43.2 ms from drive out to response in, on an NI
+/// chassis looped back at 12 800 Hz), rounded up; 819 samples at
+/// [`SINE_CHECK_FS_HZ`]. The other cases' stations have none.
+pub const SINE_CHECK_TRANSPORT_DELAY_S: f64 = 0.05;
 
 /// The station `case` runs on at `fs_hz`.
 pub fn sine_check_station(case: SineCheckCase, fs_hz: f64) -> SineCheckStationSpec {
@@ -538,6 +589,7 @@ pub fn sine_check_station(case: SineCheckCase, fs_hz: f64) -> SineCheckStationSp
                 },
                 noise_rms_g: noise,
                 inputs: 2,
+                transport_delay_samples: 0,
             }
         }
         (SineCheckPlant::OneMode { f_hz, q }, None) => SineCheckStationSpec {
@@ -547,6 +599,7 @@ pub fn sine_check_station(case: SineCheckCase, fs_hz: f64) -> SineCheckStationSp
             },
             noise_rms_g: noise,
             inputs: 1,
+            transport_delay_samples: 0,
         },
         (SineCheckPlant::TwoModes { f_hz, q }, _) => SineCheckStationSpec {
             station: SineCheckStation::Resonators {
@@ -555,6 +608,7 @@ pub fn sine_check_station(case: SineCheckCase, fs_hz: f64) -> SineCheckStationSp
             },
             noise_rms_g: noise,
             inputs: 1,
+            transport_delay_samples: 0,
         },
         (SineCheckPlant::AntiResonance { f_hz, depth_db }, _) => {
             // A flat wire cut `depth_db` at `f_hz` by a peaking biquad (Q 5).
@@ -582,8 +636,18 @@ pub fn sine_check_station(case: SineCheckCase, fs_hz: f64) -> SineCheckStationSp
                 },
                 noise_rms_g: noise.max(SINE_CHECK_ANTI_RESONANCE_NOISE_G),
                 inputs: 1,
+                transport_delay_samples: 0,
             }
         }
+        (SineCheckPlant::DelayedWire { delay_s }, _) => SineCheckStationSpec {
+            station: SineCheckStation::Resonators {
+                modes: Vec::new(),
+                feedthrough: 1.0,
+            },
+            noise_rms_g: noise,
+            inputs: 1,
+            transport_delay_samples: (delay_s * fs_hz).round() as usize,
+        },
     }
 }
 
@@ -775,6 +839,8 @@ pub fn run_check_case(
     let mode_hz = match case.plant() {
         SineCheckPlant::OneMode { f_hz, .. } | SineCheckPlant::AntiResonance { f_hz, .. } => f_hz,
         SineCheckPlant::TwoModes { f_hz, .. } => 0.5 * (f_hz[0] + f_hz[1]),
+        // No mode: only `through` and `within_away` read it.
+        SineCheckPlant::DelayedWire { .. } => 0.0,
     };
     let away_hz = match case.requirement() {
         SineRequirement::WithinAway { away_hz, .. } => away_hz,
@@ -783,6 +849,11 @@ pub fn run_check_case(
     let through_hz = match case.requirement() {
         SineRequirement::Through { hz, .. } => hz,
         _ => f64::INFINITY,
+    };
+    // `settles` judges on the time since the engage, not on the settle window.
+    let settles_after_s = match case.requirement() {
+        SineRequirement::Settles { after_s, .. } => Some(after_s),
+        _ => None,
     };
     let observer: hertzforge_sine::service::engine::TickObserver =
         Box::new(move |o: &TickObservation| {
@@ -794,6 +865,19 @@ pub fn run_check_case(
             w.max_drive = w.max_drive.max(o.drive);
             if let Some(l) = o.limit_over_db {
                 w.worst_limit_over = Some(w.worst_limit_over.map_or(l, |x| x.max(l)));
+            }
+            if let Some(after_s) = settles_after_s {
+                if w.t > after_s + 1e-9 && (o.level_db - full_db).abs() < 1e-9 {
+                    let e = if o.measured > 0.0 && o.target > 0.0 {
+                        20.0 * (o.measured / o.target).log10()
+                    } else {
+                        f64::NEG_INFINITY
+                    };
+                    w.judged += 1;
+                    if w.worst.is_none_or(|(we, _)| e.abs() > we.abs()) {
+                        w.worst = Some((e, o.freq_hz));
+                    }
+                }
             }
             if o.settling || !(o.measured > 0.0 && o.target > 0.0) {
                 w.was_notched = o.notch_binding;
@@ -814,7 +898,8 @@ pub fn run_check_case(
                 w.release_overshoot = Some(w.release_overshoot.map_or(e, |x| x.max(e)));
             }
             w.was_notched = o.notch_binding;
-            if (o.level_db - full_db).abs() < 1e-9
+            if settles_after_s.is_none()
+                && (o.level_db - full_db).abs() < 1e-9
                 && !o.notch_binding
                 && (o.freq_hz - mode_hz).abs() < through_hz
             {
@@ -1024,6 +1109,12 @@ pub fn judge_sine(case: SineCheckCase, measure: &SineCaseMeasure) -> CheckCase {
                     m.worst_error_db,
                     db,
                 ),
+                SineRequirement::Settles { db, after_s } => within(
+                    &mut why,
+                    &format!("from {after_s} s after the engage"),
+                    m.worst_error_db,
+                    db,
+                ),
                 SineRequirement::WithinAway {
                     through_db,
                     away_db,
@@ -1177,6 +1268,28 @@ mod tests {
             .filter(|c| **c != C::Notch)
             .all(|c| c.limit().is_none()));
         assert_eq!(
+            C::Delay.plant(),
+            SineCheckPlant::DelayedWire {
+                delay_s: SINE_CHECK_TRANSPORT_DELAY_S
+            }
+        );
+        assert_eq!(C::Delay.plant().to_string(), "a wire behind 50 ms");
+        assert_eq!(
+            C::Delay.mode(),
+            SineCheckMode::Dwell {
+                freq_hz: 100.0,
+                seconds: 6.0
+            }
+        );
+        assert_eq!(C::Delay.levels_db(), &[-6.0]);
+        assert_eq!(
+            C::Delay.requirement(),
+            SineRequirement::Settles {
+                db: 0.5,
+                after_s: 2.0
+            }
+        );
+        assert_eq!(
             C::ALL.map(|c| c.requirement().as_str()),
             [
                 "through",
@@ -1185,7 +1298,8 @@ mod tests {
                 "survive",
                 "within",
                 "each_rung_within",
-                "limit_held"
+                "limit_held",
+                "settles"
             ]
         );
     }
@@ -1334,6 +1448,32 @@ mod tests {
         assert!(ok(C::Notch, &notch(Some(0.3), Some(0.6))));
         fails(C::Notch, notch(Some(0.8), Some(0.6)), "over its limit");
         fails(C::Notch, notch(Some(0.3), Some(1.4)), "overshot");
+        // The transport delay: completed, and within 0.5 dB from 2 s on.
+        assert!(ok(C::Delay, &good()));
+        fails(
+            C::Delay,
+            SineCaseMeasure {
+                worst_error_db: Some(-0.6),
+                ..good()
+            },
+            "from 2 s after the engage the worst tick was -0.60 dB",
+        );
+        fails(
+            C::Delay,
+            SineCaseMeasure {
+                end: SineCaseEnd::Aborted("watchdog".into()),
+                ..good()
+            },
+            "aborted (watchdog)",
+        );
+        fails(
+            C::Delay,
+            SineCaseMeasure {
+                worst_error_db: None,
+                ..good()
+            },
+            "no tick was judged from 2 s after the engage",
+        );
     }
 
     #[test]
@@ -1372,5 +1512,22 @@ mod tests {
         // The noise case's noise is 30 dB under the full-level response.
         let n = SineCheckCase::Noise.noise_rms_g().unwrap();
         assert!((20.0 * (n / (SINE_CHECK_TARGET_G / 2f64.sqrt())).log10() + 30.0).abs() < 1e-9);
+        // Only the transport delay case's station plays the drive late: a flat
+        // wire, 50 ms behind, 819 samples at the check's rate.
+        for c in SineCheckCase::ALL {
+            let st = sine_check_station(c, SINE_CHECK_FS_HZ);
+            if c == SineCheckCase::Delay {
+                assert_eq!(st.transport_delay_samples, 819);
+                assert_eq!(
+                    st.station,
+                    SineCheckStation::Resonators {
+                        modes: Vec::new(),
+                        feedthrough: 1.0
+                    }
+                );
+            } else {
+                assert_eq!(st.transport_delay_samples, 0, "{c:?}");
+            }
+        }
     }
 }

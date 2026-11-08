@@ -532,9 +532,12 @@ identification at -20 dB, the abort band 12 dB either way.
 | measurement noise | One mode; noise 30 dB under the response; a 30 s dwell at 250 Hz | Within 1.5 dB |
 | level ladder | -20, -12, -6 and 0 dB moved by hand at a 250 Hz dwell, 10 s each, and one live change | Every rung within 1 dB after its settle window |
 | limit channel | One mode, and a limit channel reading up to 4 times the control at the mode under a flat 2 g limit | The limit channel at most 0.5 dB over its limit; the control at most 1 dB over its target after the notch releases |
+| transport delay | A flat wire that plays the drive 50 ms late (a hardware station's measured lag, rounded up); engaged at -6 dB, a 6 s dwell at 100 Hz | The run completes, and every tick from 2 s after the engage on is within 0.5 dB, settle window or not |
 
-Every case also asks that every call is answered in time with no miss and no refused output. The
-built-in law passes every case; a law that misbehaves fails.
+Only the transport delay case's station has a lag: on the others a new drive's response is read on
+the next tick, on a hardware station several ticks later. Every case also asks that every call is
+answered in time with no miss and no refused output. The built-in law passes every case; a law that
+misbehaves fails.
 
 ### The built-in Sine law
 

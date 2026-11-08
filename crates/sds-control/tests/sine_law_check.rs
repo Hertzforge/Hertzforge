@@ -184,9 +184,9 @@ async fn the_built_in_sine_law_passes_every_case_and_is_not_recorded() {
     schema.assert_valid(&r, Some("lawsCheckResult"));
     assert_eq!(r["report"]["passed"], true, "{r}");
     assert_eq!(r["report"]["recorded"], false);
-    assert_eq!(r["report"]["tool_version"], "sine-check 1");
+    assert_eq!(r["report"]["tool_version"], "sine-check 2");
     let cases = r["report"]["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 7);
+    assert_eq!(cases.len(), 8);
     for k in cases {
         assert_eq!(k["misses"], 0, "{k}");
         assert_eq!(k["refused"], 0, "{k}");
@@ -195,7 +195,7 @@ async fn the_built_in_sine_law_passes_every_case_and_is_not_recorded() {
     let events = c.of_topic("laws.check");
     assert_eq!(
         events.len(),
-        14,
+        16,
         "one as each case starts and one as it ends"
     );
     for e in events {

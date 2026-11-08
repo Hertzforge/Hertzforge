@@ -126,7 +126,7 @@ pub fn case_station(case: SineCheckCase) -> Result<StationSpec, String> {
         resonances: Vec::new(),
         noise_level: spec.noise_rms_g,
         feedthrough: 0.0,
-        transport_delay_samples: 0,
+        transport_delay_samples: spec.transport_delay_samples,
         seed: 0x51E5_5EED,
         // The simulator's default, as the runner's own reference station has it.
         max_input_channels: 8,
@@ -233,6 +233,7 @@ mod tests {
                 "one mode, 250 Hz, Q 50",
                 "one mode, 250 Hz, Q 50",
                 "one mode, 250 Hz, Q 50",
+                "a wire behind 50 ms",
             ]
         );
         let s = case_station(SineCheckCase::CloseModes).unwrap().sim;
@@ -250,5 +251,14 @@ mod tests {
         }
         let noise = case_station(SineCheckCase::Noise).unwrap().sim.noise_level;
         assert_eq!(Some(noise), SineCheckCase::Noise.noise_rms_g());
+        // The transport delay case's wire plays the drive 50 ms late; no other
+        // case's station has a lag.
+        for case in SineCheckCase::ALL {
+            let s = case_station(case).unwrap().sim;
+            let want = if case == SineCheckCase::Delay { 819 } else { 0 };
+            assert_eq!(s.transport_delay_samples, want, "{}", case.name());
+        }
+        let s = case_station(SineCheckCase::Delay).unwrap().sim;
+        assert!(s.resonances.is_empty() && s.feedthrough == 1.0);
     }
 }
