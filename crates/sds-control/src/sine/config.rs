@@ -1872,15 +1872,18 @@ impl WireSine {
 
     fn check_capture(&self, r: &mut Report) {
         let c = &self.capture;
-        if c.rule == "first_seconds" {
-            match c.first_s {
-                Some(s) => positive(r, "capture.first_s", s),
-                None => r.errors.push(Item::field(
-                    "out_of_range",
-                    "capture.first_s",
-                    "Capturing the first seconds at each level needs \"first_s\".",
-                )),
-            }
+        // The controller records the whole test from engage; it has no verbs for a
+        // recording the operator starts and stops, and no first-seconds rule.
+        if matches!(c.rule, "manual" | "first_seconds") {
+            r.errors.push(Item::field(
+                "out_of_range",
+                "capture.rule",
+                format!(
+                    "Recording \"{}\" is not offered: the service records the entire test \
+                     (\"entire_test\") or nothing (\"off\").",
+                    c.rule
+                ),
+            ));
         }
         out_of_range(
             r,

@@ -2501,10 +2501,6 @@ connection. While the service is shutting down, `sine.arm`, `start`, `proceed`, 
 `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust` are refused `shutting_down`;
 `sine.hold`, `stop` and `abort` are not.
 
-**Status.** The service does not offer Sine yet. This section is the contract the service and
-the shell are being built against; until they ship, every `sine.*` method is refused
-`unknown_method` and `laws.list` lists no `sine` laws.
-
 | Method | Params | From | Result |
 |---|---|---|---|
 | `sine.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
@@ -2608,14 +2604,16 @@ binary frame.
 | `limits.notch` | `{"drive_floor":0.01,"smoothing_ticks":3,"release_ramp_db_per_s":20}` | The notch: the drive under which a channel's gain is not estimated (a fraction of full drive, above 0 and under 1), the ticks its estimate is smoothed over (at least 1), and how fast the drive may come back once the notch releases, dB/s |
 | `cola` | off | A second, constant-amplitude reference output locked to the tone: `enabled`, `volts_pk` (default 0.1, above 0 and at most 10), `waveform` `sine` (the default), `square` or `dc`. It needs a second drive row and a station with two outputs (the simulator has one): `cola_needs_two_outputs` |
 | `feasibility` | null | Random's shaker record and moving mass (no crest factor: a sine's is 1). Checked at configure and at arm against the profile's peaks; a record that does not parse is refused `shaker_record_invalid`. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
-| `capture` | off | `rule` `off`, `entire_test`, `manual` or `first_seconds` (the first `first_s` seconds at each level, once it has been there `level_settle_s`), `level_settle_s` default 1, `periodic_save_s` (null: none), and `run_name` (default `sine`), the run folder's name under the local data root, a plain name with no path in it |
+| `capture` | off | `rule` `off` or `entire_test` (the whole test from engage, in the run folder `run_name` under the local data root); `manual` and `first_seconds` are refused `out_of_range` (there is no verb to start a recording and no first-seconds rule); `level_settle_s` (default 1) and `first_s` are kept for them; `periodic_save_s` (null: none) saves a snapshot that often while recording; `run_name` (default `sine`) is a plain name with no path in it |
 | `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
 
 The control channels are the table's enabled `control` rows, each with its weight (1 unless
 `control.weights` names it); the drive is its first enabled `drive` row (with COLA, the second
 is the reference output). A configuration whose shape is
-wrong is refused `bad_params` naming the field; its content errors are refused
-`config_invalid` with the items, located by `field` (or `row` for a profile row);
+wrong is refused `bad_params` naming the field in `detail.param` as the request's own path
+(`config.test.kind`); its content errors are refused `config_invalid` with the items,
+located by `field`, the path inside the configuration (`limits.drive_vpk_abort`, with no
+`config.` before it), or by `row` for a control profile row;
 `dry_run: true` checks without replacing anything and needs no control. RSTD is accepted on the
 wire; the shell does not offer it.
 
@@ -2725,11 +2723,16 @@ warnings `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag` (advisor
   controlled stop (`law_fault`). While a resonance search maps the plant the law is called and
   its drive is not used.
 - **`sine.level`** and **`sine.mode`** are `random.level` and `random.mode` for Sine, with the
-  same refusals (`manual_mode_required`, `not_a_rung`). A level change is a change of target:
-  the law follows it within the service's caps.
+  same refusals (`manual_mode_required`, `not_a_rung`): `delta_db` steps the scheduled level by
+  that many dB, `to_db` moves it to a level of the schedule, and the result is the scheduled
+  level once the service has taken the change. A level change is a change of target: the law
+  follows it within the service's caps.
 - **`sine.hold`** freezes the test's progress: the sweep, dwell and level clocks stop and the
   tone stays at its frequency and level, still under control (`held` true). **`sine.resume`**
   starts them again. Neither is a run state, and neither releases a review or a held gate.
+- The run verbs (`hold`, `resume`, `reverse`, `jog`, `goto`, `level`, `adjust`) are taken
+  between the service's steps of a quarter second of station time, and answer once the change
+  has been taken.
 - **`sine.reverse`** turns the sweep at the next tick. **`sine.jog`** moves the frequency by
   `delta_hz`, stopping at the band's edge, and **`sine.goto`** moves it to `hz` (refused
   `out_of_band` outside the band); each answers with the frequency applied, and the tone moves
@@ -2907,11 +2910,11 @@ last 60 s, at most 1200 points.
 |---|---|---|
 | `control` | one `spectrum` | The live frame's **Control** view |
 | `drive` | one `spectrum` | The live frame's **Drive** view |
-| `response` | one `spectrum` per resolved channel | Titled `Channel <index>: <description>` (the role when there is no description), y `Amplitude` in the channel's unit, log: `Channel <index>` (`measured`), its tracked amplitude, peak; for a limit channel also `Limit` (`limit`), its bound at the present frequency |
+| `response` | one `spectrum` per resolved channel | Titled `Channel <index>: <description>` (the role when there is no description), y `Amplitude` in the channel's unit, log: `Channel <index>` (`measured`), its tracked amplitude, peak; for a limit channel also `Limit` (`limit`), its bound (the top of its profile's abort band) at every point |
 | `phase` | one `spectrum` per resolved channel | Titled as `response`, y `Phase` deg linear: `Channel <index>` (`measured`), its phase against the drive played on the same frame, in (-180, 180], the station's whole drive-to-input delay included |
 | `thd` | one `spectrum` | **Distortion**, y `THD` % linear: `THD` (`measured`), the control channel's total harmonic distortion |
 | `time` | one `spectrum` per resolved channel | The last batch's acquired samples, as Random's (x `Time` s from the batch's first sample, no `link`) |
-| `identification` | **Identification Gain**, **Coherence** (`spectrum`s, x `Frequency` Hz log) | `Gain` (`measured`), `abs(H)` to the composite control point (control unit peak per volt peak) on the identification's grid, and `Trust floor` (`tolerance`, `trust_h_floor_frac` of the in-band peak, at the band's ends); `Coherence` (`measured`), `Trusted` (`reference`, the coherence at the frequencies the identification trusts) and `Trust coherence` (`tolerance`, at the band's ends) |
+| `identification` | **Identification Gain**, **Coherence** (`spectrum`s, x `Frequency` Hz log) | `Gain` (`measured`), `abs(H)` to the composite control point (control unit peak per volt peak) on the identification's grid inside the band (a dwell's: an octave either side), at most 1024 points log-spaced, and `Trust floor` (`tolerance`, `trust_h_floor_frac` of the in-band peak, at the grid's first and last point); `Coherence` (`measured`), `Trusted` (`reference`, the coherence at the frequencies the identification trusts) and `Trust coherence` (`tolerance`, at the same two points) |
 | `law` | one `reading` | **Law**: each declared value on the last call by its label and unit, then `Unusable calls in a row` (`pass` at 0, `warn` above) and `Ticks a cap bound` |
 | `readings` | one `reading` | The live frame's **Run** reading |
 
@@ -3075,8 +3078,7 @@ whose response rises to 4 times the control's at the resonance under a flat 2 g 
 more than 1 dB over its target when the notch releases). Every case first asks that every call
 is answered, in time, with zero misses and zero refused outputs; the worst call and the ticks a
 cap bound are reported with every case. A Sine law is named by `id` or by `path` as a classical
-law is, with the same refusals. Until the Sine check is served, a Sine law is refused
-`law_check_unsupported`. A case's result:
+law is, with the same refusals. A case's result:
 
 ```
 {"name":"slow sweep","plant":"one mode, 250 Hz, Q 50","requirement":"within","passed":true,

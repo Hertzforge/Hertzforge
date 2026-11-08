@@ -47,6 +47,9 @@ mod shock_methods;
 #[path = "server_srs.rs"]
 mod srs_methods;
 
+#[path = "server_sine.rs"]
+mod sine_methods;
+
 /// Display event topic of the `sim.*` runs.
 pub const DISPLAY_TOPIC: &str = "random.display";
 /// Display event period (5 per second), for `random.display` and `random.live`.
@@ -68,7 +71,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 22] = [
+const DRIVE_METHODS: [&str; 32] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -91,6 +94,16 @@ const DRIVE_METHODS: [&str; 22] = [
     "srs.proceed",
     "srs.fire",
     "srs.level",
+    "sine.arm",
+    "sine.start",
+    "sine.proceed",
+    "sine.level",
+    "sine.mode",
+    "sine.resume",
+    "sine.reverse",
+    "sine.jog",
+    "sine.goto",
+    "sine.adjust",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -108,8 +121,12 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     shock.abort, shock.reset, shock.clear, shock.state, shock.log, shock.subscribe, \
     shock.pulses, shock.pulse, srs.configure, srs.config, srs.preview, srs.target.import, \
     srs.table.import, srs.arm, srs.start, srs.proceed, srs.fire, srs.level, srs.stop, srs.abort, \
-    srs.reset, srs.clear, srs.state, srs.log, srs.subscribe, srs.pulses, srs.pulse, laws.list, \
-    laws.import, laws.check, sim.profiles, sim.start, sim.stop and sim.state";
+    srs.reset, srs.clear, srs.state, srs.log, srs.subscribe, srs.pulses, srs.pulse, \
+    sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
+    sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
+    sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
+    sine.state, sine.log, sine.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
+    sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -209,6 +226,7 @@ pub enum Feed {
     Mimo,
     Shock,
     Srs,
+    Sine,
 }
 
 /// A frame for every connection.
@@ -218,6 +236,9 @@ pub enum Out {
     Binary(Vec<u8>),
     /// A `random.live` frame: for the connections on the default subscription.
     Live(Vec<u8>),
+    /// A feed's default frame (`sine.live`): for the connections without a
+    /// subscription of their own to that feed.
+    DefaultLive(Feed, Vec<u8>),
     /// A `random.data` or `mimo_random.data` frame for one connection only.
     To(ConnId, Feed, Vec<u8>),
     /// `session.changed`, written for each connection with its own role.
@@ -240,6 +261,8 @@ impl Out {
             Out::Binary(b) => Message::Binary(b.clone()),
             Out::Live(b) if !subscribed(Feed::Random) => Message::Binary(b.clone()),
             Out::Live(_) => return None,
+            Out::DefaultLive(feed, b) if !subscribed(*feed) => Message::Binary(b.clone()),
+            Out::DefaultLive(..) => return None,
             Out::To(to, feed, b) if *to == conn && subscribed(*feed) => Message::Binary(b.clone()),
             Out::To(..) => return None,
             Out::Session {
@@ -305,6 +328,12 @@ struct Inner {
     srs_log_sent: (String, u64),
     srs_rows_sent: u64,
     srs_ident_sent: bool,
+    /// The Sine configuration and its run, beside the others, and what of it has
+    /// been sent.
+    sine: Option<Arc<crate::sine::SineRun>>,
+    sine_runs: u64,
+    sine_state_key: String,
+    sine_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -332,10 +361,18 @@ impl Inner {
         self.srs.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
-    /// Any run live, Random, MIMO, classical shock or SRS shock: what the
+    fn sine_live(&self) -> bool {
+        self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
+    }
+
+    /// Any run live, Random, MIMO, classical shock, SRS shock or Sine: what the
     /// session's orphan clock guards.
     fn any_live(&self) -> bool {
-        self.random_live() || self.mimo_live() || self.shock_live() || self.srs_live()
+        self.random_live()
+            || self.mimo_live()
+            || self.shock_live()
+            || self.srs_live()
+            || self.sine_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -402,6 +439,17 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.sine {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!("Sine run {} is {}; stop it first.", s.id, v.state.name()),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -445,6 +493,11 @@ pub struct Service {
     srs_notices: std::sync::Mutex<
         Option<mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::srs::view::SrsView>>>,
     >,
+    /// The connections with a Sine display subscription.
+    sine_displays: std::sync::Mutex<HashMap<ConnId, sine_methods::SineDisplay>>,
+    /// Sine runs' publishes, in order.
+    sine_notify: mpsc::UnboundedSender<crate::sine::run::Notice>,
+    sine_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::sine::run::Notice>>>,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -479,6 +532,7 @@ impl Service {
         let (notify, notices) = mpsc::unbounded_channel();
         let (shock_notify, shock_notices) = mpsc::unbounded_channel();
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
+        let (sine_notify, sine_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -500,6 +554,10 @@ impl Service {
                 srs_log_sent: (String::new(), 0),
                 srs_rows_sent: 0,
                 srs_ident_sent: false,
+                sine: None,
+                sine_runs: 0,
+                sine_state_key: String::new(),
+                sine_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -519,6 +577,9 @@ impl Service {
             srs_displays: std::sync::Mutex::new(HashMap::new()),
             srs_notify,
             srs_notices: std::sync::Mutex::new(Some(srs_notices)),
+            sine_displays: std::sync::Mutex::new(HashMap::new()),
+            sine_notify,
+            sine_notices: std::sync::Mutex::new(Some(sine_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -580,6 +641,7 @@ impl Service {
             Feed::Mimo => self.mimo_displays().contains_key(&conn),
             Feed::Shock => self.shock_displays().contains_key(&conn),
             Feed::Srs => self.srs_displays().contains_key(&conn),
+            Feed::Sine => self.sine_displays().contains_key(&conn),
         }
     }
 
@@ -683,6 +745,15 @@ impl Service {
                 }
             });
         }
+        let sine_notices = self.sine_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = sine_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, _view)) = notices.recv().await {
+                    svc.sine_changed(&run_id).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -748,8 +819,18 @@ impl Service {
             }
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
+            let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = sine {
+                sine_methods::stop_sine(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
             if let Some(s) = shock {
                 shock_methods::stop_shock(
                     &s,
@@ -793,14 +874,46 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim, shock, srs) = {
+        let (random, sim, shock, srs, sine) = {
             let inner = self.inner.lock().await;
             (
                 inner.random.clone(),
                 inner.sim.run.clone(),
                 inner.shock.clone(),
                 inner.srs.clone(),
+                inner.sine.clone(),
             )
+        };
+        // A Sine run takes its controlled stop, the 120 dB/s ramp. Should it still
+        // be live well after the ramp (at least ten seconds, three batches and twice
+        // its stop), it is aborted.
+        let sine_said = match sine.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                sine_methods::stop_sine(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true)
+                    .await;
+                let asked = Instant::now();
+                let patience = sine_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "sds-control: run {} is still live {} s after its controlled stop; \
+                             aborting it",
+                            s.id,
+                            patience.as_secs()
+                        );
+                        sine_methods::stop_sine(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // An SRS shock run takes its controlled stop the same way.
         let srs_said = match srs.filter(|s| s.view().state.is_live()) {
@@ -851,7 +964,7 @@ impl Service {
             let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
         }
         let Some(run) = random.filter(|r| r.view().state.is_live()) else {
-            return shock_said.or(srs_said);
+            return shock_said.or(srs_said).or(sine_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -901,6 +1014,7 @@ impl Service {
         self.mimo_displays().remove(&conn.id);
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
+        self.sine_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
             if let Some(s) = &inner.srs {
@@ -981,6 +1095,9 @@ impl Service {
             "srs.config" => Ok(self.srs_config().await),
             "srs.preview" => self.srs_preview(params).await,
             "srs.pulse" => self.srs_pulse(params).await,
+            "sine.configure" => self.sine_configure(conn, params).await,
+            "sine.config" => Ok(self.sine_config().await),
+            "sine.profile.validate" => self.sine_profile_validate(params).await,
             _ => self
                 .call_plain(conn, method, params)
                 .await
@@ -1101,6 +1218,25 @@ impl Service {
             "srs.log" => self.srs_log(params).await,
             "srs.subscribe" => self.srs_subscribe(conn, params).await,
             "srs.pulses" => self.srs_pulses(params).await,
+            "sine.profile.import" => self.sine_profile_import(params).await,
+            "sine.arm" => self.sine_arm(conn, params, false).await,
+            "sine.start" => self.sine_arm(conn, params, true).await,
+            "sine.proceed" => self.sine_proceed(conn).await,
+            "sine.level" => self.sine_level(conn, params).await,
+            "sine.mode" => self.sine_mode(conn, params).await,
+            "sine.hold" => self.sine_hold(conn, true).await,
+            "sine.resume" => self.sine_hold(conn, false).await,
+            "sine.reverse" => self.sine_reverse(conn).await,
+            "sine.jog" => self.sine_jog(conn, params).await,
+            "sine.goto" => self.sine_goto(conn, params).await,
+            "sine.adjust" => self.sine_adjust(conn, params).await,
+            "sine.stop" => self.sine_end(conn, false).await,
+            "sine.abort" => self.sine_end(conn, true).await,
+            "sine.reset" => self.sine_reset(conn).await,
+            "sine.clear" => self.sine_clear(conn).await,
+            "sine.state" => Ok(self.sine_state_now().await),
+            "sine.log" => self.sine_log(params).await,
+            "sine.subscribe" => self.sine_subscribe(conn, params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
             "laws.check" => match self.classical_law_id(conn, params).await {
@@ -1117,7 +1253,15 @@ impl Service {
                         p.insert("id".into(), Value::from(id));
                         self.srs_laws_check(conn, &p).await
                     }
-                    None => self.laws_check(conn, params).await,
+                    None => match self.sine_law_id(conn, params).await {
+                        Some(id) => {
+                            let mut p = params.clone();
+                            p.remove("path");
+                            p.insert("id".into(), Value::from(id));
+                            self.sine_laws_check(conn, &p).await
+                        }
+                        None => self.laws_check(conn, params).await,
+                    },
                 },
             },
             other => Err(MethodError::new(
@@ -1566,7 +1710,7 @@ impl Service {
             if v.state.is_busy() || (!start && v.state == State::Armed) {
                 inner.run_active()?;
             }
-            if inner.mimo_live() || inner.shock_live() || inner.srs_live() {
+            if inner.mimo_live() || inner.shock_live() || inner.srs_live() || inner.sine_live() {
                 inner.run_active()?;
             }
             if inner.sim_running() {
@@ -1839,7 +1983,7 @@ impl Service {
         request.validate().map_err(MethodError::bad_request)?;
 
         let mut inner = self.inner.lock().await;
-        if inner.mimo_live() || inner.shock_live() || inner.srs_live() {
+        if inner.mimo_live() || inner.shock_live() || inner.srs_live() || inner.sine_live() {
             inner.run_active()?;
         }
         if let Some(r) = &inner.random {

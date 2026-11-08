@@ -2031,7 +2031,7 @@
       "then": {"properties": {"shapes": {"type": "array"}, "needs": {"type": "array"}}},
       "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"}}},
       "allOf": [{"if": {"properties": {"world": {"const": "sine"}}},
-                 "then": {"required": ["live"]}, "else": {"not": {"required": ["live"]}}}]
+                 "then": {"required": ["live"]}, "else": {"properties": {"live": false}}}]
     },
     "lawsListParams": {
       "type": "object", "additionalProperties": false,
@@ -7807,28 +7807,23 @@
                   ]
                 }
               },
-              "anyOf": [
-                {
-                  "required": [
-                    "sweeps"
-                  ],
-                  "properties": {
-                    "sweeps": {
-                      "type": "integer"
-                    }
-                  }
-                },
-                {
-                  "required": [
-                    "duration_s"
-                  ],
-                  "properties": {
-                    "duration_s": {
-                      "type": "number"
-                    }
+              "if": {
+                "properties": {
+                  "sweeps": {
+                    "type": "null"
                   }
                 }
-              ]
+              },
+              "then": {
+                "required": [
+                  "duration_s"
+                ],
+                "properties": {
+                  "duration_s": {
+                    "type": "number"
+                  }
+                }
+              }
             }
           }
         },
@@ -10046,20 +10041,16 @@
           "required": [
             "sweep_rate_oct_per_min"
           ],
-          "not": {
-            "required": [
-              "sweep_rate_hz_per_s"
-            ]
+          "properties": {
+            "sweep_rate_hz_per_s": false
           }
         },
         {
           "required": [
             "sweep_rate_hz_per_s"
           ],
-          "not": {
-            "required": [
-              "sweep_rate_oct_per_min"
-            ]
+          "properties": {
+            "sweep_rate_oct_per_min": false
           }
         }
       ]
@@ -10571,20 +10562,16 @@
           "required": [
             "sweep_rate_oct_per_min"
           ],
-          "not": {
-            "required": [
-              "sweep_rate_hz_per_s"
-            ]
+          "properties": {
+            "sweep_rate_hz_per_s": false
           }
         },
         {
           "required": [
             "sweep_rate_hz_per_s"
           ],
-          "not": {
-            "required": [
-              "sweep_rate_oct_per_min"
-            ]
+          "properties": {
+            "sweep_rate_oct_per_min": false
           }
         }
       ]

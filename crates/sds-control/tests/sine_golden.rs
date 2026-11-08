@@ -5,11 +5,21 @@
 //! re-encode byte for byte, and the text frames are compact text frames.
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
+use hertzforge_random_laws::CheckCase;
+use hertzforge_sine::{RunMode, SweepDirection};
+use hertzforge_sine_laws::{SineCaseEnd, SineCaseMeasure, SineCheckCase};
 use sds_control::codec::{self, Arrays, Frame};
-use sds_control::sine::config::{self, CheckContext};
+use sds_control::sine::config::{self, CheckContext, Grid, LawRef};
+use sds_control::sine::profile::{self as sprofile, Crossover, Kinematics, Peaks, ProfileFigures};
+use sds_control::sine::subscribe;
+use sds_control::sine::view::{
+    self, Alarm, Figures, IdentFacts, IdentFigures, InputCurves, LiveChannel, Rate, SineView,
+    State, StationRef,
+};
 use sds_control::{protocol, table};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn golden(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -207,4 +217,436 @@ fn every_sine_text_golden_is_a_compact_text_frame() {
             Frame::Binary(_) => panic!("{name}: a message without arrays must be a text frame"),
         }
     }
+}
+
+fn bytes_equal(name: &str, got: &[u8], want: &[u8]) {
+    if got != want {
+        let at = got.iter().zip(want).position(|(a, b)| a != b);
+        panic!(
+            "{name}: {} bytes encoded vs {} golden; first difference at {at:?}\n got: {}\nwant: {}",
+            got.len(),
+            want.len(),
+            String::from_utf8_lossy(&got[..got.len().min(600)]),
+            String::from_utf8_lossy(&want[..want.len().min(600)]),
+        );
+    }
+}
+
+fn sim_station() -> StationRef {
+    StationRef {
+        kind: "sim",
+        class: "sim",
+        devices: Vec::new(),
+    }
+}
+
+fn servo_blend() -> LawRef {
+    LawRef {
+        id: "servo_blend".into(),
+        name: "Servo blend".into(),
+        version: "0.1.0".into(),
+        sha256: String::new(),
+        live: vec!["blend_w".into()],
+    }
+}
+
+fn law_labels() -> Vec<(String, String, String)> {
+    sds_control::laws::sine_builtin_manifest()
+        .diagnostics
+        .iter()
+        .map(|d| (d.key.clone(), d.label.clone(), d.unit.clone()))
+        .collect()
+}
+
+#[test]
+fn the_configured_state_is_the_golden_one() {
+    let config = golden_config();
+    let (_, derived) = check(&config);
+    let derived = derived.unwrap();
+    let w = config::parse(&config).unwrap();
+    let law = view::law_state(servo_blend(), vec![("blend_w".into(), 0.5)], law_labels());
+    let v = view::configured_view("sine-0001", &w, derived.grid, sim_station(), Some(law));
+    let want = read_json("response_sine_configure.json");
+    same(
+        &view::state_json(Some(&v)),
+        &want["result"]["state"],
+        "state",
+    );
+    same(
+        &view::state_json(None)["state"],
+        &json!("unconfigured"),
+        "unconfigured",
+    );
+}
+
+// --- the golden run's figures (schema/make_golden.py, "Sine") ------------------------
+
+const F: [f64; 4] = [500.0, 750.0, 1000.0, 1250.0];
+const NAN: f64 = f64::NAN;
+
+/// The golden run: a down sweep at -6 dB, three enabled inputs.
+fn running() -> SineView {
+    let config = golden_config();
+    let w = config::parse(&config).unwrap();
+    let mut v = view::configured_view(
+        "sine-0003",
+        &w,
+        Grid {
+            fs_hz: 16384.0,
+            tick_frames: 164,
+            actual: true,
+        },
+        sim_station(),
+        None,
+    );
+    v.state = State::Running;
+    v.phase = "engaged";
+    v.clock = Some("shared");
+    v.level_db = Some(-6.0);
+    v.rung = Some(1);
+    v.frequency_hz = Some(970.25);
+    v.direction = Some(SweepDirection::Down);
+    v.sweeps = Some((0, Some(1)));
+    v.elapsed_s = Some(230.5);
+    v.at_level_s = Some(31.25);
+    v.remaining_s = Some(566.75);
+    v.identification = Some(IdentFacts {
+        level_db: -20.0,
+        band_coherence: 0.98,
+        gate_coherence: 0.5,
+        lag_frames: 0,
+        trusted_frac: 0.97,
+        passed: true,
+    });
+    let mut law = view::law_state(servo_blend(), vec![("blend_w".into(), 0.5)], law_labels());
+    law.built = true;
+    law.capped_ticks = 2;
+    law.values = vec![
+        ("servo_step_db".into(), 0.015625),
+        ("prediction_step_db".into(), 0.0078125),
+        ("total_step_db".into(), 0.0234375),
+    ];
+    v.law = Some(law);
+    v.feasibility = Some(("pass", "The profile is within the shaker's ratings.".into()));
+    v.t_s = Some(236.75);
+    v.rate = Rate::OctPerMin(-2.0);
+    v.achieved_db = Some(-6.0);
+    v.target = Some(0.5);
+    v.measured = Some(0.5);
+    v.drive_vpk = Some(0.125);
+    v.streaming = true;
+    let ch = |index, description: &str, role, amplitude, phase_deg, rms| LiveChannel {
+        index,
+        description: description.into(),
+        role,
+        amplitude: Some(amplitude),
+        phase_deg: Some(phase_deg),
+        rms: Some(rms),
+        unit: "g".into(),
+        overload: false,
+    };
+    v.channels = vec![
+        ch(1, "Control", "control", 0.5, -12.5, 0.375),
+        ch(2, "Response", "monitor", 0.75, -30.25, 0.5625),
+        ch(3, "Fixture", "monitor", 1.25, -95.5, 0.875),
+    ];
+    v.alarms = Vec::<Alarm>::new();
+    v.figures = Some(Arc::new(figures()));
+    v
+}
+
+fn figures() -> Figures {
+    let visited = vec![false, false, true, true];
+    let on = |a: f64, b: f64| vec![NAN, NAN, a, b];
+    Figures {
+        against_time: false,
+        x: F.to_vec(),
+        visited,
+        reference: vec![0.5; 4],
+        alarm_lo: vec![0.375; 4],
+        alarm_hi: vec![0.625; 4],
+        abort_lo: vec![0.25; 4],
+        abort_hi: vec![0.75; 4],
+        measured: on(0.5, 0.515625),
+        drive: on(0.125, 0.140625),
+        cola: None,
+        thd: on(0.005, 0.00625),
+        inputs: vec![
+            InputCurves {
+                index: 1,
+                tracked: on(0.5, 0.515625),
+                phase_deg: on(-12.5, -14.0),
+                limit: None,
+            },
+            InputCurves {
+                index: 2,
+                tracked: on(0.75, 0.875),
+                phase_deg: on(-30.25, -31.0),
+                limit: None,
+            },
+            InputCurves {
+                index: 3,
+                tracked: on(1.25, 1.5),
+                phase_deg: on(-95.5, -101.25),
+                limit: Some(vec![1.5; 4]),
+            },
+        ],
+        time: vec![(1, vec![0.0, 0.25, 0.5, 0.25])],
+        time_fs_hz: 16384.0,
+        identification: Some(IdentFigures {
+            freqs_hz: vec![100.0, 200.0, 300.0],
+            gain: vec![0.5, 1.0, 0.75],
+            coherence: vec![0.99, 0.25, 0.98],
+            trusted: vec![true, false, true],
+            floor: 0.05,
+            trust_coherence: 0.5,
+            unit: "g".into(),
+        }),
+    }
+}
+
+#[test]
+fn the_running_state_is_the_golden_state_event() {
+    let want = read_json("event_sine_state.json");
+    assert_eq!(want["topic"], "sine.state");
+    same(&view::state_json(Some(&running())), &want["data"], "state");
+}
+
+fn event_sine_live() -> (Value, Arrays) {
+    let mut arrays = Arrays::new();
+    let data = view::live_json(&running(), &mut arrays);
+    (protocol::event("sine.live", 171, data), arrays)
+}
+
+fn event_sine_data() -> (Value, Arrays) {
+    let request = read_json("request_sine_subscribe.json");
+    let parsed = protocol::parse_request(&request).unwrap();
+    let sub = subscribe::parse(&parsed.params).unwrap().unwrap();
+    let mut arrays = Arrays::new();
+    let data = subscribe::data_json(&running(), &sub, &mut arrays);
+    (protocol::event("sine.data", 172, data), arrays)
+}
+
+fn response_sine_profile_validate() -> (Value, Arrays) {
+    let mut arrays = Arrays::new();
+    let fig = ProfileFigures {
+        freqs_hz: vec![50.0, 100.0, 200.0],
+        target: vec![1.0; 3],
+        alarm_hi: vec![1.1875; 3],
+        alarm_lo: vec![0.84375; 3],
+        abort_hi: vec![1.4140625; 3],
+        abort_lo: vec![0.70703125; 3],
+        velocity: vec![1.25, 0.625, 0.3125],
+        displacement: vec![0.0078125, 0.001953125, 0.00048828125],
+    };
+    let k = Kinematics {
+        peaks: Peaks {
+            accel_g: 1.0,
+            velocity_ips: 1.25,
+            disp_pp_in: 0.0078,
+        },
+        verdict: "pass",
+        message: "The profile is within the shaker's ratings.".into(),
+    };
+    let none: [Crossover; 0] = [];
+    let result = sprofile::validate_frame(
+        &table::Report::default(),
+        &none,
+        Some(&k),
+        Some(&fig),
+        &mut arrays,
+    );
+    (protocol::response(78, result), arrays)
+}
+
+fn build(name: &str) -> (Value, Arrays) {
+    match name {
+        "event_sine_live" => event_sine_live(),
+        "event_sine_data" => event_sine_data(),
+        "response_sine_profile_validate" => response_sine_profile_validate(),
+        other => panic!("no builder for {other}"),
+    }
+}
+
+#[test]
+fn encoding_reproduces_the_golden_bytes() {
+    for name in BINARY {
+        let (message, arrays) = build(name);
+        let got = codec::encode(&message, &arrays).unwrap();
+        bytes_equal(name, &got, &read_bin(&format!("{name}.bin")));
+    }
+}
+
+#[test]
+fn the_subscription_parses_to_the_golden_result_and_the_verbs_parse() {
+    let request = read_json("request_sine_subscribe.json");
+    let parsed = protocol::parse_request(&request).unwrap();
+    assert_eq!(parsed.method, "sine.subscribe");
+    let sub = subscribe::parse(&parsed.params).unwrap().unwrap();
+    same(
+        &subscribe::result_json(Some(&sub)),
+        &read_json("response_sine_subscribe.json")["result"],
+        "subscribe result",
+    );
+    let level = protocol::parse_request(&read_json("request_sine_level.json")).unwrap();
+    assert_eq!(level.method, "sine.level");
+    assert_eq!(level.params["delta_db"], json!(-1));
+    let adjust = protocol::parse_request(&read_json("request_sine_adjust.json")).unwrap();
+    assert_eq!(adjust.method, "sine.adjust");
+    assert_eq!(adjust.params["key"], "blend_w");
+    let _ = RunMode::Auto;
+}
+
+/// A golden case, its detail in the words the golden gives it.
+#[allow(clippy::too_many_arguments)]
+fn measured_case(
+    case: SineCheckCase,
+    ticks: u64,
+    judged: u64,
+    worst: f64,
+    worst_hz: f64,
+    away: Option<f64>,
+    rungs: Vec<(f64, Option<f64>)>,
+    limit_over: Option<f64>,
+    overshoot: Option<f64>,
+    capped: u64,
+    vpk: f64,
+) -> Value {
+    let m = SineCaseMeasure {
+        end: SineCaseEnd::Completed,
+        ticks,
+        judged_ticks: judged,
+        worst_error_db: Some(worst),
+        worst_error_hz: Some(worst_hz),
+        worst_away_error_db: away,
+        rungs,
+        worst_limit_over_db: limit_over,
+        worst_release_overshoot_db: overshoot,
+        calls: ticks,
+        misses: 0,
+        refused: 0,
+        capped_ticks: capped,
+        worst_call_ms: Some(0.01),
+        budget_ms: 2.5,
+        max_drive_vpk: vpk,
+        drive_ceiling_vpk: 10.0,
+    };
+    let v = CheckCase {
+        name: case.name().into(),
+        passed: true,
+        detail: format!(
+            "completed; {judged} of {ticks} ticks judged, worst {worst} dB; {ticks} calls, \
+             slowest 0.01 ms of 2.5 ms"
+        ),
+    };
+    sds_control::sine::law_check::case_json(case, &m, &v)
+}
+
+#[test]
+fn the_sine_check_report_is_the_golden_one() {
+    use SineCheckCase::*;
+    let cases = vec![
+        measured_case(
+            Slow,
+            18000,
+            17400,
+            0.42,
+            251.25,
+            None,
+            vec![],
+            None,
+            None,
+            0,
+            0.41,
+        ),
+        measured_case(
+            Fast,
+            3000,
+            2900,
+            3.5,
+            249.5,
+            Some(0.75),
+            vec![],
+            None,
+            None,
+            0,
+            0.43,
+        ),
+        measured_case(
+            CloseModes,
+            9000,
+            8700,
+            1.25,
+            260.5,
+            None,
+            vec![],
+            None,
+            None,
+            0,
+            0.39,
+        ),
+        measured_case(
+            AntiResonance,
+            9000,
+            8700,
+            2.5,
+            300.25,
+            None,
+            vec![],
+            None,
+            None,
+            12,
+            4.5,
+        ),
+        measured_case(
+            Noise,
+            3000,
+            2900,
+            0.5,
+            250.0,
+            None,
+            vec![],
+            None,
+            None,
+            0,
+            0.02,
+        ),
+        measured_case(
+            Ladder,
+            4000,
+            3600,
+            0.25,
+            250.0,
+            None,
+            vec![
+                (-20.0, Some(0.25)),
+                (-12.0, Some(0.125)),
+                (-6.0, Some(0.125)),
+                (0.0, Some(0.25)),
+            ],
+            None,
+            None,
+            0,
+            0.02,
+        ),
+        measured_case(
+            Notch,
+            9000,
+            8700,
+            0.75,
+            300.5,
+            None,
+            vec![],
+            Some(0.25),
+            Some(0.5),
+            4,
+            0.39,
+        ),
+    ];
+    let want = read_json("response_laws_check_sine.json");
+    same(
+        &sds_control::sine::law_check::report_json(&cases, true, false),
+        &want["result"]["report"],
+        "report",
+    );
 }
