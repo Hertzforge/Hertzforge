@@ -158,9 +158,6 @@ async fn sim_1_a_sweep_completes_within_its_band_at_its_rate_and_ramps_down() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "the core's ladder starts at its first rung, not at schedule.start_db \
-            (LadderPlan::new sets level_db to table_db[0]): a start of -6 dB runs at -12 dB \
-            and the -1 dB step answers -12; un-ignore once the ladder starts at start_db"]
 async fn sim_2_hold_resume_reverse_jog_goto_level_adjust_and_stop() {
     let addr = serve(service(10.0, Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;

@@ -1132,7 +1132,10 @@ pub struct LadderConfig {
     /// SysID pass level, dB relative to full (informational for the service,
     /// which runs sysID BEFORE the ladder starts).
     pub sysid_level_db: f64,
-    /// Starting level, dB (conventionally `table_db[0]`).
+    /// Starting level, dB: the level the run engages at and the service seeds
+    /// its first drive for. The ladder starts on the rung nearest it (the
+    /// rung itself when the table holds it) and commands it as given; a start
+    /// outside the table's range is refused.
     pub start_db: f64,
     /// The rung table, dB relative to full level. The LAST entry is the full
     /// rung governed by `full_for`.
@@ -1209,7 +1212,9 @@ pub struct LadderPlan {
 }
 
 impl LadderPlan {
-    /// Build from config; the table must be nonempty with finite entries.
+    /// Build from config; the table must be nonempty with finite entries and
+    /// hold the start level within its range. The ladder starts on the rung
+    /// nearest `start_db` (ties to the lower), at `start_db` itself.
     pub fn new(cfg: LadderConfig) -> Result<Self, ControlError> {
         if cfg.table_db.is_empty() {
             return Err(ControlError::BadConfig("ladder table is empty".into()));
@@ -1223,10 +1228,26 @@ impl LadderPlan {
         }
         validate_rung_for(cfg.per_rung)?;
         validate_rung_for(cfg.full_for)?;
+        // Start where the run engages: the service seeds the first drive for
+        // `start_db`, so the ladder commands it too, on the rung nearest it.
+        let lo = cfg.table_db.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = cfg
+            .table_db
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        if !(cfg.start_db >= lo && cfg.start_db <= hi) {
+            return Err(ControlError::BadConfig(format!(
+                "start level {} dB is outside the ladder's table, {lo} to {hi} dB",
+                cfg.start_db
+            )));
+        }
+        let (rung_idx, _) = Self::nearest_rung(&cfg.table_db, cfg.start_db)
+            .ok_or_else(|| ControlError::BadConfig("ladder table is empty".into()))?;
         Ok(LadderPlan {
-            level_db: cfg.table_db[0],
+            level_db: cfg.start_db,
             cfg,
-            rung_idx: 0,
+            rung_idx,
             rung_elapsed_s: 0.0,
             rung_sweeps: 0,
             held: false,
