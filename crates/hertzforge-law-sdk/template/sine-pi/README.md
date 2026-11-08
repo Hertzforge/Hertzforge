@@ -4,6 +4,23 @@ This folder is a complete single-output Sine control law: a proportional-integra
 error in dB, written plainly. Copy it, rename the package in `Cargo.toml`, and change
 `src/law.rs`.
 
+## What This Law Does
+
+It starts at the identification's prediction (moved by `start_offset_db`) and holds that drive
+until the measurement has come up: at least five ticks, then until the measured amplitude is
+within 2 dB of what the identification predicts for that drive (or over it), and at most a second.
+Without a trusted prediction it holds the second. Then each tick it moves the drive by the PI step
+on the error in dB plus the prediction's change, at most `max_step_db`. A change of level is taken
+by the loop, with no hold: the measurement already reads the drive in force.
+
+The hold is there because a drive's response reaches the measurement late. On hardware the
+converters and the output buffer delay it, and the controller's tracking filter, whose corner
+scales with the frequency, then takes a third of a second to read it at 20 Hz. On the way up the
+reading can stall and dip for several ticks, so a rise that has stopped is no sign that it has
+come up; what the identification predicts for the drive in force is. An error read before the
+response has arrived is one the law did not cause: a law that integrates it climbs on a reading of
+nothing, and by the time the response arrives the drive is several dB high.
+
 ## What a Sine Law Does
 
 The controller plays one tone and decides its frequency, its sweep, its phase and the level

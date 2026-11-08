@@ -471,6 +471,13 @@ What differs from the other worlds:
   change from tick to tick; a law may use it or not.
 - **The target is at the present level.** A level change is a change of target, and a law follows
   it within the controller's caps.
+- **The response arrives late.** On hardware a new drive's response reaches `measured` several
+  ticks after it is played (the converters and the output buffer), and the tracking filter, whose
+  corner scales with the frequency, takes a third of a second more to read it at 20 Hz. After the
+  engage the reading can stall and dip on its way up. An error read before the response has
+  arrived is one the law did not cause, and integrating it climbs blind. Hold the starting drive
+  until `measured` is near what the prediction says the drive in force should give, as the
+  template does; a reading that has stopped rising has not necessarily come up.
 - **`drive` is what was played.** It can be under what the law asked on the tick before: the caps,
   the ceilings and the notch hold the drive down without saying so in `hold`. A law that keeps a
   level of its own should follow `drive` down, as the built-in law does, or a long clamp winds that
@@ -487,7 +494,10 @@ What differs from the other worlds:
 Implement `SineSingleLaw` (`describe`, `new`, `engage`, `tick`, and `adjust` for live parameters)
 and export it with `export_sine_law!`; build the manifest with `SineManifestBuilder`, which takes
 the live keys. The template is `crates/hertzforge-law-sdk/template/sine-pi`: a
-proportional-integral loop on the error in dB that follows the prediction from tick to tick.
+proportional-integral loop on the error in dB that follows the prediction from tick to tick. It
+holds its starting drive until the measurement has come up: at least five ticks, then until the
+measured amplitude is within 2 dB of what the identification predicts for that drive (or over
+it), at most a second, and the second without a trusted prediction.
 
 | Key | What it does |
 |---|---|
