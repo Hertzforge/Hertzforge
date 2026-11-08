@@ -305,7 +305,8 @@ export class SrsStore {
 		return {
 			connected: this.connected,
 			controller: this.isController,
-			run: this.status,
+			// the latest numbers: a live frame counts the time to the next pulse down between state events
+			run: this.now,
 			setup: this.setupStatus,
 			setupErrors: this.setupErrorCount,
 			busy: this.busy,
