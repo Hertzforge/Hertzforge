@@ -23,12 +23,16 @@
 pub mod config;
 pub mod display;
 pub mod engine;
+pub mod law_records;
 pub mod report;
 pub mod ring;
 
 use crate::control::{BlendConfig, BlendLaw, DriveGuard, FeedforwardTable, NotchGovernor};
 use crate::feasibility::assess_sine;
-use crate::law::{LawClock, MonotonicClock, SineLawFactory};
+use crate::law::servo_blend::{ServoBlendFactory, ServoBlendParams};
+use crate::law::{
+    Identification, LawClock, LawDescriptor, LawFault, MonotonicClock, SineLawFactory, SineLawSetup,
+};
 use crate::profile::SineProfile;
 use crate::scheduler::{BidirSweep, DwellRun, LadderPlan, RstdPlan, StepSine};
 use config::{
@@ -49,8 +53,8 @@ use hertzforge_hal::Backend;
 use hertzforge_shaker_db::{FeasibilityReport, RatingValue, Verdict};
 use report::{
     ChannelRow, ChannelTrace, CompositeModeRecord, EventKind, EventLog, FeasibilityDigest,
-    FrfDisplay, Honesty, LevelHistoryEntry, RunSettings, RunState, SineIdentificationFacts,
-    SineInputReading, SineStatus, TracePoint, TripRecord,
+    FrfDisplay, Honesty, LawSummary, LevelHistoryEntry, RunSettings, RunState,
+    SineIdentificationFacts, SineInputReading, SineLawStatus, SineStatus, TracePoint, TripRecord,
 };
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -404,6 +408,80 @@ pub struct SineService {
     /// A tick observer to hand the step when it is built
     /// ([`SineService::with_tick_observer`]).
     tick_observer: Option<engine::TickObserver>,
+    /// The run's law as its records name it; `None` until it is built.
+    law_descriptor: Option<LawDescriptor>,
+    /// The live parameters' values in force.
+    law_live: Vec<(String, f64)>,
+    /// What the records ring has handed over, for the report and the log.
+    law_tally: LawTally,
+    /// Reused between batches for the records drain.
+    law_drain: Vec<law_records::LawRecord>,
+    /// `law_ticks.bin` in the capture's folder while a capture runs.
+    law_ticks_out: Option<std::io::BufWriter<std::fs::File>>,
+}
+
+/// The law's calls as the service has seen them (from the records ring).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LawTally {
+    /// Calls recorded.
+    pub calls: u64,
+    /// Unusable calls.
+    pub misses: u64,
+    /// Calls a core cap bound.
+    pub capped: u64,
+    /// The longest call, microseconds (0 when untimed).
+    pub worst_call_us: f64,
+    /// The largest rise the core took from the law in one tick, dB.
+    pub worst_rise_db: f64,
+    /// Records the ring dropped.
+    pub dropped: u64,
+}
+
+/// Why a live change of a law parameter was refused.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdjustRefusal {
+    /// No law is built yet (the loop has not engaged).
+    NotEngaged,
+    /// The law has no parameter `key`.
+    UnknownKey,
+    /// The parameter is not one the law lets change while the test runs.
+    NotLive,
+    /// The value is outside the parameter's declared range.
+    OutOfRange { min: f64, max: f64 },
+    /// The law refused it; its reason.
+    LawRefused(String),
+}
+
+impl AdjustRefusal {
+    /// The stable wire name (`adjust_refused`'s `why`).
+    pub fn why(&self) -> &'static str {
+        match self {
+            AdjustRefusal::NotEngaged => "not_engaged",
+            AdjustRefusal::UnknownKey => "unknown_key",
+            AdjustRefusal::NotLive => "not_live",
+            AdjustRefusal::OutOfRange { .. } => "out_of_range",
+            AdjustRefusal::LawRefused(_) => "law_refused",
+        }
+    }
+}
+
+impl std::fmt::Display for AdjustRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AdjustRefusal::NotEngaged => f.write_str("the control law is not built yet"),
+            AdjustRefusal::UnknownKey => f.write_str("the control law has no such parameter"),
+            AdjustRefusal::NotLive => {
+                f.write_str("that parameter cannot be changed while the test runs")
+            }
+            AdjustRefusal::OutOfRange { min, max } => {
+                write!(
+                    f,
+                    "the value is outside the parameter's range, {min} to {max}"
+                )
+            }
+            AdjustRefusal::LawRefused(why) => write!(f, "the control law refused it: {why}"),
+        }
+    }
 }
 
 impl SineService {
@@ -438,9 +516,9 @@ impl SineService {
     ) -> Result<Self, ServiceError> {
         let caps = backend.caps();
         cfg.validate()?;
-        // The law seam is a contract only so far: a configuration that asks for
-        // the core's law guards, or for a tick in seconds at the adopted rate,
-        // must not quietly run without them.
+        // The core's guards on the law are not built yet: a configuration that
+        // asks for them, or for a tick in seconds at the adopted rate, must not
+        // quietly run without them.
         if cfg.law_guards.is_some() || cfg.control_tick_s.is_some() {
             return Err(ServiceError::Config(ConfigError::BadConfig(
                 "the core's control-law guards (law_guards) and a control tick in seconds \
@@ -574,22 +652,24 @@ impl SineService {
             law_factory: None,
             law_clock: std::sync::Arc::new(MonotonicClock::new()),
             tick_observer: None,
+            law_descriptor: None,
+            law_live: Vec::new(),
+            law_tally: LawTally::default(),
+            law_drain: Vec::new(),
+            law_ticks_out: None,
         })
     }
 
-    /// Install the factory the run builds its control law with. Without one the
-    /// run uses the built-in law.
-    ///
-    /// Stored only: nothing calls it until the law seam is built.
+    /// Install the factory the run builds its control law with, after
+    /// identification. Without one the run builds the built-in law
+    /// (`servo_blend`) from the configuration's `blend_w` and `compression`.
     pub fn with_law_factory(mut self, factory: std::sync::Arc<dyn SineLawFactory>) -> Self {
         self.law_factory = Some(factory);
         self
     }
 
-    /// Install the clock law calls are timed on (a test clock makes a law
-    /// "slow" deterministically).
-    ///
-    /// Stored only: nothing reads it until the law seam is built.
+    /// Install the clock law calls are timed on under the core's guards (a test
+    /// clock makes a law "slow" deterministically).
     pub fn with_law_clock(mut self, clock: std::sync::Arc<dyn LawClock>) -> Self {
         self.law_clock = clock;
         self
@@ -1832,6 +1912,20 @@ impl SineService {
         } else {
             ((fs * CHUNK_SECONDS).max(MIN_CHUNK_FRAMES) as usize, "CHUNK")
         };
+        // THE TICK IN SECONDS, converted at the ADOPTED rate (the configuration
+        // states it in time; frames are the device's answer's).
+        if let Some(tick_s) = self.cfg.control_tick_s {
+            let frames = ((tick_s * fs).round() as usize).max(1);
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "control tick {:.3} ms is {frames} frames at the adopted {fs:.3} Hz \
+                     ({:.4} ms)",
+                    tick_s * 1e3,
+                    frames as f64 / fs * 1e3
+                ),
+            });
+            self.cfg.control_tick_frames = frames;
+        }
         if self.cfg.control_tick_frames > budget_frames {
             return Err(ServiceError::Config(ConfigError::BadConfig(format!(
                 "control_tick_frames ({}) exceeds the per-{unit} frame budget ({budget_frames} \
@@ -2437,6 +2531,14 @@ impl SineService {
     /// park is released.
     fn engage(&mut self) -> Result<(), ServiceError> {
         self.build_step()?;
+        // THE LAW, built from the identification and engaged before the lead-in:
+        // the lead-in is the first drive, and it is the law's (under the guards,
+        // bounded). A law that cannot be built or engaged ends the run before
+        // anything is driven at test level.
+        if let Err(fault) = self.build_and_engage_law() {
+            self.end_before_drive(fault);
+            return Ok(());
+        }
         // THE COLD START. The device is parked - `park_after_sysid`
         // stopped the tasks so the gate compute and the review park did not sit on
         // a live pin - and bringing it back up naively means the first thing the
@@ -2459,6 +2561,291 @@ impl SineService {
         });
         self.transition(RunState::Engaged);
         Ok(())
+    }
+
+    /// The factory the run builds its law with: the installed one, or the
+    /// built-in from the configuration.
+    fn law_factory(&self) -> std::sync::Arc<dyn SineLawFactory> {
+        match self.law_factory.as_ref() {
+            Some(f) => f.clone(),
+            None => std::sync::Arc::new(ServoBlendFactory {
+                params: ServoBlendParams {
+                    blend_w: self.cfg.blend_w,
+                    compression: self.cfg.compression,
+                    kp: ServoBlendParams::default().kp,
+                },
+            }),
+        }
+    }
+
+    /// Build the law for the identification, give it to the step, engage it.
+    fn build_and_engage_law(&mut self) -> Result<(), LawFault> {
+        let factory = self.law_factory();
+        let descriptor = factory.describe();
+        let fs = self.sample_rate_hz;
+        let tick_s = self.cfg.control_tick_frames as f64 / fs;
+        let (freqs, gain, coherence, trusted) = match self.frf.as_ref() {
+            Some(f) => (
+                f.freqs.clone(),
+                f.h_mag.clone(),
+                f.coherence.clone(),
+                f.trusted.clone(),
+            ),
+            None => Default::default(),
+        };
+        let target: Vec<f64> = freqs
+            .iter()
+            .map(|&f| self.cfg.profile.target_accel_g_pk(f).unwrap_or(0.0))
+            .collect();
+        let call_budget_s = self
+            .cfg
+            .law_guards
+            .as_ref()
+            .map(|g| g.call_budget_s(tick_s))
+            .unwrap_or(f64::INFINITY);
+        let setup = SineLawSetup {
+            control_channels: self.control_slots.len(),
+            tick_s,
+            band_hz: self.band,
+            drive_ceiling: self.cfg.drive_vpk_ceiling,
+            identification: Identification {
+                frequency_hz: &freqs,
+                gain: &gain,
+                coherence: &coherence,
+                trusted: &trusted,
+                target: &target,
+            },
+            call_budget_s,
+        };
+        self.law_live = descriptor
+            .live
+            .iter()
+            .map(|l| {
+                let v = descriptor
+                    .params
+                    .iter()
+                    .find(|(k, _)| *k == l.key)
+                    .and_then(|(_, v)| match v {
+                        crate::law::ParamSetting::Number(x) => Some(*x),
+                        crate::law::ParamSetting::Integer(i) => Some(*i as f64),
+                        _ => None,
+                    })
+                    .unwrap_or(f64::NAN);
+                (l.key.clone(), v)
+            })
+            .collect();
+        self.log.push(EventKind::LawBuilt {
+            id: descriptor.id.clone(),
+            name: descriptor.name.clone(),
+            version: descriptor.version.clone(),
+            sha256: descriptor.sha256.clone(),
+        });
+        self.law_descriptor = Some(descriptor.clone());
+        let law = factory.build(&setup)?;
+        let guards = self.cfg.law_guards.clone();
+        let clock = self.law_clock.clone();
+        let start_db = self.cfg.ladder.start_db;
+        let step = self
+            .step
+            .as_mut()
+            .ok_or_else(|| LawFault::Failed("the loop is not built".into()))?;
+        step.install_law(law, &descriptor, guards, clock);
+        step.engage_law(start_db)?;
+        self.write_law_json();
+        Ok(())
+    }
+
+    /// The law could not be built or engaged: end the run (`law_fault`) with
+    /// nothing driven at test level. The device is parked; the controlled
+    /// path stops it.
+    fn end_before_drive(&mut self, fault: LawFault) {
+        let record = TripRecord {
+            kind: TripKind::LawFault {
+                fault,
+                consecutive: 1,
+            },
+            at_freq_hz: self.start_freq(),
+            at_level_db: self.cfg.ladder.start_db,
+            at_tick: 0,
+        };
+        if let Some(step) = self.step.as_mut() {
+            step.zero_drive();
+        }
+        let reason = format!("control law fault: {:?}", record.kind);
+        self.log.push(EventKind::Trip {
+            record: record.clone(),
+        });
+        self.trip = Some(record);
+        self.finish_inner(RunState::Aborted, reason, false);
+    }
+
+    /// Change a live parameter of the run's law. Between batches; it applies
+    /// from the next tick and is logged. Returns the value in force.
+    pub fn adjust(&mut self, key: &str, value: f64) -> Result<f64, AdjustRefusal> {
+        let Some(d) = self.law_descriptor.as_ref() else {
+            return Err(AdjustRefusal::NotEngaged);
+        };
+        if !d.params.iter().any(|(k, _)| k == key) {
+            return Err(AdjustRefusal::UnknownKey);
+        }
+        let Some(live) = d.live.iter().find(|l| l.key == key) else {
+            return Err(AdjustRefusal::NotLive);
+        };
+        if !(value.is_finite() && value >= live.min && value <= live.max) {
+            return Err(AdjustRefusal::OutOfRange {
+                min: live.min,
+                max: live.max,
+            });
+        }
+        let step = self.step.as_mut().ok_or(AdjustRefusal::NotEngaged)?;
+        step.adjust_law(key, value)
+            .map_err(|f| AdjustRefusal::LawRefused(f.to_string()))?;
+        self.log_live_changes();
+        Ok(value)
+    }
+
+    /// Log every live parameter whose value in force moved since the last
+    /// look (a change made here, or one posted into the step's mailbox).
+    fn log_live_changes(&mut self) {
+        let Some(step) = self.step.as_ref() else {
+            return;
+        };
+        let now: Vec<(String, f64)> = step.live().map(|(k, v)| (k.to_string(), v)).collect();
+        for (k, v) in &now {
+            let from = self
+                .law_live
+                .iter()
+                .find(|(lk, _)| lk == k)
+                .map(|(_, lv)| *lv);
+            if from.is_none_or(|f| f.to_bits() != v.to_bits()) {
+                self.log.push(EventKind::LawAdjust {
+                    key: k.clone(),
+                    from: from.unwrap_or(f64::NAN),
+                    to: *v,
+                });
+            }
+        }
+        self.law_live = now;
+    }
+
+    /// The run's law as its records name it; `None` until it is built.
+    pub fn law_descriptor(&self) -> Option<&LawDescriptor> {
+        self.law_descriptor.as_ref()
+    }
+
+    /// What the records ring has handed over so far.
+    pub fn law_tally(&self) -> LawTally {
+        self.law_tally
+    }
+
+    /// Drain the law's call records (between batches): count them, log new
+    /// misses, and append them to `law_ticks.bin` while a capture runs.
+    fn service_law_records(&mut self) {
+        let Some(h) = self.handles.as_ref() else {
+            return;
+        };
+        let ring = h.law_records.clone();
+        let mut drained = std::mem::take(&mut self.law_drain);
+        drained.clear();
+        ring.drain_into(&mut drained);
+        self.law_tally.dropped = ring.dropped();
+        let mut last_miss: Option<(u8, u64)> = None;
+        let mut misses_here = 0u64;
+        for r in &drained {
+            self.law_tally.calls += 1;
+            if r.miss != 0 {
+                self.law_tally.misses += 1;
+                misses_here += 1;
+                last_miss = Some((r.miss, r.tick));
+            }
+            if r.capped {
+                self.law_tally.capped += 1;
+            }
+            self.law_tally.worst_call_us = self.law_tally.worst_call_us.max(r.call_us as f64);
+            if r.drive_in_force > 0.0 && r.applied > r.drive_in_force {
+                let rise = 20.0 * (r.applied / r.drive_in_force).log10();
+                self.law_tally.worst_rise_db = self.law_tally.worst_rise_db.max(rise);
+            }
+        }
+        if let Some((code, tick)) = last_miss {
+            let consecutive = self.step.as_ref().map(|s| s.law_counters().1).unwrap_or(0);
+            self.log.push(EventKind::LawMisses {
+                reason: law_records::MISS_NAMES
+                    .get(code as usize)
+                    .copied()
+                    .unwrap_or("error")
+                    .into(),
+                count: misses_here,
+                consecutive,
+                at_tick: tick,
+            });
+        }
+        if let Some(out) = self.law_ticks_out.as_mut() {
+            use std::io::Write;
+            let mut bytes = Vec::with_capacity(drained.len() * law_records::LawRecord::BYTES);
+            for r in &drained {
+                r.write_to(&mut bytes);
+            }
+            if out.write_all(&bytes).is_err() {
+                self.law_ticks_out = None;
+                self.log.push(EventKind::Note {
+                    text: "law: writing law_ticks.bin failed; the call records stop here".into(),
+                });
+            }
+        }
+        self.law_drain = drained;
+    }
+
+    /// Write `law.json` and `law_ticks.json` into the capture's folder and open
+    /// `law_ticks.bin`, when a capture runs and the law is built.
+    fn write_law_json(&mut self) {
+        let (Some(sink), Some(d)) = (self.capture.as_ref(), self.law_descriptor.as_ref()) else {
+            return;
+        };
+        if self.law_ticks_out.is_some() {
+            return;
+        }
+        let dir = sink.run_dir().to_path_buf();
+        let law = serde_json::json!({
+            "id": d.id,
+            "name": d.name,
+            "version": d.version,
+            "sha256": d.sha256,
+            "params": d.params.iter().map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or_default())).collect::<serde_json::Map<String, serde_json::Value>>(),
+            "diagnostics": d.diagnostics,
+            "live": d.live,
+            "guards": self.cfg.law_guards,
+        });
+        let fields: Vec<serde_json::Value> = law_records::LAW_TICK_FIELDS
+            .iter()
+            .map(|(n, t)| serde_json::json!({"name": n, "type": t}))
+            .collect();
+        let sidecar = serde_json::json!({
+            "format": law_records::LAW_TICKS_FORMAT,
+            "record_bytes": law_records::LawRecord::BYTES,
+            "endian": "little",
+            "fields": fields,
+            "diagnostics": d.diagnostics,
+            "miss": law_records::MISS_NAMES,
+            "hold": ["free", "notch", "probe"],
+        });
+        let wrote = std::fs::write(
+            dir.join("law.json"),
+            serde_json::to_vec_pretty(&law).unwrap_or_default(),
+        )
+        .and_then(|_| {
+            std::fs::write(
+                dir.join("law_ticks.json"),
+                serde_json::to_vec_pretty(&sidecar).unwrap_or_default(),
+            )
+        })
+        .and_then(|_| std::fs::File::create(dir.join("law_ticks.bin")));
+        match wrote {
+            Ok(f) => self.law_ticks_out = Some(std::io::BufWriter::new(f)),
+            Err(e) => self.log.push(EventKind::Note {
+                text: format!("law: the law's records could not be written ({e})"),
+            }),
+        }
     }
 
     /// Build the persistent [`SineProcessStep`] from the resolved config +
@@ -2834,14 +3221,16 @@ impl SineService {
                 .map(|h| h.stop_requested.load(Ordering::Acquire))
                 .unwrap_or(false);
             if stopping && self.drive_is_zero() {
-                self.finish(
-                    RunState::Stopped,
-                    "operator stop: drive ramped to zero, generation drained, tasks stopped".into(),
+                self.finish_stopped(
+                    "operator stop: drive ramped to zero, generation drained, tasks stopped",
                 );
                 return Ok(false);
             }
 
-            if !self.run_one_batch()? {
+            let alive = self.run_one_batch();
+            self.service_law_records();
+            self.log_live_changes();
+            if !alive? {
                 return Ok(false);
             }
         }
@@ -3206,8 +3595,36 @@ impl SineService {
     /// ABORTED takes `emergency_stop` (the backend's own 25 ms taper); everything
     /// else takes the ramped `stop()`, preceded by a GENERATION DRAIN.
     fn finish(&mut self, state: RunState, reason: String) {
+        self.finish_inner(state, reason, state == RunState::Aborted);
+    }
+
+    /// The end of a run that ramped to zero: a stop, or the controlled stop the
+    /// step took on the law's misses or its divergence (then the run ends
+    /// `Aborted` with that trip, through the same drain and backend stop).
+    fn finish_stopped(&mut self, reason: &str) {
+        let controlled = self
+            .handles
+            .as_ref()
+            .and_then(|h| h.abort.take_controlled());
+        match controlled {
+            Some(record) => {
+                let text = format!("control law: {:?}", record.kind);
+                self.log.push(EventKind::Trip {
+                    record: record.clone(),
+                });
+                self.trip = Some(record);
+                self.finish_inner(RunState::Aborted, text, false);
+            }
+            None => self.finish(RunState::Stopped, reason.into()),
+        }
+    }
+
+    /// [`SineService::finish`], with the backend stopped by `emergency_stop`
+    /// (`emergency`) or by the drain and the controlled stop.
+    fn finish_inner(&mut self, state: RunState, reason: String, emergency: bool) {
+        self.service_law_records();
         let _ = self.stop_capture_inner();
-        if state == RunState::Aborted {
+        if emergency {
             self.emergency_stop_guarded();
         } else {
             self.drain_generation();
@@ -3452,9 +3869,31 @@ impl SineService {
     pub fn run_mode(&self) -> RunMode {
         self.run_mode
     }
-    /// Set the blend weight `w`.
+    /// Set the built-in law's prediction weight `w`: a live change of its
+    /// `blend_w`, posted to the step and applied at its next tick. The key and
+    /// the range are checked here; [`SineService::adjust`] is the same change
+    /// answered with the law's own refusal.
     pub fn set_w(&self, w: f64) -> Result<(), ServiceError> {
-        self.post(Command::SetW(w))
+        let Some(d) = self.law_descriptor.as_ref() else {
+            return Err(ServiceError::BadState("not engaged (no step)".into()));
+        };
+        let Some(index) = d.live.iter().position(|l| l.key == "blend_w") else {
+            return Err(ServiceError::BadState(format!(
+                "blend_w: {}",
+                AdjustRefusal::NotLive
+            )));
+        };
+        let l = &d.live[index];
+        if !(w.is_finite() && w >= l.min && w <= l.max) {
+            return Err(ServiceError::BadState(format!(
+                "blend_w: {}",
+                AdjustRefusal::OutOfRange {
+                    min: l.min,
+                    max: l.max
+                }
+            )));
+        }
+        self.post(Command::Adjust { index, value: w })
     }
 
     // --- capture ----------------------------------------------------------------
@@ -3501,6 +3940,7 @@ impl SineService {
             trigger: format!("{:?}", self.cfg.capture.rule),
         });
         self.capture = Some(sink);
+        self.write_law_json();
         Ok(run_dir)
     }
 
@@ -3512,6 +3952,10 @@ impl SineService {
     }
 
     fn stop_capture_inner(&mut self) -> Result<(), ServiceError> {
+        if let Some(mut out) = self.law_ticks_out.take() {
+            use std::io::Write;
+            let _ = out.flush();
+        }
         if let Some(sink) = self.capture.take() {
             let written = sink.written();
             let dropped = sink.dropped();
@@ -3630,7 +4074,12 @@ impl SineService {
         if self.step.is_some() && !self.drive_is_zero() {
             self.pump_ramp_to_zero();
         }
-        self.finish(RunState::Stopped, "operator stop".into());
+        if self.state == RunState::Aborted {
+            // The ramp ended the run itself (the law's controlled stop): that
+            // end, and its reason, stand.
+            return Ok(());
+        }
+        self.finish_stopped("operator stop");
         Ok(())
     }
 
@@ -3777,6 +4226,32 @@ impl SineService {
                 .map(|m| (m.key.clone(), m.value.clone()))
                 .collect(),
             honesty: Honesty::default(),
+            law: self.law_descriptor.as_ref().map(|d| {
+                let (_, misses_now, capped_ticks, last, _) = self
+                    .step
+                    .as_ref()
+                    .map(|s| s.law_counters())
+                    .unwrap_or((0, 0, 0, None, false));
+                LawSummary {
+                    line: format!(
+                        "{} {}{}",
+                        d.name,
+                        d.version,
+                        d.sha256
+                            .as_ref()
+                            .map(|h| format!(" ({})", &h[..h.len().min(12)]))
+                            .unwrap_or_default()
+                    ),
+                    id: d.id.clone(),
+                    calls: self.law_tally.calls,
+                    misses: self.law_tally.misses,
+                    misses_at_end: misses_now,
+                    capped_ticks,
+                    worst_call_us: self.law_tally.worst_call_us,
+                    last_fault: last.map(|f| f.reason().to_string()),
+                    guards: self.cfg.law_guards.clone(),
+                }
+            }),
         }
     }
 
@@ -3912,7 +4387,28 @@ impl SineService {
                 lag_frames: self.sysid_lag_frames,
                 trusted_fraction: self.ident_trusted_frac,
             }),
-            law: None,
+            law: self.law_descriptor.as_ref().map(|d| SineLawStatus {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                version: d.version.clone(),
+                sha256: d.sha256.clone(),
+                calls: s.law_calls,
+                misses: s.law_misses,
+                capped_ticks: s.law_capped_ticks,
+                values: s
+                    .law_values
+                    .map(|v| {
+                        v.iter()
+                            .filter_map(|(i, x)| d.diagnostics.get(i).map(|k| (k.clone(), x)))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                live: self
+                    .step
+                    .as_ref()
+                    .map(|st| st.live().map(|(k, v)| (k.to_string(), v)).collect())
+                    .unwrap_or_default(),
+            }),
         }
     }
 

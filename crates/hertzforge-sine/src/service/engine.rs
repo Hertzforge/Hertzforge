@@ -46,13 +46,18 @@ use crate::control::{
     composite_amplitude, tracked_displacement_in_pp, tracked_velocity_ips_pk, BlendLaw,
     CompositeMode, DriveGuard, DriveVerdict, FeedforwardTable, LimitChannelTick, NotchGovernor,
 };
-use crate::law::LawValues;
+use crate::law::servo_blend::{self, ServoBlendLaw};
+use crate::law::{
+    Hold, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, SineControlLaw, TickInputs,
+    TickOutputs,
+};
 use crate::profile::SineProfile;
 use crate::scheduler::{
     BidirSweep, DwellRun, LadderPlan, RstdEvent, RstdPlan, StepSine, SweepDirection,
 };
 use crate::service::config::ColaWaveform;
 use crate::service::display::{DisplayCell, DisplayLog, DisplayRow, DisplaySlots};
+use crate::service::law_records::{miss_code, LawRecord, LawRecordRing, LAW_RECORD_CAPACITY};
 use crate::service::report::{TripKind, TripRecord};
 use crate::service::ring::SampleRing;
 use hertzforge_dsp::sine::AmplitudeServo;
@@ -95,8 +100,10 @@ pub enum Command {
     /// AUTO / MANUAL. MANUAL suppresses the ladder's own advance; the operator
     /// owns every level move.
     SetRunMode(RunMode),
-    /// Set the blend weight `w`.
-    SetW(f64),
+    /// Change the law's live parameter number `index` (in its declared live
+    /// list) to `value`, already checked against its range. A law that
+    /// refuses keeps the value in force.
+    Adjust { index: usize, value: f64 },
 }
 
 /// Who advances the level ladder.
@@ -144,6 +151,9 @@ impl CommandMailbox {
 pub struct AbortLatch {
     tripped: AtomicBool,
     record: Mutex<Option<TripRecord>>,
+    /// A run the step ended with the CONTROLLED stop (a law fault or a
+    /// divergence): the ramp runs to zero first, and this says why.
+    controlled: Mutex<Option<TripRecord>>,
 }
 
 impl AbortLatch {
@@ -163,6 +173,26 @@ impl AbortLatch {
     /// Idempotent: a record already latched (e.g. an in-process trip) wins.
     pub fn set_record(&self, record: TripRecord) {
         self.set(record);
+    }
+
+    /// Record why the step took the controlled stop (the first one wins). Does
+    /// not set the abort: the run ramps down like a stop.
+    pub fn set_controlled(&self, record: TripRecord) {
+        if let Ok(mut r) = self.controlled.lock() {
+            if r.is_none() {
+                *r = Some(record);
+            }
+        }
+    }
+
+    /// Why the step took the controlled stop, if it did.
+    pub fn take_controlled(&self) -> Option<TripRecord> {
+        self.controlled.lock().ok().and_then(|mut r| r.take())
+    }
+
+    /// Whether the step took the controlled stop.
+    pub fn controlled_pending(&self) -> bool {
+        self.controlled.lock().map(|r| r.is_some()).unwrap_or(false)
     }
 
     fn set(&self, record: TripRecord) {
@@ -430,14 +460,21 @@ pub struct TraceLog {
 
 impl TraceLog {
     fn ensure(&self, n_ch: usize) {
+        // Sized once to the bound the decimation keeps (`2 * TRACE_CAP`), so a
+        // push on the control tick never reaches the allocator.
+        let full = || -> Vec<Vec<(f64, f64)>> {
+            (0..n_ch)
+                .map(|_| Vec::with_capacity(2 * TRACE_CAP + 1))
+                .collect()
+        };
         if let Ok(mut t) = self.tracked.lock() {
             if t.len() != n_ch {
-                *t = vec![Vec::new(); n_ch];
+                *t = full();
             }
         }
         if let Ok(mut b) = self.broadband.lock() {
             if b.len() != n_ch {
-                *b = vec![Vec::new(); n_ch];
+                *b = full();
             }
         }
         if let Ok(mut s) = self.stride.lock() {
@@ -666,8 +703,30 @@ pub struct SineProcessStep {
     nco: SweepOscillator,
     filters: Vec<AdaptiveTrackingFilter>,
     thd_bank: ThdBank,
-    servo: AmplitudeServo,
-    blend: BlendLaw,
+    /// The control law: decides the drive each tick (see [`crate::law`]).
+    law: Box<dyn SineControlLaw + Send>,
+    /// The values the law reports, by declared index; cleared before each call.
+    law_buf: LawValues,
+    /// The time one call may take, seconds.
+    law_budget_s: f64,
+    /// Calls since the law was engaged (the `tick_index` it sees).
+    law_tick_index: u64,
+    /// The last unusable call's fault.
+    law_last_fault: Option<LawFault>,
+    /// The law's own fault judgement on its last usable call.
+    law_faulted: bool,
+    /// Where the observer finds the servo's step and level among the law's
+    /// values.
+    obs_ix: (Option<usize>, Option<usize>),
+    /// Per control channel: phase against the drive this tick, degrees.
+    /// Preallocated, refilled in place.
+    control_phase_buf: Vec<f64>,
+    /// Every call, for the records (drained between batches).
+    law_records: Arc<LawRecordRing>,
+    /// The law's live parameters, in its declared order, and their values in
+    /// force.
+    live_keys: Vec<String>,
+    live_values: Vec<f64>,
     feedforward: Option<FeedforwardTable>,
     notch: Option<NotchGovernor>,
     limit_channels: Vec<LimitChannelSpec>,
@@ -821,6 +880,9 @@ pub struct StepBuild {
     pub control_weights: Vec<f64>,
     pub composite_mode: CompositeMode,
     pub tracking_bw: BandwidthMode,
+    /// The built-in law's servo and blend: the step runs them as its law
+    /// until [`SineProcessStep::install_law`] gives it another (the service
+    /// always installs the law its factory builds).
     pub servo: AmplitudeServo,
     pub blend: BlendLaw,
     pub feedforward: Option<FeedforwardTable>,
@@ -908,6 +970,8 @@ pub struct StepHandles {
     pub ring: Arc<SampleRing>,
     /// The display record the service copies out between batches.
     pub display: Arc<DisplayCell>,
+    /// The law's calls, drained between batches.
+    pub law_records: Arc<LawRecordRing>,
 }
 
 impl SineProcessStep {
@@ -965,7 +1029,10 @@ impl SineProcessStep {
                 cola: b.cola.enabled,
             }),
         });
+        let law_records = Arc::new(LawRecordRing::new(LAW_RECORD_CAPACITY));
+        let blend_w = b.blend.w();
         let handles = StepHandles {
+            law_records: law_records.clone(),
             status: status.clone(),
             trace: trace.clone(),
             mailbox: mailbox.clone(),
@@ -1007,8 +1074,23 @@ impl SineProcessStep {
             nco,
             filters,
             thd_bank,
-            servo: b.servo,
-            blend: b.blend,
+            law: Box::new(ServoBlendLaw::from_parts(b.servo, b.blend)),
+            law_buf: LawValues::new(servo_blend::DIAGNOSTICS.len()),
+            law_budget_s: f64::INFINITY,
+            law_tick_index: 0,
+            law_last_fault: None,
+            law_faulted: false,
+            obs_ix: (
+                Some(servo_blend::V_SERVO_STEP),
+                Some(servo_blend::V_SERVO_LEVEL),
+            ),
+            control_phase_buf: vec![0.0; n_control],
+            law_records: law_records.clone(),
+            live_keys: servo_blend::live_params()
+                .into_iter()
+                .map(|l| l.key)
+                .collect(),
+            live_values: vec![blend_w],
             feedforward: b.feedforward,
             notch: b.notch,
             limit_channels: b.limit_channels,
@@ -1268,6 +1350,13 @@ impl SineProcessStep {
         self.observer = Some(observer);
     }
 
+    /// Take every output to zero at once. Only for a run that ends before
+    /// anything was played (a law that could not be engaged).
+    pub fn zero_drive(&mut self) {
+        self.current_drive_scale = 0.0;
+        self.cola_ramp_scale = 0.0;
+    }
+
     /// Whether a stop/abort ramp is in progress.
     pub fn is_ramping_down(&self) -> bool {
         self.ramping_down
@@ -1282,6 +1371,248 @@ impl SineProcessStep {
     /// toward zero before they return.
     pub fn begin_ramp_down(&mut self) {
         self.ramping_down = true;
+    }
+
+    // --- the control law -------------------------------------------------------
+
+    /// Give the step the law it runs. `descriptor` sizes the values buffer and
+    /// names the servo's values for an observer; `guards` are the core's
+    /// guards (`None`: none but the law's own); `clock` times the calls under
+    /// them. Before the loop engages.
+    pub fn install_law(
+        &mut self,
+        law: Box<dyn SineControlLaw + Send>,
+        descriptor: &LawDescriptor,
+        guards: Option<LawGuards>,
+        clock: Arc<dyn LawClock>,
+    ) {
+        let tick_s = self.control_tick_frames as f64 / self.fs_hz;
+        self.law_budget_s = guards
+            .as_ref()
+            .map(|g| g.call_budget_s(tick_s))
+            .unwrap_or(f64::INFINITY);
+        self.law = law;
+        self.law_buf = LawValues::new(descriptor.diagnostics.len());
+        let ix = |key: &str| descriptor.diagnostics.iter().position(|d| d == key);
+        self.obs_ix = (ix("servo_step_db"), ix("servo_level_db"));
+        // The core's guards on the law are not built yet: the law runs with
+        // none but its own (the service refuses a configuration asking for
+        // them), and its calls are not timed.
+        let _ = clock;
+        self.live_keys = descriptor.live.iter().map(|l| l.key.clone()).collect();
+        self.live_values = descriptor
+            .live
+            .iter()
+            .map(|l| {
+                descriptor
+                    .params
+                    .iter()
+                    .find(|(k, _)| *k == l.key)
+                    .and_then(|(_, v)| match v {
+                        crate::law::ParamSetting::Number(x) => Some(*x),
+                        crate::law::ParamSetting::Integer(i) => Some(*i as f64),
+                        _ => None,
+                    })
+                    .unwrap_or(f64::NAN)
+            })
+            .collect();
+    }
+
+    /// The law's live parameters and their values in force.
+    pub fn live(&self) -> impl Iterator<Item = (&str, f64)> + '_ {
+        self.live_keys
+            .iter()
+            .map(String::as_str)
+            .zip(self.live_values.iter().copied())
+    }
+
+    /// The time one law call may take, seconds (infinite without the guards).
+    pub fn law_budget_s(&self) -> f64 {
+        self.law_budget_s
+    }
+
+    /// The sweep rate now, Hz per second, signed (0 outside a sweep).
+    fn sweep_rate_hz_per_s(&self) -> f64 {
+        match &self.scheduler {
+            SchedulerState::Sweep(s) => s.rate_hz_per_s(),
+            _ => 0.0,
+        }
+    }
+
+    /// The law's starting drive: call `engage` at the start frequency and
+    /// `start_level_db`, apply the first-drive bound under the guards, and make
+    /// it the drive in force. Before the lead-in is synthesized, so the first
+    /// frame played is the law's. An unusable engage is returned: the run
+    /// ends before anything is driven at test level.
+    pub fn engage_law(&mut self, start_level_db: f64) -> Result<f64, LawFault> {
+        let f = self.freq_hz();
+        let dt = self.control_tick_frames as f64 / self.fs_hz;
+        let rung_scale = 10f64.powf(start_level_db / 20.0);
+        let target = self.profile.target_accel_g_pk(f).unwrap_or(0.0).max(1e-12) * rung_scale;
+        let prediction_db = self.feedforward.as_ref().and_then(|ff| ff.ff_db(f));
+        let inputs = TickInputs {
+            tick_index: 0,
+            dt_s: dt,
+            frequency_hz: f,
+            sweep_rate_hz_per_s: self.sweep_rate_hz_per_s(),
+            level_db: start_level_db,
+            target,
+            measured: 0.0,
+            channel_amplitude: &self.control_phase_buf,
+            channel_phase_deg: &self.control_phase_buf,
+            drive: 0.0,
+            prediction_db,
+            hold: Hold::Free,
+            notch_ceiling: None,
+            settling: true,
+        };
+        let (outcome, call_s) = call_law(&mut *self.law, true, &inputs, &mut self.law_buf);
+        self.law_calls += 1;
+        self.law_values = Some(self.law_buf);
+        let out = outcome.inspect_err(|f| {
+            self.law_misses = 1;
+            self.law_last_fault = Some(f.clone());
+        })?;
+        self.law_faulted = out.faulted;
+        let drive = out.drive;
+        let capped = false;
+        self.law_records.push(LawRecord {
+            tick: 0,
+            freq_hz: f,
+            target,
+            measured: 0.0,
+            drive_in_force: 0.0,
+            prediction_db: prediction_db.unwrap_or(f64::NAN),
+            hold: LawRecord::hold_code(Hold::Free),
+            output: out.drive,
+            miss: 0,
+            capped,
+            applied: drive,
+            call_us: (call_s * 1e6) as f32,
+            values: LawRecord::values_of(&self.law_buf),
+        });
+        self.current_drive_scale = drive;
+        if let Some(slot) = self.frame_ctx.first_mut() {
+            slot.drive_scale = drive;
+        }
+        Ok(drive)
+    }
+
+    /// Change the law's live parameter `key` (the service has checked the key
+    /// is declared live and the value in range). Between batches; the value
+    /// applies from the next tick. A refusal leaves the value in force.
+    pub fn adjust_law(&mut self, key: &str, value: f64) -> Result<(), LawFault> {
+        let law = &mut self.law;
+        let r =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| law.adjust(key, value)))
+            {
+                Ok(r) => r,
+                Err(p) => Err(LawFault::Crashed(panic_text(&*p))),
+            };
+        if r.is_ok() {
+            if let Some(i) = self.live_keys.iter().position(|k| k == key) {
+                self.live_values[i] = value;
+            }
+        }
+        r
+    }
+
+    /// The law's counters: calls, unusable calls in a row, ticks a cap bound,
+    /// the last unusable call's fault, and its own fault judgement.
+    pub fn law_counters(&self) -> (u64, u32, u64, Option<&LawFault>, bool) {
+        (
+            self.law_calls,
+            self.law_misses,
+            self.law_capped_ticks,
+            self.law_last_fault.as_ref(),
+            self.law_faulted,
+        )
+    }
+
+    /// One tick of the law: call it, count, record. Returns the drive the core takes from
+    /// the law, before the notch and the drive guard.
+    ///
+    /// The law's drive is taken as it is (the shipped law clamps itself to
+    /// 1 dB a tick), which is the controller's original arithmetic; a failed
+    /// call holds the drive in force.
+    fn law_decision(
+        &mut self,
+        f: f64,
+        dt: f64,
+        target: f64,
+        measured: f64,
+        hold: Hold,
+        settling: bool,
+    ) -> f64 {
+        let in_force = self.current_drive_scale;
+        // The control channels' phases against the drive, for the law.
+        for (k, &slot) in self.control_slots.iter().enumerate() {
+            if let Some(p) = self.control_phase_buf.get_mut(k) {
+                *p = wrap_deg(
+                    (self.last_phase.get(slot).copied().unwrap_or(0.0) + self.phase_offset)
+                        .to_degrees(),
+                );
+            }
+        }
+        let prediction_db = self.feedforward.as_ref().and_then(|ff| ff.ff_db(f));
+        let notch_ceiling = self
+            .notch
+            .as_ref()
+            .map(|g| g.ceiling())
+            .filter(|c| c.is_finite());
+        self.law_tick_index += 1;
+        let inputs = TickInputs {
+            tick_index: self.law_tick_index,
+            dt_s: dt,
+            frequency_hz: f,
+            sweep_rate_hz_per_s: self.sweep_rate_hz_per_s(),
+            level_db: self.ladder.level_db(),
+            target,
+            measured,
+            channel_amplitude: &self.control_amps_buf,
+            channel_phase_deg: &self.control_phase_buf,
+            drive: in_force,
+            prediction_db,
+            hold,
+            notch_ceiling,
+            settling,
+        };
+        let (outcome, call_s) = call_law(&mut *self.law, false, &inputs, &mut self.law_buf);
+        self.law_calls += 1;
+        self.law_values = Some(self.law_buf);
+
+        let mut record = LawRecord {
+            tick: self.law_tick_index,
+            freq_hz: f,
+            target,
+            measured,
+            drive_in_force: in_force,
+            prediction_db: prediction_db.unwrap_or(f64::NAN),
+            hold: LawRecord::hold_code(hold),
+            output: f64::NAN,
+            miss: 0,
+            capped: false,
+            applied: in_force,
+            call_us: (call_s * 1e6) as f32,
+            values: LawRecord::values_of(&self.law_buf),
+        };
+
+        // The law's drive as it is; a failed call holds the drive in force.
+        let drive = match outcome {
+            Ok(out) => {
+                self.law_faulted = out.faulted;
+                record.output = out.drive;
+                out.drive
+            }
+            Err(fault) => {
+                record.miss = miss_code(Some(&fault));
+                self.law_last_fault = Some(fault);
+                in_force
+            }
+        };
+        record.applied = drive;
+        self.law_records.push(record);
+        drive
     }
 
     // --- the control tick ------------------------------------------------------
@@ -1394,51 +1725,29 @@ impl SineProcessStep {
         // 4. Composite the control channels' tracked amplitudes.
         let measured = self.control_composite();
 
-        // 5. The normalized-target servo feed: the servo target is
-        //    1.0; feed = measured / (profile_target(f) * rung_scale).
+        // 5. The target at this frequency and level, which the law controls to.
         let rung_scale = 10f64.powf(self.ladder.level_db() / 20.0);
         let target_g = self.profile.target_accel_g_pk(f).unwrap_or(0.0).max(1e-12) * rung_scale;
-        let feed = measured / target_g.max(1e-12);
 
         // 6. Observe the limit channels and compute the notch ceiling BEFORE the
-        //    servo, so we know whether the ceiling will bind and thus whether to
-        //    `hold_tick` the servo (freeze while binding).
+        //    law, so it is told whether the ceiling binds (it must not raise the
+        //    drive, and the built-in holds its servo rather than wind it up).
         let notch_binding = self.observe_notch(f, measured);
 
-        // 7. Run the servo: HOLD during the RSTD probe (fixed-drive resonance map)
-        //    or while the notch binds; else update.
-        let scale_before = self.servo.drive_scale();
-        let servo_scale = if rstd_probe || notch_binding {
-            self.servo.hold_tick(feed)
+        // 7-8. THE CONTROL LAW decides the drive (the servo, the blend and the
+        //    drive decision were here; see `law_decision` for the guards).
+        let hold = if rstd_probe {
+            Hold::Probe
+        } else if notch_binding {
+            Hold::Notch
         } else {
-            self.servo.update(feed, dt)
+            Hold::Free
         };
-        let scale_after = servo_scale;
-        let servo_step_db = if scale_before > 0.0 && scale_after > 0.0 {
-            20.0 * (scale_after / scale_before).log10()
-        } else {
-            0.0
-        };
-
-        // 8. The delta-form blend adds the w-scaled feedforward slope
-        //    and clamps the total per-tick move. We track the drive scale in dB
-        //    across the working drive, seeded from the servo scale. During the RSTD
-        //    probe the feedforward is BYPASSED so it does not shape the drive
-        //    and flatten the resonance the search is mapping; the drive is held.
-        let ff_ref = self.feedforward.as_ref();
-        let delta_db = if rstd_probe {
-            0.0
-        } else {
-            match ff_ref {
-                Some(ff) => self.blend.step(f, servo_step_db, ff),
-                None => servo_step_db.clamp(-1.0, 1.0),
-            }
-        };
-        // Apply the delta to the working drive scale (dB domain).
-        let mut requested = self.current_drive_scale * 10f64.powf(delta_db / 20.0);
+        let mut requested = self.law_decision(f, dt, target_g, measured, hold, settling);
         if !requested.is_finite() || requested < 0.0 {
             requested = 0.0;
         }
+        let feed = measured / target_g.max(1e-12);
 
         // 9. Apply the notch governor ceiling. The apply-time
         //    `binding` flag is the AUTHORITATIVE "the ceiling actually clamped
@@ -1645,15 +1954,16 @@ impl SineProcessStep {
         self.publish_snapshot(broadband, notch_binding, alarm_active);
         self.trace.push(f, &self.tracked, broadband);
         if let Some(obs) = self.observer.as_mut() {
+            let value = |ix: Option<usize>| ix.and_then(|i| self.law_buf.get(i)).unwrap_or(0.0);
             obs(&TickObservation {
                 tick: self.tick_count,
                 freq_hz: f,
                 level_db: self.ladder.level_db(),
                 measured,
                 drive: self.current_drive_scale,
-                servo_step_db,
-                servo_level_db: 20.0 * self.servo.drive_scale().log10(),
-                servo_faulted: self.servo.faulted(),
+                servo_step_db: value(self.obs_ix.0),
+                servo_level_db: value(self.obs_ix.1),
+                servo_faulted: self.law_faulted,
                 notch_binding,
             });
         }
@@ -1977,8 +2287,10 @@ impl SineProcessStep {
             Command::SetRunMode(mode) => {
                 self.ladder.set_manual(matches!(mode, RunMode::Manual));
             }
-            Command::SetW(w) => {
-                let _ = self.blend.set_w(w);
+            Command::Adjust { index, value } => {
+                if let Some(key) = self.live_keys.get(index).cloned() {
+                    let _ = self.adjust_law(&key, value);
+                }
             }
         }
     }
@@ -2221,6 +2533,34 @@ fn wrap_deg(d: f64) -> f64 {
     } else {
         w
     }
+}
+
+/// What a panic carried, as text.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = p.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = p.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "the law panicked".to_string()
+    }
+}
+
+/// Call the law once (`engage` or `tick`) into a cleared values buffer.
+/// Returns the outcome and the call's time in seconds (0: not timed).
+fn call_law(
+    law: &mut dyn SineControlLaw,
+    engage: bool,
+    inputs: &TickInputs<'_>,
+    values: &mut LawValues,
+) -> (Result<TickOutputs, LawFault>, f64) {
+    values.clear();
+    let r = if engage {
+        law.engage(inputs, values)
+    } else {
+        law.tick(inputs, values)
+    };
+    (r, 0.0)
 }
 
 /// Linear interpolation of `values` at `f` on a strictly-increasing `freqs`

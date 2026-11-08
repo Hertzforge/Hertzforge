@@ -50,12 +50,14 @@
 //!
 //! # State of this seam
 //!
-//! The traits, the inputs and outputs, the guards and the clock are the
-//! contract the closed loop is built against. The service stores a factory and
-//! a clock ([`crate::SineService::with_law_factory`],
-//! [`crate::SineService::with_law_clock`]) but calls neither yet, and refuses a
-//! configuration that sets [`crate::SineTestConfig::law_guards`] or
-//! [`crate::SineTestConfig::control_tick_s`] until the loop is built.
+//! The service builds the run's law with its factory after identification
+//! ([`crate::SineService::with_law_factory`]; without one, the built-in
+//! [`servo_blend`]) and the step calls it every tick. The guards are not built
+//! yet: the service refuses a configuration that sets
+//! [`crate::SineTestConfig::law_guards`] or
+//! [`crate::SineTestConfig::control_tick_s`].
+
+pub mod servo_blend;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
