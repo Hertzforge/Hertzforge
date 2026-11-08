@@ -144,6 +144,24 @@ describe('the Sine store', () => {
 		expect([sine.refusal?.reason, sine.refusal?.detail?.param]).toEqual(['bad_params', 'path']);
 	});
 
+	it('reads the run\'s numbers from its own data frames once it has subscribed to plots, as the service sends them', async () => {
+		const { sine, client } = await screen();
+		short(sine);
+		sine.setup.identification.review = false;
+		expect(await sine.apply()).toBe(true);
+		// A screen drawing its pages subscribes to plots: from then on the service sends it `sine.data`, not `sine.live`.
+		const lives: number[] = [];
+		client.on('sine.live', () => lives.push(1));
+		await client.request('sine.subscribe', { rate_hz: 5, plots: [{ id: 'p1', quantity: 'control' }] });
+		expect(await sine.start()).toBe(true);
+		await until(() => (sine.frameOfRun?.t_s ?? 0) > 0.5);
+		const t = sine.frameOfRun!.t_s!;
+		await until(() => (sine.frameOfRun?.t_s ?? 0) > t + 0.5);
+		expect(typeof sine.frameOfRun?.drive_vpk).toBe('number');
+		expect(lives).toHaveLength(0);
+		await sine.abort();
+	}, 15000);
+
 	it("latches a control row's overload once it reaches 95 % of the abort band's top, and only a control row's", async () => {
 		const { sine } = await screen();
 		short(sine);

@@ -295,9 +295,14 @@ describe("the mock control service's Sine frames have the service's form", () =>
 		const plots = want.plots;
 		let data: SineData | null = null;
 		client.on(SINE_TOPICS.data, (d) => (data = d as unknown as SineData));
+		const observer = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
+		observer.connect();
+		await observer.whenOpen();
+		let observedLive: SineLive | null = null;
+		observer.on(SINE_TOPICS.live, (d) => (observedLive = d as unknown as SineLive));
 		await client.request('sine.subscribe', { rate_hz: 5, plots });
 		expect(await sine.start()).toBe(true);
-		await until(() => !!data && data.phase === 'engaged' && data.plots.every((p) => p.views.length > 0) && (data.plots[0].views[0] as SpectrumView).series[0].x.length > 1);
+		await until(() => !!data && data.phase === 'engaged' && data.plots.every((p) => p.views.length > 0) && (data.plots[0].views[0] as SpectrumView).series[0].x.length > 1 && !!observedLive && observedLive.phase === 'engaged');
 		const theirs = (decodeFrame(readBin('event_sine_data.bin')) as unknown as Event<SineData>).data;
 		const mine = data as unknown as SineData;
 		expect(Object.keys(mine).sort()).toEqual(Object.keys(theirs).sort());
@@ -306,8 +311,9 @@ describe("the mock control service's Sine frames have the service's form", () =>
 			expect([p.quantity, m.views.length]).toEqual([m.quantity, p.views.length]);
 			expect(m.views.map(shapeOf)).toEqual(p.views.map(shapeOf));
 		}
+		// A connection on the default subscription gets `sine.live`; this one subscribed to plots.
 		const live = (decodeFrame(readBin('event_sine_live.bin')) as unknown as Event<SineLive>).data;
-		expect(sine.frameOfRun?.views.map(shapeOf)).toEqual(live.views.map(shapeOf));
+		expect((observedLive as SineLive | null)?.views.map(shapeOf)).toEqual(live.views.map(shapeOf));
 		await sine.abort();
 	}, 15000);
 });

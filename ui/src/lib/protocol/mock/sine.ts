@@ -809,11 +809,22 @@ export function createSineMock(host: SineMockHost): SineMock {
 		stateChanged();
 	}
 
+	/**
+	 * As the service sends them: `sine.live` to every connection on the default subscription, and
+	 * `sine.data` instead to each subscribed one at its own rate (always the final frame).
+	 */
 	function publish(r: Run) {
-		host.broadcast('sine.live', liveOf(r) as unknown as Record<string, unknown>);
-		for (const [conn, sub] of subs) {
+		const final = r.state === 'finished';
+		let frame: Record<string, unknown> | null = null;
+		for (const conn of host.connections()) {
+			const sub = subs.get(conn);
+			if (!sub) {
+				frame ??= liveOf(r) as unknown as Record<string, unknown>;
+				conn.emit('sine.live', frame);
+				continue;
+			}
 			sub.acc += LIVE_MS / 1000;
-			if (sub.acc + 1e-9 >= 1 / sub.rate) {
+			if (final || sub.acc + 1e-9 >= 1 / sub.rate) {
 				sub.acc = 0;
 				conn.emit('sine.data', dataFor(r, sub.plots) as unknown as Record<string, unknown>);
 			}
