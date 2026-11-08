@@ -288,7 +288,8 @@ fn every_enabled_input_is_read_in_table_order() {
         st.drive_vpk
     );
     let limit = &st.inputs[2];
-    assert_eq!(limit.limit, Some(100.0 * 10f64.powf(3.0 / 20.0)));
+    // The limit the notch holds the channel to: its profile's level.
+    assert_eq!(limit.limit, Some(100.0));
     assert!(st.cola_vpk.is_none());
     let id = st.identification.expect("identification ran");
     assert_eq!(id.gate_coherence, 0.0);

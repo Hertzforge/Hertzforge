@@ -600,8 +600,8 @@ pub struct SineInputReading {
     pub rms: f64,
     /// For a control row, its overload latch; `false` otherwise.
     pub overload: bool,
-    /// For a limit channel, its bound at the tone's frequency (the limit
-    /// profile's abort edge), the channel's unit, peak.
+    /// For a limit channel, its limit at the tone's frequency (the level its
+    /// profile states, which the notch holds it to), the channel's unit, peak.
     pub limit: Option<f64>,
 }
 

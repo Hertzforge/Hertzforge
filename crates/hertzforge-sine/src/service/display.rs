@@ -350,8 +350,8 @@ pub struct SineInputCurves {
     pub phase_deg: Vec<f32>,
     /// Broadband rms over the tick, the channel's unit.
     pub rms: Vec<f32>,
-    /// For a limit channel, its bound (the limit profile's abort edge at the
-    /// frequency), the channel's unit, peak.
+    /// For a limit channel, its limit at the frequency (the level its profile
+    /// states, which the notch holds it to), the channel's unit, peak.
     pub limit: Option<Vec<f32>>,
 }
 

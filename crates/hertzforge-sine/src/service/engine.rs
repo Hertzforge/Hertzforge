@@ -257,8 +257,8 @@ pub struct ControlSnapshot {
     pub input_tracked: Vec<f64>,
     pub input_phase_deg: Vec<f64>,
     pub input_rms: Vec<f64>,
-    /// Per limit channel, in configuration order: its bound at the tick's
-    /// frequency (the limit profile's abort edge).
+    /// Per limit channel, in configuration order: its limit at the tick's
+    /// frequency (the level its profile states, which the notch holds it to).
     pub limit_bound: Vec<f64>,
     /// The control law's counters and its values on the last call.
     pub law_calls: u64,
@@ -2171,10 +2171,15 @@ impl SineProcessStep {
         ticks.clear();
         ticks.extend(self.limit_channels.iter().map(|lc| {
             let tracked = self.tracked.get(lc.input_slot).copied().unwrap_or(0.0);
+            // The notch holds the channel at its LIMIT, the level its profile
+            // states; the limit-channel abort stays at that profile's abort
+            // edge above it. (Holding it at the abort edge itself put the
+            // notch and the abort on the same number, and a binding notch then
+            // tripped on the first read a hair over.)
             let limit = lc
                 .profile
-                .abort_bounds(f)
-                .map(|(_, hi)| hi)
+                .target_accel_g_pk(f)
+                .filter(|v| v.is_finite() && *v > 0.0)
                 .unwrap_or(f64::INFINITY);
             let sysid_h = lc.sysid_h.as_ref().map(|(freqs, h)| interp_at(freqs, h, f));
             LimitChannelTick {
@@ -2473,12 +2478,11 @@ impl SineProcessStep {
         let f_meas = self.tick_freq_hz;
         let mut limit_bound = std::mem::take(&mut self.limit_bound_buf);
         limit_bound.clear();
-        limit_bound.extend(self.limit_channels.iter().map(|lc| {
-            lc.profile
-                .abort_bounds(f_meas)
-                .map(|(_, hi)| hi)
-                .unwrap_or(f64::NAN)
-        }));
+        limit_bound.extend(
+            self.limit_channels
+                .iter()
+                .map(|lc| lc.profile.target_accel_g_pk(f_meas).unwrap_or(f64::NAN)),
+        );
         let t_s = self.frames_processed as f64 / self.fs_hz;
         let drive_vpk = self.current_drive_scale;
         let cola_vpk = self

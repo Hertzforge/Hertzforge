@@ -204,7 +204,7 @@
 {"drive":"3fe485a651c59be7","fixture":"d_ladder_by_hand","freq_hz":"4066800000000000","level_db":"0000000000000000","measured":"3feff6a048334f70","notch":false,"servo_faulted":false,"servo_level_db":"4027fa0bf2e2c7e2","servo_step_db":"bf6a27c51fdf9002","tick":512}
 {"end":"Stopped","fixture":"d_ladder_by_hand","hash":"e171f686416646b2","notch_ticks":0,"ticks":599,"trip":"None"}
 {"drive":"3fab51c0a0c907ad","fixture":"e_notch","freq_hz":"406f400000000000","level_db":"0000000000000000","measured":"3fb1e68483463f87","notch":false,"servo_faulted":false,"servo_level_db":"3fe337fffffffffd","servo_step_db":"3fe337fffffffffd","tick":0}
-{"end":"Aborted","fixture":"e_notch","hash":"4af7c7f54cbf13da","notch_ticks":136,"ticks":149,"trip":"Some(LimitChannel { channel_index: 3, measured: 0.7553652808900813, limit: 0.7553552470765004 })"}
+{"end":"Stopped","fixture":"e_notch","hash":"225b4c5857642cc8","notch_ticks":417,"ticks":424,"trip":"None"}
 {"drive":"3fa999999999999a","fixture":"f_rstd_phase_hold","freq_hz":"4062c00000000000","level_db":"0000000000000000","measured":"3f32a3d94f56a07d","notch":false,"servo_faulted":false,"servo_level_db":"0000000000000000","servo_step_db":"0000000000000000","tick":0}
 {"drive":"3fa999999999999a","fixture":"f_rstd_phase_hold","freq_hz":"4072c00000000000","level_db":"0000000000000000","measured":"3fc27f064077f18f","notch":false,"servo_faulted":false,"servo_level_db":"0000000000000000","servo_step_db":"0000000000000000","tick":512}
 {"end":"Stopped","fixture":"f_rstd_phase_hold","hash":"0e8c122e9c6d13fe","notch_ticks":0,"ticks":1024,"trip":"None"}
