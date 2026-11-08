@@ -2604,6 +2604,3 @@ same refusals. A case's result:
  "refused":0,"limited_components":0,"calls":10,"worst_call_ms":0.1,"budget_ms":250,
  "max_drive_vpk":0.41}
 ```
-
-The service does not run the SRS check yet; `laws.check` on an SRS law is refused
-`law_check_unsupported` until it does.

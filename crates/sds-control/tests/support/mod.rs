@@ -67,6 +67,8 @@ pub fn options(
         // Classical shock likewise runs on the simulated engine here; the wire runs
         // on the controller's service set their own (tests/shock_sim_run.rs).
         shock_engine: Some(server::simulated_shock_engine()),
+        // SRS shock likewise (tests/srs_sim_run.rs sets its own).
+        srs_engine: Some(server::simulated_srs_engine()),
     }
 }
 
