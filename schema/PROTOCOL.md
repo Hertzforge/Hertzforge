@@ -1931,7 +1931,7 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
 | `schedule.start_db` | the first level | The level a run starts at, between the first and last levels |
 | `schedule.advance` | `count` | `count` moves to the next level after its pulses; `on_pass` moves only on a passing pulse |
 | `schedule.max_pulses_per_level` | 5 | With `on_pass`, pulses at one level without a pass (in `manual`, failing pulses in a row at one level) before the run ends `not_converged`; 1 to 100 |
-| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, seconds: `cooling_s`, `settling_s` and `compute_s`, each 0 to 3600. The time between pulses (`derived.spacing_s`) is the largest of them, above 0 |
+| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, seconds: `cooling_s`, `settling_s` and `compute_s`, each 0 to 3600. The time between pulses (`derived.spacing_s`) is the largest of them, above 0. A pulse starts when the station's clock starts its record, and the time between pulses holds between two such starts, from the pulse before a train to the train's first pulse too |
 | `identification.drive_vrms` | 0.05 | Band-limited random at this many volts rms, below the drive ceiling; its peak is held under the drive ceiling |
 | `identification.duration_s`, `nfft` | 4, 2048 | Its length, 0.5 to 120 s, and the block it is estimated in (a power of two, 256 to 65536, at most half the samples) |
 | `identification.band_hz` | 5 to the lesser of 5000 Hz and 0.4 times the rate | The band it excites, below half the rate |
@@ -2067,7 +2067,8 @@ pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled 
 - `pulses`: `fired` and `passed` over the run; `at_level` pulses fired at this level, and in
   `auto` `of_level` the pulses the schedule fires here (0 in `manual`).
 - `next_pulse_s`: in `auto`, the seconds until the next pulse fires; in `manual`, until
-  `shock.fire` is accepted (0 once it is); null when no pulse is due.
+  `shock.fire` is accepted (0 once it is); null when no pulse is due. It counts from the last
+  pulse's start, the moment the station's clock started its record.
 - `identification` and `prediction` are null until identification is done. `identification`
   is the drive it played (rms and peak, volts) and its mean in-band coherence against the hold.
   `prediction` is the predicted full-level drive peak against the ceiling and the abort, and the
@@ -2137,7 +2138,8 @@ held; an older pulse's are refused `not_found`, its row is still in `shock.pulse
   window, percent of the reference), `velocity_change_ips` and `velocity_change_ratio` (over the
   nominal), the three `verdicts` and `passed` are the core's judgement; null when the pulse was
   not measured.
-- `srs` counts the SRS bands within the informational band; `at_s` is seconds from the start.
+- `srs` counts the SRS bands within the informational band; `at_s` is the pulse's start, the
+  moment the station's clock started its record, in seconds from when the run armed.
 - `law` is the call that produced the drive this pulse played (`used` false and `miss` the
   reason when the drive in force was refired after a miss); null for a pulse fired in force by a
   train or burst.
@@ -2439,8 +2441,8 @@ alarm and abort bands), **Pulse** (the measured pulse), **Drive** (the drive as 
  "law":{"used":true,"miss":null,"call_ms":0.2}}
 ```
 
-- `origin` is always `ladder`; `scheduled_db`, `commanded_db`, `limit_scale` and `drive_vpk` as
-  classical shock's.
+- `origin` is always `ladder`; `scheduled_db`, `commanded_db`, `limit_scale`, `drive_vpk` and
+  `at_s` as classical shock's.
 - `peak_g`, `velocity_pk_ips` and `displacement_pk_pk_in` are the measured pulse's kinematics.
   `worst_err_db` is the band furthest from the target at the level fired and `worst_band_hz` its
   centre; `alarm_bands` and `abort_bands` count the bands outside each band of the envelope;

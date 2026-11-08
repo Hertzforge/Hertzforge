@@ -111,8 +111,9 @@ the bands the table has and fills the rest.
   inside the alarm band, but for a band a limit channel holds down reading low; the law keeps
   correcting until a level's pulses pass, and too many tries at one level end the run as not
   converged), or after its pulses, passed or not.
-- **Time between pulses:** at least the largest of the cooling, settling and computing times. It
-  also sets the control law's time budget, a share of it.
+- **Time between pulses:** at least the largest of the cooling, settling and computing times,
+  from the moment the station starts one pulse to the moment it starts the next. It also sets the
+  control law's time budget, a share of it.
 
 ## Identification
 
