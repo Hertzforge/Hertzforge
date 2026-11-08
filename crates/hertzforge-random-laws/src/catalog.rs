@@ -693,6 +693,7 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
         AnyLaw::ShockClassical(l) => (l.manifest().clone(), LawWorld::ShockClassical, None),
         AnyLaw::ShockSrs(l) => (l.manifest().clone(), LawWorld::ShockSrs, None),
         AnyLaw::Sine(l) => (l.manifest().clone(), LawWorld::Sine, None),
+        AnyLaw::Twr(l) => (l.manifest().clone(), LawWorld::Twr, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),

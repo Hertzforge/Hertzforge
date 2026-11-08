@@ -56,6 +56,7 @@ pub fn law_fault(e: &LawError) -> LawFault {
         | LawError::BadClassicalOutput { .. }
         | LawError::BadSrsOutput { .. }
         | LawError::BadSineOutput { .. }
+        | LawError::BadTwrOutput { .. }
         | LawError::Compile(_)
         | LawError::NotALaw(_)
         | LawError::ManifestInvalid(_)
