@@ -200,9 +200,7 @@ impl fmt::Display for OutputRule {
             }
             OutputRule::NotPositive => "a gain was not above zero",
             OutputRule::GainRise => "a gain rose more than the per-call cap",
-            OutputRule::PredictedPeak => {
-                "the drive's predicted response peak was over its bound"
-            }
+            OutputRule::PredictedPeak => "the drive's predicted response peak was over its bound",
         };
         f.write_str(words)
     }

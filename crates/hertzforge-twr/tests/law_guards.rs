@@ -418,6 +418,9 @@ fn the_envelope_is_watched_during_a_play() {
     // The plant's gain steps up 6 dB after the identification.
     let station = Twisted::new(sim_backend(), 1, 2.0, 0);
     let mut svc = service(station, no_backoff(), Mode::Ok);
+    svc.advance().unwrap();
+    // What the identification clocked, its rest pad included.
+    let after_id = svc.station_frames();
     run(&mut svc);
     assert_eq!(svc.state(), TwrState::Aborted, "{:?}", svc.event_log());
     let trip = svc.trip().unwrap().clone();
@@ -436,9 +439,7 @@ fn the_envelope_is_watched_during_a_play() {
     assert_eq!(trip.play, Some(0), "the play it cut short");
     // Cut within the debounce and one block: the station clocked the
     // identification, then at most the lag, the trip sample and one block.
-    let cfg = no_backoff();
-    let id = cfg.sysid.build_excitation(common::FS).len() as u64;
-    let pad = svc.station_frames() - id;
+    let pad = svc.station_frames() - after_id;
     let lag = svc.lag_frames().unwrap() as u64;
     let block = hertzforge_hal::default_block_frames(common::FS) as u64;
     assert!(
@@ -537,7 +538,7 @@ fn every_call_is_recorded_between_plays() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("law.json")).unwrap()).unwrap();
     assert_eq!(law["law"]["id"], "test-law");
     assert_eq!(law["guards"]["max_misses"], 3);
-    let index = std::fs::read_to_string(dir.join("law_calls.json")).unwrap();
+    let index = std::fs::read_to_string(dir.join("law_calls.jsonl")).unwrap();
     let lines: Vec<serde_json::Value> = index
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())

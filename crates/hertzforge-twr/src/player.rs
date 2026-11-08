@@ -227,6 +227,27 @@ pub trait ReferencePlayer {
         Vec::new()
     }
 
+    /// [`ReferencePlayer::play`], watching the response as each block arrives
+    /// against `watch`: when the response leaves the abort band for the
+    /// debounce count of samples in a row, the play is cut short at the next
+    /// block boundary with the emergency stop and the call returns
+    /// [`TwrError::Aborted`]; [`ReferencePlayer::take_watch_trip`] then says
+    /// where. The default plays unwatched, for a path that cannot see its
+    /// response arrive.
+    fn play_watched(
+        &mut self,
+        drive: &[f64],
+        _watch: &PlayWatch<'_>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
+        self.play(drive)
+    }
+
+    /// What the watch found on the play it cut short, once. `None` when the
+    /// last watched play was not cut short.
+    fn take_watch_trip(&mut self) -> Option<WatchTrip> {
+        None
+    }
+
     /// Bring the path up: open, configure, adopt the rate, consult the arm
     /// gate. Called ONCE per run.
     ///
@@ -279,6 +300,32 @@ pub trait ReferencePlayer {
     fn emergency_stop(&mut self) -> Result<(), TwrError> {
         self.stop()
     }
+}
+
+/// What a watched play checks each sample against as it arrives: the level
+/// target on the record grid, aligned as the response is (sample `j` of the
+/// response is raw sample `j + lag`).
+#[derive(Debug, Clone, Copy)]
+pub struct PlayWatch<'a> {
+    /// The level target, record samples.
+    pub target: &'a [f64],
+    /// The abort band, control units: `|response - target|` over it counts.
+    pub band: f64,
+    /// Samples in a row over the band that cut the play short.
+    pub debounce: usize,
+    /// The target's peak, for the worst fraction.
+    pub peak: f64,
+}
+
+/// Where a watched play was cut short.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WatchTrip {
+    /// The response sample it tripped at.
+    pub at_sample: usize,
+    /// Samples in a row over the band when it tripped.
+    pub samples: usize,
+    /// The worst `|response - target| / peak` over what was read.
+    pub worst_frac: f64,
 }
 
 fn hal_err(e: HalError) -> TwrError {
@@ -361,6 +408,8 @@ pub struct BackendReferencePlayer<B: Backend> {
     /// Frames read back on the last play, the rest pad included: what the
     /// station clocked ([`ReferencePlayer::last_play_frames`]).
     last_played: usize,
+    /// Where the last watched play was cut short.
+    watch_trip: Option<WatchTrip>,
     /// The display tap (off unless a caller asks for one).
     ///
     /// SHARED since the daemon host landed, and that is what makes daemon-side time streaming
@@ -483,6 +532,7 @@ impl<B: Backend> BackendReferencePlayer<B> {
             cancel: Arc::new(AtomicBool::new(false)),
             last_committed: 0,
             last_played: 0,
+            watch_trip: None,
             tap: None,
             play_observer: None,
         })
@@ -806,8 +856,13 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// first `pipeline_lag_frames` frames are dropped, so `response[k]` is the
     /// plant output while `drive[k]` was commanded. Everything downstream - the
     /// FRF, the coherence gate, the inverse update - assumes that pairing.
-    fn play_cycle(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
+    fn play_cycle(
+        &mut self,
+        drive: &[f64],
+        watch: Option<&PlayWatch<'_>>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
         self.last_played = 0;
+        self.watch_trip = None;
         if !self.configured {
             return Err(TwrError::State("play() before arm()".into()));
         }
@@ -843,6 +898,15 @@ impl<B: Backend> BackendReferencePlayer<B> {
         // while this play runs. The clones are two `Arc` bumps per play.
         let tap = self.tap.clone();
         let observer = self.play_observer.clone();
+        // The watch: per sample, two subtractions and a compare, no allocation.
+        // A trip raises the cancel flag, so the play stops at the next block
+        // boundary as an operator's stop would, and is then torn down with the
+        // emergency stop.
+        let lag = self.pipeline_lag_frames;
+        let cancel = Arc::clone(&self.cancel);
+        let mut consec = 0usize;
+        let mut worst = 0.0f64;
+        let mut tripped: Option<WatchTrip> = None;
         let played = hertzforge_hal::play_block_wise(
             &mut self.backend,
             &self.drive_scratch,
@@ -868,6 +932,33 @@ impl<B: Backend> BackendReferencePlayer<B> {
                         }
                     }
                 }
+                if let Some(w) = watch {
+                    for (i, y) in raw.iter().enumerate().skip(first) {
+                        let Some(j) = i.checked_sub(lag) else {
+                            continue;
+                        };
+                        let Some(&t) = w.target.get(j) else {
+                            continue;
+                        };
+                        let e = (y - t).abs();
+                        if w.peak > 0.0 {
+                            worst = worst.max(e / w.peak);
+                        }
+                        if e > w.band {
+                            consec += 1;
+                            if consec >= w.debounce && tripped.is_none() {
+                                tripped = Some(WatchTrip {
+                                    at_sample: j,
+                                    samples: consec,
+                                    worst_frac: 0.0,
+                                });
+                                cancel.store(true, Ordering::Relaxed);
+                            }
+                        } else {
+                            consec = 0;
+                        }
+                    }
+                }
                 if let Some(obs) = observer.as_ref() {
                     obs(PlayProgress {
                         frames_done: raw.len(),
@@ -876,6 +967,9 @@ impl<B: Backend> BackendReferencePlayer<B> {
                 }
             },
         );
+        if let Some(t) = tripped.as_mut() {
+            t.worst_frac = worst;
+        }
 
         // What the station clocked, on every path: the frames read back.
         self.last_played = raw.len();
@@ -888,8 +982,24 @@ impl<B: Backend> BackendReferencePlayer<B> {
         // DAQmx queue - mid-record preemption is refused by the hardware
         // (-200289), so the honest stop arithmetic is
         // `(frames_committed - frames_done)/fs + the taper`.
-        let stopped = self.backend.stop();
+        let stopped = if tripped.is_some() {
+            // Cut short by the watch: the immediate teardown, as an abort.
+            self.configured = false;
+            self.backend.emergency_stop()
+        } else {
+            self.backend.stop()
+        };
         match played {
+            Err(StreamError::Cancelled { .. }) if tripped.is_some() => {
+                stopped.map_err(hal_err)?;
+                let t = tripped.expect("checked");
+                self.watch_trip = Some(t);
+                return Err(TwrError::Aborted(format!(
+                    "response envelope abort during the play: |error| over the abort band for \
+                     {} consecutive samples (at sample {})",
+                    t.samples, t.at_sample
+                )));
+            }
             Err(StreamError::Cancelled {
                 frames_done,
                 frames_expected,
@@ -1162,7 +1272,19 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
     }
 
     fn play(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
-        self.play_cycle(drive)
+        self.play_cycle(drive, None)
+    }
+
+    fn play_watched(
+        &mut self,
+        drive: &[f64],
+        watch: &PlayWatch<'_>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
+        self.play_cycle(drive, Some(watch))
+    }
+
+    fn take_watch_trip(&mut self) -> Option<WatchTrip> {
+        self.watch_trip.take()
     }
 
     fn request_cancel(&self) {

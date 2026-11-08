@@ -27,6 +27,13 @@
 //! On the clip fixture (d) the first split is at play 8 (its drives until then
 //! within 7e-14 of peak, its responses bit for bit); after it the worst is
 //! about 2e-8.
+//!
+//! **One guard binds by design.** On the gain-step fixture (h) the envelope
+//! watched during a play cuts the second play short, where the run without the
+//! seam judged it whole and tripped after it. There both runs must end on the
+//! envelope at that play, and the plays before it compare as above. Every
+//! other guard (the per-call caps, the predicted peak, the first-drive bound,
+//! the alignment check at 1 frame) is at its default and binds on no fixture.
 
 mod common;
 
@@ -42,6 +49,10 @@ struct Run {
     plays: Vec<(PlayRow, Vec<f64>)>,
     /// Each play's measured response.
     resp: Vec<Vec<f64>>,
+    /// The play the envelope cut short during the play, when it did.
+    cut: Option<u64>,
+    /// The trip's kind and play.
+    trip: Option<(String, Option<u64>)>,
     end: (TwrState, u64, Option<String>, Option<String>),
 }
 
@@ -65,6 +76,8 @@ fn run(f: &Fixture, seam: bool) -> Run {
         steps: Vec::new(),
         plays: Vec::new(),
         resp: Vec::new(),
+        cut: None,
+        trip: None,
         end: (TwrState::Configured, 0, None, None),
     };
     let advance = |svc: &mut TwrService<BackendReferencePlayer<Box<dyn Backend>>>,
@@ -115,6 +128,14 @@ fn run(f: &Fixture, seam: bool) -> Run {
         out.steps.push((st.state, st.level_db, st.rung));
     }
     let st = svc.status();
+    out.trip = st
+        .trip
+        .as_ref()
+        .map(|t| (t.kind.as_str().to_string(), t.play));
+    out.cut = st.trip.as_ref().and_then(|t| match t.kind {
+        hertzforge_twr::TripKind::Envelope { in_play: true, .. } => t.play,
+        _ => None,
+    });
     out.end = (
         st.state,
         st.station_frames,
@@ -134,10 +155,30 @@ fn close(a: f64, b: f64, rel: f64) -> bool {
 fn the_seam_with_the_built_in_is_the_run_without_it() {
     let mut report = Vec::new();
     for f in fixtures() {
-        let (open, seam) = (run(&f, false), run(&f, true));
+        let (mut open, seam) = (run(&f, false), run(&f, true));
         let tag = f.tag;
         assert_eq!(open.steps, seam.steps, "{tag}: the steps");
-        assert_eq!(open.end, seam.end, "{tag}: the end");
+        if let Some(cut) = seam.cut {
+            // The envelope watched during a play binds by design where the
+            // run without the seam judged the play whole and tripped after:
+            // both end on the envelope at that play, and the plays before it
+            // compare as everywhere else.
+            assert_eq!(open.trip, Some(("envelope".into(), Some(cut))), "{tag}");
+            assert_eq!(open.end.0, seam.end.0, "{tag}: the end state");
+            assert_eq!(
+                seam.plays.len() as u64,
+                cut,
+                "{tag}: the play cut short has no row"
+            );
+            open.plays.truncate(cut as usize);
+            open.resp.truncate(cut as usize);
+            report.push(format!(
+                "{tag}: the envelope during the play cut play {cut} short; the run without \
+                 the seam judged it whole and tripped after it"
+            ));
+        } else {
+            assert_eq!(open.end, seam.end, "{tag}: the end");
+        }
         assert_eq!(open.plays.len(), seam.plays.len(), "{tag}: the plays");
         let (mut worst, mut worst_metric, mut flips) = (0.0f64, 0.0f64, 0usize);
         let mut split: Option<u64> = None;
