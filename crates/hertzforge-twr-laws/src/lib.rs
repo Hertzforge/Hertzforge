@@ -18,9 +18,6 @@
 //! The law catalog, check records and the arming rule are
 //! `hertzforge-random-laws`'s, shared by every world.
 //!
-//! Not built yet: [`resolve_twr`] refuses every law, [`run_twr_check_case`]
-//! refuses every case, and [`judge_twr`] passes none.
-//!
 //! [`TwrLawFactory`]: hertzforge_twr::TwrLawFactory
 //! [`LawChoice`]: hertzforge_random_laws::LawChoice
 //! [`LawCatalog`]: hertzforge_random_laws::LawCatalog
@@ -31,10 +28,17 @@
 
 mod check;
 mod choice;
+mod wasm;
 
 pub use check::{
-    judge_twr, run_twr_check_case, CheckRunError, TwrCaseEnd, TwrCaseMeasure, TwrCheckCase,
-    TwrCheckPlant, TwrRequirement, TWR_CHECK_DRIVE_CEILING_V, TWR_CHECK_FS_HZ, TWR_CHECK_LEVELS_DB,
-    TWR_CHECK_PEAK_G, TWR_CHECK_RECORD_LEN, TWR_CHECK_SYSID_DRIVE_VRMS, TWR_CHECK_VERSION,
+    judge_twr, run_twr_check_case, twr_check_config, twr_check_record, twr_check_reference,
+    twr_check_station, CheckRunError, TwrCaseEnd, TwrCaseMeasure, TwrCheckCase, TwrCheckPlant,
+    TwrCheckStation, TwrCheckStationSpec, TwrRequirement, TWR_CHECK_DRIVE_CEILING_V,
+    TWR_CHECK_FEEDTHROUGH, TWR_CHECK_FS_HZ, TWR_CHECK_LEVELS_DB, TWR_CHECK_NOISE_FLOOR_G,
+    TWR_CHECK_PEAK_G, TWR_CHECK_RECORD_LEN, TWR_CHECK_SYSID_DRIVE_VRMS, TWR_CHECK_TIKHONOV_FLOOR,
+    TWR_CHECK_VERSION,
 };
-pub use choice::{default_twr_choice, resolve_twr, DEFAULT_TWR_LAW_ID};
+pub use choice::{
+    builtin_twr_params, default_twr_choice, resolve_twr, BuiltinTwrFactory, DEFAULT_TWR_LAW_ID,
+};
+pub use wasm::{twr_law_fault, WasmTwrLaw, WasmTwrLawFactory};

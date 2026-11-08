@@ -1498,9 +1498,15 @@ version = "0.1.0"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-module-abi",
  "hertzforge-random-laws",
+ "hertzforge-sdm",
  "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
  "hertzforge-twr",
+ "serde_json",
 ]
 
 [[package]]

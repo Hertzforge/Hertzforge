@@ -23,6 +23,7 @@ use hertzforge_law_host::{
 use hertzforge_mimo_laws::BuiltinMimo;
 use hertzforge_shock_law_math::classical as fdc;
 use hertzforge_shock_law_math::srs as srsr;
+use hertzforge_shock_law_math::twr as twrc;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -124,6 +125,22 @@ pub fn srs_builtin_manifest() -> Manifest {
         srsr::SUMMARY,
         srsr::KNOBS,
         srsr::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in TWR law, `twr_correct`.
+pub const TWR_BUILTIN_ID: &str = twrc::ID;
+
+/// The built-in TWR law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`: the same manifest its law file
+/// (`laws/twr-correct`) describes.
+pub fn twr_builtin_manifest() -> Manifest {
+    math_manifest(
+        twrc::NAME,
+        twrc::VERSION,
+        twrc::SUMMARY,
+        twrc::KNOBS,
+        twrc::DIAGNOSTICS,
     )
 }
 
@@ -247,6 +264,10 @@ fn classical_builtin_entry() -> CatalogEntry {
 
 fn srs_builtin_entry() -> CatalogEntry {
     shock_builtin_entry(SRS_BUILTIN_ID, srs_builtin_manifest(), LawWorld::ShockSrs)
+}
+
+fn twr_builtin_entry() -> CatalogEntry {
+    shock_builtin_entry(TWR_BUILTIN_ID, twr_builtin_manifest(), LawWorld::Twr)
 }
 
 fn shock_builtin_entry(id: &str, manifest: Manifest, world: LawWorld) -> CatalogEntry {
@@ -537,11 +558,25 @@ impl LawCatalog {
         }
     }
 
-    /// Every TWR law. None yet: the built-in `twr_correct` and `twr-single`
-    /// law files are listed here once they are served (the built-in first,
-    /// then the imported files by name, version and hash).
+    /// Every TWR law, the built-in `twr_correct` (the default) first, then the
+    /// imported `twr-single` law files by name, version and hash.
     pub fn twr_entries(&self) -> Vec<CatalogEntry> {
-        Vec::new()
+        std::iter::once(twr_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Twr(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// The imported TWR law file with `id` (its SHA-256).
+    pub fn twr_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedTwrLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::Twr(l)) => Some(l),
+            _ => None,
+        }
     }
 
     /// Every law of `world`.
@@ -588,6 +623,9 @@ impl LawCatalog {
         }
         if id == SINE_BUILTIN_ID {
             return Some(sine_builtin_entry());
+        }
+        if id == TWR_BUILTIN_ID {
+            return Some(twr_builtin_entry());
         }
         self.imported_law(id).map(imported_entry)
     }

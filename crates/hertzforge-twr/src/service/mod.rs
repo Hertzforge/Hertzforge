@@ -222,6 +222,9 @@ pub struct TwrService<P: ReferencePlayer> {
     law_factory: Option<Arc<dyn TwrLawFactory>>,
     /// The clock law calls are timed on.
     law_clock: Arc<dyn LawClock>,
+    /// The law check's identification error: the identified gain scaled by
+    /// this factor before it is inverted. `None` in every run but the check's.
+    identification_scale: Option<f64>,
 }
 
 impl<P: ReferencePlayer> TwrService<P> {
@@ -340,6 +343,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             closed: config_has_control.then(closed::Closed::default),
             law_factory: None,
             law_clock: Arc::new(MonotonicClock::new()),
+            identification_scale: None,
         };
         if blocked {
             svc.log("feasibility hard-block: a kinematic ceiling failed");
@@ -359,6 +363,15 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// "slow" deterministically).
     pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
         self.law_clock = clock;
+        self
+    }
+
+    /// Scale the identified gain by `db` before it is inverted, as an
+    /// identification that was that many dB wrong would. The control-law
+    /// check's identification-error case runs this; no run that drives
+    /// hardware sets it.
+    pub fn with_identification_scale_db(mut self, db: f64) -> Self {
+        self.identification_scale = Some(10f64.powf(db / 20.0));
         self
     }
 
@@ -546,7 +559,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             return Err(TwrError::Play(msg.to_string()));
         }
 
-        let sysid = match self.config.sysid.estimate(&excitation, &response, fs) {
+        let mut sysid = match self.config.sysid.estimate(&excitation, &response, fs) {
             Ok(s) => s,
             Err(e) => {
                 // COHERENCE HOLD. The state goes up BEFORE the return: leaving
@@ -560,6 +573,12 @@ impl<P: ReferencePlayer> TwrService<P> {
             }
         };
         let mean = sysid.in_band_mean_coherence;
+        if let Some(k) = self.identification_scale {
+            for c in sysid.h.iter_mut() {
+                c.0 *= k;
+                c.1 *= k;
+            }
+        }
         let inv = GridInverse::from_sysid(
             &sysid,
             &self.config.inverse,

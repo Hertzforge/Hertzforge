@@ -75,7 +75,9 @@ pub use player::{BackendReferencePlayer, ReferencePlayer, TwrPath};
 pub use reference::{ReferenceWaveform, WaveformError};
 pub use schedule::{RunSchedule, Section, TwrLadderState, TwrLevelSchedule};
 pub use service::config::TwrConfig;
-pub use service::{PlayRow, TwrService, TwrState, TwrStatus};
+pub use service::{
+    PlayLawCall, PlayRow, TwrCallPayload, TwrCallRecord, TwrService, TwrState, TwrStatus,
+};
 pub use sysid::{Excitation, SysIdConfig, SysIdResult};
 pub use trip::{TripKind, TwrTrip};
 

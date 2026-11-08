@@ -21,9 +21,20 @@ hertzforge-twr.workspace = true
 hertzforge-random-laws.workspace = true
 # The abstract backend a check case runs on.
 hertzforge-hal.workspace = true
+# The law host: a `twr-single` law file built for a run (`WasmTwrLaw`).
+hertzforge-law-host.workspace = true
+# The law seam's fault, value and descriptor types.
+hertzforge-shock-common.workspace = true
+# The built-in's parameters, checked against their declaration.
+hertzforge-shock-law-math.workspace = true
+# The channel table and the station class a check case's player is built with.
+hertzforge-channel-table.workspace = true
+hertzforge-module-abi.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-# The law seam's fault and descriptor types, and the channel table a backend is
-# configured with, for the test doubles that pin the refusals.
-hertzforge-channel-table.workspace = true
-hertzforge-shock-common.workspace = true
+# The simulated stations the check cases run on in this crate's own tests, built
+# from the check's station facts as the controller builds them.
+hertzforge-hal-sim.workspace = true
+# The FRF matrix the anti-resonance case's station plays.
+hertzforge-sdm.workspace = true
