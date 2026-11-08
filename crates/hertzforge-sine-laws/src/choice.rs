@@ -66,12 +66,14 @@ pub fn resolve_sine(
                 let params = law.resolve_params(&choice.params, 1).map_err(bad_param)?;
                 Ok(Arc::new(WasmSineLawFactory::new(law.clone(), params)))
             }
-            LawWorld::Single | LawWorld::Mimo | LawWorld::ShockClassical | LawWorld::ShockSrs => {
-                Err(ChoiceError::WrongTestType {
-                    id: choice.id.clone(),
-                    law_is_for: entry.world.test_type(),
-                })
-            }
+            LawWorld::Single
+            | LawWorld::Mimo
+            | LawWorld::ShockClassical
+            | LawWorld::ShockSrs
+            | LawWorld::Twr => Err(ChoiceError::WrongTestType {
+                id: choice.id.clone(),
+                law_is_for: entry.world.test_type(),
+            }),
         },
     }
 }

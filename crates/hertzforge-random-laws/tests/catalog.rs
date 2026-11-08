@@ -558,3 +558,29 @@ fn the_sine_world_lists_its_built_in_first_with_its_live_parameters() {
     ));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_twr_world_is_named_and_lists_nothing_until_its_laws_are_served() {
+    assert_eq!(LawWorld::Twr.as_str(), "twr");
+    assert_eq!(LawWorld::Twr.test_type(), "TWR");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-twr-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let cat = open(&root);
+    assert!(cat.entries_for(LawWorld::Twr).is_empty());
+    assert!(cat.twr_entries().is_empty());
+    // The built-in's id is its own: no built-in of another world holds it yet.
+    assert!(cat.entry("twr_correct").is_none());
+    // No other world's list gains or loses anything.
+    assert!(cat
+        .entries()
+        .iter()
+        .chain(cat.mimo_entries().iter())
+        .chain(cat.shock_classical_entries().iter())
+        .chain(cat.shock_srs_entries().iter())
+        .chain(cat.sine_entries().iter())
+        .all(|e| e.world != LawWorld::Twr));
+    let _ = std::fs::remove_dir_all(root);
+}

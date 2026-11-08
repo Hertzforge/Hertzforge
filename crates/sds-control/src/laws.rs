@@ -21,6 +21,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::ShockClassical => "shock_classical",
         LawWorld::ShockSrs => "shock_srs",
         LawWorld::Sine => "sine",
+        LawWorld::Twr => "twr",
     }
 }
 
@@ -299,6 +300,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockClassical => Ok(()),
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Err("Sine"),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
     }
@@ -345,6 +347,7 @@ pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockClassical => Err("classical shock"),
             LawWorld::ShockSrs => Ok(()),
             LawWorld::Sine => Err("Sine"),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
     }
@@ -392,6 +395,7 @@ pub fn sine_facts(e: &CatalogEntry) -> crate::sine::config::LawFacts {
             LawWorld::ShockClassical => Err("classical shock"),
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Ok(()),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
         live: e.live.clone(),
