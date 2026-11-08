@@ -1372,6 +1372,7 @@ dependencies = [
  "hertzforge-shock-common",
  "hertzforge-shock-host",
  "hertzforge-shock-law-math",
+ "hertzforge-srs",
  "serde_json",
 ]
 

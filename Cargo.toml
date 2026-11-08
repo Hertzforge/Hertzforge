@@ -34,6 +34,7 @@ hertzforge-shock-common = { path = "crates/hertzforge-shock-common" }
 hertzforge-shock-host = { path = "crates/hertzforge-shock-host" }
 hertzforge-shock-law-math = { path = "crates/hertzforge-shock-law-math" }
 hertzforge-shock-laws = { path = "crates/hertzforge-shock-laws" }
+hertzforge-srs = { path = "crates/hertzforge-srs" }
 hertzforge-station = { path = "crates/hertzforge-station" }
 hertzforge-twr = { path = "crates/hertzforge-twr" }
 # `preserve_order`: protocol headers keep the key order they were written in, which

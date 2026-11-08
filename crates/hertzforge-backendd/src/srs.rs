@@ -1315,6 +1315,9 @@ fn translate_srs(p: &SrsProfile) -> Result<SrsTestConfig, ProtocolError> {
                 value: m.value.clone(),
             })
             .collect(),
+        // This host runs SRS as it always has: the synthesis in g written as
+        // volts, no closed-loop settings.
+        control: None,
     };
     cfg.validate().map_err(|e| ProtocolError::InvalidArgument {
         message: e.to_string(),

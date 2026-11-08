@@ -18,8 +18,12 @@
 //! - the shaker + moving mass for the DETERMINISTIC feasibility gate (crest = 1.0);
 //! - the [`DriveLimit`] peak ceilings (the honesty split: enforcement, not
 //!   prediction);
-//! - the optional reduced-level system ID (Path-B-only).
+//! - the optional reduced-level system ID (Path-B-only);
+//! - the closed loop's settings ([`SrsControl`]: the drive ceiling and abort in
+//!   volts, the identification cap, pacing, the law's guards), which the
+//!   control service always sets.
 
+use crate::control::SrsControl;
 use crate::iterate::SynthesisOpts;
 use hertzforge_dsp::srs::{octave_freqs, OctaveFraction};
 use hertzforge_shaker_db::{MovingMass, ShakerRecord};
@@ -594,6 +598,14 @@ pub struct SrsTestConfig {
     pub review_after_sysid: bool,
     /// User metadata.
     pub metadata: Vec<MetaField>,
+    /// The closed loop: the drive ceiling and abort in volts, the
+    /// identification burst's cap and coherence hold, pacing between pulses,
+    /// the law's guards and the core's gain cap. `None` is the run as it was
+    /// before the drive was in volts, kept for the old daemon host and the
+    /// recorded trace only; the control service always sets it. Left out of
+    /// the serialized settings when `None`, so an existing record is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<SrsControl>,
 }
 
 /// The serde default for [`SrsTestConfig::review_after_sysid`].
@@ -632,6 +644,7 @@ impl SrsTestConfig {
             ring_out_s: DEFAULT_RING_OUT_S,
             review_after_sysid: default_review_after_sysid(),
             metadata: MetaField::defaults(),
+            control: None,
         }
     }
 
@@ -820,6 +833,15 @@ impl SrsTestConfig {
                 "ring_out_s must be finite and >= 0".into(),
             ));
         }
+        if let Some(c) = &self.control {
+            if self.sysid.is_none() {
+                return Err(ConfigError::BadConfig(
+                    "the closed loop needs system identification: the drive in volts comes                      from the identified plant"
+                        .into(),
+                ));
+            }
+            c.validate().map_err(ConfigError::BadConfig)?;
+        }
         Ok(())
     }
 }
@@ -849,4 +871,41 @@ fn log_log_interp(points: &[(f64, f64)], f: f64) -> f64 {
     let (f1, g1) = points[hi];
     let t = (f / f0).ln() / (f1 / f0).ln();
     g0 * (g1 / g0).powf(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_config_without_control_serializes_as_before_and_one_with_it_round_trips() {
+        // `control: None` adds nothing to the settings record, so existing
+        // records and their readers are unchanged.
+        let open = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+        let json = serde_json::to_value(&open).unwrap();
+        assert!(json.get("control").is_none(), "{json}");
+        let back: SrsTestConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(back.control, None);
+        assert_eq!(serde_json::to_value(&back).unwrap(), json);
+
+        let mut c = open;
+        c.control = Some(SrsControl::new(0.5, 0.8));
+        c.validate().unwrap();
+        let text = serde_json::to_string(&c).unwrap();
+        let back: SrsTestConfig = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn a_bad_closed_loop_setting_or_a_closed_loop_without_identification_is_refused() {
+        let mut c = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+        c.control = Some(SrsControl::new(0.5, 0.4));
+        let e = c.validate().unwrap_err();
+        assert!(e.to_string().contains("drive_vpk_abort"), "{e}");
+
+        c.control = Some(SrsControl::new(0.5, 0.8));
+        c.sysid = None;
+        let e = c.validate().unwrap_err();
+        assert!(e.to_string().contains("identification"), "{e}");
+    }
 }

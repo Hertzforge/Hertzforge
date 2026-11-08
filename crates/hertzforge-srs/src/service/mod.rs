@@ -68,6 +68,7 @@ pub mod config;
 pub mod plant;
 pub mod report;
 
+use crate::control::SrsLawFactory;
 use crate::iterate::{synthesize_to_target, SynthesisEngine};
 use crate::law::{LawLimits, SrsSynthesisLaw};
 use crate::limit::{predict_response_srs, LimitChannel, PredictiveNotch};
@@ -80,6 +81,7 @@ use hertzforge_capture::{default_data_root, save_snapshot, CaptureConfig, Captur
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_dsp::srs::srs_analyze;
 use hertzforge_shaker_db::FeasibilityReport;
+use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use hertzforge_shock_common::pulse_store::{build_snapshot, capture_pulse};
 use hertzforge_shock_common::{
     predict_peak_accel_g, pulse_feasibility, MeasuredPeak, MonitorEnforcement, PathCapabilities,
@@ -224,6 +226,15 @@ pub struct SrsShockService {
 
     // --- one-shot honesty notes ---------------------------------------------------
     noted_no_frf_prediction: bool,
+
+    // --- the control-law seam -------------------------------------------------------
+    /// The factory the closed loop builds its law with, after identification.
+    /// `None`: the built-in `srs_ratio`. Stored, not yet called: the closed loop
+    /// that calls it is not built, and [`SrsShockService::new`] refuses a
+    /// configuration that asks for it.
+    law_factory: Option<Arc<dyn SrsLawFactory>>,
+    /// The clock law calls are timed on.
+    law_clock: Arc<dyn LawClock>,
 }
 
 impl SrsShockService {
@@ -237,6 +248,14 @@ impl SrsShockService {
         data_root: Option<PathBuf>,
     ) -> Result<Self, ServiceError> {
         cfg.validate()?;
+        if cfg.control.is_some() {
+            return Err(ServiceError::Config(ConfigError::BadConfig(
+                "closed-loop SRS control (the drive in volts with its ceiling and abort, \
+                 pacing between pulses and a chosen control law) is not built yet; this \
+                 service runs only without `control`"
+                    .into(),
+            )));
+        }
         table.validate().map_err(|e| {
             ServiceError::Config(ConfigError::BadConfig(format!("channel table: {e}")))
         })?;
@@ -297,6 +316,8 @@ impl SrsShockService {
             data_root,
             delegated_log: DelegatedFireLog::default(),
             noted_no_frf_prediction: false,
+            law_factory: None,
+            law_clock: Arc::new(MonotonicClock::new()),
         };
         // Path honesty is logged up front, not discovered mid-run.
         let honesty = Honesty::for_path(svc.path.drive_path());
@@ -307,6 +328,22 @@ impl SrsShockService {
             });
         }
         Ok(svc)
+    }
+
+    /// Install the factory the closed loop builds its control law with. Without
+    /// one the closed loop uses the built-in `srs_ratio`.
+    ///
+    /// Stored only: nothing calls it until the closed loop is built.
+    pub fn with_law_factory(mut self, factory: Arc<dyn SrsLawFactory>) -> Self {
+        self.law_factory = Some(factory);
+        self
+    }
+
+    /// Install the clock law calls are timed on (a test clock makes a law
+    /// "slow" deterministically).
+    pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
     }
 
     // --- introspection ------------------------------------------------------------

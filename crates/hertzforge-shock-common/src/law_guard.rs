@@ -19,8 +19,9 @@
 //!   identity in the records.
 //!
 //! The arithmetic of each module's own output checks and change caps lives
-//! with that module (classical shock in `hertzforge-shock-host`); what is here
-//! is what both shock modules share.
+//! with that module (classical shock in `hertzforge-shock-host`, SRS in
+//! `hertzforge-srs`); what is here is what both shock modules share, the names
+//! of every output rule included.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -156,6 +157,11 @@ pub enum OutputRule {
     BinRise,
     /// The seed's predicted response peak was over the first-drive bound.
     FirstDrive,
+    /// A gain was zero or negative (an SRS law's gains are multiplicative
+    /// and must be above zero).
+    NotPositive,
+    /// A gain rose more than the per-pulse gain cap (an SRS law).
+    GainRise,
 }
 
 impl OutputRule {
@@ -169,6 +175,8 @@ impl OutputRule {
             OutputRule::PeakRise => "peak_rise",
             OutputRule::BinRise => "bin_rise",
             OutputRule::FirstDrive => "first_drive",
+            OutputRule::NotPositive => "not_positive",
+            OutputRule::GainRise => "gain_rise",
         }
     }
 }
@@ -185,6 +193,8 @@ impl fmt::Display for OutputRule {
             OutputRule::FirstDrive => {
                 "the first drive's predicted response was over the first-drive bound"
             }
+            OutputRule::NotPositive => "a gain was not above zero",
+            OutputRule::GainRise => "a gain rose more than the per-pulse cap",
         };
         f.write_str(words)
     }
@@ -512,6 +522,14 @@ mod tests {
             LawFault::BadOutput(OutputRule::FirstDrive).reason(),
             "first_drive"
         );
+        assert_eq!(
+            LawFault::BadOutput(OutputRule::NotPositive).reason(),
+            "not_positive"
+        );
+        assert_eq!(
+            LawFault::BadOutput(OutputRule::GainRise).reason(),
+            "gain_rise"
+        );
         // The serde name of each rule is its wire name.
         for rule in [
             OutputRule::WrongLength,
@@ -521,6 +539,8 @@ mod tests {
             OutputRule::PeakRise,
             OutputRule::BinRise,
             OutputRule::FirstDrive,
+            OutputRule::NotPositive,
+            OutputRule::GainRise,
         ] {
             assert_eq!(
                 serde_json::to_value(rule).unwrap(),

@@ -1021,3 +1021,67 @@ fn i_stop_parks_the_plant_and_abort_emergency_stops_it() {
         "abort takes the EMERGENCY teardown, not the ramped one"
     );
 }
+
+// ===========================================================================
+// The control-law seam: stored, and the closed loop refused until it is built
+// ===========================================================================
+
+/// A factory that refuses to build, enough to prove the seam's traits are
+/// object safe and the service stores one.
+struct NeverBuilds;
+
+impl crate::control::SrsLawFactory for NeverBuilds {
+    fn build(
+        &self,
+        _setup: &crate::control::SrsLawSetup<'_>,
+    ) -> Result<Box<dyn crate::control::SrsLaw + Send>, hertzforge_shock_common::LawFault> {
+        Err(hertzforge_shock_common::LawFault::Failed("never".into()))
+    }
+
+    fn describe(&self) -> hertzforge_shock_common::LawDescriptor {
+        hertzforge_shock_common::LawDescriptor {
+            id: "never".into(),
+            name: "never".into(),
+            version: "0".into(),
+            sha256: None,
+            params: serde_json::json!({}),
+        }
+    }
+}
+
+#[test]
+fn closed_loop_control_is_refused_until_the_loop_is_built() {
+    // The seam is a contract only: a configuration that asks for the closed
+    // loop must not quietly run the drive in g written as volts instead.
+    let spy = Arc::new(PlantSpy::default());
+    let mut cfg = mock_cfg();
+    cfg.control = Some(crate::control::SrsControl::new(0.5, 0.8));
+    let refused = SrsShockService::new(
+        cfg,
+        siso_table(),
+        FirePath::Host(Box::new(MockPlant::new(
+            Arc::clone(&spy),
+            20_000.0,
+            20_000.0,
+        ))),
+        Some(std::env::temp_dir().join(format!("hertzforge-srs-mock-{}", std::process::id()))),
+    );
+    match refused {
+        Err(ServiceError::Config(e)) => assert!(e.to_string().contains("not built"), "{e}"),
+        Err(e) => panic!("refused for the wrong reason: {e}"),
+        Ok(_) => panic!("a closed-loop configuration was accepted"),
+    }
+    assert_eq!(spy.fires(), 0);
+
+    // Without it the service builds as before, and stores a factory and a
+    // clock without calling either.
+    let s = mock_service(
+        mock_cfg(),
+        MockPlant::new(Arc::clone(&spy), 20_000.0, 20_000.0),
+    )
+    .with_law_factory(Arc::new(NeverBuilds))
+    .with_law_clock(Arc::new(
+        hertzforge_shock_common::law_guard::MonotonicClock::new(),
+    ));
+    assert_eq!(s.state(), RunState::Idle);
+}
