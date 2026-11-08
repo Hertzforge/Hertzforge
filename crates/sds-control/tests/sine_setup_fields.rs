@@ -703,3 +703,32 @@ fn a_one_level_dwell_needs_no_time_at_the_levels_before_full_level() {
         .iter()
         .any(|(r, f)| r == "out_of_range" && f == "schedule.per_level.sweeps"));
 }
+
+/// The built-in named without its compression runs at the compression its
+/// manifest declares as the default, as its law does: the configuration's
+/// compression sets the settle window, so the two must agree.
+#[test]
+fn the_built_in_named_without_its_compression_takes_its_declared_default() {
+    let mut c = golden();
+    c["control"]["law"]["params"]
+        .as_object_mut()
+        .unwrap()
+        .remove("compression");
+    let w = wire(&c);
+    let mut facts = sds_control::laws::builtin_sine_facts();
+    for (name, want) in [
+        ("fast", CompressionPreset::Fast),
+        ("slow", CompressionPreset::Slow),
+    ] {
+        for p in facts.params.iter_mut().filter(|p| p.key == "compression") {
+            if let hertzforge_law_host::ParamKind::Choice(spec) = &mut p.kind {
+                spec.default = name.into();
+            }
+        }
+        assert_eq!(
+            w.build(&table(w.cola.enabled), &facts).compression,
+            want,
+            "the manifest declares {name}"
+        );
+    }
+}
