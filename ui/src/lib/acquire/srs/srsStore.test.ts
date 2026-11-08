@@ -199,6 +199,24 @@ describe('the SRS shock store', () => {
 		expect(srs.status?.end?.outcome).toBe('operator_stop');
 	});
 
+	it("offers Fire again once the live frame says the time between pulses has passed", async () => {
+		const { srs } = await screen({ speed: 4 });
+		ready(srs);
+		srs.setup.schedule.mode = 'manual';
+		srs.setup.identification.review = false;
+		expect(await srs.apply()).toBe(true);
+		await srs.start();
+		await until(() => srs.verbs.fire.enabled, 4000);
+		expect(await srs.fire()).toBe(true);
+		await until(() => srs.pulses.length === 1 && srs.status?.phase === 'waiting');
+		expect(srs.verbs.fire.enabled).toBe(false);
+		// the state said the next pulse was a while off; the live frames count it down
+		await until(() => srs.live?.phase === 'waiting' && (srs.now?.next_pulse_s ?? 1) <= 0.05, 4000);
+		expect(srs.verbs.fire.reason).toBeNull();
+		expect(srs.verbs.fire.enabled).toBe(true);
+		await srs.abort();
+	});
+
 	it('refuses the manual verbs on an automatic schedule, and the run slot both ways with classical shock and Random', async () => {
 		const { client, acq, srs } = await screen({ speed: 1 });
 		ready(srs);
