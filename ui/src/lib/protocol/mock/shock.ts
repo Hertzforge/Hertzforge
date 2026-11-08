@@ -1202,6 +1202,11 @@ export function createShockMock(host: ShockMockHost): ShockMock {
 				}
 				if (!Array.isArray(params.plots)) refuse('bad_request', 'bad_params', 'A subscription lists its plots, or asks for the default.', { param: 'plots' });
 				const plots = (params.plots as ShockSubscribePlot[]).filter((p) => typeof p.id === 'string');
+				plots.forEach((p, i) => {
+					if (p.points != null && !['pulse', 'velocity', 'displacement'].includes(p.quantity)) {
+						refuse('bad_request', 'bad_params', '"points" applies to the pulse, velocity and displacement plots', { param: `plots[${i}].points` });
+					}
+				});
 				const rate = typeof params.rate_hz === 'number' ? params.rate_hz : 2;
 				subs.set(conn, { rate, plots });
 				if (run && run.state !== 'configured' && run.state !== 'unconfigured') {

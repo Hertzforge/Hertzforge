@@ -91,9 +91,15 @@ export function shockPagePlots(page: ShockPageSpec, width = 900, pixelRatio = 1)
 	return PAGE_QUANTITIES[page.kind].map((quantity) => ({ id: shockPlotId(page, quantity), quantity, points }));
 }
 
-/** What a window sends: its plots, or the default subscription when it shows none. */
+/** The quantities drawn as time histories: the only plots that take a point count. */
+export const TIME_QUANTITIES: readonly ShockQuantity[] = ['pulse', 'velocity', 'displacement'];
+
+/** What a window sends: its plots, or the default subscription when it shows none. A point count
+ * goes with the time histories only; the service refuses it on any other plot. */
 export function shockSubscribeParams(plots: ShockPlotSpec[], rate: number): Record<string, unknown> {
-	const wanted: ShockSubscribePlot[] = plots.map((p) => ({ id: p.id, quantity: p.quantity, points: p.points }));
+	const wanted: ShockSubscribePlot[] = plots.map((p) =>
+		TIME_QUANTITIES.includes(p.quantity) ? { id: p.id, quantity: p.quantity, points: p.points } : { id: p.id, quantity: p.quantity }
+	);
 	return wanted.length ? { rate_hz: rate, plots: wanted } : { default: true };
 }
 

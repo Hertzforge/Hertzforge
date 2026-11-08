@@ -13,10 +13,10 @@
 //
 // 1. The chooser offers Classical Shock; its screen opens on Setup, and the screen takes control.
 //    The SIM badge is checked at every step: a simulated run never shows LIVE.
-// 2. Pulse: the service draws the pulse with its tolerance band, velocity and displacement;
+// 2. Pulse, a 1 g peak: the service draws the pulse with its tolerance band, velocity and displacement;
 //    half-sine shoulders 1.5 times the duration leave the quiet window and say so; back to
 //    rectangular shoulders four times the duration, inside it.
-// 3. Limits: the drive ceiling and abort, which have no default.
+// 3. Identification in blocks of 8192 points; Limits: the drive ceiling and abort, which have no default.
 // 4. Control: the classical laws from the service; a law file imported by its path shows its
 //    parameters from its manifest; the built-in law is chosen again for the run.
 // 5. Proceed to Run applies; Start identifies; the review hold brings |H| and the coherence
@@ -220,6 +220,9 @@ try {
 
 	// ---- Pulse ----------------------------------------------------------------------------------
 	await section(a, 'pulse');
+	// A 1 g peak: the simulated station needs about 2 V a g, so the full-level drive stays under
+	// the 3 V drive abort set below.
+	await fill(tid(a, 'shock-amplitude'), 1);
 	await until(a, 'the preview', async (p) => (await attr(p, 'shock-preview', 'data-state')) === 'ok', 30_000);
 	const legend = await text(a, 'shock-preview-view-0');
 	check('the service draws the pulse with its tolerance band', /Reference/.test(legend) && /tolerance/i.test(legend), legend.slice(0, 120));
@@ -234,6 +237,12 @@ try {
 	await tid(a, 'shock-comp-rectangular').click();
 	await fill(tid(a, 'shock-pre'), 4);
 	await until(a, 'back inside the quiet window', async (p) => (await attr(p, 'shock-quiet', 'data-inside')) === 'true', 20_000);
+
+	// ---- Identification: blocks of 8192 points (6.25 Hz at 51 200 Hz). The simulated station's
+	// low-frequency gain is not flat, and at 2048 points (25 Hz) the pulse's velocity change sits
+	// about 20% low at the first level and the run ends not converged there.
+	await section(a, 'identification');
+	await tid(a, 'shock-id-nfft').selectOption('8192');
 
 	// ---- Limits ---------------------------------------------------------------------------------
 	await section(a, 'limits');
