@@ -263,6 +263,18 @@ impl ServiceEngine {
         e
     }
 
+    /// A test engine running the core's own iteration, without the law seam.
+    fn lawless(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.without_law
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+
     fn svc(&mut self) -> Result<&mut Service, MethodError> {
         self.svc
             .as_mut()
@@ -605,11 +617,14 @@ pub fn row_of(p: &hertzforge_twr::PlayRow) -> PlayRow {
 
 impl TwrEngine for ServiceEngine {
     fn arm(&mut self, plan: ArmPlan) -> Result<ArmOutcome, MethodError> {
-        let law = plan.law?;
+        let law = match plan.law {
+            Ok(f) => Some(f),
+            Err(e) if !self.lawless() => return Err(e),
+            Err(_) => None,
+        };
         #[allow(unused_mut)]
         let mut cfg = plan.cfg.build(&plan.stored, &plan.facts);
-        #[cfg(test)]
-        if self.without_law {
+        if self.lawless() {
             cfg.control = None;
         }
         let built = station::build(&plan.station, &*plan.scanner)?;
@@ -666,9 +681,10 @@ impl TwrEngine for ServiceEngine {
         .with_display_tap(TAP_SAMPLES)
         .with_play_observer(observer);
         let tap = player.display_tap_handle();
-        let mut svc = TwrService::new(player, cfg)
-            .map_err(arm_refused)?
-            .with_law_factory(law);
+        let mut svc = TwrService::new(player, cfg).map_err(arm_refused)?;
+        if let Some(law) = law {
+            svc = svc.with_law_factory(law);
+        }
         let feas =
             super::reference::feasibility(svc.feasibility(), plan.cfg.shape.feasibility.any());
         let verdict = (feas.verdict, feas.message.clone());
@@ -1004,5 +1020,177 @@ impl TwrEngine for ServiceEngine {
 
     fn take_log(&mut self) -> Vec<(&'static str, String)> {
         std::mem::take(&mut self.log)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The engine against the controller's own TWR service on the simulated station:
+    //! what the wire is told of a real run (identification, rows, station time, the
+    //! end by its kind), with the core's own iteration in place of the law seam.
+
+    use super::*;
+    use crate::station::FixedScanner;
+    use crate::twr::reference::{self, ImportOptions, ImportRequest, Source};
+    use hertzforge_channel_table::Units;
+
+    fn ctx() -> EngineContext {
+        EngineContext {
+            signals: Signals::new(),
+            progress: Arc::new(Progress::default()),
+            sim_speed: 0.0,
+        }
+    }
+
+    fn table() -> ChannelTable {
+        let mut t = crate::table::Table::new().table;
+        let mut c = crate::table::new_row(1);
+        c.role = ChannelRole::Control;
+        let mut d = crate::table::new_row(2);
+        d.role = ChannelRole::Drive;
+        d.units = Units::VoltageV;
+        t.channels = vec![c, d];
+        t
+    }
+
+    fn plan(cfg: serde_json::Value) -> ArmPlan {
+        let root = std::env::temp_dir().join(format!(
+            "sds-twr-engine-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let text: String = (0..2048)
+            .map(|i| {
+                let k = ((i + 16) % 64) as f64;
+                format!("{}\n", 0.25 * (1.0 - (k - 32.0).abs() / 16.0))
+            })
+            .collect();
+        let stored = reference::import(
+            &root,
+            &ImportRequest {
+                source: Source::Text(text),
+                options: ImportOptions {
+                    fs_hz: Some(12_800.0),
+                    column: 0,
+                    units: None,
+                },
+                name: None,
+            },
+        )
+        .unwrap();
+        let mut cfg = cfg;
+        cfg["reference"] = serde_json::json!({"sha256": stored.sha256});
+        let w = crate::twr::config::parse(&cfg).unwrap();
+        ArmPlan {
+            cfg: Arc::new(w),
+            stored: Arc::new(stored),
+            facts: crate::laws::builtin_twr_facts(),
+            table: table(),
+            station: StationPlan::Sim { fs_hz: 12_800.0 },
+            scanner: Arc::new(FixedScanner(Err(
+                hertzforge_station::StationBuildError::NoNiDevices,
+            ))),
+            data_root: root.clone(),
+            capture_root: Some(root),
+            bind: "ws://127.0.0.1:0/".into(),
+            law: Err(MethodError::internal("no law in this test")),
+            ack: None,
+        }
+    }
+
+    fn config() -> serde_json::Value {
+        serde_json::json!({
+            "reference": {"sha256": "0".repeat(64)},
+            "identification": {"duration_s": 1, "drive_vrms": 0.05},
+            "schedule": {"levels_db": [-6, 0], "max_iterations": 8},
+            "limits": {"drive_vpk_ceiling": 5}
+        })
+    }
+
+    #[test]
+    fn a_run_on_the_core_maps_to_rows_station_time_and_its_end() {
+        let mut e = ServiceEngine::without_law(ctx());
+        let armed = match e.arm(plan(config())).unwrap() {
+            ArmOutcome::Armed(a) => a,
+            ArmOutcome::Blocked(b) => panic!("blocked: {b:?}"),
+        };
+        assert_eq!(armed.fs_hz, 12_800.0);
+        assert_eq!(armed.record_len, 4096);
+        assert!(armed.tap.is_some());
+        let facts = match e.identify().unwrap() {
+            Identified::Done { facts, review } => {
+                assert!(review);
+                facts
+            }
+            Identified::Held { message, .. } => panic!("held: {message}"),
+            Identified::Ended { end, .. } => panic!("ended: {end:?}"),
+        };
+        assert!(facts.passed && facts.coherence_mean > 0.9, "{facts:?}");
+        assert_eq!(facts.lag_source, "measured");
+        assert!(facts.coverage.is_some_and(|c| c > 0.9));
+        let after_id = e.frames_clocked();
+        assert!(
+            after_id >= 12_800,
+            "the identification's frames count: {after_id}"
+        );
+        assert!(e.identification().is_some_and(|f| !f.phase_deg.is_empty()));
+        assert!(e.mask().is_some_and(|m| m.trusted.contains(&1.0)));
+        assert!(matches!(e.proceed().unwrap(), Proceeded::Ready(_)));
+        let mut rows = Vec::new();
+        let end = loop {
+            let p = e.play().unwrap();
+            assert!(p.cancelled_at.is_none());
+            if let Some(r) = p.row {
+                assert!(p.records.is_some());
+                rows.push(r);
+            }
+            if let Some(end) = p.end {
+                break end;
+            }
+            assert!(rows.len() < 40, "the run did not end");
+        };
+        assert_eq!(end.outcome, "completed", "{end:?}");
+        // Rows in order, the first at the first level, the last a playback play,
+        // each starting where the station's clock had got to.
+        assert_eq!(rows[0].index, 0);
+        assert_eq!(rows[0].level_db, -6.0);
+        assert_eq!(rows[0].start_frame, after_id);
+        assert!(rows
+            .windows(2)
+            .all(|w| w[1].start_frame == w[0].start_frame + w[0].frames));
+        let last = rows.last().unwrap();
+        assert!(
+            last.playback && last.gated && last.level_db == 0.0,
+            "{last:?}"
+        );
+        assert_eq!(e.frames_clocked(), last.start_frame + last.frames);
+        assert!(rows.iter().all(|r| r.lag_frames.is_none()));
+    }
+
+    #[test]
+    fn a_coverage_trip_ends_the_run_by_its_kind() {
+        let mut cfg = config();
+        cfg["correction"] = serde_json::json!({"band_hz": [20, 100], "min_band_energy": 0.95});
+        cfg["prep"] = serde_json::json!({"highpass_hz": 5});
+        let mut e = ServiceEngine::without_law(ctx());
+        assert!(matches!(e.arm(plan(cfg)).unwrap(), ArmOutcome::Armed(_)));
+        match e.identify().unwrap() {
+            Identified::Ended { end, .. } => {
+                assert_eq!(end.outcome, "aborted");
+                let trip = end.trip.expect("a trip");
+                assert_eq!(trip.kind(), "coverage");
+                assert_eq!(trip.play, None);
+            }
+            _ => panic!("the coverage floor should end the run"),
+        }
+    }
+
+    #[test]
+    fn a_law_that_cannot_be_built_refuses_the_arm() {
+        let mut e = ServiceEngine::new(ctx());
+        let Err(err) = e.arm(plan(config())) else {
+            panic!("armed without a law");
+        };
+        assert!(err.message.contains("no law"), "{}", err.message);
     }
 }
