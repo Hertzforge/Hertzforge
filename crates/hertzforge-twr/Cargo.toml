@@ -34,6 +34,10 @@ hertzforge-capture = { path = "../hertzforge-capture" }
 # the law's descriptor), shared with classical and SRS shock. No cycle:
 # hertzforge-shock-common does not depend on this crate.
 hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# The built-in law's arithmetic (`twr_correct`) and the world-convention
+# spectra the closed loop hands a law. No cycle: the math crate takes this one
+# as a dev-dependency only.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

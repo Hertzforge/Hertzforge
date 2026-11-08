@@ -12,6 +12,7 @@ use hertzforge_hal::{
     AcquisitionConfig, Backend, BackendStatus, Caps, ConfiguredActual, HalError, InputRead,
 };
 use hertzforge_hal_sim::{SimBackend, SimConfig};
+use hertzforge_twr::schedule::{GateFailPolicy, TwrRunMode};
 use hertzforge_twr::service::config::TwrConfig;
 use hertzforge_twr::{BackendReferencePlayer, ReferenceWaveform, RunSchedule};
 
@@ -201,4 +202,159 @@ impl<B: Backend> Backend for Twisted<B> {
     fn emergency_stop(&mut self) -> Result<(), HalError> {
         self.inner.emergency_stop()
     }
+}
+
+/// One step of a fixture's script.
+#[derive(Debug, Clone, Copy)]
+pub enum Step {
+    /// One unit of work.
+    Advance,
+    /// Advance until the run is no longer iterating at the level, at most
+    /// this many units.
+    UntilGated(usize),
+    /// Until the run ends, at most this many units.
+    ToEnd(usize),
+    Up,
+    Jump(usize),
+    Play,
+}
+
+/// The station a fixture runs on.
+#[derive(Debug, Clone, Copy)]
+pub enum Station {
+    /// `sim_e2e`'s plant as it is.
+    Sim,
+    /// The plant twisted from the `after`-th play on ([`Twisted`]).
+    Twisted {
+        after: usize,
+        gain: f32,
+        delay: usize,
+    },
+}
+
+impl Station {
+    pub fn backend(self) -> Box<dyn Backend> {
+        match self {
+            Station::Sim => Box::new(sim_backend()),
+            Station::Twisted { after, gain, delay } => {
+                Box::new(Twisted::new(sim_backend(), after, gain, delay))
+            }
+        }
+    }
+}
+
+/// One recorded run: its tag, station, configuration and script.
+pub struct Fixture {
+    pub tag: &'static str,
+    pub station: Station,
+    pub cfg: TwrConfig,
+    pub script: Vec<Step>,
+}
+
+pub fn no_backoff() -> TwrConfig {
+    let mut c = config();
+    c.law.initial_drive_backoff_db = 0.0;
+    c
+}
+
+/// The recorded trace's fixtures (see `recorded_trace.rs`).
+pub fn fixtures() -> Vec<Fixture> {
+    use Step::*;
+    let mut out = Vec::new();
+    // (a) sim_e2e's run through the ladder, its 6 dB backoff.
+    out.push(Fixture {
+        tag: "a",
+        station: Station::Sim,
+        cfg: config(),
+        script: vec![ToEnd(400)],
+    });
+    // (b) The only rung is 0 dB.
+    let mut c = no_backoff();
+    c.schedule.table_db = vec![0.0];
+    c.run = RunSchedule::LoopN(1);
+    out.push(Fixture {
+        tag: "b",
+        station: Station::Sim,
+        cfg: c,
+        script: vec![ToEnd(100)],
+    });
+    // (c) MANUAL: two corrections at -12 dB, three +1 dB steps, one
+    // correction, the jump to 0 dB, corrections to the gate, playback.
+    let mut c = no_backoff();
+    c.schedule.mode = TwrRunMode::Manual;
+    out.push(Fixture {
+        tag: "c",
+        station: Station::Sim,
+        cfg: c,
+        script: vec![
+            Advance,
+            Advance,
+            Advance,
+            Up,
+            Up,
+            Up,
+            Advance,
+            Jump(4),
+            UntilGated(10),
+            Play,
+            ToEnd(10),
+        ],
+    });
+    // (d) The per-sample clip engaged from -3 dB on; a level that does not
+    // gate holds.
+    let mut c = no_backoff();
+    c.limits.drive_clip = Some(0.12);
+    c.schedule.on_gate_fail = GateFailPolicy::Hold;
+    out.push(Fixture {
+        tag: "d",
+        station: Station::Sim,
+        cfg: c,
+        script: vec![ToEnd(100)],
+    });
+    // (e) The 6 dB backoff in MANUAL at -12 dB: four corrections.
+    let mut c = config();
+    c.schedule.mode = TwrRunMode::Manual;
+    out.push(Fixture {
+        tag: "e",
+        station: Station::Sim,
+        cfg: c,
+        script: vec![Advance, Advance, Advance, Advance, Advance],
+    });
+    // (f) Adaptation during three playback plays.
+    let mut c = no_backoff();
+    c.adapt_during_playback = true;
+    c.run = RunSchedule::LoopN(3);
+    out.push(Fixture {
+        tag: "f",
+        station: Station::Sim,
+        cfg: c,
+        script: vec![ToEnd(100)],
+    });
+    // (g) The plant's sign flips after the identification.
+    let mut c = no_backoff();
+    c.limits.envelope_abort_frac = 50.0;
+    c.limits.envelope_alarm_frac = 25.0;
+    c.schedule.max_iterations_per_level = 20;
+    out.push(Fixture {
+        tag: "g",
+        station: Station::Twisted {
+            after: 1,
+            gain: -0.8,
+            delay: 0,
+        },
+        cfg: c,
+        script: vec![ToEnd(100)],
+    });
+    // (h) The plant's gain triples after the first correction.
+    out.push(Fixture {
+        tag: "h",
+        station: Station::Twisted {
+            after: 2,
+            gain: 3.0,
+            delay: 0,
+        },
+        cfg: no_backoff(),
+        script: vec![ToEnd(100)],
+    });
+    out
 }

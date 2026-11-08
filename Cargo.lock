@@ -1478,6 +1478,7 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-module-abi",
  "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
  "serde",
  "serde_json",
  "sha2",

@@ -33,11 +33,10 @@ mod common;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use common::{config, player, sim_backend, Twisted};
+use common::{fixtures, player, Step};
 use hertzforge_hal::Backend;
-use hertzforge_twr::schedule::{GateFailPolicy, TwrRunMode};
 use hertzforge_twr::service::config::TwrConfig;
-use hertzforge_twr::{BackendReferencePlayer, RunSchedule, TwrService, TwrState};
+use hertzforge_twr::{BackendReferencePlayer, TwrService, TwrState};
 use sha2::{Digest, Sha256};
 
 fn sha256_f64(x: &[f64]) -> String {
@@ -77,21 +76,6 @@ fn flat(key: &str, v: &serde_json::Value) -> String {
         Value::String(t) => format!("{key}={}", t.replace(' ', "_")),
         other => format!("{key}={other}"),
     }
-}
-
-/// One step of a fixture's script.
-#[derive(Clone, Copy)]
-enum Step {
-    /// One unit of work.
-    Advance,
-    /// Advance until the run is no longer iterating at the level, at most
-    /// this many units.
-    UntilGated(usize),
-    /// Until the run ends, at most this many units.
-    ToEnd(usize),
-    Up,
-    Jump(usize),
-    Play,
 }
 
 fn run_fixture<B: Backend>(
@@ -229,101 +213,12 @@ fn run_fixture<B: Backend>(
     .unwrap();
 }
 
-fn no_backoff() -> TwrConfig {
-    let mut c = config();
-    c.law.initial_drive_backoff_db = 0.0;
-    c
-}
-
 fn record_all() -> String {
     let mut out = String::new();
-    let sim = || player(sim_backend());
-
-    // (a) sim_e2e's run through the ladder, its 6 dB backoff.
-    run_fixture(&mut out, "a", sim(), config(), &[Step::ToEnd(400)]);
-
-    // (b) The only rung is 0 dB.
-    let mut c = no_backoff();
-    c.schedule.table_db = vec![0.0];
-    c.run = RunSchedule::LoopN(1);
-    run_fixture(&mut out, "b", sim(), c, &[Step::ToEnd(100)]);
-
-    // (c) MANUAL: two corrections at -12 dB, three +1 dB steps, one
-    // correction, the jump to 0 dB, corrections to the gate, playback.
-    let mut c = no_backoff();
-    c.schedule.mode = TwrRunMode::Manual;
-    run_fixture(
-        &mut out,
-        "c",
-        sim(),
-        c,
-        &[
-            Step::Advance,
-            Step::Advance,
-            Step::Advance,
-            Step::Up,
-            Step::Up,
-            Step::Up,
-            Step::Advance,
-            Step::Jump(4),
-            Step::UntilGated(10),
-            Step::Play,
-            Step::ToEnd(10),
-        ],
-    );
-
-    // (d) The per-sample clip engaged from -6 dB on; a level that does not
-    // gate holds.
-    let mut c = no_backoff();
-    c.limits.drive_clip = Some(0.12);
-    c.schedule.on_gate_fail = GateFailPolicy::Hold;
-    run_fixture(&mut out, "d", sim(), c, &[Step::ToEnd(100)]);
-
-    // (e) The 6 dB backoff in MANUAL at -12 dB: four corrections.
-    let mut c = config();
-    c.schedule.mode = TwrRunMode::Manual;
-    run_fixture(
-        &mut out,
-        "e",
-        sim(),
-        c,
-        &[
-            Step::Advance,
-            Step::Advance,
-            Step::Advance,
-            Step::Advance,
-            Step::Advance,
-        ],
-    );
-
-    // (f) Adaptation during three playback plays.
-    let mut c = no_backoff();
-    c.adapt_during_playback = true;
-    c.run = RunSchedule::LoopN(3);
-    run_fixture(&mut out, "f", sim(), c, &[Step::ToEnd(100)]);
-
-    // (g) The plant's sign flips after the identification.
-    let mut c = no_backoff();
-    c.limits.envelope_abort_frac = 50.0;
-    c.limits.envelope_alarm_frac = 25.0;
-    c.schedule.max_iterations_per_level = 20;
-    run_fixture(
-        &mut out,
-        "g",
-        player(Twisted::new(sim_backend(), 1, -0.8, 0)),
-        c,
-        &[Step::ToEnd(100)],
-    );
-
-    // (h) The plant's gain triples after the first correction.
-    run_fixture(
-        &mut out,
-        "h",
-        player(Twisted::new(sim_backend(), 2, 3.0, 0)),
-        no_backoff(),
-        &[Step::ToEnd(100)],
-    );
-
+    for f in fixtures() {
+        let tag = f.tag;
+        run_fixture(&mut out, tag, player(f.station.backend()), f.cfg, &f.script);
+    }
     out
 }
 

@@ -1,11 +1,8 @@
-//! The control-law seam as a contract: the service stores a law factory and a
-//! clock without calling either, and refuses a configuration that sets
-//! `control`, until the seam is built.
-//!
-//! The refusal matters for the same reason classical shock's and Sine's did: a
-//! configuration that asks for the core's guards (the call budget, the miss
-//! limit, the per-call caps, the first-drive bound, the alignment check, the
-//! at-rest taper) must not quietly run the built-in iteration without them.
+//! The control-law seam as a contract: a configuration that sets `control`
+//! builds, holds for review after a passing identification, and builds its
+//! law only at proceed (the installed factory's, or the built-in from the
+//! configuration's correction settings); a law that cannot be built ends the
+//! run on a law fault before anything plays.
 
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
 use hertzforge_hal_sim::SimConfig;
@@ -13,8 +10,8 @@ use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, MonotonicClock
 use hertzforge_twr::service::config::TwrConfig;
 use hertzforge_twr::service::TwrState;
 use hertzforge_twr::{
-    BackendReferencePlayer, ReferenceWaveform, TwrControl, TwrError, TwrLaw, TwrLawFactory,
-    TwrLawSetup, TwrService,
+    BackendReferencePlayer, ReferenceWaveform, TwrControl, TwrLaw, TwrLawFactory, TwrLawSetup,
+    TwrService,
 };
 use std::sync::Arc;
 
@@ -77,21 +74,52 @@ impl TwrLawFactory for Never {
 }
 
 #[test]
-fn a_configuration_that_sets_control_is_refused_until_the_seam_is_built() {
+fn under_control_the_run_holds_for_review_and_builds_its_law_at_proceed() {
     let mut c = config();
     c.control = Some(TwrControl::default());
-    match TwrService::new(player(), c) {
-        Err(TwrError::Config(m)) => {
-            assert!(m.contains("not built yet"), "{m}");
-            assert!(m.contains("control"), "{m}");
+    // Without a factory: the built-in, from the correction settings.
+    let mut svc = TwrService::new(player(), c.clone()).expect("a closed configuration builds");
+    assert!(
+        svc.proceed().is_err(),
+        "nothing to proceed from before identification"
+    );
+    svc.advance().unwrap();
+    assert_eq!(svc.state(), TwrState::Review, "{:?}", svc.event_log());
+    assert!(svc.law_descriptor().is_none(), "no law before proceed");
+    assert!(svc.advance().is_err(), "nothing plays at the review hold");
+    assert!(svc.plays().is_empty());
+    svc.proceed().unwrap();
+    assert_eq!(svc.state(), TwrState::Iterating);
+    let d = svc.law_descriptor().expect("the built-in");
+    assert_eq!(d.id, hertzforge_twr::control::TWR_CORRECT_ID);
+    assert_eq!(d.params["beta"], 0.5);
+    assert!(svc.drive_in_force_vpk().unwrap() > 0.0);
+    svc.advance().unwrap();
+    assert_eq!(svc.plays().len(), 1);
+
+    // An installed factory that cannot build: a law fault before any play.
+    let mut svc = TwrService::new(player(), c)
+        .unwrap()
+        .with_law_factory(Arc::new(Never));
+    svc.advance().unwrap();
+    svc.proceed().unwrap();
+    assert_eq!(svc.state(), TwrState::Aborted);
+    assert!(svc.plays().is_empty(), "nothing played");
+    let trip = svc.trip().expect("a trip");
+    match &trip.kind {
+        hertzforge_twr::TripKind::LawFault {
+            reason,
+            consecutive,
+        } => {
+            assert_eq!(reason, &LawFault::Failed("never built".into()));
+            assert_eq!(*consecutive, 1);
         }
-        Err(e) => panic!("refused for the wrong reason: {e}"),
-        Ok(_) => panic!("a configuration asking for the core's law guards ran without them"),
+        k => panic!("expected a law fault, got {k:?}"),
     }
 }
 
 #[test]
-fn a_bad_control_is_refused_by_its_field_before_the_seam_refusal() {
+fn a_bad_control_is_refused_by_its_field() {
     let mut c = config();
     c.control = Some(TwrControl {
         first_drive_ratio: 0.5,

@@ -16,6 +16,7 @@
 //! (level-invariant: error percent and the mask's relative floor both scale out
 //! the level).
 
+mod closed;
 pub mod config;
 pub mod plays;
 pub mod report;
@@ -28,7 +29,8 @@ use hertzforge_dsp::fft::Cplx;
 use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use serde::{Deserialize, Serialize};
 
-use crate::control::{PlayKind, TwrLawFactory};
+use crate::builtin::TwrCorrectFactory;
+use crate::control::{PlayInputs, PlayKind, TwrLawFactory, TwrLawSetup, TwrPlant, Verdict};
 use crate::grid::{irfft_half, rfft_half, RecordGrid};
 use crate::inverse::GridInverse;
 use crate::law;
@@ -52,6 +54,11 @@ pub enum TwrState {
     FeasibilityBlocked,
     /// Configured and feasible; sysid not yet run.
     Configured,
+    /// The identification passed and nothing plays until
+    /// [`TwrService::proceed`] builds the control law and seeds it. Only a run
+    /// under a changeable control law (`control` set) holds here; without one
+    /// the identification seeds the drive and the run goes on iterating.
+    Review,
     /// Correcting at a ladder level.
     Iterating,
     /// A level exhausted its iteration budget under the Hold policy; the
@@ -199,11 +206,13 @@ pub struct TwrService<P: ReferencePlayer> {
     station_frames: u64,
     /// What the core ended the run on, when it tripped.
     trip: Option<TwrTrip>,
+    /// The closed loop under a changeable control law; `None` without
+    /// `control`, which is the iteration the crate has always run.
+    closed: Option<closed::Closed>,
 
     // --- the control-law seam -----------------------------------------------------
     /// The factory a closed-loop run builds its control law with, at proceed.
-    /// Stored, not yet called: the seam that calls it is not built, and
-    /// [`TwrService::new`] refuses a configuration that sets `control`.
+    /// `None` builds the built-in from the configuration's correction settings.
     law_factory: Option<Arc<dyn TwrLawFactory>>,
     /// The clock law calls are timed on. Stored only until the seam reads it.
     #[allow(dead_code)]
@@ -216,16 +225,6 @@ impl<P: ReferencePlayer> TwrService<P> {
     pub fn new(mut player: P, config: TwrConfig) -> Result<Self, TwrError> {
         let fs = player.fs_hz();
         config.validate(fs)?;
-        // The law seam is a contract only so far: a configuration that asks for
-        // the core's guards on a changeable law must not quietly run the
-        // built-in iteration without them.
-        if config.control.is_some() {
-            return Err(TwrError::Config(
-                "the closed loop under a changeable control law (control) is not built yet; \
-                 this service runs only without it"
-                    .into(),
-            ));
-        }
 
         // ---- prep pipeline (documented order) ----
         let mut r = config.reference.clone();
@@ -285,6 +284,7 @@ impl<P: ReferencePlayer> TwrService<P> {
         player.set_reference_rate_hz(r.fs_hz);
 
         let ladder = TwrLadderState::new(config.schedule.clone())?;
+        let config_has_control = config.control.is_some();
         let path_caps = TwrPathCapabilities::for_path(player.path());
         if !path_caps.response_observable {
             return Err(TwrError::Config(
@@ -332,6 +332,7 @@ impl<P: ReferencePlayer> TwrService<P> {
             plays: Vec::new(),
             station_frames: 0,
             trip: None,
+            closed: config_has_control.then(closed::Closed::default),
             law_factory: None,
             law_clock: Arc::new(MonotonicClock::new()),
         };
@@ -342,9 +343,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     }
 
     /// Install the factory a closed-loop run builds its control law with, at
-    /// proceed.
-    ///
-    /// Stored only: nothing calls it until the law seam is built.
+    /// proceed. Without one, proceed builds the built-in law from the
+    /// configuration's correction settings.
     pub fn with_law_factory(mut self, factory: Arc<dyn TwrLawFactory>) -> Self {
         self.law_factory = Some(factory);
         self
@@ -398,6 +398,11 @@ impl<P: ReferencePlayer> TwrService<P> {
             TwrState::Holding => Err(TwrError::State(
                 "holding after gate failure: step/jump level, or abort".into(),
             )),
+            TwrState::Review => Err(TwrError::State(
+                "holding for review after a passing identification: proceed builds the control \
+                 law and seeds it"
+                    .into(),
+            )),
             TwrState::CoherenceHold => Err(TwrError::State(
                 "coherence hold: system identification did not meet the coherence floor, so \
                  the plant is not known and nothing may be driven from it. Adjust the sysid \
@@ -414,7 +419,10 @@ impl<P: ReferencePlayer> TwrService<P> {
         for _ in 0..max_units {
             match self.state {
                 TwrState::Complete | TwrState::Aborted | TwrState::Stopped => break,
-                TwrState::Holding | TwrState::FeasibilityBlocked | TwrState::CoherenceHold => break,
+                TwrState::Holding
+                | TwrState::FeasibilityBlocked
+                | TwrState::CoherenceHold
+                | TwrState::Review => break,
                 _ => {
                     self.advance()?;
                 }
@@ -579,6 +587,28 @@ impl<P: ReferencePlayer> TwrService<P> {
         }
         self.mask_coverage = Some(coverage);
 
+        if let Some(closed) = self.closed.as_mut() {
+            // Under a control law the seed is the law's, at proceed: hold here.
+            closed.plant = Some(closed::WorldPlant::new(
+                &sysid,
+                &inv,
+                &mask,
+                &self.prepared.grid,
+            ));
+            self.sysid = Some(sysid);
+            self.inv = Some(inv);
+            self.mask = mask;
+            self.state = TwrState::Review;
+            let coverage_pct = 100.0 * coverage;
+            self.log(&format!(
+                "sysid complete: in-band mean coherence {mean:.3}, mask covers {coverage_pct:.1}% \
+                 of target energy; holding for review"
+            ));
+            return Ok(Advanced::SysId {
+                in_band_mean_coherence: mean,
+            });
+        }
+
         // Initial drive at the CURRENT ladder level: D_0 = G * R * scale,
         // scaled DOWN by the conservative backoff (the iteration recovers it;
         // undershoot corrects upward safely, overshoot is an overtest).
@@ -629,7 +659,12 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// The played drive and response land in `last_drive` and `last_achieved`
     /// whether or not the response check tripped.
     fn play_current(&mut self, target_l: &[f64]) -> Result<PlayStep, TwrError> {
-        let mut drive = irfft_half(&self.drive_spec, self.prepared.grid.n);
+        let s = self.ladder.current_scale();
+        let mut drive = match self.closed_run() {
+            // The full-level drive in force, scaled to the level.
+            Some(run) => run.drive.iter().map(|&v| v * s).collect(),
+            None => irfft_half(&self.drive_spec, self.prepared.grid.n),
+        };
         let clipped = self.config.limits.apply_drive_clip(&mut drive);
         self.last_clipped_frac = if drive.is_empty() {
             0.0
@@ -638,7 +673,11 @@ impl<P: ReferencePlayer> TwrService<P> {
         };
         if clipped > 0 {
             // Clip-then-measure: the law corrects the REALIZED drive.
-            self.drive_spec = rfft_half(&drive, self.prepared.grid.n);
+            match self.closed.as_mut().and_then(|c| c.run.as_mut()) {
+                // The drive in force is the drive as played, at full level.
+                Some(run) => run.drive = drive.iter().map(|&v| v / s).collect(),
+                None => self.drive_spec = rfft_half(&drive, self.prepared.grid.n),
+            }
         }
         // THE CEILING, on the realized record and before the player sees it.
         if let Some(t) = self.config.limits.drive_peak_trip(&drive) {
@@ -753,15 +792,23 @@ impl<P: ReferencePlayer> TwrService<P> {
         let converged = self.ladder.check_gate(metrics.rms_error_pct);
         let mut clamped_bins = 0usize;
         if !converged && !self.adapt_frozen {
-            let inv = self.inv.as_ref().expect("iterating implies inverse");
-            clamped_bins = law::correct(
-                &mut self.drive_spec,
-                &r_l,
-                &played.y_half,
-                inv,
-                &self.mask,
-                &self.config.law,
-            );
+            if self.closed.is_some() {
+                let verdict = verdict(&metrics, converged);
+                match self.call_law(PlayKind::Iteration, verdict, played.clipped > 0) {
+                    Ok(n) => clamped_bins = n,
+                    Err(t) => return self.trip_with(t, None),
+                }
+            } else {
+                let inv = self.inv.as_ref().expect("iterating implies inverse");
+                clamped_bins = law::correct(
+                    &mut self.drive_spec,
+                    &r_l,
+                    &played.y_half,
+                    inv,
+                    &self.mask,
+                    &self.config.law,
+                );
+            }
         }
 
         let record = ConvergenceRecord {
@@ -811,7 +858,8 @@ impl<P: ReferencePlayer> TwrService<P> {
             ));
             if self.ladder.schedule().mode == TwrRunMode::Auto {
                 if let Some(step_db) = self.ladder.advance_level() {
-                    if let Err(refused) = self.scale_drive_db(step_db) {
+                    let to_db = self.ladder.current_level_db();
+                    if let Err(refused) = self.scale_drive_db(step_db, to_db) {
                         // Found on the step's exact projection: nothing played.
                         return self.trip_with(
                             LimitTrip {
@@ -881,18 +929,6 @@ impl<P: ReferencePlayer> TwrService<P> {
             return self.trip_with(t, Some(index));
         }
         // Optional continued adaptation during playback (default OFF).
-        let mut clamped_bins = 0usize;
-        if self.config.adapt_during_playback && !self.adapt_frozen {
-            let inv = self.inv.as_ref().expect("playing implies inverse");
-            clamped_bins = law::correct(
-                &mut self.drive_spec,
-                &r_l,
-                &played.y_half,
-                inv,
-                &self.mask,
-                &self.config.law,
-            );
-        }
         // Keep the metrics stream alive for the UI during playback.
         let metrics = ErrorMetrics::compute(
             &target_l,
@@ -902,6 +938,32 @@ impl<P: ReferencePlayer> TwrService<P> {
             &played.y_half,
             &self.mask,
         );
+        // Judged against the same gate as the ladder, without moving it.
+        let gated = metrics.rms_error_pct <= self.ladder.schedule().gate_rms_error_pct;
+        // Optional continued adaptation during playback (default OFF).
+        let mut clamped_bins = 0usize;
+        if self.config.adapt_during_playback && !self.adapt_frozen {
+            if self.closed.is_some() {
+                match self.call_law(
+                    PlayKind::Playback,
+                    verdict(&metrics, gated),
+                    played.clipped > 0,
+                ) {
+                    Ok(n) => clamped_bins = n,
+                    Err(t) => return self.trip_with(t, None),
+                }
+            } else {
+                let inv = self.inv.as_ref().expect("playing implies inverse");
+                clamped_bins = law::correct(
+                    &mut self.drive_spec,
+                    &r_l,
+                    &played.y_half,
+                    inv,
+                    &self.mask,
+                    &self.config.law,
+                );
+            }
+        }
         self.history.push(ConvergenceRecord {
             level_db: self.ladder.current_level_db(),
             iteration: 0, // 0 marks a playback play, not a correction pass
@@ -909,8 +971,6 @@ impl<P: ReferencePlayer> TwrService<P> {
             clamped_bins: 0,
             clipped_samples: played.clipped,
         });
-        // Judged against the same gate as the ladder, without moving it.
-        let gated = metrics.rms_error_pct <= self.ladder.schedule().gate_rms_error_pct;
         self.push_row(
             &played,
             PlayKind::Playback,
@@ -976,11 +1036,24 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// The projection is EXACT, not an estimate: scaling every bin by `s`
     /// scales the time record by exactly `s`, so the realized peak after the
     /// step is `peak(irfft(drive_spec)) * s` with no play required.
-    fn scale_drive_db(&mut self, step_db: f64) -> Result<(), StepRefused> {
+    ///
+    /// Under a control law the drive in force is a full-level record and the
+    /// level is the scale a play applies to it, so the step moves nothing: the
+    /// projection is the drive in force's peak at `to_db`.
+    fn scale_drive_db(&mut self, step_db: f64, to_db: f64) -> Result<(), StepRefused> {
         let s = 10f64.powf(step_db / 20.0);
-        if !self.drive_spec.is_empty() {
-            let realized = irfft_half(&self.drive_spec, self.prepared.grid.n);
-            let peak_after = realized.iter().fold(0.0f64, |m, &v| m.max(v.abs())) * s;
+        let projected = match self.closed.as_ref() {
+            Some(c) => c
+                .run
+                .as_ref()
+                .map(|run| peak_abs(&run.drive) * 10f64.powf(to_db / 20.0)),
+            None if !self.drive_spec.is_empty() => {
+                let realized = irfft_half(&self.drive_spec, self.prepared.grid.n);
+                Some(realized.iter().fold(0.0f64, |m, &v| m.max(v.abs())) * s)
+            }
+            None => None,
+        };
+        if let Some(peak_after) = projected {
             if let Some(t) = self.config.limits.peak_value_trip(peak_after, true) {
                 let reason = t.message;
                 self.log(&format!("level step {step_db:+.1} dB REFUSED: {reason}"));
@@ -992,6 +1065,13 @@ impl<P: ReferencePlayer> TwrService<P> {
                     )),
                 });
             }
+        }
+        if self.closed.is_some() {
+            self.log(&format!(
+                "level step {step_db:+.1} dB: the full-level drive in force plays x{:.4}",
+                10f64.powf(to_db / 20.0)
+            ));
+            return Ok(());
         }
         for c in self.drive_spec.iter_mut() {
             c.0 *= s;
@@ -1012,7 +1092,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// reached.
     pub fn step_level_up(&mut self) -> Result<(), TwrError> {
         self.require_live()?;
-        self.scale_drive_db(crate::schedule::MANUAL_STEP_DB)
+        let to_db = self.ladder.current_level_db() + crate::schedule::MANUAL_STEP_DB;
+        self.scale_drive_db(crate::schedule::MANUAL_STEP_DB, to_db)
             .map_err(|r| r.error)?;
         self.ladder.step_up();
         self.unhold();
@@ -1022,7 +1103,8 @@ impl<P: ReferencePlayer> TwrService<P> {
     /// Manual -1 dB trim.
     pub fn step_level_down(&mut self) -> Result<(), TwrError> {
         self.require_live()?;
-        self.scale_drive_db(-crate::schedule::MANUAL_STEP_DB)
+        let to_db = self.ladder.current_level_db() - crate::schedule::MANUAL_STEP_DB;
+        self.scale_drive_db(-crate::schedule::MANUAL_STEP_DB, to_db)
             .map_err(|r| r.error)?;
         self.ladder.step_down();
         self.unhold();
@@ -1035,7 +1117,8 @@ impl<P: ReferencePlayer> TwrService<P> {
         // The step is COMPUTED before it is taken, so a ceiling refusal does
         // not leave the ladder somewhere the drive never followed it to.
         let step = self.ladder.jump_step_to(i)?;
-        self.scale_drive_db(step).map_err(|r| r.error)?;
+        let to_db = self.ladder.schedule().table_db[i];
+        self.scale_drive_db(step, to_db).map_err(|r| r.error)?;
         let applied = self.ladder.jump_to_level(i)?;
         debug_assert!((applied - step).abs() < 1e-12, "jump step disagreed");
         self.unhold();
@@ -1057,6 +1140,139 @@ impl<P: ReferencePlayer> TwrService<P> {
         self.plays_completed = 0;
         self.log("operator started the run schedule");
         Ok(())
+    }
+
+    /// Release the review hold after a passing identification: build the
+    /// control law from the installed factory (the built-in from the
+    /// configuration's correction settings when none is installed), seed it,
+    /// and go on iterating at the present level.
+    ///
+    /// A law that cannot be built, or a seed that gives no drive, ends the run
+    /// on a law fault before anything plays; the state says so.
+    pub fn proceed(&mut self) -> Result<(), TwrError> {
+        if self.state != TwrState::Review {
+            return Err(TwrError::State(format!(
+                "nothing to proceed from: proceed releases the review hold after a passing \
+                 identification (state {:?})",
+                self.state
+            )));
+        }
+        let factory = self
+            .law_factory
+            .clone()
+            .unwrap_or_else(|| Arc::new(TwrCorrectFactory::from_law_config(&self.config.law)));
+        let descriptor = factory.describe();
+        let built = {
+            let setup = self.law_setup().expect("review implies a plant");
+            factory.build(&setup)
+        };
+        let mut law = match built {
+            Ok(law) => law,
+            Err(fault) => {
+                let _ = self.trip_with(law_fault(fault, 1), None);
+                return Ok(());
+            }
+        };
+        let inputs = PlayInputs {
+            play_index: 0,
+            kind: PlayKind::Iteration,
+            response: &[],
+            drive: &[],
+            judged: None,
+            limited: false,
+        };
+        let out = match law.seed(&inputs) {
+            Ok(out) => out,
+            Err(fault) => {
+                let _ = self.trip_with(law_fault(fault, 1), None);
+                return Ok(());
+            }
+        };
+        self.log(&format!(
+            "control law {} {} seeded; iterating at {} dB",
+            descriptor.name,
+            descriptor.version,
+            self.ladder.current_level_db()
+        ));
+        if let Some(c) = self.closed.as_mut() {
+            c.run = Some(closed::LawRun {
+                law,
+                descriptor,
+                drive: out.drive,
+                last_values: out.values,
+            });
+        }
+        self.state = TwrState::Iterating;
+        Ok(())
+    }
+
+    /// The setup a law is built for, borrowing the prepared record and the
+    /// plant. `None` before a passing identification.
+    fn law_setup(&self) -> Option<TwrLawSetup<'_>> {
+        let plant = self.closed.as_ref()?.plant.as_ref()?;
+        let control = self.config.control.as_ref()?;
+        let grid = &self.prepared.grid;
+        Some(TwrLawSetup {
+            fs_hz: grid.fs_hz,
+            record_len: grid.n,
+            band_lo_hz: self.config.law.f_lo_hz,
+            band_hi_hz: self.config.law.f_hi_hz,
+            reference: &self.prepared.target_full,
+            section_start: grid.pad_pre,
+            section_len: grid.section_len,
+            plant: TwrPlant {
+                frf: &plant.h,
+                coherence: &plant.coherence,
+                inverse: &plant.inverse,
+                trusted: &plant.trusted,
+                epsilon: plant.eps,
+            },
+            drive_ceiling_v: self.config.limits.max_drive_vpk.unwrap_or(0.0),
+            call_budget_s: control.call_budget_s(grid.n as f64 / grid.fs_hz),
+        })
+    }
+
+    /// Call the law after a judged play: the play's response and its drive as
+    /// played, both referred to full level, and the core's verdict. The law's
+    /// drive becomes the drive in force. Returns the bins the law reports it
+    /// held back, or the trip that ends the run.
+    fn call_law(
+        &mut self,
+        kind: PlayKind,
+        judged: Verdict,
+        limited: bool,
+    ) -> Result<usize, LimitTrip> {
+        let s = self.ladder.current_scale();
+        let response: Vec<f64> = self.last_achieved.iter().map(|&v| v / s).collect();
+        let drive: Vec<f64> = self.last_drive.iter().map(|&v| v / s).collect();
+        let play_index = self.plays.len() as u64 + 1;
+        let run = self
+            .closed
+            .as_mut()
+            .and_then(|c| c.run.as_mut())
+            .expect("a judged play under control implies a law");
+        let inputs = PlayInputs {
+            play_index,
+            kind,
+            response: &response,
+            drive: &drive,
+            judged: Some(judged),
+            limited,
+        };
+        match run.law.iterate(&inputs) {
+            Ok(out) => {
+                let clamped = closed::value_of(&out.values, "clamped_bins").unwrap_or(0.0);
+                run.drive = out.drive;
+                run.last_values = out.values;
+                Ok(clamped.max(0.0) as usize)
+            }
+            Err(fault) => Err(law_fault(fault, 1)),
+        }
+    }
+
+    /// The law run, from proceed on.
+    fn closed_run(&self) -> Option<&closed::LawRun> {
+        self.closed.as_ref()?.run.as_ref()
     }
 
     /// Freeze / unfreeze adaptation (the converged drive stays fixed while
@@ -1105,7 +1321,7 @@ impl<P: ReferencePlayer> TwrService<P> {
 
     fn require_live(&self) -> Result<(), TwrError> {
         match self.state {
-            TwrState::Iterating | TwrState::Holding => Ok(()),
+            TwrState::Iterating | TwrState::Holding | TwrState::Review => Ok(()),
             s => Err(TwrError::State(format!(
                 "level control requires an iterating run (state {s:?})"
             ))),
@@ -1159,6 +1375,9 @@ impl<P: ReferencePlayer> TwrService<P> {
         self.plays.clear();
         self.station_frames = 0;
         self.trip = None;
+        if let Some(c) = self.closed.as_mut() {
+            *c = closed::Closed::default();
+        }
         self.state = if self.feasibility.blocked && self.override_ack.is_none() {
             TwrState::FeasibilityBlocked
         } else {
@@ -1442,6 +1661,29 @@ impl<P: ReferencePlayer> TwrService<P> {
         self.trip.as_ref()
     }
 
+    /// The control law the run built at proceed: its id, name, version, hash
+    /// (a law file's) and parameters. `None` without `control`, and before
+    /// proceed.
+    pub fn law_descriptor(&self) -> Option<&hertzforge_shock_common::law_guard::LawDescriptor> {
+        self.closed_run().map(|run| &run.descriptor)
+    }
+
+    /// The peak of the drive in force at the present level, volts: what the
+    /// next play would play before the clip. `None` before there is a drive.
+    pub fn drive_in_force_vpk(&self) -> Option<f64> {
+        match self.closed.as_ref() {
+            Some(c) => c
+                .run
+                .as_ref()
+                .map(|run| peak_abs(&run.drive) * self.ladder.current_scale()),
+            None if !self.drive_spec.is_empty() => Some(peak_abs(&irfft_half(
+                &self.drive_spec,
+                self.prepared.grid.n,
+            ))),
+            None => None,
+        }
+    }
+
     /// Coherence on the sysid grid: `(freq_hz, gamma^2)` (trace 984).
     pub fn coherence(&self) -> Vec<(f64, f64)> {
         let Some(s) = self.sysid.as_ref() else {
@@ -1457,8 +1699,17 @@ impl<P: ReferencePlayer> TwrService<P> {
 
     /// Drive spectrum magnitude on the record grid (trace 985).
     pub fn drive_spectrum_mag(&self) -> Vec<(f64, f64)> {
-        self.drive_spec
-            .iter()
+        let at_level;
+        let spec = match self.closed_run() {
+            Some(run) => {
+                let s = self.ladder.current_scale();
+                let d: Vec<f64> = run.drive.iter().map(|&v| v * s).collect();
+                at_level = rfft_half(&d, self.prepared.grid.n);
+                &at_level
+            }
+            None => &self.drive_spec,
+        };
+        spec.iter()
             .enumerate()
             .map(|(k, &(re, im))| (self.prepared.grid.freq(k), (re * re + im * im).sqrt()))
             .collect()
@@ -1520,6 +1771,32 @@ impl<P: ReferencePlayer> TwrService<P> {
     pub(crate) fn override_ack(&self) -> Option<&str> {
         self.override_ack.as_deref()
     }
+}
+
+/// The core's verdict on a play, as a law sees it.
+fn verdict(m: &ErrorMetrics, gated: bool) -> Verdict {
+    Verdict {
+        gated,
+        rms_error_pct: m.rms_error_pct,
+        peak_error_pct: m.peak_error_pct,
+        spectral_error_db: m.spectral_error_db,
+    }
+}
+
+/// A law fault as the trip that ends the run.
+fn law_fault(fault: hertzforge_shock_common::law_guard::LawFault, consecutive: u32) -> LimitTrip {
+    let message = format!("control law fault: {fault}");
+    LimitTrip {
+        kind: TripKind::LawFault {
+            reason: fault,
+            consecutive,
+        },
+        message,
+    }
+}
+
+fn peak_abs(x: &[f64]) -> f64 {
+    x.iter().fold(0.0f64, |m, &v| m.max(v.abs()))
 }
 
 /// What playing the current drive came to.

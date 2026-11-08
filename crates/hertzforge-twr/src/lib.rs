@@ -32,6 +32,7 @@
 //! - [`inverse`] - regularized inverse on the sysid grid + interpolation onto the
 //!   record grid + the per-bin trust mask.
 //! - [`law`] - the pure iterative correction law (unit-testable with no backend).
+//! - [`builtin`] - the built-in law, `twr_correct`, as a native law.
 //! - [`control`] - the control-law seam: what a changeable law sees and
 //!   returns ([`control::TwrLaw`], [`control::TwrLawFactory`]) and the
 //!   closed-loop settings the core runs it under ([`control::TwrControl`]).
@@ -46,6 +47,7 @@
 //!   Backend playout, NOT through `hertzforge_engine::Engine`).
 //! - [`service`] - the run orchestration state machine + status/report surface.
 
+pub mod builtin;
 pub mod control;
 pub mod grid;
 pub mod inverse;
@@ -59,6 +61,7 @@ pub mod service;
 pub mod sysid;
 pub mod trip;
 
+pub use builtin::{TwrCorrectFactory, TwrCorrectLaw};
 pub use control::{
     PlayInputs, PlayKind, PlayOutputs, TwrControl, TwrLaw, TwrLawFactory, TwrLawSetup, TwrPlant,
     Verdict,
