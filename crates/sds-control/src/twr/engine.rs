@@ -237,7 +237,16 @@ pub struct ServiceEngine {
     capturing: bool,
     #[cfg(test)]
     without_law: bool,
+    /// A test's wrapper around the station's backend, applied as the run arms (a
+    /// station that cannot do what the simulator can, such as change its rate).
+    #[cfg(test)]
+    wrap_station: Option<StationWrap>,
 }
+
+/// A test's wrapper around the station's backend.
+#[cfg(test)]
+type StationWrap =
+    Box<dyn Fn(Box<dyn hertzforge_hal::Backend>) -> Box<dyn hertzforge_hal::Backend> + Send>;
 
 impl ServiceEngine {
     pub fn new(ctx: EngineContext) -> ServiceEngine {
@@ -252,6 +261,8 @@ impl ServiceEngine {
             capturing: false,
             #[cfg(test)]
             without_law: false,
+            #[cfg(test)]
+            wrap_station: None,
         }
     }
 
@@ -690,15 +701,18 @@ impl TwrEngine for ServiceEngine {
         let observer = Arc::new(move |p: PlayProgress| {
             progress.block(p.frames_done as u64, p.frames_expected as u64);
         });
-        let player = BackendReferencePlayer::new(
-            Observed::new(built.backend, watch),
-            plan.table.clone(),
-            class,
-        )
-        .map_err(arm_refused)?
-        .with_cancel_flag(own)
-        .with_display_tap(TAP_SAMPLES)
-        .with_play_observer(observer);
+        #[allow(unused_mut)]
+        let mut backend = built.backend;
+        #[cfg(test)]
+        if let Some(wrap) = self.wrap_station.as_ref() {
+            backend = wrap(backend);
+        }
+        let player =
+            BackendReferencePlayer::new(Observed::new(backend, watch), plan.table.clone(), class)
+                .map_err(arm_refused)?
+                .with_cancel_flag(own)
+                .with_display_tap(TAP_SAMPLES)
+                .with_play_observer(observer);
         let tap = player.display_tap_handle();
         let mut svc = TwrService::new(player, cfg).map_err(arm_refused)?;
         if let Some(law) = law {
@@ -1266,5 +1280,239 @@ mod tests {
             panic!("armed without a law");
         };
         assert!(err.message.contains("no law"), "{}", err.message);
+    }
+
+    // ---- the station's rate (bench T0, 2026-11-08) --------------------------------
+    //
+    // On the bench the run asked 12 800 Hz of an NI station whose caps state the
+    // chassis's default, 51 200 Hz, and the run came up at 51 200 Hz. The simulator
+    // never showed it because the service builds the simulated station AT the asked
+    // rate. These build it at the default rate instead, as the NI station is built,
+    // and ask 12 800 Hz of it: the simulator can run at either, as the 9234 can run at
+    // 51 200 / 4.
+
+    /// The rate the NI station's caps state before any configure.
+    const DEFAULT_HZ: f64 = 51_200.0;
+    /// The rate the run asks (bench T0's).
+    const ASKED_HZ: f64 = 12_800.0;
+
+    /// The run's configuration asking `ASKED_HZ` of the station.
+    fn asked(mut cfg: serde_json::Value) -> serde_json::Value {
+        cfg["acquisition"] = serde_json::json!({"fs_hz": ASKED_HZ});
+        cfg
+    }
+
+    /// The plan on a simulated station built at the default rate, not the asked one.
+    fn on_a_default_rate_station(mut p: ArmPlan) -> ArmPlan {
+        p.station = StationPlan::Sim { fs_hz: DEFAULT_HZ };
+        p
+    }
+
+    /// The record the service derived at configure, at the asked rate.
+    fn derived(p: &ArmPlan) -> reference::Prepared {
+        let shape = &p.cfg.shape;
+        let fs = shape.fs_for(p.stored.fs_hz);
+        assert_eq!(fs, ASKED_HZ, "the configuration asks the rate");
+        reference::prepare(&p.stored, shape, fs, shape.band(p.cfg.sysid_band_hz))
+            .expect("the configuration prepares")
+    }
+
+    /// A station that runs only at its native rate, whatever it is asked: the shape
+    /// of a device that cannot program the rate a run asks. It counts the plays it
+    /// is given, so a test can say nothing played.
+    struct NativeRateOnly {
+        inner: Box<dyn hertzforge_hal::Backend>,
+        native_hz: f64,
+        starts: Arc<std::sync::atomic::AtomicUsize>,
+        written: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl hertzforge_hal::Backend for NativeRateOnly {
+        fn caps(&self) -> hertzforge_hal::Caps {
+            self.inner.caps()
+        }
+        fn open(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.inner.open()
+        }
+        fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.inner.close()
+        }
+        fn take_warnings(&mut self) -> Vec<String> {
+            self.inner.take_warnings()
+        }
+        fn configure(
+            &mut self,
+            table: &ChannelTable,
+            acq: &hertzforge_hal::AcquisitionConfig,
+        ) -> Result<hertzforge_hal::ConfiguredActual, hertzforge_hal::HalError> {
+            let native = hertzforge_hal::AcquisitionConfig::new(self.native_hz, acq.block_frames);
+            self.inner.configure(table, &native)
+        }
+        fn arm(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.inner.arm()
+        }
+        fn start(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.starts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.start()
+        }
+        fn stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.inner.stop()
+        }
+        fn read_input(
+            &mut self,
+            out: &mut [f32],
+        ) -> Result<hertzforge_hal::InputRead, hertzforge_hal::HalError> {
+            self.inner.read_input(out)
+        }
+        fn write_drive(&mut self, drive: &[f32]) -> Result<usize, hertzforge_hal::HalError> {
+            self.written
+                .fetch_add(drive.len(), std::sync::atomic::Ordering::SeqCst);
+            self.inner.write_drive(drive)
+        }
+        fn output_space(&mut self) -> Option<usize> {
+            self.inner.output_space()
+        }
+        fn input_overloads(&mut self) -> Vec<bool> {
+            self.inner.input_overloads()
+        }
+        fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
+            self.inner.poll_status()
+        }
+        fn emergency_stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+            self.inner.emergency_stop()
+        }
+    }
+
+    /// **The run comes up at the rate it asked, on the record the service derived.**
+    ///
+    /// Bench T0's configure derived 12 800 Hz and a record of 65 536 samples; the run
+    /// came up at 51 200 Hz and 262 144 samples, because the player configured the
+    /// station at the rate its caps state and the core prepared the record at that
+    /// rate. Here the reference is 2048 samples at 12 800 Hz: a record of 4096 at the
+    /// asked rate, of 16 384 at the default one.
+    #[test]
+    fn a_station_built_at_its_default_rate_runs_the_run_at_the_rate_asked() {
+        let p = on_a_default_rate_station(plan(asked(config())));
+        let want = derived(&p);
+        assert_eq!((want.grid.fs_hz, want.grid.n), (ASKED_HZ, 4096));
+        let mut e = ServiceEngine::without_law(ctx());
+        let armed = match e.arm(p).unwrap() {
+            ArmOutcome::Armed(a) => a,
+            ArmOutcome::Blocked(b) => panic!("blocked: {b:?}"),
+        };
+        assert_eq!(
+            (armed.fs_hz, armed.record_len),
+            (ASKED_HZ, want.grid.n),
+            "the run came up at {} Hz on a record of {} samples; it asked {ASKED_HZ} Hz and \
+             the service derived {} samples",
+            armed.fs_hz,
+            armed.record_len,
+            want.grid.n
+        );
+        assert_eq!(e.svc.as_ref().unwrap().grid(), &want.grid);
+
+        match e.identify().unwrap() {
+            Identified::Done { .. } => {}
+            Identified::Held { message, .. } => panic!("held: {message}"),
+            Identified::Ended { end, .. } => panic!("ended: {end:?}"),
+        }
+        let st = e.svc.as_ref().unwrap().status();
+        assert_eq!(st.requested_fs_hz, ASKED_HZ, "the rate the run asked");
+        assert_eq!(
+            st.actual_fs_hz,
+            Some(ASKED_HZ),
+            "the rate the station adopted"
+        );
+        // One second of identification and its rest pad, at the asked rate; at the
+        // default rate it is 51 200 frames and more.
+        let clocked = e.frames_clocked();
+        assert!(
+            (12_800..2 * 12_800).contains(&clocked),
+            "the identification clocked {clocked} frames"
+        );
+    }
+
+    /// **An explicit section is the section configured, in time and in content.**
+    ///
+    /// A section is a sample count of the prepared reference. Prepared at a rate four
+    /// times the asked one, the same count is a quarter of the time: the section
+    /// configured as 80 ms of the reference plays as its first 20 ms.
+    #[test]
+    fn an_explicit_section_keeps_its_length_in_time_on_a_default_rate_station() {
+        let mut cfg = asked(config());
+        cfg["section"] = serde_json::json!({"start": 256, "len": 1024});
+        let p = on_a_default_rate_station(plan(cfg));
+        let want = derived(&p);
+        let mut e = ServiceEngine::without_law(ctx());
+        assert!(matches!(e.arm(p).unwrap(), ArmOutcome::Armed(_)));
+        let svc = e.svc.as_ref().unwrap();
+        let g = svc.grid();
+        assert_eq!(
+            g.section_len as f64 / g.fs_hz,
+            1024.0 / ASKED_HZ,
+            "the section lasts {} s on the run's record; configured it lasts {} s",
+            g.section_len as f64 / g.fs_hz,
+            1024.0 / ASKED_HZ
+        );
+        assert_eq!(g, &want.grid, "the record is the record configured");
+        // The same samples: the core's full-level target is the service's.
+        let k = 10f64.powf(svc.status().level_db / 20.0);
+        let core: Vec<f64> = svc.target_time().iter().map(|v| v / k).collect();
+        assert_eq!(core.len(), want.target.len());
+        let worst = core
+            .iter()
+            .zip(&want.target)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
+        assert!(worst < 1e-9, "the core's target differs by {worst}");
+    }
+
+    /// **A station that cannot run at the asked rate is refused at arm, by name,
+    /// before anything plays** - never re-gridded at the rate it can run at.
+    #[test]
+    fn a_station_that_cannot_run_at_the_asked_rate_is_refused_at_arm() {
+        let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let written = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut e = ServiceEngine::without_law(ctx());
+        let (s, w) = (starts.clone(), written.clone());
+        e.wrap_station = Some(Box::new(move |inner| {
+            Box::new(NativeRateOnly {
+                inner,
+                native_hz: DEFAULT_HZ,
+                starts: s.clone(),
+                written: w.clone(),
+            })
+        }));
+        let outcome = e.arm(on_a_default_rate_station(plan(asked(config()))));
+        let err = match outcome {
+            Err(err) => err,
+            Ok(ArmOutcome::Armed(a)) => panic!(
+                "armed at {} Hz on a record of {} samples, for a run that asked {ASKED_HZ} Hz",
+                a.fs_hz, a.record_len
+            ),
+            Ok(ArmOutcome::Blocked(b)) => panic!("blocked: {b:?}"),
+        };
+        assert_eq!(err.code, ErrorCode::Refused, "{}", err.message);
+        assert_eq!(err.reason, Some("arm_refused"), "{}", err.message);
+        assert!(
+            err.message.contains("12800") && err.message.contains("51200"),
+            "the refusal names both rates: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("never resamples"),
+            "the refusal is the rate policy's: {}",
+            err.message
+        );
+        assert!(e.svc.is_none(), "nothing is left armed");
+        assert_eq!(
+            (
+                starts.load(std::sync::atomic::Ordering::SeqCst),
+                written.load(std::sync::atomic::Ordering::SeqCst)
+            ),
+            (0, 0),
+            "nothing played"
+        );
     }
 }
