@@ -99,8 +99,8 @@ share, by its coherence.
 - **Drive:** volts rms; its peak is held under the drive ceiling and the clip.
 - **Length**, **block length** and **band:** the identification runs for its length, is estimated
   in blocks of the length chosen (at least two must fit), and excites the band, below half the rate.
-- **Mean coherence it must reach:** over the band. Under it the run holds: nothing drives, Proceed is
-  refused, and only **New Run** releases the hold.
+- **Mean coherence it must reach:** over the band. Under it the run holds: nothing drives, Proceed,
+  Iterate and Play are refused, and only **New Run** releases the hold.
 - **Hold for review:** the run waits after identification with the identified gain, phase and
   coherence and the bins the correction trusts on the Identification page; **Proceed** in the run
   bar goes on.
@@ -185,10 +185,12 @@ its lookahead and a block), then brings the drive down along a 250 ms taper; **A
 with a 25 ms taper. Between plays, either ends the run at once, and nothing plays after either.
 Beside them:
 
-- On the manual ladder, between plays: **Iterate**, **Play** once the level has gated, a level step
-  down and up of 1 dB, and **Go to level**. The level moves within the table.
-- **Freeze** holds the law's corrections off: the drive in force plays again until **Resume
-  Corrections**.
+- On the manual ladder, between plays and until playback begins: **Iterate**, **Play** once the level
+  has gated, a level step down and up of 1 dB, and **Go to level**. The level moves within the
+  table. On the automatic ladder the level verbs are offered only at a level held for its gate; a
+  move there releases the hold and the run goes on from the new level.
+- **Freeze** holds the law's corrections off from the next play (a play in flight is corrected as
+  it would have been): the drive in force plays again until **Resume Corrections**.
 
 A verb that cannot run says why when it is focused or hovered: "A play is in flight", "Once a play
 at this level meets the gate", "At the last level of the table", "Take control to iterate".
@@ -218,7 +220,8 @@ The pages, each drawn from the control service's views:
   (shown as not yet measured until the alignment check has measured it), the law call that made its
   drive and the values the law reported. **Records** opens a play's target, response, error and drive
   from the control service; the records of the most recent plays are held, and an older play keeps
-  its row.
+  its row. A play that a stop, an abort or the in-play envelope check cut short has no row; its frames
+  still count in station time, and the run's end names it.
 
 **Target**, **Drive**, **Envelope** (the response inside the alarm and abort bands) and **Scope** (the
 control channel during the play in flight) pages can be added. Pages can be added, renamed and

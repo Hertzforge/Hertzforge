@@ -357,10 +357,14 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 		case 'drive_ceiling':
 			// TWR has no drive abort: its refusal names the ceiling.
 			if (has('vpk') && has('ceiling_vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive ceiling is ${String(detail.ceiling_vpk)} V pk`);
+			else if (has('ceiling_vpk')) out.push(`At ${String(detail.level_db ?? '-')} dB the drive would pass the drive ceiling, ${String(detail.ceiling_vpk)} V pk`);
 			else if (has('vpk')) out.push(`Drive ${String(detail.vpk)} V pk at ${String(detail.level_db ?? '-')} dB; the drive abort is ${String(detail.abort_vpk ?? '-')} V pk`);
 			break;
 		case 'not_converged':
 			if (has('gate_pct')) out.push(`Gate: ${String(detail.gate_pct)}% rms error`);
+			break;
+		case 'law_not_checked':
+			if (has('tool_version') && has('current')) out.push(`Checked with ${String(detail.tool_version)}; the check in force is ${String(detail.current)}`);
 			break;
 		case 'coherence_hold':
 			if (has('coherence_mean') && has('min_mean_coherence')) out.push(`Mean coherence ${String(detail.coherence_mean)}, under ${String(detail.min_mean_coherence)}`);

@@ -70,10 +70,14 @@ function toTyped(node: unknown): unknown {
 	return node;
 }
 
-/** A plot's point count: only where the quantity takes it, as the service has it; never channels. */
-function keysAsTheServiceTakes(plots: { quantity: TwrQuantity; points?: number; channels?: unknown }[]) {
+/**
+ * A plot's point count only where the quantity takes it, never channels; `filled` (the service's
+ * answer, every default filled in) also has the count on every plot that takes one.
+ */
+function keysAsTheServiceTakes(plots: { quantity: TwrQuantity; points?: number; channels?: unknown }[], filled = false) {
 	for (const p of plots) {
-		expect('points' in p && p.points !== undefined).toBe(TWR_POINTS_QUANTITIES.includes(p.quantity));
+		const has = 'points' in p && p.points !== undefined;
+		if (filled || has) expect(has).toBe(TWR_POINTS_QUANTITIES.includes(p.quantity));
 		expect('channels' in p).toBe(false);
 	}
 }
@@ -223,14 +227,14 @@ describe('TWR goldens through the shell', () => {
 	it('every page the shell offers subscribes with a point count on the record plots only', () => {
 		for (const kind of TWR_PAGES.kinds) {
 			const sent = twrSubscribeParams(twrPagePlots({ id: 'p', name: kind, kind }), 5) as { plots: { quantity: TwrQuantity }[] };
-			keysAsTheServiceTakes(sent.plots);
+			keysAsTheServiceTakes(sent.plots, true);
 		}
 	});
 
 	it.skipIf(!has('response_twr_subscribe.json'))('the subscription is answered with every default filled in', () => {
 		const r = (readJson('response_twr_subscribe.json') as ResponseOk<TwrSubscribeResult>).result;
 		expect([...r.quantities].sort()).toEqual([...QUANTITIES].sort());
-		if (r.plots) keysAsTheServiceTakes(r.plots);
+		if (r.plots) keysAsTheServiceTakes(r.plots, true);
 	});
 
 	it.skipIf(!has('response_twr_plays.json'))('a plays row has every field the plays table reads', () => {
@@ -269,7 +273,14 @@ describe("the mock control service's TWR frames have the service's form", () => 
 		await acq.claim();
 		const twr = new TwrStore(acq, { local: null, checkDelayMs: 0 });
 		await twr.sync();
-		return { client, twr };
+		/** A second screen on the default subscription. */
+		const observer = async () => {
+			const c = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
+			c.connect();
+			await c.whenOpen();
+			return c;
+		};
+		return { client, twr, observer };
 	}
 
 	it.skipIf(!has('response_laws_list_twr.json'))("the mock's built-in law is the service's", async () => {
@@ -284,16 +295,33 @@ describe("the mock control service's TWR frames have the service's form", () => 
 		expect(Object.keys(mine).sort()).toEqual(Object.keys(theirs).sort());
 	});
 
+	it.skipIf(!hasFrame('response_twr_reference_import') || !hasFrame('response_twr_reference_preview'))("the mock's reference and its preparation, view for view", async () => {
+		const { client } = await mockRun();
+		const text = ['time_s, accel_g', ...Array.from({ length: 2000 }, (_, i) => `${(i / 12800).toFixed(10)}, ${(0.2 * Math.sin((2 * Math.PI * 250 * i) / 12800)).toFixed(6)}`)].join('\n');
+		const mine = await client.request<TwrReferenceImportResult>('twr.reference.import', { text });
+		const theirs = frame<ResponseOk<TwrReferenceImportResult>>('response_twr_reference_import').result;
+		expect(Object.keys(mine.reference).sort()).toEqual(Object.keys(theirs.reference).sort());
+		expect(mine.views.map(shapeOf)).toEqual(theirs.views.map(shapeOf));
+		const prep = await client.request<TwrReferencePreviewResult>('twr.reference.preview', { reference: { sha256: mine.reference.sha256 }, feasibility: { disp_pkpk_in: 1 } });
+		const theirPrep = frame<ResponseOk<TwrReferencePreviewResult>>('response_twr_reference_preview').result;
+		expect(prep.views.map(shapeOf)).toEqual(theirPrep.views.map(shapeOf));
+		for (const k of ['grid', 'section', 'kinematics', 'coverage', 'feasibility'] as const) expect(Object.keys(prep.derived[k]).sort()).toEqual(Object.keys(theirPrep.derived[k]).sort());
+		expect(prep.derived.feasibility.checks.map((c) => c.name)).toEqual(theirPrep.derived.feasibility.checks.map((c) => c.name));
+	});
+
 	it.skipIf(!hasFrame('event_twr_data') || !has('request_twr_subscribe.json'))("a subscribed screen's data frame and the live frame, view for view", async () => {
-		const { client, twr } = await mockRun();
+		const { client, twr, observer } = await mockRun();
 		expect(await twr.importReference({ path: '/data/references/r1.csv' })).toBe(true);
 		twr.setup.limits.drive_vpk_ceiling = 1;
 		twr.setup.identification.review = false;
 		const want = (readJson('request_twr_subscribe.json') as Request<TwrSubscribeParams>).params;
 		let data: TwrData | null = null;
 		let live: TwrLive | null = null;
+		let liveToSubscribed = 0;
 		client.on(TWR_TOPICS.data, (d) => (data = d as unknown as TwrData));
-		client.on(TWR_TOPICS.live, (d) => (live = d as unknown as TwrLive));
+		// The subscribed screen gets its data frame in place of the live frame; the other screen gets the live frame.
+		client.on(TWR_TOPICS.live, () => liveToSubscribed++);
+		(await observer()).on(TWR_TOPICS.live, (d) => (live = d as unknown as TwrLive));
 		await client.request('twr.subscribe', want as unknown as Record<string, unknown>);
 		expect(await twr.apply()).toBe(true);
 		expect(await twr.start()).toBe(true);
@@ -305,8 +333,17 @@ describe("the mock control service's TWR frames have the service's form", () => 
 		for (const p of theirs.plots) {
 			const m = mine.plots.find((x) => x.id === p.id)!;
 			expect(m.quantity).toBe(p.quantity);
-			if (p.views.length) expect(m.views.map(shapeOf)).toEqual(p.views.map(shapeOf));
+			// The scope is empty between plays, and the run has ended; every other plot is drawn.
+			if (p.quantity !== 'scope') expect(m.views.length).toBeGreaterThan(0);
+			if (p.views.length && m.views.length) expect(m.views.map(shapeOf)).toEqual(p.views.map(shapeOf));
 		}
+		if (has('response_twr_plays.json')) {
+			const rows = (await client.request<TwrPlaysResult>('twr.plays', { since: 0 })).plays;
+			const their = (readJson('response_twr_plays.json') as ResponseOk<TwrPlaysResult>).result.plays[0];
+			for (const row of rows) expect(Object.keys(row).sort()).toEqual(Object.keys(their).sort());
+			for (const row of rows) if (row.law) expect(Object.keys(row.law).sort()).toEqual(Object.keys(their.law!).sort());
+		}
+		expect(liveToSubscribed).toBe(0);
 		if (hasFrame('event_twr_live')) {
 			const l = frame<Event<TwrLive>>('event_twr_live').data;
 			expect(Object.keys(live as unknown as TwrLive).sort()).toEqual(Object.keys(l).sort());

@@ -322,7 +322,10 @@ try {
 	await until(a, 'the run to complete', async (p) => (await outcome(p)) !== '', 300_000);
 	check('the automatic ladder completes', (await outcome(a)) === 'completed', `${await outcome(a)}: ${await text(a, 'twr-end')}`);
 	await showPage(a, 'Convergence');
-	await until(a, 'the convergence drawn', async (p) => /RMS error/.test(await text(p, 'twr-page-view')), 20_000);
+	await until(a, 'the convergence drawn', async (p) => {
+		const t = await text(p, 'twr-page-view');
+		return /Convergence/.test(t) && /Gate/.test(t);
+	}, 20_000);
 	await shot(a, 'run_convergence');
 
 	// ---- Manual: Play waits for the gate; Iterate; a level step; Freeze; Play; Stop ----------------

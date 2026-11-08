@@ -160,7 +160,7 @@ export function twrLevelStatus(s: TwrRunNow | null, excitation: 'random' | 'log_
 			return { mark: 'control', text: `Playing ${n} of ${s.plays.of_playback} at ${at}`, tone: 'pass' };
 		}
 		case 'holding':
-			return { mark: 'hold', text: `Holding at ${at}: the level did not meet its gate in ${s.plays.at_level} plays`, tone: 'warn' };
+			return { mark: 'hold', text: `Holding at ${at}: the level did not meet its gate in ${s.plays.at_level} ${s.plays.at_level === 1 ? 'play' : 'plays'}`, tone: 'warn' };
 		default:
 			if (s?.mode === 'manual') return { mark: 'control', text: `Waiting for Iterate or Play at ${at}`, tone: 'info' };
 			return { mark: 'control', text: `Between plays at ${at}`, tone: 'pass' };
@@ -245,7 +245,8 @@ export function twrTripFacts(trip: TwrTrip): { label: string; value: string }[] 
 				{ label: 'Found', value: trip.in_play ? 'During the play, from a block' : 'After the play' },
 				{ label: 'Worst', value: `${formatNumber(trip.worst_frac * 100, 3)}% of the target's peak` },
 				{ label: 'Abort band', value: `${formatNumber(trip.abort_frac * 100, 3)}%` },
-				{ label: 'Samples in a row', value: String(trip.samples) }
+				{ label: 'Samples in a row', value: String(trip.samples) },
+				{ label: 'At record sample', value: String(trip.at_sample) }
 			];
 		case 'drive_vpk':
 			return [

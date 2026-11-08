@@ -63,6 +63,10 @@ const GAP_S = 0.15;
 const STOP_S = 0.25;
 const MAX_RECORD = 1048576;
 const LAG_FRAMES = 4;
+/** The rest pad the station clocks behind each record, frames: a play's frames are the record and it. */
+const REST_PAD = 1024;
+/** The frames the device holds before a play starts, logged after each play. */
+const COMMITTED = 256;
 /** The fewest ticks a play takes, whatever the speed. */
 const MIN_PLAY_TICKS = 3;
 
@@ -84,6 +88,8 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const absolute = (p: unknown): p is string => typeof p === 'string' && /^(\/|[A-Za-z]:\\)/.test(p);
 const f64 = (a: number[]) => Float64Array.from(a);
+/** The frames the station clocks for one play: its record and the rest pad. */
+const playFrames = (p: { recordLen: number }) => p.recordLen + REST_PAD;
 const nextPow2 = (n: number) => 2 ** Math.ceil(Math.log2(Math.max(2, n)));
 const linspace = (a: number, b: number, n: number) => Array.from({ length: n }, (_, i) => a + ((b - a) * i) / Math.max(1, n - 1));
 const logspace = (a: number, b: number, n: number) => linspace(Math.log10(a), Math.log10(b), n).map((v) => 10 ** v);
@@ -106,7 +112,7 @@ function hash64(...parts: (string | number)[]): string {
 const builtIn = { status: 'built_in' as const, date: null, tool_version: null, cases: [], hardware: true, message: 'Built in: cleared for hardware.' };
 const unchecked = { status: 'unchecked' as const, date: null, tool_version: null, cases: [], hardware: false, message: 'Not checked: runs on the simulator; check it before it drives hardware.' };
 
-/** The built-in law, as the service lists it. */
+/** The built-in law, as the service lists it (its manifest, word for word). */
 const TWR_CORRECT: LawEntry = {
 	id: 'twr_correct',
 	world: 'twr',
@@ -114,18 +120,18 @@ const TWR_CORRECT: LawEntry = {
 	name: 'frequency-domain correction',
 	version: '0.1.0',
 	author: 'Hertzforge contributors',
-	summary: 'Seeds the drive from the inverse of the identified system applied to the reference, then after each play corrects it by a share of the inverse applied to the error, on the trusted bins, each bin held to a growth limit a call.',
+	summary: "Starts from the inverse of the identified plant applied to the reference record, then after each correction play corrects the drive spectrum by a fraction of the inverse times the error, on the bins the controller trusts. Each bin's growth is limited per correction. When the controller clipped a play's drive, the correction starts from the drive as played.",
 	sha256: null,
 	check: builtIn,
 	params: [
-		{ key: 'beta', label: 'Correction share', help: "The share of the inverse times the error added to the drive after each play.", kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 0.5 },
-		{ key: 'max_db_per_iter', label: 'Growth limit a call', help: 'The most any bin of the drive may grow in one correction.', kind: 'number', unit: 'dB', min: 1, max: 9, step: 0.5, default: 6 },
-		{ key: 'initial_backoff_db', label: 'First drive backoff', help: 'The seed is played this far under the inverse times the reference.', kind: 'number', unit: 'dB', min: 0, max: 12, step: 1, default: 0 }
+		{ key: 'beta', label: 'Correction gain', help: "The fraction of each play's error corrected before the next play. 1 corrects the whole error at once; smaller values settle more gently when the plant estimate is uncertain.", kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 0.5 },
+		{ key: 'max_db_per_iter', label: 'Largest rise per correction', help: 'The most any one frequency of the drive may grow from one correction to the next. A frequency may always fall.', kind: 'number', unit: 'dB', min: 1, max: 9, step: 0.5, default: 6 },
+		{ key: 'initial_backoff_db', label: 'First play backoff', help: 'How far under the predicted drive the first play starts. The correction brings the level up over the next plays.', kind: 'number', unit: 'dB', min: 0, max: 12, step: 1, default: 0 }
 	],
 	diagnostics: [
-		{ key: 'corrected_bins', label: 'Corrected bins', unit: '', help: 'The bins the last call changed.', layout: null },
-		{ key: 'clamped_bins', label: 'Bins at the growth limit', unit: '', help: 'The bins the growth limit held back on the last call.', layout: null },
-		{ key: 'drive_change_db', label: 'Drive change', unit: 'dB', help: "The change of the drive's rms on the last call.", layout: null }
+		{ key: 'corrected_bins', label: 'Corrected bins', unit: 'bins', help: 'Bins whose drive the law moved on this call.', layout: null },
+		{ key: 'clamped_bins', label: 'Bins at the rise limit', unit: 'bins', help: 'Bins whose rise the law held to its largest rise per correction on this call.', layout: null },
+		{ key: 'drive_change_db', label: 'Drive change', unit: 'dB', help: "The drive's peak against the last drive's, in dB (0 at the seed).", layout: null }
 	],
 	shapes: null,
 	needs: null
@@ -215,8 +221,9 @@ function statsOf(at: (i: number) => number, n: number): { peak: number; rms: num
 const TIME_AXIS = { label: 'Time', unit: 's', scale: 'linear' as const };
 const FREQ_AXIS = { label: 'Frequency', unit: 'Hz', scale: 'log' as const };
 
-function timeView(title: string, unit: string | null, series: Series[]): SpectrumView {
-	return { view: 'spectrum', title, x: TIME_AXIS, y: { label: title, unit, scale: 'linear' }, series, link: 'time' };
+/** A record against time, its y axis named as the service names it ("Acceleration" in the control unit). */
+function timeView(title: string, yLabel: string, unit: string | null, series: Series[]): SpectrumView {
+	return { view: 'spectrum', title, x: TIME_AXIS, y: { label: yLabel, unit, scale: 'linear' }, series, link: 'time' };
 }
 
 const line = (name: string, role: Series['role'], x: number[], y: number[]): Series => ({ name, role, x: f64(x), y: f64(y) });
@@ -282,6 +289,8 @@ interface Run {
 	stopBy: string | undefined;
 	/** Starting playback on the manual ladder: the schedule then runs to its end. */
 	playingBack: boolean;
+	/** A freeze asked for during a play, taking effect before the next one. */
+	pendingFrozen: boolean | null;
 	misses: number;
 	/** The law call that made the drive in force, for the next play's row. */
 	call: TwrPlayRow['law'];
@@ -356,7 +365,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const n = r.facts.samples;
 		const m = Math.min(points, n);
 		const idx = linspace(0, n - 1, m);
-		return timeView('Reference', r.facts.units, [line('Reference', 'reference', idx.map((i) => i / r.facts.fs_hz), idx.map(r.at))]);
+		return timeView('Reference', 'Reference', r.facts.units, [line('Reference', 'reference', idx.map((i) => i / r.facts.fs_hz), idx.map(r.at))]);
 	}
 
 	function parseText(text: string, fsHz: number | undefined, column: number | undefined): { values: number[]; fs: number } {
@@ -369,21 +378,23 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			const nums = cells.map(Number);
 			if (nums.some((v) => !Number.isFinite(v))) {
 				if (rows.length === 0) return; // a header line
-				refuse('refused', 'reference_unreadable', `Line ${k + 1} is not a row of numbers: "${l.slice(0, 40)}".`, { line: k + 1 });
+				refuse('refused', 'reference_unreadable', `Line ${k + 1} is not a row of numbers: "${l.slice(0, 40)}".`, { path: null, line: k + 1 });
 			}
 			rows.push(nums);
 		});
-		if (rows.length < 2) refuse('refused', 'reference_unreadable', 'The text holds fewer than two samples.');
+		if (rows.length < 2) refuse('refused', 'reference_unreadable', 'The text holds fewer than two samples.', { path: null, line: null });
 		const width = rows[0].length;
-		const timed = width >= 2 && fsHz === undefined;
-		const col = column ?? (timed ? 1 : 0);
-		if (col >= width) refuse('refused', 'reference_unreadable', `The text has ${width} column(s); column ${col} is not one of them.`, { column: col });
+		// Without a rate the first column is time and the data columns follow it; with one, every column is data.
+		const timed = fsHz === undefined;
+		const col = (column ?? 0) + (timed ? 1 : 0);
+		if (timed && width < 2) refuse('refused', 'reference_unreadable', 'The text has no time column; give the rate (fs_hz).', { path: null, line: null });
+		if (col >= width) refuse('refused', 'reference_unreadable', `The text has ${timed ? width - 1 : width} data column(s); column ${column ?? 0} is not one of them.`, { path: null, line: null });
 		let fs = fsHz;
 		if (fs === undefined) {
-			if (width < 2) refuse('refused', 'reference_unreadable', 'The text has no time column; give the rate (fs_hz).');
-			const dt = (rows[rows.length - 1][0] - rows[0][0]) / (rows.length - 1);
-			if (!(dt > 0) || rows.some((r, i) => i > 0 && r[0] <= rows[i - 1][0])) refuse('refused', 'reference_unreadable', 'The time column does not rise from row to row.');
-			fs = round(1 / dt, 6);
+			const steps = rows.slice(1).map((r, i) => r[0] - rows[i][0]).sort((a, b) => a - b);
+			const median = steps[Math.floor(steps.length / 2)];
+			if (!(median > 0) || steps.some((d) => Math.abs(d - median) > 0.01 * median)) refuse('refused', 'reference_unreadable', 'The time column is not evenly spaced within 1% of its median step.', { path: null, line: null });
+			fs = round((rows.length - 1) / (rows[rows.length - 1][0] - rows[0][0]), 6);
 		}
 		return { values: rows.map((r) => r[col]), fs };
 	}
@@ -430,9 +441,9 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const fraction = round(Math.min(0.9999, inBand - Math.max(0, 40 - floor) * 0.002), 4);
 		const checks: TwrFeasibilityCheck[] = [];
 		const f = c.feasibility ?? {};
-		if (isNum(f.peak_accel)) checks.push({ name: 'acceleration', value: round(p.peak, 6), limit: f.peak_accel, pass: p.peak <= f.peak_accel });
-		if (isNum(f.peak_velocity_ips)) checks.push({ name: 'velocity', value: round(velocity, 6), limit: f.peak_velocity_ips, pass: velocity <= f.peak_velocity_ips });
-		if (isNum(f.disp_pkpk_in)) checks.push({ name: 'displacement', value: round(disp, 8), limit: f.disp_pkpk_in, pass: disp <= f.disp_pkpk_in });
+		if (isNum(f.peak_accel)) checks.push({ name: 'peak_accel', value: round(p.peak, 6), limit: f.peak_accel, pass: p.peak <= f.peak_accel });
+		if (isNum(f.peak_velocity_ips)) checks.push({ name: 'peak_velocity_ips', value: round(velocity, 6), limit: f.peak_velocity_ips, pass: velocity <= f.peak_velocity_ips });
+		if (isNum(f.disp_pkpk_in)) checks.push({ name: 'disp_pkpk_in', value: round(disp, 8), limit: f.disp_pkpk_in, pass: disp <= f.disp_pkpk_in });
 		const exceeded = checks.some((x) => !x.pass) || (host.feasibilityExceeds && checks.length > 0);
 		return {
 			grid: { fs_hz: p.fs, record_len: p.recordLen, df_hz: p.fs / p.recordLen, record_s: p.recordLen / p.fs, section_start: p.pre, section_len: p.sectionLen, actual: false },
@@ -441,34 +452,53 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			coverage: { band_hz: [band[0], band[1]], ref_floor_db: floor, fraction, error_floor_pct: round(100 * Math.sqrt(1 - fraction), 3) },
 			feasibility: {
 				verdict: checks.length === 0 ? 'not_evaluated' : exceeded ? 'exceeded' : 'pass',
-				message: checks.length === 0 ? 'No feasibility ceiling was set, so the kinematics were not checked.' : exceeded ? "The section's kinematics are over a feasibility ceiling." : 'Within every feasibility ceiling set.',
+				message: checks.length === 0 ? 'No feasibility ceiling was set, so the kinematics were not checked.' : exceeded ? 'The section at full level is over a kinematic ceiling.' : 'The section at full level is within its kinematic ceilings.',
 				checks
 			}
 		};
 	}
 
 	function previewViews(p: Prepared, r: StoredRef, c: Pick<TwrConfig, 'correction'>): View[] {
-		const m = 2048;
+		const m = 1024;
 		const ks = linspace(0, p.recordLen - 1, m);
 		const ts = ks.map((k) => k / p.fs);
-		const section = timeView('Section', r.facts.units, [line('Section', 'reference', ts, ks.map(p.target))]);
-		const f = logspace(5, p.fs / 2.2, 256);
+		const section = timeView('Section', 'Reference', r.facts.units, [line('Reference', 'reference', ts, ks.map(p.target))]);
+		// The spectrum on the record grid from 0 to half the rate, the reference floor across the correction band.
+		const f = linspace(0, p.fs / 2, m);
 		const band = c.correction?.band_hz ?? [20, 2000];
-		const spec = f.map((x) => p.rms * (Math.exp(-(((Math.log10(x) - Math.log10(250)) / 0.25) ** 2)) + 0.6 * Math.exp(-(((Math.log10(x) - Math.log10(620)) / 0.2) ** 2)) + 0.03));
+		const bump = (x: number, c0: number, w: number) => Math.exp(-(((x - c0) / w) ** 2));
+		const spec = f.map((x) => p.rms * (bump(x, 250, 60) + 0.6 * bump(x, 620, 90) + 0.3 * bump(x, 1100, 120) + 1e-4));
 		const floor = Math.max(...spec) * 10 ** (-(c.correction?.ref_floor_db ?? 50) / 20);
 		const spectrum: SpectrumView = {
 			view: 'spectrum',
 			title: 'Spectrum',
-			x: FREQ_AXIS,
+			x: { label: 'Frequency', unit: 'Hz', scale: 'linear' },
 			y: { label: 'Magnitude', unit: r.facts.units, scale: 'log' },
-			series: [line('Reference', 'reference', f, spec), line('Reference floor', 'limit', [f[0], f[f.length - 1]], [floor, floor])],
-			regions: [{ x0: band[0], x1: band[1], kind: 'span', label: 'Correction band' }],
+			series: [line('Reference', 'reference', f, spec), line('Reference floor', 'tolerance', [band[0], band[1]], [floor, floor])],
 			link: 'frequency'
 		};
 		const w = 2 * Math.PI * 250;
-		const velocity = timeView('Velocity', 'in/s', [line('Velocity', 'reference', ts, ks.map((k) => (-p.target(k + p.fs / 1000) * G_IPS2) / w))]);
-		const displacement = timeView('Displacement', 'in', [line('Displacement', 'reference', ts, ks.map((k) => (-p.target(k) * G_IPS2) / (w * w)))]);
+		const velocity = timeView('Velocity', 'Velocity', 'in/s', [line('Velocity', 'reference', ts, ks.map((k) => (-p.target(k + p.fs / 1000) * G_IPS2) / w))]);
+		const displacement = timeView('Displacement', 'Displacement', 'in', [line('Displacement', 'reference', ts, ks.map((k) => (-p.target(k) * G_IPS2) / (w * w)))]);
 		return [section, spectrum, velocity, displacement];
+	}
+
+	/** What a preparation would be refused, each at its field (the preview's `config_invalid` items). */
+	function preparationErrors(r: StoredRef, c: Pick<TwrConfig, 'prep' | 'section' | 'pads' | 'acquisition' | 'correction'>): Item[] {
+		const out: Item[] = [];
+		const fs = c.acquisition?.fs_hz ?? r.facts.fs_hz;
+		if (fs < r.facts.fs_hz - 1e-9 || (Math.abs(fs - r.facts.fs_hz) > 1e-9 && c.prep?.auto_resample === false)) out.push(item('rate_mismatch', `The reference is at ${r.facts.fs_hz} Hz and the station is asked for ${fs} Hz.`, 'acquisition.fs_hz'));
+		const taper = c.prep?.taper_frac;
+		if (taper !== undefined && taper !== null && !(taper > 0 && taper <= 0.5)) out.push(item('out_of_range', `The taper is ${taper}; it is above 0 and at most 0.5.`, 'prep.taper_frac'));
+		const band = c.correction?.band_hz ?? [20, 2000];
+		if (band[1] >= fs / 2) out.push(item('band_above_grid', `The correction band reaches ${band[1]} Hz, at or above half the rate.`, 'correction.band_hz'));
+		const hp = c.prep?.highpass_hz;
+		if (isNum(hp) && hp > band[0]) out.push(item('highpass_above_band', `The high-pass at ${hp} Hz is above the correction band's low edge, ${band[0]} Hz.`, 'prep.highpass_hz'));
+		if (out.length) return out;
+		const p = prepare(r, c);
+		if (p.start + p.sectionLen > p.len || p.start < 0 || p.sectionLen < 1) out.push(item('section_outside_reference', `The section ${p.start} + ${p.sectionLen} leaves the prepared reference of ${p.len} samples.`, 'section'));
+		if (p.recordLen > MAX_RECORD) out.push(item('record_too_long', `The record would be ${p.recordLen} samples, over the ${MAX_RECORD} the service plays.`, 'pads'));
+		return out;
 	}
 
 	function lawOf(c: TwrConfig): LawEntry | null {
@@ -603,7 +633,8 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 	const ofLevel = (r: Run) => r.config.schedule?.max_iterations ?? 8;
 	const gate = (r: Run) => r.config.schedule?.gate_pct ?? 10;
 	const fsOf = (r: Run) => r.derived.grid.fs_hz;
-	const recordS = (r: Run) => r.derived.grid.record_len / fsOf(r);
+	/** A play's length in station time: its record and the rest pad. */
+	const recordS = (r: Run) => (r.derived.grid.record_len + REST_PAD) / fsOf(r);
 
 	function playsOf(r: Run) {
 		return { done: r.done, at_level: r.atLevel, of_level: ofLevel(r), playback: r.playback, of_playback: r.derived.plays_target };
@@ -679,9 +710,9 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const resp = responseOf(rec.err, s * p.rms);
 		const y = ks.map((k, i) => resp(k, target[i], p.fs));
 		return [
-			timeView('Replication', unit(), [line('Response', 'measured', t, y), line('Target', 'reference', t, target)]),
-			timeView('Error', unit(), [line('Error', 'measured', t, y.map((v, i) => v - target[i]))]),
-			timeView('Drive', 'V', [line('Drive', 'drive', t, target.map((v) => v / G_PER_V))])
+			timeView('Replication', 'Acceleration', unit(), [line('Response', 'measured', t, y), line('Target', 'reference', t, target)]),
+			timeView('Error', 'Error', unit(), [line('Error', 'measured', t, y.map((v, i) => v - target[i]))]),
+			timeView('Drive', 'Drive', 'V', [line('Drive', 'drive', t, target.map((v) => v / G_PER_V))])
 		];
 	}
 
@@ -696,7 +727,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const mode = (x: number, fn: number, q: number) => 1 / Math.sqrt((1 - (x / fn) ** 2) ** 2 + (x / (fn * q)) ** 2);
 		const gain = f.map((x) => G_PER_V * (0.6 * mode(x, 200, 2.5) + 0.4 * mode(x, 550, 2.5)));
 		const phase = f.map((x) => (-180 / Math.PI) * Math.atan2(x / (200 * 2.5), 1 - (x / 200) ** 2));
-		const coh = f.map((x) => (r.identification?.coherence_mean ?? 0.99) * (1 - 0.04 * Math.exp(-(((x - 300) / 40) ** 2))));
+		const coh = f.map((x) => (r.identification?.coherence_mean ?? 0.5) * (1 - 0.04 * Math.exp(-(((x - 300) / 40) ** 2))));
 		const cohFloor = r.config.inverse?.coherence_floor ?? 0.9;
 		const minMean = id.min_mean_coherence ?? 0.8;
 		const corr = r.config.correction?.band_hz ?? band;
@@ -707,22 +738,27 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const spec = (title: string, y: { label: string; unit: string | null; scale: 'linear' | 'log' }, series: Series[]): SpectrumView => ({ view: 'spectrum', title, x: FREQ_AXIS, y, series, link: 'frequency' });
 		return {
 			frf: [spec('Identification Gain', { label: 'Gain', unit: `${unit()}/V`, scale: 'log' }, [line('Gain', 'measured', f, gain)]), spec('Identification Phase', { label: 'Phase', unit: 'deg', scale: 'linear' }, [line('Phase', 'measured', f, phase)])],
-			coherence: [spec('Coherence', { label: 'Coherence', unit: null, scale: 'linear' }, [line('Coherence', 'measured', f, coh), line('Trust floor', 'limit', [f[0], f[f.length - 1]], [cohFloor, cohFloor]), line('Hold under', 'abort', [f[0], f[f.length - 1]], [minMean, minMean])])],
+			coherence: [spec('Coherence', { label: 'Coherence', unit: null, scale: 'linear' }, [line('Coherence', 'measured', f, coh), line('Trust floor', 'tolerance', [f[0], f[f.length - 1]], [cohFloor, cohFloor]), line('Hold', 'abort', [f[0], f[f.length - 1]], [minMean, minMean])])],
 			mask: [spec('Trust', { label: 'Trusted', unit: null, scale: 'linear' }, [line('Trusted', 'measured', fm, trusted), line('Reference', 'reference', fm, refSpec.map((v) => v / top))])]
 		};
 	}
 
+	/** The run's numbers, each row only once there is a number for it. */
 	function readingsView(r: Run): View {
 		const last = r.rows.at(-1);
-		const rows: ReadingRow[] = [
-			{ label: 'Level', value: r.level === null ? '-' : round(r.level, 2), unit: 'dB', status: 'info' },
-			{ label: 'Plays', value: r.done, unit: null, status: 'info' },
-			{ label: 'Last rms error', value: last ? round(last.rms_error_pct, 3) : '-', unit: '%', status: last ? (last.gated ? 'pass' : 'warn') : 'info' },
-			{ label: 'Gate', value: gate(r), unit: '%', status: 'info' },
-			{ label: 'Drive peak', value: last ? round(last.drive_vpk, 4) : '-', unit: 'V', status: 'info' },
-			{ label: 'Lag', value: r.identification ? r.identification.lag_frames : '-', unit: 'frames', status: 'info' },
-			{ label: 'Unusable calls in a row', value: r.misses, unit: null, status: r.misses ? 'warn' : 'pass' }
-		];
+		const s = stateOf(r);
+		const rows: ReadingRow[] = [];
+		if (r.level !== null) rows.push({ label: 'Level', value: round(r.level, 2), unit: 'dB', status: 'info' });
+		rows.push({ label: 'Plays', value: r.done, unit: null, status: 'info' });
+		if (r.derived.plays_target > 0 && r.playback > 0) rows.push({ label: 'Playback', value: `${r.playback} of ${r.derived.plays_target}`, unit: null, status: 'info' });
+		if (last) {
+			rows.push({ label: 'Last error', value: round(last.rms_error_pct, 3), unit: '%', status: last.gated ? 'pass' : 'info' });
+			rows.push({ label: 'Gate', value: gate(r), unit: '%', status: 'info' });
+			rows.push({ label: 'Last drive peak', value: round(last.drive_vpk, 4), unit: 'V', status: last.drive_vpk > ceiling(r) ? 'fail' : 'info' });
+			rows.push({ label: 'Last response peak', value: round(last.response_peak, 4), unit: unit(), status: 'info' });
+		}
+		if (s.prediction) rows.push({ label: 'Drive in force', value: round(s.prediction.drive_vpk, 4), unit: 'V', status: s.prediction.drive_vpk > s.prediction.drive_vpk_ceiling ? 'fail' : 'info' });
+		if (s.t_s !== null) rows.push({ label: 'Station time', value: round(s.t_s, 3), unit: 's', status: 'info' });
 		return { view: 'reading', title: 'Run', rows };
 	}
 
@@ -733,26 +769,40 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			const pts = r.calls.filter((c) => k in c.values);
 			return line(r.law.diagnostics.find((d) => d.key === k)?.label ?? k, 'measured', pts.map((c) => c.index + 1), pts.map((c) => c.values[k]));
 		});
+		// The last used call's values, by their labels, and the unusable calls in a row.
 		const values = r.lastValues ?? {};
 		const rows: ReadingRow[] = [
-			...r.law.diagnostics.map((d): ReadingRow => ({ label: d.label, value: values[d.key] === undefined ? '-' : round(values[d.key], 4), unit: d.unit || null, status: 'info' })),
+			...r.law.diagnostics.filter((d) => values[d.key] !== undefined).map((d): ReadingRow => ({ label: d.label, value: round(values[d.key], 6), unit: d.unit || null, status: 'info' })),
 			{ label: 'Unusable calls in a row', value: r.misses, unit: null, status: r.misses ? 'warn' : 'pass' }
 		];
-		return [{ view: 'spectrum', title: 'Law', x: { label: 'Play', unit: null, scale: 'linear' }, y: { label: 'Value', unit: null, scale: 'linear' }, series, link: 'play' }, { view: 'reading', title: 'Law Values', rows }];
+		return [{ view: 'spectrum', title: 'Law', x: { label: 'Play', unit: null, scale: 'linear' }, y: { label: 'Value', unit: null, scale: 'linear' }, series }, { view: 'reading', title: 'Law Values', rows }];
 	}
 
 	function playsTable(r: Run): TableView {
 		return {
 			view: 'table',
 			title: 'Plays',
-			columns: ['Play', 'Kind', 'Level', 'Iteration', 'RMS error', 'Gated', 'Drive peak'],
-			rows: r.rows.map((p) => [String(p.index + 1), p.kind, `${p.level_db} dB`, p.iteration === null ? '-' : String(p.iteration), `${round(p.rms_error_pct, 3)}%`, p.gated ? 'yes' : 'no', `${round(p.drive_vpk, 4)} V`])
+			columns: ['Play', 'Kind', 'Level (dB)', 'Iteration', 'Error (%)', 'Peak error (%)', 'Spectral error (dB)', 'Gated', 'Drive peak (V)', 'Clipped samples', 'Clamped bins', 'Lag (frames)'],
+			rows: r.rows.map((p) => [
+				String(p.index + 1),
+				p.kind,
+				String(round(p.level_db, 2)),
+				p.iteration === null ? '' : String(p.iteration),
+				String(round(p.rms_error_pct, 2)),
+				String(round(p.peak_error_pct, 2)),
+				String(round(p.spectral_error_db, 2)),
+				p.gated ? 'yes' : 'no',
+				String(round(p.drive_vpk, 4)),
+				String(p.clipped_samples),
+				String(p.clamped_bins),
+				p.lag_frames === null ? '' : String(round(p.lag_frames, 2))
+			])
 		};
 	}
 
 	function scopeView(r: Run, points = 1024): SpectrumView {
 		const p = ref(r);
-		const empty = timeView('Scope', unit(), []);
+		const empty = timeView('Scope', 'Acceleration', unit(), []);
 		if (!r.play) return empty;
 		const n = Math.min(points, 1024);
 		const end = Math.max(1, Math.round(r.play.done * p.recordLen));
@@ -760,7 +810,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const ks = linspace(startK, end, n);
 		const s = 10 ** ((r.level ?? 0) / 20);
 		const resp = responseOf(r.err, s * p.rms);
-		return timeView('Scope', unit(), [line('Control', 'measured', ks.map((k) => (k - startK) / p.fs), ks.map((k) => resp(k, s * p.target(k), p.fs)))]);
+		return timeView('Scope', 'Acceleration', unit(), [line('Control', 'measured', ks.map((k) => (k - startK) / p.fs), ks.map((k) => resp(k, s * p.target(k), p.fs)))]);
 	}
 
 	function plotViews(r: Run, pl: TwrSubscribePlot): View[] {
@@ -771,7 +821,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			case 'target': {
 				if (r.level === null) return [];
 				const { x, y } = recordAt(r, points, (_k, target) => target);
-				return [timeView('Target', unit(), [line('Target', 'reference', x, y)])];
+				return [timeView('Target', 'Acceleration', unit(), [line('Target', 'reference', x, y)])];
 			}
 			case 'response':
 				return rec ? [{ ...(recordViews(r, rec, points)[0] as SpectrumView), title: 'Response' }] : [];
@@ -789,7 +839,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				const x = Array.from(target.x as Float64Array);
 				const t = Array.from(target.y as Float64Array);
 				return [
-					timeView('Envelope', unit(), [
+					timeView('Envelope', 'Acceleration', unit(), [
 						{ ...resp, name: 'Response' },
 						line('Alarm high', 'tolerance', x, t.map((v) => v + alarm * pk)),
 						line('Alarm low', 'tolerance', x, t.map((v) => v - alarm * pk)),
@@ -812,7 +862,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				const R = f.map((x) => s * (Math.exp(-(((Math.log10(x) - Math.log10(250)) / 0.25) ** 2)) + 0.6 * Math.exp(-(((Math.log10(x) - Math.log10(620)) / 0.2) ** 2)) + 0.03));
 				const Y = R.map((v, i) => v * (1 + (rec.err / 100) * Math.sin(i / 9)));
 				const D = R.map((v, i) => v / (G_PER_V * (0.6 + 0.4 * Math.cos(i / 40))));
-				return [{ view: 'spectrum', title: 'Spectra', x: FREQ_AXIS, y: { label: 'Magnitude', unit: null, scale: 'log' }, series: [line('Target', 'reference', f, R), line('Response', 'measured', f, Y), line('Drive', 'drive', f, D)], link: 'frequency' }];
+				return [{ view: 'spectrum', title: 'Spectra', x: FREQ_AXIS, y: { label: 'Magnitude', unit: unit(), scale: 'log' }, series: [line('Target', 'reference', f, R), line('Response', 'measured', f, Y), line('Drive', 'drive', f, D)], link: 'frequency' }];
 			}
 			case 'convergence': {
 				if (!r.rows.length) return [];
@@ -822,9 +872,8 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 						view: 'spectrum',
 						title: 'Convergence',
 						x: { label: 'Play', unit: null, scale: 'linear' },
-						y: { label: 'RMS error', unit: '%', scale: 'log' },
-						series: [line('RMS error', 'measured', x, r.rows.map((p) => p.rms_error_pct)), line('Gate', 'limit', [x[0], x[x.length - 1]], [gate(r), gate(r)])],
-						link: 'play'
+						y: { label: 'Error', unit: '%', scale: 'log' },
+						series: [line('Error', 'measured', x, r.rows.map((p) => p.rms_error_pct)), line('Gate', 'tolerance', [x[0], x[x.length - 1]], [gate(r), gate(r)])]
 					}
 				];
 			}
@@ -852,7 +901,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			level_db: r.level,
 			rung: r.rung,
 			plays: playsOf(r),
-			play: r.play ? { index: r.play.index, kind: r.play.kind, iteration: r.play.iteration, frames_done: Math.min(p.recordLen, Math.round(r.play.done * p.recordLen)), frames: p.recordLen } : null,
+			play: r.play ? { index: r.play.index, kind: r.play.kind, iteration: r.play.iteration, frames_done: Math.min(playFrames(p), Math.round(r.play.done * playFrames(p))), frames: playFrames(p) } : null,
 			last: last ? { rms_error_pct: last.rms_error_pct, peak_error_pct: last.peak_error_pct, spectral_error_db: last.spectral_error_db, gated: last.gated } : null
 		};
 	}
@@ -861,22 +910,25 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 	const dataFor = (r: Run, plots: TwrSubscribePlot[]) => ({ ...head(r), plots: plots.map((pl) => ({ id: pl.id, quantity: pl.quantity, views: plotViews(r, pl) })) });
 
 	/**
-	 * As the service sends them: `twr.live` to every connection, five times a second from arm until
-	 * the run has finished and once more; `twr.data` to each subscribed connection at most at its
-	 * rate while a plotted quantity has changed (the scope changes all through a play), and always
-	 * the final frame.
+	 * As the service sends them: `twr.live` five times a second from arm until the run has finished
+	 * (and once more) to every connection without a TWR subscription of its own; to a subscribed
+	 * connection `twr.data` in its place, at its rate while a play is in flight whatever its plots
+	 * show, and once when identification ends, once after each play and once when the run has
+	 * finished (and at once on subscribe).
 	 */
 	function publish(r: Run) {
 		const final = r.state === 'finished';
-		const live = liveOf(r) as unknown as Record<string, unknown>;
+		let live: Record<string, unknown> | null = null;
 		for (const conn of host.connections()) {
-			conn.emit('twr.live', live);
 			const sub = subs.get(conn);
-			if (!sub) continue;
+			if (!sub) {
+				live ??= liveOf(r) as unknown as Record<string, unknown>;
+				conn.emit('twr.live', live);
+				continue;
+			}
 			sub.acc += LIVE_MS / 1000;
-			const scoping = !!r.play && sub.plots.some((p) => p.quantity === 'scope');
-			const changed = sub.sent !== r.version || scoping;
-			if (final || (changed && sub.acc + 1e-9 >= 1 / sub.rate)) {
+			const due = sub.sent !== r.version || final || (!!r.play && sub.acc + 1e-9 >= 1 / sub.rate);
+			if (due && (sub.sent !== r.version || sub.acc + 1e-9 >= 1 / sub.rate || final)) {
 				sub.acc = 0;
 				sub.sent = r.version;
 				conn.emit('twr.data', dataFor(r, sub.plots) as unknown as Record<string, unknown>);
@@ -936,6 +988,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			stopOutcome: 'operator_stop',
 			stopBy: undefined,
 			playingBack: false,
+			pendingFrozen: null,
 			misses: 0,
 			call: null,
 			lastValues: null,
@@ -988,7 +1041,8 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		const coh = vrms >= 0.002 ? 0.9999 : 0.42;
 		const min = id.min_mean_coherence ?? 0.8;
 		const coverage = r.derived.coverage.fraction;
-		r.identification = { excitation: id.excitation ?? 'random', drive_vrms: vrms, drive_vpk: round(vrms * 4.6, 4), coherence_mean: coh, min_mean_coherence: min, coverage, lag_frames: LAG_FRAMES, lag_source: 'measured', passed: coh >= min };
+		const passed = coh >= min;
+		r.identification = { excitation: id.excitation ?? 'random', drive_vrms: vrms, drive_vpk: round(vrms * 4.6, 4), coherence_mean: coh, min_mean_coherence: min, coverage: passed ? coverage : null, lag_frames: LAG_FRAMES, lag_source: 'measured', passed };
 		r.version++;
 		addLog('gate', `identification done: mean coherence ${coh}, lag ${LAG_FRAMES} frames measured`);
 		if (coh < min) {
@@ -1034,14 +1088,16 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		r.lastValues = values;
 		r.calls.push({ index: r.done, values });
 		r.call = { used: true, miss: null, call_ms: round(0.8 + (r.calls.length % 5) * 0.3, 3), peak_rise_db: round(Math.abs(change) + 0.2, 3), bin_rise_db: round(Math.abs(change) * 1.6 + 0.4, 3), predicted_peak_ratio: round(1 + r.err / 200, 4), values };
-		r.version++;
 		addLog('law', kind === 'playback' ? 'the law corrected the drive after a playback play' : 'the law corrected the drive');
 		return true;
 	}
 
 	function proceed(r: Run) {
-		r.level = r.levels[0];
-		r.rung = 0;
+		// The first level of the table, unless a level move from the review hold set one.
+		if (r.level === null) {
+			r.level = r.levels[0];
+			r.rung = 0;
+		}
 		r.atLevel = 0;
 		const backoff = typeof r.params.initial_backoff_db === 'number' ? r.params.initial_backoff_db : 0;
 		r.err = r.params.correct === false ? 50.1 : backoff > 0 ? (1 - 10 ** (-backoff / 20)) * 100 : 18;
@@ -1058,7 +1114,19 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		else setPhase(r, 'running', 'waiting');
 	}
 
+	/** A freeze asked for takes effect: logged, and the state says so. */
+	function applyFreeze(r: Run) {
+		if (r.pendingFrozen === null) return;
+		const frozen = r.pendingFrozen;
+		r.pendingFrozen = null;
+		if (frozen === r.frozen) return;
+		r.frozen = frozen;
+		addLog('law', r.frozen ? 'corrections frozen: the drive in force replays' : 'corrections resumed');
+		stateChanged(true);
+	}
+
 	function beginPlay(r: Run, kind: TwrPlayKind) {
+		applyFreeze(r);
 		const iteration = kind === 'iteration' ? r.atLevel + 1 : null;
 		r.play = { index: r.done, kind, iteration, t0: r.t, elapsed: 0, done: 0, ticks: 0 };
 		setPhase(r, 'running', kind === 'iteration' ? 'iterating' : 'playing');
@@ -1089,7 +1157,7 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			lag_frames: round(LAG_FRAMES + 0.02, 3),
 			drift_frames: 0.02,
 			start_frame: Math.round(pl.t0 * p.fs),
-			frames: p.recordLen,
+			frames: playFrames(p),
 			at_s: round(pl.t0, 3),
 			law: r.call
 		};
@@ -1102,8 +1170,10 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		else r.playback++;
 		r.play = null;
 		r.version++;
-		addLog('note', `play ${row.index + 1} (${pl.kind}) at ${level} dB: ${err}% rms error, ${gated ? 'gated' : 'not gated'}`);
+		addLog('note', `Play ${row.index}: ${COMMITTED} frames committed before start.`);
 		afterPlay(r, row);
+		// A freeze asked for during the play takes effect once the play's correction is done.
+		if (run === r && r.state === 'running') applyFreeze(r);
 	}
 
 	function afterPlay(r: Run, row: TwrPlayRow) {
@@ -1142,7 +1212,6 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			r.rung = (r.rung ?? 0) + 1;
 			r.level = r.levels[r.rung];
 			r.atLevel = 0;
-			r.version++;
 			addLog('level', `level ${r.level} dB`);
 		}
 		queueNext(r, 'iteration');
@@ -1269,8 +1338,20 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 		if (r.mode !== 'manual') refuse('refused', 'wrong_mode', `${verb} is for the manual ladder; this run is automatic.`, { mode: r.mode });
 	}
 
-	function needBetween(r: Run, verb: string) {
-		if (r.state !== 'running' || r.phase !== 'waiting' || r.play) wrongState(r, verb);
+	/** At the coherence hold only a new run goes on; the service says why in its own words. */
+	function notHeld(r: Run) {
+		if (r.state !== 'held') return;
+		const id = r.identification;
+		refuse('refused', 'coherence_hold', `The run is held at the coherence hold: the identification's mean coherence, ${id?.coherence_mean ?? '-'}, is under ${id?.min_mean_coherence ?? '-'}. Only twr.reset releases it.`, {
+			coherence_mean: id?.coherence_mean ?? null,
+			min_mean_coherence: id?.min_mean_coherence ?? null
+		});
+	}
+
+	/** Between plays and before playback (Play also from a level held for its gate). */
+	function needBetween(r: Run, verb: string, holding = false) {
+		const phaseOk = r.phase === 'waiting' || (holding && r.phase === 'holding');
+		if (r.state !== 'running' || !phaseOk || r.play || r.playingBack) wrongState(r, verb);
 	}
 
 	const gatedHere = (r: Run) => {
@@ -1352,7 +1433,8 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				if (hasText) {
 					if (typeof params.text !== 'string') bad('text', '"text" is the reference as text.');
 					const { values, fs } = parseText(params.text as string, fsHz, params.column as number | undefined);
-					const sha = hash64('text', params.text as string, fs, units);
+					// The hash is of the record as read (its rate, its unit and its samples), not of the text.
+					const sha = hash64('record', fs, units, values.join(','));
 					const name = typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'pasted';
 					stored = storeRef({ sha256: sha, path: null, name, format: 'text', fs_hz: round(fs, 6), samples: values.length, duration_s: round(values.length / fs, 6), units }, (i) => {
 						const a = Math.max(0, Math.min(values.length - 1, Math.floor(i)));
@@ -1363,9 +1445,9 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				} else {
 					if (!absolute(params.path)) bad('path', 'A reference file is named by its full path on the computer that runs the test.');
 					const path = params.path as string;
-					if (/missing|unreadable|\.bad$/i.test(path)) refuse('refused', 'reference_unreadable', `Could not read ${path}: no such file.`, { path });
+					if (/missing|unreadable|\.bad$/i.test(path)) refuse('refused', 'reference_unreadable', `Could not read ${path}: no such file.`, { path, line: null });
 					const ext = (path.split('.').pop() ?? '').toLowerCase();
-					if (!['csv', 'tsv', 'wav', 'json'].includes(ext)) refuse('refused', 'reference_unreadable', `${path} is not a CSV, TSV, WAV or JSON record.`, { path });
+					if (!['csv', 'tsv', 'wav', 'json'].includes(ext)) refuse('refused', 'reference_unreadable', `${path} is not a CSV, TSV, WAV or JSON record.`, { path, line: null });
 					const fs = fsHz ?? 12800;
 					const n = Math.round(fs * 4);
 					const name = typeof params.name === 'string' && params.name.trim() ? params.name.trim() : (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/, '');
@@ -1375,13 +1457,23 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				return { reference: stored.facts, warnings: [], views: [referenceView(stored)] };
 			},
 			'twr.reference.preview': (params) => {
-				if (!isObject(params.reference) || typeof (params.reference as Record<string, unknown>).sha256 !== 'string') bad('reference', 'Name the stored reference by its "sha256".');
-				const r = refs.get((params.reference as { sha256: string }).sha256);
-				if (!r) bad('reference.sha256', 'No stored reference has that SHA-256; import the reference again.');
-				const c = params as unknown as Pick<TwrConfig, 'prep' | 'section' | 'pads' | 'acquisition' | 'correction' | 'feasibility'>;
-				const p = prepare(r, c);
-				if (p.recordLen > MAX_RECORD) refuse('bad_request', 'bad_params', `The record would be ${p.recordLen} samples, over ${MAX_RECORD}.`, { param: 'pads' });
-				return { derived: previewDerived(r, c, p), views: previewViews(p, r, c) };
+				// A wrong shape is a bad parameter, named; what a configuration would be refused is `config_invalid`.
+				const sha = isObject(params.reference) ? (params.reference as Record<string, unknown>).sha256 : undefined;
+				if (typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha)) bad('reference.sha256', '"reference.sha256" is 64 lowercase hexadecimal digits.');
+				for (const k of ['prep', 'section', 'pads', 'acquisition', 'correction', 'feasibility']) {
+					const v = params[k];
+					if (v !== undefined && v !== null && !isObject(v)) bad(k, `"${k}" is an object.`);
+				}
+				const c = { ...(params as unknown as Pick<TwrConfig, 'prep' | 'section' | 'pads' | 'acquisition' | 'correction' | 'feasibility'>) };
+				// The correction band, when not given, is the default identification's.
+				c.correction = { band_hz: [20, 2000], ...(c.correction ?? {}) };
+				const r = refs.get(sha as string);
+				const errors: Item[] = [];
+				if (!r) errors.push(item('reference_unknown', 'No stored reference has that SHA-256; import the reference again.', 'reference.sha256'));
+				else errors.push(...preparationErrors(r, c));
+				if (errors.length) refuse('bad_request', 'config_invalid', `The preparation has ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}.`, { errors, warnings: [] });
+				const p = prepare(r!, c);
+				return { derived: previewDerived(r!, c, p), views: previewViews(p, r!, c) };
 			},
 			'twr.configure': (params, conn) => {
 				if (!isObject(params.config)) bad('config', 'Configuring needs a test configuration.');
@@ -1433,17 +1525,19 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 			'twr.iterate': (_params, conn) => {
 				host.own(conn);
 				const r = needRun();
-				needManual(r, 'Iterate');
-				needBetween(r, 'Iterate');
+				needManual(r, 'An iteration');
+				notHeld(r);
+				needBetween(r, 'An iteration');
 				beginPlay(r, 'iteration');
 				return stateOf(r);
 			},
 			'twr.play': (_params, conn) => {
 				host.own(conn);
 				const r = needRun();
-				needManual(r, 'Play');
-				needBetween(r, 'Play');
-				if (!gatedHere(r)) refuse('refused', 'not_converged', `The level ${r.level} dB has not met its ${gate(r)}% gate; iterate until a play does.`, { level_db: r.level, gate_pct: gate(r) });
+				needManual(r, 'Playback');
+				notHeld(r);
+				needBetween(r, 'Playback', true);
+				if (!gatedHere(r)) refuse('refused', 'not_converged', `Playback begins once the present level has gated; ${r.level} dB has not met the ${gate(r)} % gate.`, { level_db: r.level, gate_pct: gate(r) });
 				r.playingBack = true;
 				addLog('level', 'playback begins');
 				beginPlay(r, 'playback');
@@ -1458,29 +1552,28 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				if (hasDelta && params.delta_db !== 1 && params.delta_db !== -1) bad('delta_db', '"delta_db" is 1 or -1.');
 				if (hasRung && !(Number.isInteger(params.rung) && (params.rung as number) >= 0)) bad('rung', '"rung" is a whole number from 0.');
 				// The automatic ladder takes a level move only at a level that failed its gate under the hold policy.
-				if (r.mode !== 'manual' && r.phase !== 'holding') refuse('refused', 'wrong_mode', 'Level moves are for the manual ladder; this run is automatic.', { mode: r.mode });
+				if (r.mode !== 'manual' && r.phase !== 'holding') refuse('refused', 'wrong_mode', 'A level change needs the manual ladder; this run is automatic.', { mode: r.mode });
 				const between = (r.state === 'running' && (r.phase === 'waiting' || r.phase === 'holding')) || r.state === 'review';
-				if (!between || r.play) wrongState(r, 'A level move');
+				if (!between || r.play || r.playingBack) wrongState(r, 'A level change');
 				const from = r.level ?? r.levels[0];
 				let to: number;
 				let rung: number | null;
 				if (hasRung) {
 					const i = params.rung as number;
-					if (i >= r.levels.length) refuse('refused', 'not_a_rung', `The table has ${r.levels.length} levels; rung ${i} is not one of them.`, { levels_db: r.levels });
+					if (i >= r.levels.length) refuse('bad_request', 'not_a_rung', `The table has ${r.levels.length} levels; rung ${i} is not one of them.`, { levels_db: r.levels });
 					to = r.levels[i];
 					rung = i;
 				} else {
 					to = from + (params.delta_db as number);
-					if (to < r.levels[0] - 1e-9 || to > r.levels[r.levels.length - 1] + 1e-9) refuse('refused', 'not_a_rung', `${to} dB is past the table's ${to < r.levels[0] ? 'first' : 'last'} level.`, { levels_db: r.levels });
+					if (to < r.levels[0] - 1e-9 || to > r.levels[r.levels.length - 1] + 1e-9) refuse('bad_request', 'not_a_rung', `${to} dB is past the table's ${to < r.levels[0] ? 'first' : 'last'} level.`, { levels_db: r.levels });
 					const i = r.levels.findIndex((l) => Math.abs(l - to) < 1e-9);
 					rung = i >= 0 ? i : null;
 				}
 				const vpk = driveAt(r, to);
-				if (vpk > ceiling(r)) refuse('refused', 'drive_ceiling', `The drive at ${to} dB would peak at ${round(vpk, 4)} V, over the ${ceiling(r)} V pk ceiling; the level stays at ${from} dB.`, { vpk: round(vpk, 4), ceiling_vpk: ceiling(r), level_db: to });
+				if (vpk > ceiling(r)) refuse('refused', 'drive_ceiling', `The drive in force would need ${round(vpk, 4)} V pk at ${to} dB; the drive ceiling is ${ceiling(r)} V pk. The level and the drive are unchanged.`, { vpk: round(vpk, 4), ceiling_vpk: ceiling(r), level_db: round(to, 2) });
 				r.level = to;
 				r.rung = rung;
 				r.atLevel = 0;
-				r.version++;
 				addLog('level', `level ${to} dB`);
 				if (r.phase === 'holding') {
 					// The automatic ladder goes on correcting at the new level.
@@ -1492,11 +1585,11 @@ export function createTwrMock(host: TwrMockHost): TwrMock {
 				host.own(conn);
 				const r = needRun();
 				if (typeof params.frozen !== 'boolean') bad('frozen', '"frozen" is true or false.');
-				if (r.state !== 'running' && r.state !== 'review') wrongState(r, 'Freezing');
-				r.frozen = params.frozen as boolean;
-				addLog('law', r.frozen ? 'corrections frozen: the drive in force replays' : 'corrections resumed');
-				stateChanged(true);
-				return { frozen: r.frozen };
+				if (r.state !== 'running' && r.state !== 'review') wrongState(r, 'Freezing the law');
+				// It takes effect before the next play: a play in flight is corrected after as it would have been.
+				r.pendingFrozen = params.frozen as boolean;
+				if (!r.play) applyFreeze(r);
+				return { frozen: params.frozen };
 			},
 			'twr.stop': (_params, conn) => {
 				if (run && isLive() && run.state !== 'stopping') {

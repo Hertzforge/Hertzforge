@@ -18,7 +18,8 @@
 	let { kinematics, feasibility, unit }: Props = $props();
 
 	const tone = $derived(feasibility?.verdict === 'exceeded' ? 'fail' : feasibility?.verdict === 'advisory' ? 'warn' : feasibility?.verdict === 'pass' ? 'pass' : 'info');
-	const CHECK_WORDS: Record<string, string> = { acceleration: 'Acceleration', velocity: 'Velocity', displacement: 'Displacement' };
+	/** Each check is named by its ceiling's field. */
+	const CHECK_WORDS: Record<string, string> = { peak_accel: 'Peak acceleration', peak_velocity_ips: 'Peak velocity', disp_pkpk_in: 'Displacement' };
 </script>
 
 <section class="kin" aria-label="Kinematics" data-testid="twr-kinematics">

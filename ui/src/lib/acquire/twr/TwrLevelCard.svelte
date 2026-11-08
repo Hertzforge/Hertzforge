@@ -98,9 +98,9 @@
 
 	{#if id && !compact}
 		<dl class="nums ident" data-testid="twr-identification-facts">
-			<div><dt>Coherence</dt><dd class="num">{formatNumber(id.coherence_mean, 4)}<span class="sub">, holds under {formatNumber(id.min_mean_coherence, 3)}</span></dd></div>
-			<div><dt>Coverage</dt><dd class="num">{formatNumber(id.coverage * 100, 4)}%</dd></div>
-			<div><dt>Lag</dt><dd class="num">{formatNumber(id.lag_frames, 4)} frames, {id.lag_source}</dd></div>
+			<div><dt>Coherence</dt><dd class="num">{id.coherence_mean === null ? 'Not measured' : formatNumber(id.coherence_mean, 4)}<span class="sub">, holds under {formatNumber(id.min_mean_coherence, 3)}</span></dd></div>
+			<div><dt>Coverage</dt><dd class="num">{id.coverage === null ? '-' : `${formatNumber(id.coverage * 100, 4)}%`}</dd></div>
+			<div><dt>Lag</dt><dd class="num">{id.lag_frames === null ? 'None found' : `${formatNumber(id.lag_frames, 4)} frames, ${id.lag_source}`}</dd></div>
 			<div><dt>Drive</dt><dd class="num">{formatNumber(id.drive_vrms, 3)} V rms, {formatNumber(id.drive_vpk, 3)} V pk</dd></div>
 		</dl>
 	{/if}

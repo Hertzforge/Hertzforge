@@ -665,7 +665,10 @@ export class TwrStore {
 			if (seq === this.previewSeq) {
 				this.preview = null;
 				this.previewKey = key;
-				this.previewError = toRefusal('Prepare the reference', err).message;
+				// What a configuration would be refused comes as items, each in its own words.
+				const r = toRefusal('Prepare the reference', err);
+				const items = r.reason === 'config_invalid' ? ((r.detail?.errors as { message: string }[] | undefined) ?? []) : [];
+				this.previewError = items.length ? items.map((i) => i.message).join(' ') : r.message;
 			}
 			return null;
 		} finally {
@@ -797,8 +800,8 @@ export class TwrStore {
 
 	/** Hold the law's corrections off (the drive in force replays), or let them go on. */
 	async freeze(frozen: boolean): Promise<boolean> {
+		// The answer says what was asked; `state.frozen` follows when it takes effect, before the next play.
 		const res = await this.act<TwrFreezeResult>(frozen ? 'Freeze' : 'Resume Corrections', 'twr.freeze', { frozen });
-		if (res && this.status) this.status = { ...this.status, frozen: res.frozen };
 		return res !== null;
 	}
 

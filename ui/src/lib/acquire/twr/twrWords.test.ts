@@ -113,7 +113,7 @@ describe('the TWR level card', () => {
 describe("a TWR trip's facts", () => {
 	it('names where and what for every kind', () => {
 		const trips: TwrTrip[] = [
-			{ kind: 'envelope', play: 3, at_level_db: -6, in_play: true, worst_frac: 0.61, abort_frac: 0.5, samples: 8 },
+			{ kind: 'envelope', play: 3, at_level_db: -6, in_play: true, worst_frac: 0.61, abort_frac: 0.5, samples: 8, at_sample: 20480 },
 			{ kind: 'drive_vpk', play: null, at_level_db: 0, vpk: 0.2, ceiling_vpk: 0.15, predicted: true },
 			{ kind: 'drive_rms', play: 1, at_level_db: -12, vrms: 0.4, limit_vrms: 0.3 },
 			{ kind: 'response_rms', play: 1, at_level_db: -12, rms: 2.1, limit: 2 },

@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createControlServer, type ControlServerOptions } from '$lib/protocol/mock/control';
-import { mockSocketFactory, type MockConnection, type MockServer } from '$lib/protocol/mock/socket';
+import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import { TWR_TOPICS, type TwrData, type TwrLive, type TwrPlaysResult } from '$lib/protocol/twr';
 import type { SpectrumView } from '$lib/protocol/types';
 import { SineStore } from '../sine/sineStore.svelte';
@@ -29,34 +29,8 @@ const until = async (cond: () => boolean, ms = 8000) => {
 	}
 };
 
-/** A server whose `twr.live` frames reach only connections that never subscribed to plots. */
-function liveOnlyToDefault(server: MockServer): MockServer {
-	const subscribed = new WeakSet<MockConnection>();
-	const methods = { ...server.methods };
-	const sub = methods['twr.subscribe'];
-	methods['twr.subscribe'] = async (params, conn) => {
-		const res = (await sub(params, conn)) as { default: boolean };
-		if (res.default) subscribed.delete(conn);
-		else subscribed.add(conn);
-		return res;
-	};
-	return {
-		...server,
-		methods,
-		attach(conn) {
-			const emit = conn.emit.bind(conn);
-			conn.emit = (topic, data) => {
-				if (topic === TWR_TOPICS.live && subscribed.has(conn)) return;
-				emit(topic, data);
-			};
-			server.attach?.(conn);
-		}
-	};
-}
-
-async function screen(options: ControlServerOptions & { liveToDefaultOnly?: boolean } = {}) {
-	const base = createControlServer({ speed: 20, ...options });
-	const server = options.liveToDefaultOnly ? liveOnlyToDefault(base) : base;
+async function screen(options: ControlServerOptions = {}) {
+	const server = createControlServer({ speed: 20, ...options });
 	const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
 	const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
 	client.connect();
@@ -156,7 +130,7 @@ describe('the TWR store', () => {
 		twr.setup.feasibility.disp_pkpk_in = 1e-9;
 		await twr.refreshPreview();
 		expect(twr.prepared!.derived.feasibility.verdict).toBe('exceeded');
-		expect(twr.prepared!.derived.feasibility.checks.map((c) => [c.name, c.pass])).toEqual([['displacement', false]]);
+		expect(twr.prepared!.derived.feasibility.checks.map((c) => [c.name, c.pass])).toEqual([['disp_pkpk_in', false]]);
 	});
 
 	it("checks the draft in a dry run, its findings on the fields and sections they name", async () => {
@@ -245,9 +219,79 @@ describe('the TWR store', () => {
 		expect(await twr.iterate()).toBe(true);
 		await until(() => twr.plays.length === 3 && twr.now?.phase === 'waiting');
 		expect(await twr.play()).toBe(true);
+		// once playback has begun the manual verbs wait for the end
+		expect(await twr.iterate()).toBe(false);
+		expect(twr.refusal?.reason).toBe('wrong_state');
 		await until(() => twr.status?.state === 'finished', 10000);
 		expect(twr.status?.end?.outcome).toBe('completed');
 		expect(twr.plays.at(-1)?.kind).toBe('playback');
+	});
+
+	it('a level move from the review hold steps from the first level, and the run proceeds at it', async () => {
+		const { twr } = await screen();
+		await ready(twr);
+		twr.setup.schedule.mode = 'manual';
+		await toReview(twr);
+		expect([twr.status?.level_db, twr.status?.rung]).toEqual([null, null]);
+		expect(await twr.level(1)).toBe(-11);
+		expect(await twr.proceed()).toBe(true);
+		await until(() => twr.now?.phase === 'waiting');
+		expect([twr.now?.level_db, twr.now?.rung]).toEqual([-11, null]);
+	});
+
+	it('at the coherence hold the manual verbs are refused coherence_hold too', async () => {
+		const { client, twr } = await screen();
+		await ready(twr);
+		twr.setup.schedule.mode = 'manual';
+		twr.setup.identification.drive_vrms = 0.0005;
+		await twr.apply();
+		await twr.start();
+		await until(() => twr.status?.state === 'held');
+		for (const m of ['twr.iterate', 'twr.play']) {
+			const r = await refusal(client.request(m));
+			expect([r.reason, r.detail]).toEqual(['coherence_hold', { coherence_mean: 0.42, min_mean_coherence: 0.8 }]);
+		}
+	});
+
+	it('on the automatic ladder a level held for its gate takes a level move, and the run goes on from the new level', async () => {
+		const { twr } = await screen();
+		await ready(twr);
+		twr.setup.identification.review = false;
+		twr.setup.schedule.max_iterations = 1;
+		twr.setup.schedule.on_gate_fail = 'hold';
+		await twr.apply();
+		await twr.start();
+		await until(() => twr.now?.phase === 'holding');
+		expect(twrLevelStatus(twr.now).text).toBe('Holding at -12.0 dB: the level did not meet its gate in 1 play');
+		expect(twr.verbs.levelUp.enabled).toBe(true);
+		expect(await twr.level(1)).toBe(-11);
+		await until(() => twr.plays.length === 2);
+		expect(twr.plays[1].level_db).toBe(-11);
+		await twr.abort();
+	});
+
+	it("refuses a preparation by its shape as a bad parameter, and what a configuration would be refused as config_invalid", async () => {
+		const { client, twr } = await screen();
+		expect((await refusal(client.request('twr.reference.preview', { reference: { sha256: 'ABC' } }))).detail?.param).toBe('reference.sha256');
+		const unknown = await refusal(client.request('twr.reference.preview', { reference: { sha256: 'a'.repeat(64) } }));
+		expect([unknown.code, unknown.reason]).toEqual(['bad_request', 'config_invalid']);
+		expect((unknown.detail?.errors as { reason: string; field: string }[]).map((e) => [e.reason, e.field])).toEqual([['reference_unknown', 'reference.sha256']]);
+		await ready(twr);
+		twr.setup.prep.highpass_hz = 30;
+		await twr.refreshPreview();
+		expect(twr.prepared).toBeNull();
+		expect(twr.previewError).toMatch(/high-pass at 30 Hz is above the correction band's low edge/);
+	});
+
+	it('logs, after every judged play, the frames the station took before it started', async () => {
+		const { twr } = await screen();
+		await ready(twr);
+		twr.setup.identification.review = false;
+		await twr.apply();
+		await twr.start();
+		await until(() => twr.status?.state === 'finished', 15000);
+		await until(() => twr.log.filter((e) => /frames committed before start/.test(e.text)).length === twr.plays.length);
+		expect(twr.log.find((e) => /^Play 0: \d+ frames committed before start\.$/.test(e.text))?.kind).toBe('note');
 	});
 
 	it('refuses the manual verbs on the automatic ladder, wrong_mode', async () => {
@@ -275,6 +319,8 @@ describe('the TWR store', () => {
 		expect(await twr.proceed()).toBe(false);
 		expect([twr.refusal?.reason, twr.refusal?.title]).toEqual(['coherence_hold', 'Held at the Coherence Floor']);
 		expect(twr.refusal?.facts[0]).toMatch(/^Mean coherence 0.42, under 0.8$/);
+		// the measured mean, and no coverage at the hold
+		expect([twr.status?.identification?.coherence_mean, twr.status?.identification?.coverage]).toEqual([0.42, null]);
 		const was = twr.status?.run_id;
 		expect(await twr.reset()).toBe(true);
 		expect(twr.status?.state).toBe('configured');
@@ -302,7 +348,8 @@ describe('the TWR store', () => {
 		await twr.proceed();
 		await until(() => (twr.now?.play?.frames_done ?? 0) > 0, 15000);
 		const frames = twr.now!.play!;
-		expect(frames.frames).toBe(65536);
+		// the record and the rest pad behind it
+		expect(frames.frames).toBe(65536 + 1024);
 		expect(twr.verbs.iterate.visible).toBe(false);
 		expect(await twr.stop()).toBe(true);
 		await until(() => twr.status?.state === 'finished', 10000);
@@ -383,6 +430,23 @@ describe('the TWR store', () => {
 		expect(twr.now?.frozen).toBe(false);
 	});
 
+	it('a freeze asked for during a play takes effect once that play has been corrected, and the state then says so', async () => {
+		const { twr } = await screen({ speed: 4 });
+		expect(await twr.importReference({ path: '/data/r1.csv' })).toBe(true);
+		twr.setup.limits.drive_vpk_ceiling = 1;
+		await toReview(twr);
+		await twr.proceed();
+		await until(() => (twr.now?.play?.frames_done ?? 0) > 0, 15000);
+		expect(await twr.freeze(true)).toBe(true);
+		expect(twr.status?.frozen).toBe(false);
+		await until(() => twr.plays.length === 1, 15000);
+		await until(() => twr.status?.frozen === true);
+		// the play in flight was corrected as it would have been: the next play has a call behind it
+		await until(() => twr.plays.length === 2, 15000);
+		expect(twr.plays[1].law?.used).toBe(true);
+		await twr.abort();
+	}, 40000);
+
 	it('shares the run slot: a live TWR run holds off Sine, and is refused while another run is live', async () => {
 		const { acq, twr } = await screen();
 		await ready(twr);
@@ -444,8 +508,8 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		expect(Object.keys(last).sort()).toEqual(['last', 'level_db', 'mode', 'phase', 'play', 'plays', 'plots', 'rung', 'run_id', 'source', 'state', 't_s'].sort());
 	});
 
-	it("reads the run's numbers from a subscribed screen's data frames when no live frame comes to it", async () => {
-		const { client, twr } = await screen({ liveToDefaultOnly: true, speed: 4 });
+	it("reads the run's numbers from a subscribed screen's data frames, which come in place of the live frame, at its rate through a play", async () => {
+		const { client, twr } = await screen({ speed: 4 });
 		let live = 0;
 		client.on(TWR_TOPICS.live, () => live++);
 		const views = new TwrViewsState(client, { setupTitle: () => null, showing: () => true, storage: null, session: null, events: null, subscribeDelayMs: 0 });
@@ -454,8 +518,7 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		twr.setup.limits.drive_vpk_ceiling = 1;
 		await toReview(twr);
 		await twr.proceed();
-		// the default page asks for no scope: frames come once a quantity changes, and the store reads them
-		views.addPage('scope');
+		// the default page plots no scope: the data frames come at the window's rate through the play all the same
 		await until(() => (twr.now?.play?.frames_done ?? 0) > 0, 15000);
 		const before = twr.now!.play!.frames_done;
 		await until(() => (twr.now?.play?.frames_done ?? 0) > before, 5000);
@@ -465,7 +528,7 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		stop();
 	}, 30000);
 
-	it('sends twr.live to every connection, the play in flight and the Scope view while it plays', async () => {
+	it('sends twr.live to every connection without a subscription, the play in flight and the Scope view while it plays', async () => {
 		const { twr, observer } = await screen({ speed: 4 });
 		const b = await observer();
 		const frames: TwrLive[] = [];
@@ -478,7 +541,7 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		const f = frames.find((x) => x.play && x.play.frames_done > 0)!;
 		expect(f.views.map((v) => v.title)).toEqual(['Scope']);
 		expect((f.views[0] as SpectrumView).series.length).toBe(1);
-		expect(f.play).toMatchObject({ index: 0, kind: 'iteration', iteration: 1, frames: 65536 });
+		expect(f.play).toMatchObject({ index: 0, kind: 'iteration', iteration: 1, frames: 65536 + 1024 });
 		await twr.abort();
 	}, 30000);
 });
