@@ -1,9 +1,10 @@
 # Control law plug-ins: specification
 
 **Status: draft for comment.** Interface version 0.1. Both Random worlds, single-output
-(section 6) and MIMO (section 7), and classical shock (section 8) are implemented: the host loads
-them and the built-in laws run through them. While the interface is 0.x it may still change (R15). Comments are wanted on every
-part, and on the questions still open (section 11).
+(section 6) and MIMO (section 7), classical shock (section 8) and SRS shock (section 9) are
+implemented: the host loads them and the built-in laws run through them. While the interface is 0.x
+it may still change (R15). Comments are wanted on every part, and on the questions still open
+(section 12).
 
 ## 1. Purpose
 
@@ -61,7 +62,7 @@ reports divergent lines), but never suppress one.
 | R10 | **State.** A law keeps its state in the resource the core constructs for each run. Nothing carries over between runs. |
 | R11 | **Parameters.** Only the declared kinds in section 5. The core validates every value against the declaration before the law is constructed. There are no free-form strings for a law to parse. |
 | R12 | **Identity and records.** A law file is identified by the SHA-256 of its bytes. Every run records the law's name, version, hash and parameter values, the law file itself, and each loop's law inputs and outputs. |
-| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). A classical shock law is checked on seven simulated test articles, each a whole run under the core's guards (section 8; the guide's "Checking a classical shock law before hardware"). |
+| R13 | **Check before hardware.** `law check` runs a law against a fixed set of simulated test articles (one mode, two close modes, a deep anti-resonance with low coherence, measurement noise, a level ladder) and records a pass against the file's hash. The simulator accepts any law; hardware arms only with a law that has passed. A multiple-output law is checked on its own set: the well-conditioned 4 x 4 and 12 x 6 modal plants, an ill-conditioned 12 x 6, a rigid plate, a plant with measurement noise and a level ladder from -20 dB, each a whole run under the core's guards (`laws.check`; the guide's "Checking a MIMO law before hardware"). A classical shock law is checked on seven simulated test articles, each a whole run under the core's guards (section 8; the guide's "Checking a classical shock law before hardware"), and an SRS shock law on six (section 9; the guide's "Checking an SRS shock law before hardware"). |
 | R14 | **Licensing.** A law file is a separate work loaded at run time; its author chooses its license. Laws shipped with Hertzforge are MIT. |
 | R15 | **Versioning.** While the interface is 0.x it may change. From 1.0, minor versions only add, and the controller loads the current and the previous major version. |
 
@@ -329,19 +330,85 @@ an identification error (the identified gain +3 dB: a pass within eight pulses a
 measurement noise (a pass by pulse 4) and a 30 dB notch at 300 Hz under the coherence floor
 (survive). Every case asks every call answered in time, with no miss and no refused output.
 
-## 9. Later test types
+## 9. SRS shock (`shock-srs`)
+
+An SRS shock law closes the loop between pulses on a synthesized pulse: the controller synthesizes
+every pulse from a table of components (odd-half-cycle wavelets or damped sines, one per band by
+default), and the law proposes one gain per component. The controller applies the gains, caps
+them, checks the drive, plays it, measures and judges the pulse, and calls the law again. A law
+never writes a drive record, so a pulse's zero net velocity and displacement hold whatever it
+returns. The world is `wit/control-law/shock-srs.wit`.
+
+**When it runs.** Once after system identification and before the controller plans its limit notch
+(`seed`), then once after each fired, measured and judged pulse (`iterate`), on the run's thread
+and never while a pulse plays. Each call has a budget of a fraction of the time between pulses
+(`law_budget`, default 0.25: 250 ms at the default 1.0 s floor); a law file's host deadline is the
+same number.
+
+**What it sees.** Fixed for the run: the band centres every spectrum is on, the components'
+frequencies in table order (a separate grid, of any length), the full-level target SRS, the Q every
+SRS is computed at, and the identified gain at each component, `|H|` in EU per volt floored by the
+controller (absent when nothing was identified). Each call: the pulse index, the target at the scale
+the last pulse was commanded at (the level times the controller's safety trims, so a law aims at
+what was asked of that pulse and never fights a limiter), the last pulse's measured SRS (zeros at
+the seed) and that scale.
+
+**What it returns.** One multiplicative gain per component, finite and above zero (at the seed, the
+starting gains relative to the table), and up to eight values its manifest declares. It does not
+decide the level, the ladder, when a pulse fires, the spacing, the envelope verdict or any abort.
+
+**What the controller enforces, for every law.**
+
+| Guard | Rule |
+|---|---|
+| Drive in volts | From the identified gain. Identification plays the synthesized pulse at its level (`identification.level_db`, default -20 dB), its peak held at `identification.max_vpk` (default a tenth of the drive ceiling) |
+| Coherence hold | A mean in-band coherence under `identification.min_mean_coherence` (default 0.8) ends the run `held` before any pulse |
+| Drive ceiling and abort | On the synthesized drive before it plays: over the abort it is refused and the run aborts (`drive_vpk`); over the ceiling it is scaled to it and the action logged. At proceed, the drive at the highest level the run is scheduled to reach over the abort ends the run before any pulse (`predicted`); a level move that would pass it is refused |
+| Predicted response | Through the identified gain before every pulse: its peak against the drive limit, its acceleration, velocity and displacement against the run's kinematic aborts and the shaker's ratings (`kinematic`, `predicted`) |
+| Output checks | One gain per component, every number finite, every gain above zero, at most eight declared values |
+| Gain cap | No gain may rise more than `max_gain_rise_db` (default 6 dB) in one pulse; an output that asks for more is refused (`gain_rise`). It never binds on the built-in at its default |
+| Limit cap | After the law, each gain is held to `min(law gain, cap)`: the cap is the tightest allowed-over-predicted ratio over the limit channels and the bands within half an octave of the component, from the prediction for the last drive referred to the highest level the run is scheduled to reach; a rise toward the bound is damped to the square root, a binding cap is cut a further 0.5 dB, and nothing rises without a prediction. A falling gain always wins. A band the limit holds down (a band the arm-time notch cut, or within half an octave of one) that reads low does not fail a pulse |
+| Misses | A late, failed, crashed or refused call is a miss; the next pulse refires the table in force. `law_misses` (default 3) in a row take the controlled stop (`law_fault`); a seed miss fires nothing |
+| Measured pulse | The envelope at the level fired (alarm and abort bands), the measured kinematics and the drive monitors |
+| Convergence and pacing | With `advance: on_pass` a pulse passes when no band is outside the alarm band; `max_pulses_per_level` (default 5) pulses at one level without a pass, or failing in a row at one manual level, end the run `not_converged`, as does the run's `max_pulses` (default 100). Pulses start no closer than the time between pulses |
+
+**The built-in law, `srs_ratio`.** The classic per-band SRS iteration: the seed is `1 / |H(fc)|`
+per component (1 when nothing was identified); after each pulse each component is scaled by the
+target over the measured SRS at the band nearest its frequency, held at 1 on a band with no
+response or no target, limited to `max_db_per_pulse` (0.5 to 5 dB, default 3) either way. It
+reports the worst band's error and frequency and the components at its limit. It runs natively and
+as the law file `laws/shock-srs-ratio`, and the two give the same run.
+
+**Records.** At the seed the run folder gets `law.json` (the law's identity and parameters, the
+guards and the gain cap); every call goes to `law_pulses` (an index line per call: pulse, seed or
+iteration, used or the miss reason, call time, the commanded scale, the components the limit cap
+held, values; the target and measured SRS as `f32` and the gains returned and applied as `f64` in
+the payload), written between pulses. The report carries the law's name, version and short hash and
+the guard counts.
+
+**The check.** Six simulated test articles, each a whole run under these guards on a flat 1/3-octave
+target from 100 to 2000 Hz at Q 10: one mode (400 Hz, Q 10), two close modes (240 and 260 Hz,
+Q 30) and one mode with measurement noise (each every band within 3 dB by the sixth full-level
+pulse and on every one after), a level ladder of -12, -6 and 0 dB with manual moves (every band
+within 3 dB after three pulses at each level), one mode with the identified gain +3 dB (within 3 dB
+by the eighth full-level pulse), and a wire with a limit channel whose supplied gain is 4 at 500 Hz
+under a flat bound (the prediction at most 0.5 dB over the bound on every pulse, and the control
+within 3 dB outside the bands the limit holds down). Every case asks every call answered in time,
+with no miss and no refused output.
+
+## 10. Later test types
 
 Each test type gets its own world, built on the same mechanism.
 
 | Test type | When the law runs | Note |
 |---|---|---|
 | Classical shock | Between pulses | Built: section 8 |
-| SRS | Between pulses | Slack time budget |
+| SRS shock | Between pulses | Built: section 9 |
 | Time waveform replication | Between passes | Slack time budget |
 | Sine | Every servo update | Far more frequent than Random, so the budget is tight; to be measured before deciding how much of the sine servo can be changed |
 | MIMO variants of the above | As above | After MIMO Random |
 
-## 10. Writing a law
+## 11. Writing a law
 
 Hertzforge publishes a Rust crate for law authors (the interface bindings for both worlds, plus
 helpers such as the default level servo and, for MIMO, the controller's own matrix types and
@@ -350,7 +417,7 @@ per-line linear algebra), a template project, and a worked example for each worl
 against the WIT files can produce a law file (C and C++ can, for example); only Rust is supported
 for now. A law should pass `law check` before it is used on hardware.
 
-## 11. Open questions for reviewers
+## 12. Open questions for reviewers
 
 1. **MIMO inputs.** *Answered:* the inputs of section 7. The large optional ones (the last drive,
    the response-drive cross spectrum, the identification response, drive and noise) are declared in

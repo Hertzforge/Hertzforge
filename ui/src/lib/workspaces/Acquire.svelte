@@ -9,6 +9,7 @@
 	import RandomScreen from '$lib/acquire/RandomScreen.svelte';
 	import MimoRandomScreen from '$lib/acquire/mimo/MimoRandomScreen.svelte';
 	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
+	import SrsScreen from '$lib/acquire/srs/SrsScreen.svelte';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
@@ -25,7 +26,9 @@
 				? STATE_WORDS[app.mimo.status.state]
 				: app.shock.isLive && app.shock.status
 					? STATE_WORDS[app.shock.status.state]
-					: null
+					: app.srs.isLive && app.srs.status
+						? STATE_WORDS[app.srs.status.state]
+						: null
 	);
 </script>
 
@@ -37,6 +40,8 @@
 	<MimoRandomScreen {app} />
 {:else if tests.screen === 'shock'}
 	<ShockScreen {app} />
+{:else if tests.screen === 'srs'}
+	<SrsScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

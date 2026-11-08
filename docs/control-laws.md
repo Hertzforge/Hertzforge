@@ -2,9 +2,9 @@
 
 A control law is the math the controller runs once per loop to decide the next drive. Hertzforge
 loads control laws from files, so a law can be written, built and shared without rebuilding
-Hertzforge. This page is a guide for someone writing one, for the two test types with a law
-interface: single-output Random, and multiple-output (MIMO) Random, which has its own chapter
-below. The requirements a law must meet, what it is given and what it must return are in the
+Hertzforge. This page is a guide for someone writing one, for the test types with a law
+interface: single-output Random, and multiple-output (MIMO) Random, classical shock and SRS shock,
+which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -369,6 +369,88 @@ controller trusts, each bin's rise held to `max_db_per_pulse` (default 6 dB), th
 optionally `initial_backoff_db` under the prediction. It is time waveform replication's iteration
 bin for bin, runs natively, and is also the law file `laws/shock-fdc`; the two give the same run.
 
+## SRS shock laws
+
+An SRS shock law closes the loop between pulses on a synthesized pulse. The controller synthesizes
+every pulse from a table of components (odd-half-cycle wavelets or damped sines, one per band by
+default), identifies the system with that pulse at a low level in volts, and calls the law: once
+for the starting gains, then after each pulse has been fired, measured and judged. The law returns
+one gain per component; the controller applies the gains to its table, caps them, checks the drive
+and plays it. The specification's section 9 states the world in full.
+
+What differs from a classical law:
+
+- **A law returns gains, not a record.** One multiplicative gain per component, in table order,
+  each finite and above zero. The controller synthesizes the drive, so every pulse ends at rest
+  whatever the gains.
+- **Two grids.** Every spectrum is a shock response spectrum on the band centres (`band_hz`); the
+  components are on their own grid (`component_hz`). `srs::nearest_band` in the SDK maps a
+  component to the band nearest it.
+- **The target follows the pulse.** The target a law sees on each call is at the scale the last
+  pulse was commanded at, so a gain computed from it aims at what was asked of that pulse.
+- **The identified gain comes with the setup**: `|H|` at each component, floored by the controller,
+  or nothing when the run identified nothing.
+
+### Writing an SRS law in Rust
+
+Implement `ShockSrsLaw` (`describe`, `new`, `seed`, `iterate`) and export it with
+`export_srs_law!`. The template is `crates/hertzforge-law-sdk/template/shock-srs`: the per-band
+ratio update written plainly, with three parameters.
+
+| Key | What it does |
+|---|---|
+| `max_db_per_pulse` | The most any component may rise or fall from one pulse to the next |
+| `correct` | Off: the starting gains are held for the whole run, and a run that starts wrong ends not converged |
+| `seed_error_db` | Scales the law's starting gains, for seeing how the controller's guards respond: -4 dB starts every band 4 dB low |
+
+Build it with `cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with an SRS law's gains
+
+Every one of these holds whatever the law returns:
+
+- one gain per component, finite, above zero, with declared values, or the call is refused;
+- no gain may rise more than 6 dB in a pulse (by default);
+- each gain is held to what the limit channels can take at the highest level the run is scheduled
+  to reach (a falling gain always wins), and a band the limit holds down may read low without
+  failing a pulse;
+- the drive's peak in volts against the drive ceiling (scaled to it) and the drive abort (refused),
+  before every pulse, and at proceed for the highest level the run is scheduled to reach;
+- the response predicted through the identified gain against the drive limit, the kinematic aborts
+  and the shaker's ratings, before every pulse;
+- pulses start no closer than the time between pulses;
+- a late, failed, crashed or refused call is a miss and the next pulse refires the table in force;
+  three in a row end the run;
+- five pulses at one level without a pass, or the run's pulse cap, end the run not converged.
+
+### Checking an SRS shock law before hardware
+
+As for the other worlds, an imported SRS law must pass the check before it may drive hardware.
+Each case is a whole run on a simulated station: a flat 1 g target on a 1/3-octave grid from 100
+to 2000 Hz at Q 10, synthesized from wavelets; AUTO -12, -6 and 0 dB with two pulses at each lower
+level and the case's pulses at full level, advancing on a passing pulse (every band inside 3 dB),
+at most 12 pulses a level.
+
+| Case | Plant | Asks for |
+|---|---|---|
+| one mode | 400 Hz, Q 10 | Every band within 3 dB by the sixth full-level pulse, and on every one after |
+| close modes | 240 and 260 Hz, Q 30 | As one mode |
+| measurement noise | One mode, noise 30 dB under the identification's pulse | As one mode |
+| level ladder | A wire, manual moves: a jump from -12 to -6 dB, then six 1 dB steps to 0 dB | Every band within 3 dB after three pulses at each level |
+| identification error | One mode; the identified gain scaled +3 dB before the seed | Every band within 3 dB by the eighth full-level pulse. A law that does not correct cannot pass |
+| limit channel | A wire, and a limit channel whose supplied gain is 4 at 500 Hz under a flat bound | The prediction at most 0.5 dB over the bound on every pulse; outside the bands the limit holds down, every band within 3 dB |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law passes every case; a law that holds its starting gains fails the identification-error
+case.
+
+### The built-in SRS law
+
+`srs_ratio`, the classic per-band SRS iteration: each component starts at one over the identified
+gain at its frequency, then after each pulse is scaled by the target over the measured response at
+the band nearest it, limited to `max_db_per_pulse` (default 3 dB) either way. It runs natively, and
+is also the law file `laws/shock-srs-ratio`; the two give the same run.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
@@ -394,8 +476,8 @@ Laws are separate files loaded at run time, so their authors can license them as
 
 ## The interface version
 
-The interface is `hertzforge:control-law@0.1.0`, with two worlds, `random-single` and
-`random-mimo`. While it is at 0.x it may change between releases, and a law must be built against
+The interface is `hertzforge:control-law@0.1.0`, with four worlds: `random-single`,
+`random-mimo`, `shock-classical` and `shock-srs`. While it is at 0.x it may change between releases, and a law must be built against
 the version the host loads.
 
 ## Building and testing in this repository

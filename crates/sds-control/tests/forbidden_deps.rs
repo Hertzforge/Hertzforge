@@ -79,6 +79,14 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // case on the backend it is handed and names none). Written here, so on LAW_CRATES.
     "hertzforge-shock-law-math",
     "hertzforge-shock-laws",
+    // SRS shock behind the wire's `srs.*` methods, reviewed 2026-11-07: the SRS
+    // synthesis engines, the predictive limit notch and the SRS run service
+    // (`hertzforge-srs`, MIT), reached first through the SRS law choice and check in
+    // `hertzforge-shock-laws`. Its `[dependencies]` are crates already on this list and
+    // name no backend: it reaches hardware only through the station backend it is
+    // handed, and holds the Sim only as a dev-dependency. Its delegated fire path is
+    // never constructed by this crate.
+    "hertzforge-srs",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -153,7 +161,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// in its tests. So was the classical shock set (2026-11-07): the built-in law's
 /// math, the choice and check of a law, the `shock-fdc` law file, and the
 /// `shock-misbehave` and `shock-template` host fixtures (the latter the SDK
-/// template's own law source, built in this workspace).
+/// template's own law source, built in this workspace). The SRS shock set was
+/// listed the same way when its contracts were written (2026-11-07), before the
+/// crates exist: the `shock-srs-ratio` law file and the `srs-misbehave` and
+/// `srs-template` host fixtures.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
@@ -167,6 +178,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-ratio-math",
     "hertzforge-law-sdk",
     "hertzforge-law-shock-fdc",
+    "hertzforge-law-shock-srs-ratio",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
     "hertzforge-shock-law-math",
@@ -176,6 +188,8 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-misbehave",
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
+    "law-fixture-srs-misbehave",
+    "law-fixture-srs-template",
 ];
 
 struct Package {

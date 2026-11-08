@@ -53,6 +53,11 @@ hertzforge-twr.workspace = true
 # The built-in classical law's declaration (its parameters and the values it
 # reports), so the wire lists and checks it without running it. Plain math.
 hertzforge-shock-law-math.workspace = true
+# SRS shock (src/srs/): the controller's SRS shock service, its synthesis, tables
+# and predictive notch. Reviewed 2026-11-07: it reaches hardware only through the
+# station backend it is handed, and holds the Sim only as a dev-dependency
+# (tests/forbidden_deps.rs).
+hertzforge-srs.workspace = true
 serde_json.workspace = true
 # `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).
 tokio = { workspace = true, features = ["signal"] }

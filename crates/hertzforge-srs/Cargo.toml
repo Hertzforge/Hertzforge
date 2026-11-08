@@ -22,6 +22,8 @@ publish = false
 [dependencies]
 hertzforge-dsp = { path = "../hertzforge-dsp" }
 hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# The built-in law's arithmetic (`srs_ratio`), shared with its law file.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
 # Service deps: shaker-db (deterministic pulse feasibility),
 # testkit (per-pulse capture + shock Snapshot payload), channel-table (identity;
 # the capture sidecar + the HAL bring-up both take the table), hal (the Backend

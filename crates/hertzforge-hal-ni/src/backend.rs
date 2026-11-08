@@ -1522,11 +1522,34 @@ impl Backend for NiBackend {
         match self.state {
             State::Open | State::Configured | State::Stopped => {
                 self.require_ai().map_err(HalError::from)?;
-                // Verify is advisory: it asks the driver to check the task's
-                // configuration without reserving hardware. Absence is fine.
+                // RE-COMMIT THE AI TASK - the AO re-commit's partner below, and
+                // what keeps `start()` a start.
+                //
+                // `configure()` commits the AI task at first bring-up so that
+                // everything the driver validates lazily is validated then.
+                // `stop()` UNRESERVES it with the AO (the zombie fix), and until
+                // 2026-11-07 arm only VERIFIED it, which reserves nothing. So
+                // from the first `stop()` on, every `DAQmxStartTask(ai)` reserved
+                // and committed the AI task itself, inside the start call. A
+                // pulse module that brings its shot up, waits out the time
+                // between pulses and then starts had that work on its deadline:
+                // the NI bench measured every shock interval about 125 ms long
+                // with the arm, commit and start all after the wait. Committing
+                // here puts the AI task's reservation in the arm, and the start
+                // is left to start (still AO first, then AI; see `start()`).
+                //
+                // A commit the driver refuses degrades to the old verify, with a
+                // warning, as the AO commit below does: the start then reserves
+                // the task itself, which is correct, only slower.
                 if let (Ok(d), Some(ai)) = (self.drv(), self.ai) {
-                    if let Err(e) = d.task_control(ai, val::TASK_VERIFY) {
-                        self.warnings.push(format!("AI task verify skipped: {e}"));
+                    if let Err(e) = d.task_control(ai, val::TASK_COMMIT) {
+                        self.warnings.push(format!(
+                            "AI task commit at arm() failed ({e}); the start will reserve and \
+                             commit the input task itself, which lengthens the start call"
+                        ));
+                        if let Err(e) = d.task_control(ai, val::TASK_VERIFY) {
+                            self.warnings.push(format!("AI task verify skipped: {e}"));
+                        }
                     }
                 }
                 // RE-COMMIT THE AO TASK - the symmetric partner of `stop()`'s
@@ -2583,6 +2606,27 @@ mod tests {
         let w = b.warnings().join(" | ");
         assert!(!w.contains("taper"), "{w}");
         assert!(!w.contains("zero"), "{w}");
+    }
+
+    /// A shot brought up and withheld (a pulse module's wait before it was stopped
+    /// or held): the tasks ARMED, the record's head written (`last_drive_frame`
+    /// is its last sample, not zero), nothing ever started. `stop()` parks it with
+    /// no taper (nothing was generated, so the output still holds the last shot's
+    /// closing zero), no zero write and no warning, and the backend is Stopped,
+    /// from where `arm()` takes it again. The stop and unreserve calls themselves
+    /// need a driver; on the bench they are the same calls as every shot's park.
+    #[test]
+    fn a_stop_on_an_armed_never_started_shot_parks_it_without_a_taper() {
+        let mut b = mid_run_with_drive(1);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        b.state = State::Armed;
+        b.last_drive_frame = vec![0.25];
+        b.stop().unwrap();
+        assert!(b.warnings().is_empty(), "{:?}", b.warnings());
+        assert!(!b.taper_cut_short);
+        assert_eq!(b.state, State::Stopped);
+        b.arm().unwrap();
+        assert_eq!(b.state, State::Armed);
     }
 
     /// Records the DAQmx calls `zero_ao_on_demand` makes, failing the step named in

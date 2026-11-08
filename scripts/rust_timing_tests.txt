@@ -192,3 +192,41 @@ sds-control  test:shock_sim_run  the_built_in_law_and_its_law_file_drive_alike
 sds-control  test:shock_sim_run  exclusion_and_shutting_down
 sds-control  test:shock_sim_run  a_law_that_does_not_correct_ends_not_converged
 sds-control  test:shock_sim_run  the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse
+
+# SRS shock laws: the host's deadline on an SRS law file, and a law file call's
+# time against its budget
+hertzforge-law-host  test:shock_srs_host  a_spinning_srs_law_is_stopped_within_a_tick_of_its_budget
+hertzforge-law-host  test:shock_srs_host  a_late_srs_law_is_stopped_at_its_budget_and_stays_stopped
+hertzforge-law-host  test:shock_srs_host  each_misbehaviour_is_a_named_error
+hertzforge-shock-laws  test:srs_law_call_timing  an_srs_law_file_call_at_the_default_band_count_is_well_inside_its_budget
+
+# The SRS shock service end to end over its socket: runs on the simulated engine
+# and on the controller's own service, waited on against wall-clock deadlines,
+# with the time between pulses, the orphan timeout, the shutdown and the abort
+# bounds on the real clock
+sds-control  test:srs_protocol  an_auto_run_goes_from_configure_through_review_to_completed
+sds-control  test:srs_protocol  a_subscription_gets_its_plots_with_limit_channels_and_their_gains
+sds-control  test:srs_protocol  a_configuration_with_errors_is_refused_with_its_items
+sds-control  test:srs_protocol  manual_firing_and_its_refusals_then_the_stop
+sds-control  test:srs_protocol  wrong_mode_and_the_drive_ceiling_on_a_level_move
+sds-control  test:srs_protocol  a_fire_in_flight_refuses_another_and_an_observer_abort_ends_the_run
+sds-control  test:srs_protocol  a_live_srs_run_and_random_mimo_or_classical_shock_exclude_each_other
+sds-control  test:srs_protocol  shutdown_refuses_the_drive_verbs_and_safe_stops_the_run
+sds-control  test:srs_protocol  firing_holds_when_the_controller_goes_resumes_on_a_reclaim_and_safe_stops_after
+sds-control  test:srs_sim_run  auto_with_the_default_law_completes_inside_the_band
+sds-control  test:srs_sim_run  manual_moves_and_an_early_fire_then_the_stop
+sds-control  test:srs_sim_run  an_observer_abort_in_the_wait
+sds-control  test:srs_sim_run  a_displacement_ceiling_under_the_prediction_aborts_predicted
+sds-control  test:srs_sim_run  the_controller_lost_and_the_shutdown_safe_stop
+sds-control  test:srs_sim_run  a_slow_law_ends_the_run_after_three_misses
+sds-control  test:srs_sim_run  the_template_meets_the_default_and_the_built_in_law_matches_its_file
+sds-control  test:srs_sim_run  exclusion_and_shutting_down
+sds-control  test:srs_sim_run  a_law_that_does_not_correct_ends_not_converged
+sds-control  test:srs_sim_run  the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse
+sds-control  test:srs_sim_run  auto_pulses_are_spaced_at_the_time_between_pulses
+
+# The run threads' pulse timing against fake engines that sleep real time
+sds-control  test:pulse_due  srs_counts_the_next_pulse_from_the_devices_start
+sds-control  test:pulse_due  classical_counts_the_next_pulse_from_the_devices_start
+sds-control  test:pulse_due  srs_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time
+sds-control  test:pulse_due  classical_asks_for_an_auto_pulse_its_lead_ahead_of_the_due_time

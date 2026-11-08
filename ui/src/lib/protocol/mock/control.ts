@@ -13,8 +13,8 @@
  *   full level, controlled stop, abort and protection trips) streaming `random.state`,
  *   `random.live` and `random.log`, and to a screen that subscribes (`random.subscribe`), its own
  *   `random.data` with only the plots it asked for.
- * - Classical shock (`shock.*` and the classical world of `laws.*`; `./shock`), on the same run
- *   slot and controller seat.
+ * - Classical shock (`shock.*` and the classical world of `laws.*`; `./shock`) and SRS shock
+ *   (`srs.*` and the SRS world; `./srs`), on the same run slot and controller seat.
  *
  * Every value it produces is simulated. Its NI devices are driver-simulated unless a test asks
  * otherwise, so in the shell everything it sends is tagged `SIM`.
@@ -66,6 +66,7 @@ import type {
 } from '../types';
 import { MockConnection, MockError, type MockServer } from './socket';
 import { createShockMock } from './shock';
+import { createSrsMock } from './srs';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -778,7 +779,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
 	/** A run of any test type is live (the seat's countdown runs for every one). */
-	const anyLive = () => isLive() || shock.isLive();
+	const anyLive = () => isLive() || shock.isLive() || srs.isLive();
 	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
@@ -806,7 +807,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		seatDeadline = null;
 		if (seat && seat.conn === null) seat = null;
 		if (!seat && random && isLive()) requestStop(random, 'safe_stop');
-		if (!seat) shock.seatExpired();
+		if (!seat) {
+			shock.seatExpired();
+			srs.seatExpired();
+		}
 		sessionChanged();
 	}
 
@@ -826,13 +830,30 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		return seat?.conn === conn ? `${seat.name} (controller)` : `${names.get(conn) ?? 'a client'} (observer)`;
 	}
 
-	// ---- classical shock, on the same run slot and seat -----------------------------------------
+	// ---- classical and SRS shock, on the same run slot and seat --------------------------------
 	const shock = createShockMock({
 		speed,
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : null),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : srs.liveId()),
+		broadcast: (topic, data) => broadcast(topic, data),
+		connections: () => connections,
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		feasibilityExceeds: options.feasibilityExceeds ?? false
+	});
+	const srs = createSrsMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : shock.liveId()),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -1606,7 +1627,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileShock(what: string) {
-		const id = shock.liveId();
+		const id = shock.liveId() ?? srs.liveId();
 		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
@@ -1632,6 +1653,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			connections.delete(c);
 			subs.delete(c);
 			shock.detach(c);
+			srs.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1643,6 +1665,18 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		},
 		methods: {
 			...shock.methods,
+			...srs.methods,
+			// The law catalog holds both shock worlds: each lists its own, and a law file goes to the
+			// world it implements (the mock tells an SRS law file by its name).
+			'laws.list': (params, conn) => {
+				const world = params.world;
+				const classical = (shock.methods['laws.list'](params, conn) as { laws: unknown[] }).laws;
+				return { laws: [...classical, ...(world === undefined || world === null || world === 'shock_srs' ? srs.laws() : [])], problems: [] };
+			},
+			'laws.import': (params, conn) => {
+				const name = typeof params.path === 'string' ? (params.path.split(/[\\/]/).pop() ?? '') : '';
+				return /srs/i.test(name) ? srs.methods['laws.import'](params, conn) : shock.methods['laws.import'](params, conn);
+			},
 			// ---- sim.* (superseded for running tests; kept for the Simulate workspace) ----------
 			'sim.profiles': () => ({ profiles: PROFILES.map(({ id, title, summary }) => ({ id, title, summary })) }),
 			'sim.state': () => ({ state: simState, run_id: simRun?.id ?? lastSimId }),

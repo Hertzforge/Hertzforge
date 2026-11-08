@@ -868,7 +868,7 @@ plain words: it never names a protocol method.
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
-| `config_invalid` | `bad_request` | The Random or classical shock configuration has errors | `errors`, `warnings` |
+| `config_invalid` | `bad_request` | The Random, classical shock or SRS shock configuration has errors | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
 | `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` with reason `gate_failed` goes on anyway | `gates` |
@@ -878,14 +878,14 @@ plain words: it never names a protocol method.
 | `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
 | `law_unknown` | `not_found` | `laws.check` names an id the catalog does not hold | `id` |
 | `law_params_invalid` | `bad_request` | `laws.check` parameter values the law does not accept | `id` |
-| `law_check_unsupported` | `refused` | `laws.check` names a single-output law | |
-| `not_yet` | `refused` | `shock.fire`, `shock.train` or `shock.burst` before the time between pulses has passed, or while a pulse is in flight | `seconds` |
-| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train` or `shock.burst` while the ladder is automatic | `mode` |
-| `drive_ceiling` | `refused` | `shock.level` to a level where the identified drive would pass the drive abort | `vpk`, `abort_vpk`, `level_db` |
+| `law_check_unsupported` | `refused` | `laws.check` names a single-output law, or a case of a shock law's check cannot be run at all (the message names it) | |
+| `not_yet` | `refused` | `shock.fire`, `shock.train`, `shock.burst` or `srs.fire` before the time between pulses has passed, or while a pulse is in flight | `seconds` |
+| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire` or `srs.level` while the ladder is automatic | `mode` |
+| `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort | `vpk`, `abort_vpk`, `level_db` |
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
-| `law_not_checked` | `refused` | `mimo_random.start` or `shock.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
-| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, and `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst` are refused | |
+| `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm` or `srs.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, and `srs.arm`, `start`, `proceed`, `fire` and `level` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -903,6 +903,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
 | Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
+| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 
 A refusal not listed here is a defect in the service.
 
@@ -1930,7 +1931,7 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
 | `schedule.start_db` | the first level | The level a run starts at, between the first and last levels |
 | `schedule.advance` | `count` | `count` moves to the next level after its pulses; `on_pass` moves only on a passing pulse |
 | `schedule.max_pulses_per_level` | 5 | With `on_pass`, pulses at one level without a pass (in `manual`, failing pulses in a row at one level) before the run ends `not_converged`; 1 to 100 |
-| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, seconds: `cooling_s`, `settling_s` and `compute_s`, each 0 to 3600. The time between pulses (`derived.spacing_s`) is the largest of them, above 0 |
+| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, seconds: `cooling_s`, `settling_s` and `compute_s`, each 0 to 3600. The time between pulses (`derived.spacing_s`) is the largest of them, above 0. A pulse starts when the station's clock starts its record, and the time between pulses holds between two such starts, from the pulse before a train to the train's first pulse too |
 | `identification.drive_vrms` | 0.05 | Band-limited random at this many volts rms, below the drive ceiling; its peak is held under the drive ceiling |
 | `identification.duration_s`, `nfft` | 4, 2048 | Its length, 0.5 to 120 s, and the block it is estimated in (a power of two, 256 to 65536, at most half the samples) |
 | `identification.band_hz` | 5 to the lesser of 5000 Hz and 0.4 times the rate | The band it excites, below half the rate |
@@ -2056,7 +2057,7 @@ pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled 
 | `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
 | `blocked` | `feasibility_blocked` | Feasibility exceeded; arming needs an acknowledgement |
 | `armed` | `armed` | Station open and gated; nothing driven yet |
-| `running` | `sysid`, `waiting`, `firing` | Identification; waiting out the time to the next pulse (or for `shock.fire`); a pulse playing |
+| `running` | `sysid`, `waiting`, `firing` | Identification; waiting out the time to the next pulse (or for `shock.fire`); a pulse being brought up and playing (in `auto` this begins a moment before the pulse starts, at most 1 s: the station is brought up with the pulse loaded and starts it on the time between pulses) |
 | `review` | `awaiting_review` | Identification done; nothing fires until `shock.proceed` |
 | `stopping` | `stopping` | The pulse in flight finishes; nothing more fires |
 | `finished` | `stopped`, `aborted`, `held` | Ended; `end` says how |
@@ -2066,7 +2067,8 @@ pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled 
 - `pulses`: `fired` and `passed` over the run; `at_level` pulses fired at this level, and in
   `auto` `of_level` the pulses the schedule fires here (0 in `manual`).
 - `next_pulse_s`: in `auto`, the seconds until the next pulse fires; in `manual`, until
-  `shock.fire` is accepted (0 once it is); null when no pulse is due.
+  `shock.fire` is accepted (0 once it is); null when no pulse is due. It counts from the last
+  pulse's start, the moment the station's clock started its record.
 - `identification` and `prediction` are null until identification is done. `identification`
   is the drive it played (rms and peak, volts) and its mean in-band coherence against the hold.
   `prediction` is the predicted full-level drive peak against the ceiling and the abort, and the
@@ -2136,7 +2138,8 @@ held; an older pulse's are refused `not_found`, its row is still in `shock.pulse
   window, percent of the reference), `velocity_change_ips` and `velocity_change_ratio` (over the
   nominal), the three `verdicts` and `passed` are the core's judgement; null when the pulse was
   not measured.
-- `srs` counts the SRS bands within the informational band; `at_s` is seconds from the start.
+- `srs` counts the SRS bands within the informational band; `at_s` is the pulse's start, the
+  moment the station's clock started its record, in seconds from when the run armed.
 - `law` is the call that produced the drive this pulse played (`used` false and `miss` the
   reason when the drive in force was refired after a miss); null for a pulse fired in force by a
   train or burst.
@@ -2177,14 +2180,313 @@ The result is `{"default","rate_hz","plots","quantities"}`, every default filled
 A plot of the latest pulse is empty (`views` empty) until a pulse has fired, and
 `identification` until identification has ended.
 
+## SRS Shock
+
+An SRS shock test synthesizes each pulse to match a target shock response spectrum (SRS) and
+closes the loop between pulses. The service synthesizes the target offline into a table of
+components (odd-half-cycle wavelets or damped sines, one per band by default), identifies the
+system with a burst of that synthesis at a stated peak in volts, and seeds the control law from
+the identified gain at each component; after each pulse is fired, measured and judged, the law
+proposes a gain for each component, and the service caps the gains and checks the drive before it
+plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
+classical shock run, a Random run, a MIMO run and a `sim.start` run exclude each other, each
+refused `run_active` while another is live. **Any connected screen may stop or abort**
+(`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
+`fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
+open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
+`fire` and `level` are refused `shutting_down`.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `srs.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
+| `srs.config` | `{}` | any | `{"run_id","config","derived","views"}` |
+| `srs.preview` | `{"target","bands","synthesis","envelope","fs_hz"}` (`synthesis`, `envelope` and `fs_hz` optional) | any | `{"derived","views"}` |
+| `srs.target.import` | `{"path"}` | any | `{"target","errors","warnings"}` |
+| `srs.table.import` | `{"path","engine"}` | any | `{"components","errors","warnings"}` |
+| `srs.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
+| `srs.start` | `{}` | `configured`, `armed` | state |
+| `srs.proceed` | `{}` | `review` | state |
+| `srs.fire` | `{}` | `running`, in `manual` | state |
+| `srs.level` | `{"delta_db"}` (1 or -1) or `{"rung"}` (from 0) | `running` or `review`, in `manual` | `{"level_db"}` |
+| `srs.stop` | `{}` | any | state |
+| `srs.abort` | `{}` | any | state |
+| `srs.reset` | `{}` | any but live | state |
+| `srs.clear` | `{}` | any but live | state |
+| `srs.state` | `{}` | any | state |
+| `srs.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `srs.subscribe` | see "SRS Shock Display" | any | as there |
+| `srs.pulses` | `{"since"}` (optional, default 0) | any | `{"pulses":[row...],"next"}` |
+| `srs.pulse` | `{"index","points"}` (`points` optional) | any | `{"pulse":row,"views"}` |
+
+"state" in the Result column is the `srs.state` object below. A run is live while it is armed,
+running, holding for review or stopping. `srs.configure` replaces a run that is not live;
+`srs.reset` configures the present run's configuration again on the present table and station;
+`srs.clear` forgets it (`unconfigured`). A result that carries views travels as a binary frame.
+SRS shock has no trains and no gunfire bursts: every pulse is a synthesized pulse of the schedule.
+
+### SRS Shock Configuration
+
+```
+{"title":"SRS 100 g, 100 to 2000 Hz",
+ "target":{"kind":"breakpoints","points":[[100,40],[1000,100],[2500,100]]},
+ "bands":{"f_lo_hz":100,"f_hi_hz":2000,"bands_per_octave":3,"q":10},
+ "synthesis":{"engine":"wavsyn","components":null,"max_iters":50,"tol_db":1.5,
+              "max_gain_db_per_iter":3},
+ "envelope":{"alarm_db":[3,3],"abort_db":[9,6],"per_band":null},
+ "acquisition":{"fs_hz":51200,"ring_out_s":0.05,"pvss":true},
+ "schedule":{"mode":"auto","levels_db":[-12,-6,0],"pulses":[2,2,3],"start_db":-12,
+             "advance":"on_pass","max_pulses_per_level":5},
+ "spacing":{"cooling_s":1,"settling_s":0.5,"compute_s":0.25},
+ "identification":{"excitation":"shaped","level_db":-20,"max_vpk":null,"nfft":1024,
+                   "h_floor_frac":0.05,"min_mean_coherence":0.8,"review":true},
+ "control":{"law":{"id":"srs_ratio","params":{"max_db_per_pulse":3}},
+            "law_budget":0.25,"law_misses":3,"max_pulses":100,"max_gain_rise_db":6},
+ "limits":{"drive_vpk_ceiling":0.5,"drive_vpk_abort":0.8,"peak_accel_g":null,"abort_factor":2,
+           "kinematic":{"accel_g":null,"velocity_ips":null,"disp_pp_in":null},
+           "monitors":[{"channel":2,"unit":"A","peak_ceiling":40,"kind":"between_pulse"}]},
+ "limit_channels":{"headroom_db":1,
+                   "channels":[{"channel":3,"bound":{"kind":"flat","accel_g":50},"frf":null}]},
+ "feasibility":{"shaker":{...},
+                "moving_mass_lb":{"armature":45,"slip_table":0,"drive_adapter":3,"fixturing":10,
+                                  "test_article":12},
+                "residual_velocity_ips":0.1,"residual_disp_in":0.001},
+ "capture":{"auto_start":false,"run_name":"srs_shock"},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `target` | (required) | The target SRS, g: `{"kind":"flat","accel_g"}` (every band the same, above 0, at most 1000000), or `{"kind":"breakpoints","points":[[frequency_hz, accel_g], ...]}`, at least two points, frequencies strictly ascending, both above 0, joined by straight lines on log-log axes and covering the band grid from `f_lo_hz` to its top centre (`srs.target.import` reads such a table from a file) |
+| `bands` | (required: `f_lo_hz`, `f_hi_hz`) | The band grid every spectrum is on: centres from `f_lo_hz` up to the first centre at or above `f_hi_hz`, that top centre below half the rate; `bands_per_octave` centres an octave (default 3; a whole number from 1 to 24), and the quality factor `q` every SRS is computed at (default 10, above 0.5, at most 100) |
+| `synthesis.engine` | `wavsyn` | `wavsyn`: odd-half-cycle wavelets, at rest at both ends by construction. `seds`: damped sines with the compensating terms that bring the composite to rest |
+| `synthesis.components` | null: one per band | The component table to start from: `{"engine","rows":[...]}` (`srs.table.import` reads one from a file), 1 to 512 rows. A `wavsyn` row is `{"freq_hz","amplitude_g","half_cycles","delay_s"}` (`half_cycles` odd, at least 3; `delay_s` default 0); a `seds` row is `{"freq_hz","amplitude_g","zeta","delay_s","polarity"}` (`zeta` above 0, `polarity` `positive` (the default) or `negative`). Its `engine` is `synthesis.engine` |
+| `synthesis.max_iters`, `tol_db`, `max_gain_db_per_iter` | 50, 1.5, 3 | The offline synthesis that fits the table to the target before any station: at most `max_iters` passes (1 to 1000), done when every band is within `tol_db` (above 0, at most 20), each pass moving a component at most `max_gain_db_per_iter` (above 0, at most 20). It does not set the run's law |
+| `envelope` | ±3 dB alarm; abort 9 dB under, 6 dB over | The tolerance on every band, judged against the target at the level fired: `alarm_db` and `abort_db` as `[under, over]`, the dB a band may sit under and over the target (each above 0, at most 60, the abort at least as wide as the alarm on each side), or `per_band`, one `{"alarm_db","abort_db"}` per band in place of both. A band outside the abort band aborts the run (`envelope`); outside the alarm band it alarms |
+| `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run reports the rate it ran at |
+| `acquisition.ring_out_s` | 0.05 | Seconds measured after each pulse's drive ends, 0 to 10 |
+| `acquisition.pvss` | true | Also compute each pulse's pseudo-velocity SRS |
+| `schedule` | as classical shock's | `mode`, `levels_db`, `pulses`, `start_db`, `advance` and `max_pulses_per_level` as "Classical Shock Configuration" has them. With `advance` `on_pass` a pulse passes when every band is inside the alarm band, but for a band a limit channel holds down reading low (see "SRS Shock Pulses") |
+| `spacing` | 1, 0.5, 0.25 | The floors between pulse starts, as classical shock's (`derived.spacing_s` is the largest) |
+| `identification.excitation` | `shaped` | `shaped`: the synthesized pulse, which puts the identification's energy where the test drives. `standard_pulse`: a short broadband pulse |
+| `identification.level_db` | -20 | The burst's level under the full-level synthesis, dB (below 0, at least -60) |
+| `identification.max_vpk` | null: a tenth of the drive ceiling | The burst's peak in volts is at most this (above 0, at most the drive ceiling); a burst over it is scaled down to it |
+| `identification.nfft` | 1024 | The block the gain is estimated in (a power of two, 64 to 65536) |
+| `identification.h_floor_frac` | 0.05 | The identified gain is floored at this fraction of its in-band peak before the seed divides by it (above 0, at most 1) |
+| `identification.min_mean_coherence` | 0.8 | A mean in-band coherence under it holds the run (`held`), 0 to below 1 |
+| `identification.review` | true | Hold for the operator after identification (`review`) |
+| `control.law` | `{"id":"srs_ratio"}` | The control law, by its catalog `id` (see "Control Laws", world `shock_srs`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest) |
+| `control.law_budget`, `law_misses`, `max_pulses` | 0.25, 3, 100 | As classical shock's |
+| `control.max_gain_rise_db` | 6 | The most any component's gain may rise from one pulse to the next, dB (above 0, at most 20); a law asking for more is not used (`gain_rise`). With `srs_ratio` it is at least its `max_db_per_pulse` plus 1 |
+| `limits.drive_vpk_ceiling` | (required) | The drive ceiling, volts peak (above 0, at most 10). A commanded drive over it is scaled down to it and the action is logged |
+| `limits.drive_vpk_abort` | (required) | The drive abort, volts peak, above the ceiling and at most 10. A commanded drive over it is refused and the run aborts (`drive_vpk`) |
+| `limits.peak_accel_g` | null | A predicted response peak over it scales the pulse down before it fires; at `abort_factor` times it the run aborts (`accel`) |
+| `limits.abort_factor` | 2 | A predicted response peak or a monitored peak at or over this times its ceiling aborts instead of scaling (1 to 100) |
+| `limits.kinematic` | none | Per-pulse ceilings on the measured, and before each pulse the predicted, peak acceleration (g), peak velocity (in/s) and peak-to-peak displacement (in), each above 0; null is no ceiling |
+| `limits.monitors` | none | Monitored inputs by table `index`, as classical shock's |
+| `limit_channels` | null | Inputs whose response must stay under a bound: `headroom_db` (0 to 40) how far under its bound a prediction must stay, and `channels`, each a table `index` (any row but the control row; without an `frf`, an enabled input), a `bound` (`{"kind":"flat","accel_g"}` or `{"kind":"per_band","bounds_g":[...]}`, one per band, null for no bound at a band) and an optional `frf` (`{"freqs_hz":[...],"mag":[...]}`, the drive-to-channel gain in g per volt, frequencies ascending from 0; null: identification measures it). At proceed the service notches the drive where a prediction would pass a bound, and before each pulse caps every component by what the prediction leaves. An empty `channels` list is no limit channels |
+| `feasibility` | null | Random's shaker record and moving mass, and the synthesis's residual velocity (in/s) and displacement (in) tolerances (default 0.1 and 0.001). Checked at arm. Without it, feasibility is not evaluated and the run says so |
+| `capture` | off | Random's: with `auto_start` every pulse's record is written to the run folder under the local data root from arm, and the law's records with it |
+| `metadata` | the default fields | Random's |
+
+The control channel is the table's first enabled `control` row; the drive is its first enabled
+`drive` row. A monitor and a limit channel are named to the controller by their row's
+`description`, or `ch<index>` without one. A configuration whose shape is wrong is refused
+`bad_params` naming the field; its content errors are refused `config_invalid` with the items,
+located by `field`; `dry_run: true` checks without replacing anything and needs no control.
+
+**Result.** `state` is the `srs.state` object (`configured`). `derived`:
+
+```
+{"grid":{"fs_hz":51200,"record_len":10569,"actual":false},
+ "bands_hz":[100,125.9921,158.7401,...,2015.8737],"target_g":[40,43.8521,48.0752,...,100],
+ "synthesis":{"engine":"wavsyn","components":14,"iters":9,"converged":true,"worst_err_db":-0.893,
+              "duration_s":0.15643},
+ "reference":{"peak_g":22.2066,"velocity_pk_ips":6.1726,"displacement_pk_pk_in":0.020336,
+              "residual_velocity_ips":0,"residual_disp_in":0},
+ "spacing_s":1,"call_budget_s":0.25,
+ "feasibility":{"verdict":"pass","message":"The pulse is within the shaker's ratings."}}
+```
+
+- `grid`: every pulse's record, the synthesized pulse and its ring-out, at the requested rate;
+  `actual` is true once the run has armed and the rate is the one the station runs at.
+- `bands_hz` and `target_g`: the band grid and the full-level target on it.
+- `synthesis`: the offline fit of the table to the target: its components, passes, whether every
+  band reached `tol_db`, the worst band's error, dB (signed), and the pulse's length, seconds.
+- `reference`: the synthesized pulse at full level, g: its peak, peak velocity, peak-to-peak
+  displacement and what it leaves at its end.
+- `spacing_s`, `call_budget_s` and `feasibility` as classical shock's.
+
+`views` are **Target** (the target with its alarm and abort bands), **Synthesis** (the
+synthesized pulse's SRS against the target), **Pulse**, **Velocity** and **Displacement** (the
+synthesized pulse at full level from its first sample, series `Synthesized`), as `srs.preview`
+gives them. `srs.preview` computes the same `derived.bands_hz`, `target_g`, `synthesis` and
+`reference` and the views for a target alone (`target`, `bands`, `synthesis` and `envelope` as
+in a configuration, `fs_hz` default 51200), with no station and no configuration, so a screen
+draws a synthesis without computing it. A preview is a computation, never a measurement; a
+preview whose parts are not sound is refused `bad_params` naming the first.
+
+`srs.target.import` reads a breakpoint table (two columns, frequency in Hz and SRS in g; tab,
+comma, semicolon or space separated; a header row and `#` comments allowed) and
+`srs.table.import` a component table for `engine` (`wavsyn` or `seds`, the rows' fields as
+above, by header name or in that order), each by full path on the computer that runs the test,
+at most 4 MiB. Neither needs control or changes the run; each returns what a configuration
+takes (`target`, `components`), or null with error items (`target_file`, `table_file`) at the
+data `row` they name (from 0, its line in `message`), or at `field` `path` for a file that could
+not be read. A relative path is `bad_params`.
+
+Item reasons (SRS Shock): errors `out_of_range`, `levels_empty`, `levels_not_ascending`,
+`pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering` (the breakpoints
+do not cover the band grid), `target_not_ascending`, `alarm_wider_than_abort`,
+`per_band_length_mismatch` (a per-band envelope or bound list that is not one per band),
+`components_engine_mismatch`, `component_invalid` (at `synthesis.components.rows[i]`),
+`record_too_long`, `limit_unknown_channel`, `limit_no_frf` (a limit channel with no `frf` and no
+input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unknown`,
+`law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `synthesis_not_converged`
+(the offline fit did not reach `tol_db`; the run's law refines from there).
+
+### Running an SRS Shock Test
+
+- **`srs.arm`** checks feasibility (when given) on the synthesized pulse, opens the station, adopts
+  its rate, derives the grid at that rate and passes the arm gate. Nothing is driven. Refusals as
+  `shock.arm`'s: `feasibility_exceeded` (the state becomes `blocked`; a non-empty `override_ack`
+  arms past it), `override_not_needed`, `law_not_checked` on a hardware station, and the
+  station's own.
+- **`srs.start`** from `configured` arms first. It runs identification (`phase` `sysid`): the
+  burst at `identification.level_db`, its peak held at `identification.max_vpk`, measuring the
+  gain to the control channel and to every limit channel without an `frf`. Then it holds for
+  review (`review`) or, without a review, goes on as `srs.proceed` does. It answers at once.
+- **`srs.proceed`** seeds the law, then plans the limit notch at full level when there are limit
+  channels. If the predicted full-level drive is over the drive abort, the run ends `aborted`
+  (`drive_vpk`, `predicted: true`) before any pulse. In `auto` it then fires the schedule, a pulse
+  every `derived.spacing_s` at the soonest; in `manual` it waits for `srs.fire`.
+- **`srs.fire`** and **`srs.level`** are `shock.fire` and `shock.level` for SRS, with the same
+  refusals (`wrong_mode`, `not_yet` with `seconds`, `not_a_rung`, `drive_ceiling`).
+- **Before each pulse** the service synthesizes the drive from the table, scales it to the level
+  fired, predicts the response through the identified gain and checks the drive in volts against
+  the ceiling and abort, the predicted peak against `peak_accel_g` and the predicted kinematics
+  against `limits.kinematic` and the shaker's ratings. A predicted trip fires nothing.
+- **After each pulse** it judges the measured SRS against the envelope, the measured kinematics
+  and the monitors, then calls the law and caps its gains: by `max_gain_rise_db`, and by the limit
+  channels' prediction (a gain may rise only as far as the tightest channel near the component
+  can take, and a binding channel takes it down; a falling gain always wins).
+- **`srs.stop`**, **`srs.abort`** and **when nobody holds control** are as classical shock's.
+
+### SRS Shock Run State
+
+```
+{"run_id":"srs-0004","state":"running","phase":"waiting","title":"SRS 100 g, 100 to 2000 Hz",
+ "source":"SIM","station":{"kind":"sim","class":"sim","devices":[]},
+ "grid":{"fs_hz":51200,"record_len":14336,"actual":true},"clock":"shared",
+ "mode":"auto","levels_db":[-12,-6,0],"level_db":-6,"rung":1,
+ "pulses":{"fired":3,"passed":2,"at_level":1,"of_level":2},"next_pulse_s":0.6,
+ "elapsed_s":9.5,"alarm":false,
+ "identification":{"excitation":"shaped","drive_vpk":0.05,"max_vpk":0.05,
+                   "coherence_mean":0.97,"min_mean_coherence":0.8,"passed":true},
+ "prediction":{"drive_vpk":0.41,"drive_vpk_ceiling":0.5,"drive_vpk_abort":0.8,
+               "response_peak_g":72.1,"velocity_pk_ips":14.1,"displacement_pk_pk_in":0.031},
+ "notch":{"notched_bands":2,"worst_before_db":3.1,"worst_after_db":-0.6,"converged":true},
+ "last_pulse":{row},
+ "law":{"id":"srs_ratio","name":"SRS ratio","version":"0.1.0","sha256":null,"misses":0},
+ "feasibility":{"verdict":"pass","message":"..."},"end":null}
+```
+
+`state`, `phase`, `level_db`, `rung`, `pulses`, `next_pulse_s`, `prediction`, `last_pulse`,
+`law`, `feasibility` and `end` are as "Classical Shock Run State" has them; `prediction` is
+the table in force's, renewed after every pulse as the law moves the table. `pulses.passed` counts
+the pulses that passed (`passed` in their rows). `identification` is null until identification is
+done, then the excitation, the burst's peak and its cap (volts), and its mean in-band coherence
+against the hold. `notch` is null without limit channels, then the arm-time notch: the bands it
+notched, the worst predicted exceedance before and after it (dB over the allowed level) and
+whether its fit converged.
+
+| `outcome` | How the run ended |
+|---|---|
+| `completed` | The schedule finished |
+| `operator_stop`, `operator_abort`, `safe_stop` | As classical shock's |
+| `aborted` | A protection tripped; `trip` says which |
+| `not_converged` | The iteration limit: `max_pulses_per_level` pulses at one level without a pass, or the run's `max_pulses` |
+| `held` | Identification held the run before any pulse: its mean in-band coherence was under `min_mean_coherence` |
+| `law_fault` | The law gave no usable gains `law_misses` times in a row, or its seed was not usable; nothing more fired. `trip` says why |
+| `fault` | The run or the station failed; `message` is the controller's words |
+
+| `kind` | Facts |
+|---|---|
+| `envelope` | `abort_bands`, `worst_band_hz`, `worst_err_db` |
+| `kinematic` | `axis` (`accel`, `velocity` or `displacement`), `value`, `limit`, `predicted` |
+| `drive_vpk` | `vpk`, `abort_vpk`, `predicted` |
+| `accel` | `predicted_g`, `limit_g` (a predicted response peak at or over `abort_factor` times `peak_accel_g`) |
+| `monitor` | `channel`, `value`, `limit` |
+| `not_converged` | `limit` (`per_level` or `run`), `pulses` |
+| `law_fault` | `reason`, `consecutive` |
+
+A `law_fault` trip's `reason` is `error`, `panicked`, `over_budget`, `over_memory`,
+`wrong_length` (not one gain per component), `non_finite`, `not_positive` (a gain at or under
+zero), `undeclared_value`, `too_many_values` or `gain_rise` (a gain rising more than
+`max_gain_rise_db`).
+
+### SRS Shock Pulses
+
+Every pulse fired has a row; `srs.pulses` and `srs.pulse` are `shock.pulses` and `shock.pulse` for
+SRS. `srs.pulse`'s views are **SRS** (the measured SRS and the target at the level fired with its
+alarm and abort bands), **Pulse** (the measured pulse), **Drive** (the drive as played),
+**Velocity** and **Displacement**, each time history from the record's first sample and at most
+`points` points as there; the views of the most recent 32 pulses are held.
+
+```
+{"index":2,"origin":"ladder","scheduled_db":-6,"commanded_db":-6,"limit_scale":1,
+ "drive_vpk":0.205,"peak_g":36.3,"velocity_pk_ips":7.1,"displacement_pk_pk_in":0.016,
+ "worst_err_db":-1.2,"worst_band_hz":630,"alarm_bands":0,"abort_bands":0,"passed":true,
+ "limited_components":2,"worst_limit_db":-0.7,"at_s":7.5,
+ "law":{"used":true,"miss":null,"call_ms":0.2}}
+```
+
+- `origin` is always `ladder`; `scheduled_db`, `commanded_db`, `limit_scale`, `drive_vpk` and
+  `at_s` as classical shock's.
+- `peak_g`, `velocity_pk_ips` and `displacement_pk_pk_in` are the measured pulse's kinematics.
+  `worst_err_db` is the band furthest from the target at the level fired and `worst_band_hz` its
+  centre; `alarm_bands` and `abort_bands` count the bands outside each band of the envelope;
+  `passed` is true when no band is outside the alarm band. A band a limit channel holds down (a band
+  the notch cut, or one within half an octave of it, where the cap holds the components that reach
+  it) that reads low does not fail the pulse; it still alarms. A band outside the abort band, or
+  reading high, always fails it. They are null when the pulse was not measured.
+- `limited_components` counts the components the limit channels' prediction capped in the gains
+  this pulse played, and `worst_limit_db` is the worst predicted limit-channel exceedance for its
+  drive, dB over the allowed level (both null without limit channels).
+- `law` is the call that produced the gains this pulse played (`used` false and `miss` the
+  reason when the gains in force were kept after a miss).
+
+### SRS Shock Display
+
+Event topics: `srs.state`, `srs.log`, `srs.live`, `srs.pulse` and `srs.data`, as classical shock's;
+`srs.pulse` carries the **SRS**, **Pulse** and **Drive** views at 1024 points. `srs.subscribe`
+takes classical shock's form; `points` applies to `pulse`, `velocity` and `displacement`.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `srs` | **SRS** (`spectrum`) | The target at the level fired with its alarm and abort bands, and the measured SRS, g |
+| `pulse` | **Pulse**, **Drive** (`spectrum`, time) | The measured pulse, g; the drive as played, V |
+| `velocity`, `displacement` | **Velocity**, **Displacement** (`spectrum`, time) | The measured pulse's |
+| `identification` | **Identification Gain**, **Coherence** (`spectrum`s) | `abs(H)` to the control channel (control unit per volt) with the floor the seed divides by at the least; the coherence with the hold |
+| `components` | **Components**, **Gains** (`spectrum`s) | Each component's drive amplitude in the table in force, V, at its frequency; the gains applied to the table on the law's last call, after the service's caps (no Gains view before its first call) |
+| `limit_channels` | **Limit** *name* (`spectrum`), one per limit channel | The predicted SRS for the last pulse's drive, the bound and the bound less the headroom, g (a band with no bound is left out) |
+| `limit_frf` | **Gain** *name* (`spectrum`), one per limit channel | The drive-to-channel gain, g per volt, `Measured` or `Supplied` |
+| `law` | one `reading` | The law's reported values on its last call |
+| `readings` | one `reading` | The run's numbers |
+| `pulses` | one `table` | The pulse rows |
+
+A plot of the latest pulse is empty (`views` empty) until a pulse has fired, `identification` and
+`limit_frf` until identification has ended, and `limit_channels` without limit channels.
+
 ## Control Laws
 
-The control laws an operator can choose, for single-output and MIMO Random and for classical
-shock alike: the laws built into the program, and law files imported into the local data folder.
+The control laws an operator can choose, for single-output and MIMO Random and for classical and
+SRS shock alike: the laws built into the program, and law files imported into the local data
+folder.
 
 | Method | Params | Result |
 |---|---|---|
-| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
+| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
 | `laws.import` | `{"path"}` | `{"law":entry}` |
 | `laws.check` | `{"id"}` or `{"path"}`, and `{"params"}` (optional) | `{"law":entry,"report":{"passed","recorded","tool_version","cases":[case...]}}` |
 
@@ -2208,10 +2510,12 @@ shock alike: the laws built into the program, and law files imported into the lo
 - `diagnostics` are the numbers a law reports each loop; for a MIMO law `layout` is `scalar`,
   `per_line`, `per_control_line` or `per_drive_line` (null for a single-output law).
 - `shapes` and `needs` (the optional inputs the law reads) are null for a single-output law and
-  a classical shock law.
+  a shock law.
 - A classical shock law's entry has `world: "shock_classical"`; its `diagnostics` are scalar
   values (`layout` null), at most 8, reported once per call. The built-in `fd_correct` comes
   first.
+- An SRS shock law's entry has `world: "shock_srs"`, its `diagnostics` likewise. The built-in
+  `srs_ratio` comes first.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.
@@ -2282,4 +2586,29 @@ refused `law_check_unsupported`, naming it. A case's result:
  "detail":"...","end":"completed","trip":null,"pulses":7,"first_pass_pulse":2,
  "full_level_pulses":3,"full_level_passed":3,"misses":0,"refused":0,"capped_bins":0,
  "calls":8,"worst_call_ms":1.2,"budget_ms":250,"max_drive_vpk":0.41}
+```
+
+**An SRS shock law.** For a law of world `shock_srs`, `laws.check` runs the SRS check set, each
+case a whole run under the core's guards on a simulated station at 51200 Hz: a flat target on a
+1/3-octave grid from 100 to 2000 Hz, Q 10, synthesized from wavelets; AUTO at -12, -6 and 0 dB,
+2 and 2 pulses and then the case's own at full level, advancing on a pass, at most 12 pulses a
+level, the abort band 12 dB either way, and identification in blocks of 0.2 s. The cases: one
+mode at 400 Hz, Q 10; two close modes at 240 and 260 Hz, Q 30; one mode with measurement noise
+30 dB under the identification burst's peak (each `within_by` 6: every band within ±3 dB of the
+target by the sixth full-level pulse and on every full-level pulse after it); a wire on a ladder
+of -12, -6 and 0 dB with manual moves (`each_level_within`: every band within ±3 dB after 3
+pulses at each level); one mode with the identified gain scaled +3 dB before the seed
+(`within_by` 8; a law that does not correct cannot pass it); and a wire with one limit channel
+whose supplied gain resonates at 500 Hz under a flat bound (`limit_held`: the predicted limit SRS
+at most 0.5 dB over its bound on every pulse, and the control SRS within ±3 dB outside the
+notched bands). Every case first asks that every call is answered, in time, with zero misses and
+zero refused outputs. An SRS law is named by `id` or by `path` as a classical law is, with the
+same refusals. A case's result:
+
+```
+{"name":"one mode","plant":"one mode, 400 Hz, Q 10","requirement":"within_by","passed":true,
+ "detail":"...","end":"completed","trip":null,"pulses":9,"full_level_pulses":3,
+ "first_within_pulse":1,"final_worst_band_db":0.6,"worst_limit_over_db":null,"misses":0,
+ "refused":0,"limited_components":0,"calls":10,"worst_call_ms":0.1,"budget_ms":250,
+ "max_drive_vpk":0.41}
 ```

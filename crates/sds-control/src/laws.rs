@@ -19,6 +19,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::Single => "single",
         LawWorld::Mimo => "mimo",
         LawWorld::ShockClassical => "shock_classical",
+        LawWorld::ShockSrs => "shock_srs",
     }
 }
 
@@ -160,10 +161,15 @@ pub fn entry_json(e: &CatalogEntry) -> Value {
 }
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
-/// first, then multiple-output Random, then classical shock).
+/// first, then multiple-output Random, then classical shock, then SRS shock).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
-    for w in [LawWorld::Single, LawWorld::Mimo, LawWorld::ShockClassical] {
+    for w in [
+        LawWorld::Single,
+        LawWorld::Mimo,
+        LawWorld::ShockClassical,
+        LawWorld::ShockSrs,
+    ] {
         if world.is_none_or(|x| x == w) {
             laws.extend(catalog.entries_for(w).iter().map(entry_json));
         }
@@ -184,10 +190,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("single") => Ok(Some(LawWorld::Single)),
         Some("mimo") => Ok(Some(LawWorld::Mimo)),
         Some("shock_classical") => Ok(Some(LawWorld::ShockClassical)),
+        Some("shock_srs") => Ok(Some(LawWorld::ShockSrs)),
         Some(_) => Err(MethodError::bad_params(
             "world",
-            "\"world\" is \"single\", \"mimo\" or \"shock_classical\", or absent for every \
-             world",
+            "\"world\" is \"single\", \"mimo\", \"shock_classical\" or \"shock_srs\", or \
+             absent for every world",
         )),
     }
 }
@@ -276,6 +283,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::Single => Err("single-output Random"),
             LawWorld::Mimo => Err("multiple-output Random"),
             LawWorld::ShockClassical => Ok(()),
+            LawWorld::ShockSrs => Err("SRS shock"),
         },
         params: e.manifest.params.clone(),
     }
@@ -288,5 +296,40 @@ pub fn law_ref(i: &crate::mimo::setup::LawInfo) -> crate::mimo::driver::LawRef {
         name: i.name.clone(),
         version: i.version.clone(),
         sha256: i.sha256.clone(),
+    }
+}
+
+/// The built-in SRS law, `srs_ratio`, as an SRS configuration's checks see it,
+/// from the catalog's own manifest of it (for a check with no catalog at hand, as
+/// `srs.preview`'s).
+pub fn builtin_srs_facts() -> crate::shock::config::LawFacts {
+    let m = hertzforge_random_laws::srs_builtin_manifest();
+    crate::shock::config::LawFacts {
+        id: hertzforge_random_laws::SRS_BUILTIN_ID.to_owned(),
+        name: m.name,
+        version: m.version,
+        sha256: String::new(),
+        builtin: true,
+        world: Ok(()),
+        params: m.params,
+    }
+}
+
+/// A catalog entry as an SRS configuration's checks see it: a law of another
+/// world is refused by the test type it is for.
+pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
+    crate::shock::config::LawFacts {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: match e.world {
+            LawWorld::Single => Err("single-output Random"),
+            LawWorld::Mimo => Err("multiple-output Random"),
+            LawWorld::ShockClassical => Err("classical shock"),
+            LawWorld::ShockSrs => Ok(()),
+        },
+        params: e.manifest.params.clone(),
     }
 }

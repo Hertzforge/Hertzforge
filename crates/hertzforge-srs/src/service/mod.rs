@@ -64,36 +64,48 @@
 //! ceilings are inert. The capability truth is read from
 //! [`hertzforge_shock_common::PathCapabilities`] - never re-derived here.
 
+pub mod closed;
 pub mod config;
+pub mod pacer;
 pub mod plant;
 pub mod report;
 
+use crate::control::{SrsInputs, SrsLawFactory, SrsRatioFactory};
 use crate::iterate::{synthesize_to_target, SynthesisEngine};
-use crate::law::{LawLimits, SrsSynthesisLaw};
+use crate::law::{LawLimitStatus, LawLimits};
 use crate::limit::{predict_response_srs, LimitChannel, PredictiveNotch};
-use crate::table::{DampedSineTable, WaveletTable};
+use closed::{LawOutcome, LawRun};
 use config::{
-    ConfigError, EngineKind, FrfSpec, LimitTarget, ShockCaptureTrigger, SrsEnvelope, SrsTestConfig,
-    SysIdExcitation,
+    ConfigError, EngineKind, EnvelopeCheck, FrfSpec, LimitTarget, ShockCaptureTrigger, SrsEnvelope,
+    SrsTestConfig, SysIdExcitation,
 };
 use hertzforge_capture::{default_data_root, save_snapshot, CaptureConfig, CaptureSink, Mark};
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_dsp::srs::srs_analyze;
 use hertzforge_shaker_db::FeasibilityReport;
+use hertzforge_shock_common::ladder::MANUAL_STEP_DB;
+use hertzforge_shock_common::law_guard::LawCall;
+use hertzforge_shock_common::law_guard::{LawClock, MonotonicClock};
 use hertzforge_shock_common::pulse_store::{build_snapshot, capture_pulse};
+use hertzforge_shock_common::BringUp;
 use hertzforge_shock_common::{
-    predict_peak_accel_g, pulse_feasibility, MeasuredPeak, MonitorEnforcement, PathCapabilities,
-    PulseStore, ShockControlLaw, ShockLadderState, ShockLawInputs,
+    predict_peak_accel_g, pulse_feasibility, LadderTick, MeasuredPeak, MonitorEnforcement,
+    PathCapabilities, PulseStore, ShockLadderState,
 };
+use hertzforge_shock_law_math::srs::SrsRatioParams;
+use pacer::{PulsePacer, RealPacer};
 use plant::{FirePath, PlantError};
 use report::{
-    BandResult, DelegatedFireLog, EventKind, EventLog, FeasibilityDigest, FrfSummary, Honesty,
-    LevelHistoryEntry, LimitReport, PulseRow, ReportData, RunSettings, RunState, Status, TripKind,
-    TripRecord,
+    BandResult, DelegatedFireLog, DrivePrediction, EventKind, EventLog, FeasibilityDigest,
+    FrfSummary, HeldReason, Honesty, IdentificationSummary, LevelHistoryEntry, LimitReport,
+    NotchSummary, PulseLawCall, PulseRow, PulseView, ReportData, RunSettings, RunState, Status,
+    TripKind, TripRecord,
 };
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Errors from a service operation.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +123,16 @@ pub enum ServiceError {
     /// written. The message carries the committed-queue arithmetic from
     /// [`plant::PlantError::Cancelled`].
     Cancelled(String),
+    /// A level move refused: the drive at the new level would pass the drive
+    /// abort.
+    DriveCeiling {
+        /// The level asked for, dB.
+        level_db: f64,
+        /// The drive's peak there, volts.
+        vpk: f64,
+        /// The drive abort, volts peak.
+        abort_vpk: f64,
+    },
 }
 
 impl std::fmt::Display for ServiceError {
@@ -121,6 +143,15 @@ impl std::fmt::Display for ServiceError {
             ServiceError::Plant(s) => write!(f, "plant error: {s}"),
             ServiceError::Io(s) => write!(f, "io error: {s}"),
             ServiceError::Cancelled(s) => write!(f, "cancelled: {s}"),
+            ServiceError::DriveCeiling {
+                level_db,
+                vpk,
+                abort_vpk,
+            } => write!(
+                f,
+                "the drive at {level_db:+.1} dB would be {vpk:.3} V pk, over the {abort_vpk:.3} V \
+                 pk drive abort"
+            ),
         }
     }
 }
@@ -133,11 +164,43 @@ impl From<ConfigError> for ServiceError {
     }
 }
 
+/// How many fired pulses the service keeps the drive and the measured SRS of,
+/// for [`SrsShockService::pulse_view`].
+pub const PULSE_VIEWS_KEPT: usize = 64;
+
+/// What the service kept of one fired pulse for its views.
+#[derive(Debug, Clone)]
+struct PlayedPulse {
+    seq: u64,
+    level_db: f64,
+    commanded_db: f64,
+    /// The ladder's linear level.
+    level_scale: f64,
+    /// The drive as played, before its ring-out.
+    drive: Vec<f64>,
+    /// The measured control SRS at the run's Q.
+    measured_srs: Vec<f64>,
+}
+
+/// The facts of a pulse as played that its row carries.
+#[derive(Debug, Clone, Default)]
+struct PlayedFacts {
+    commanded_db: f64,
+    limit_scale: f64,
+    drive_vpk: Option<f64>,
+    worst_limit_db: Option<f64>,
+    limited_components: usize,
+    law: Option<PulseLawCall>,
+    at_s: Option<f64>,
+    bring_up: Option<BringUp>,
+}
+
 /// A measured drive->channel FRF from the reduced-level system ID.
 #[derive(Debug, Clone, PartialEq)]
 struct MeasuredFrf {
     freqs_hz: Vec<f64>,
     mag: Vec<f64>,
+    coherence: Vec<f64>,
     band_coherence: f64,
 }
 
@@ -183,10 +246,9 @@ pub struct SrsShockService {
     model_engine: Option<SynthesisEngine>,
     /// Whether the offline model convergence reached `tol_db`.
     model_converged: bool,
-    /// The DRIVE table (post FRF feedforward seed + arm-time notch); re-synthesized
-    /// every pulse from the law's gain updates. Path B only.
+    /// The DRIVE table (post seed + arm-time notch); re-synthesized every
+    /// pulse from the law's gain updates. Path B only.
     engine: Option<SynthesisEngine>,
-    law: Option<SrsSynthesisLaw>,
 
     // --- system-ID artifacts (Path B) ---------------------------------------------
     control_frf: Option<MeasuredFrf>,
@@ -224,6 +286,40 @@ pub struct SrsShockService {
 
     // --- one-shot honesty notes ---------------------------------------------------
     noted_no_frf_prediction: bool,
+
+    // --- the control-law seam -------------------------------------------------------
+    /// The factory the run builds its law with, after identification.
+    /// `None`: the built-in `srs_ratio`.
+    law_factory: Option<Arc<dyn SrsLawFactory>>,
+    /// The clock law calls are timed on.
+    law_clock: Arc<dyn LawClock>,
+
+    // --- the pulse views ------------------------------------------------------------
+    /// The most recent [`PULSE_VIEWS_KEPT`] fired pulses' drives and SRS.
+    played: VecDeque<PlayedPulse>,
+    /// Components the limit cap held back in the gains in force: what the
+    /// next pulse plays.
+    played_limited: usize,
+
+    // --- the law and the closed loop -------------------------------------------------
+    /// The law, its records and its counts, once built (Path B).
+    law_run: Option<LawRun>,
+    /// The bounds the core caps the law's gains by (limit channels only).
+    law_limits: Option<LawLimits>,
+    /// What the cap did on the last pulse.
+    last_limit_status: LawLimitStatus,
+    /// The gains last applied to the table, after the core's caps.
+    last_gains: Vec<f64>,
+    /// The identified control gain is scaled by this before the seed, dB.
+    identification_scale_db: f64,
+    identification: Option<IdentificationSummary>,
+    held: Option<HeldReason>,
+    prediction: Option<DrivePrediction>,
+    /// The clock the time between pulses is kept on.
+    pacer: Mutex<Box<dyn PulsePacer>>,
+    wait_observer: Option<Box<dyn FnMut(f64) + Send>>,
+    /// When the last pulse started, on the pacer.
+    last_pulse_start_s: Option<f64>,
 }
 
 impl SrsShockService {
@@ -277,7 +373,6 @@ impl SrsShockService {
             model_engine: None,
             model_converged: false,
             engine: None,
-            law: None,
             control_frf: None,
             measured_limit_frfs: Vec::new(),
             limit_channels: Vec::new(),
@@ -297,6 +392,21 @@ impl SrsShockService {
             data_root,
             delegated_log: DelegatedFireLog::default(),
             noted_no_frf_prediction: false,
+            law_factory: None,
+            law_clock: Arc::new(MonotonicClock::new()),
+            played: VecDeque::new(),
+            played_limited: 0,
+            law_run: None,
+            law_limits: None,
+            last_limit_status: LawLimitStatus::default(),
+            last_gains: Vec::new(),
+            identification_scale_db: 0.0,
+            identification: None,
+            held: None,
+            prediction: None,
+            pacer: Mutex::new(Box::new(RealPacer::new())),
+            wait_observer: None,
+            last_pulse_start_s: None,
         };
         // Path honesty is logged up front, not discovered mid-run.
         let honesty = Honesty::for_path(svc.path.drive_path());
@@ -307,6 +417,21 @@ impl SrsShockService {
             });
         }
         Ok(svc)
+    }
+
+    /// Install the factory the run builds its control law with. Without one
+    /// the run uses the built-in `srs_ratio`: at its declared defaults with
+    /// `control`, and from `synthesis.max_gain_db_per_iter` without it.
+    pub fn with_law_factory(mut self, factory: Arc<dyn SrsLawFactory>) -> Self {
+        self.law_factory = Some(factory);
+        self
+    }
+
+    /// Install the clock law calls are timed on (a test clock makes a law
+    /// "slow" deterministically).
+    pub fn with_law_clock(mut self, clock: Arc<dyn LawClock>) -> Self {
+        self.law_clock = clock;
+        self
     }
 
     // --- introspection ------------------------------------------------------------
@@ -650,6 +775,25 @@ impl SrsShockService {
         Ok(())
     }
 
+    /// Level moves: while firing or armed, and (closed loop) at the review
+    /// hold, where the ladder is already placed and nothing drives.
+    fn refuse_level_move_from_state(&self, verb: &str) -> Result<(), ServiceError> {
+        if self.cfg.control.is_some()
+            && self.state == RunState::AwaitingReview
+            && self.ladder.is_some()
+        {
+            return Ok(());
+        }
+        self.refuse_if_awaiting_review(verb)?;
+        if !matches!(self.state, RunState::Armed | RunState::Firing) {
+            return Err(ServiceError::BadState(format!(
+                "{verb} from {:?}",
+                self.state
+            )));
+        }
+        Ok(())
+    }
+
     /// Named refusal for the driving verbs while the review hold is up.
     fn refuse_if_awaiting_review(&self, verb: &str) -> Result<(), ServiceError> {
         if matches!(self.state, RunState::AwaitingReview) {
@@ -716,7 +860,7 @@ impl SrsShockService {
             )));
         }
         let peak = model_wave.iter().fold(0.0f64, |m, &v| m.max(v.abs()));
-        let burst: Vec<f64> = match spec.excitation {
+        let mut burst: Vec<f64> = match spec.excitation {
             SysIdExcitation::Shaped => model_wave.iter().map(|&v| v * level).collect(),
             SysIdExcitation::StandardPulse => {
                 // A few-sample broadband rectangle (the classical low-level pulse).
@@ -728,6 +872,13 @@ impl SrsShockService {
                 p
             }
         };
+        // The closed loop: the burst is in volts, its peak held at the cap.
+        let closed = self.cfg.control.clone();
+        let burst_cap_v = closed.as_ref().map(|c| c.identification_vpk_cap());
+        if let Some(cap) = burst_cap_v {
+            self.hold_burst_at_cap(&mut burst, cap);
+        }
+        let burst_vpk = closed::peak(&burst);
 
         // Tile the burst (with ring-out gaps) so Welch has at least ~4 segments.
         let ring = self.ring_out_samples;
@@ -784,8 +935,22 @@ impl SrsShockService {
         let mut drive_padded = drive;
         drive_padded.resize(responses.control_g.len(), 0.0);
 
-        let control_frf = self.estimate_frf(&drive_padded, &responses.control_g, spec.nfft);
+        let mut control_frf = self.estimate_frf(&drive_padded, &responses.control_g, spec.nfft);
         let band_coh = control_frf.band_coherence;
+        if self.identification_scale_db != 0.0 {
+            // The gain the core believes: the identification error a law
+            // check asks for.
+            let s = closed::db_scale(self.identification_scale_db);
+            for m in control_frf.mag.iter_mut() {
+                *m *= s;
+            }
+            self.log.push(EventKind::Note {
+                text: format!(
+                    "the identified gain is scaled {:+.1} dB before the seed",
+                    self.identification_scale_db
+                ),
+            });
+        }
 
         // Measure the drive->limit-channel FRFs for spec'd channels without a
         // user-supplied FRF.
@@ -814,6 +979,42 @@ impl SrsShockService {
             band_coherence: band_coh,
             level_db: spec.level_db,
         });
+
+        if let (Some(c), Some(cap)) = (&closed, burst_cap_v) {
+            let passed = band_coh >= c.min_mean_coherence;
+            self.identification = Some(IdentificationSummary {
+                excitation: spec.excitation,
+                drive_vpk: burst_vpk,
+                max_vpk: cap,
+                coherence_mean: band_coh,
+                min_mean_coherence: c.min_mean_coherence,
+                passed,
+            });
+            self.log.push(EventKind::Identified {
+                drive_vpk: burst_vpk,
+                max_vpk: cap,
+                coherence_mean: band_coh,
+                min_mean_coherence: c.min_mean_coherence,
+            });
+            if self.coherence_holds(band_coh, c.min_mean_coherence) {
+                return Ok(());
+            }
+            // The closed loop always holds for review here, whatever
+            // `review_after_sysid` says: the caller reviews (or not) and
+            // proceeds. The ladder is placed now so a level move at review
+            // has a level to move.
+            let ladder = ShockLadderState::new(self.cfg.schedule.clone())
+                .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?;
+            self.ladder = Some(ladder);
+            self.log.push(EventKind::Note {
+                text: "identification complete; holding for review. Nothing drives until \
+                       proceed_after_review()."
+                    .into(),
+            });
+            self.transition(RunState::AwaitingReview);
+            self.park_plant();
+            return Ok(());
+        }
 
         // REVIEW HOLD. The system ID passed; this is the deliberate
         // stop-and-look before anything drives, not a fault. Bypassable per test
@@ -912,26 +1113,17 @@ impl SrsShockService {
         MeasuredFrf {
             freqs_hz: freqs,
             mag,
+            coherence: coh,
             band_coherence: if n > 0 { acc / n as f64 } else { 0.0 },
         }
     }
 
     // --- arming the drive -----------------------------------------------------------
 
-    /// The default (pre-iteration) component table for the configured engine: one
-    /// component per band.
+    /// The (pre-iteration) component table: the configured one, or one component
+    /// per band for the configured engine.
     fn default_engine(&self) -> Result<SynthesisEngine, ServiceError> {
-        let frac = self.cfg.fraction.into();
-        Ok(match self.cfg.engine {
-            EngineKind::Wavsyn => SynthesisEngine::Wavsyn(
-                WaveletTable::default_over_band(self.cfg.f_lo_hz, self.cfg.f_hi_hz, frac)
-                    .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?,
-            ),
-            EngineKind::Seds => SynthesisEngine::Seds(
-                DampedSineTable::default_over_band(self.cfg.f_lo_hz, self.cfg.f_hi_hz, frac)
-                    .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?,
-            ),
-        })
+        Ok(self.cfg.seed_table()?)
     }
 
     /// Synthesize-and-arm: seed the DRIVE table from the model (FRF feedforward on
@@ -944,28 +1136,52 @@ impl SrsShockService {
             .clone()
             .ok_or_else(|| ServiceError::BadState("no model engine (assess first)".into()))?;
 
-        let ladder = ShockLadderState::new(self.cfg.schedule.clone())
-            .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?;
+        // The closed loop placed its ladder at review; otherwise place it now.
+        let ladder = match self.ladder.take() {
+            Some(l) => l,
+            None => ShockLadderState::new(self.cfg.schedule.clone())
+                .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?,
+        };
 
         match self.path.drive_path() {
             hertzforge_shock_common::DrivePath::HostDac => {
                 let mut engine = model;
 
-                // FRF feedforward seed: divide each component's drive amplitude by
-                // |H(f_c)| (floored) so the FIRST pulse's response lands near the
-                // target (the "drive prediction" use of the FRF).
-                if let (Some(frf), Some(spec)) = (&self.control_frf, &self.cfg.sysid) {
-                    let mut h_max = 0.0f64;
-                    for (k, &f) in frf.freqs_hz.iter().enumerate() {
-                        if f >= self.cfg.f_lo_hz && f <= self.cfg.f_hi_hz {
-                            h_max = h_max.max(frf.mag[k]);
+                // The law: built for the run after identification and seeded
+                // before the notch. The built-in's seed divides each component
+                // by the identified |H(f_c)| (floored by the core) so the first
+                // pulse's response lands near the target.
+                let comp_freqs = engine.component_freqs();
+                let factory: Arc<dyn SrsLawFactory> = match &self.law_factory {
+                    Some(f) => Arc::clone(f),
+                    None if self.cfg.control.is_some() => Arc::new(SrsRatioFactory::default()),
+                    // Without `control`, the run's own clamp, as it always was.
+                    None => Arc::new(SrsRatioFactory::new(SrsRatioParams {
+                        max_db_per_pulse: self.cfg.synthesis.max_gain_db_per_iter,
+                    })),
+                };
+                match self.build_and_seed(factory, &comp_freqs, ladder.current_scale()) {
+                    LawOutcome::Used(gains) => {
+                        for (j, &g) in gains.iter().enumerate() {
+                            engine.scale_amplitude(j, g);
                         }
+                        self.last_gains = gains;
                     }
-                    let floor = (spec.h_floor_frac * h_max).max(f64::MIN_POSITIVE);
-                    let freqs = engine.component_freqs();
-                    for (j, &fc) in freqs.iter().enumerate() {
-                        let h = interp_clamped(&frf.freqs_hz, &frf.mag, fc).max(floor);
-                        engine.scale_amplitude(j, 1.0 / h);
+                    // A seed that is not usable fires nothing.
+                    LawOutcome::Ended(fault, consecutive) => {
+                        self.ladder = Some(ladder);
+                        self.end_law_fault(fault, consecutive);
+                        return Ok(());
+                    }
+                    LawOutcome::Missed => {
+                        self.ladder = Some(ladder);
+                        self.end_law_fault(
+                            hertzforge_shock_common::LawFault::Failed(
+                                "the seed gave no usable gains".into(),
+                            ),
+                            1,
+                        );
+                        return Ok(());
                     }
                 }
 
@@ -991,48 +1207,16 @@ impl SrsShockService {
                         converged: outcome.report.converged,
                     });
                     self.arm_notch_report = Some(outcome.report);
+                    // The cap the core holds every later gain to.
+                    self.law_limits = Some(LawLimits {
+                        bounds: self
+                            .limit_channels
+                            .iter()
+                            .map(|c| c.limit_srs.clone())
+                            .collect(),
+                        headroom_db: self.cfg.limits.as_ref().map_or(0.0, |l| l.headroom_db),
+                    });
                 }
-
-                // The run-time law: limit-aware when limit channels
-                // exist, plain per-band ratio otherwise.
-                let comp_freqs = engine.component_freqs();
-                let law = if self.limit_channels.is_empty() {
-                    SrsSynthesisLaw::with_clamp(
-                        comp_freqs.clone(),
-                        self.cfg.synthesis.max_gain_db_per_iter,
-                    )
-                } else {
-                    SrsSynthesisLaw::with_limits(
-                        comp_freqs.clone(),
-                        self.cfg.synthesis.max_gain_db_per_iter,
-                        LawLimits {
-                            bounds: self
-                                .limit_channels
-                                .iter()
-                                .map(|c| c.limit_srs.clone())
-                                .collect(),
-                            headroom_db: self.cfg.limits.as_ref().map_or(0.0, |l| l.headroom_db),
-                        },
-                    )
-                }
-                .map_err(|e| ServiceError::Config(ConfigError::BadConfig(e.to_string())))?;
-
-                let mut law = law;
-                let zeros = vec![0.0f64; self.band_freqs.len()];
-                let scaled_target: Vec<f64> = self
-                    .target_full
-                    .iter()
-                    .map(|&t| t * ladder.current_scale())
-                    .collect();
-                let _ = law.init(&ShockLawInputs {
-                    target_srs: &scaled_target,
-                    measured_srs: &zeros,
-                    band_freqs: &self.band_freqs,
-                    component_freqs: &comp_freqs,
-                    predicted_limit_srs: None,
-                    current_scale: ladder.current_scale(),
-                });
-                self.law = Some(law);
                 self.engine = Some(engine);
             }
             hertzforge_shock_common::DrivePath::Delegated => {
@@ -1073,10 +1257,20 @@ impl SrsShockService {
         });
         self.ladder = Some(ladder);
 
+        // The closed loop: the drive the table in force needs at the highest
+        // level the run is scheduled to reach, before any pulse.
+        if self.cfg.control.is_some() {
+            self.refresh_prediction();
+            if self.predicted_drive_abort() {
+                return Ok(());
+            }
+        }
+
         // Capture: EveryPulse opens the sink at arm; Manual waits for the operator.
         if matches!(self.cfg.capture.trigger, ShockCaptureTrigger::EveryPulse) {
             let name = format!("srs_run_{}", Self::now_unix());
             self.start_capture(&name)?;
+            self.persist_law_records();
         }
         self.transition(RunState::Armed);
         Ok(())
@@ -1137,6 +1331,29 @@ impl SrsShockService {
     /// Fire one pulse through the per-pulse pipeline (module docs). Returns `true`
     /// while the run keeps going, `false` when it stopped or aborted this pulse.
     pub fn fire_pulse(&mut self) -> Result<bool, ServiceError> {
+        self.fire_pulse_cancellable(None)
+    }
+
+    /// [`Self::fire_pulse`] plus a host's `should_continue` flag (TRUE to keep
+    /// going), read with the cancel flag throughout the wait for the time between
+    /// pulses. Lowered there (nobody holds control, say), the pulse does not
+    /// start: the station is parked with nothing played, the run stays in
+    /// `Firing`, and this returns `false`; a later call fires it.
+    ///
+    /// # The order inside a pulse
+    ///
+    /// The drive is built and checked first (its volts, its predicted peak and
+    /// kinematics), then the shot is brought up (armed, the record's head
+    /// committed), and only then does the wait for the time between pulses run,
+    /// inside the plant's `ready` hook (`PulsePlant::fire_timed`). So nothing is
+    /// committed that the checks would refuse, and the bring-up, about 125 ms a
+    /// shot on the NI bench, is done inside the floor instead of after it. The
+    /// start call is the only thing left on the deadline, and the pulse's start
+    /// is stamped once it returns.
+    pub fn fire_pulse_cancellable(
+        &mut self,
+        should_continue: Option<&AtomicBool>,
+    ) -> Result<bool, ServiceError> {
         self.refuse_if_awaiting_review("fire_pulse")?;
         if !matches!(self.state, RunState::Armed | RunState::Firing) {
             return Err(ServiceError::BadState(format!(
@@ -1157,9 +1374,21 @@ impl SrsShockService {
         let level_scale = ladder.current_scale();
         let pulse_seq = self.store.len() as u64;
 
+        // The closed loop: the run's pulse cap. The time between pulses is waited
+        // out once the shot is brought up (below).
+        let closed = self.cfg.control.clone();
+        if let Some(c) = &closed {
+            if self.run_pulse_cap_reached(c.guards.max_pulses, pulse_seq) {
+                return Ok(false);
+            }
+        }
+        let mut at_s = None;
+        let mut bring_up = None;
+        let checks_from = Instant::now();
+
         // --- synthesize + fire (path split) ------------------------------------
         let is_host = self.path.drive_path().is_host();
-        let (control, monitors, fire_scale_for_law) = if is_host {
+        let (control, monitors, fire_scale_for_law, played_drive) = if is_host {
             let engine = self
                 .engine
                 .as_ref()
@@ -1214,13 +1443,92 @@ impl SrsShockService {
                 }
             }
 
+            // The closed loop: the drive in volts against the ceiling and the
+            // abort, and the predicted kinematics, before it plays.
+            if let Some(c) = &closed {
+                if !self.check_drive_before_fire(c, &full, &mut fire_scale, level_db, pulse_seq) {
+                    return Ok(false);
+                }
+            }
+
             let drive: Vec<f64> = full.iter().map(|&v| v * fire_scale).collect();
             let ring = self.ring_out_samples;
             let cancel = Arc::clone(&self.cancel);
+            let checks_s = checks_from.elapsed().as_secs_f64();
+            // The shot is brought up, then the time between pulses is waited out
+            // in the plant's `ready` hook, then the start, and the pulse's start is
+            // stamped once the device's clock runs (`PulsePlant::fire_timed`). Only
+            // the closed loop paces.
+            let deadline = closed
+                .as_ref()
+                .and_then(|c| self.last_pulse_start_s.map(|t| t + c.min_spacing_s()));
+            let mut pace = closed::Pace {
+                pacer: self.pacer.get_mut().unwrap_or_else(|e| e.into_inner()),
+                cancel: &cancel,
+                should_continue,
+                observer: &mut self.wait_observer,
+                deadline,
+                paced: closed.is_some(),
+                prepared: Default::default(),
+                waited: closed::Waited::Due,
+                wait_s: 0.0,
+                start_s: 0.0,
+                started_at: None,
+            };
             let FirePath::Host(p) = &mut self.path else {
                 unreachable!("path checked above");
             };
-            let fired = match p.fire(&drive, ring, Some(&cancel)) {
+            let fired = p.fire_timed(&drive, ring, Some(&cancel), &mut pace);
+            let closed::Pace {
+                prepared,
+                waited,
+                wait_s,
+                start_s,
+                started_at,
+                ..
+            } = pace;
+            if matches!(fired, Err(PlantError::Withheld)) {
+                // Nothing started: the station is armed with the record committed
+                // and unplayed. Parking it unreserves the record.
+                if waited == closed::Waited::Held {
+                    self.park_plant();
+                    self.log.push(EventKind::Note {
+                        text: format!(
+                            "held in the wait before pulse {pulse_seq}: the station was \
+                             parked with nothing played"
+                        ),
+                    });
+                    return Ok(false);
+                }
+                // A stop raised in the wait: nothing more fires.
+                self.cancel.store(false, Ordering::Relaxed);
+                self.log.push(EventKind::Note {
+                    text: format!(
+                        "stopped in the wait before pulse {pulse_seq}; nothing more fired"
+                    ),
+                });
+                self.stop()?;
+                return Ok(false);
+            }
+            if closed.is_some() {
+                // A fire that never said its device started is stamped now: late,
+                // never early.
+                at_s = Some(started_at.unwrap_or_else(|| {
+                    self.pacer
+                        .get_mut()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .pulse_start_s()
+                }));
+                self.last_pulse_start_s = at_s;
+                bring_up = Some(BringUp {
+                    checks_ms: checks_s * 1e3,
+                    arm_ms: prepared.arm_s * 1e3,
+                    commit_ms: prepared.commit_s * 1e3,
+                    wait_ms: wait_s * 1e3,
+                    start_ms: start_s * 1e3,
+                });
+            }
+            let fired = match fired {
                 Ok(f) => f,
                 Err(cancelled @ PlantError::Cancelled { .. }) => {
                     // A CLEAN stop, not a trip: no protection engine fired, the
@@ -1270,7 +1578,7 @@ impl SrsShockService {
                 })
                 .collect();
 
-            (fired.control_g, fired.monitors, fire_scale)
+            (fired.control_g, fired.monitors, fire_scale, Some(drive))
         } else {
             // Path A: absolute-scalar fire; no host drive, law, or predictions.
             let FirePath::Delegated(dev) = &mut self.path else {
@@ -1288,7 +1596,7 @@ impl SrsShockService {
                 scale: level_scale,
                 level_db,
             });
-            (control, Vec::new(), level_scale)
+            (control, Vec::new(), level_scale, None)
         };
 
         // --- ingest (SRS + kinematics + PVSS on ingest) ----------------
@@ -1313,6 +1621,34 @@ impl SrsShockService {
         // is at the pinned shock-common Q=10 convention; identical at the default).
         let measured_srs = srs_analyze(&control, self.fs_hz, &self.band_freqs, self.cfg.q);
 
+        // What the pulse played, for its row and its views.
+        let facts = PlayedFacts {
+            commanded_db: 20.0 * fire_scale_for_law.log10(),
+            limit_scale: fire_scale_for_law / level_scale,
+            drive_vpk: played_drive
+                .as_ref()
+                .map(|d| d.iter().fold(0.0f64, |m, &v| m.max(v.abs()))),
+            worst_limit_db: self.worst_limit_exceedance_db(),
+            limited_components: self.played_limited,
+            law: closed
+                .as_ref()
+                .and(self.law_run.as_ref())
+                .and_then(|r| r.pending.clone()),
+            at_s,
+            bring_up,
+        };
+        if self.played.len() == PULSE_VIEWS_KEPT {
+            self.played.pop_front();
+        }
+        self.played.push_back(PlayedPulse {
+            seq,
+            level_db,
+            commanded_db: facts.commanded_db,
+            level_scale,
+            drive: played_drive.unwrap_or_default(),
+            measured_srs: measured_srs.clone(),
+        });
+
         // --- kinematic ceilings (pure-integrator kinematics) -------
         let kin = self.store.get(seq).map(|r| r.kinematics);
         if let Some(k) = kin {
@@ -1332,12 +1668,13 @@ impl SrsShockService {
             for (axis, value, limit) in checks {
                 if let Some(lim) = limit {
                     if value > lim {
-                        self.push_pulse_row(seq, level_db, &measured_srs, 0, 0, 0);
+                        self.push_pulse_row(seq, level_db, &measured_srs, None, &facts);
                         self.abort(
                             TripKind::Kinematic {
                                 axis: axis.into(),
                                 value,
                                 limit: lim,
+                                predicted: false,
                             },
                             level_db,
                             seq,
@@ -1355,14 +1692,7 @@ impl SrsShockService {
         self.alarm_active = check.alarmed();
         if check.aborted() {
             let worst_band = check.worst_band.unwrap_or(0);
-            self.push_pulse_row(
-                seq,
-                level_db,
-                &measured_srs,
-                check.alarm_bands.len(),
-                check.abort_bands.len(),
-                0,
-            );
+            self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
             self.abort(
                 TripKind::Envelope {
                     abort_bands: check.abort_bands.len(),
@@ -1396,7 +1726,7 @@ impl SrsShockService {
                 if action.enforcement == MonitorEnforcement::Enforced {
                     if let Some(peak) = action.measured_peak_eu {
                         if peak >= self.cfg.drive_abort_factor * action.peak_ceiling {
-                            self.push_pulse_row(seq, level_db, &measured_srs, 0, 0, 0);
+                            self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
                             self.abort(
                                 TripKind::DriveBreach {
                                     channel: action.channel.clone(),
@@ -1430,57 +1760,71 @@ impl SrsShockService {
         }
 
         // --- the law iteration (Path B) ----------------------------
-        let mut limited_components = 0usize;
+        // The law aims at the target scaled by everything actually COMMANDED
+        // (level x safety trims): the law must not fight a limiter (the Random
+        // lesson). The core caps what it returns.
+        let mut law_ended = None;
         if is_host {
-            let engine = self.engine.as_mut().expect("engine present while firing");
-            let comp_freqs = engine.component_freqs();
-            // The law aims at the target scaled by everything actually COMMANDED
-            // (level x safety trims): the law must not fight a limiter (the Random lesson).
+            let comp_freqs = self
+                .engine
+                .as_ref()
+                .map(|e| e.component_freqs())
+                .unwrap_or_default();
             let law_target: Vec<f64> = self
                 .target_full
                 .iter()
                 .map(|&t| t * fire_scale_for_law)
                 .collect();
-            let preds: Vec<Vec<f64>> = self
-                .last_predicted_limit_srs
-                .iter()
-                .map(|(_, p)| p.clone())
-                .collect();
-            let law = self.law.as_mut().expect("law present while firing");
-            let out = law.on_pulse(&ShockLawInputs {
-                target_srs: &law_target,
-                measured_srs: &measured_srs,
-                band_freqs: &self.band_freqs,
-                component_freqs: &comp_freqs,
-                predicted_limit_srs: if preds.is_empty() { None } else { Some(&preds) },
-                current_scale: level_scale,
-            });
-            limited_components = law.last_limit_status().limited_components;
-            for (j, &g) in out.component_gain_updates.iter().enumerate() {
-                engine.scale_amplitude(j, g);
+            let inputs = SrsInputs {
+                pulse_index: self.store.len() as u64,
+                target: &law_target,
+                measured: &measured_srs,
+                commanded_scale: fire_scale_for_law,
+            };
+            let limit_ref = self.limit_reference_scale(level_scale);
+            match self.call_law(LawCall::Iterate, &inputs, &comp_freqs, limit_ref) {
+                LawOutcome::Used(gains) => {
+                    let engine = self.engine.as_mut().expect("engine present while firing");
+                    for (j, &g) in gains.iter().enumerate() {
+                        engine.scale_amplitude(j, g);
+                    }
+                    self.last_gains = gains;
+                }
+                // The table in force stays: the next pulse refires it.
+                LawOutcome::Missed => {}
+                LawOutcome::Ended(fault, consecutive) => law_ended = Some((fault, consecutive)),
             }
+        }
+        // The next pulse plays the gains just capped.
+        self.played_limited = self.last_limit_status.limited_components;
+        if closed.is_some() {
+            self.refresh_prediction();
         }
 
         // --- bookkeeping + ladder ---------------------------------------------
         self.last_measured_srs = Some(measured_srs.clone());
-        self.push_pulse_row(
-            seq,
-            level_db,
-            &measured_srs,
-            check.alarm_bands.len(),
-            0,
-            limited_components,
-        );
+        self.push_pulse_row(seq, level_db, &measured_srs, Some(&check), &facts);
         self.log.push(EventKind::PulseFired {
             seq,
             level_db,
             peak_accel_g: kin.map(|k| k.peak_accel_g).unwrap_or(0.0),
             worst_err_db: check.worst_err_db,
         });
+        if let Some((fault, consecutive)) = law_ended {
+            // The misses in a row reached the limit: nothing more fires.
+            self.end_law_fault(fault, consecutive);
+            return Ok(false);
+        }
 
+        let passed = self.judged_pass(&check, &measured_srs, level_scale);
         let ladder = self.ladder.as_mut().expect("ladder present while firing");
         let before_db = ladder.current_level_db();
-        ladder.on_pulse_fired();
+        let tick = if closed.is_some() {
+            ladder.on_pulse_judged(passed)
+        } else {
+            ladder.on_pulse_fired();
+            LadderTick::Held
+        };
         let after_db = ladder.current_level_db();
         let completed = ladder.completed();
         if (after_db - before_db).abs() > 1e-12 {
@@ -1494,6 +1838,14 @@ impl SrsShockService {
                 to_db: after_db,
                 auto: true,
             });
+            if closed.is_some() {
+                self.refresh_prediction();
+            }
+        }
+        if let LadderTick::NotConverged { pulses } = tick {
+            if self.iteration_limit_ends_run(pulses) {
+                return Ok(false);
+            }
         }
         if completed {
             self.stop()?;
@@ -1502,14 +1854,15 @@ impl SrsShockService {
         Ok(true)
     }
 
+    /// Add the pulse's row. `judged` is the envelope's verdict on it (`None`
+    /// when the pulse ended before the envelope was judged).
     fn push_pulse_row(
         &mut self,
         seq: u64,
         level_db: f64,
         measured_srs: &[f64],
-        alarm_bands: usize,
-        abort_bands: usize,
-        limited_components: usize,
+        judged: Option<&EnvelopeCheck>,
+        facts: &PlayedFacts,
     ) {
         let kin = self.store.get(seq).map(|r| r.kinematics);
         let (mut worst, mut worst_band) = (None::<f64>, None::<usize>);
@@ -1532,10 +1885,88 @@ impl SrsShockService {
             pk_pk_disp_in: kin.map(|k| k.pk_pk_disp_in).unwrap_or(0.0),
             worst_err_db: worst,
             worst_band,
-            alarm_bands,
-            abort_bands,
-            limited_components,
+            alarm_bands: judged.map_or(0, |c| c.alarm_bands.len()),
+            abort_bands: judged.map_or(0, |c| c.abort_bands.len()),
+            limited_components: facts.limited_components,
+            scheduled_db: level_db,
+            commanded_db: facts.commanded_db,
+            limit_scale: facts.limit_scale,
+            drive_vpk: facts.drive_vpk,
+            passed: judged.map(|c| self.judged_pass(c, measured_srs, scale)),
+            worst_band_hz: worst_band.and_then(|b| self.band_freqs.get(b).copied()),
+            worst_limit_db: facts.worst_limit_db,
+            law: facts.law.clone(),
+            at_s: facts.at_s,
+            bring_up: facts.bring_up,
         });
+    }
+
+    /// The worst predicted limit-channel exceedance for the last pulse's drive,
+    /// dB over the allowed level (`bound` less the headroom); `None` without
+    /// limit channels or a comparable prediction.
+    fn worst_limit_exceedance_db(&self) -> Option<f64> {
+        let headroom_db = self.cfg.limits.as_ref().map_or(0.0, |l| l.headroom_db);
+        let headroom_lin = 10.0_f64.powf(-headroom_db / 20.0);
+        let mut worst: Option<f64> = None;
+        for (ch, (_, pred)) in self
+            .limit_channels
+            .iter()
+            .zip(&self.last_predicted_limit_srs)
+        {
+            for (&bound, &p) in ch.limit_srs.iter().zip(pred) {
+                if !bound.is_finite() || p <= 0.0 {
+                    continue;
+                }
+                let db = 20.0 * (p / (bound * headroom_lin)).log10();
+                worst = Some(worst.map_or(db, |w: f64| w.max(db)));
+            }
+        }
+        worst
+    }
+
+    /// One fired pulse's views (see [`PulseView`]): `None` for a pulse not
+    /// fired, or older than the last [`PULSE_VIEWS_KEPT`].
+    pub fn pulse_view(&self, pulse: u64) -> Option<PulseView> {
+        let p = self.played.iter().find(|p| p.seq == pulse)?;
+        let rec = self.store.get(pulse)?;
+        let series = hertzforge_dsp::shock::pulse_kinematic_series(&rec.time_history, rec.fs_hz);
+        let target: Vec<f64> = self
+            .target_full
+            .iter()
+            .map(|&t| t * p.level_scale)
+            .collect();
+        let band = |lo_db: f64, hi_db: f64, t: f64| {
+            (t * 10f64.powf(-lo_db / 20.0), t * 10f64.powf(hi_db / 20.0))
+        };
+        let alarm = self
+            .envelope
+            .bands
+            .iter()
+            .zip(&target)
+            .map(|(b, &t)| band(b.alarm_lo_db, b.alarm_hi_db, t))
+            .collect();
+        let abort = self
+            .envelope
+            .bands
+            .iter()
+            .zip(&target)
+            .map(|(b, &t)| band(b.abort_lo_db, b.abort_hi_db, t))
+            .collect();
+        Some(PulseView {
+            pulse,
+            fs_hz: rec.fs_hz,
+            level_db: p.level_db,
+            commanded_db: p.commanded_db,
+            band_hz: self.band_freqs.clone(),
+            measured_srs: p.measured_srs.clone(),
+            target_srs: target,
+            alarm,
+            abort,
+            measured: rec.time_history.clone(),
+            drive: p.drive.clone(),
+            velocity_ips: series.velocity_ips,
+            displacement_in: series.disp_in,
+        })
     }
 
     // --- level control (AUTO ladder + MANUAL +/- 1 dB) -----------------
@@ -1551,18 +1982,18 @@ impl SrsShockService {
     }
 
     fn manual_step(&mut self, up: bool) -> Result<f64, ServiceError> {
-        self.refuse_if_awaiting_review("level step")?;
-        if !matches!(self.state, RunState::Armed | RunState::Firing) {
-            return Err(ServiceError::BadState(format!(
-                "level step from {:?}",
-                self.state
-            )));
-        }
+        self.refuse_level_move_from_state("level step")?;
+        let from = self
+            .ladder
+            .as_ref()
+            .ok_or_else(|| ServiceError::BadState("no ladder".into()))?
+            .current_level_db();
+        let step = if up { MANUAL_STEP_DB } else { -MANUAL_STEP_DB };
+        self.check_level_move(from + step)?;
         let ladder = self
             .ladder
             .as_mut()
             .ok_or_else(|| ServiceError::BadState("no ladder".into()))?;
-        let from = ladder.current_level_db();
         if up {
             ladder.step_up();
         } else {
@@ -1584,12 +2015,13 @@ impl SrsShockService {
 
     /// Jump to ladder table level `i`, clearing any manual offset.
     pub fn jump_to_level(&mut self, i: usize) -> Result<f64, ServiceError> {
-        self.refuse_if_awaiting_review("jump_to_level")?;
-        if !matches!(self.state, RunState::Armed | RunState::Firing) {
-            return Err(ServiceError::BadState(format!(
-                "jump_to_level from {:?}",
-                self.state
-            )));
+        self.refuse_level_move_from_state("jump_to_level")?;
+        if let Some(&to) = self
+            .ladder
+            .as_ref()
+            .and_then(|l| l.schedule().table_db.get(i))
+        {
+            self.check_level_move(to)?;
         }
         let ladder = self
             .ladder
@@ -1695,11 +2127,13 @@ impl SrsShockService {
     /// has committed plays out, which for a shock record is a zero tail.
     pub fn stop(&mut self) -> Result<(), ServiceError> {
         self.park_plant();
-        if self.state != RunState::Aborted && self.cfg.capture.snapshot_on_stop {
+        let ended = self.state.is_terminal();
+        if !ended && self.cfg.capture.snapshot_on_stop {
             let _ = self.save_snapshot(Vec::new());
         }
         let _ = self.stop_capture_inner();
-        if self.state != RunState::Aborted {
+        // An ended run keeps how it ended (aborted, held, not converged).
+        if !ended {
             self.transition(RunState::Stopped);
         }
         Ok(())
@@ -1903,11 +2337,7 @@ impl SrsShockService {
                     .map(|c| (c.name.clone(), c.limit_srs.clone()))
                     .collect(),
                 last_predicted_srs: self.last_predicted_limit_srs.clone(),
-                last_status: self
-                    .law
-                    .as_ref()
-                    .map(|l| l.last_limit_status())
-                    .unwrap_or_default(),
+                last_status: self.last_limit_status,
                 headroom_db: self.cfg.limits.as_ref().map_or(0.0, |l| l.headroom_db),
             })
         };
@@ -1928,6 +2358,7 @@ impl SrsShockService {
             delegated: self.delegated_log.clone(),
             metadata: self.cfg.metadata.clone(),
             honesty: Honesty::for_path(self.path.drive_path()),
+            law: self.law_report(),
         }
     }
 
@@ -1940,17 +2371,29 @@ impl SrsShockService {
             pulses_fired: self.store.len() as u64,
             pulses_at_level: self.ladder.as_ref().map_or(0, |l| l.pulses_at_level()),
             last_worst_err_db: self.pulse_rows.last().and_then(|r| r.worst_err_db),
-            last_limit_status: self
-                .law
-                .as_ref()
-                .map(|l| l.last_limit_status())
-                .unwrap_or_default(),
+            last_limit_status: self.last_limit_status,
             alarm_active: self.alarm_active,
             abort_active: matches!(self.state, RunState::Aborted),
             ladder_completed: self.ladder.as_ref().is_some_and(|l| l.completed()),
             capturing: self.capture.is_some(),
             band_coherence: self.control_frf.as_ref().map_or(0.0, |f| f.band_coherence),
             capture_trigger: self.cfg.capture.trigger,
+            next_pulse_s: self.next_pulse_in_s(),
+            pulses_passed: self
+                .pulse_rows
+                .iter()
+                .filter(|r| r.passed == Some(true))
+                .count() as u64,
+            identification: self.identification.clone(),
+            prediction: self.prediction.clone(),
+            notch: self.arm_notch_report.as_ref().map(|r| NotchSummary {
+                notched_bands: r.notched_bands.len(),
+                worst_before_db: r.worst_exceedance_before_db,
+                worst_after_db: r.worst_exceedance_after_db,
+                converged: r.converged,
+            }),
+            law: self.law_status(),
+            held: self.held.clone(),
         }
     }
 }

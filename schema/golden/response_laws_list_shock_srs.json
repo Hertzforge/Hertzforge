@@ -1,0 +1,65 @@
+{
+ "type": "response",
+ "id": 66,
+ "result": {
+  "laws": [
+   {
+    "id": "srs_ratio",
+    "world": "shock_srs",
+    "builtin": true,
+    "name": "SRS ratio",
+    "version": "0.1.0",
+    "author": "Hertzforge contributors",
+    "summary": "Starts each component from the inverse of the identified gain at its frequency, then after each pulse scales it by the target over the measured response at the nearest band, limited per pulse. The controller caps every change by what the limit channels can take.",
+    "sha256": null,
+    "check": {
+     "status": "built_in",
+     "date": null,
+     "tool_version": null,
+     "cases": [],
+     "hardware": true,
+     "message": "Built in: cleared for hardware."
+    },
+    "params": [
+     {
+      "key": "max_db_per_pulse",
+      "label": "Largest change per pulse",
+      "help": "The most any one component of the drive may rise or fall from one pulse to the next. Smaller values settle more gently when the measured response is noisy.",
+      "kind": "number",
+      "unit": "dB",
+      "min": 0.5,
+      "max": 5,
+      "step": 0.5,
+      "default": 3
+     }
+    ],
+    "diagnostics": [
+     {
+      "key": "worst_band_error_db",
+      "label": "Worst band error",
+      "unit": "dB",
+      "help": "The last pulse's measured response against the target at the band furthest from it, in dB (0 at the seed).",
+      "layout": null
+     },
+     {
+      "key": "worst_band_hz",
+      "label": "Worst band",
+      "unit": "Hz",
+      "help": "The frequency of that band (0 at the seed).",
+      "layout": null
+     },
+     {
+      "key": "clamped_components",
+      "label": "Components at the change limit",
+      "unit": "components",
+      "help": "Components whose change the law held to its largest change per pulse on this call.",
+      "layout": null
+     }
+    ],
+    "shapes": null,
+    "needs": null
+   }
+  ],
+  "problems": []
+ }
+}

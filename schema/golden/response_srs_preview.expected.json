@@ -1,0 +1,410 @@
+{
+ "type": "response",
+ "id": 63,
+ "result": {
+  "derived": {
+   "bands_hz": [
+    100,
+    200,
+    400
+   ],
+   "target_g": [
+    12.5,
+    15,
+    11
+   ],
+   "synthesis": {
+    "engine": "wavsyn",
+    "components": 3,
+    "iters": 6,
+    "converged": true,
+    "worst_err_db": 1.2,
+    "duration_s": 0.008
+   },
+   "reference": {
+    "peak_g": 3,
+    "velocity_pk_ips": 0.5,
+    "displacement_pk_pk_in": 0.0003,
+    "residual_velocity_ips": 0,
+    "residual_disp_in": 0
+   }
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Target",
+    "x": {
+     "label": "Natural frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Peak acceleration",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.5,
+        15.0,
+        11.0
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        17.5,
+        21.0,
+        15.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        9.0,
+        10.5,
+        7.75
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        25.0,
+        30.0,
+        22.0
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        6.25,
+        7.5,
+        5.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Synthesis",
+    "x": {
+     "label": "Natural frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Peak acceleration",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.5,
+        15.0,
+        11.0
+       ]
+      }
+     },
+     {
+      "name": "Synthesis",
+      "role": "other",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.0,
+        15.25,
+        11.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Pulse",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Synthesized",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.5,
+        -1.25,
+        2.5,
+        -3.0,
+        1.5,
+        -0.5,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Velocity",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Velocity",
+     "unit": "in/s",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Synthesized",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.25,
+        -0.125,
+        0.5,
+        -0.5,
+        0.25,
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Displacement",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Displacement",
+     "unit": "in",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Synthesized",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.0001,
+        0.0002,
+        0.0003,
+        0.0002,
+        0.0001,
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

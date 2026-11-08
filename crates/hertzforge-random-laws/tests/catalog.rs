@@ -457,3 +457,48 @@ fn classical_shock_laws_have_their_own_list_the_built_in_first() {
     ));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn srs_shock_laws_have_their_own_list_the_built_in_first() {
+    assert_eq!(LawWorld::ShockSrs.as_str(), "shock_srs");
+    assert_eq!(LawWorld::ShockSrs.test_type(), "SRS shock");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-srs-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut cat = open(&root);
+    let list = cat.entries_for(LawWorld::ShockSrs);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "srs_ratio");
+    assert_eq!(list[0].world, LawWorld::ShockSrs);
+    assert_eq!(
+        list[0].manifest,
+        hertzforge_random_laws::srs_builtin_manifest()
+    );
+    assert_eq!(cat.entry("srs_ratio").unwrap().world, LawWorld::ShockSrs);
+
+    // An imported SRS law file lists with the SRS laws only.
+    let entry = cat
+        .import(&law_file("hertzforge_law_shock_srs_ratio"))
+        .expect("the SRS law file imports");
+    assert_eq!(entry.world, LawWorld::ShockSrs);
+    let ids: Vec<String> = cat.shock_srs_entries().into_iter().map(|e| e.id).collect();
+    assert_eq!(ids, ["srs_ratio".to_string(), entry.id.clone()]);
+    assert!(cat.srs_law(&entry.id).is_some());
+    assert!(cat.classical_law(&entry.id).is_none());
+    assert!(!cat
+        .shock_classical_entries()
+        .iter()
+        .any(|e| e.id == entry.id));
+    // A single-output Random choice of it is refused by its world.
+    let mut cfg = ladder_cfg();
+    assert!(matches!(
+        cat.resolve(&LawChoice::new(entry.id.clone(), Vec::new()), &mut cfg),
+        Err(ChoiceError::WrongTestType {
+            law_is_for: "SRS shock",
+            ..
+        })
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
