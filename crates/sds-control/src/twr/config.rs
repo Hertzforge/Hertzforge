@@ -1466,6 +1466,14 @@ impl WireTwr {
         if self.sysid_duration_s * fs > 1e8 || !fs.is_finite() {
             return;
         }
+        // The excitation is built only from a block the identification can use:
+        // an unusable one is its own item, and building with it would not return.
+        let n = (self.sysid_duration_s * fs) as u64;
+        if !(self.nfft >= 64 && self.nfft.is_power_of_two() && self.nfft <= 1 << 20)
+            || n < 2 * self.nfft
+        {
+            return;
+        }
         let b = self.sysid_band_hz;
         if !(b.0 > 0.0 && b.1 > b.0 && b.1 < fs / 2.0) {
             return;

@@ -61,6 +61,10 @@ pub struct Stored {
     pub samples: Vec<f64>,
     /// How it was read, so the file can be read again the same way.
     pub options: ImportOptions,
+    /// Every file this record was read from, with how: a later import of the same
+    /// samples from another file or as text never changes how an earlier file is
+    /// read again.
+    pub files: Vec<(String, ImportOptions)>,
 }
 
 /// How a record was read from its file or text.
@@ -449,6 +453,18 @@ fn folder(root: &Path) -> PathBuf {
     root.join(REFERENCE_FOLDER)
 }
 
+fn options_json(o: &ImportOptions) -> Value {
+    json!({"fs_hz": o.fs_hz, "column": o.column, "units": o.units})
+}
+
+fn options_of(o: &Value) -> ImportOptions {
+    ImportOptions {
+        fs_hz: o["fs_hz"].as_f64(),
+        column: o["column"].as_u64().unwrap_or(0) as usize,
+        units: o["units"].as_str().map(str::to_owned),
+    }
+}
+
 fn sidecar_json(s: &Stored) -> Value {
     json!({
         "sha256": s.sha256,
@@ -458,12 +474,28 @@ fn sidecar_json(s: &Stored) -> Value {
         "fs_hz": s.fs_hz,
         "units": s.units,
         "samples": s.samples.len(),
-        "options": {
-            "fs_hz": s.options.fs_hz,
-            "column": s.options.column,
-            "units": s.options.units,
-        },
+        "options": options_json(&s.options),
+        "files": s.files.iter().map(|(p, o)| json!({"path": p, "options": options_json(o)}))
+            .collect::<Vec<_>>(),
     })
+}
+
+fn read_sidecar(dir: &Path, sha256: &str) -> Value {
+    std::fs::read(dir.join(format!("{sha256}.json")))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or(Value::Null)
+}
+
+fn files_of(side: &Value) -> Vec<(String, ImportOptions)> {
+    side["files"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| Some((f["path"].as_str()?.to_owned(), options_of(&f["options"]))))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn static_format(f: &str) -> &'static str {
@@ -510,7 +542,7 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
     });
     let bytes = record_bytes(fs_hz, &units, &samples);
     let sha256 = sha256_hex(&bytes);
-    let stored = Stored {
+    let mut stored = Stored {
         sha256: sha256.clone(),
         path: path.map(|p| p.display().to_string()),
         name,
@@ -519,6 +551,7 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
         units,
         samples,
         options: req.options.clone(),
+        files: Vec::new(),
     };
     let dir = folder(root);
     std::fs::create_dir_all(&dir).map_err(|e| {
@@ -530,6 +563,12 @@ pub fn import(root: &Path, req: &ImportRequest) -> Result<Stored, MethodError> {
     let rec = dir.join(format!("{sha256}.rec"));
     if !rec.exists() {
         write_atomic(&rec, &bytes)?;
+    }
+    // The files this record was read from before, and this one.
+    stored.files = files_of(&read_sidecar(&dir, &sha256));
+    if let Some(p) = &stored.path {
+        stored.files.retain(|(q, _)| q != p);
+        stored.files.push((p.clone(), stored.options.clone()));
     }
     let side = serde_json::to_vec_pretty(&sidecar_json(&stored))
         .map_err(|e| MethodError::internal(format!("the reference's facts: {e}")))?;
@@ -563,11 +602,7 @@ pub fn load(root: &Path, sha256: &str) -> Option<Stored> {
         return None;
     }
     let (fs_hz, units, samples) = parse_record(&bytes)?;
-    let side: Value = std::fs::read(dir.join(format!("{sha256}.json")))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(Value::Null);
-    let o = &side["options"];
+    let side = read_sidecar(&dir, sha256);
     Some(Stored {
         sha256: sha256.to_owned(),
         path: side["path"].as_str().map(str::to_owned),
@@ -576,20 +611,22 @@ pub fn load(root: &Path, sha256: &str) -> Option<Stored> {
         fs_hz,
         units,
         samples,
-        options: ImportOptions {
-            fs_hz: o["fs_hz"].as_f64(),
-            column: o["column"].as_u64().unwrap_or(0) as usize,
-            units: o["units"].as_str().map(str::to_owned),
-        },
+        options: options_of(&side["options"]),
+        files: files_of(&side),
     })
 }
 
-/// Whether the file at `path` still reads, with `stored`'s options, to the record
-/// kept under `stored.sha256`. `Err` carries the words for the refusal.
+/// Whether the file at `path` still reads, as it was imported, to the record kept
+/// under `stored.sha256`. `Err` carries the words for the refusal.
 pub fn still_matches(stored: &Stored, path: &str) -> Result<(), String> {
     let p = Path::new(path);
+    let Some((_, options)) = stored.files.iter().find(|(q, _)| q == path) else {
+        return Err(format!(
+            "this reference was not imported from {path}; import the file to use it"
+        ));
+    };
     let bytes = std::fs::read(p).map_err(|e| format!("{path} could not be read ({e})"))?;
-    let (_, fs, units, samples) = read(&bytes, Some(p), &stored.options)
+    let (_, fs, units, samples) = read(&bytes, Some(p), options)
         .map_err(|why| format!("{path} no longer reads as a record: {why}"))?;
     let now = record_sha256(fs, &units, &samples);
     if now == stored.sha256 {
