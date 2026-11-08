@@ -903,7 +903,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
 | Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
-| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`, `alarm_wider_than_abort` |
+| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 
 A refusal not listed here is a defect in the service.
 
@@ -2194,14 +2194,11 @@ refused `run_active` while another is live. **Any connected screen may stop or a
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
 `fire` and `level` are refused `shutting_down`.
 
-**Status.** The control service does not offer these methods yet; this section is the contract
-they are built to.
-
 | Method | Params | From | Result |
 |---|---|---|---|
 | `srs.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
 | `srs.config` | `{}` | any | `{"run_id","config","derived","views"}` |
-| `srs.preview` | `{"target","bands","synthesis","fs_hz"}` (`synthesis` and `fs_hz` optional) | any | `{"derived","views"}` |
+| `srs.preview` | `{"target","bands","synthesis","envelope","fs_hz"}` (`synthesis`, `envelope` and `fs_hz` optional) | any | `{"derived","views"}` |
 | `srs.target.import` | `{"path"}` | any | `{"target","errors","warnings"}` |
 | `srs.table.import` | `{"path","engine"}` | any | `{"components","errors","warnings"}` |
 | `srs.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
@@ -2229,7 +2226,7 @@ SRS shock has no trains and no gunfire bursts: every pulse is a synthesized puls
 
 ```
 {"title":"SRS 100 g, 100 to 2000 Hz",
- "target":{"kind":"breakpoints","points":[[100,40],[1000,100],[2000,100]]},
+ "target":{"kind":"breakpoints","points":[[100,40],[1000,100],[2500,100]]},
  "bands":{"f_lo_hz":100,"f_hi_hz":2000,"bands_per_octave":3,"q":10},
  "synthesis":{"engine":"wavsyn","components":null,"max_iters":50,"tol_db":1.5,
               "max_gain_db_per_iter":3},
@@ -2258,12 +2255,12 @@ SRS shock has no trains and no gunfire bursts: every pulse is a synthesized puls
 | Field | Default | Meaning |
 |---|---|---|
 | `title` | empty | The run's name |
-| `target` | (required) | The target SRS, g: `{"kind":"flat","accel_g"}` (every band the same, above 0), or `{"kind":"breakpoints","points":[[frequency_hz, accel_g], ...]}`, at least two points, frequencies strictly ascending, both above 0, joined by straight lines on log-log axes and covering the band grid (`srs.target.import` reads such a table from a file) |
-| `bands` | (required: `f_lo_hz`, `f_hi_hz`) | The band grid every spectrum is on: centres from `f_lo_hz` to the first centre at or above `f_hi_hz` (below half the rate), `bands_per_octave` centres an octave (default 3; 1, 3, 6, 12, or any whole number 1 to 24), and the quality factor `q` every SRS is computed at (default 10, above 0.5, at most 100) |
+| `target` | (required) | The target SRS, g: `{"kind":"flat","accel_g"}` (every band the same, above 0, at most 1000000), or `{"kind":"breakpoints","points":[[frequency_hz, accel_g], ...]}`, at least two points, frequencies strictly ascending, both above 0, joined by straight lines on log-log axes and covering the band grid from `f_lo_hz` to its top centre (`srs.target.import` reads such a table from a file) |
+| `bands` | (required: `f_lo_hz`, `f_hi_hz`) | The band grid every spectrum is on: centres from `f_lo_hz` up to the first centre at or above `f_hi_hz`, that top centre below half the rate; `bands_per_octave` centres an octave (default 3; a whole number from 1 to 24), and the quality factor `q` every SRS is computed at (default 10, above 0.5, at most 100) |
 | `synthesis.engine` | `wavsyn` | `wavsyn`: odd-half-cycle wavelets, at rest at both ends by construction. `seds`: damped sines with the compensating terms that bring the composite to rest |
-| `synthesis.components` | null: one per band | The component table to start from: `{"engine","rows":[...]}` (`srs.table.import` reads one from a file). A `wavsyn` row is `{"freq_hz","amplitude_g","half_cycles","delay_s"}` (`half_cycles` odd, at least 3); a `seds` row is `{"freq_hz","amplitude_g","zeta","delay_s","polarity"}` (`zeta` above 0, `polarity` `positive` or `negative`). Its `engine` is `synthesis.engine` |
-| `synthesis.max_iters`, `tol_db`, `max_gain_db_per_iter` | 50, 1.5, 3 | The offline synthesis that fits the table to the target before any station: at most `max_iters` passes (1 to 1000), done when every band is within `tol_db` (above 0), each pass moving a component at most `max_gain_db_per_iter` (above 0, at most 20). It does not set the run's law |
-| `envelope` | ±3 dB alarm, +9/-6 dB abort | The tolerance on every band, judged against the target at the level fired: `alarm_db` and `abort_db` as `[low, high]` dB (each above 0, abort at least as wide as alarm), or `per_band`, one `{"alarm_db","abort_db"}` per band. A band outside the abort band aborts the run (`envelope`); outside the alarm band it alarms |
+| `synthesis.components` | null: one per band | The component table to start from: `{"engine","rows":[...]}` (`srs.table.import` reads one from a file), 1 to 512 rows. A `wavsyn` row is `{"freq_hz","amplitude_g","half_cycles","delay_s"}` (`half_cycles` odd, at least 3; `delay_s` default 0); a `seds` row is `{"freq_hz","amplitude_g","zeta","delay_s","polarity"}` (`zeta` above 0, `polarity` `positive` (the default) or `negative`). Its `engine` is `synthesis.engine` |
+| `synthesis.max_iters`, `tol_db`, `max_gain_db_per_iter` | 50, 1.5, 3 | The offline synthesis that fits the table to the target before any station: at most `max_iters` passes (1 to 1000), done when every band is within `tol_db` (above 0, at most 20), each pass moving a component at most `max_gain_db_per_iter` (above 0, at most 20). It does not set the run's law |
+| `envelope` | ±3 dB alarm, +9/-6 dB abort | The tolerance on every band, judged against the target at the level fired: `alarm_db` and `abort_db` as `[low, high]` dB (each side above 0, at most 60, the abort at least as wide as the alarm on each side), or `per_band`, one `{"alarm_db","abort_db"}` per band in place of both. A band outside the abort band aborts the run (`envelope`); outside the alarm band it alarms |
 | `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run reports the rate it ran at |
 | `acquisition.ring_out_s` | 0.05 | Seconds measured after each pulse's drive ends, 0 to 10 |
 | `acquisition.pvss` | true | Also compute each pulse's pseudo-velocity SRS |
@@ -2282,64 +2279,69 @@ SRS shock has no trains and no gunfire bursts: every pulse is a synthesized puls
 | `limits.drive_vpk_ceiling` | (required) | The drive ceiling, volts peak (above 0, at most 10). A commanded drive over it is scaled down to it and the action is logged |
 | `limits.drive_vpk_abort` | (required) | The drive abort, volts peak, above the ceiling and at most 10. A commanded drive over it is refused and the run aborts (`drive_vpk`) |
 | `limits.peak_accel_g` | null | A predicted response peak over it scales the pulse down before it fires; at `abort_factor` times it the run aborts (`accel`) |
-| `limits.abort_factor` | 2 | A predicted response peak or a monitored peak at or over this times its ceiling aborts instead of scaling (at least 1) |
-| `limits.kinematic` | none | Per-pulse ceilings on the measured, and before each pulse the predicted, peak acceleration (g), peak velocity (in/s) and peak-to-peak displacement (in); null is no ceiling |
+| `limits.abort_factor` | 2 | A predicted response peak or a monitored peak at or over this times its ceiling aborts instead of scaling (1 to 100) |
+| `limits.kinematic` | none | Per-pulse ceilings on the measured, and before each pulse the predicted, peak acceleration (g), peak velocity (in/s) and peak-to-peak displacement (in), each above 0; null is no ceiling |
 | `limits.monitors` | none | Monitored inputs by table `index`, as classical shock's |
-| `limit_channels` | null | Inputs whose response must stay under a bound: `headroom_db` (at least 0) how far under its bound a prediction must stay, and `channels`, each a table `index`, a `bound` (`{"kind":"flat","accel_g"}` or `{"kind":"per_band","bounds_g":[...]}`, one per band, null for no bound at a band) and an optional `frf` (`{"freqs_hz":[...],"mag":[...]}`, the drive-to-channel gain in g per volt; null: identification measures it). At arm the service notches the drive where a prediction would pass a bound, and before each pulse caps every component by what the prediction leaves |
+| `limit_channels` | null | Inputs whose response must stay under a bound: `headroom_db` (0 to 40) how far under its bound a prediction must stay, and `channels`, each a table `index` (any row but the control row; without an `frf`, an enabled input), a `bound` (`{"kind":"flat","accel_g"}` or `{"kind":"per_band","bounds_g":[...]}`, one per band, null for no bound at a band) and an optional `frf` (`{"freqs_hz":[...],"mag":[...]}`, the drive-to-channel gain in g per volt, frequencies ascending from 0; null: identification measures it). At proceed the service notches the drive where a prediction would pass a bound, and before each pulse caps every component by what the prediction leaves. An empty `channels` list is no limit channels |
 | `feasibility` | null | Random's shaker record and moving mass, and the synthesis's residual velocity (in/s) and displacement (in) tolerances (default 0.1 and 0.001). Checked at arm. Without it, feasibility is not evaluated and the run says so |
-| `capture`, `metadata` | as shown | Random's |
+| `capture` | off | Random's: with `auto_start` every pulse's record is written to the run folder under the local data root from arm, and the law's records with it |
+| `metadata` | the default fields | Random's |
 
 The control channel is the table's first enabled `control` row; the drive is its first enabled
-`drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field; its
-content errors are refused `config_invalid` with the items, located by `field`; `dry_run: true`
-checks without replacing anything and needs no control.
+`drive` row. A monitor and a limit channel are named to the controller by their row's
+`description`, or `ch<index>` without one. A configuration whose shape is wrong is refused
+`bad_params` naming the field; its content errors are refused `config_invalid` with the items,
+located by `field`; `dry_run: true` checks without replacing anything and needs no control.
 
 **Result.** `state` is the `srs.state` object (`configured`). `derived`:
 
 ```
-{"grid":{"fs_hz":51200,"record_len":14336,"actual":false},
- "bands_hz":[100,125.99,158.74,...],"target_g":[40,47.6,56.5,...],
- "synthesis":{"engine":"wavsyn","components":14,"iters":6,"converged":true,"worst_err_db":1.2,
-              "duration_s":0.23},
- "reference":{"peak_g":72.4,"velocity_pk_ips":14.2,"displacement_pk_pk_in":0.031,
+{"grid":{"fs_hz":51200,"record_len":10569,"actual":false},
+ "bands_hz":[100,125.9921,158.7401,...,2015.8737],"target_g":[40,43.8521,48.0752,...,100],
+ "synthesis":{"engine":"wavsyn","components":14,"iters":9,"converged":true,"worst_err_db":-0.893,
+              "duration_s":0.15643},
+ "reference":{"peak_g":22.2066,"velocity_pk_ips":6.1726,"displacement_pk_pk_in":0.020336,
               "residual_velocity_ips":0,"residual_disp_in":0},
  "spacing_s":1,"call_budget_s":0.25,
  "feasibility":{"verdict":"pass","message":"The pulse is within the shaker's ratings."}}
 ```
 
-- `grid`: every pulse's record, the synthesized pulse and its ring-out; `actual` is true once the
-  run has armed and the rate is the one the station runs at.
+- `grid`: every pulse's record, the synthesized pulse and its ring-out, at the requested rate;
+  `actual` is true once the run has armed and the rate is the one the station runs at.
 - `bands_hz` and `target_g`: the band grid and the full-level target on it.
 - `synthesis`: the offline fit of the table to the target: its components, passes, whether every
-  band reached `tol_db`, the worst band's error, dB, and the pulse's length.
+  band reached `tol_db`, the worst band's error, dB (signed), and the pulse's length, seconds.
 - `reference`: the synthesized pulse at full level, g: its peak, peak velocity, peak-to-peak
   displacement and what it leaves at its end.
 - `spacing_s`, `call_budget_s` and `feasibility` as classical shock's.
 
 `views` are **Target** (the target with its alarm and abort bands), **Synthesis** (the
 synthesized pulse's SRS against the target), **Pulse**, **Velocity** and **Displacement** (the
-synthesized pulse at full level), as `srs.preview` gives them. `srs.preview` computes the same
-`derived.bands_hz`, `target_g`, `synthesis` and `reference` and the views for a target alone
-(`target`, `bands` and `synthesis` as in a configuration, `fs_hz` default 51200), with no station
-and no configuration, so a screen draws a synthesis without computing it. A preview is a
-computation, never a measurement.
+synthesized pulse at full level from its first sample, series `Synthesized`), as `srs.preview`
+gives them. `srs.preview` computes the same `derived.bands_hz`, `target_g`, `synthesis` and
+`reference` and the views for a target alone (`target`, `bands`, `synthesis` and `envelope` as
+in a configuration, `fs_hz` default 51200), with no station and no configuration, so a screen
+draws a synthesis without computing it. A preview is a computation, never a measurement; a
+preview whose parts are not sound is refused `bad_params` naming the first.
 
 `srs.target.import` reads a breakpoint table (two columns, frequency in Hz and SRS in g; tab,
-comma or space separated; a header row and `#` comments allowed) and `srs.table.import` a
-component table for `engine` (`wavsyn` or `seds`, the rows' fields as above, by header name), each
-by full path on the computer that runs the test. Neither needs control or changes the run; each
-returns what a configuration takes (`target`, `components`) or null with error items
-(`target_file`, `table_file`, naming the row). A relative path is `bad_params`.
+comma, semicolon or space separated; a header row and `#` comments allowed) and
+`srs.table.import` a component table for `engine` (`wavsyn` or `seds`, the rows' fields as
+above, by header name or in that order), each by full path on the computer that runs the test,
+at most 4 MiB. Neither needs control or changes the run; each returns what a configuration
+takes (`target`, `components`), or null with error items (`target_file`, `table_file`) at the
+data `row` they name (from 0, its line in `message`), or at `field` `path` for a file that could
+not be read. A relative path is `bad_params`.
 
 Item reasons (SRS Shock): errors `out_of_range`, `levels_empty`, `levels_not_ascending`,
 `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering` (the breakpoints
-do not cover the band grid), `target_not_ascending`, `per_band_length_mismatch` (a per-band
-envelope or bound list that is not one per band), `components_engine_mismatch`,
-`component_invalid` (with `row`), `record_too_long`, `limit_unknown_channel`, `limit_no_frf` (a
-limit channel with no `frf` and no input to measure one from), `no_control_channel`,
-`no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`;
-warnings `synthesis_not_converged` (the offline fit did not reach `tol_db`; the run's law refines
-from there), `alarm_wider_than_abort`.
+do not cover the band grid), `target_not_ascending`, `alarm_wider_than_abort`,
+`per_band_length_mismatch` (a per-band envelope or bound list that is not one per band),
+`components_engine_mismatch`, `component_invalid` (at `synthesis.components.rows[i]`),
+`record_too_long`, `limit_unknown_channel`, `limit_no_frf` (a limit channel with no `frf` and no
+input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unknown`,
+`law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `synthesis_not_converged`
+(the offline fit did not reach `tol_db`; the run's law refines from there).
 
 ### Running an SRS Shock Test
 
@@ -2371,7 +2373,7 @@ from there), `alarm_wider_than_abort`.
 ### SRS Shock Run State
 
 ```
-{"run_id":"r-0004","state":"running","phase":"waiting","title":"SRS 100 g, 100 to 2000 Hz",
+{"run_id":"srs-0004","state":"running","phase":"waiting","title":"SRS 100 g, 100 to 2000 Hz",
  "source":"SIM","station":{"kind":"sim","class":"sim","devices":[]},
  "grid":{"fs_hz":51200,"record_len":14336,"actual":true},"clock":"shared",
  "mode":"auto","levels_db":[-12,-6,0],"level_db":-6,"rung":1,
@@ -2425,11 +2427,11 @@ zero), `undeclared_value`, `too_many_values` or `gain_rise` (a gain rising more 
 Every pulse fired has a row; `srs.pulses` and `srs.pulse` are `shock.pulses` and `shock.pulse` for
 SRS. `srs.pulse`'s views are **SRS** (the measured SRS and the target at the level fired with its
 alarm and abort bands), **Pulse** (the measured pulse), **Drive** (the drive as played),
-**Velocity** and **Displacement**, each time history at most `points` points as there; the views
-of the most recent 32 pulses are held.
+**Velocity** and **Displacement**, each time history from the record's first sample and at most
+`points` points as there; the views of the most recent 32 pulses are held.
 
 ```
-{"index":3,"origin":"ladder","scheduled_db":-6,"commanded_db":-6,"limit_scale":1,
+{"index":2,"origin":"ladder","scheduled_db":-6,"commanded_db":-6,"limit_scale":1,
  "drive_vpk":0.205,"peak_g":36.3,"velocity_pk_ips":7.1,"displacement_pk_pk_in":0.016,
  "worst_err_db":-1.2,"worst_band_hz":630,"alarm_bands":0,"abort_bands":0,"passed":true,
  "limited_components":2,"worst_limit_db":-0.7,"at_s":7.5,
@@ -2453,17 +2455,17 @@ of the most recent 32 pulses are held.
 
 Event topics: `srs.state`, `srs.log`, `srs.live`, `srs.pulse` and `srs.data`, as classical shock's;
 `srs.pulse` carries the **SRS**, **Pulse** and **Drive** views at 1024 points. `srs.subscribe`
-takes classical shock's form.
+takes classical shock's form; `points` applies to `pulse`, `velocity` and `displacement`.
 
 | `quantity` | Views | What they show |
 |---|---|---|
-| `srs` | one `spectrum` | The measured SRS and the target at the level fired, with the alarm and abort bands |
+| `srs` | **SRS** (`spectrum`) | The target at the level fired with its alarm and abort bands, and the measured SRS, g |
 | `pulse` | **Pulse**, **Drive** (`spectrum`, time) | The measured pulse, g; the drive as played, V |
-| `velocity`, `displacement` | one `spectrum` (time) | The measured pulse's |
-| `identification` | **Identification Gain**, **Coherence** (`spectrum`s) | `abs(H)` to the control channel (control unit per volt) with its floor; the coherence and the hold |
-| `components` | one `spectrum` | Each component's drive amplitude in the table in force, V, at its frequency, and the last gains the law returned |
-| `limit_channels` | one `spectrum` per limit channel | The predicted SRS for the last pulse's drive, the bound and the bound less the headroom, g |
-| `limit_frf` | one `spectrum` per limit channel | The drive-to-channel gain, g per volt, measured or supplied, and which |
+| `velocity`, `displacement` | **Velocity**, **Displacement** (`spectrum`, time) | The measured pulse's |
+| `identification` | **Identification Gain**, **Coherence** (`spectrum`s) | `abs(H)` to the control channel (control unit per volt) with the floor the seed divides by at the least; the coherence with the hold |
+| `components` | **Components**, **Gains** (`spectrum`s) | Each component's drive amplitude in the table in force, V, at its frequency; the last gains the law returned (no Gains view before its first call) |
+| `limit_channels` | **Limit** *name* (`spectrum`), one per limit channel | The predicted SRS for the last pulse's drive, the bound and the bound less the headroom, g (a band with no bound is left out) |
+| `limit_frf` | **Gain** *name* (`spectrum`), one per limit channel | The drive-to-channel gain, g per volt, `Measured` or `Supplied` |
 | `law` | one `reading` | The law's reported values on its last call |
 | `readings` | one `reading` | The run's numbers |
 | `pulses` | one `table` | The pulse rows |
@@ -2508,7 +2510,7 @@ folder.
   values (`layout` null), at most 8, reported once per call. The built-in `fd_correct` comes
   first.
 - An SRS shock law's entry has `world: "shock_srs"`, its `diagnostics` likewise. The built-in
-  `srs_ratio` comes first. (The service lists no SRS laws yet; see "SRS Shock".)
+  `srs_ratio` comes first.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.

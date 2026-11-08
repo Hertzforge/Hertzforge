@@ -161,12 +161,27 @@ pub fn entry_json(e: &CatalogEntry) -> Value {
 }
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
-/// first, then multiple-output Random, then classical shock).
+/// first, then multiple-output Random, then classical shock, then SRS shock).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
-    for w in [LawWorld::Single, LawWorld::Mimo, LawWorld::ShockClassical] {
+    for w in [
+        LawWorld::Single,
+        LawWorld::Mimo,
+        LawWorld::ShockClassical,
+        LawWorld::ShockSrs,
+    ] {
         if world.is_none_or(|x| x == w) {
-            laws.extend(catalog.entries_for(w).iter().map(entry_json));
+            let entries = catalog.entries_for(w);
+            // The built-in SRS law first, from its own declaration while the
+            // catalog does not list it.
+            if w == LawWorld::ShockSrs
+                && !entries
+                    .iter()
+                    .any(|e| e.id == hertzforge_shock_law_math::srs::ID)
+            {
+                laws.push(entry_json(&builtin_srs_entry()));
+            }
+            laws.extend(entries.iter().map(entry_json));
         }
     }
     json!({
@@ -185,10 +200,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("single") => Ok(Some(LawWorld::Single)),
         Some("mimo") => Ok(Some(LawWorld::Mimo)),
         Some("shock_classical") => Ok(Some(LawWorld::ShockClassical)),
+        Some("shock_srs") => Ok(Some(LawWorld::ShockSrs)),
         Some(_) => Err(MethodError::bad_params(
             "world",
-            "\"world\" is \"single\", \"mimo\" or \"shock_classical\", or absent for every \
-             world",
+            "\"world\" is \"single\", \"mimo\", \"shock_classical\" or \"shock_srs\", or \
+             absent for every world",
         )),
     }
 }
@@ -290,5 +306,94 @@ pub fn law_ref(i: &crate::mimo::setup::LawInfo) -> crate::mimo::driver::LawRef {
         name: i.name.clone(),
         version: i.version.clone(),
         sha256: i.sha256.clone(),
+    }
+}
+
+/// The built-in SRS law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`.
+pub fn srs_builtin_manifest() -> hertzforge_law_host::Manifest {
+    use hertzforge_law_host::{DiagnosticSpec, NumberSpec};
+    use hertzforge_shock_law_math::srs as sr;
+    hertzforge_law_host::Manifest {
+        name: sr::NAME.into(),
+        version: sr::VERSION.into(),
+        author: hertzforge_shock_law_math::AUTHOR.into(),
+        summary: sr::SUMMARY.into(),
+        params: sr::KNOBS
+            .iter()
+            .map(|k| ParamSpec {
+                key: k.key.into(),
+                label: k.label.into(),
+                help: k.help.into(),
+                kind: ParamKind::Number(NumberSpec {
+                    unit: k.unit.into(),
+                    min: k.min,
+                    max: k.max,
+                    step: k.step,
+                    default: k.default,
+                }),
+            })
+            .collect(),
+        diagnostics: sr::DIAGNOSTICS
+            .iter()
+            .map(|d| DiagnosticSpec {
+                key: d.key.into(),
+                label: d.label.into(),
+                unit: d.unit.into(),
+                help: d.help.into(),
+            })
+            .collect(),
+    }
+}
+
+/// The built-in SRS law's catalog entry: the catalog's own when it lists one,
+/// else built from the law's declaration.
+pub fn builtin_srs_entry() -> CatalogEntry {
+    let manifest = srs_builtin_manifest();
+    CatalogEntry {
+        id: hertzforge_shock_law_math::srs::ID.into(),
+        identity: hertzforge_law_host::LawIdentity {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            author: manifest.author.clone(),
+            sha256: String::new(),
+        },
+        manifest,
+        builtin: true,
+        check: CheckStatus::BuiltIn,
+        world: LawWorld::ShockSrs,
+        mimo: None,
+    }
+}
+
+/// The SRS law named `id`: the catalog's entry, or the built-in law's while the
+/// catalog does not list it.
+pub fn srs_entry(catalog: &LawCatalog, id: &str) -> Option<CatalogEntry> {
+    catalog
+        .entry(id)
+        .or_else(|| (id == hertzforge_shock_law_math::srs::ID).then(builtin_srs_entry))
+}
+
+/// The built-in SRS law, `srs_ratio`, as an SRS configuration's checks see it.
+pub fn builtin_srs_facts() -> crate::shock::config::LawFacts {
+    srs_facts(&builtin_srs_entry())
+}
+
+/// A catalog entry as an SRS configuration's checks see it: a law of another
+/// world is refused by the test type it is for.
+pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
+    crate::shock::config::LawFacts {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: match e.world {
+            LawWorld::Single => Err("single-output Random"),
+            LawWorld::Mimo => Err("multiple-output Random"),
+            LawWorld::ShockClassical => Err("classical shock"),
+            LawWorld::ShockSrs => Ok(()),
+        },
+        params: e.manifest.params.clone(),
     }
 }
