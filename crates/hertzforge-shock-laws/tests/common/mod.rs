@@ -92,3 +92,24 @@ pub fn law_file(name: &str) -> PathBuf {
     );
     path
 }
+
+/// The SRS tests' station rate, Hz.
+pub const SRS_FS: f64 = 20_480.0;
+
+/// The simulated station an SRS check case names: a feedthrough of 1 with the
+/// case's modes, and its measurement noise.
+pub fn srs_station_for(case: hertzforge_shock_laws::SrsCheckCase) -> Box<dyn Backend> {
+    use hertzforge_shock_laws::SrsCheckPlant;
+    let cfg = SimConfig::new()
+        .sample_rate_hz(SRS_FS)
+        .shared_clock(true)
+        .noise_level(case.noise_rms_g(SRS_FS).unwrap_or(0.0));
+    let cfg = match case.plant() {
+        SrsCheckPlant::Wire => cfg.resonances(Vec::new()).feedthrough(1.0),
+        SrsCheckPlant::OneMode { f_hz, q } => cfg.resonance(f_hz, q).feedthrough(1.0),
+        SrsCheckPlant::TwoModes { f_hz, q } => cfg
+            .resonances(vec![(f_hz[0], q), (f_hz[1], q)])
+            .feedthrough(1.0),
+    };
+    Box::new(cfg.build())
+}

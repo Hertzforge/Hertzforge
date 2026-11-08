@@ -113,11 +113,31 @@ pub mod __shock_bindings {
     });
 }
 
+/// The generated bindings of the `shock-srs` world. Not a stable API: use
+/// [`srs`]. The shared `types` interface is the one [`__bindings`] generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __srs_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "shock-srs",
+        pub_export_macro: true,
+        export_macro_name: "__export_shock_srs",
+        default_bindings_module: "hertzforge_law_sdk::__srs_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
 pub mod mimo;
 pub mod shock;
+pub mod srs;
 
 pub use mimo::{MimoLawResource, RandomMimoLaw};
 pub use shock::{ClassicalLawResource, ShockClassicalLaw};
+pub use srs::{ShockSrsLaw, SrsLawResource};
 
 use __bindings::exports::hertzforge::control_law::random_single_law as wit_law;
 
@@ -341,6 +361,32 @@ macro_rules! export_classical_law {
 
         $crate::__shock_bindings::__export_shock_classical!(
             __HertzforgeClassicalLawExport with_types_in $crate::__shock_bindings
+        );
+    };
+}
+
+/// Export a [`ShockSrsLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_srs_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeSrsLawExport;
+
+        impl $crate::__srs_bindings::Guest for __HertzforgeSrsLawExport {
+            fn describe() -> $crate::Manifest {
+                <$law as $crate::ShockSrsLaw>::describe()
+            }
+        }
+
+        impl $crate::__srs_bindings::exports::hertzforge::control_law::shock_srs_law::Guest
+            for __HertzforgeSrsLawExport
+        {
+            type Law = $crate::SrsLawResource<$law>;
+        }
+
+        $crate::__srs_bindings::__export_shock_srs!(
+            __HertzforgeSrsLawExport with_types_in $crate::__srs_bindings
         );
     };
 }

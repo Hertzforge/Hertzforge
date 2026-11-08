@@ -1,10 +1,10 @@
 //! The control-law host: loads a control law compiled to a WebAssembly
-//! component (the `random-single`, `random-mimo` or `shock-classical` world of
-//! `hertzforge:control-law@0.1.0`, in `wit/control-law/`) and runs it
-//! contained. [`LawHost::load`] loads a single-output Random law,
-//! [`LawHost::load_mimo`] a multiple-output one,
-//! [`LawHost::load_classical`] a classical shock law, and
-//! [`LawHost::load_any`] whichever the file is.
+//! component (the `random-single`, `random-mimo`, `shock-classical` or
+//! `shock-srs` world of `hertzforge:control-law@0.1.0`, in
+//! `wit/control-law/`) and runs it contained. [`LawHost::load`] loads a
+//! single-output Random law, [`LawHost::load_mimo`] a multiple-output one,
+//! [`LawHost::load_classical`] a classical shock law, [`LawHost::load_srs`] an
+//! SRS shock law, and [`LawHost::load_any`] whichever the file is.
 //!
 //! # What the host guarantees
 //!
@@ -75,11 +75,12 @@ mod host;
 pub mod mimo;
 mod sandbox;
 pub mod shock_classical;
+pub mod shock_srs;
 mod ticker;
 mod types;
 pub mod validate;
 
-pub use error::{ClassicalOutputRule, MimoOutputRule};
+pub use error::{ClassicalOutputRule, MimoOutputRule, SrsOutputRule};
 pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
 pub use mimo::{
@@ -88,6 +89,9 @@ pub use mimo::{
 pub use shock_classical::{
     ClassicalInputs, ClassicalLawInstance, ClassicalOutputs, ClassicalPlant, ClassicalSetup,
     ClassicalVerdict, LoadedClassicalLaw, MAX_CLASSICAL_VALUES,
+};
+pub use shock_srs::{
+    LoadedSrsLaw, SrsInputs, SrsLawInstance, SrsOutputs, SrsSetup, MAX_SRS_VALUES,
 };
 pub use types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, GuestOutput, IntegerSpec,
@@ -103,3 +107,5 @@ pub const WORLD: &str = "random-single";
 pub const MIMO_WORLD: &str = "random-mimo";
 /// The world a classical shock law file implements.
 pub const CLASSICAL_WORLD: &str = "shock-classical";
+/// The world an SRS shock law file implements.
+pub const SRS_WORLD: &str = "shock-srs";
