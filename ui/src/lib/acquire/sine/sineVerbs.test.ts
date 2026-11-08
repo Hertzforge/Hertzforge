@@ -79,7 +79,7 @@ describe('the Sine verbs', () => {
 		expect(sineModuleVerbs(ctx({ connected: false })).hold.reason).toBe('The control service is not connected.');
 	});
 
-	it("open only the law's live number parameters to a change, while the run runs or holds for review, to the screen in control", () => {
+	it("open only the law's live number parameters to a change, once the tone is driving, to the screen in control", () => {
 		const values = { blend_w: 0.4, ki: 3 };
 		const at = (over: Partial<SineVerbContext>) => liveParams(SERVO_BLEND, { live: { blend_w: 0.25 } }, values, ctx(over)).map((p) => [p.key, p.live, p.enabled, p.value, p.reason]);
 		expect(at({})).toEqual([
@@ -87,7 +87,13 @@ describe('the Sine verbs', () => {
 			['steps', true, true, 3, null],
 			['ki', false, false, 3, 'Fixed for the run.']
 		]);
-		expect(at({ run: run({ state: 'review', phase: 'awaiting_review' }) }).map((p) => p[2])).toEqual([true, true, false]);
+		expect(at({ run: run({ state: 'review', phase: 'awaiting_review' }) }).map((p) => [p[2], p[4]])).toEqual([
+			[false, 'Once the tone is driving at the schedule.'],
+			[false, 'Once the tone is driving at the schedule.'],
+			[false, 'Fixed for the run.']
+		]);
+		expect(at({ run: run({ phase: 'sysid' }) }).map((p) => p[2])).toEqual([false, false, false]);
+		expect(at({ run: run({ phase: 'full_level' }) }).map((p) => p[2])).toEqual([true, true, false]);
 		expect(at({ run: run({ state: 'configured', phase: 'idle' }) }).map((p) => p[4])).toEqual(['Changed during a run.', 'Changed during a run.', 'Fixed for the run.']);
 		expect(at({ run: run({ state: 'stopping', phase: 'ramping_down' }) }).map((p) => p[2])).toEqual([false, false, false]);
 		expect(at({ controller: false })[0][4]).toBe('Take control to change it.');

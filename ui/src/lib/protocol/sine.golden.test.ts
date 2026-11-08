@@ -50,7 +50,7 @@ const SINE = readdirSync(DIR).filter((f) => /(^|_)sine(_|\.)/.test(f));
 const TEXT = SINE.filter((f) => f.endsWith('.json') && !f.endsWith('.expected.json')).sort();
 const BIN = SINE.filter((f) => f.endsWith('.bin')).sort();
 const QUANTITIES: readonly SineLiveQuantity[] = SINE_QUANTITIES;
-const REQUIREMENTS: SineCheckRequirement[] = ['within', 'within_away', 'survive', 'each_rung_within', 'limit_held'];
+const REQUIREMENTS: SineCheckRequirement[] = ['within', 'through', 'within_away', 'survive', 'each_rung_within', 'limit_held'];
 
 type Expected = { dtype: Dtype; shape: number[]; values: number[] };
 const isExpected = (v: unknown): v is Expected => typeof v === 'object' && v !== null && 'dtype' in v && 'values' in v;

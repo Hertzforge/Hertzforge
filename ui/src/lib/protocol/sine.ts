@@ -589,6 +589,11 @@ export interface SineLiveChannel {
 	/** Broadband rms in the row's unit. */
 	rms: number | null;
 	unit: string;
+	/**
+	 * For a control row: true once its tracked amplitude has reached 95 % of the top of the
+	 * profile's abort band at the present frequency and level, then true to the end of the run.
+	 * False for every other row. It is not an input-range latch.
+	 */
 	overload: boolean;
 }
 
@@ -668,7 +673,7 @@ export interface SineData extends SineLiveHead {
 /** A Sine law's catalog entry: `world` is `sine` and only it carries `live`. */
 export type SineLawEntry = LawEntry & { world: 'sine'; live: string[] };
 
-export type SineCheckRequirement = 'within' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held';
+export type SineCheckRequirement = 'within' | 'through' | 'within_away' | 'survive' | 'each_rung_within' | 'limit_held';
 
 /** One simulated test article's result in a Sine law check. */
 export interface SineLawCheckCase {

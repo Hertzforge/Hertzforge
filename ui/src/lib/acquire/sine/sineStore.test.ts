@@ -144,6 +144,26 @@ describe('the Sine store', () => {
 		expect([sine.refusal?.reason, sine.refusal?.detail?.param]).toEqual(['bad_params', 'path']);
 	});
 
+	it("latches a control row's overload once it reaches 95 % of the abort band's top, and only a control row's", async () => {
+		const { sine } = await screen();
+		short(sine);
+		sine.setup.identification.review = false;
+		sine.setup.profile.abort_db = [0.3, 0.3];
+		sine.setup.profile.alarm_db = [0.2, 0.2];
+		expect(await sine.apply()).toBe(true);
+		expect(await sine.start()).toBe(true);
+		await until(() => !!sine.live?.channels.find((c) => c.role === 'control')?.overload);
+		const live = sine.live!;
+		expect(live.channels.filter((c) => c.role !== 'control').every((c) => !c.overload)).toBe(true);
+		const control = live.channels.find((c) => c.role === 'control')!;
+		expect(live.alarms).toContainEqual({ kind: 'overload', channel: control.index });
+		// latched: it stays to the end of the run
+		const t = live.t_s ?? 0;
+		await until(() => (sine.live?.t_s ?? 0) > t + 0.5);
+		expect(sine.live?.channels.find((c) => c.index === control.index)?.overload).toBe(true);
+		await sine.abort();
+	}, 15000);
+
 	it('names the service findings on their sections: the reference output on the simulator, a level short of the sweeps, a limit channel on the control row', async () => {
 		const { sine } = await screen();
 		ready(sine);
@@ -172,6 +192,10 @@ describe('the Sine store', () => {
 		expect(sineLevelStatus(sine.now, sine.live).text).toBe('Holding for review');
 		expect(sine.status?.identification?.passed).toBe(true);
 		expect(sine.primary).toBe('proceed');
+		// the law is built at proceed: before it there is nothing to change
+		expect(sine.liveParams[0]).toMatchObject({ key: 'blend_w', enabled: false, reason: 'Once the tone is driving at the schedule.' });
+		expect(await sine.adjust('blend_w', 0.3)).toBeNull();
+		expect(sine.refusal?.reason).toBe('wrong_state');
 		expect(await sine.proceed()).toBe(true);
 		await until(() => sine.live?.phase === 'engaged' && (sine.live?.frequency_hz ?? 0) > 60);
 		const f0 = sine.live!.frequency_hz!;
