@@ -94,13 +94,13 @@ export interface SrsSynthesis {
 	max_gain_db_per_iter?: number;
 }
 
-/** `[low, high]` dB. */
+/** `[low, high]` dB: how far under the target, then how far over it. */
 export type SrsBandDb = [number, number];
 
 export interface SrsEnvelope {
-	/** Default ±3 dB. */
+	/** Default `[3, 3]`: 3 dB under, 3 dB over. */
 	alarm_db?: SrsBandDb;
-	/** Default +9/-6 dB. */
+	/** Default `[9, 6]`: 9 dB under, 6 dB over. */
 	abort_db?: SrsBandDb;
 	/** One per band, in place of the two above; null when not used. */
 	per_band?: { alarm_db: SrsBandDb; abort_db: SrsBandDb }[] | null;
@@ -273,6 +273,8 @@ export interface SrsPreviewParams {
 	target: SrsTarget;
 	bands: SrsBands;
 	synthesis?: SrsSynthesis;
+	/** The alarm and abort bands the Target view draws. */
+	envelope?: SrsEnvelope;
 	fs_hz?: number;
 }
 

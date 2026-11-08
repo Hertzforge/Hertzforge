@@ -2,15 +2,15 @@
 	/**
 	 * The manual ladder's verbs, in the run bar: Fire, a level step down and up, Go to a level of the
 	 * table, Train and Burst. Shown only on a manual run; a verb that cannot run says why when it is
-	 * focused or hovered, as the bar's own verbs do.
+	 * focused or hovered, as the bar's own verbs do. SRS shock shows the same verbs, with no train
+	 * and no burst.
 	 */
 	import Icon from '$lib/shell/Icon.svelte';
 	import { db } from '../words';
-	import type { ShockStore } from './shockStore.svelte';
-	import type { ShockVerbId } from './shockVerbs';
+	import type { ShockVerbHost, ShockVerbId } from './shockVerbs';
 
 	interface Props {
-		shock: ShockStore;
+		shock: ShockVerbHost;
 	}
 	let { shock }: Props = $props();
 
@@ -101,6 +101,8 @@
 	}
 
 	.lv {
+		/* The level never shrinks under its words ("-12.0 dB"): a min-width alone lets a flex item shrink to it. */
+		flex: none;
 		min-width: 7ch;
 		white-space: nowrap;
 		text-align: center;

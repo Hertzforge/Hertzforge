@@ -87,6 +87,9 @@
 			} else if (app.shock.actions.abort.enabled) {
 				e.preventDefault();
 				void app.shock.abort();
+			} else if (app.srs.actions.abort.enabled) {
+				e.preventDefault();
+				void app.srs.abort();
 			}
 			return;
 		}
