@@ -208,6 +208,43 @@ mod tests {
         assert!((m.drive_rms - 0.5).abs() < 1e-12);
     }
 
+    /// A response that is the target plus a constant has no error: the offset
+    /// is the input chain's, not the plant's motion, and no correction acts at
+    /// 0 Hz. Beside a real error, the offset leaves that error's figures as
+    /// they are without it.
+    #[test]
+    fn a_constant_offset_on_the_response_is_not_error() {
+        let n = 1024;
+        let t: Vec<f64> = (0..n)
+            .map(|i| (std::f64::consts::TAU * 8.0 * i as f64 / n as f64).sin())
+            .collect();
+        let d = vec![0.0; n];
+        let shifted: Vec<f64> = t.iter().map(|v| v + 0.2).collect();
+        let m = ErrorMetrics::compute(&t, &shifted, &d, &[], &[], &[]);
+        assert!(m.rms_error_pct.abs() < 1e-9, "{m:?}");
+        assert!(m.peak_error_pct.abs() < 1e-9, "{m:?}");
+
+        // A real error, 10% of the target at 24 cycles a record, with and
+        // without the offset.
+        let wrong: Vec<f64> = t
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v + 0.1 * (std::f64::consts::TAU * 24.0 * i as f64 / n as f64).sin())
+            .collect();
+        let both: Vec<f64> = wrong.iter().map(|v| v + 0.2).collect();
+        let a = ErrorMetrics::compute(&t, &wrong, &d, &[], &[], &[]);
+        let b = ErrorMetrics::compute(&t, &both, &d, &[], &[], &[]);
+        assert!((a.rms_error_pct - 10.0).abs() < 1e-9, "{a:?}");
+        assert!(
+            (b.rms_error_pct - a.rms_error_pct).abs() < 1e-9,
+            "{a:?} {b:?}"
+        );
+        assert!(
+            (b.peak_error_pct - a.peak_error_pct).abs() < 1e-9,
+            "{a:?} {b:?}"
+        );
+    }
+
     #[test]
     fn spectral_error_uses_masked_bins_and_clamps() {
         let t = vec![0.0; 4];
