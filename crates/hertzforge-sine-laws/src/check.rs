@@ -1144,7 +1144,7 @@ mod tests {
         );
         assert_eq!(
             C::Slow.requirement(),
-            SineRequirement::Through { db: 1.5, hz: 30.0 }
+            SineRequirement::Through { db: 1.0, hz: 30.0 }
         );
         assert!(matches!(
             C::Fast.mode(),
@@ -1226,15 +1226,15 @@ mod tests {
         fails(
             C::Slow,
             SineCaseMeasure {
-                worst_error_db: Some(-1.6),
+                worst_error_db: Some(-1.1),
                 ..good()
             },
-            "within 30 Hz of the resonance the worst tick was -1.60 dB",
+            "within 30 Hz of the resonance the worst tick was -1.10 dB",
         );
         assert!(ok(
             C::Slow,
             &SineCaseMeasure {
-                worst_error_db: Some(1.4),
+                worst_error_db: Some(0.9),
                 ..good()
             }
         ));

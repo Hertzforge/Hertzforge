@@ -123,7 +123,7 @@ pub const KNOBS: &[Knob] = &[
                at most 60 dB/s), or custom with the two values below.",
         kind: KnobKind::Choice {
             options: COMPRESSION_OPTIONS,
-            default: "slow",
+            default: "fast",
         },
         live: false,
     },
@@ -214,12 +214,52 @@ pub struct ServoBlendParams {
     pub kp: f64,
 }
 
+/// The declared default of the number parameter `key` in [`KNOBS`].
+fn number_default(key: &str) -> f64 {
+    KNOBS
+        .iter()
+        .find_map(|k| match k.kind {
+            KnobKind::Number { default, .. } if k.key == key => Some(default),
+            _ => None,
+        })
+        .unwrap_or(f64::NAN)
+}
+
+/// The declared default of the choice parameter `key` in [`KNOBS`].
+fn choice_default(key: &str) -> &'static str {
+    KNOBS
+        .iter()
+        .find_map(|k| match k.kind {
+            KnobKind::Choice { default, .. } if k.key == key => Some(default),
+            _ => None,
+        })
+        .unwrap_or("")
+}
+
+/// The compression a choice names, with `(ki, max_rate)` for `custom`.
+fn compression_named(name: &str, ki: f64, max_rate_db_per_s: f64) -> CompressionPreset {
+    match name {
+        "fast" => CompressionPreset::Fast,
+        "custom" => CompressionPreset::Custom {
+            ki,
+            max_rate_db_per_s,
+        },
+        _ => CompressionPreset::Slow,
+    }
+}
+
+/// The declared defaults ([`KNOBS`]): the native law, the law file, the
+/// catalog's manifest and a run's configuration all take them from there.
 impl Default for ServoBlendParams {
     fn default() -> Self {
         ServoBlendParams {
-            blend_w: 0.5,
-            compression: CompressionPreset::Slow,
-            kp: 0.3,
+            blend_w: number_default("blend_w"),
+            compression: compression_named(
+                choice_default("compression"),
+                number_default("ki"),
+                number_default("max_rate_db_per_s"),
+            ),
+            kp: number_default("kp"),
         }
     }
 }
@@ -279,8 +319,8 @@ impl ServoBlendParams {
     /// value of the wrong kind or out of range is refused, by name.
     pub fn from_settings(settings: &[(String, ParamSetting)]) -> Result<Self, String> {
         let mut p = ServoBlendParams::default();
-        let mut compression = "slow".to_string();
-        let (mut ki, mut rate) = (2.0, 20.0);
+        let mut compression = choice_default("compression").to_string();
+        let (mut ki, mut rate) = (number_default("ki"), number_default("max_rate_db_per_s"));
         for (key, v) in settings {
             let number = |v: &ParamSetting| -> Result<f64, String> {
                 match v {
@@ -308,14 +348,7 @@ impl ServoBlendParams {
                 other => return Err(format!("{other} is not a parameter of this law")),
             }
         }
-        p.compression = match compression.as_str() {
-            "fast" => CompressionPreset::Fast,
-            "custom" => CompressionPreset::Custom {
-                ki,
-                max_rate_db_per_s: rate,
-            },
-            _ => CompressionPreset::Slow,
-        };
+        p.compression = compression_named(&compression, ki, rate);
         p.validate()?;
         Ok(p)
     }
@@ -579,6 +612,31 @@ mod tests {
                 min: 0.0,
                 max: 1.0
             }]
+        );
+    }
+
+    #[test]
+    fn the_defaults_are_the_declared_ones() {
+        let declared: Vec<(String, ParamSetting)> = KNOBS
+            .iter()
+            .map(|k| {
+                let v = match k.kind {
+                    KnobKind::Number { default, .. } => ParamSetting::Number(default),
+                    KnobKind::Choice { default, .. } => ParamSetting::Choice(default.into()),
+                };
+                (k.key.to_string(), v)
+            })
+            .filter(|(k, _)| k != "ki" && k != "max_rate_db_per_s")
+            .collect();
+        let mine: Vec<(String, ParamSetting)> = ServoBlendParams::default()
+            .settings()
+            .into_iter()
+            .filter(|(k, _)| k != "ki" && k != "max_rate_db_per_s")
+            .collect();
+        assert_eq!(mine, declared);
+        assert_eq!(
+            ServoBlendParams::default().compression,
+            CompressionPreset::Fast
         );
     }
 
