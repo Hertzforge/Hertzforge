@@ -1,0 +1,26 @@
+{
+ "type": "response",
+ "id": 108,
+ "result": {
+  "marks": [
+   {
+    "kind": "overload",
+    "row": 1,
+    "value": 0.4502,
+    "level": 0.45,
+    "station_frame": 6460,
+    "recording": null
+   },
+   {
+    "kind": "limit",
+    "row": 1,
+    "axis": "accel",
+    "value": 0.4012,
+    "limit": 0.4,
+    "station_frame": 32044,
+    "recording": "rec_0001"
+   }
+  ],
+  "next": 2
+ }
+}

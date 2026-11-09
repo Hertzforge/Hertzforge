@@ -1,0 +1,72 @@
+{
+ "type": "response",
+ "id": 102,
+ "result": {
+  "run_id": "recorder-0001",
+  "state": "running",
+  "phase": "monitoring",
+  "title": "Fixture A, run 4",
+  "source": "HARDWARE",
+  "station": {
+   "kind": "ni",
+   "class": "ni_real",
+   "devices": [
+    {
+     "id": "cDAQ2Mod1",
+     "serial": "01A2B3C4"
+    }
+   ]
+  },
+  "grid": {
+   "requested_fs_hz": 12800,
+   "fs_hz": 12800,
+   "block_frames": 256,
+   "batch_frames": 512,
+   "group_delay_frames": 38.44,
+   "actual": true
+  },
+  "clock": "shared",
+  "outputs": "none",
+  "rows": [
+   1,
+   2,
+   3,
+   4
+  ],
+  "mode": "level",
+  "t_s": 0.04,
+  "station_frames": 512,
+  "trigger": {
+   "armed": false,
+   "pre_frames": 6400,
+   "held_frames": 0,
+   "fires": 0,
+   "last_station_frame": null,
+   "saved": 0,
+   "left": 5,
+   "holdoff_left_s": 0
+  },
+  "recording": null,
+  "recordings": 0,
+  "marks": 0,
+  "disk": {
+   "free_bytes": 107374182400,
+   "floor_bytes": 1073741824,
+   "seconds_above_floor": 519045,
+   "fault": null
+  },
+  "health": {
+   "batches": 1,
+   "blocks_dropped": 0,
+   "driver_warnings": 0,
+   "station_errors": 0,
+   "pass_ms": {
+    "last": 1.2,
+    "worst": 1.2
+   },
+   "batch_gap_ms": null
+  },
+  "stop": null,
+  "end": null
+ }
+}

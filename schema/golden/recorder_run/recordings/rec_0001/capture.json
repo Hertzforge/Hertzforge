@@ -1,0 +1,77 @@
+{
+  "config": {
+    "n_channels": 2,
+    "sample_rate_hz": 1024.0,
+    "decimation": 1,
+    "ring_capacity": 512
+  },
+  "channel_table": {
+    "schema_version": 2,
+    "channels": [
+      {
+        "index": 1,
+        "enabled": true,
+        "save": true,
+        "stream": false,
+        "interface": "SingleEnded",
+        "iepe_bias_v": null,
+        "units": "AccelG",
+        "sensitivity_mv_per_eu": 1000.0,
+        "range_max": 5.0,
+        "polarity": "Positive",
+        "description": "Triangle",
+        "role": "Control",
+        "control_group": null,
+        "abort": {
+          "accel_g": null,
+          "velocity_ips": null,
+          "displacement_mil": null
+        },
+        "physical": null,
+        "analysis_tier": "Full"
+      },
+      {
+        "index": 2,
+        "enabled": true,
+        "save": true,
+        "stream": false,
+        "interface": "SingleEnded",
+        "iepe_bias_v": null,
+        "units": "AccelG",
+        "sensitivity_mv_per_eu": 1000.0,
+        "range_max": 5.0,
+        "polarity": "Positive",
+        "description": "Ramp",
+        "role": "Monitor",
+        "control_group": null,
+        "abort": {
+          "accel_g": null,
+          "velocity_ips": null,
+          "displacement_mil": null
+        },
+        "physical": null,
+        "analysis_tier": "Full"
+      }
+    ],
+    "reference": null
+  },
+  "start_unix_secs": 1794240000,
+  "run_config_json": "",
+  "chunks_written": 1,
+  "chunks_dropped": 0,
+  "frames_written": 1024,
+  "complete": true,
+  "layout": {
+    "interleave": "frame_interleaved",
+    "block_frames": 1024,
+    "channel_order": [
+      1,
+      2
+    ],
+    "channel_order_source": "channel_table_enabled_inputs"
+  },
+  "flushes": 1,
+  "free_space_at_start_bytes": 107374182400,
+  "free_space_floor_bytes": 1073741824,
+  "fault": null
+}

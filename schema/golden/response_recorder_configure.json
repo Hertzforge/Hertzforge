@@ -1,0 +1,107 @@
+{
+ "type": "response",
+ "id": 101,
+ "result": {
+  "state": {
+   "run_id": "recorder-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Fixture A, run 4",
+   "source": "HARDWARE",
+   "station": {
+    "kind": "ni",
+    "class": "ni_real",
+    "devices": [
+     {
+      "id": "cDAQ2Mod1",
+      "serial": "01A2B3C4"
+     }
+    ]
+   },
+   "grid": {
+    "requested_fs_hz": 12800,
+    "fs_hz": 12800,
+    "block_frames": 256,
+    "batch_frames": 512,
+    "group_delay_frames": 38.44,
+    "actual": false
+   },
+   "clock": null,
+   "outputs": "none",
+   "rows": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "mode": "level",
+   "t_s": null,
+   "station_frames": null,
+   "trigger": {
+    "armed": false,
+    "pre_frames": 6400,
+    "held_frames": 0,
+    "fires": 0,
+    "last_station_frame": null,
+    "saved": 0,
+    "left": 5,
+    "holdoff_left_s": 0
+   },
+   "recording": null,
+   "recordings": 0,
+   "marks": 0,
+   "disk": {
+    "free_bytes": 107374182400,
+    "floor_bytes": 1073741824,
+    "seconds_above_floor": 519045,
+    "fault": null
+   },
+   "health": null,
+   "stop": null,
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 12800,
+    "block_frames": 256,
+    "batch_frames": 512,
+    "group_delay_frames": 38.44,
+    "actual": false
+   },
+   "outputs": "none",
+   "rows": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "analysis": {
+    "fs_hz": 12800,
+    "df_hz": 6.25,
+    "lines": 800,
+    "span_hz": 5000,
+    "block_s": 0.16,
+    "overlap_pct": 50,
+    "averages_s": 0.72
+   },
+   "trigger": {
+    "pre_frames": 6400,
+    "record_frames": 12800,
+    "holdoff_frames": 0
+   },
+   "disk": {
+    "bytes_per_s": 204800,
+    "floor_bytes": 1073741824,
+    "free_bytes": 107374182400,
+    "seconds_above_floor": 519045
+   }
+  },
+  "warnings": [
+   {
+    "reason": "drive_channel_present",
+    "channel": 5,
+    "message": "Row 5 is a drive row; a Recorder run does not open or record it."
+   }
+  ]
+ }
+}

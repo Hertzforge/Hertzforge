@@ -1,0 +1,8 @@
+{"seq":0,"at_unix":1794240000.0,"kind":"station","text":"the station programmed 1024 Hz (asked 1024 Hz)"}
+{"seq":1,"at_unix":1794240001.0,"kind":"note","text":"records in recorder_run"}
+{"seq":2,"at_unix":1794240002.0,"kind":"note","text":"outputs: none"}
+{"seq":3,"at_unix":1794240003.0,"kind":"state","text":"running, monitoring"}
+{"seq":4,"at_unix":1794240004.0,"kind":"recording","text":"rec_0001 began at station frame 2304 (pre-window 256 frames)"}
+{"seq":5,"at_unix":1794240005.0,"kind":"recording","text":"rec_0001 saved: 1024 frames, 1.000 s, no gaps"}
+{"seq":6,"at_unix":1794240006.0,"kind":"state","text":"stop began: operator"}
+{"seq":7,"at_unix":1794240007.0,"kind":"state","text":"ended operator_stop: Stopped by golden: every recording is saved."}

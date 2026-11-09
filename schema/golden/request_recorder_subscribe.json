@@ -1,0 +1,35 @@
+{
+ "type": "request",
+ "id": 106,
+ "method": "recorder.subscribe",
+ "params": {
+  "rate_hz": 5,
+  "plots": [
+   {
+    "id": "t",
+    "quantity": "time",
+    "channels": [
+     1,
+     2
+    ],
+    "points": 64,
+    "seconds": 0.04
+   },
+   {
+    "id": "s",
+    "quantity": "spectrum",
+    "channels": [
+     1
+    ]
+   },
+   {
+    "id": "f",
+    "quantity": "frf"
+   },
+   {
+    "id": "r",
+    "quantity": "readings"
+   }
+  ]
+ }
+}

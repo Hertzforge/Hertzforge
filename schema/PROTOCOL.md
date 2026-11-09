@@ -4021,7 +4021,7 @@ number timed by the service's clock.
 ### Recorder Run State
 
 ```
-{"run_id":"recorder-0003","state":"running","phase":"recording","title":"Fixture A, run 4",
+{"run_id":"recorder-0002","state":"running","phase":"recording","title":"Fixture A, run 4",
  "source":"HARDWARE","station":{"kind":"ni","class":"ni_real","devices":[...]},
  "grid":{"requested_fs_hz":12800,"fs_hz":12800,"block_frames":256,"batch_frames":512,
          "group_delay_frames":38.44,"actual":true},"clock":"shared",
@@ -4146,12 +4146,17 @@ The wire offers no other place.
                                  recorder.json
 ```
 
-- `run.json`: the configuration, the station, the asked and programmed rates, the group delay,
-  the recorded rows and the derived numbers, and the overload indicator's definition.
-- `log.jsonl` and `marks.jsonl`: a line for every log entry and every mark, as `recorder.log` and
-  `recorder.marks` give them.
-- `end.json`: the end, and each recorded row's statistics over the whole run (mean, rms, peak,
-  crest factor and kurtosis).
+- `run.json`, written at start: `run_id`, `title`, `source`, `station` (as in the state),
+  `config` (the configuration as sent), `requested_fs_hz` and `fs_hz` (the rate asked and the
+  rate the station programmed), `group_delay_frames`, `outputs` (`"none"`), `rows` (each recorded
+  row's `index`, `description`, `role`, `unit` and `range_max`, in column order), `derived` (as
+  configure's, at the programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and
+  `definition`, the indicator's definition in words).
+- `log.jsonl` and `marks.jsonl`: a line for every log entry (`{"seq","at_unix","kind","text"}`)
+  and every mark, as `recorder.log` and `recorder.marks` give them, each a compact JSON object.
+- `end.json`, written when the run finishes: `run_id`, `end` (as in the state), `station_frames`
+  (the frames acquired) and `rows`, each recorded row's statistics over the whole run
+  (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian signal).
 - `recordings/rec_NNNN/`, numbered from `rec_0001` in the order they began:
   - `telemetry.f32`: no header; little-endian 32-bit floats, one frame after another, each frame
     one value per recorded row in `rows` order, in the row's unit, at `fs_hz`. The file's size is
@@ -4249,7 +4254,9 @@ default 10; at most 64 plots, each `id` unique, 1 to 64 characters) or `{"defaul
 `{"id","quantity","channels","points","seconds"}`: `channels` applies to `time` and `spectrum` (a
 list of recorded rows' indexes, or `"all"`; default `"all"`), `points` and `seconds` to `time`
 (`points` 64 to 8192, default 1024; `seconds` above 0 and at most 2, default 2). The result is
-`{"default","rate_hz","plots","quantities"}`, every default filled in. In `recorder.data` each plot
+`{"default","rate_hz","plots","quantities"}`, every default filled in: each plot comes back with
+the keys its quantity takes (`time` `channels`, `points` and `seconds`; `spectrum` `channels`;
+`frf` and `readings` none). In `recorder.data` each plot
 is `{"id","quantity","channels","first_frame","views"}`: `channels` the indexes it resolved to, in
 table order, and null for the rest; `first_frame` the station frame of a `time` plot's first
 sample, and null for the rest.
