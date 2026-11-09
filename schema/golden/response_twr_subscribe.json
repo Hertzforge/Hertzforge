@@ -1,0 +1,88 @@
+{
+ "type": "response",
+ "id": 84,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "tgt",
+    "quantity": "target",
+    "points": 1024
+   },
+   {
+    "id": "rep",
+    "quantity": "response",
+    "points": 1024
+   },
+   {
+    "id": "err",
+    "quantity": "error",
+    "points": 1024
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "points": 1024
+   },
+   {
+    "id": "env",
+    "quantity": "envelope",
+    "points": 1024
+   },
+   {
+    "id": "frf",
+    "quantity": "frf"
+   },
+   {
+    "id": "coh",
+    "quantity": "coherence"
+   },
+   {
+    "id": "trust",
+    "quantity": "mask"
+   },
+   {
+    "id": "spec",
+    "quantity": "spectra"
+   },
+   {
+    "id": "conv",
+    "quantity": "convergence"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "scope",
+    "quantity": "scope",
+    "points": 1024
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "plays",
+    "quantity": "plays"
+   }
+  ],
+  "quantities": [
+   "target",
+   "response",
+   "error",
+   "drive",
+   "envelope",
+   "frf",
+   "coherence",
+   "mask",
+   "spectra",
+   "convergence",
+   "law",
+   "scope",
+   "readings",
+   "plays"
+  ]
+ }
+}

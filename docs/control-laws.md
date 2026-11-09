@@ -2,9 +2,9 @@
 
 A control law is the math the controller runs once per loop to decide the next drive. Hertzforge
 loads control laws from files, so a law can be written, built and shared without rebuilding
-Hertzforge. This page is a guide for someone writing one, for the two test types with a law
-interface: single-output Random, and multiple-output (MIMO) Random, which has its own chapter
-below. The requirements a law must meet, what it is given and what it must return are in the
+Hertzforge. This page is a guide for someone writing one, for the test types with a law
+interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock,
+Sine and time waveform replication, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -369,12 +369,294 @@ controller trusts, each bin's rise held to `max_db_per_pulse` (default 6 dB), th
 optionally `initial_backoff_db` under the prediction. It is time waveform replication's iteration
 bin for bin, runs natively, and is also the law file `laws/shock-fdc`; the two give the same run.
 
+## SRS shock laws
+
+An SRS shock law closes the loop between pulses on a synthesized pulse. The controller synthesizes
+every pulse from a table of components (odd-half-cycle wavelets or damped sines, one per band by
+default), identifies the system with that pulse at a low level in volts, and calls the law: once
+for the starting gains, then after each pulse has been fired, measured and judged. The law returns
+one gain per component; the controller applies the gains to its table, caps them, checks the drive
+and plays it. The specification's section 9 states the world in full.
+
+What differs from a classical law:
+
+- **A law returns gains, not a record.** One multiplicative gain per component, in table order,
+  each finite and above zero. The controller synthesizes the drive, so every pulse ends at rest
+  whatever the gains.
+- **Two grids.** Every spectrum is a shock response spectrum on the band centres (`band_hz`); the
+  components are on their own grid (`component_hz`). `srs::nearest_band` in the SDK maps a
+  component to the band nearest it.
+- **The target follows the pulse.** The target a law sees on each call is at the scale the last
+  pulse was commanded at, so a gain computed from it aims at what was asked of that pulse.
+- **The identified gain comes with the setup**: `|H|` at each component, floored by the controller,
+  or nothing when the run identified nothing.
+
+### Writing an SRS law in Rust
+
+Implement `ShockSrsLaw` (`describe`, `new`, `seed`, `iterate`) and export it with
+`export_srs_law!`. The template is `crates/hertzforge-law-sdk/template/shock-srs`: the per-band
+ratio update written plainly, with three parameters.
+
+| Key | What it does |
+|---|---|
+| `max_db_per_pulse` | The most any component may rise or fall from one pulse to the next |
+| `correct` | Off: the starting gains are held for the whole run, and a run that starts wrong ends not converged |
+| `seed_error_db` | Scales the law's starting gains, for seeing how the controller's guards respond: -4 dB starts every band 4 dB low |
+
+Build it with `cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with an SRS law's gains
+
+Every one of these holds whatever the law returns:
+
+- one gain per component, finite, above zero, with declared values, or the call is refused;
+- no gain may rise more than 6 dB in a pulse (by default);
+- each gain is held to what the limit channels can take at the highest level the run is scheduled
+  to reach (a falling gain always wins), and a band the limit holds down may read low without
+  failing a pulse;
+- the drive's peak in volts against the drive ceiling (scaled to it) and the drive abort (refused),
+  before every pulse, and at proceed for the highest level the run is scheduled to reach;
+- the response predicted through the identified gain against the drive limit, the kinematic aborts
+  and the shaker's ratings, before every pulse;
+- pulses start no closer than the time between pulses;
+- a late, failed, crashed or refused call is a miss and the next pulse refires the table in force;
+  three in a row end the run;
+- five pulses at one level without a pass, or the run's pulse cap, end the run not converged.
+
+### Checking an SRS shock law before hardware
+
+As for the other worlds, an imported SRS law must pass the check before it may drive hardware.
+Each case is a whole run on a simulated station: a flat 1 g target on a 1/3-octave grid from 100
+to 2000 Hz at Q 10, synthesized from wavelets; AUTO -12, -6 and 0 dB with two pulses at each lower
+level and the case's pulses at full level, advancing on a passing pulse (every band inside 3 dB),
+at most 12 pulses a level.
+
+| Case | Plant | Asks for |
+|---|---|---|
+| one mode | 400 Hz, Q 10 | Every band within 3 dB by the sixth full-level pulse, and on every one after |
+| close modes | 240 and 260 Hz, Q 30 | As one mode |
+| measurement noise | One mode, noise 30 dB under the identification's pulse | As one mode |
+| level ladder | A wire, manual moves: a jump from -12 to -6 dB, then six 1 dB steps to 0 dB | Every band within 3 dB after three pulses at each level |
+| identification error | One mode; the identified gain scaled +3 dB before the seed | Every band within 3 dB by the eighth full-level pulse. A law that does not correct cannot pass |
+| limit channel | A wire, and a limit channel whose supplied gain is 4 at 500 Hz under a flat bound | The prediction at most 0.5 dB over the bound on every pulse; outside the bands the limit holds down, every band within 3 dB |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law passes every case; a law that holds its starting gains fails the identification-error
+case.
+
+### The built-in SRS law
+
+`srs_ratio`, the classic per-band SRS iteration: each component starts at one over the identified
+gain at its frequency, then after each pulse is scaled by the target over the measured response at
+the band nearest it, limited to `max_db_per_pulse` (default 3 dB) either way. It runs natively, and
+is also the law file `laws/shock-srs-ratio`; the two give the same run.
+
+## Sine laws
+
+A Sine law decides one number every control tick (10 ms by default): the amplitude of the one tone
+the controller plays, in drive units peak (volts peak on hardware). The controller keeps the
+frequency, the sweep and its direction, the tone's phase, the level schedule and the second
+reference output; the law is called once for the starting drive after identification (`engage`)
+and then once a tick (`tick`), on the controller's real-time thread, with a quarter of the tick as
+its budget. The specification's section 10 states the world in full.
+
+What differs from the other worlds:
+
+- **One number per tick, on the real-time thread.** A Sine law runs a hundred times a second, and a
+  late call is not used. Keep a tick's work small and bounded; do the heavy work in the
+  constructor, which is given the whole identification.
+- **The prediction comes with every tick.** `prediction_db` is the controller's plant-inverse drive
+  at this frequency at full level, from the identification, in dB relative to one drive unit; it
+  is absent where the controller does not trust the identification. The built-in law follows its
+  change from tick to tick; a law may use it or not.
+- **The target is at the present level.** A level change is a change of target, and a law follows
+  it within the controller's caps.
+- **The response arrives late.** On hardware a new drive's response reaches `measured` several
+  ticks after it is played (the converters and the output buffer), and the tracking filter, whose
+  corner scales with the frequency, takes a third of a second more to read it at 20 Hz. After the
+  engage the reading can stall and dip on its way up. An error read before the response has
+  arrived is one the law did not cause, and integrating it climbs blind. Hold the starting drive
+  until `measured` is near what the prediction says the drive in force should give, as the
+  template does; a reading that has stopped rising has not necessarily come up.
+- **`drive` is what was played.** It can be under what the law asked on the tick before: the caps,
+  the ceilings and the notch hold the drive down without saying so in `hold`. A law that keeps a
+  level of its own should follow `drive` down, as the built-in law does, or a long clamp winds that
+  level up.
+- **Holds.** `hold` is `notch` while a limit channel holds the drive down (the controller holds it
+  at the notch ceiling, so a law cannot raise it) and `probe` while a resonance search maps the
+  plant (the law is still called, and its drive is not used).
+- **Live parameters.** A number parameter the manifest lists as `live` can be changed while the
+  test runs; the controller checks the value against its declared range and calls `adjust`, and
+  the value applies from the next tick.
+
+### Writing a Sine law in Rust
+
+Implement `SineSingleLaw` (`describe`, `new`, `engage`, `tick`, and `adjust` for live parameters)
+and export it with `export_sine_law!`; build the manifest with `SineManifestBuilder`, which takes
+the live keys. The template is `crates/hertzforge-law-sdk/template/sine-pi`: a
+proportional-integral loop on the error in dB that follows the prediction from tick to tick. It
+holds its starting drive until the measurement has come up: at least five ticks, then until the
+measured amplitude is within 2 dB of what the identification predicts for that drive (or over
+it), at most a second, and the second without a trusted prediction.
+
+| Key | What it does |
+|---|---|
+| `kp` | Proportional gain on the change of the error |
+| `ki` | Integral gain on the error, per second; live |
+| `follow` | How much of the prediction's change from tick to tick the drive follows |
+| `max_step_db` | The most the law moves the drive in one tick |
+| `start_offset_db` | Scales the law's own first drive, for seeing how the controller's guards respond: +4 dB starts 4 dB high, and the law brings it back |
+
+Build it with `cargo build --target wasm32-wasip2 --release`. A law written against the
+controller's own native seam (`hertzforge_sine::law`) can be carried across the interface with
+`sine::native` in the SDK, as the built-in law's file is.
+
+### What the controller does with a Sine law's drive
+
+Every one of these holds whatever the law returns:
+
+- a drive that is not a finite number at least zero, or a value that is not finite or not
+  declared, is refused;
+- a call past its budget, a failed call, a panic or a refused output is a miss and the drive in
+  force is held; three in a row end the run with the controlled stop (the 120 dB/s ramp);
+- the drive moves at most 1 dB a tick and rises at most 240 dB a second (by default); a cap that
+  binds for a second without a break ends the run (`divergence`);
+- the first drive is at most the prediction plus 6 dB, or 0.05 of the start level's scale without
+  one;
+- the notch ceiling holds the drive under the limit channels (each held at its limit, its abort edge
+  above), and the drive ceiling, the drive abort, the alarm and abort bands and the kinematic
+  monitor apply as on every Sine run.
+
+### Checking a Sine law before hardware
+
+As for the other worlds, an imported Sine law must pass the check before it may drive hardware.
+Each case is a whole run on a simulated station at 16384 Hz and a 10 ms tick: a flat 1 g target,
+identification at -20 dB, the abort band 12 dB either way.
+
+| Case | Plant and run | Asks for |
+|---|---|---|
+| slow sweep | One mode, 250 Hz, Q 50; a log sweep 100 to 800 Hz at 1 oct/min | Within 1.5 dB through the resonance (every judged tick within 30 Hz of it) |
+| fast sweep | The same at 6 oct/min | Within 5 dB through the resonance; within 2 dB more than 30 Hz from it |
+| close modes | 240 and 260 Hz, Q 30; 2 oct/min | Within 2 dB |
+| anti-resonance | A flat plant cut 30 dB at 300 Hz, its coherence there under the trust floor; 2 oct/min | The run completes, or ends on the controller's own divergence trip; the drive never over the ceiling |
+| measurement noise | One mode; noise 30 dB under the response; a 30 s dwell at 250 Hz | Within 1.5 dB |
+| level ladder | -20, -12, -6 and 0 dB moved by hand at a 250 Hz dwell, 10 s each, and one live change | Every rung within 1 dB after its settle window |
+| limit channel | One mode, and a limit channel reading up to 4 times the control at the mode under a flat 2 g limit | The limit channel at most 0.5 dB over its limit; the control at most 1 dB over its target after the notch releases |
+| transport delay | A flat wire that plays the drive 50 ms late (a hardware station's measured lag, rounded up); engaged at -6 dB, a 6 s dwell at 100 Hz | The run completes, and every tick from 2 s after the engage on is within 0.5 dB, settle window or not |
+
+Only the transport delay case's station has a lag: on the others a new drive's response is read on
+the next tick, on a hardware station several ticks later. Every case also asks that every call is
+answered in time with no miss and no refused output. The built-in law passes every case; a law that
+misbehaves fails.
+
+### The built-in Sine law
+
+`servo_blend`: an amplitude servo (proportional-integral on the error in dB) moves its own level
+each tick, and the drive moves by that step plus `blend_w` (default 0.5, live) times the
+prediction's change, at most 1 dB a tick. `compression` sets the servo's speed: slow (integral gain
+2, at most 20 dB/s, the default), fast (6, 60 dB/s) or custom. A change of level is taken by the
+servo alone (the prediction follows the frequency), so the compression sets how fast a level step
+lands: slow takes a 1 dB step to within 0.1 dB in about 1.3 s, fast in under half a second. Fast is
+quicker than a hardware station's own measurement, which trails the drive by the converters, the
+output buffer and the tracking filter, and it overshoots there by several dB on a level step at
+20 Hz; slow does not. It runs natively, and is also the law file `laws/sine-servo`; the two give the
+same run.
+
+## Time waveform replication laws
+
+A time waveform replication (TWR) law closes the loop between whole records. The controller
+identifies the system with band-limited random in volts, inverts the identified plant and holds for
+review; when the run proceeds it builds the law and calls it: once for the first drive, then after
+each correction play that did not meet its gate (and after each playback play when adaptation
+during playback is on). The law returns the next drive record at full level, in volts; the
+controller scales it to the commanded level, checks it, brings it to rest at both ends and plays
+it. The specification's section 11 states the world in full.
+
+What differs from a classical shock law:
+
+- **The record is the replicated section between quiet pads**, `record_len` samples (a power of
+  two) at `fs_hz`, often tens of thousands of samples. A call's lists are long, and copying them in
+  and out is part of every call's time.
+- **The controller calls the law only when it wants a correction.** A play that meets the gate is
+  carried to the next level by the controller alone, with no call.
+- **When the controller clipped the last drive**, `limited` is set and `drive` is the drive that
+  played. A law that corrects from that record, rather than from the one it asked for, measures
+  what really played; the built-in does, and so does the template.
+- The plant has the classical world's shape, and the same conventions: one-sided spectra under the
+  negative-exponent transform; `twr::rfft_half` and `twr::irfft_half` in the SDK are that pair.
+
+### Writing a TWR law in Rust
+
+Implement `TwrSingleLaw` (`describe`, `new`, `seed`, `iterate`) and export it with
+`export_twr_law!`. The template is `crates/hertzforge-law-sdk/template/twr`: the frequency-domain
+correction written plainly, with three parameters.
+
+| Key | What it does |
+|---|---|
+| `beta` | The fraction of each play's error corrected before the next play |
+| `correct` | Off: the first drive is held for the whole run |
+| `model_error_db` | Scales the law's own copy of the plant's inverse, for seeing how the controller's guards respond: -6 dB plays half the target (with `correct` off, the run ends not converged), -4 dB leaves 0.685 of the error after each correction at `beta` 0.5, +8 dB starts 2.5 times hot (the first-drive bound) |
+
+Build it with `cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with a TWR law's drive
+
+Every one of these holds whatever the law returns:
+
+- the drive's peak in volts against the drive ceiling, on the record as it will play, refused (and
+  the run aborted) if over; in AUTO, at proceed, the controller's own full-level drive against the
+  ceiling; in MANUAL, a level move that would pass it is refused;
+- the length, finite values and declared values of every output;
+- at full level, the drive's peak and every bin may rise at most 10 dB a call (by default) over the
+  drive last played; the drive's predicted response peak at most 1.5 times the level target's
+  (with the default envelope); the first drive's at most twice;
+- every record tapers to rest at both ends;
+- a late, failed, crashed or refused call is a miss and the next play replays the drive in force;
+  three in a row end the run;
+- the response is watched as each block arrives, and a play that leaves the abort band for eight
+  samples in a row is cut short with the emergency stop;
+- each play's lag is fitted against the identification's; a drift of more than a frame ends the
+  run before anything is corrected from that play;
+- a level that does not meet its gate in its iterations ends the run (or holds), as does the error
+  rising on three plays in a row.
+
+### Checking a TWR law before hardware
+
+An imported TWR law must pass the check before it may drive hardware. Each case is a whole run on
+a simulated station at 12 800 Hz: a 2 s field-like reference peaking at 1 g, AUTO from -12 dB to
+full level with a 10% gate and at most eight correction plays a rung, then one playback play.
+
+| Case | Plant | Asks for |
+|---|---|---|
+| flat | A wire | Every rung gates on its first play; full level within 5% |
+| one mode | 400 Hz, Q 10 | Every rung gates within its eight; full level within 10% |
+| station plant | 200 and 550 Hz, Q 2.5 | As one mode |
+| transport delay | One mode behind 2 ms | As one mode |
+| deep queue | A wire behind 41 samples, the station keeping its output 512 frames ahead in 256-frame blocks | As flat, and the run aligned on the lag the identification measured |
+| identification error | A wire; the identified gain scaled +3 dB before inversion | The first rung gated by play 4, every later rung on its first. A law that does not correct sits 29% low and cannot pass |
+| measurement noise | One mode, noise 30 dB under the first rung's response | Full level within 10% |
+| anti-resonance | A 30 dB notch at 300 Hz under the coherence floor | Survive: complete, or be ended by the controller's own judgement (not converged, divergence, the coverage floor); never over the drive ceiling, never an envelope abort |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law and the template pass every case; a law that holds its first drive fails the
+identification-error case. A check record clears a law file only at the check in force; a file
+checked by an earlier one is checked again.
+
+### The built-in TWR law
+
+`twr_correct`, the frequency-domain correction: the plant's inverse applied to the reference, then
+after each correction play a fraction `beta` (default 0.5) of the inverse times the error, on the
+bins the controller trusts, each bin's rise held to `max_db_per_iter` (default 6 dB), the first
+play optionally `initial_backoff_db` under the prediction; after a clipped play it corrects from
+the drive that played. It runs natively, and is also the law file `laws/twr-correct`; the two give
+the same run, sample for sample.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
 checks its manifest) and copies it into the `laws` folder of the local data root, named by the
-SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output Random, multiple-output Random and
-classical shock laws are listed apart, each on its own test type's screens, and a law chosen for
+SHA-256 of its bytes: `laws/<sha256>.wasm`. Single-output Random, multiple-output Random,
+classical shock, SRS shock and Sine laws are listed apart, each on its own test type's screens, and a law chosen for
 another test type is refused. The data
 root is the folder Hertzforge keeps its runs in, on the local disk.
 
@@ -394,8 +676,8 @@ Laws are separate files loaded at run time, so their authors can license them as
 
 ## The interface version
 
-The interface is `hertzforge:control-law@0.1.0`, with two worlds, `random-single` and
-`random-mimo`. While it is at 0.x it may change between releases, and a law must be built against
+The interface is `hertzforge:control-law@0.1.0`, with six worlds: `random-single`,
+`random-mimo`, `shock-classical`, `shock-srs`, `sine-single` and `twr-single`. While it is at 0.x it may change between releases, and a law must be built against
 the version the host loads.
 
 ## Building and testing in this repository

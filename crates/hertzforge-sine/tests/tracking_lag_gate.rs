@@ -312,6 +312,8 @@ fn arm_refuses_a_configuration_the_check_rejects() {
         control_tick_frames: 64,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     };
 
     let sim = SimConfig::new()

@@ -182,6 +182,8 @@ async fn an_auto_run_goes_from_configure_through_review_to_completed() {
     schema.assert_valid(&end, Some("shockState"));
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
     assert_eq!(end["pulses"]["fired"], 7);
+    // A finished run keeps the counts of its last pulse: every pulse passed.
+    assert_eq!(end["pulses"]["passed"], 7, "{end}");
     assert_eq!(end["end"]["pulse"], 6);
 
     // Every pulse has a row, in order, at the schedule's levels.

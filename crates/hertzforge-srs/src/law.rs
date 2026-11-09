@@ -59,6 +59,12 @@ use hertzforge_shock_common::control_law::ShockLawDiagnostics;
 use hertzforge_shock_common::{ControlLawError, ShockControlLaw, ShockLawInputs, ShockLawOutputs};
 use serde::{Deserialize, Serialize};
 
+/// The built-in law's arithmetic, `srs_ratio`: the per-component ratio update
+/// without the limit cap. The run's core calls it through
+/// [`crate::control::SrsRatioFactory`]; [`SrsSynthesisLaw`] wraps the same
+/// arithmetic with the cap.
+pub use hertzforge_shock_law_math::srs as ratio;
+
 /// The default per-iteration per-component gain clamp, dB (matches
 /// [`hertzforge_shock_common::DEFAULT_MAX_GAIN_DB_PER_ITER`]).
 pub const DEFAULT_MAX_GAIN_DB_PER_ITER: f64 = 3.0;
@@ -232,21 +238,6 @@ impl SrsSynthesisLaw {
         self.last_limit_status
     }
 
-    /// Index of the band nearest `f_hz` in `band_freqs` (linear scan). Returns 0 for an
-    /// empty grid (guarded by the caller).
-    fn nearest_band(band_freqs: &[f64], f_hz: f64) -> usize {
-        let mut best = 0usize;
-        let mut best_d = f64::INFINITY;
-        for (i, &fb) in band_freqs.iter().enumerate() {
-            let d = (fb - f_hz).abs();
-            if d < best_d {
-                best_d = d;
-                best = i;
-            }
-        }
-        best
-    }
-
     /// Which component-frequency list to iterate: prefer the inputs' `component_freqs`
     /// when its length matches the law's own (a service that re-synthesizes may reorder
     /// or refine the grid), else fall back to the law's stored list. Either way the
@@ -301,6 +292,66 @@ impl SrsSynthesisLaw {
     }
 }
 
+/// The predictive-limit cap on the gain update of the component at `fc`, as
+/// the run applies it after the law (limit-down beats control-up): the
+/// tightest `allowed / predicted` ratio over the limit channels and the bands
+/// within [`LIMIT_CAP_WINDOW_OCTAVES`], an up-move damped by
+/// [`LIMIT_UP_MOVE_DAMPING`], a binding cap cut a further
+/// [`LIMIT_DOWN_OVERCUT_DB`]. With no prediction the cap is 1 (nothing rises
+/// without a prediction) and the second value is `true`.
+pub fn predictive_cap(
+    limits: &LawLimits,
+    predictions: Option<&[Vec<f64>]>,
+    band_freqs: &[f64],
+    fc: f64,
+) -> (f64, bool) {
+    match predictions {
+        Some(preds) => {
+            let c = SrsSynthesisLaw::limit_cap_for_component(limits, preds, band_freqs, fc);
+            let cap = if c > 1.0 && c.is_finite() {
+                // Damped approach to the bound from below.
+                c.powf(LIMIT_UP_MOVE_DAMPING)
+            } else if c < 1.0 {
+                // Binding: exact ratio plus the fixed over-cut so the down-move
+                // wins against window-edge pumping.
+                c * 10.0_f64.powf(-LIMIT_DOWN_OVERCUT_DB / 20.0)
+            } else {
+                c
+            };
+            (cap, false)
+        }
+        // Bounds configured, no prediction this pulse: safety-monotone hold.
+        None => (1.0, true),
+    }
+}
+
+/// `min(update, cap)`: the gain the run applies, and whether the cap bound it.
+pub fn apply_cap(update: f64, cap: f64) -> (f64, bool) {
+    if cap < update {
+        (cap.max(0.0), true)
+    } else {
+        (update, false)
+    }
+}
+
+/// The worst predicted exceedance over every channel and band, dB over the
+/// allowed level (`20 log10(predicted / allowed)`; positive is over). `None`
+/// when no comparable prediction was supplied.
+pub fn worst_predicted_exceedance_db(limits: &LawLimits, predictions: &[Vec<f64>]) -> Option<f64> {
+    let headroom_lin = 10.0_f64.powf(-limits.headroom_db / 20.0);
+    let mut worst: Option<f64> = None;
+    for (bounds, pred) in limits.bounds.iter().zip(predictions) {
+        for (&bound, &p) in bounds.iter().zip(pred) {
+            if !bound.is_finite() || p <= 0.0 {
+                continue;
+            }
+            let db = 20.0 * (p / (bound * headroom_lin)).log10();
+            worst = Some(worst.map_or(db, |w: f64| w.max(db)));
+        }
+    }
+    worst
+}
+
 impl ShockControlLaw for SrsSynthesisLaw {
     fn init(&mut self, inputs: &ShockLawInputs) -> ShockLawOutputs {
         self.last_limit_status = LawLimitStatus::default();
@@ -315,86 +366,40 @@ impl ShockControlLaw for SrsSynthesisLaw {
     fn on_pulse(&mut self, inputs: &ShockLawInputs) -> ShockLawOutputs {
         let m = inputs.ncomponents();
         let nb = inputs.nbands();
-        let max_lin = 10.0_f64.powf(self.max_gain_db_per_iter / 20.0);
-        let min_lin = 1.0 / max_lin;
-
-        let freqs = self.freqs_for(inputs);
+        let freqs = self.freqs_for(inputs).to_vec();
         let mut gains = vec![1.0f64; m];
         let mut clamped = 0usize;
         let mut status = LawLimitStatus::default();
 
         if nb > 0 {
-            for (j, gain) in gains.iter_mut().enumerate() {
-                // Map component j to its nearest analysis band. `freqs` has length m
-                // (either the inputs' or the law's own list, chosen in freqs_for).
-                let fc = freqs.get(j).copied().unwrap_or(0.0);
-                let b = Self::nearest_band(inputs.band_freqs, fc);
-                let tgt = inputs.target_srs.get(b).copied().unwrap_or(0.0);
-                let meas = inputs.measured_srs.get(b).copied().unwrap_or(0.0);
-                // Classic SRS-iteration ratio; hold on a dead/zero measured or target
-                // band (no trusted ratio -> don't push into noise).
-                let ratio = if meas > 0.0 && tgt > 0.0 {
-                    tgt / meas
-                } else {
-                    1.0
-                };
-                let clamped_ratio = ratio.clamp(min_lin, max_lin);
-                if (clamped_ratio - ratio).abs() > 1e-12 {
-                    clamped += 1;
+            // The ratio update is the built-in law's; a grid the arithmetic
+            // cannot take (mismatched lengths) holds every gain.
+            let params = ratio::SrsRatioParams {
+                max_db_per_pulse: self.max_gain_db_per_iter,
+            };
+            let step = ratio::SrsRatio::new(params, inputs.band_freqs, &freqs, None)
+                .and_then(|mut r| r.iterate(inputs.target_srs, inputs.measured_srs));
+            if let Ok(step) = step {
+                clamped = step.report.clamped_components;
+                gains = step.gains;
+            }
+            // The predictive-limit cap (module docs).
+            if let Some(limits) = &self.limits {
+                for (j, gain) in gains.iter_mut().enumerate() {
+                    let fc = freqs.get(j).copied().unwrap_or(0.0);
+                    let (cap, held) =
+                        predictive_cap(limits, inputs.predicted_limit_srs, inputs.band_freqs, fc);
+                    status.held_no_prediction |= held;
+                    let (g, bound) = apply_cap(*gain, cap);
+                    *gain = g;
+                    status.limited_components += usize::from(bound);
                 }
-                let mut update = clamped_ratio;
-
-                // Predictive-limit cap (module docs): limit-down beats
-                // control-up, and beats the per-iteration dB clamp. Up-moves toward
-                // the bound are DAMPED (LIMIT_UP_MOVE_DAMPING) so simultaneous
-                // multi-component rises approach the bound instead of overshooting
-                // it; down-caps are exact.
-                if let Some(limits) = &self.limits {
-                    let cap = match inputs.predicted_limit_srs {
-                        Some(preds) => {
-                            let c =
-                                Self::limit_cap_for_component(limits, preds, inputs.band_freqs, fc);
-                            if c > 1.0 && c.is_finite() {
-                                // Damped approach to the bound from below.
-                                c.powf(LIMIT_UP_MOVE_DAMPING)
-                            } else if c < 1.0 {
-                                // Binding: exact ratio plus the fixed over-cut so
-                                // the down-move wins against window-edge pumping.
-                                c * 10.0_f64.powf(-LIMIT_DOWN_OVERCUT_DB / 20.0)
-                            } else {
-                                c
-                            }
-                        }
-                        // Bounds configured, no prediction this pulse: safety-
-                        // monotone hold - nothing may be driven UP blind.
-                        None => {
-                            status.held_no_prediction = true;
-                            1.0
-                        }
-                    };
-                    if cap < update {
-                        update = cap.max(0.0);
-                        status.limited_components += 1;
-                    }
-                }
-                *gain = update;
             }
         }
 
         // Worst predicted exceedance for the limit status (diagnostic).
         if let (Some(limits), Some(preds)) = (&self.limits, inputs.predicted_limit_srs) {
-            let headroom_lin = 10.0_f64.powf(-limits.headroom_db / 20.0);
-            let mut worst: Option<f64> = None;
-            for (bounds, pred) in limits.bounds.iter().zip(preds) {
-                for (&bound, &p) in bounds.iter().zip(pred) {
-                    if !bound.is_finite() || p <= 0.0 {
-                        continue;
-                    }
-                    let db = 20.0 * (p / (bound * headroom_lin)).log10();
-                    worst = Some(worst.map_or(db, |w: f64| w.max(db)));
-                }
-            }
-            status.worst_predicted_exceedance_db = worst;
+            status.worst_predicted_exceedance_db = worst_predicted_exceedance_db(limits, preds);
         }
         self.last_limit_status = status;
 

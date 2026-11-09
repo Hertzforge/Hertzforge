@@ -124,6 +124,15 @@ export function lawWireParams(law: LawEntry | null, values: Record<string, LawVa
 	return params;
 }
 
+/**
+ * The labels of the chosen law's parameters that may change during a run, for a test type whose
+ * laws declare them (Sine); null when the test type marks none. Only a number parameter can be live.
+ */
+export function liveParamLabels(law: LawEntry | null, live: readonly string[] | undefined): string[] | null {
+	if (live === undefined) return null;
+	return (law?.params ?? []).filter((p) => live.includes(p.key) && (p.kind === 'number' || p.kind === 'integer')).map((p) => p.label);
+}
+
 /** A law's check record in a word or two. */
 export const CHECK_WORDS: Record<LawEntry['check']['status'], string> = {
 	built_in: 'Built in',

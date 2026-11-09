@@ -687,6 +687,7 @@ fn ladder_defaults_and_sweep_rungs_advance() {
 #[test]
 fn f17_ladder_rung_clock_pauses_during_hold() {
     let mut l = LadderPlan::new(LadderConfig {
+        start_db: -6.0,
         table_db: vec![-6.0, 0.0],
         per_rung: RungFor::Seconds(1.0),
         full_for: RungFor::Seconds(1.0),
@@ -747,6 +748,7 @@ fn f17_ladder_jump_does_not_restart_the_sweep() {
 #[test]
 fn ladder_jump_to_validates_and_reopens() {
     let mut l = LadderPlan::new(LadderConfig {
+        start_db: -6.0,
         table_db: vec![-6.0, 0.0],
         per_rung: RungFor::Sweeps(1),
         full_for: RungFor::Sweeps(1),

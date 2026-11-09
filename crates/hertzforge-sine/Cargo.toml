@@ -5,33 +5,52 @@ edition.workspace = true
 license = "MIT"
 publish = false
 
-# Profile grammar + feasibility, control core, schedulers - pure libs on hertzforge-dsp +
-# hertzforge-shaker-db.
+# Profile grammar, control core, schedulers and the control-law seam: pure libs
+# on hertzforge-dsp, which build for `wasm32-wasip2`. The built-in Sine law
+# (`law::servo_blend`) is also built as a law file (`laws/sine-servo`) from this
+# same code, with `default-features = false`.
 #
-# The closed-loop Sine RUN SERVICE (`service` module family) - `SineService`,
-# the persistent `SineProcessStep` engine loop, the level ladder with
-# sine semantics, sysID + feedforward trust mask, the scalar alarm/abort, the
-# analytic kinematic monitor, the drive Vpk guard, COLA on the aux drive
-# channel, the debounced servo fault, and the report + status surface.
+# The closed-loop Sine RUN SERVICE (`service` module family, and the
+# deterministic feasibility assessment it runs) - `SineService`, the persistent
+# `SineProcessStep` engine loop, the level ladder with sine semantics, sysID +
+# feedforward trust mask, the scalar alarm/abort, the analytic kinematic
+# monitor, the drive Vpk guard, COLA on the aux drive channel, the debounced
+# servo fault, and the report + status surface - is behind the default
+# `service` feature.
 # Path B: the loop runs on the HOST against whatever station backend it is handed
 # (`SineService::new` takes a `Box<dyn Backend>`; it no longer builds a plant).
 [dependencies]
-hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
 hertzforge-dsp = { path = "../hertzforge-dsp" }
-# Service deps: engine (Engine/ProcessStep/CaptureSink + the tri-field
-# watchdog for the accel axis), hal (the `Backend` trait the service is handed),
-# channel-table (identity + the COLA width invariant), testkit (disk
-# capture/snapshot). NOT hertzforge-hal-sim: it is a dev-dependency only. Mirrors
-# hertzforge-random's service deps (shared infra in testkit).
-hertzforge-engine = { path = "../hertzforge-engine" }
-hertzforge-hal = { path = "../hertzforge-hal" }
-hertzforge-channel-table = { path = "../hertzforge-channel-table" }
-hertzforge-capture = { path = "../hertzforge-capture" }
-# The loop-owner resolver (`resolve_loop`), consulted at arm(): Sine is a
-# closed-loop HOST module and must hard-refuse a backend that closes its own loop.
-hertzforge-module-abi = { path = "../hertzforge-module-abi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Service deps, behind the default `service` feature: shaker-db (feasibility),
+# engine (Engine/ProcessStep/CaptureSink + the tri-field watchdog for the accel
+# axis), hal (the `Backend` trait the service is handed), channel-table
+# (identity + the COLA width invariant), capture (disk capture/snapshot). NOT
+# hertzforge-hal-sim: it is a dev-dependency only. Mirrors hertzforge-random's
+# service deps (shared infra in capture).
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db", optional = true }
+hertzforge-engine = { path = "../hertzforge-engine", optional = true }
+hertzforge-hal = { path = "../hertzforge-hal", optional = true }
+hertzforge-channel-table = { path = "../hertzforge-channel-table", optional = true }
+hertzforge-capture = { path = "../hertzforge-capture", optional = true }
+# The loop-owner resolver (`resolve_loop`), consulted at arm(): Sine is a
+# closed-loop HOST module and must hard-refuse a backend that closes its own loop.
+hertzforge-module-abi = { path = "../hertzforge-module-abi", optional = true }
+
+[features]
+# The run service (`service`) and the feasibility assessment: on by default.
+# Off, the crate is the profile, the control core, the schedulers and the law
+# seam, which is what a control law built to WebAssembly links.
+default = ["service"]
+service = [
+    "dep:hertzforge-shaker-db",
+    "dep:hertzforge-engine",
+    "dep:hertzforge-hal",
+    "dep:hertzforge-channel-table",
+    "dep:hertzforge-capture",
+    "dep:hertzforge-module-abi",
+]
 
 [dev-dependencies]
 # The Sim e2e acceptance fixtures drive the service against the SimBackend

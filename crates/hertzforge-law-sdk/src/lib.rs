@@ -1,6 +1,9 @@
-//! Write a Random control law for Hertzforge: single-output ([`RandomLaw`],
-//! [`export_law!`]) or multiple-output ([`RandomMimoLaw`], [`export_mimo_law!`],
-//! the [`mimo`] module).
+//! Write a control law for Hertzforge: single-output Random ([`RandomLaw`],
+//! [`export_law!`]), multiple-output Random ([`RandomMimoLaw`],
+//! [`export_mimo_law!`], the [`mimo`] module), classical and SRS shock
+//! ([`shock`], [`srs`]), single-output Sine ([`SineSingleLaw`],
+//! [`export_sine_law!`], the [`sine`] module) or time waveform replication
+//! ([`TwrSingleLaw`], [`export_twr_law!`], the [`twr`] module).
 //!
 //! A law is a Rust library crate built to a WebAssembly component:
 //!
@@ -113,11 +116,73 @@ pub mod __shock_bindings {
     });
 }
 
+/// The generated bindings of the `shock-srs` world. Not a stable API: use
+/// [`srs`]. The shared `types` interface is the one [`__bindings`] generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __srs_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "shock-srs",
+        pub_export_macro: true,
+        export_macro_name: "__export_shock_srs",
+        default_bindings_module: "hertzforge_law_sdk::__srs_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
+/// The generated bindings of the `sine-single` world. Not a stable API: use
+/// [`sine`]. The shared `types` interface is the one [`__bindings`] generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __sine_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "sine-single",
+        pub_export_macro: true,
+        export_macro_name: "__export_sine_single",
+        default_bindings_module: "hertzforge_law_sdk::__sine_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
+/// The generated bindings of the `twr-single` world. Not a stable API: use
+/// [`twr`]. The shared `types` interface is the one [`__bindings`] generated
+/// and the plant's `classical-types` the one [`__shock_bindings`] generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __twr_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "twr-single",
+        pub_export_macro: true,
+        export_macro_name: "__export_twr_single",
+        default_bindings_module: "hertzforge_law_sdk::__twr_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+            "hertzforge:control-law/classical-types@0.1.0": hertzforge_law_sdk::__shock_bindings::hertzforge::control_law::classical_types,
+        },
+    });
+}
+
 pub mod mimo;
 pub mod shock;
+pub mod sine;
+pub mod srs;
+pub mod twr;
 
 pub use mimo::{MimoLawResource, RandomMimoLaw};
 pub use shock::{ClassicalLawResource, ShockClassicalLaw};
+pub use sine::{SineLawResource, SineSingleLaw};
+pub use srs::{ShockSrsLaw, SrsLawResource};
+pub use twr::{TwrLawResource, TwrSingleLaw};
 
 use __bindings::exports::hertzforge::control_law::random_single_law as wit_law;
 
@@ -341,6 +406,84 @@ macro_rules! export_classical_law {
 
         $crate::__shock_bindings::__export_shock_classical!(
             __HertzforgeClassicalLawExport with_types_in $crate::__shock_bindings
+        );
+    };
+}
+
+/// Export a [`TwrSingleLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_twr_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeTwrLawExport;
+
+        impl $crate::__twr_bindings::Guest for __HertzforgeTwrLawExport {
+            fn describe() -> $crate::Manifest {
+                <$law as $crate::TwrSingleLaw>::describe()
+            }
+        }
+
+        impl $crate::__twr_bindings::exports::hertzforge::control_law::twr_single_law::Guest
+            for __HertzforgeTwrLawExport
+        {
+            type Law = $crate::TwrLawResource<$law>;
+        }
+
+        $crate::__twr_bindings::__export_twr_single!(
+            __HertzforgeTwrLawExport with_types_in $crate::__twr_bindings
+        );
+    };
+}
+
+/// Export a [`ShockSrsLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_srs_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeSrsLawExport;
+
+        impl $crate::__srs_bindings::Guest for __HertzforgeSrsLawExport {
+            fn describe() -> $crate::Manifest {
+                <$law as $crate::ShockSrsLaw>::describe()
+            }
+        }
+
+        impl $crate::__srs_bindings::exports::hertzforge::control_law::shock_srs_law::Guest
+            for __HertzforgeSrsLawExport
+        {
+            type Law = $crate::SrsLawResource<$law>;
+        }
+
+        $crate::__srs_bindings::__export_shock_srs!(
+            __HertzforgeSrsLawExport with_types_in $crate::__srs_bindings
+        );
+    };
+}
+
+/// Export a [`SineSingleLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_sine_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeSineLawExport;
+
+        impl $crate::__sine_bindings::Guest for __HertzforgeSineLawExport {
+            fn describe() -> $crate::sine::SineManifest {
+                <$law as $crate::SineSingleLaw>::describe()
+            }
+        }
+
+        impl $crate::__sine_bindings::exports::hertzforge::control_law::sine_single_law::Guest
+            for __HertzforgeSineLawExport
+        {
+            type Law = $crate::SineLawResource<$law>;
+        }
+
+        $crate::__sine_bindings::__export_sine_single!(
+            __HertzforgeSineLawExport with_types_in $crate::__sine_bindings
         );
     };
 }

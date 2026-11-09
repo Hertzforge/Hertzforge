@@ -1,0 +1,253 @@
+{
+ "type": "response",
+ "id": 83,
+ "result": {
+  "derived": {
+   "grid": {
+    "fs_hz": 12800,
+    "record_len": 4096,
+    "df_hz": 3.125,
+    "record_s": 0.32,
+    "section_start": 512,
+    "section_len": 2048,
+    "actual": false
+   },
+   "section": {
+    "peak": 0.254232,
+    "rms": 0.14249,
+    "duration_s": 0.16
+   },
+   "kinematics": {
+    "peak_accel": 0.254232,
+    "peak_velocity_ips": 0.0902058,
+    "disp_pkpk_in": 0.000781673,
+    "kinematics_hp_hz": 5
+   },
+   "coverage": {
+    "band_hz": [
+     20,
+     2000
+    ],
+    "ref_floor_db": 50,
+    "fraction": 0.999267,
+    "error_floor_pct": 2.708
+   },
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The section at full level is within its kinematic ceilings.",
+    "checks": [
+     {
+      "name": "disp_pkpk_in",
+      "value": 0.000781673,
+      "limit": 1,
+      "pass": true
+     }
+    ]
+   }
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Section",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Reference",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        7.8125e-05,
+        0.00015625,
+        0.000234375
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        0.25,
+        0.5,
+        0.25
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Spectrum",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Magnitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        0.0,
+        3200.0,
+        6400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        0.0,
+        1.0,
+        0.5
+       ]
+      }
+     },
+     {
+      "name": "Reference floor",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        20.0,
+        2000.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.003125,
+        0.003125
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Velocity",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Velocity",
+     "unit": "in/s",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Velocity",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        7.8125e-05,
+        0.00015625,
+        0.000234375
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        0.5,
+        1.5,
+        2.0
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Displacement",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Displacement",
+     "unit": "in",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Displacement",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        7.8125e-05,
+        0.00015625,
+        0.000234375
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        0.0625,
+        0.25,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

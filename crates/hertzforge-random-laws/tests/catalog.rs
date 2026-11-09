@@ -457,3 +457,193 @@ fn classical_shock_laws_have_their_own_list_the_built_in_first() {
     ));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn srs_shock_laws_have_their_own_list_the_built_in_first() {
+    assert_eq!(LawWorld::ShockSrs.as_str(), "shock_srs");
+    assert_eq!(LawWorld::ShockSrs.test_type(), "SRS shock");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-srs-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut cat = open(&root);
+    let list = cat.entries_for(LawWorld::ShockSrs);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "srs_ratio");
+    assert_eq!(list[0].world, LawWorld::ShockSrs);
+    assert_eq!(
+        list[0].manifest,
+        hertzforge_random_laws::srs_builtin_manifest()
+    );
+    assert_eq!(cat.entry("srs_ratio").unwrap().world, LawWorld::ShockSrs);
+
+    // An imported SRS law file lists with the SRS laws only.
+    let entry = cat
+        .import(&law_file("hertzforge_law_shock_srs_ratio"))
+        .expect("the SRS law file imports");
+    assert_eq!(entry.world, LawWorld::ShockSrs);
+    let ids: Vec<String> = cat.shock_srs_entries().into_iter().map(|e| e.id).collect();
+    assert_eq!(ids, ["srs_ratio".to_string(), entry.id.clone()]);
+    assert!(cat.srs_law(&entry.id).is_some());
+    assert!(cat.classical_law(&entry.id).is_none());
+    assert!(!cat
+        .shock_classical_entries()
+        .iter()
+        .any(|e| e.id == entry.id));
+    // A single-output Random choice of it is refused by its world.
+    let mut cfg = ladder_cfg();
+    assert!(matches!(
+        cat.resolve(&LawChoice::new(entry.id.clone(), Vec::new()), &mut cfg),
+        Err(ChoiceError::WrongTestType {
+            law_is_for: "SRS shock",
+            ..
+        })
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_sine_world_lists_its_built_in_first_with_its_live_parameters() {
+    assert_eq!(LawWorld::Sine.as_str(), "sine");
+    assert_eq!(LawWorld::Sine.test_type(), "Sine");
+    let root = std::env::temp_dir().join(format!(
+        "hertzforge-random-laws-sine-world-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut cat = open(&root);
+    let sine = cat.entries_for(LawWorld::Sine);
+    assert_eq!(sine, cat.sine_entries());
+    assert_eq!(sine.len(), 1, "the built-in alone in an empty catalog");
+    let b = &sine[0];
+    assert_eq!((b.id.as_str(), b.builtin), ("servo_blend", true));
+    assert_eq!(b.identity.name, "Servo blend");
+    assert_eq!(b.live, vec!["blend_w".to_string()]);
+    let keys: Vec<&str> = b.manifest.params.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["blend_w", "compression", "ki", "max_rate_db_per_s", "kp"]
+    );
+    assert_eq!(b.manifest.diagnostics.len(), 4);
+    assert_eq!(cat.entry("servo_blend").as_ref(), Some(b));
+    // No other world's list gains or loses anything, and only Sine lists live
+    // parameters.
+    assert!(cat
+        .entries()
+        .iter()
+        .chain(cat.mimo_entries().iter())
+        .chain(cat.shock_classical_entries().iter())
+        .chain(cat.shock_srs_entries().iter())
+        .all(|e| e.world != LawWorld::Sine && e.live.is_empty()));
+
+    // An imported Sine law file lists after the built-in, with its own live
+    // parameters, and a single-output Random choice of it is refused.
+    let entry = cat
+        .import(&law_file("law_fixture_sine_template"))
+        .expect("the Sine law file imports");
+    assert_eq!(entry.world, LawWorld::Sine);
+    assert_eq!(entry.live, vec!["ki".to_string()]);
+    let ids: Vec<String> = cat.sine_entries().into_iter().map(|e| e.id).collect();
+    assert_eq!(ids, ["servo_blend".to_string(), entry.id.clone()]);
+    assert!(cat.sine_law(&entry.id).is_some());
+    assert!(cat.srs_law(&entry.id).is_none());
+    let mut cfg = ladder_cfg();
+    assert!(matches!(
+        cat.resolve(&LawChoice::new(entry.id.clone(), Vec::new()), &mut cfg),
+        Err(ChoiceError::WrongTestType {
+            law_is_for: "Sine",
+            ..
+        })
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_twr_world_lists_its_built_in_first_then_its_files() {
+    assert_eq!(LawWorld::Twr.as_str(), "twr");
+    assert_eq!(LawWorld::Twr.test_type(), "TWR");
+    let scratch = Scratch::new("catalog-twr");
+    let mut cat = open(scratch.path());
+    let twr = cat.twr_entries();
+    assert_eq!(twr.len(), 1);
+    let b = &twr[0];
+    assert_eq!(b.id, "twr_correct");
+    assert!(b.builtin);
+    assert_eq!(b.world, LawWorld::Twr);
+    assert_eq!(b.manifest, hertzforge_random_laws::twr_builtin_manifest());
+    assert_eq!(cat.entries_for(LawWorld::Twr), twr);
+    assert_eq!(cat.entry("twr_correct").unwrap(), *b);
+    let file = cat.import(&law_file("law_fixture_twr_template")).unwrap();
+    assert_eq!(file.world, LawWorld::Twr);
+    let twr = cat.twr_entries();
+    assert_eq!(twr.len(), 2);
+    assert_eq!(twr[0].id, "twr_correct", "the built-in first");
+    assert_eq!(twr[1].id, file.id);
+    assert!(cat.twr_law(&file.id).is_some());
+    assert!(
+        cat.twr_law("twr_correct").is_none(),
+        "the built-in is no file"
+    );
+    // No other world's list gains or loses anything.
+    assert!(cat
+        .entries()
+        .iter()
+        .chain(cat.mimo_entries().iter())
+        .chain(cat.shock_classical_entries().iter())
+        .chain(cat.shock_srs_entries().iter())
+        .chain(cat.sine_entries().iter())
+        .all(|e| e.world != LawWorld::Twr));
+}
+
+/// A TWR file is cleared for hardware only by a passing record of the check in
+/// force; a record of an earlier check does not clear it. Another world's
+/// record is not held to its version.
+#[test]
+fn a_twr_record_clears_a_file_only_at_the_check_in_force() {
+    let scratch = Scratch::new("catalog-twr-check");
+    let mut cat = open(scratch.path());
+    let law = cat.import(&law_file("law_fixture_twr_template")).unwrap();
+    assert_eq!(may_arm_on_hardware(&law), Err(ArmRefusal::Unchecked));
+    let case = CheckCase {
+        name: "flat".into(),
+        passed: true,
+        detail: String::new(),
+    };
+    let old = CheckRecord::new(
+        law.id.clone(),
+        "twr-check 0",
+        "2026-11-08T17:00:00Z",
+        vec![case.clone()],
+    );
+    cat.record_check(&old).unwrap();
+    match may_arm_on_hardware(&cat.entry(&law.id).unwrap()) {
+        Err(ArmRefusal::CheckOutdated {
+            tool_version,
+            current,
+        }) => {
+            assert_eq!(tool_version, "twr-check 0");
+            assert_eq!(current, hertzforge_random_laws::TWR_CHECK_VERSION);
+        }
+        other => panic!("{other:?}"),
+    }
+    let now = CheckRecord::new(
+        law.id.clone(),
+        hertzforge_random_laws::TWR_CHECK_VERSION,
+        "2026-11-08T18:00:00Z",
+        vec![case.clone()],
+    );
+    cat.record_check(&now).unwrap();
+    assert_eq!(may_arm_on_hardware(&cat.entry(&law.id).unwrap()), Ok(()));
+
+    // A Sine file passed under any version still clears (unchanged).
+    let sine = cat.import(&law_file("law_fixture_sine_template")).unwrap();
+    let rec = CheckRecord::new(
+        sine.id.clone(),
+        "sine-check 1",
+        "2026-11-08T19:00:00Z",
+        vec![case],
+    );
+    cat.record_check(&rec).unwrap();
+    assert_eq!(may_arm_on_hardware(&cat.entry(&sine.id).unwrap()), Ok(()));
+}

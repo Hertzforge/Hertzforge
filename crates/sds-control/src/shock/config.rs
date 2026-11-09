@@ -249,13 +249,13 @@ pub fn round(x: f64, digits: i32) -> f64 {
 // Parsing: types and structure. Content problems are items, not parse errors.
 // ---------------------------------------------------------------------------------
 
-struct Obj<'a> {
-    m: &'a Map<String, Value>,
-    path: String,
+pub(crate) struct Obj<'a> {
+    pub(crate) m: &'a Map<String, Value>,
+    pub(crate) path: String,
 }
 
 impl<'a> Obj<'a> {
-    fn of(v: &'a Value, path: &str) -> Result<Obj<'a>, MethodError> {
+    pub(crate) fn of(v: &'a Value, path: &str) -> Result<Obj<'a>, MethodError> {
         v.as_object()
             .map(|m| Obj {
                 m,
@@ -265,18 +265,18 @@ impl<'a> Obj<'a> {
     }
 
     /// `None` when `k` is absent or null.
-    fn opt_obj(&self, k: &str) -> Result<Option<Obj<'a>>, MethodError> {
+    pub(crate) fn opt_obj(&self, k: &str) -> Result<Option<Obj<'a>>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(v) => Obj::of(v, &self.at(k)).map(Some),
         }
     }
 
-    fn at(&self, k: &str) -> String {
+    pub(crate) fn at(&self, k: &str) -> String {
         format!("{}.{k}", self.path)
     }
 
-    fn require(&self, k: &str) -> Result<&'a Value, MethodError> {
+    pub(crate) fn require(&self, k: &str) -> Result<&'a Value, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Err(MethodError::bad_params(
                 &self.at(k),
@@ -286,11 +286,11 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn obj(&self, k: &str) -> Result<Obj<'a>, MethodError> {
+    pub(crate) fn obj(&self, k: &str) -> Result<Obj<'a>, MethodError> {
         Obj::of(self.require(k)?, &self.at(k))
     }
 
-    fn opt_f64(&self, k: &str) -> Result<Option<f64>, MethodError> {
+    pub(crate) fn opt_f64(&self, k: &str) -> Result<Option<f64>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(v) => v
@@ -306,19 +306,19 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn f64(&self, k: &str) -> Result<f64, MethodError> {
+    pub(crate) fn f64(&self, k: &str) -> Result<f64, MethodError> {
         self.opt_f64(k)?.ok_or_else(|| {
             MethodError::bad_params(&self.at(k), format!("\"{}\" must be a number", self.at(k)))
         })
     }
 
-    fn f64_or(&self, k: &str, default: f64) -> Result<f64, MethodError> {
+    pub(crate) fn f64_or(&self, k: &str, default: f64) -> Result<f64, MethodError> {
         Ok(self.opt_f64(k)?.unwrap_or(default))
     }
 
     /// A whole number from 0. Fractions and negatives are `bad_params`; a size out
     /// of range is an item.
-    fn opt_count(&self, k: &str) -> Result<Option<u64>, MethodError> {
+    pub(crate) fn opt_count(&self, k: &str) -> Result<Option<u64>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(v) => v
@@ -338,7 +338,7 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn opt_bool(&self, k: &str) -> Result<Option<bool>, MethodError> {
+    pub(crate) fn opt_bool(&self, k: &str) -> Result<Option<bool>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(Value::Bool(b)) => Ok(Some(*b)),
@@ -349,7 +349,7 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn opt_str(&self, k: &str) -> Result<Option<&'a str>, MethodError> {
+    pub(crate) fn opt_str(&self, k: &str) -> Result<Option<&'a str>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(Value::String(s)) => Ok(Some(s)),
@@ -360,7 +360,7 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn array(&self, k: &str) -> Result<Option<&'a Vec<Value>>, MethodError> {
+    pub(crate) fn array(&self, k: &str) -> Result<Option<&'a Vec<Value>>, MethodError> {
         match self.m.get(k) {
             None | Some(Value::Null) => Ok(None),
             Some(Value::Array(a)) => Ok(Some(a)),
@@ -372,7 +372,7 @@ impl<'a> Obj<'a> {
     }
 
     /// `[low, high]` in Hz.
-    fn band(&self, k: &str) -> Result<Option<(f64, f64)>, MethodError> {
+    pub(crate) fn band(&self, k: &str) -> Result<Option<(f64, f64)>, MethodError> {
         let Some(a) = self.array(k)? else {
             return Ok(None);
         };
@@ -391,7 +391,7 @@ impl<'a> Obj<'a> {
     }
 
     /// One of `names`, or `default` when absent.
-    fn choice<T: Copy>(
+    pub(crate) fn choice<T: Copy>(
         &self,
         k: &str,
         names: &[(&str, T)],

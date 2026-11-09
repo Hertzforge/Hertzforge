@@ -46,7 +46,7 @@ def test_every_mimo_text_golden_is_checked_here():
     # The Rust, TypeScript and Python suites read the same files in schema/golden/.
     names = {p.stem for p in GOLDEN.glob('*.json')
              if ('mimo_random' in p.stem or '_laws_' in p.stem)
-             and 'shock' not in p.stem
+             and 'shock' not in p.stem and 'sine' not in p.stem and 'twr' not in p.stem
              and not p.name.endswith('.expected.json')}
     names.add('response_error_setup_invalid')
     assert names == set(PAYLOADS), sorted(names ^ set(PAYLOADS))

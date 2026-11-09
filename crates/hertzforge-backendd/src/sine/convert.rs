@@ -214,6 +214,10 @@ pub fn config_from_wire(w: SineWireProfile) -> Result<SineTestConfig, ProtocolEr
                 value: m.value,
             })
             .collect(),
+        // This host has no control-law seam: its runs are the servo and blend
+        // with their own clamp, as they always were.
+        law_guards: None,
+        control_tick_s: None,
     };
 
     // The core's own validator is the authority on every numeric rule (row
@@ -377,7 +381,15 @@ mod roundtrip {
             fs_hz,
             review_hold,
             metadata,
+            law_guards,
+            control_tick_s,
         } = c;
+        // The wire mirror has no law seam, so neither crosses; a config that
+        // set one would not survive the round trip, and this says so.
+        assert!(
+            law_guards.is_none() && control_tick_s.is_none(),
+            "the daemon's wire carries no law guards and no tick in seconds"
+        );
         SineWireProfile {
             schema_version: PROFILE_SCHEMA,
             profile: wire_profile(profile),
@@ -738,6 +750,8 @@ mod roundtrip {
                     value: "fixture only".into(),
                 },
             ],
+            law_guards: None,
+            control_tick_s: None,
         }
     }
 

@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::control::TwrControl;
 use crate::inverse::InverseConfig;
 use crate::law::LawConfig;
 use crate::limits::TwrLimits;
@@ -118,6 +119,15 @@ pub struct TwrConfig {
     pub review_after_sysid: bool,
     pub capture: CaptureRules,
     pub metadata: Vec<MetaField>,
+    /// The closed loop under a changeable control law: the guards, the
+    /// per-call caps, the first-drive bound, the alignment check and the
+    /// at-rest taper ([`TwrControl`]). `None` is the iteration this crate has
+    /// always run, kept for the old daemon host, the module sweep and the
+    /// recorded trace; the control service always sets it. Left out of the
+    /// serialized settings when `None`, so a record written before it existed
+    /// reads unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<TwrControl>,
 }
 
 /// The serde default for [`TwrConfig::review_after_sysid`]: `true`.
@@ -171,6 +181,7 @@ impl TwrConfig {
                     value: String::new(),
                 },
             ],
+            control: None,
         }
     }
 
@@ -224,6 +235,9 @@ impl TwrConfig {
         }
         if self.capture.run_name.is_empty() {
             return Err(TwrError::Config("capture run_name is empty".into()));
+        }
+        if let Some(control) = &self.control {
+            control.validate()?;
         }
         Ok(())
     }

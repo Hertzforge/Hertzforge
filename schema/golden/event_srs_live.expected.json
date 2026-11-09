@@ -1,0 +1,25 @@
+{
+ "type": "event",
+ "topic": "srs.live",
+ "seq": 149,
+ "data": {
+  "run_id": "srs-0004",
+  "source": "SIM",
+  "state": "running",
+  "phase": "firing",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 1,
+  "pulses": {
+   "fired": 3,
+   "passed": 2,
+   "at_level": 1,
+   "of_level": 2
+  },
+  "next_pulse_s": null,
+  "fire": {
+   "done": 4096,
+   "of": 14336
+  }
+ }
+}

@@ -136,6 +136,9 @@ async fn auto_with_the_default_law_completes_inside_the_standard() {
         assert!(r["error_pct"].as_f64().unwrap() <= 5.0, "{r}");
         assert!(r["drive_vpk"].as_f64().unwrap() > 0.0);
     }
+    // The finished run's count of passing pulses is its rows'.
+    let passed = rows.iter().filter(|r| r["passed"] == true).count();
+    assert_eq!(end["pulses"]["passed"], passed, "{end}");
 }
 
 /// MANUAL fire, two steps, a rung, two fires, an early fire refused, Stop.

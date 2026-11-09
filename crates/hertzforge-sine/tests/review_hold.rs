@@ -99,6 +99,8 @@ fn cfg(coherence_floor: f64, review_hold: bool) -> SineTestConfig {
         control_tick_frames: 64,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 

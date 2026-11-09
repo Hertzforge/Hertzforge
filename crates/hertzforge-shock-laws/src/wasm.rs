@@ -131,7 +131,7 @@ impl WasmClassicalLawFactory {
     }
 }
 
-fn params_json(params: &[Param]) -> serde_json::Value {
+pub(crate) fn params_json(params: &[Param]) -> serde_json::Value {
     let mut m = serde_json::Map::new();
     for p in params {
         let v = match &p.value {

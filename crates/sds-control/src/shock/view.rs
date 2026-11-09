@@ -513,7 +513,13 @@ pub fn time_axis(start: i64, n: usize, fs_hz: f64) -> Vec<f64> {
 
 /// A time series, decimated to at most `points` as an envelope (each point the
 /// largest and smallest value in its interval) when it is longer.
-fn time_series(name: &str, role: Role, t: Vec<f64>, y: &[f64], points: Option<usize>) -> Series {
+pub fn time_series(
+    name: &str,
+    role: Role,
+    t: Vec<f64>,
+    y: &[f64],
+    points: Option<usize>,
+) -> Series {
     match points {
         Some(p) if p >= 2 && y.len() > p => {
             let n = y.len();
