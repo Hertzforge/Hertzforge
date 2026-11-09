@@ -651,6 +651,10 @@ impl WireRecorder {
                 .frf
                 .and_then(|(x, y)| Some((column(x)?, column(y)?))),
             metadata: self.metadata.clone(),
+            // The floor asked, which the core keeps while the run records (its own least,
+            // 1 GiB, otherwise; the derived floor is the larger of this and twice a timed
+            // recording, as the core's is).
+            keep_free_bytes: Some((self.keep_free_gb * GIB).round().max(0.0) as u64),
             ..RecorderConfig::default()
         }
     }
