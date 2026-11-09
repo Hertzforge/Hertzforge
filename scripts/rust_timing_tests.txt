@@ -305,3 +305,24 @@ sds-control  test:explorer_sim_run  explorer_sim_4_a_level_during_the_stop_is_re
 sds-control  test:explorer_sim_run  explorer_sim_5_a_lost_controller_and_a_shutdown_end_in_the_safe_stop
 sds-control  test:explorer_sim_run  explorer_sim_7_an_accel_limit_aborts_by_the_watchdog
 sds-control  test:explorer_sim_run  explorer_sim_8_a_simulation_run_and_an_explorer_run_exclude_each_other
+
+# Recorder: the core's guards that run a recording on the wall clock (the reading thread kept off
+# the disk, the free-space floor, falling behind the disk, the holdoff in station time, a limit
+# crossing marked), the service's simulated runs paced to the wall clock, and the wire's rules and
+# run folder on polling deadlines
+hertzforge-recorder  test:recorder_guards  recorder_the_reading_thread_never_touches_the_disk
+hertzforge-recorder  test:recorder_guards  recorder_the_free_space_floor_ends_the_run_and_says_so
+hertzforge-recorder  test:recorder_guards  recorder_falling_behind_the_disk_ends_the_run
+hertzforge-recorder  test:recorder_guards  recorder_holdoff_counts_station_time_from_the_trigger
+hertzforge-recorder  test:recorder_guards  recorder_a_limit_crossing_is_marked_and_recording_goes_on
+sds-control  test:recorder_sim_run  recorder_sim_records_from_the_first_frame_in_start_mode
+sds-control  test:recorder_sim_run  recorder_sim_manual_recordings_carry_their_pre_windows
+sds-control  test:recorder_sim_run  recorder_sim_level_trigger_records_at_the_markers
+sds-control  test:recorder_sim_run  recorder_sim_refuses_a_start_under_the_floor
+sds-control  test:recorder_sim_run  recorder_sim_a_lost_controller_and_a_shutdown_end_safely
+sds-control  test:recorder_sim_run  recorder_sim_an_observer_may_abort_but_not_record
+sds-control  test:recorder_sim_run  recorder_sim_limits_are_marks_and_the_recording_runs_on
+sds-control  test:recorder_sim_run  recorder_sim_runs_exclude_each_other_and_shutdown_refuses_starts
+sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every_state_and_mode
+sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
+sds-control  test:recorder_records  recorder_run_folder_holds_its_records

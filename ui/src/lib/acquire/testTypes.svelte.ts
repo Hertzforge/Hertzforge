@@ -75,7 +75,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: false },
 	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
 	{ id: 'mimo_twr', group: 'mimo', title: 'MIMO TWR', summary: 'Recorded signals reproduced at several control points at once, from several shakers.', ready: false },
-	{ id: 'recorder', group: 'acquisition', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: false }
+	{ id: 'recorder', group: 'acquisition', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: true }
 ];
 
 /** The test types under each section of the chooser, in order. */
