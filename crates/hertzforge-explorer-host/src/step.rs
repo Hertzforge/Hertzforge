@@ -485,9 +485,15 @@ impl ExplorerProcessStep {
     /// Start (or re-aim) a sweep. `rate_oct_per_min` is taken as a magnitude; the
     /// direction carries the sign. Starting a sweep clears any halt, so the operator can
     /// walk a parked tone off a band edge by sweeping the other way.
+    ///
+    /// The rate is held to the frequency slew, 60 times `freq_oct_per_s` in octaves per
+    /// minute, and [`Self::sweep`] states the rate used. A faster target would run ahead
+    /// of a tone the slew holds back, and a hold would then leave the tone travelling on
+    /// toward wherever the target had got to.
     pub fn start_sweep(&mut self, direction: SweepDirection, rate_oct_per_min: f64) {
+        let ceiling = 60.0 * self.slew.freq_oct_per_s.max(0.0);
         let rate = if rate_oct_per_min.is_finite() {
-            rate_oct_per_min.abs()
+            rate_oct_per_min.abs().min(ceiling)
         } else {
             0.0
         };
@@ -505,8 +511,13 @@ impl ExplorerProcessStep {
     }
 
     /// Stop the sweep. The tone stays exactly where it is (taking over
-    /// must never move the shaker).
+    /// must never move the shaker): a sweep still moving the tone leaves its target at the
+    /// tone. A sweep already halted by a click keeps the click's target, which is where
+    /// the operator put the tone.
     pub fn stop_sweep(&mut self) {
+        if self.sweep.is_some_and(|s| !s.halted) && !self.jump_pending {
+            self.target_freq_hz = self.freq_hz;
+        }
         self.sweep = None;
         self.sweep_oct_per_frame = 0.0;
     }
