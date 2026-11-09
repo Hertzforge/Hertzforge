@@ -261,6 +261,11 @@ impl TriggerEngine {
         self.ring.capacity_frames()
     }
 
+    /// The frames the pre-window holds now.
+    pub fn pre_frames_held(&self) -> usize {
+        self.ring.len_frames()
+    }
+
     /// Frames consumed so far across all feeds.
     pub fn global_frame(&self) -> u64 {
         self.global_frame

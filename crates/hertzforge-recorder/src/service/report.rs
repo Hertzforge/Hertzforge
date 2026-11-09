@@ -65,6 +65,9 @@ pub struct ChannelMeter {
 pub struct FrfSnapshot {
     /// `|H1|` per bin (magnitude of the default estimator).
     pub h1_mag: Vec<f64>,
+    /// The phase of H1 per bin, degrees, in (-180, 180].
+    #[serde(default)]
+    pub h1_phase_deg: Vec<f64>,
     /// Ordinary coherence per bin (only meaningful when `valid`).
     pub coherence: Vec<f64>,
     /// True once at least two averages have completed (the single-average
@@ -135,6 +138,52 @@ pub struct RecStatus {
     /// The one-line basis for whatever the watchdog policy decided, verbatim.
     #[serde(default)]
     pub watchdog_basis: String,
+    /// The rate asked of the station, Hz.
+    #[serde(default)]
+    pub requested_fs_hz: f64,
+    /// The rate the station programmed once it is up (the rate asked until then), Hz.
+    #[serde(default)]
+    pub fs_hz: f64,
+    /// Frames the station has delivered since start (station frames).
+    #[serde(default)]
+    pub station_frames: u64,
+    /// Batches read since start.
+    #[serde(default)]
+    pub batches: u64,
+    /// The analysis pass's last time, ms (null before the first pass).
+    #[serde(default)]
+    pub pass_ms_last: Option<f64>,
+    /// The analysis pass's worst time, ms (null before the first pass).
+    #[serde(default)]
+    pub pass_ms_worst: Option<f64>,
+    /// The longest gap between the end of one batch's read and the start of the
+    /// next, ms (null until two batches have run).
+    #[serde(default)]
+    pub batch_gap_ms_max: Option<f64>,
+    /// Trigger fires since start, every mode (held: never reset by a later pass).
+    #[serde(default)]
+    pub trigger_fires: u64,
+    /// The station frame of the last trigger (null before one).
+    #[serde(default)]
+    pub last_fire_station_frame: Option<u64>,
+    /// The frames the pre-window holds now.
+    #[serde(default)]
+    pub pre_frames_held: u64,
+    /// The pre-window asked, frames.
+    #[serde(default)]
+    pub pre_frames_asked: u64,
+    /// Recordings finished since start.
+    #[serde(default)]
+    pub recordings_saved: u64,
+    /// Frames handed to the recording in progress (its pre-window included).
+    #[serde(default)]
+    pub frames_fed: u64,
+    /// Frames of the recording in progress on disk.
+    #[serde(default)]
+    pub frames_on_disk: u64,
+    /// The writer's fault in its own words, if writing has failed.
+    #[serde(default)]
+    pub write_fault: Option<String>,
 }
 
 /// A single event in the recorder log: a monotonic session-second timestamp +

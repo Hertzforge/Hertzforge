@@ -55,8 +55,9 @@ use crate::analysis::{
     TimeStatsAccumulator,
 };
 use crate::recording::{
-    recorder_disk_budget_seconds, RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter,
+    recorder_disk_budget_seconds, RecordingInfo, RecordingReader, RecordingSummary,
 };
+use crate::store::{RecordStore, RecordingSpec, WriterStore};
 use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
 pub use config::{MetaField, RecState, RecorderConfig};
@@ -270,8 +271,10 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// The trigger engine (active while Armed/Recording).
     trigger: Option<TriggerEngine>,
 
-    /// The active recording writer.
-    writer: Option<RecordingWriter>,
+    /// What writes the recordings (the crate's writer unless a test supplies one).
+    store: Box<dyn RecordStore>,
+    /// Whether a recording is in progress in the store.
+    recording: bool,
     /// Frames written to the active recording.
     record_frames: u64,
     /// Target frames for a timed recording (`None` = manual stop).
@@ -297,6 +300,21 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     run_counter: u32,
     /// The name of the active recording's run directory (for status).
     active_run_name: Option<String>,
+
+    /// Batches (engine calls) read so far.
+    batches: u64,
+    /// The analysis pass's last and worst time.
+    pass_last: Option<std::time::Duration>,
+    pass_worst: Option<std::time::Duration>,
+    /// When the last batch's read ended, and the longest gap from there to the next
+    /// batch's read.
+    last_batch_end: Option<std::time::Instant>,
+    batch_gap_max: Option<std::time::Duration>,
+    /// Trigger fires since start, and the station frame of the last.
+    trigger_fires: u64,
+    last_fire_station_frame: Option<u64>,
+    /// Recordings finished since start.
+    recordings_saved: u64,
 
     /// How many [`StopReason::SchedulingFault`] retries this session has taken.
     ///
@@ -458,7 +476,8 @@ impl<B: Backend> RecorderService<B> {
             analysis,
             frf,
             trigger: None,
-            writer: None,
+            store: Box::new(WriterStore::default()),
+            recording: false,
             record_frames: 0,
             record_target_frames: None,
             record_gap_free: true,
@@ -470,6 +489,14 @@ impl<B: Backend> RecorderService<B> {
             rearms_remaining: 0,
             run_counter: 0,
             active_run_name: None,
+            batches: 0,
+            pass_last: None,
+            pass_worst: None,
+            last_batch_end: None,
+            batch_gap_max: None,
+            trigger_fires: 0,
+            last_fire_station_frame: None,
+            recordings_saved: 0,
             scheduling_faults: 0,
         })
     }
@@ -479,6 +506,13 @@ impl<B: Backend> RecorderService<B> {
     /// that this reads `0` after >= 30 minutes.
     pub fn scheduling_faults(&self) -> u64 {
         self.scheduling_faults
+    }
+
+    /// Put another record store behind the seam (a test double, or a writer with
+    /// other settings). Must be set before a recording begins.
+    pub fn with_store(mut self, store: Box<dyn RecordStore>) -> Self {
+        self.store = store;
+        self
     }
 
     /// Request a specific acquisition block (frames per `read_input`) at
@@ -583,13 +617,15 @@ impl<B: Backend> RecorderService<B> {
             .as_mut()
             .map(|t| t.manual_fire())
             .filter(|ev| ev.pretrigger_frames > 0);
+        self.trigger_fires += 1;
+        self.last_fire_station_frame = Some(self.session_frames);
         self.begin_recording(pretrigger)
     }
 
     /// Stop the monitor loop entirely -> Stopped. Finalizes any active
     /// recording and tears the backend down.
     pub fn stop_monitor(&mut self) -> Result<(), RecorderError> {
-        if self.writer.is_some() {
+        if self.recording {
             self.finish_recording()?;
         }
         self.trigger = None;
@@ -671,7 +707,7 @@ impl<B: Backend> RecorderService<B> {
     fn fault(&mut self, msg: String) {
         self.log
             .push(self.session_seconds(), format!("FAULT: {msg}"));
-        if self.writer.is_some() {
+        if self.recording {
             let _ = self.finish_recording();
         }
         self.tear_backend_down();
@@ -710,12 +746,18 @@ impl<B: Backend> RecorderService<B> {
             // boundary stopped the NI tasks, the silent re-start below failed,
             // and the next segment stalled against a dead AO (2026-07-30).
             // The service owns the real stop (`tear_backend_down`).
+            if let Some(end) = self.last_batch_end {
+                let gap = end.elapsed();
+                self.batch_gap_max = Some(self.batch_gap_max.map_or(gap, |g| g.max(gap)));
+            }
             let report = engine.run_ticks(
                 &mut self.backend,
                 &mut step as &mut dyn ProcessStep,
                 &mut bridge as &mut dyn EngineCaptureSink,
                 ticks,
             );
+            self.last_batch_end = Some(std::time::Instant::now());
+            self.batches += 1;
             reason = report.reason;
             if matches!(reason, StopReason::SchedulingFault(_)) {
                 // COUNTED even when retried and even on the final attempt: the
@@ -769,14 +811,16 @@ impl<B: Backend> RecorderService<B> {
                 })
             });
             if let Some((ev, local)) = fire {
+                self.trigger_fires += 1;
+                self.last_fire_station_frame = Some(self.session_frames + local as u64);
                 self.begin_recording(Some(ev))?;
                 if local < n {
-                    if let Some(w) = self.writer.as_mut() {
+                    if self.recording {
                         let tail = &interleaved[local * self.n_input..];
                         let tail_frames = n - local;
-                        w.push_frames(tail, tail_frames);
-                        self.record_frames = w.frames_fed();
-                        self.record_gap_free = w.gaps().is_empty();
+                        self.store.push(tail, tail_frames);
+                        self.record_frames += tail_frames as u64;
+                        self.record_gap_free = self.store.gap_free();
                     }
                     if let Some(target) = self.record_target_frames {
                         if self.record_frames >= target {
@@ -787,10 +831,10 @@ impl<B: Backend> RecorderService<B> {
             }
         } else if self.state == RecState::Recording {
             // 3. RECORD path (priority): write every frame.
-            if let Some(w) = self.writer.as_mut() {
-                w.push_frames(interleaved, n);
-                self.record_frames = w.frames_fed();
-                self.record_gap_free = w.gaps().is_empty();
+            if self.recording {
+                self.store.push(interleaved, n);
+                self.record_frames += n as u64;
+                self.record_gap_free = self.store.gap_free();
             }
             if let Some(target) = self.record_target_frames {
                 if self.record_frames >= target {
@@ -799,8 +843,12 @@ impl<B: Backend> RecorderService<B> {
             }
         }
 
-        // 4. Analysis path (ALWAYS; drop-tolerant).
+        // 4. Analysis path (ALWAYS; drop-tolerant), timed.
+        let pass = std::time::Instant::now();
         self.feed_analysis(interleaved, n);
+        let took = pass.elapsed();
+        self.pass_last = Some(took);
+        self.pass_worst = Some(self.pass_worst.map_or(took, |w| w.max(took)));
 
         self.session_frames += n_frames;
         Ok(())
@@ -884,25 +932,22 @@ impl<B: Backend> RecorderService<B> {
         self.run_counter += 1;
         let run_name = format!("rec_{:04}", self.run_counter);
         let pre_frames = pretrigger.as_ref().map_or(0, |e| e.pretrigger_frames);
-        let writer = RecordingWriter::start(
-            &self.data_root,
-            &run_name,
-            &self.cfg.acq,
-            self.record_table.clone(),
-            pretrigger,
-        )
-        .map_err(|e| RecorderError::Io(e.to_string()))?;
-        // The writer's run dir name may differ from the requested name after
-        // sanitize/de-collision; track the real one.
-        let real_name = writer
-            .run_dir()
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or(run_name);
-        self.record_frames = writer.frames_fed();
-        self.record_gap_free = writer.gaps().is_empty();
+        // The store's name may differ from the requested name after sanitize and
+        // de-collision; track the real one.
+        let real_name = self
+            .store
+            .start(RecordingSpec {
+                data_root: self.data_root.clone(),
+                name: run_name,
+                table: self.record_table.clone(),
+                acq: self.cfg.acq.clone(),
+                pretrigger,
+            })
+            .map_err(RecorderError::Io)?;
+        self.recording = true;
+        self.record_frames = pre_frames;
+        self.record_gap_free = self.store.gap_free();
         self.record_pretrigger_frames = pre_frames;
-        self.writer = Some(writer);
         self.active_run_name = Some(real_name.clone());
         self.record_target_frames = self.cfg.timed_record_frames();
         let session_s = self.session_seconds();
@@ -955,12 +1000,12 @@ impl<B: Backend> RecorderService<B> {
 
     /// Finalize the active recording writer, record the session summary + event.
     fn finish_recording(&mut self) -> Result<(), RecorderError> {
-        let Some(writer) = self.writer.take() else {
+        if !self.recording {
             return Ok(());
-        };
-        let summary: RecordingSummary = writer
-            .finish()
-            .map_err(|e| RecorderError::Io(e.to_string()))?;
+        }
+        self.recording = false;
+        let summary: RecordingSummary = self.store.finish().map_err(RecorderError::Io)?;
+        self.recordings_saved += 1;
         let name = summary
             .run_dir
             .file_name()
@@ -1144,6 +1189,35 @@ impl<B: Backend> RecorderService<B> {
             watchdog_armed: self.watchdog.armed,
             limits_disarmed: self.watchdog.disarmed_with_limits,
             watchdog_basis: self.watchdog.basis.clone(),
+            requested_fs_hz: self.cfg.acq.native_rate_hz,
+            fs_hz: self.actual_rate_hz(),
+            station_frames: self.session_frames,
+            batches: self.batches,
+            pass_ms_last: self.pass_last.map(ms),
+            pass_ms_worst: self.pass_worst.map(ms),
+            batch_gap_ms_max: self.batch_gap_max.map(ms),
+            trigger_fires: self.trigger_fires,
+            last_fire_station_frame: self.last_fire_station_frame,
+            pre_frames_held: self
+                .trigger
+                .as_ref()
+                .map_or(0, |t| t.pre_frames_held() as u64),
+            pre_frames_asked: self
+                .trigger
+                .as_ref()
+                .map_or(0, |t| t.ring_capacity_frames() as u64),
+            recordings_saved: self.recordings_saved,
+            frames_fed: if self.recording {
+                self.record_frames
+            } else {
+                0
+            },
+            frames_on_disk: if self.recording {
+                self.store.frames_on_disk()
+            } else {
+                0
+            },
+            write_fault: self.store.fault(),
         }
     }
 
@@ -1170,8 +1244,15 @@ impl<B: Backend> RecorderService<B> {
             .iter()
             .map(|&(re, im)| (re * re + im * im).sqrt())
             .collect();
+        let h1_phase_deg = frf
+            .pipeline
+            .h1()
+            .iter()
+            .map(|&(re, im)| im.atan2(re).to_degrees())
+            .collect();
         Some(FrfSnapshot {
             h1_mag,
+            h1_phase_deg,
             coherence: frf.pipeline.coherence(),
             valid: frf.pipeline.coherence_valid(),
             df_hz: frf.pipeline.df_hz(),
@@ -1302,6 +1383,10 @@ fn clone_ecfg(c: &EngineConfig) -> EngineConfig {
     e.compute_budget = c.compute_budget;
     e.stall_deadline = c.stall_deadline;
     e
+}
+
+fn ms(d: std::time::Duration) -> f64 {
+    d.as_secs_f64() * 1e3
 }
 
 fn empty_stats() -> TimeStats {

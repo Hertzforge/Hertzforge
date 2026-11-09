@@ -43,6 +43,7 @@ pub mod acq;
 pub mod analysis;
 pub mod recording;
 pub mod service;
+pub mod store;
 pub mod trigger;
 
 pub use acq::{AcquisitionConfig, AveragingKind, WindowKind};
@@ -56,6 +57,7 @@ pub use recording::{
     recorder_capture_config, recorder_disk_budget_seconds, GapRecord, RecorderSidecar,
     RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter,
 };
+pub use store::{RecordStore, RecordingSpec, WriterStore};
 pub use trigger::{LevelTrigger, PreTriggerRing, Slope, TriggerEngine, TriggerEvent, TriggerMode};
 
 pub use service::{

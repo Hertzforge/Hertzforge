@@ -378,6 +378,17 @@ impl RecordingWriter {
         self.n_channels
     }
 
+    /// Frames the writer thread has written to `telemetry.f32` so far.
+    pub fn frames_written(&self) -> u64 {
+        self.sink.frames_written()
+    }
+
+    /// The fault that stopped the writer, in its own words, if any. Read live: a
+    /// write that failed, a sync that failed, or the free space under the floor.
+    pub fn fault(&self) -> Option<String> {
+        self.sink.fault()
+    }
+
     /// Flush the pending partial chunk, finish the sink (writes
     /// `capture.json`), and finalize `recorder.json` (`clean: true` + final
     /// gap list).
