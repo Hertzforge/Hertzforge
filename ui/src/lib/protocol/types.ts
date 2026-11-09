@@ -205,8 +205,13 @@ export interface Shape3DView {
 	node_ids?: Uint32Array;
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
-	/** Static line work over the model in its own coordinates: DOF arrows, sensor bodies. */
+	/** Static line work over the model in its own coordinates: DOF arrows. */
 	marks?: { nodes: Float32Array; lines: Uint32Array };
+	/**
+	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
+	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
+	 */
+	bodies?: { nodes: Float32Array; triangles: Uint32Array; colors: Uint8Array; follow: Uint32Array };
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */

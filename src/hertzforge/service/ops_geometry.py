@@ -10,9 +10,9 @@ added, set and deleted through the geometry's own methods
 through the project's, which keep the nodes data is measured at. Each
 edit returns the geometry drawn and the table of that kind of entity,
 the columns of the entity tables. A `shape3d` has no
-markers, so a coordinate system's axes, a DOF arrow and a sensor's body
-are drawn as extra nodes and lines of the mesh, as the instrumentation
-planner draws its sensors.
+markers, so a coordinate system's axes and a DOF arrow are drawn as
+extra nodes and lines of the mesh; a sensor's body is a solid of its own
+(`bodies`).
 """
 
 from __future__ import annotations
@@ -868,23 +868,15 @@ SIZE = Param('size', 'Drawn at', 'enum', default=1, options=tuple(
     Option(factor, label) for label, factor in (
         ('True size', 1), ('×2', 2), ('×5', 5), ('×10', 10), ('×20', 20), ('×50', 50),
         ('×100', 100))))
-#: with the geometry's units undefined, a millimeter is drawn as this
-#: fraction of the model's size
-NOMINAL_MM = 0.0015
-_CORNERS = np.array([(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
-_EDGES = [(a, b) for a in range(8) for b in range(a + 1, 8)
-          if np.count_nonzero(_CORNERS[a] != _CORNERS[b]) == 1]
-
-
 def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.sensors`: the sensors a channel table places on its
     geometry (`Project.sensors`, `core.sensors.place`), each centered on
-    its node and turned into its frame, at a multiple of true size. Each body is drawn as the
-    outline of its box, from the catalog's size, with its sensing axes
-    from the node out past its faces: a triax's X, Y and Z, a uniaxial
-    accelerometer's or a force transducer's one axis. These are extra
-    nodes and lines of the mesh, since a `shape3d` has no solids of its
-    own beside the model's."""
+    its node and turned into its frame, at a multiple of true size. Each
+    body is built from its catalog entry's shape and size, with its
+    connector and cable, and a triax's letters or a uniaxial's arrows on
+    its faces (`drawing.viz.sensors`), as `bodies` on the `shape3d`."""
+    from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
+
     name = params['table']
     try:
         placed, notes = project.sensors(name)
@@ -894,35 +886,19 @@ def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} names no sensor model at a node of its geometry'
                       + (f': {notes[0]}' if notes else ''))
     home, geometry = project.geometry_for(name)
-    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-    if geometry.units_defined:
-        per_mm = 1e-3
-    else:
-        span = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0))) if len(xyz) else 1.0
-        per_mm = NOMINAL_MM * (span or 1.0)
-        notes = [*notes, ('the geometry\'s units are not defined, so the sensors are drawn '
-                 'at a size proportional to the model, not true size')]
-    scale = per_mm * float(params['size'])
-    nodes: list = []
-    lines: list = []
-    rows = []
-    for sensor in placed:
-        half = 0.5 * np.asarray(sensor.entry.size, dtype=float) * scale
-        base = len(nodes)
-        nodes += list(sensor.center + (_CORNERS * half) @ sensor.frame.T)
-        lines += [(base + a, base + b) for a, b in _EDGES]
-        axes = (0, 1, 2) if sensor.kind == 'triax' else (2,)
-        for axis in axes:
-            _arrow(np.asarray(sensor.center, dtype=float),
-                   sensor.center + 2.0 * half[axis] * sensor.frame[:, axis], nodes, lines)
-        rows.append([str(sensor.node), sensor.model or 'none named', sensor.kind,
-                     ' '.join(str(r + 1) for r in sensor.rows),
-                     ' × '.join(f'{s:g}' for s in sensor.entry.size) + ' mm',
-                     'generic body' if sensor.generic else ''])
+    bodies, said = sensor_bodies(placed, geometry, rows_of(geometry.node_id),
+                                 float(params['size']))
+    notes = [*notes, *said]
+    rows = [[str(sensor.node), sensor.model or 'none named', sensor.kind,
+             ' '.join(str(r + 1) for r in sensor.rows),
+             ' × '.join(f'{s:g}' for s in sensor.entry.size) + ' mm',
+             'generic body' if sensor.generic else ''] for sensor in placed]
     readings = [v.row('Sensors', float(len(placed)), '', 'info'),
                 v.row('Drawn at', f'{params["size"]} × true size', None, 'info')]
     readings += [v.row('Note', note, None, 'warn') for note in notes]
-    return [_drawn(f'{home}, sensors of {name}', geometry, nodes, lines),
+    view = _drawn(f'{home}, sensors of {name}', geometry)
+    view['bodies'] = bodies
+    return [view,
             v.table(f'Sensors of {name} on {home}',
                     ['Node', 'Model', 'Kind', 'Channels', 'Body', 'Note'], rows),
             v.reading(f'Sensors of {name}', readings)]

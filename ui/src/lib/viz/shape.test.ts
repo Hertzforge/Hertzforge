@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignedShape, nodeTravel } from './shape';
+import { alignedShape, followed, nodeTravel, STILL } from './shape';
 
 /** The largest distance from the origin of re cos(t) - im sin(t), found by sweeping t. */
 function swept(re: number[], im: number[]): number {
@@ -52,5 +52,14 @@ describe('alignedShape', () => {
 		alignedShape(new Float32Array([0, 0, 1]), new Float32Array([0, 0, 1]), -Math.PI / 4, 2, re, im);
 		expect(re[2]).toBeCloseTo(2, 6);
 		expect(im[2]).toBeCloseTo(0, 6);
+	});
+});
+
+describe('followed', () => {
+	it("gives each point its node's offset, and none to a point that stays put", () => {
+		const source = new Float32Array([1, 2, 3, 4, 5, 6]);
+		const out = new Float32Array(9).fill(9);
+		followed(source, new Uint32Array([1, STILL, 0]), out);
+		expect(Array.from(out)).toEqual([4, 5, 6, 0, 0, 0, 1, 2, 3]);
 	});
 });

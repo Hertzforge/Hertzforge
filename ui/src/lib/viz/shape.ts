@@ -50,3 +50,23 @@ export function alignedShape(
 		im[i] *= k;
 	}
 }
+
+/** `follow` for a point that takes no node's motion. */
+export const STILL = 0xffffffff;
+
+/**
+ * Each point's offset as its node's: `out[3i..3i+3]` is `source` at row `follow[i]`, or zero for
+ * a point that stays put, so a body moves with the node it sits on.
+ */
+export function followed(source: Float32Array, follow: Uint32Array, out: Float32Array): void {
+	for (let i = 0; i < follow.length; i++) {
+		const r = follow[i];
+		if (r === STILL || 3 * r + 2 >= source.length) {
+			out[3 * i] = out[3 * i + 1] = out[3 * i + 2] = 0;
+		} else {
+			out[3 * i] = source[3 * r];
+			out[3 * i + 1] = source[3 * r + 1];
+			out[3 * i + 2] = source[3 * r + 2];
+		}
+	}
+}

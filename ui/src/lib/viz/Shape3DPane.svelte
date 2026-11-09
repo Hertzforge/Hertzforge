@@ -61,7 +61,7 @@
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
-	import { alignedShape, nodeTravel } from './shape';
+	import { alignedShape, followed, nodeTravel } from './shape';
 	import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
@@ -323,6 +323,10 @@
 	let ghostOutline: LineSegments | null = null;
 	/** The view's `marks`: DOF arrows and sensors, drawn still. */
 	let markLines: LineSegments | null = null;
+	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
+	let bodies: Mesh | null = null;
+	let bodyShapeAttr: BufferAttribute | null = null;
+	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
 	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
@@ -418,8 +422,20 @@
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
+		followBodies(true);
 		dirty = true;
 		paintColors();
+	}
+
+	/** Give the bodies their nodes' offsets: the real part, and the imaginary too when `both`. */
+	function followBodies(both: boolean) {
+		if (!view.bodies || !bodyShapeAttr || !bodyShapeImagAttr) return;
+		followed(shapeAttr.array as Float32Array, view.bodies.follow, bodyShapeAttr.array as Float32Array);
+		bodyShapeAttr.needsUpdate = true;
+		if (both) {
+			followed(shapeImagAttr.array as Float32Array, view.bodies.follow, bodyShapeImagAttr.array as Float32Array);
+			bodyShapeImagAttr.needsUpdate = true;
+		}
 	}
 
 	/**
@@ -452,6 +468,7 @@
 		const rgb: [number, number, number] = [0, 0, 0];
 		for (let n = 0; n < colors.length / 3; n++) paint(colors, n, 0, rgb);
 		shapeImagAttr.needsUpdate = true;
+		followBodies(true);
 		shownSample = -1;
 		showSample(Math.floor(position));
 	}
@@ -466,6 +483,7 @@
 		for (const n of moved) paint(colors, n, Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
+		followBodies(false);
 		shownSample = k;
 		sample = k;
 		dirty = true;
@@ -609,6 +627,24 @@
 			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
 			markLines.frustumCulled = false;
 			scene.add(markLines);
+		}
+
+		if (view.bodies && view.bodies.triangles.length) {
+			// sensor bodies: solids in their own colors, each point moving with its node
+			const { nodes: bn, triangles: bt, colors: bc, follow } = view.bodies;
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(bn, 3));
+			bodyShapeAttr = new BufferAttribute(new Float32Array(follow.length * 3), 3);
+			bodyShapeImagAttr = new BufferAttribute(new Float32Array(follow.length * 3), 3);
+			g.setAttribute('shape', bodyShapeAttr);
+			g.setAttribute('shapeImag', bodyShapeImagAttr);
+			const linear = new Float32Array(bc.length);
+			for (let i = 0; i < bc.length; i++) linear[i] = srgbToLinear(bc[i] / 255);
+			g.setAttribute('color', new BufferAttribute(linear, 3));
+			g.setIndex(new BufferAttribute(bt, 1));
+			bodies = new Mesh(g, displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true })));
+			bodies.frustumCulled = false;
+			scene.add(bodies);
 		}
 
 		if (view.lines && view.lines.length) {
@@ -901,6 +937,7 @@
 			markLines.geometry.dispose();
 			(markLines.material as Material).dispose();
 		}
+		bodies?.geometry.dispose();
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;

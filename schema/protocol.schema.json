@@ -190,6 +190,13 @@
           "type": "object", "required": ["nodes", "lines"],
           "properties": {"nodes": {"$ref": "#/$defs/arrayRef"}, "lines": {"$ref": "#/$defs/arrayRef"}}
         },
+        "bodies": {
+          "type": "object", "required": ["nodes", "triangles", "colors", "follow"],
+          "properties": {
+            "nodes": {"$ref": "#/$defs/arrayRef"}, "triangles": {"$ref": "#/$defs/arrayRef"},
+            "colors": {"$ref": "#/$defs/arrayRef"}, "follow": {"$ref": "#/$defs/arrayRef"}
+          }
+        },
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "link": {"type": "string"},

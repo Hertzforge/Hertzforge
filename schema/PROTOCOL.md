@@ -522,8 +522,12 @@ values read at `prefs.values_dofs` (`all` or a channel choice of the table in it
 `offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
 `prefs.sensors` (offered as `arrows` and `sensors`) put DOF arrows and the channel table's sensors over
-every stage as `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the geometry's
-coordinates and `lines` u32 [L, 2] indexing them. A lone channel table shows typed into, its cells
+every stage. The arrows are `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the
+geometry's coordinates and `lines` u32 [L, 2] indexing them. The sensors are `bodies`: solids drawn
+from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
+`triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's
+`nodes` whose motion each point takes, so a body moves with its node (2^32 − 1 stays put).
+`project.sensors` draws its view's sensors the same way. A lone channel table shows typed into, its cells
 edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
 date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the
 Control column shows (`offers.environments`) and `prefs.table_view` the table or one of that loop's

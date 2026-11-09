@@ -76,6 +76,7 @@ PRELOAD = (
     'hertzforge',
     'hertzforge.drawing.plot',
     'hertzforge.drawing.viz.geometry',
+    'hertzforge.drawing.viz.sensors',
     'hertzforge.drawing.viz.waterfall',
     'hertzforge.deform',
     # what showing a selection reaches, imported inside the core at first use

@@ -453,7 +453,14 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert offered['offers']['sensors'] is True
         with_sensors = shown(plate, geometry, history, prefs={'sensors': True, 'arrows': False},
                              validate=validate)
-        assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
+        assert '1 sensors' in with_sensors['note'] and 'marks' not in with_sensors['views'][0]
+        stage = with_sensors['views'][0]
+        bodies = stage['bodies']
+        assert bodies['triangles'].dtype == np.uint32 and len(bodies['triangles']) > 0
+        # each point follows the drawn node its sensor sits on
+        sensor = project.sensors(table_name)[0][0]
+        follow = set(bodies['follow'].tolist())
+        assert len(follow) == 1 and int(stage['node_ids'][follow.pop()]) == sensor.node
     finally:
         table.set_cell('model', 0, was)
 

@@ -235,6 +235,11 @@ def test_dof_arrows_mark_a_tables_references_pointing_in(project, validate):
     assert len(table['rows']) == 3 * project['Geometry'].num_nodes
 
 
+def placed_frame(project):
+    """The first sensor's frame, to read its body in its own axes."""
+    return project.sensors('Channel Table')[0][0].frame
+
+
 def test_sensors_are_drawn_at_a_multiple_of_true_size(project, validate):
     with pytest.raises(ProtocolError, match='names no sensor model'):
         run(project, 'project.sensors')
@@ -242,9 +247,20 @@ def test_sensors_are_drawn_at_a_multiple_of_true_size(project, validate):
     view, table, reading = run(project, 'project.sensors', size=10)
     wire_views([view, table, reading], validate)
     assert cells(table)[0]['Model'] == '352A24' and cells(table)[0]['Kind'] == 'uniaxial'
-    corners = view['nodes'][project['Geometry'].num_nodes:][:8]
-    # a 9.9 x 7.1 x 4.8 mm body at ten times its size, centered on node 101
-    assert np.ptp(corners, axis=0) == pytest.approx([0.099, 0.071, 0.048], rel=1e-5)
+    bodies = view['bodies']
+    assert len(view['nodes']) == project['Geometry'].num_nodes
+    assert bodies['triangles'].dtype == np.uint32 and bodies['colors'].dtype == np.uint8
+    assert len(bodies['nodes']) == len(bodies['colors']) == len(bodies['follow'])
+    geometry = project['Geometry']
+    row = int(np.flatnonzero(np.asarray(geometry.node_id) == 101)[0])
+    # every point moves with node 101, the one the sensor sits on
+    assert set(bodies['follow'].tolist()) == {row}
+    # a 9.9 x 7.1 x 4.8 mm teardrop at ten times its size, centered on node 101, with
+    # its cable out of the tail
+    reach = np.ptp(bodies['nodes'] @ placed_frame(project), axis=0)
+    # the round end is a polygon, so its width is a little short of 7.1 mm
+    assert reach[1:] == pytest.approx([0.071, 0.048], rel=1e-3)
+    assert reach[0] > 0.099
 
 
 def test_work_up_goes_by_the_module_it_is_run_in(validate):

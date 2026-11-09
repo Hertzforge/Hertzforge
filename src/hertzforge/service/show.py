@@ -197,10 +197,11 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
 
 def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
            ) -> list[str]:
-    """DOF arrows and sensors over every stage the selection shows: static line work in
-    the geometry's coordinates (`marks` on the `shape3d`), the arrows as
-    `project.dof_arrows` draws them and the sensors as `project.sensors`
-    does. Returns the notes."""
+    """DOF arrows and sensors over every stage the selection shows, in the
+    geometry's coordinates: the arrows as static line work (`marks` on the
+    `shape3d`) as `project.dof_arrows` draws them, the sensors as solids
+    that move with their nodes (`bodies`) as `project.sensors` draws
+    them. Returns the notes."""
     stages = [view for view in views if view.get('view') == 'shape3d']
     if not stages or not (prefs['arrows'] or prefs['sensors']):
         return []
@@ -208,8 +209,9 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
     if geometry_name is None:
         return []
     from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+    from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
 
-    from .ops_geometry import _CORNERS, _EDGES, NOMINAL_MM, _arrow, _extent
+    from .ops_geometry import _arrow, _extent
 
     geometry = project[geometry_name]
     table = _table_on(project, geometry_name)
@@ -241,25 +243,17 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
         except (TypeError, ValueError):
             placed = []
         if placed:
-            if geometry.units_defined:
-                per_mm = 1e-3
-            else:
-                span = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0))) if len(xyz) else 1.0
-                per_mm = NOMINAL_MM * (span or 1.0)
-            for sensor in placed:
-                half = 0.5 * np.asarray(sensor.entry.size, dtype=float) * per_mm
-                base = len(nodes)
-                nodes += list(sensor.center + (_CORNERS * half) @ sensor.frame.T)
-                lines += [(base + a, base + b) for a, b in _EDGES]
-                for axis in (0, 1, 2) if sensor.kind == 'triax' else (2,):
-                    _arrow(np.asarray(sensor.center, dtype=float),
-                           sensor.center + 2.0 * half[axis] * sensor.frame[:, axis], nodes, lines)
+            for stage in stages:
+                ids = stage.get('node_ids')
+                stage['bodies'] = sensor_bodies(
+                    placed, geometry, rows_of(geometry.node_id if ids is None else ids))[0]
             notes.append(f'{len(placed)} sensors')
     if nodes:
         marks = {'nodes': np.asarray(nodes, dtype=np.float32).reshape(-1, 3),
                  'lines': np.asarray(lines, dtype=np.uint32).reshape(-1, 2)}
         for stage in stages:
-            stage['marks'] = marks
+            # each its own, since converting a stage's units writes into it
+            stage['marks'] = dict(marks)
     return notes
 
 
