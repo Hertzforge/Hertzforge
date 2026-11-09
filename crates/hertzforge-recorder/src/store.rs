@@ -10,11 +10,11 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use hertzforge_capture::DEFAULT_FLUSH_INTERVAL;
+use hertzforge_capture::{DurabilityConfig, FreeSpaceFloor, DEFAULT_FLUSH_INTERVAL};
 use hertzforge_channel_table::ChannelTable;
 
 use crate::acq::AcquisitionConfig;
-use crate::recording::{RecordingSummary, RecordingWriter};
+use crate::recording::{GapRecord, RecordingSummary, RecordingWriter, StationFacts, WriterFacts};
 use crate::trigger::TriggerEvent;
 
 /// What a recording is, given to the store when it begins.
@@ -26,10 +26,20 @@ pub struct RecordingSpec {
     pub name: String,
     /// The recorded rows, in column order.
     pub table: ChannelTable,
-    /// The acquisition and analysis selection (its rate is the rate the file is at).
+    /// The acquisition and analysis selection (its rate is the rate the station
+    /// programmed: the file is at it).
     pub acq: AcquisitionConfig,
+    /// The rate asked of the station, Hz.
+    pub requested_fs_hz: f64,
+    /// The free space the recording leaves on the data volume, bytes: it is not
+    /// begun under it, and it stops writing, with the fault stated, if the volume
+    /// falls under it.
+    pub floor_bytes: u64,
     /// The trigger that began it, if any; its pre-window is the file's first frames.
     pub pretrigger: Option<TriggerEvent>,
+    /// What began it, the station's group delay, its first station frame and the
+    /// pre-window asked, for its record.
+    pub station: StationFacts,
 }
 
 /// The seam between the service and the writer. One recording at a time.
@@ -49,6 +59,10 @@ pub trait RecordStore: Send {
     fn gap_free(&self) -> bool {
         true
     }
+    /// Note frames the recording in progress never received, at a file position.
+    fn gap(&mut self, _gap: GapRecord) {}
+    /// Note marks that fell inside the recording in progress, for its record.
+    fn marks(&mut self, _marks: Vec<serde_json::Value>) {}
 }
 
 /// The crate's own writer behind the seam.
@@ -86,12 +100,22 @@ impl RecordStore for WriterStore {
         if self.writer.is_some() {
             return Err("a recording is already in progress".into());
         }
-        let writer = RecordingWriter::start(
+        let writer = RecordingWriter::start_with(
             &spec.data_root,
             &spec.name,
             &spec.acq,
             spec.table,
             spec.pretrigger,
+            WriterFacts {
+                requested_fs_hz: Some(spec.requested_fs_hz),
+                durability: DurabilityConfig {
+                    flush_interval: self.flush_interval,
+                    free_space_floor: FreeSpaceFloor::Bytes(spec.floor_bytes),
+                    allow_unknown_free_space: false,
+                },
+                station: spec.station,
+                ..WriterFacts::default()
+            },
         )
         .map_err(|e| e.to_string())?;
         let name = writer
@@ -127,5 +151,17 @@ impl RecordStore for WriterStore {
 
     fn gap_free(&self) -> bool {
         self.writer.as_ref().is_none_or(|w| w.gaps().is_empty())
+    }
+
+    fn gap(&mut self, gap: GapRecord) {
+        if let Some(w) = self.writer.as_mut() {
+            w.note_gap(gap);
+        }
+    }
+
+    fn marks(&mut self, marks: Vec<serde_json::Value>) {
+        if let Some(w) = self.writer.as_mut() {
+            w.note_marks(marks);
+        }
     }
 }

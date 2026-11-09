@@ -71,6 +71,8 @@ pub struct Calls {
     pub asked_rate_bits: AtomicU64,
     /// The block the last configure asked.
     pub asked_block: AtomicU64,
+    /// Enabled drive rows in the table the last configure was given.
+    pub drive_rows: AtomicU64,
 }
 
 impl Calls {
@@ -192,9 +194,15 @@ impl Backend for ScriptedStation {
     }
     fn configure(
         &mut self,
-        _table: &ChannelTable,
+        table: &ChannelTable,
         acq: &AcquisitionConfig,
     ) -> Result<ConfiguredActual, HalError> {
+        let drives = table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .count();
+        self.calls.drive_rows.store(drives as u64, Ordering::SeqCst);
         self.calls
             .asked_rate_bits
             .store(acq.requested_rate_hz.to_bits(), Ordering::SeqCst);

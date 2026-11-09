@@ -1496,7 +1496,8 @@ specified with the run-file format, not here.
 
 Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
 reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
-single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR or Explorer run)
+single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR, Explorer or
+Recorder run)
 exclude each other exactly as two Random runs would: each is refused `run_active` while the other
 is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
@@ -1858,8 +1859,8 @@ identifies the system with band-limited random at a stated drive in volts, inver
 plant, and seeds the control law from it; after each pulse is fired, measured and judged, the law
 proposes the next full-level drive and the service checks it before it plays. The drive is in
 volts throughout. The run is one test like any other: a classical shock run, a Random run, a MIMO
-run, an SRS shock run, a Sine run, a TWR run, an Explorer run and a `sim.start` run exclude each
-other, each refused `run_active` while another is live.
+run, an SRS shock run, a Sine run, a TWR run, an Explorer run, a Recorder run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live.
 **Any connected screen may stop or abort** (`shock.stop`, `shock.abort`); `shock.configure`
 (other than a dry run), `arm`, `start`, `proceed`, `fire`, `level`, `train`, `burst`, `reset`
 and `clear` need control; everything that only reads is open to every connection. While the
@@ -2203,8 +2204,8 @@ system with a burst of that synthesis at a stated peak in volts, and seeds the c
 the identified gain at each component; after each pulse is fired, measured and judged, the law
 proposes a gain for each component, and the service caps the gains and checks the drive before it
 plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run, a Recorder
+run and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
 `fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
@@ -2502,8 +2503,8 @@ channels' notch and the drive ceiling, and judges the response against the profi
 and abort bands at the present frequency. The frequency, the sweep and its direction, the
 tone's phase and the level schedule are the service's, never the law's. The drive is in volts
 peak on hardware. The run is one test like any other: a Sine run, an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run, a Recorder run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`sine.stop`, `sine.abort`); `sine.configure` (other than a dry run), `arm`, `start`,
 `proceed`, `level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `adjust`, `reset` and
 `clear` need control; everything that only reads or only computes is open to every
@@ -2957,8 +2958,8 @@ the response, aligns it, judges it and gates it at its level; after a play the s
 corrected, the law proposes the next full-level drive and the service checks it before it plays.
 The level ladder, the gate, the playback schedule and every abort are the service's, never the
 law's. The drive is in volts throughout. The run is one test like any other: a TWR run, a Sine
-run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
+run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run, a Recorder
+run and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
 stop or abort** (`twr.stop`, `twr.abort`); `twr.configure` (other than a dry run), `arm`,
 `start`, `proceed`, `iterate`, `play`, `level`, `freeze`, `reset` and `clear` need control;
 everything that only reads or only computes is open to every connection. While the service is
@@ -3448,8 +3449,8 @@ never asked for in any other unit. The run starts quiet: the tone runs at exactl
 operator raises the level, which is why Explorer has no review hold. While the tone moves the
 service remembers the response level at each frequency it has visited, the survey line, from
 which the operator reads a resonance. The run is one test like any other: an Explorer run, a TWR
-run, a Sine run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any
+run, a Sine run, an SRS shock run, a classical shock run, a Random run, a MIMO run, a Recorder run
+and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any
 connected screen may stop or abort** (`explorer.stop`, `explorer.abort`); `explorer.configure`
 (other than a dry run), `start`, `steer`, `sweep`, `hold`, `survey.clear`, `reset` and `clear`
 need control; everything that only reads or only computes is open to every connection. While the
@@ -3829,10 +3830,6 @@ live. **Any connected screen may stop or abort** (`recorder.stop`, `recorder.abo
 and `clear` need control; everything that only reads is open to every connection. While the
 service is shutting down, `recorder.start`, `arm` and `record` are refused `shutting_down`;
 `recorder.disarm`, `cut`, `stop` and `abort` are not.
-
-**Status.** The service does not offer the Recorder yet. This section is the contract the service
-and the shell are being built against; until they ship, every `recorder.*` method is refused
-`unknown_method`.
 
 | Method | Params | From | Result |
 |---|---|---|---|
@@ -4217,10 +4214,12 @@ the 433 Hz tone does not, so a frame missing from a recording moves its phase.
 Event topics:
 
 - `recorder.state` (text): the state object on every change of `state`, `phase`, `stop` or `end`.
-- `recorder.log` (text): new log entries, as Random's, of the kinds `state`, `station`,
-  `recording` (a recording began or was saved), `mark`, `overload` and `note`: "the station
-  programmed <fs> Hz (asked <fs> Hz)", "records in <path>" and "outputs: none" at start (naming
-  any drive row not opened), every trigger and recording ("rec_0002 began at station frame <n>",
+- `recorder.log` (text, to every connection): new log entries, as Random's, of the kinds
+  `state`, `station`, `recording` (a recording began or was saved), `mark`, `overload` and
+  `note`: when the station programs another rate than asked, "sample rate coerced: requested
+  <fs> Hz, device programmed <fs> Hz"; then "the station programmed <fs> Hz (asked <fs> Hz)",
+  "records in <path>" (the run folder's absolute path) and "outputs: none" at start (naming any
+  drive row not opened), every trigger and recording ("rec_0002 began at station frame <n>",
   "rec_0002 saved: <frames> frames, <seconds> s, no gaps"), every mark and overload, every driver
   warning (`note`, "driver: " and the driver's own text), "stop began: <cause>" and "ended
   <outcome>: <message>".

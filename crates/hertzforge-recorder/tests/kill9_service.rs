@@ -236,9 +236,9 @@ fn a_kill_9_mid_recording_leaves_readable_honest_artifacts() {
         .expect("recorder.json must be readable (written before any data)");
     let rec: serde_json::Value = serde_json::from_str(&rec_json).expect("recorder.json JSON");
     assert_eq!(
-        rec["clean"],
+        rec["complete"],
         serde_json::Value::Bool(false),
-        "only finish() sets clean: {rec_json}"
+        "only finish() sets complete: {rec_json}"
     );
 
     // 3. The binary is a whole number of frames - a torn frame would make every

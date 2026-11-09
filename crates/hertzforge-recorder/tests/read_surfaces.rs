@@ -210,6 +210,14 @@ fn recorder_status_counts_recordings_and_the_frames_fed_and_on_disk() {
     );
     assert_eq!(s.recordings_saved, 0);
     svc.stop_recording().unwrap();
+    // The record thread finishes the recording; the next passes collect it.
+    for _ in 0..500 {
+        if svc.status(u64::MAX).recordings_saved == 1 {
+            break;
+        }
+        svc.pump_frames(256).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+    }
     assert_eq!(svc.status(u64::MAX).recordings_saved, 1);
 }
 
@@ -231,8 +239,15 @@ fn recorder_status_names_the_writer_fault_in_its_words() {
     svc.start_monitor().unwrap();
     svc.record_now().unwrap();
     assert_eq!(svc.status(u64::MAX).write_fault, None);
-    svc.pump_frames(1024).unwrap();
-    svc.pump_frames(1024).unwrap();
+    // The record thread takes the frames; its fault is read once it has (and ends
+    // the run, so the pass that reads it answers an error).
+    for _ in 0..500 {
+        let _ = svc.pump_frames(1024);
+        if svc.status(u64::MAX).write_fault.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
     assert_eq!(
         svc.status(u64::MAX).write_fault.as_deref(),
         Some("the disk refused the write")
@@ -348,6 +363,8 @@ fn recorder_every_recording_goes_through_the_store_seam() {
     }
     svc.stop_recording().unwrap();
     assert_eq!(svc.state(), RecState::Monitoring);
+    // The record thread finishes it; stopping waits for that.
+    svc.stop_monitor().unwrap();
 
     let log = log.lock().unwrap();
     let starts = log
@@ -379,4 +396,49 @@ fn recorder_every_recording_goes_through_the_store_seam() {
         from as f32 * 2.0,
         "the store's first frame is the next frame read"
     );
+}
+
+#[test]
+fn recorder_status_states_the_recording_in_progress_and_the_last_batch() {
+    let station = ScriptedStation::new(2, FS, Box::new(|n, c| n as f32 + c as f32 * 0.5));
+    let mut c = cfg(TriggerMode::Manual);
+    c.pretrigger_s = Some(0.25);
+    c.timed_record_s = Some(1.0);
+    let mut svc = RecorderService::with_backend(
+        c,
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        temp_root("rs_now"),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.arm().unwrap();
+    svc.pump_frames(4096).unwrap();
+    let (first, frames) = svc.last_batch();
+    assert_eq!(first, 4096 - 512, "the last batch's first station frame");
+    assert_eq!(frames.len(), 512 * 2);
+    assert_eq!(frames[0], first as f32);
+    assert_eq!(svc.status(u64::MAX).recording, None);
+    svc.record_now().unwrap();
+    let now = svc
+        .status(u64::MAX)
+        .recording
+        .expect("a recording in progress");
+    assert_eq!(now.name, "rec_0001");
+    assert_eq!(now.trigger, "manual");
+    assert_eq!(now.trigger_station_frame, 4096);
+    assert_eq!((now.pre_frames, now.pre_frames_asked), (2048, 2048));
+    assert_eq!(now.first_station_frame, 4096 - 2048);
+    assert_eq!(now.target_frames, Some(2048 + 8192));
+    svc.stop_recording().unwrap();
+    // Disarm returns an armed run to monitoring.
+    svc.arm().unwrap();
+    assert_eq!(svc.state(), RecState::Armed);
+    svc.disarm().unwrap();
+    assert_eq!(svc.state(), RecState::Monitoring);
+    assert!(svc.disarm().is_err(), "disarm applies only while armed");
+    assert_eq!(svc.row_stats().len(), 2);
 }

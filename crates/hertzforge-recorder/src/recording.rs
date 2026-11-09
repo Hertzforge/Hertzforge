@@ -1,24 +1,23 @@
-//! Recording writer bridge + reader.
+//! The recording writer and reader.
 //!
-//! [`RecordingWriter`] bridges the recorder onto the testkit
-//! [`CaptureSink`] (dedicated writer thread + bounded ring, drop-on-full):
-//! it batches incoming frames into ~100 ms chunks before pushing,
-//! keeps position-accurate gap records when the ring drops, and owns a
-//! recorder-side `recorder.json` sidecar written PROVISIONALLY (`clean: false`)
-//! before any data hits disk so an unclean death is recoverable.
-//! Zero testkit changes: `recorder.json` rides alongside testkit's
-//! `capture.json`.
+//! [`RecordingWriter`] puts a recording onto the capture crate's [`CaptureSink`] (a
+//! writer thread behind a bounded ring): it batches frames into chunks of about
+//! 100 ms, keeps position-accurate gap records, and writes the recording's own record,
+//! `recorder.json`, provisionally (`complete: false`) before any frame reaches the
+//! disk, so a recording cut short by a crash is still readable, and again when it
+//! ends. `recorder.json` sits beside the writer's `capture.json`.
 //!
-//! [`RecordingReader`] opens a run directory, reads BOTH sidecars, recovers
-//! runs whose writer died before `capture.json` existed, and DISTRUSTS sidecar
-//! frame counts: the `telemetry.f32` file size is the authority (sidecars can
-//! lie, as a sidecar bug in the Random crate showed). Region
-//! reads are chunked seeks - the reader never loads the whole file.
+//! [`RecordingReader`] opens a recording's folder, reads both records, recovers a
+//! recording whose writer died before `capture.json` was written, and takes the frame
+//! count from the size of `telemetry.f32`, never from a record. Region reads are
+//! seeks: the reader never loads the whole file.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use hertzforge_capture::{disk_budget_max_seconds, CaptureConfig, CaptureSidecar, CaptureSink};
+use hertzforge_capture::{
+    disk_budget_max_seconds, CaptureConfig, CaptureSidecar, CaptureSink, DurabilityConfig,
+};
 use hertzforge_channel_table::ChannelTable;
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +31,7 @@ pub const T0_TRIGGER: &str = "trigger";
 /// The `t0_convention` value for start-relative time (t=0 at the first frame).
 pub const T0_START: &str = "start";
 
-/// The ring depth (in ~100 ms chunks) handed to the testkit sink: 512 chunks
+/// The ring depth (in ~100 ms chunks) handed to the capture sink: 512 chunks
 /// at ~100 ms each absorbs a ~51 s disk stall before anything drops.
 pub const DEFAULT_RING_CAPACITY: usize = 512;
 
@@ -48,33 +47,83 @@ pub struct GapRecord {
     pub dropped_frames: u64,
 }
 
-/// The recorder-owned sidecar (`recorder.json`), written alongside testkit's
-/// `capture.json`. Written provisionally (`clean: false`, empty gaps) BEFORE
-/// any data, finalized at [`RecordingWriter::finish`].
+/// The recording's own record (`recorder.json`), written alongside the writer's
+/// `capture.json`: provisionally (`complete: false`) before any data, finalized when the
+/// recording ends. Its fields are PROTOCOL's ("Recorder Records"); a reader ignores
+/// fields it does not know.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecorderSidecar {
-    /// `false` until the writer finishes cleanly. A run found on disk with
-    /// `clean: false` died mid-run (or mid-finalize) and must be recovered
-    /// from the file itself.
-    pub clean: bool,
-    /// The acquisition selection at record time (analysis-side settings ride
-    /// along for review; capture itself is always native / decimation 1).
-    pub config: AcquisitionConfig,
-    /// Frames of pre-trigger window at the START of the file (0 for FreeRun /
-    /// Manual-without-ring recordings).
-    pub pretrigger_frames: u64,
-    /// The trigger frame in the TRIGGER ENGINE's global counter (diagnostic;
-    /// in FILE coordinates the trigger sample sits at index
-    /// `pretrigger_frames`).
-    pub trigger_frame_global: Option<u64>,
+    /// `false` until the recording is finalized. A recording found on disk with
+    /// `complete: false` was cut short by a crash, and its file holds what reached
+    /// the disk.
+    #[serde(alias = "clean")]
+    pub complete: bool,
+    /// The recording's name, `rec_NNNN`.
+    #[serde(default)]
+    pub name: String,
+    /// What began it: `start`, `manual` or `level`.
+    #[serde(default)]
+    pub trigger: String,
+    /// The rate asked of the station, Hz.
+    #[serde(default)]
+    pub requested_fs_hz: f64,
+    /// The rate the station programmed, Hz: the file is at this rate.
+    #[serde(alias = "native_rate_hz")]
+    pub fs_hz: f64,
+    /// The station's stated input group delay, frames.
+    #[serde(default)]
+    pub group_delay_frames: f64,
+    /// The recorded rows' `index`es, in column order.
+    #[serde(default)]
+    pub rows: Vec<u32>,
+    /// The recorded rows' units, in column order.
+    #[serde(default)]
+    pub units: Vec<String>,
+    /// The station frame of the file's first frame.
+    #[serde(default)]
+    pub first_station_frame: u64,
+    /// The station frame of the trigger, file frame `pre_frames`: t = 0.
+    #[serde(alias = "trigger_frame_global", default)]
+    pub trigger_station_frame: u64,
+    /// The pre-window held at the start of the file.
+    #[serde(alias = "pretrigger_frames")]
+    pub pre_frames: u64,
+    /// The pre-window asked; more than held when it had not filled.
+    #[serde(default)]
+    pub pre_frames_asked: u64,
+    /// The frames written, as the writer counted them (0 until finalized).
+    #[serde(default)]
+    pub frames: u64,
+    /// Position-accurate records of missing frames (empty when gap-free).
+    pub gaps: Vec<GapRecord>,
+    /// The marks inside the recording.
+    #[serde(default)]
+    pub marks: Vec<serde_json::Value>,
+    /// The write fault's words, if writing stopped on one.
+    #[serde(default)]
+    pub fault: Option<String>,
     /// Time-zero convention: [`T0_TRIGGER`] or [`T0_START`].
     pub t0_convention: String,
-    /// Position-accurate ring-drop records (empty when gap-free).
-    pub gaps: Vec<GapRecord>,
     /// Channels per interleaved frame.
     pub n_channels: usize,
-    /// The native capture rate in Hz (recording is ALWAYS native).
-    pub native_rate_hz: f64,
+    /// The acquisition and analysis selection at record time (its rate the file's).
+    pub config: AcquisitionConfig,
+}
+
+/// The station facts of a recording, for its record.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StationFacts {
+    /// The recording's name as the service gave it (the folder name when empty).
+    pub name: String,
+    /// What began it: `start`, `manual` or `level` (`manual` when empty).
+    pub trigger: String,
+    /// The station's stated input group delay, frames.
+    pub group_delay_frames: f64,
+    /// The station frame of the file's first frame. With a pre-window it is the
+    /// trigger's less the pre-window.
+    pub first_station_frame: u64,
+    /// The pre-window asked, frames.
+    pub pre_frames_asked: u64,
 }
 
 /// Summary returned by [`RecordingWriter::finish`].
@@ -108,9 +157,8 @@ pub fn recorder_capture_config(acq: &AcquisitionConfig, n_channels: usize) -> Ca
 
 /// How many whole seconds of native-rate recording fit in `free_bytes`.
 ///
-/// Exact math: bytes/s = `n_channels * 4 * native_rate_hz`. At the
-/// v1 default of 8 channels x 4 B x 65,536 Hz that is 2,097,152 B/s = 2.10 MB/s
-/// (SI megabytes), i.e. one gigabyte holds ~511 s of 8-channel native capture.
+/// Bytes a second are `n_channels * 4 * native_rate_hz`: four rows at 12 800 Hz are
+/// 204 800 B/s, so one gigabyte holds about 81 minutes of them.
 /// `free_bytes` stays a caller-supplied parameter - the `statfs` plumbing that
 /// stats the data-root volume lives with the caller.
 pub fn recorder_disk_budget_seconds(
@@ -171,7 +219,31 @@ fn write_recorder_sidecar(run_dir: &Path, sidecar: &RecorderSidecar) -> io::Resu
     std::fs::write(run_dir.join("recorder.json"), json)
 }
 
-/// A running recording: the batching bridge onto the testkit [`CaptureSink`]
+/// What a recording states beyond its acquisition selection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriterFacts {
+    /// The rate asked of the station, Hz (the acquisition's rate when not given).
+    pub requested_fs_hz: Option<f64>,
+    /// The writer's ring depth, in chunks.
+    pub ring_capacity: usize,
+    /// The flush cadence and the free-space floor the writer keeps.
+    pub durability: DurabilityConfig,
+    /// The station facts the record states.
+    pub station: StationFacts,
+}
+
+impl Default for WriterFacts {
+    fn default() -> Self {
+        Self {
+            requested_fs_hz: None,
+            ring_capacity: DEFAULT_RING_CAPACITY,
+            durability: DurabilityConfig::default(),
+            station: StationFacts::default(),
+        }
+    }
+}
+
+/// A running recording: the batching bridge onto the capture crate's [`CaptureSink`]
 /// plus the recorder-owned sidecar lifecycle.
 ///
 /// If the writer is dropped without [`RecordingWriter::finish`] (crash,
@@ -180,7 +252,6 @@ fn write_recorder_sidecar(run_dir: &Path, sidecar: &RecorderSidecar) -> io::Resu
 pub struct RecordingWriter {
     sink: CaptureSink,
     run_dir: PathBuf,
-    acq: AcquisitionConfig,
     n_channels: usize,
     /// Batch size in frames (~100 ms at the native rate).
     chunk_frames: usize,
@@ -192,20 +263,21 @@ pub struct RecordingWriter {
     /// All frames fed in (accepted + dropped).
     frames_fed: u64,
     gaps: Vec<GapRecord>,
-    pretrigger_frames: u64,
-    trigger_frame_global: Option<u64>,
-    t0_convention: String,
+    /// Marks noted inside the recording.
+    marks: Vec<serde_json::Value>,
+    /// The record as begun; finalized with the frames, gaps and fault at the end.
+    record: RecorderSidecar,
 }
 
 impl RecordingWriter {
     /// Start a recording under `data_root/<sanitized run_name>/`.
     ///
-    /// Order of operations: sanitize + de-collide the name, create
-    /// the directory, write the PROVISIONAL `recorder.json` (`clean: false`)
-    /// BEFORE any data, then start the testkit sink (native rate, decimation
-    /// 1, ring [`DEFAULT_RING_CAPACITY`]). If `pretrigger` is given, its
-    /// pre-window frames are pushed FIRST and the sidecar records
-    /// `pretrigger_frames` / `trigger_frame_global` / t0 = `"trigger"`.
+    /// Order of operations: sanitize and de-collide the name, create the folder,
+    /// write the provisional `recorder.json` (`complete: false`) before any frame,
+    /// then start the capture sink (at the acquisition's rate, no decimation, ring
+    /// [`DEFAULT_RING_CAPACITY`]). If `pretrigger` is given, its pre-window frames are
+    /// pushed first and the record states `pre_frames`, `trigger_station_frame` and
+    /// t0 = `"trigger"`.
     ///
     /// The interleaved frame layout fed to [`RecordingWriter::push_frames`]
     /// must match `table.channels.len()`.
@@ -237,6 +309,30 @@ impl RecordingWriter {
         pretrigger: Option<TriggerEvent>,
         ring_capacity: usize,
     ) -> io::Result<Self> {
+        Self::start_with(
+            data_root,
+            run_name,
+            acq,
+            table,
+            pretrigger,
+            WriterFacts {
+                ring_capacity,
+                ..WriterFacts::default()
+            },
+        )
+    }
+
+    /// [`RecordingWriter::start`] with the recording's other facts stated.
+    pub fn start_with(
+        data_root: &Path,
+        run_name: &str,
+        acq: &AcquisitionConfig,
+        table: ChannelTable,
+        pretrigger: Option<TriggerEvent>,
+        facts: WriterFacts,
+    ) -> io::Result<Self> {
+        let ring_capacity = facts.ring_capacity;
+        let requested_fs_hz = facts.requested_fs_hz.unwrap_or(acq.native_rate_hz);
         let n_channels = table.channels.len();
         if n_channels == 0 {
             return Err(io::Error::new(
@@ -255,37 +351,63 @@ impl RecordingWriter {
         let run_dir = data_root.join(&name);
         std::fs::create_dir_all(&run_dir)?;
 
-        let (pretrigger_frames, trigger_frame_global, t0_convention) = match &pretrigger {
+        let station = facts.station.clone();
+        let (pre_frames, trigger_station_frame, t0_convention) = match &pretrigger {
             Some(ev) => (
                 ev.pretrigger_frames,
-                Some(ev.trigger_frame_global),
+                ev.trigger_frame_global,
                 T0_TRIGGER.to_string(),
             ),
-            None => (0, None, T0_START.to_string()),
+            None => (0, station.first_station_frame, T0_START.to_string()),
+        };
+        let record = RecorderSidecar {
+            complete: false,
+            name: if station.name.is_empty() {
+                name.clone()
+            } else {
+                station.name.clone()
+            },
+            trigger: if station.trigger.is_empty() {
+                "manual".to_string()
+            } else {
+                station.trigger.clone()
+            },
+            requested_fs_hz,
+            fs_hz: acq.native_rate_hz,
+            group_delay_frames: station.group_delay_frames,
+            rows: table.channels.iter().map(|c| c.index).collect(),
+            units: table.channels.iter().map(|c| unit_name(&c.units)).collect(),
+            first_station_frame: trigger_station_frame.saturating_sub(pre_frames),
+            trigger_station_frame,
+            pre_frames,
+            pre_frames_asked: station.pre_frames_asked.max(pre_frames),
+            frames: 0,
+            gaps: Vec::new(),
+            marks: Vec::new(),
+            fault: None,
+            t0_convention,
+            n_channels,
+            config: acq.clone(),
         };
 
-        // The provisional sidecar hits disk BEFORE any data.
-        write_recorder_sidecar(
-            &run_dir,
-            &RecorderSidecar {
-                clean: false,
-                config: acq.clone(),
-                pretrigger_frames,
-                trigger_frame_global,
-                t0_convention: t0_convention.clone(),
-                gaps: Vec::new(),
-                n_channels,
-                native_rate_hz: acq.native_rate_hz,
-            },
-        )?;
+        // The provisional record hits disk BEFORE any data.
+        write_recorder_sidecar(&run_dir, &record)?;
 
         let mut cfg = recorder_capture_config(acq, n_channels);
         cfg.ring_capacity = ring_capacity;
         let run_config_json = serde_json::to_string(acq)
             .map_err(|e| io::Error::other(format!("acquisition config serialize: {e}")))?;
-        let sink = CaptureSink::start(data_root, &name, cfg, table, run_config_json)?;
+        let sink = CaptureSink::start_durable(
+            data_root,
+            &name,
+            cfg,
+            table,
+            run_config_json,
+            facts.durability,
+        )
+        .map_err(io::Error::from)?;
 
-        // ~100 ms of frames, rounded up to a power of two (8,192 at 65,536 Hz).
+        // ~100 ms of frames, rounded up to a power of two (2048 at 12 800 Hz).
         let chunk_frames = ((acq.native_rate_hz * 0.1).round() as usize)
             .next_power_of_two()
             .max(1);
@@ -293,16 +415,14 @@ impl RecordingWriter {
         let mut writer = Self {
             sink,
             run_dir,
-            acq: acq.clone(),
             n_channels,
             chunk_frames,
             pending: Vec::with_capacity(2 * chunk_frames * n_channels),
             frames_accepted: 0,
             frames_fed: 0,
             gaps: Vec::new(),
-            pretrigger_frames,
-            trigger_frame_global,
-            t0_convention,
+            marks: Vec::new(),
+            record,
         };
         if let Some(ev) = pretrigger {
             let n = ev.pretrigger_frames as usize;
@@ -378,6 +498,17 @@ impl RecordingWriter {
         self.n_channels
     }
 
+    /// Note marks that fell inside this recording, for its record.
+    pub fn note_marks(&mut self, marks: Vec<serde_json::Value>) {
+        self.marks.extend(marks);
+    }
+
+    /// Note frames this recording never received (the queue to the record thread
+    /// could not take them), at the file position they would have started at.
+    pub fn note_gap(&mut self, gap: GapRecord) {
+        self.gaps.push(gap);
+    }
+
     /// Frames the writer thread has written to `telemetry.f32` so far.
     pub fn frames_written(&self) -> u64 {
         self.sink.frames_written()
@@ -410,19 +541,13 @@ impl RecordingWriter {
         let capture_sidecar = self.sink.finish()?;
         let gap_free = self.gaps.is_empty() && capture_sidecar.chunks_dropped == 0;
 
-        write_recorder_sidecar(
-            &self.run_dir,
-            &RecorderSidecar {
-                clean: true,
-                config: self.acq.clone(),
-                pretrigger_frames: self.pretrigger_frames,
-                trigger_frame_global: self.trigger_frame_global,
-                t0_convention: self.t0_convention.clone(),
-                gaps: self.gaps.clone(),
-                n_channels: self.n_channels,
-                native_rate_hz: self.acq.native_rate_hz,
-            },
-        )?;
+        let mut record = self.record.clone();
+        record.complete = true;
+        record.frames = capture_sidecar.frames_written;
+        record.gaps = self.gaps.clone();
+        record.fault = capture_sidecar.fault.clone();
+        record.marks = std::mem::take(&mut self.marks);
+        write_recorder_sidecar(&self.run_dir, &record)?;
 
         Ok(RecordingSummary {
             run_dir: self.run_dir,
@@ -473,7 +598,7 @@ pub struct RecordingInfo {
 pub struct RecordingReader {
     file: std::fs::File,
     info: RecordingInfo,
-    /// The testkit sidecar, when present (channel table, EU context).
+    /// The writer's record, when present (channel table, EU context).
     capture_sidecar: Option<CaptureSidecar>,
     /// The recorder sidecar, when present.
     recorder_sidecar: Option<RecorderSidecar>,
@@ -486,7 +611,7 @@ impl RecordingReader {
     /// CRASH RECOVERY: `capture.json` MISSING but a provisional
     /// `recorder.json` exists - channels/rate come from `recorder.json`,
     /// frames from the `telemetry.f32` size, status `"recovered (unclean)"`.
-    /// Plain testkit runs (only `capture.json`) also open, with t0 =
+    /// Plain captures (only `capture.json`) also open, with t0 =
     /// `"start"` and no gap info.
     ///
     /// SANITY: when `capture.json` claims a frame count, it is
@@ -515,9 +640,9 @@ impl RecordingReader {
             };
 
         // Channels + rate: the recorder sidecar is authoritative when present
-        // (it exists from before the first data byte); else the testkit one.
+        // (it exists from before the first data byte); else the writer's.
         let (n_channels, rate_hz) = match (&recorder_sidecar, &capture_sidecar) {
-            (Some(r), _) => (r.n_channels, r.native_rate_hz),
+            (Some(r), _) => (r.n_channels, r.fs_hz),
             (None, Some(c)) => (c.config.n_channels, c.config.sample_rate_hz),
             (None, None) => {
                 return Err(io::Error::new(
@@ -559,8 +684,8 @@ impl RecordingReader {
 
         let recovered = capture_sidecar.is_none();
         let clean = match &recorder_sidecar {
-            Some(r) => r.clean,
-            // Legacy testkit-only run: capture.json presence is the best signal.
+            Some(r) => r.complete,
+            // A plain capture: capture.json presence is the best signal.
             None => capture_sidecar.is_some(),
         };
         let status = if recovered {
@@ -575,8 +700,8 @@ impl RecordingReader {
         {
             Some(r) => (
                 r.t0_convention.clone(),
-                r.trigger_frame_global,
-                r.pretrigger_frames,
+                (r.t0_convention == T0_TRIGGER).then_some(r.trigger_station_frame),
+                r.pre_frames,
                 r.gaps.clone(),
             ),
             None => (T0_START.to_string(), None, 0, Vec::new()),
@@ -609,7 +734,7 @@ impl RecordingReader {
         &self.info
     }
 
-    /// The testkit sidecar (channel table / EU context), when present.
+    /// The writer's record (channel table / EU context), when present.
     pub fn capture_sidecar(&self) -> Option<&CaptureSidecar> {
         self.capture_sidecar.as_ref()
     }
@@ -721,5 +846,18 @@ impl RecordingReader {
         } else {
             f / self.info.rate_hz
         }
+    }
+}
+
+/// A unit's name as the wire states it.
+pub fn unit_name(u: &hertzforge_channel_table::Units) -> String {
+    use hertzforge_channel_table::Units;
+    match u {
+        Units::AccelG => "g".to_string(),
+        Units::VelocityIps => "in/s".to_string(),
+        Units::DisplacementMil => "mil".to_string(),
+        Units::ForceLbf => "lbf".to_string(),
+        Units::VoltageV => "V".to_string(),
+        Units::Custom(s) => s.clone(),
     }
 }

@@ -1,14 +1,12 @@
-//! The Recorder contract before the service serves it (schema/PROTOCOL.md, "Recorder").
+//! The Recorder contract (schema/PROTOCOL.md, "Recorder").
 //!
-//! Three things are pinned until the `recorder.*` methods ship. Every method in the
-//! contract's table is refused `unknown_method`, as the section's status line says, so the
-//! line cannot go stale while the service grows. The configuration defaults the contract
+//! Three things are pinned. Every method in the contract's table is served (none is
+//! refused `unknown_method`). The configuration defaults the contract
 //! states are the Recorder core's own wherever the core has one, with the derived numbers
 //! of the contract's example worked from the core's own arithmetic. And the names the wire
 //! offers for the core's windows, averaging, slopes and trigger modes cover every variant
 //! the core has, so a variant added to the core is a compile error here until the wire
-//! decides on it. When the methods ship, the first test becomes the positive one and the
-//! status line goes.
+//! decides on it.
 
 use hertzforge_recorder::analysis::hop_frames;
 use hertzforge_recorder::service::config::{default_metadata, DEFAULT_OVERLOAD_FRACTION};
@@ -41,19 +39,14 @@ const RECORDER_METHODS: [&str; 16] = [
 ];
 
 #[tokio::test]
-async fn recorder_methods_are_refused_until_the_service_serves_them() {
+async fn recorder_methods_are_served() {
     let svc = Service::new();
     let conn = svc.connect("recorder contract".into());
-    // A method the service does serve answers, so the refusals below are the dispatch's
-    // answer and not a service that answers nothing.
-    assert!(svc.call(&conn, "session.state", &Map::new()).await.is_ok());
+    // Every method of the contract's table answers as itself: an answer, or a refusal
+    // of its own (no configuration, no control), never `unknown_method`.
     for method in RECORDER_METHODS {
-        match svc.call(&conn, method, &Map::new()).await {
-            Ok(_) => panic!(
-                "{method} answered: the service now serves the Recorder, so PROTOCOL.md's \
-                 status line and this test must change with it"
-            ),
-            Err(e) => assert_eq!(e.code, ErrorCode::UnknownMethod, "{method}: {e:?}"),
+        if let Err(e) = svc.call(&conn, method, &Map::new()).await {
+            assert_ne!(e.code, ErrorCode::UnknownMethod, "{method}: {e:?}");
         }
     }
 }

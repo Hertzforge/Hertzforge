@@ -69,9 +69,9 @@ fn bit_exact_round_trip_with_pretrigger_and_trigger_t0() {
     // The PROVISIONAL recorder.json exists before any data is finalized.
     let provisional_text = std::fs::read_to_string(writer.run_dir().join("recorder.json")).unwrap();
     let provisional: RecorderSidecar = serde_json::from_str(&provisional_text).unwrap();
-    assert!(!provisional.clean);
-    assert_eq!(provisional.pretrigger_frames, 40);
-    assert_eq!(provisional.trigger_frame_global, Some(40));
+    assert!(!provisional.complete);
+    assert_eq!(provisional.pre_frames, 40);
+    assert_eq!(provisional.trigger_station_frame, 40);
     assert_eq!(provisional.t0_convention, "trigger");
 
     // Live continuation in uneven blocks.
@@ -163,14 +163,25 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
     std::fs::write(run_dir.join("telemetry.f32"), &bytes).unwrap();
 
     let provisional = RecorderSidecar {
-        clean: false,
-        config: acq_at(2048.0),
-        pretrigger_frames: 0,
-        trigger_frame_global: None,
-        t0_convention: "start".to_string(),
+        complete: false,
+        name: "recovered".to_string(),
+        trigger: "start".to_string(),
+        requested_fs_hz: 2048.0,
+        fs_hz: 2048.0,
+        group_delay_frames: 0.0,
+        rows: vec![1, 2, 3],
+        units: vec!["g".to_string(); 3],
+        first_station_frame: 0,
+        trigger_station_frame: 0,
+        pre_frames: 0,
+        pre_frames_asked: 0,
+        frames: 0,
         gaps: Vec::new(),
+        marks: Vec::new(),
+        fault: None,
+        t0_convention: "start".to_string(),
         n_channels: 3,
-        native_rate_hz: 2048.0,
+        config: acq_at(2048.0),
     };
     std::fs::write(
         run_dir.join("recorder.json"),
