@@ -1462,14 +1462,18 @@ impl ExplorerHostService {
     }
 
     fn finish(&mut self, state: RunState, reason: String, trip: Option<AbortTrip>) {
-        self.state = state;
-        let record = EndRecord {
+        self.end_with(EndRecord {
             state,
             reason,
             trip,
             stop: None,
             drive: None,
-        };
+        });
+    }
+
+    fn end_with(&mut self, record: EndRecord) {
+        let state = record.state;
+        self.state = state;
         self.end = Some(record.clone());
         if state == RunState::Aborted {
             self.abort_latch.set(record);
@@ -1596,6 +1600,34 @@ impl ExplorerHostService {
                 return Err(ServiceError::PumpPanicked(what));
             }
         };
+
+        // A GENERATED SAMPLE PAST THE CEILING. The step clipped it, so nothing past the
+        // ceiling reached the station; the run ends here, before any further batch,
+        // whatever else the batch reports.
+        if let Some((vpk, ceiling_vpk)) = self.step.as_mut().and_then(|s| s.take_drive_trip()) {
+            let _ = self.emergency_stop_now();
+            self.end_with(EndRecord {
+                state: RunState::Aborted,
+                reason: format!(
+                    "a drive sample of {vpk:.4} V pk passed the {ceiling_vpk:.4} V pk ceiling; \
+                     it was clipped to the ceiling and emergency_stop was issued"
+                ),
+                trip: None,
+                stop: None,
+                drive: Some(DriveTrip { vpk, ceiling_vpk }),
+            });
+            if let Some(b) = self.backend.as_mut() {
+                let fresh = b.take_warnings();
+                self.driver_warnings_total += fresh.len() as u64;
+                self.driver_warnings.extend(fresh);
+                let excess = self
+                    .driver_warnings
+                    .len()
+                    .saturating_sub(MAX_DRIVER_WARNINGS);
+                self.driver_warnings.drain(..excess);
+            }
+            return Ok(false);
+        }
 
         // DRAIN the driver's own diagnostics every batch. `take_warnings` empties the
         // backend's buffer, so a caller that does not pull them is not "leaving them for

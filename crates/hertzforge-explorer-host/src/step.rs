@@ -294,6 +294,9 @@ pub struct ExplorerProcessStep {
     /// TEST ONLY: a gain on every generated sample after the amplitude clamp (1.0 in a
     /// run), set through `ExplorerHostService::bypass_amplitude_clamp_for_test`.
     pub(crate) test_gain: f64,
+    /// The first generated sample this run that passed the ceiling, `(|sample|, ceiling)`,
+    /// latched on the tick and taken by the service between batches.
+    drive_trip: Option<(f64, f64)>,
     /// The amplitude being generated right now, volts peak.
     vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -369,6 +372,7 @@ impl ExplorerProcessStep {
             target_freq_hz: start,
             jump_pending: false,
             test_gain: 1.0,
+            drive_trip: None,
             vpk: 0.0,
             target_vpk: 0.0,
             ramp_floor_vpk: 0.0,
@@ -522,6 +526,12 @@ impl ExplorerProcessStep {
         self.sweep_oct_per_frame = 0.0;
     }
 
+    /// Take the first sample past the ceiling, `(|sample|, ceiling)`, if one was
+    /// generated.
+    pub fn take_drive_trip(&mut self) -> Option<(f64, f64)> {
+        self.drive_trip.take()
+    }
+
     /// The run-relative frame count this step has generated drive for.
     pub fn frames_generated(&self) -> u64 {
         self.frames_generated.load(Ordering::Relaxed)
@@ -667,7 +677,21 @@ impl ProcessStep for ExplorerProcessStep {
             self.slew_frequency();
             self.slew_amplitude();
             let (sin, _inst_freq, _phase) = self.nco.next();
-            let sample = (sin * self.vpk * self.test_gain) as f32;
+            let mut sample = (sin * self.vpk * self.test_gain) as f32;
+            // THE LAST CHECK ON THE DRIVE: every sample against the ceiling, after the
+            // clamp that should already hold it there. The clamp and the slew bound the
+            // amplitude; this bounds the sample itself, whatever produced it. A sample
+            // past the ceiling is clipped to it, so nothing past the ceiling is written,
+            // and the first one is latched for the service to abort the run on. The
+            // comparison is in f32, the drive's own type: rounding to f32 keeps order,
+            // so a sample the clamp held at or under the ceiling never trips it.
+            let ceiling = self.max_drive_vpk as f32;
+            if sample.abs() > ceiling {
+                if self.drive_trip.is_none() {
+                    self.drive_trip = Some((f64::from(sample.abs()), self.max_drive_vpk));
+                }
+                sample = sample.clamp(-ceiling, ceiling);
+            }
             drive_out.push(sample);
             for _ in 1..self.out_channels {
                 drive_out.push(0.0);
