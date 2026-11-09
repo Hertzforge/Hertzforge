@@ -4183,6 +4183,30 @@ ignores fields it does not know. Every file is written by the run's own thread o
 thread, never by the thread that reads the station; the record thread flushes and syncs the data
 every 5 s, so a crash loses at most the last 5 s.
 
+### The Recorder on the Simulator
+
+The simulator's plant moves only when it is driven, and a Recorder run drives nothing. So on the
+simulator a Recorder run's inputs carry a stated source, added to the plant's noise: the k-th
+recorded row, in table order, carries row k of the table below, and a fifth row and after repeat
+the four in order. The source repeats every 2.000 s from the run's first frame; each tone starts
+at phase 0 and makes whole cycles in that period. Levels are peak, in each row's unit: the
+simulator works in the row's unit, so a row's sensitivity does not scale it. The shell names the
+source whenever a Recorder run is on the simulator. The wire offers no way to change it.
+
+| Row | Signal |
+|---|---|
+| 1 | Markers: a half-sine of 0.5 peak lasting 10 ms, beginning 0.5 s into every 2.000 s period; 0 between |
+| 2 | 250 Hz, 0.2 peak |
+| 3 | 433 Hz, 0.1 peak |
+| 4 | 1000 Hz, 0.15 peak |
+
+At station time `t = n / fs_hz` (frame `n` over the rate the station programmed), row 1 is
+`0.5 sin(pi (t - t_k) / 0.010)` for `t_k <= t < t_k + 0.010`, `t_k = 0.5 + 2k` s, and 0
+otherwise; rows 2 to 4 are `A sin(2 pi f t)`. At 12 800 Hz a marker begins at station frame
+6 400 + 25 600 k and lasts 128 frames, and rises through 0.25 at 1.667 ms (21.33 frames) after
+it begins. At 12 800 Hz the 250 and 1000 Hz tones make whole cycles in every 2048 frames and
+the 433 Hz tone does not, so a frame missing from a recording moves its phase.
+
 ### Recorder Display
 
 Event topics:
