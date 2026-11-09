@@ -8,7 +8,10 @@ use crate::mimo::LoadedMimoLaw;
 use crate::mimo_bindings::RandomMimoPre;
 use crate::sandbox::{self, HostState, Sandbox};
 use crate::shock_classical::{LoadedClassicalLaw, ShockClassicalPre};
+use crate::shock_srs::{LoadedSrsLaw, ShockSrsPre};
+use crate::sine::{LoadedSineLaw, SineSinglePre};
 use crate::ticker::Ticker;
+use crate::twr::{LoadedTwrLaw, TwrSinglePre};
 use crate::types::{
     DiagnosticSpec, GuestOutput, LawIdentity, LoopInputs, LoopOutputs, Manifest, Param, Setup,
 };
@@ -112,6 +115,12 @@ pub enum AnyLaw {
     Mimo(LoadedMimoLaw),
     /// A classical shock law (the `shock-classical` world).
     ShockClassical(LoadedClassicalLaw),
+    /// An SRS shock law (the `shock-srs` world).
+    ShockSrs(LoadedSrsLaw),
+    /// A single-output Sine law (the `sine-single` world).
+    Sine(LoadedSineLaw),
+    /// A time waveform replication law (the `twr-single` world).
+    Twr(LoadedTwrLaw),
 }
 
 impl AnyLaw {
@@ -121,16 +130,22 @@ impl AnyLaw {
             AnyLaw::Single(l) => l.identity(),
             AnyLaw::Mimo(l) => l.identity(),
             AnyLaw::ShockClassical(l) => l.identity(),
+            AnyLaw::ShockSrs(l) => l.identity(),
+            AnyLaw::Sine(l) => l.identity(),
+            AnyLaw::Twr(l) => l.identity(),
         }
     }
 
-    /// The world the file implements: `random-single`, `random-mimo` or
-    /// `shock-classical`.
+    /// The world the file implements: `random-single`, `random-mimo`,
+    /// `shock-classical` or `shock-srs`.
     pub fn world(&self) -> &'static str {
         match self {
             AnyLaw::Single(_) => crate::WORLD,
             AnyLaw::Mimo(_) => crate::MIMO_WORLD,
             AnyLaw::ShockClassical(_) => crate::CLASSICAL_WORLD,
+            AnyLaw::ShockSrs(_) => crate::SRS_WORLD,
+            AnyLaw::Sine(_) => crate::SINE_WORLD,
+            AnyLaw::Twr(_) => crate::TWR_WORLD,
         }
     }
 }
@@ -227,6 +242,29 @@ impl LawHost {
         }
     }
 
+    /// Compile an SRS shock law file and read its manifest: as
+    /// [`Self::load`], for the `shock-srs` world. Fails with
+    /// [`LawError::NotALaw`] when the component is not a `shock-srs` law, and
+    /// [`LawError::ManifestInvalid`] when the manifest breaks a rule
+    /// (including declaring more values than an SRS law may report).
+    pub fn load_srs(&self, bytes: &[u8]) -> Result<LoadedSrsLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match ShockSrsPre::new(pre.clone()) {
+            Ok(c) => LoadedSrsLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if ShockClassicalPre::new(pre.clone()).is_ok() {
+                    "it is a classical shock law, not an SRS shock law (the shock-srs world)".into()
+                } else if RandomSinglePre::new(pre.clone()).is_ok()
+                    || RandomMimoPre::new(pre).is_ok()
+                {
+                    "it is a Random law, not an SRS shock law (the shock-srs world)".into()
+                } else {
+                    chain(&e)
+                },
+            )),
+        }
+    }
+
     /// Compile a law file of any kind and read its manifest: the world it
     /// implements decides which. Fails with [`LawError::NotALaw`] when it
     /// implements none, naming why for each.
@@ -240,18 +278,79 @@ impl LawHost {
             Ok(mimo) => return LoadedMimoLaw::read(self, sha256, mimo).map(AnyLaw::Mimo),
             Err(e) => chain(&e),
         };
-        match ShockClassicalPre::new(pre) {
-            Ok(c) => LoadedClassicalLaw::read(self, sha256, c).map(AnyLaw::ShockClassical),
+        let classical_err = match ShockClassicalPre::new(pre.clone()) {
+            Ok(c) => return LoadedClassicalLaw::read(self, sha256, c).map(AnyLaw::ShockClassical),
+            Err(e) => chain(&e),
+        };
+        let srs_err = match ShockSrsPre::new(pre.clone()) {
+            Ok(c) => return LoadedSrsLaw::read(self, sha256, c).map(AnyLaw::ShockSrs),
+            Err(e) => chain(&e),
+        };
+        let sine_err = match SineSinglePre::new(pre.clone()) {
+            Ok(c) => return LoadedSineLaw::read(self, sha256, c).map(AnyLaw::Sine),
+            Err(e) => chain(&e),
+        };
+        match TwrSinglePre::new(pre) {
+            Ok(c) => LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
             Err(e) => Err(LawError::NotALaw(format!(
-                "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}) \
-                 and not a classical shock law ({})",
+                "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}), \
+                 not a classical shock law ({classical_err}), not an SRS shock law ({srs_err}), \
+                 not a Sine law ({sine_err}) and not a time waveform replication law ({})",
                 chain(&e)
             ))),
         }
     }
 
-    /// Compile `bytes` and link them against the sandbox: the one place a
-    /// law is compiled.
+    /// Load a time waveform replication law file (the `twr-single` world).
+    pub fn load_twr(&self, bytes: &[u8]) -> Result<LoadedTwrLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match TwrSinglePre::new(pre.clone()) {
+            Ok(c) => LoadedTwrLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if RandomSinglePre::new(pre.clone()).is_ok()
+                    || RandomMimoPre::new(pre.clone()).is_ok()
+                {
+                    "it is a Random law, not a time waveform replication law (the twr-single \
+                     world)"
+                        .into()
+                } else if ShockClassicalPre::new(pre.clone()).is_ok()
+                    || ShockSrsPre::new(pre.clone()).is_ok()
+                {
+                    "it is a shock law, not a time waveform replication law (the twr-single \
+                     world)"
+                        .into()
+                } else if SineSinglePre::new(pre).is_ok() {
+                    "it is a Sine law, not a time waveform replication law (the twr-single \
+                     world)"
+                        .into()
+                } else {
+                    chain(&e)
+                },
+            )),
+        }
+    }
+
+    /// Load a single-output Sine law file (the `sine-single` world).
+    pub fn load_sine(&self, bytes: &[u8]) -> Result<LoadedSineLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match SineSinglePre::new(pre.clone()) {
+            Ok(c) => LoadedSineLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if RandomSinglePre::new(pre.clone()).is_ok()
+                    || RandomMimoPre::new(pre.clone()).is_ok()
+                {
+                    "it is a Random law, not a Sine law (the sine-single world)".into()
+                } else if ShockClassicalPre::new(pre.clone()).is_ok()
+                    || ShockSrsPre::new(pre).is_ok()
+                {
+                    "it is a shock law, not a Sine law (the sine-single world)".into()
+                } else {
+                    chain(&e)
+                },
+            )),
+        }
+    }
+
     fn compile(&self, bytes: &[u8]) -> Result<(String, InstancePre<HostState>), LawError> {
         let sha256 = law_file_sha256(bytes);
         let component =

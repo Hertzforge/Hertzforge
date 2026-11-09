@@ -1,0 +1,914 @@
+{
+ "type": "event",
+ "topic": "sine.data",
+ "seq": 172,
+ "data": {
+  "run_id": "sine-0003",
+  "source": "SIM",
+  "class": "sim",
+  "state": "running",
+  "phase": "engaged",
+  "test": "sweep",
+  "mode": "auto",
+  "t_s": 236.75,
+  "elapsed_s": 230.5,
+  "frequency_hz": 970.25,
+  "direction": "down",
+  "sweep_rate_oct_per_min": -2,
+  "sweeps": {
+   "done": 0,
+   "of": 1
+  },
+  "held": false,
+  "level_db": -6,
+  "commanded_db": -6,
+  "target": 0.5,
+  "measured": 0.5,
+  "error_db": 0,
+  "drive_vpk": 0.125,
+  "cola_vpk": null,
+  "notch": false,
+  "alarm": false,
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "amplitude": 0.5,
+    "phase_deg": -12.5,
+    "rms": 0.375,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 2,
+    "description": "Response",
+    "role": "monitor",
+    "amplitude": 0.75,
+    "phase_deg": -30.25,
+    "rms": 0.5625,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 3,
+    "description": "Fixture",
+    "role": "monitor",
+    "amplitude": 1.25,
+    "phase_deg": -95.5,
+    "rms": 0.875,
+    "unit": "g",
+    "overload": false
+   }
+  ],
+  "alarms": [],
+  "law": {
+   "values": {
+    "servo_step_db": 0.015625,
+    "prediction_step_db": 0.0078125,
+    "total_step_db": 0.0234375,
+    "servo_level_db": -12.5
+   },
+   "misses": 0,
+   "capped_ticks": 2
+  },
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Control",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Control",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.515625
+         ]
+        }
+       },
+       {
+        "name": "Profile",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.625,
+          0.625,
+          0.625,
+          0.625
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.375,
+          0.375,
+          0.375,
+          0.375
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.75,
+          0.75,
+          0.75,
+          0.75
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.25,
+          0.25,
+          0.25,
+          0.25
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drive",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Drive",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.125,
+          0.140625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "resp",
+    "quantity": "response",
+    "channels": [
+     1,
+     3
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Channel 1: Control",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Channel 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.515625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Channel 3: Fixture",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Channel 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1.25,
+          1.5
+         ]
+        }
+       },
+       {
+        "name": "Limit",
+        "role": "limit",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          500.0,
+          750.0,
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          1.5,
+          1.5,
+          1.5,
+          1.5
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "ph",
+    "quantity": "phase",
+    "channels": [
+     1,
+     3
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Channel 1: Control",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -12.5,
+          -14.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Channel 3: Fixture",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -95.5,
+          -101.25
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "thd",
+    "quantity": "thd",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Distortion",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "THD",
+       "unit": "%",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "THD",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1000.0,
+          1250.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "t1",
+    "quantity": "time",
+    "channels": [
+     1
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Channel 1: Control",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          6.103515625e-05,
+          0.0001220703125,
+          0.00018310546875
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.25,
+          0.5,
+          0.25
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "id",
+    "quantity": "identification",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Identification Gain",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": "g/V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Gain",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.75
+         ]
+        }
+       },
+       {
+        "name": "Trust floor",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.05,
+          0.05
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Coherence",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Coherence",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Coherence",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.99,
+          0.25,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Trusted",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.99,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Trust coherence",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.5
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "channels": null,
+    "views": [
+     {
+      "view": "reading",
+      "title": "Law",
+      "rows": [
+       {
+        "label": "Servo step",
+        "value": 0.015625,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Prediction step",
+        "value": 0.0078125,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Total step",
+        "value": 0.0234375,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Servo level",
+        "value": -12.5,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Unusable calls in a row",
+        "value": 0,
+        "unit": null,
+        "status": "pass"
+       },
+       {
+        "label": "Ticks a cap bound",
+        "value": 2,
+        "unit": null,
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "channels": null,
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Frequency",
+        "value": 970.25,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Direction",
+        "value": "down",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Level",
+        "value": -6,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Target",
+        "value": 0.5,
+        "unit": "g",
+        "status": "info"
+       },
+       {
+        "label": "Measured",
+        "value": 0.5,
+        "unit": "g",
+        "status": "pass"
+       },
+       {
+        "label": "Error",
+        "value": 0,
+        "unit": "dB",
+        "status": "pass"
+       },
+       {
+        "label": "Drive",
+        "value": 0.125,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Sweeps",
+        "value": "0 of 1",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Elapsed",
+        "value": 230.5,
+        "unit": "s",
+        "status": "info"
+       },
+       {
+        "label": "Remaining",
+        "value": 566.75,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,27 @@
+[package]
+name = "my-sine-law"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# A single-output Sine control law, built to a law file with
+#
+#     cargo build --target wasm32-wasip2 --release
+#
+# Copy this folder, rename the package, and change `src/law.rs`. See README.md.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Inside the Hertzforge repository the SDK is found by path. In a copy outside it,
+# point this at your checkout of the repository, or at the SDK's git source.
+hertzforge-law-sdk = { path = "../.." }
+
+# Its own workspace: the template builds on its own, wherever it is copied.
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

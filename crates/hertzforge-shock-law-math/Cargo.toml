@@ -6,11 +6,11 @@ license = "MIT"
 publish = false
 
 # The math of the shock control laws, with nothing around it: plain slices in and
-# plain numbers out. The law files (`laws/shock-fdc`, built to WebAssembly) and the
-# controller's built-in native laws (`hertzforge-shock-host`, `hertzforge-shock-laws`)
-# both run this code, so each built-in law and its law file are one
-# implementation. It depends only on `hertzforge-dsp`, which builds for
-# `wasm32-wasip2`, and must keep building there:
+# plain numbers out. The law files (`laws/shock-fdc` and `laws/shock-srs-ratio`, built
+# to WebAssembly) and the controller's built-in native laws (`hertzforge-shock-host`,
+# `hertzforge-srs`, `hertzforge-shock-laws`) both run this code, so each built-in law
+# and its law file are one implementation. It depends only on `hertzforge-dsp`, which
+# builds for `wasm32-wasip2`, and must keep building there:
 # `cargo build -p hertzforge-shock-law-math --target wasm32-wasip2`.
 [dependencies]
 hertzforge-dsp = { path = "../hertzforge-dsp" }

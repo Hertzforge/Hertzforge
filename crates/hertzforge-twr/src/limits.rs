@@ -27,6 +27,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::reference::WaveformKinematics;
+use crate::trip::TripKind;
 use crate::TwrError;
 
 /// The drive ceiling every module ships with, peak volts. The standing
@@ -155,22 +156,41 @@ impl TwrLimits {
     /// Peak, not RMS, and on the REALIZED record, not a projection: see the
     /// field docs for why neither substitution is safe here.
     pub fn check_drive_peak(&self, drive: &[f64]) -> Option<String> {
+        self.drive_peak_trip(drive).map(|t| t.message)
+    }
+
+    /// [`TwrLimits::check_drive_peak`] with the trip's numbers: the realized
+    /// record's peak and the ceiling.
+    pub fn drive_peak_trip(&self, drive: &[f64]) -> Option<LimitTrip> {
         let peak = drive.iter().fold(0.0f64, |m, &v| m.max(v.abs()));
-        self.check_peak_value(peak)
+        self.peak_value_trip(peak, false)
     }
 
     /// [`TwrLimits::check_drive_peak`] against a peak already in hand - the
     /// level verbs know theirs without playing anything, because scaling every
     /// bin by `s` scales the time record by exactly `s`.
     pub fn check_peak_value(&self, peak: f64) -> Option<String> {
+        self.peak_value_trip(peak, false).map(|t| t.message)
+    }
+
+    /// [`TwrLimits::check_peak_value`] with the trip's numbers. `predicted`
+    /// marks a peak found on a projection, before anything played.
+    pub fn peak_value_trip(&self, peak: f64, predicted: bool) -> Option<LimitTrip> {
         let ceiling = self.max_drive_vpk?;
         if peak > ceiling {
-            return Some(format!(
-                "drive peak {peak:.4} V exceeds the max drive ceiling {ceiling:.4} V \
-                 (peak volts, measured on the realized drive record): REFUSED, not clipped \
-                 - clipping would distort the drive and the law would then converge around \
-                 the distortion"
-            ));
+            return Some(LimitTrip {
+                kind: TripKind::DriveVpk {
+                    vpk: peak,
+                    ceiling_vpk: ceiling,
+                    predicted,
+                },
+                message: format!(
+                    "drive peak {peak:.4} V exceeds the max drive ceiling {ceiling:.4} V \
+                     (peak volts, measured on the realized drive record): REFUSED, not \
+                     clipped - clipping would distort the drive and the law would then \
+                     converge around the distortion"
+                ),
+            });
         }
         None
     }
@@ -187,7 +207,9 @@ impl TwrLimits {
         let mut worst = 0.0f64;
         let mut alarm = false;
         let mut consec = 0usize;
-        let mut abort: Option<String> = None;
+        // The trip is decided once; the abort sentence is derived from it, so
+        // the two cannot disagree.
+        let mut trip: Option<LimitTrip> = None;
         for (i, (&t, &a)) in target.iter().zip(achieved.iter()).enumerate() {
             let e = (a - t).abs();
             worst = worst.max(e / peak);
@@ -196,31 +218,52 @@ impl TwrLimits {
             }
             if e > abort_w {
                 consec += 1;
-                if consec >= self.envelope_debounce_samples && abort.is_none() {
-                    abort = Some(format!(
-                        "response envelope abort: |error| > {:.0}% of target peak for {} \
-                         consecutive samples (at sample {})",
-                        self.envelope_abort_frac * 100.0,
-                        consec,
-                        i
-                    ));
+                if consec >= self.envelope_debounce_samples && trip.is_none() {
+                    trip = Some(LimitTrip {
+                        kind: TripKind::Envelope {
+                            in_play: false,
+                            // The whole record's worst, filled in below.
+                            worst_frac: 0.0,
+                            abort_frac: self.envelope_abort_frac,
+                            samples: consec,
+                            at_sample: i,
+                        },
+                        message: format!(
+                            "response envelope abort: |error| > {:.0}% of target peak for {} \
+                             consecutive samples (at sample {})",
+                            self.envelope_abort_frac * 100.0,
+                            consec,
+                            i
+                        ),
+                    });
                 }
             } else {
                 consec = 0;
             }
         }
-        if abort.is_none() {
+        if let Some(LimitTrip {
+            kind: TripKind::Envelope { worst_frac, .. },
+            ..
+        }) = trip.as_mut()
+        {
+            *worst_frac = worst;
+        }
+        if trip.is_none() {
             if let Some(lim) = self.response_rms_limit {
                 let rms = hertzforge_dsp::stats::rms(achieved);
                 if rms > lim {
-                    abort = Some(format!("response RMS {rms:.4} exceeds the limit {lim:.4}"));
+                    trip = Some(LimitTrip {
+                        kind: TripKind::ResponseRms { rms, limit: lim },
+                        message: format!("response RMS {rms:.4} exceeds the limit {lim:.4}"),
+                    });
                 }
             }
         }
         ResponseOutcome {
             worst_frac: worst,
             alarm,
-            abort,
+            abort: trip.as_ref().map(|t| t.message.clone()),
+            trip,
         }
     }
 
@@ -241,16 +284,35 @@ impl TwrLimits {
 
     /// Pre-play drive check (RMS ceiling). Returns the abort reason if tripped.
     pub fn check_drive(&self, drive: &[f64]) -> Option<String> {
+        self.drive_rms_trip(drive).map(|t| t.message)
+    }
+
+    /// [`TwrLimits::check_drive`] with the trip's numbers.
+    pub fn drive_rms_trip(&self, drive: &[f64]) -> Option<LimitTrip> {
         if let Some(lim) = self.drive_rms_limit {
             let rms = hertzforge_dsp::stats::rms(drive);
             if rms > lim {
-                return Some(format!(
-                    "drive RMS {rms:.4} exceeds the limit {lim:.4} (pre-play check)"
-                ));
+                return Some(LimitTrip {
+                    kind: TripKind::DriveRms {
+                        vrms: rms,
+                        limit_vrms: lim,
+                    },
+                    message: format!(
+                        "drive RMS {rms:.4} exceeds the limit {lim:.4} (pre-play check)"
+                    ),
+                });
             }
         }
         None
     }
+}
+
+/// A limit that tripped: its kind with its numbers, and the sentence the run
+/// log and the abort reason carry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitTrip {
+    pub kind: TripKind,
+    pub message: String,
 }
 
 /// The per-play response-check outcome.
@@ -262,6 +324,9 @@ pub struct ResponseOutcome {
     pub alarm: bool,
     /// Abort reason, if the abort band + debounce (or the RMS limit) tripped.
     pub abort: Option<String>,
+    /// What tripped, with its numbers; set exactly when `abort` is, which is
+    /// its sentence.
+    pub trip: Option<LimitTrip>,
 }
 
 /// Pre-arm kinematic ceilings. `None` = not evaluated.
@@ -350,6 +415,97 @@ mod tests {
         let out = l.check_response(&target, &a);
         assert!(out.abort.is_some(), "{out:?}");
         assert!(out.worst_frac >= 1.0 - 1e-12);
+    }
+
+    /// The typed trips carry today's sentences byte for byte, and their
+    /// numbers.
+    #[test]
+    fn the_typed_trips_carry_the_same_sentences_and_their_numbers() {
+        let mut l = limits();
+        l.max_drive_vpk = Some(1.0);
+        let d = vec![0.0, 2.0, -0.5];
+        let t = l.drive_peak_trip(&d).unwrap();
+        assert_eq!(
+            t.message,
+            "drive peak 2.0000 V exceeds the max drive ceiling 1.0000 V (peak volts, measured \
+             on the realized drive record): REFUSED, not clipped - clipping would distort the \
+             drive and the law would then converge around the distortion"
+        );
+        assert_eq!(
+            t.kind,
+            TripKind::DriveVpk {
+                vpk: 2.0,
+                ceiling_vpk: 1.0,
+                predicted: false
+            }
+        );
+        assert_eq!(l.check_drive_peak(&d), Some(t.message.clone()));
+        assert_eq!(l.check_peak_value(2.0), Some(t.message.clone()));
+        let p = l.peak_value_trip(2.0, true).unwrap();
+        assert_eq!(p.message, t.message);
+        assert!(matches!(
+            p.kind,
+            TripKind::DriveVpk {
+                predicted: true,
+                ..
+            }
+        ));
+        assert!(l.drive_peak_trip(&[0.5]).is_none());
+
+        l.drive_rms_limit = Some(0.5);
+        let r = l.drive_rms_trip(&d).unwrap();
+        assert_eq!(
+            r.message,
+            "drive RMS 1.1902 exceeds the limit 0.5000 (pre-play check)"
+        );
+        assert_eq!(l.check_drive(&d), Some(r.message.clone()));
+        match r.kind {
+            TripKind::DriveRms { vrms, limit_vrms } => {
+                assert_eq!(limit_vrms, 0.5);
+                assert_eq!(vrms, hertzforge_dsp::stats::rms(&d));
+            }
+            k => panic!("{k:?}"),
+        }
+
+        let target = vec![1.0f64; 100];
+        let mut a = target.clone();
+        for v in a.iter_mut().skip(40).take(9) {
+            *v = 2.0;
+        }
+        let out = limits().check_response(&target, &a);
+        let e = out.trip.clone().unwrap();
+        assert_eq!(
+            e.message,
+            "response envelope abort: |error| > 50% of target peak for 8 consecutive samples \
+             (at sample 47)"
+        );
+        assert_eq!(out.abort, Some(e.message.clone()));
+        assert_eq!(
+            e.kind,
+            TripKind::Envelope {
+                in_play: false,
+                worst_frac: 1.0,
+                abort_frac: 0.5,
+                samples: 8,
+                at_sample: 47
+            }
+        );
+        let clean = limits().check_response(&target, &target);
+        assert!(clean.trip.is_none() && clean.abort.is_none());
+
+        let mut l = limits();
+        l.response_rms_limit = Some(0.5);
+        let out = l.check_response(&target, &target);
+        let t = out.trip.unwrap();
+        assert_eq!(t.message, "response RMS 1.0000 exceeds the limit 0.5000");
+        assert_eq!(out.abort, Some(t.message));
+        assert_eq!(
+            t.kind,
+            TripKind::ResponseRms {
+                rms: 1.0,
+                limit: 0.5
+            }
+        );
     }
 
     #[test]

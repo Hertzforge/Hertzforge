@@ -396,6 +396,10 @@ impl Phase {
     fn from_state(s: TwrState) -> Phase {
         match s {
             TwrState::Configured => Phase::Idle,
+            // The core's own review hold, under a control law. The daemon runs
+            // no law (its configuration never sets `control`), so it parks at
+            // review host-side instead; the arm is the same park.
+            TwrState::Review => Phase::AwaitingReview,
             TwrState::FeasibilityBlocked => Phase::FeasibilityBlocked,
             TwrState::Iterating => Phase::Iterating,
             TwrState::Holding => Phase::Holding,
@@ -2783,6 +2787,8 @@ fn translate_twr(p: &TwrProfile, staged: &StagedReference) -> Result<TwrConfig, 
                 value: m.value.clone(),
             })
             .collect(),
+        // The daemon host runs the built-in iteration only: it has no law seam.
+        control: None,
     };
     Ok(cfg)
 }

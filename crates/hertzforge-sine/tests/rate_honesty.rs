@@ -220,6 +220,8 @@ fn cfg(band: (f64, f64), control_tick_frames: usize) -> SineTestConfig {
         control_tick_frames,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 

@@ -169,6 +169,13 @@ pub struct NiBackend {
     /// engine's timebase; a plot moving while this is flat is a bug.
     frames_read: u64,
     frames_written: u64,
+    /// Frames accepted into the AO task since its generation began: since the
+    /// tasks were built, or since the AO task was last stopped (frames primed
+    /// into the parked task before the next start belong to that start). The
+    /// device's generated count restarts at every start, so this, not
+    /// `frames_written`, is what it reaches once everything written has
+    /// played: the shutdown taper's wait target.
+    generation_frames_written: u64,
     epoch: u32,
     faulted: bool,
 
@@ -270,6 +277,40 @@ fn derive_ao_routing(chassis: Option<&str>, force_unrouted: bool) -> String {
     }
 }
 
+/// How the shutdown taper's wait for generation ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaperWait {
+    /// The device generated up to the target.
+    Reached,
+    /// The budget ran out with the device at `generated`.
+    TimedOut { generated: u64 },
+    /// No driver to ask: nothing to wait on.
+    NoDriver,
+}
+
+/// Wait until `generated()` reports at least `target` frames generated, or
+/// `budget` has passed, polling every 200 us. `generated` answers `None` when
+/// there is no driver to ask.
+fn await_taper_generation(
+    target: u64,
+    budget: std::time::Duration,
+    mut generated: impl FnMut() -> Option<u64>,
+) -> TaperWait {
+    let wait_until = std::time::Instant::now() + budget;
+    loop {
+        let Some(now) = generated() else {
+            return TaperWait::NoDriver;
+        };
+        if now >= target {
+            return TaperWait::Reached;
+        }
+        if std::time::Instant::now() >= wait_until {
+            return TaperWait::TimedOut { generated: now };
+        }
+        std::thread::sleep(std::time::Duration::from_micros(200));
+    }
+}
+
 impl NiBackend {
     /// A backend for `cfg` at `acq`. Nothing touches the driver until
     /// [`Backend::open`].
@@ -305,6 +346,7 @@ impl NiBackend {
             regen_mode_readback: None,
             frames_read: 0,
             frames_written: 0,
+            generation_frames_written: 0,
             epoch: 0,
             faulted: false,
             overload_latched: false,
@@ -525,6 +567,8 @@ impl NiBackend {
             self.ao = None;
             self.ai = None;
         }
+        // No task, no generation.
+        self.generation_frames_written = 0;
         // No task, no host loop: release the 1 ms timer (close, Drop, a rebuild,
         // and the abort path all come through here).
         #[cfg(windows)]
@@ -1030,37 +1074,46 @@ impl NiBackend {
         // freezes the output at whatever the taper had reached (the device holds
         // its last sample), so a stop before generation catches up is the same
         // bug as the zero-block it replaced - only with a nicer-looking buffer.
-        let target = self.frames_written;
+        let target = self.taper_generation_target();
         let ao = self.ao.expect("checked above");
         let budget = ((self.cfg.ao_buffer_frames(self.acq.block_frames) as f64 + n_frames as f64)
             / rate)
             * 2.0;
-        let wait_until =
-            std::time::Instant::now() + std::time::Duration::from_secs_f64(budget.min(2.0));
-        // Device stop path with no hardware-free test, so it keeps its reviewed form
-        // rather than a `while let` rewrite for a style lint.
-        #[allow(clippy::while_let_loop)]
-        loop {
-            let generated = match self.drv() {
-                Ok(d) => d
-                    .write_total_samp_per_chan_generated(ao)
-                    .unwrap_or(u64::MAX),
-                Err(_) => break,
-            };
-            if generated >= target {
-                break;
-            }
-            if std::time::Instant::now() >= wait_until {
-                self.warnings.push(format!(
-                    "shutdown taper did not finish generating within {:.0} ms ({generated}/{target} \
-                     frames); the drive is being cut mid-taper",
-                    budget.min(2.0) * 1e3
-                ));
-                self.taper_cut_short = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_micros(200));
+        let budget = std::time::Duration::from_secs_f64(budget.min(2.0));
+        let driver = self.driver.as_ref();
+        let wait = await_taper_generation(target, budget, || {
+            driver.map(|d| {
+                d.write_total_samp_per_chan_generated(ao)
+                    .unwrap_or(u64::MAX)
+            })
+        });
+        if let TaperWait::TimedOut { generated } = wait {
+            self.warnings.push(format!(
+                "shutdown taper did not finish generating within {:.0} ms ({generated} of the \
+                 {target} frames written since the device started); the drive is being cut \
+                 mid-taper",
+                budget.as_secs_f64() * 1e3
+            ));
+            self.taper_cut_short = true;
         }
+    }
+
+    /// The device's generation count at which the last frame written, the
+    /// taper's last, has reached the pin: what the taper's wait waits for.
+    /// This generation's frames only, because the device counts from its own
+    /// start: a module that starts the device for every record (TWR plays,
+    /// pulse shots) would otherwise wait, from its second record on, for a
+    /// count no generation reaches, run the whole budget, and call a finished
+    /// taper cut short (measured on the NI loopback 2026-11-08: 10 559 of
+    /// 129 343).
+    fn taper_generation_target(&self) -> u64 {
+        self.generation_frames_written
+    }
+
+    /// Account for `frames` the device's output buffer accepted.
+    fn note_frames_accepted(&mut self, frames: usize) {
+        self.frames_written += frames as u64;
+        self.generation_frames_written += frames as u64;
     }
 
     /// After a shutdown taper that did NOT complete, and only then: put every AO
@@ -1522,11 +1575,34 @@ impl Backend for NiBackend {
         match self.state {
             State::Open | State::Configured | State::Stopped => {
                 self.require_ai().map_err(HalError::from)?;
-                // Verify is advisory: it asks the driver to check the task's
-                // configuration without reserving hardware. Absence is fine.
+                // RE-COMMIT THE AI TASK - the AO re-commit's partner below, and
+                // what keeps `start()` a start.
+                //
+                // `configure()` commits the AI task at first bring-up so that
+                // everything the driver validates lazily is validated then.
+                // `stop()` UNRESERVES it with the AO (the zombie fix), and until
+                // 2026-11-07 arm only VERIFIED it, which reserves nothing. So
+                // from the first `stop()` on, every `DAQmxStartTask(ai)` reserved
+                // and committed the AI task itself, inside the start call. A
+                // pulse module that brings its shot up, waits out the time
+                // between pulses and then starts had that work on its deadline:
+                // the NI bench measured every shock interval about 125 ms long
+                // with the arm, commit and start all after the wait. Committing
+                // here puts the AI task's reservation in the arm, and the start
+                // is left to start (still AO first, then AI; see `start()`).
+                //
+                // A commit the driver refuses degrades to the old verify, with a
+                // warning, as the AO commit below does: the start then reserves
+                // the task itself, which is correct, only slower.
                 if let (Ok(d), Some(ai)) = (self.drv(), self.ai) {
-                    if let Err(e) = d.task_control(ai, val::TASK_VERIFY) {
-                        self.warnings.push(format!("AI task verify skipped: {e}"));
+                    if let Err(e) = d.task_control(ai, val::TASK_COMMIT) {
+                        self.warnings.push(format!(
+                            "AI task commit at arm() failed ({e}); the start will reserve and \
+                             commit the input task itself, which lengthens the start call"
+                        ));
+                        if let Err(e) = d.task_control(ai, val::TASK_VERIFY) {
+                            self.warnings.push(format!("AI task verify skipped: {e}"));
+                        }
                     }
                 }
                 // RE-COMMIT THE AO TASK - the symmetric partner of `stop()`'s
@@ -1680,6 +1756,9 @@ impl Backend for NiBackend {
                     let _ = d.task_control(ai, val::TASK_UNRESERVE);
                 }
             }
+            // The generation is over: the unreserve dropped whatever was still
+            // queued, and the next start counts from zero.
+            self.generation_frames_written = 0;
             // Only when the taper above was cut short; a completed taper skips it.
             if std::mem::take(&mut self.taper_cut_short) {
                 self.zero_outputs_after_cut_taper();
@@ -1880,7 +1959,7 @@ impl Backend for NiBackend {
             self.absorb_driver_warnings();
         }
         let written = written.max(0) as usize;
-        self.frames_written += written as u64;
+        self.note_frames_accepted(written);
         Ok(written)
     }
 
@@ -2583,6 +2662,126 @@ mod tests {
         let w = b.warnings().join(" | ");
         assert!(!w.contains("taper"), "{w}");
         assert!(!w.contains("zero"), "{w}");
+    }
+
+    /// A shot brought up and withheld (a pulse module's wait before it was stopped
+    /// or held): the tasks ARMED, the record's head written (`last_drive_frame`
+    /// is its last sample, not zero), nothing ever started. `stop()` parks it with
+    /// no taper (nothing was generated, so the output still holds the last shot's
+    /// closing zero), no zero write and no warning, and the backend is Stopped,
+    /// from where `arm()` takes it again. The stop and unreserve calls themselves
+    /// need a driver; on the bench they are the same calls as every shot's park.
+    #[test]
+    fn a_stop_on_an_armed_never_started_shot_parks_it_without_a_taper() {
+        let mut b = mid_run_with_drive(1);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        b.state = State::Armed;
+        b.last_drive_frame = vec![0.25];
+        b.stop().unwrap();
+        assert!(b.warnings().is_empty(), "{:?}", b.warnings());
+        assert!(!b.taper_cut_short);
+        assert_eq!(b.state, State::Stopped);
+        b.arm().unwrap();
+        assert_eq!(b.state, State::Armed);
+    }
+
+    // --- the taper's wait: this generation's frames ---------------------------
+
+    /// A backend that has run generations before this one, the shape of a
+    /// module that brings the station up once and starts the device for every
+    /// record (TWR plays, pulse shots): `earlier` frames were written, and
+    /// generated, in earlier generations, each ending on a zero and stopped;
+    /// the backend is re-armed and running again.
+    fn rearmed_after(earlier: &[usize]) -> NiBackend {
+        let mut b = mid_run_with_drive(1);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        for &frames in earlier {
+            b.note_frames_accepted(frames);
+            // A record that ran to its end rests at 0 V: its stop has no taper.
+            b.last_drive_frame = vec![0.0];
+            b.stop().unwrap();
+            b.arm().unwrap();
+            b.state = State::Running;
+        }
+        b
+    }
+
+    /// The abort inside a play measured on the NI loopback (2026-11-08): the
+    /// identification and one play ran in earlier generations (118 784 frames
+    /// written and generated), then this play's 10 239 frames and its 25 ms
+    /// taper, 320 frames at 12 800 Hz. The device counts generation from its
+    /// own start, and it reported 10 559 frames generated: every frame of this
+    /// generation, taper included. The wait must be for those 10 559. It waited
+    /// for the 129 343 written since the backend was built, which no count
+    /// after the first start can reach, so it ran its whole 170 ms budget,
+    /// called a finished taper cut short, and zeroed an output already at 0 V.
+    ///
+    /// RED-MUTATION: count the target over every frame written since
+    /// construction (the code before 2026-11-08) and this reds.
+    #[test]
+    fn the_taper_waits_for_this_generations_frames_not_every_frame_since_the_backend_was_built() {
+        let mut b = rearmed_after(&[52_224, 66_560]);
+        b.note_frames_accepted(10_239 + 320);
+        assert_eq!(
+            b.frames_written(),
+            129_343,
+            "the cumulative counter is unchanged"
+        );
+        assert_eq!(b.taper_generation_target(), 10_559);
+        let t0 = std::time::Instant::now();
+        let wait = await_taper_generation(
+            b.taper_generation_target(),
+            std::time::Duration::from_millis(170),
+            || Some(10_559),
+        );
+        assert_eq!(wait, TaperWait::Reached);
+        assert!(t0.elapsed() < std::time::Duration::from_millis(100));
+    }
+
+    /// The direction that would cut a taper short: frames written after a stop
+    /// and before the next start (a record's head primed into the parked task,
+    /// the start's silence prefill) are the next generation's, and its count
+    /// includes them. The first generation counts every frame written since
+    /// the tasks were built.
+    ///
+    /// RED-MUTATION: start the count at `arm()` instead of at the stop, and
+    /// the 768 frames primed while Stopped go missing from the target.
+    #[test]
+    fn frames_written_between_a_stop_and_the_next_start_count_toward_that_generation() {
+        let mut b = rearmed_after(&[]);
+        b.note_frames_accepted(1_000);
+        assert_eq!(b.taper_generation_target(), 1_000);
+        b.last_drive_frame = vec![0.0];
+        b.stop().unwrap();
+        b.note_frames_accepted(768);
+        b.arm().unwrap();
+        b.note_frames_accepted(256);
+        b.state = State::Running;
+        b.note_frames_accepted(4_000);
+        assert_eq!(b.taper_generation_target(), 768 + 256 + 4_000);
+    }
+
+    /// An abort clears the tasks, and with them the generation: whatever is
+    /// built next counts from zero.
+    #[test]
+    fn an_abort_ends_the_generation_count_with_the_tasks() {
+        let mut b = rearmed_after(&[]);
+        b.note_frames_accepted(5_000);
+        b.last_drive_frame = vec![0.0];
+        b.emergency_stop().unwrap();
+        assert_eq!(b.taper_generation_target(), 0);
+        assert_eq!(b.frames_written(), 5_000);
+    }
+
+    /// A generation that really falls short of the taper's end still times out
+    /// and reports where it was; with no driver there is nothing to wait on.
+    #[test]
+    fn a_generation_short_of_the_taper_times_out_with_its_count() {
+        let short =
+            await_taper_generation(10_559, std::time::Duration::from_millis(5), || Some(9_000));
+        assert_eq!(short, TaperWait::TimedOut { generated: 9_000 });
+        let none = await_taper_generation(1, std::time::Duration::from_millis(5), || None);
+        assert_eq!(none, TaperWait::NoDriver);
     }
 
     /// Records the DAQmx calls `zero_ao_on_demand` makes, failing the step named in

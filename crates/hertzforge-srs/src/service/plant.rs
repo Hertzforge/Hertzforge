@@ -23,7 +23,9 @@
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_hal::Backend;
+use hertzforge_shock_common::{NoHooks, Prepared, ShotHooks};
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 /// How one [`PulsePlant::fire`] failed.
 ///
@@ -47,6 +49,11 @@ pub enum PlantError {
     },
     /// Bring-up, driver, or stream failure. The message is the underlying error.
     Failed(String),
+    /// The shot was brought up (armed, the record's head committed) and the
+    /// caller's [`ShotHooks::ready`] withheld it: nothing started and nothing
+    /// played. The device is left ARMED with the record committed; the caller
+    /// parks it ([`PulsePlant::stop`]), which unreserves the record unplayed.
+    Withheld,
 }
 
 impl std::fmt::Display for PlantError {
@@ -63,6 +70,9 @@ impl std::fmt::Display for PlantError {
                 frames_committed.saturating_sub(*frames_done)
             ),
             PlantError::Failed(m) => write!(f, "{m}"),
+            PlantError::Withheld => {
+                write!(f, "the shot was brought up and not started; nothing played")
+            }
         }
     }
 }
@@ -152,11 +162,46 @@ pub trait PulsePlant {
     /// `cancel`, when `Some`, is read once per block BEFORE more drive is offered;
     /// observed `true` returns [`PlantError::Cancelled`] with the committed-queue
     /// arithmetic. `None` never reads a flag.
+    ///
+    /// The same as [`Self::fire_timed`] with [`NoHooks`]: the shot starts as soon
+    /// as it is brought up, and nobody asks when.
     fn fire(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+    ) -> Result<FiredResponses, PlantError> {
+        self.fire_timed(drive_g, ring_out_samples, cancel, &mut NoHooks)
+    }
+
+    /// [`Self::fire`], stopping twice for the caller's `hooks`
+    /// (`hertzforge_shock_common::shot`): [`ShotHooks::ready`] once the shot is
+    /// brought up (armed, the record's head committed) and before the start, and
+    /// [`ShotHooks::started`] as soon as the start call has returned.
+    ///
+    /// # Why both moments matter
+    ///
+    /// The service waits out the time between pulses inside `ready`, so only the
+    /// start call lands on the deadline; a bring-up done after the wait adds its
+    /// whole length to every interval (about 125 ms a shot on the NI bench,
+    /// 2026-11-07). It stamps the pulse's start inside `started`: a start call
+    /// returns once the device's clock is running, so the record's first sample
+    /// is out at or before that call, and the next start call is issued no sooner
+    /// than the time between pulses after it. A stamp taken before the bring-up
+    /// let two physical starts come closer than the floor (4.986 s against 5 s,
+    /// timed on the bench by an instrument on its own clock).
+    ///
+    /// `ready` returning `false` is [`PlantError::Withheld`]: nothing started, and
+    /// the device stays armed for the caller to park. A plant with no device
+    /// beneath it calls `ready` and then `started` first. A fire that fails
+    /// before the start never calls `started`; the service then stamps the pulse
+    /// when the fire returns, which is late but never early.
+    fn fire_timed(
+        &mut self,
+        drive_g: &[f64],
+        ring_out_samples: usize,
+        cancel: Option<&AtomicBool>,
+        hooks: &mut dyn ShotHooks,
     ) -> Result<FiredResponses, PlantError>;
 
     /// PARK the plant: stop the device task and unreserve it, leaving the plant
@@ -478,17 +523,19 @@ impl<B: Backend> PulsePlant for HalPulsePlant<B> {
         Ok(())
     }
 
-    fn fire(
+    fn fire_timed(
         &mut self,
         drive_g: &[f64],
         ring_out_samples: usize,
         cancel: Option<&AtomicBool>,
+        hooks: &mut dyn ShotHooks,
     ) -> Result<FiredResponses, PlantError> {
         if !self.opened {
             return Err(PlantError::Failed("plant not open (arm first)".into()));
         }
         // COLD TASK, per shot. Re-arm if the previous fire's stop parked
         // the task; the very first fire after `ensure_open` is already armed.
+        let armed_at = Instant::now();
         if !self.armed {
             self.backend
                 .arm()
@@ -531,6 +578,7 @@ impl<B: Backend> PulsePlant for HalPulsePlant<B> {
         // anything is accepted the query is ADVISORY and `write_drive`'s accept count is
         // the authority. (The one-block pre-start reserve that used to sit here went with
         // the hypothesis it was built for - a commit-depth sweep refuted it.)
+        let committed_at = Instant::now();
         let mut committed = 0usize;
         let block = self.block_frames.max(1);
         while committed < total {
@@ -553,13 +601,28 @@ impl<B: Backend> PulsePlant for HalPulsePlant<B> {
             committed += accepted.min(total - committed);
         }
 
+        // BROUGHT UP: armed, the record's head committed, nothing started. The
+        // caller waits out the time between pulses here (`fire_timed`'s docs), so
+        // only the start lands on its deadline. Withheld, the task stays armed for
+        // the caller to park.
+        let prepared = Prepared {
+            arm_s: (committed_at - armed_at).as_secs_f64(),
+            commit_s: committed_at.elapsed().as_secs_f64(),
+        };
+        if !hooks.ready(prepared) {
+            return Err(PlantError::Withheld);
+        }
+
         // START. Any silence the backend tops the buffer up with now lands BEHIND
         // the committed record, so the first clocked sample is real drive - the
         // whole point of the cold-task shape.
+        let start_at = Instant::now();
         self.backend
             .start()
             .map_err(|e| PlantError::Failed(e.to_string()))?;
         self.armed = false;
+        // The clock is running, so the pulse has started (`fire_timed`'s docs).
+        hooks.started(start_at.elapsed().as_secs_f64());
 
         let control_slot = self.control_slot;
         let monitor_slots = &self.monitor_slots;

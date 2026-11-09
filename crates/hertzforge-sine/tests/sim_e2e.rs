@@ -130,6 +130,8 @@ fn sweep_cfg(band: (f64, f64), rate: SweepRate, profile: SineProfile) -> SineTes
         control_tick_frames: 64,
         fs_hz: None,
         metadata: Vec::new(),
+        law_guards: None,
+        control_tick_s: None,
     }
 }
 
@@ -2690,7 +2692,7 @@ fn build_notch_step_tuned(
     // An optional constant sysID |H| for the limit channel. When set together with a
     // high `notch_drive_floor` (so the notch always takes the sysID fallback rather
     // than the measured tracked/drive ratio), the notch ceiling is a CONSTANT
-    // (limit_abort_high / sysid_h) independent of the actual limit reading. That
+    // (limit_g / sysid_h) independent of the actual limit reading. That
     // decouples the notch bind point from the limit channel's own abort band: the
     // notch can bind hard (holding the drive down) while the limit channel reads well
     // below its own abort - so a drive transient during a control collapse cannot
@@ -2868,7 +2870,14 @@ fn notched_under_test_does_not_trip_low_side_or_servo_fault() {
                              // Limit bound 0.4 g: with limit_gain 5.0 the drive is capped near
                              // 0.4/5.0 = 0.08, so the control channel (gain 0.5) reads ~0.04 g, far below
                              // its 1 g target and below its abort-low (~0.7 g). No over-test offset.
-    let (step, handles) = SineProcessStep::new(build_notch_step(fs, 1.0, 0.4, 25));
+                             // The run starts AT that cap. The notch holds the limit channel at its 0.4 g
+                             // limit (the level its profile states; its abort edge is 6 dB above), and a
+                             // start 11 dB over it (the builder's 0.3) slams the ceiling down past the
+                             // equilibrium, so the 20-tick settle window ends while the drive is still
+                             // climbing back to it, un-notched, with the control point legitimately low.
+    let mut build = build_notch_step(fs, 1.0, 0.4, 25);
+    build.start_level_scale = 0.08;
+    let (step, handles) = SineProcessStep::new(build);
     let trip = run_notch_step(fs, step, &handles, ctrl_gain, limit_gain, 0.0);
     let snap = handles.status.read();
     // Setup validity (so the test cannot pass vacuously): the NotchGovernor held
@@ -2938,28 +2947,25 @@ fn dead_control_channel_aborts_even_while_notch_binds() {
     use hertzforge_sine::service::engine::SineProcessStep;
     let fs = 8_192.0;
     // A MORE-sensitive limit channel (limit_gain 5.0 vs ctrl_gain 0.5) with a tight
-    // bound (0.4 g, abort-high ~0.798 g) makes the NotchGovernor cap the drive so
-    // the notch binds and holds the LIMIT channel at ~its bound (drive ~0.16, limit
-    // ~0.798). The control target is set LOW (0.1 g) so the control channel reads
-    // ~0.08 g at the notch equilibrium (feed ~0.8, a meaningfully-driven notched
-    // under-test - well above the 1e-2 fault fraction, so it must NOT false-trip
-    // while control is alive), and the servo sits near its target rather than
-    // hammering the notch (which would otherwise creep the limit channel over its
-    // own abort edge). A WIDE control abort band (60 dB -> abort-low ~1e-4 g) keeps
+    // limit (0.4 g; the notch holds a limit channel at its limit, its abort edge
+    // above) makes the NotchGovernor cap the drive so the notch binds. The control
+    // target is set LOW (0.1 g) so the control channel is a meaningfully-driven
+    // notched under-test at the notch equilibrium (feed ~0.05, above the 1e-2
+    // fault fraction, so it must NOT false-trip while control is alive). A WIDE control abort band (60 dB -> abort-low ~1e-4 g) keeps
     // the control channel's post-kill collapse toward 0 from tripping the
     // short-debounce low-side scalar abort; the dedicated servo-fault path
     // (feed < 1e-2 for the debounce window) catches it instead - the ungating.
     let ctrl_gain = 0.5f32;
     let limit_gain = 5.0f32;
     let limit_offset = 0.0f32;
-    // The notch ceiling is a CONSTANT limit_abort_high / sysid_h (see the builder):
-    // limit abort-high = 0.4 * 10^(20/20) = 4.0 g, sysid_h = 40, so ceiling = 0.1.
-    // The servo wants drive ~0.2 (control target 0.1 g at ctrl_gain 0.5), so it
-    // KEEPS REQUESTING above the 0.1 ceiling and the notch stays HARD-BINDING -
-    // even through the control collapse (the dead-control case: the OLD code gated
-    // the servo-fault off exactly here). The constant ceiling means the drive is
-    // pinned at 0.1, so the limit channel reads ~0.1 * 5 = 0.5 g, WELL below its
-    // own 4.0 g abort band: no limit-channel abort can pre-empt the servo-fault.
+    // The notch ceiling is a CONSTANT limit / sysid_h (see the builder): limit 0.4 g,
+    // sysid_h = 40, so ceiling = 0.01. The servo wants drive ~0.2 (control target
+    // 0.1 g at ctrl_gain 0.5), so it KEEPS REQUESTING above the ceiling and the
+    // notch stays HARD-BINDING - even through the control collapse (the
+    // dead-control case: the OLD code gated the servo-fault off exactly here). The
+    // constant ceiling means the drive is pinned at 0.01, so the limit channel reads
+    // ~0.05 g, WELL below its own 4.0 g abort edge (0.4 g + 20 dB): no
+    // limit-channel abort can pre-empt the servo-fault.
     // The very wide control abort band (100 dB -> abort-low ~1e-6 g) keeps the
     // collapsing control channel from reaching the low-side scalar band before the
     // servo-fault debounce (8 ticks) completes, so the dedicated servo-fault path

@@ -8,6 +8,10 @@
 //!   from the per-block observer, a wait that keeps answering requests, and
 //!   `catch_unwind` around each step so a panic ends in the emergency stop.
 //! - [`ring`]: the bounded store of the most recent pulses' figures.
+//! - [`observe`]: the station's backend seen from the run, for a controller that
+//!   gives the run no per-block observer of its own: the stop bridged at every
+//!   block, the fire's progress, and the simulator's pace.
 
+pub mod observe;
 pub mod rails;
 pub mod ring;

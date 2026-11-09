@@ -144,7 +144,8 @@ pub trait ReferencePlayer {
 
     /// Playout sample rate, Hz - the rate a caller can ask for BEFORE arming,
     /// i.e. the REQUESTED rate. The prepared reference is built against it (the
-    /// service validates; the RESAMPLE prep op is the explicit remedy).
+    /// service validates; the RESAMPLE prep op is the explicit remedy), and it is
+    /// the rate the player asks the device for when it arms.
     fn fs_hz(&self) -> f64;
 
     /// The rate the hardware actually programmed, once it has said. `None`
@@ -205,6 +206,17 @@ pub trait ReferencePlayer {
         None
     }
 
+    /// Frames the station clocked on the last `play()`: the record and its rest
+    /// pad on a play that completed, the frames read back before the cancel on
+    /// one that was cancelled. `None` = this path cannot say, and the service
+    /// counts the record's own length (or a cancel's `frames_done`).
+    ///
+    /// Station time is the sum of these over the run, which is why it counts
+    /// the pad: the pad is clocked out like any other frame.
+    fn last_play_frames(&self) -> Option<usize> {
+        None
+    }
+
     /// Drain the DRIVER's own diagnostics (underruns, rate coercions) since the
     /// last call, so a host can journal them.
     ///
@@ -214,6 +226,27 @@ pub trait ReferencePlayer {
     /// scheme `sine.rs`'s `fresh_driver_warnings` exists to avoid.
     fn take_driver_warnings(&mut self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// [`ReferencePlayer::play`], watching the response as each block arrives
+    /// against `watch`: when the response leaves the abort band for the
+    /// debounce count of samples in a row, the play is cut short at the next
+    /// block boundary with the emergency stop and the call returns
+    /// [`TwrError::Aborted`]; [`ReferencePlayer::take_watch_trip`] then says
+    /// where. The default plays unwatched, for a path that cannot see its
+    /// response arrive.
+    fn play_watched(
+        &mut self,
+        drive: &[f64],
+        _watch: &PlayWatch<'_>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
+        self.play(drive)
+    }
+
+    /// What the watch found on the play it cut short, once. `None` when the
+    /// last watched play was not cut short.
+    fn take_watch_trip(&mut self) -> Option<WatchTrip> {
+        None
     }
 
     /// Bring the path up: open, configure, adopt the rate, consult the arm
@@ -270,6 +303,32 @@ pub trait ReferencePlayer {
     }
 }
 
+/// What a watched play checks each sample against as it arrives: the level
+/// target on the record grid, aligned as the response is (sample `j` of the
+/// response is raw sample `j + lag`).
+#[derive(Debug, Clone, Copy)]
+pub struct PlayWatch<'a> {
+    /// The level target, record samples.
+    pub target: &'a [f64],
+    /// The abort band, control units: `|response - target|` over it counts.
+    pub band: f64,
+    /// Samples in a row over the band that cut the play short.
+    pub debounce: usize,
+    /// The target's peak, for the worst fraction.
+    pub peak: f64,
+}
+
+/// Where a watched play was cut short.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WatchTrip {
+    /// The response sample it tripped at.
+    pub at_sample: usize,
+    /// Samples in a row over the band when it tripped.
+    pub samples: usize,
+    /// The worst `|response - target| / peak` over what was read.
+    pub worst_frac: f64,
+}
+
 fn hal_err(e: HalError) -> TwrError {
     TwrError::Play(e.to_string())
 }
@@ -304,6 +363,21 @@ pub struct BackendReferencePlayer<B: Backend> {
     /// Enabled DRIVE rows in the table. One today; more than one is
     /// refused at `open_and_configure` rather than written mono.
     n_drive: usize,
+    /// The rate the RUN asks the device for, when the caller states one
+    /// ([`BackendReferencePlayer::with_requested_rate_hz`]). `None` asks for the
+    /// rate the backend's caps state.
+    ///
+    /// # Why the caps rate is not the request
+    ///
+    /// A backend's caps state the rate it was BUILT at, which is not the rate a
+    /// run wants: an NI task is built at the 9234's native 51 200 Hz so `open()`
+    /// is legal, and the acquisition seam exists so each run states its own rate
+    /// at `configure`. Asking for the caps rate put a run asked at 12 800 Hz on
+    /// the chassis at 51 200 Hz (bench T0, 2026-11-08): the service prepared the
+    /// record at the caps rate, the gate compared that rate with itself, and
+    /// nothing refused. The simulator never showed it, because the service
+    /// builds the simulated station at the asked rate.
+    requested_fs_hz: Option<f64>,
     /// The rate the prepared reference RECORD was generated at, when the caller
     /// states it. `None` = not stated, and the arm gate then has no claim to
     /// check - it must never invent one. Set it via
@@ -347,6 +421,11 @@ pub struct BackendReferencePlayer<B: Backend> {
     /// Frames the device accepted before `start()` on the last play (the
     /// commit depth `play_block_wise` is seeded with).
     last_committed: usize,
+    /// Frames read back on the last play, the rest pad included: what the
+    /// station clocked ([`ReferencePlayer::last_play_frames`]).
+    last_played: usize,
+    /// Where the last watched play was cut short.
+    watch_trip: Option<WatchTrip>,
     /// The display tap (off unless a caller asks for one).
     ///
     /// SHARED since the daemon host landed, and that is what makes daemon-side time streaming
@@ -456,6 +535,7 @@ impl<B: Backend> BackendReferencePlayer<B> {
             control_slot: control_slot.unwrap_or(0),
             quiet_frames: DEFAULT_QUIET_FRAMES,
             n_drive,
+            requested_fs_hz: None,
             reference_rate_hz: None,
             configured: false,
             actual_fs_hz: None,
@@ -468,6 +548,8 @@ impl<B: Backend> BackendReferencePlayer<B> {
             drive_scratch: Vec::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             last_committed: 0,
+            last_played: 0,
+            watch_trip: None,
             tap: None,
             play_observer: None,
         })
@@ -478,6 +560,18 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// rate. Without it the gate has no claim to check.
     pub fn with_reference_rate_hz(mut self, hz: f64) -> Self {
         self.reference_rate_hz = Some(hz);
+        self
+    }
+
+    /// Ask the device for `hz` when the path comes up, rather than for the rate
+    /// the backend's caps state. It is also [`ReferencePlayer::fs_hz`], so the
+    /// service prepares the record at it, and the device must then program it:
+    /// a device that adopts another rate is refused at arm by the rate policy,
+    /// never re-gridded at the rate it runs at. Without it the request is the
+    /// caps rate, which on an NI station is the rate the task was built at, not
+    /// the rate the run asked (bench T0, 2026-11-08).
+    pub fn with_requested_rate_hz(mut self, hz: f64) -> Self {
+        self.requested_fs_hz = Some(hz);
         self
     }
 
@@ -688,9 +782,28 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// per-play cycle commits real drive before `start`, which satisfies the
     /// same driver rule with the record instead of with silence ("the first thing
     /// written after the clock starts must be real drive").
+    ///
+    /// **A refused bring-up leaves the station CLOSED.** Past `open()` every
+    /// refusal (the rate policy's, the width, the driver's) closes the backend
+    /// before it returns, so a refused run holds nothing open and the same arm
+    /// asked again meets the same refusal, not "already open".
     pub fn open_and_configure(&mut self) -> Result<(), TwrError> {
         self.backend.open().map_err(hal_err)?;
-        let fs = self.backend.caps().sample_rate_hz;
+        let up = self.configure_gate_and_park();
+        if up.is_err() {
+            self.configured = false;
+            let _ = self.backend.close();
+        }
+        up
+    }
+
+    /// [`BackendReferencePlayer::open_and_configure`] past `open()`.
+    fn configure_gate_and_park(&mut self) -> Result<(), TwrError> {
+        // THE REQUEST is the rate the run asked, the one the service prepared the
+        // record at: `fs_hz()`, never the caps rate on its own. The caps state the
+        // rate the backend was BUILT at, and asking for it is what ran bench T0 at
+        // 51 200 Hz for a run asked at 12 800 Hz.
+        let fs = ReferencePlayer::fs_hz(self);
         // The block is REQUESTED here and the backend's answer is what the play
         // actually runs at.
         let want_block = self
@@ -729,8 +842,10 @@ impl<B: Backend> BackendReferencePlayer<B> {
             // The reference RECORD is a sampled waveform, so it is genuinely
             // rate-bearing: playing it at a different rate rescales the whole
             // test in frequency. This is the module the rate policy exists for,
-            // so this arm is never `None` in a run - the service states it.
-            self.reference_rate_hz,
+            // so this arm is never `None` in a run - the service states it. A
+            // stated REQUEST is a claim too, for a caller with no record yet: a
+            // run that asked a rate and got another is refused, not re-gridded.
+            self.reference_rate_hz.or(self.requested_fs_hz),
             actual.actual_rate_hz,
         )
         .map_err(|reason| TwrError::State(format!("arm refused: {reason}")))?;
@@ -791,7 +906,13 @@ impl<B: Backend> BackendReferencePlayer<B> {
     /// first `pipeline_lag_frames` frames are dropped, so `response[k]` is the
     /// plant output while `drive[k]` was commanded. Everything downstream - the
     /// FRF, the coherence gate, the inverse update - assumes that pairing.
-    fn play_cycle(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
+    fn play_cycle(
+        &mut self,
+        drive: &[f64],
+        watch: Option<&PlayWatch<'_>>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
+        self.last_played = 0;
+        self.watch_trip = None;
         if !self.configured {
             return Err(TwrError::State("play() before arm()".into()));
         }
@@ -827,6 +948,15 @@ impl<B: Backend> BackendReferencePlayer<B> {
         // while this play runs. The clones are two `Arc` bumps per play.
         let tap = self.tap.clone();
         let observer = self.play_observer.clone();
+        // The watch: per sample, two subtractions and a compare, no allocation.
+        // A trip raises the cancel flag, so the play stops at the next block
+        // boundary as an operator's stop would, and is then torn down with the
+        // emergency stop.
+        let lag = self.pipeline_lag_frames;
+        let cancel = Arc::clone(&self.cancel);
+        let mut consec = 0usize;
+        let mut worst = 0.0f64;
+        let mut tripped: Option<WatchTrip> = None;
         let played = hertzforge_hal::play_block_wise(
             &mut self.backend,
             &self.drive_scratch,
@@ -852,6 +982,33 @@ impl<B: Backend> BackendReferencePlayer<B> {
                         }
                     }
                 }
+                if let Some(w) = watch {
+                    for (i, y) in raw.iter().enumerate().skip(first) {
+                        let Some(j) = i.checked_sub(lag) else {
+                            continue;
+                        };
+                        let Some(&t) = w.target.get(j) else {
+                            continue;
+                        };
+                        let e = (y - t).abs();
+                        if w.peak > 0.0 {
+                            worst = worst.max(e / w.peak);
+                        }
+                        if e > w.band {
+                            consec += 1;
+                            if consec >= w.debounce && tripped.is_none() {
+                                tripped = Some(WatchTrip {
+                                    at_sample: j,
+                                    samples: consec,
+                                    worst_frac: 0.0,
+                                });
+                                cancel.store(true, Ordering::Relaxed);
+                            }
+                        } else {
+                            consec = 0;
+                        }
+                    }
+                }
                 if let Some(obs) = observer.as_ref() {
                     obs(PlayProgress {
                         frames_done: raw.len(),
@@ -860,6 +1017,12 @@ impl<B: Backend> BackendReferencePlayer<B> {
                 }
             },
         );
+        if let Some(t) = tripped.as_mut() {
+            t.worst_frac = worst;
+        }
+
+        // What the station clocked, on every path: the frames read back.
+        self.last_played = raw.len();
 
         // PARK, on every path including cancel. A cancelled play must not leave
         // a started task behind it, and on the cancel path this call IS the
@@ -869,8 +1032,24 @@ impl<B: Backend> BackendReferencePlayer<B> {
         // DAQmx queue - mid-record preemption is refused by the hardware
         // (-200289), so the honest stop arithmetic is
         // `(frames_committed - frames_done)/fs + the taper`.
-        let stopped = self.backend.stop();
+        let stopped = if tripped.is_some() {
+            // Cut short by the watch: the immediate teardown, as an abort.
+            self.configured = false;
+            self.backend.emergency_stop()
+        } else {
+            self.backend.stop()
+        };
         match played {
+            Err(StreamError::Cancelled { .. }) if tripped.is_some() => {
+                stopped.map_err(hal_err)?;
+                let t = tripped.expect("checked");
+                self.watch_trip = Some(t);
+                return Err(TwrError::Aborted(format!(
+                    "response envelope abort during the play: |error| over the abort band for \
+                     {} consecutive samples (at sample {})",
+                    t.samples, t.at_sample
+                )));
+            }
             Err(StreamError::Cancelled {
                 frames_done,
                 frames_expected,
@@ -1094,8 +1273,11 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
         TwrPath::HostBackend
     }
 
+    /// The rate the run asked ([`BackendReferencePlayer::with_requested_rate_hz`]),
+    /// or the caps rate when none was stated.
     fn fs_hz(&self) -> f64 {
-        self.backend.caps().sample_rate_hz
+        self.requested_fs_hz
+            .unwrap_or_else(|| self.backend.caps().sample_rate_hz)
     }
 
     fn lag_provenance(&self) -> Option<LagSource> {
@@ -1108,6 +1290,10 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
 
     fn committed_frames(&self) -> Option<usize> {
         Some(self.last_committed)
+    }
+
+    fn last_play_frames(&self) -> Option<usize> {
+        Some(self.last_played)
     }
 
     fn take_driver_warnings(&mut self) -> Vec<String> {
@@ -1139,7 +1325,19 @@ impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
     }
 
     fn play(&mut self, drive: &[f64]) -> Result<Option<Vec<f64>>, TwrError> {
-        self.play_cycle(drive)
+        self.play_cycle(drive, None)
+    }
+
+    fn play_watched(
+        &mut self,
+        drive: &[f64],
+        watch: &PlayWatch<'_>,
+    ) -> Result<Option<Vec<f64>>, TwrError> {
+        self.play_cycle(drive, Some(watch))
+    }
+
+    fn take_watch_trip(&mut self) -> Option<WatchTrip> {
+        self.watch_trip.take()
     }
 
     fn request_cancel(&self) {

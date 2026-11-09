@@ -19,8 +19,9 @@
 //!   identity in the records.
 //!
 //! The arithmetic of each module's own output checks and change caps lives
-//! with that module (classical shock in `hertzforge-shock-host`); what is here
-//! is what both shock modules share.
+//! with that module (classical shock in `hertzforge-shock-host`, SRS in
+//! `hertzforge-srs`); what is here is what both shock modules share, the names
+//! of every output rule included.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -148,14 +149,23 @@ pub enum OutputRule {
     UndeclaredValue,
     /// More reported values than [`MAX_LAW_VALUES`].
     TooManyValues,
-    /// The drive's peak rose more than the per-pulse peak cap over the last
+    /// The drive's peak rose more than the per-call peak cap over the last
     /// drive played.
     PeakRise,
-    /// A bin's magnitude rose more than the per-pulse bin cap over the last
+    /// A bin's magnitude rose more than the per-call bin cap over the last
     /// drive played.
     BinRise,
     /// The seed's predicted response peak was over the first-drive bound.
     FirstDrive,
+    /// A gain was zero or negative (an SRS law's gains are multiplicative
+    /// and must be above zero).
+    NotPositive,
+    /// A gain rose more than the per-call gain cap (an SRS law).
+    GainRise,
+    /// The drive's predicted response peak was over its bound (a time
+    /// waveform replication law: `1 + envelope_abort_frac` times the level
+    /// target's peak).
+    PredictedPeak,
 }
 
 impl OutputRule {
@@ -169,6 +179,9 @@ impl OutputRule {
             OutputRule::PeakRise => "peak_rise",
             OutputRule::BinRise => "bin_rise",
             OutputRule::FirstDrive => "first_drive",
+            OutputRule::NotPositive => "not_positive",
+            OutputRule::GainRise => "gain_rise",
+            OutputRule::PredictedPeak => "predicted_peak",
         }
     }
 }
@@ -180,11 +193,14 @@ impl fmt::Display for OutputRule {
             OutputRule::NonFinite => "the output held a value that is not a finite number",
             OutputRule::UndeclaredValue => "the law reported a value its manifest does not declare",
             OutputRule::TooManyValues => "the law reported more values than allowed",
-            OutputRule::PeakRise => "the drive's peak rose more than the per-pulse cap",
-            OutputRule::BinRise => "a drive bin rose more than the per-pulse cap",
+            OutputRule::PeakRise => "the drive's peak rose more than the per-call cap",
+            OutputRule::BinRise => "a drive bin rose more than the per-call cap",
             OutputRule::FirstDrive => {
                 "the first drive's predicted response was over the first-drive bound"
             }
+            OutputRule::NotPositive => "a gain was not above zero",
+            OutputRule::GainRise => "a gain rose more than the per-call cap",
+            OutputRule::PredictedPeak => "the drive's predicted response peak was over its bound",
         };
         f.write_str(words)
     }
@@ -512,6 +528,18 @@ mod tests {
             LawFault::BadOutput(OutputRule::FirstDrive).reason(),
             "first_drive"
         );
+        assert_eq!(
+            LawFault::BadOutput(OutputRule::NotPositive).reason(),
+            "not_positive"
+        );
+        assert_eq!(
+            LawFault::BadOutput(OutputRule::GainRise).reason(),
+            "gain_rise"
+        );
+        assert_eq!(
+            LawFault::BadOutput(OutputRule::PredictedPeak).reason(),
+            "predicted_peak"
+        );
         // The serde name of each rule is its wire name.
         for rule in [
             OutputRule::WrongLength,
@@ -521,6 +549,9 @@ mod tests {
             OutputRule::PeakRise,
             OutputRule::BinRise,
             OutputRule::FirstDrive,
+            OutputRule::NotPositive,
+            OutputRule::GainRise,
+            OutputRule::PredictedPeak,
         ] {
             assert_eq!(
                 serde_json::to_value(rule).unwrap(),

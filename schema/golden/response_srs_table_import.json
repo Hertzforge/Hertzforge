@@ -1,0 +1,31 @@
+{
+ "type": "response",
+ "id": 70,
+ "result": {
+  "components": {
+   "engine": "wavsyn",
+   "rows": [
+    {
+     "freq_hz": 100,
+     "amplitude_g": 1.5,
+     "half_cycles": 5,
+     "delay_s": 0.04
+    },
+    {
+     "freq_hz": 200,
+     "amplitude_g": 1.25,
+     "half_cycles": 7,
+     "delay_s": 0.02
+    },
+    {
+     "freq_hz": 400,
+     "amplitude_g": 1,
+     "half_cycles": 9,
+     "delay_s": 0
+    }
+   ]
+  },
+  "errors": [],
+  "warnings": []
+ }
+}

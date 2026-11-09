@@ -637,11 +637,11 @@ impl SineProfile {
     ///
     /// - frequency: `freq`, `frequency`, `hz`, `f` (also `freq_hz`)
     /// - acceleration (`g` pk): `accel`, `acceleration`, `g`, `gpk`, `a`
-    ///   (also `accel_g_pk`)
+    ///   (also `accel_g_pk`, and the wire's `accel_g`)
     /// - velocity (`in/s` pk): `vel`, `velocity`, `ips`, `in_s`, `v`
-    ///   (also `vel_ips_pk`)
+    ///   (also `vel_ips_pk`, and the wire's `velocity_ips`)
     /// - displacement (`in` pk-pk): `disp`, `displacement`, `in`, `inch`, `pp`,
-    ///   `d` (also `disp_in_pp`)
+    ///   `d` (also `disp_in_pp`, and the wire's `disp_pp_in`)
     /// - alarm: `alarm` / `alarm_db` (symmetric dB) or `alarm-` / `alarm+`
     ///   (also `alarm_minus` / `alarm_plus`, `_db`-suffixed forms), or
     ///   `alarm_pct` (symmetric percent, converted ASYMMETRICALLY per
@@ -791,10 +791,15 @@ impl Column {
             | ("g", _)
             | ("gpk", _)
             | ("a", _)
-            | ("accelgpk", _) => Some(Column::Accel),
-            ("vel", _) | ("velocity", _) | ("ips", _) | ("ins", _) | ("v", _) | ("velipspk", _) => {
-                Some(Column::Vel)
-            }
+            | ("accelgpk", _)
+            | ("accelg", _) => Some(Column::Accel),
+            ("vel", _)
+            | ("velocity", _)
+            | ("ips", _)
+            | ("ins", _)
+            | ("v", _)
+            | ("velipspk", _)
+            | ("velocityips", _) => Some(Column::Vel),
             ("disp", _)
             | ("displacement", _)
             | ("in", _)
@@ -802,7 +807,8 @@ impl Column {
             | ("pp", _)
             | ("d", _)
             | ("inpkpk", _)
-            | ("dispinpp", _) => Some(Column::Disp),
+            | ("dispinpp", _)
+            | ("dispppin", _) => Some(Column::Disp),
             ("alarm", Some('-'))
             | ("alarmminus", _)
             | ("alarmminusdb", _)

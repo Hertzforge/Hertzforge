@@ -1,0 +1,1178 @@
+{
+ "type": "event",
+ "topic": "twr.data",
+ "seq": 182,
+ "data": {
+  "run_id": "twr-0003",
+  "source": "SIM",
+  "state": "running",
+  "phase": "playing",
+  "mode": "auto",
+  "t_s": 4.25,
+  "level_db": 0,
+  "rung": 4,
+  "plays": {
+   "done": 10,
+   "at_level": 1,
+   "of_level": 8,
+   "playback": 2,
+   "of_playback": 375
+  },
+  "play": {
+   "index": 10,
+   "kind": "playback",
+   "iteration": null,
+   "frames_done": 2560,
+   "frames": 5120
+  },
+  "last": {
+   "rms_error_pct": 1.75,
+   "peak_error_pct": 4.5,
+   "spectral_error_db": 0.125,
+   "gated": true
+  },
+  "plots": [
+   {
+    "id": "tgt",
+    "quantity": "target",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Target",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Target",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.25,
+          0.5,
+          0.25
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "rep",
+    "quantity": "response",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Response",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Response",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.25,
+          0.53125,
+          0.25
+         ]
+        }
+       },
+       {
+        "name": "Target",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.25,
+          0.5,
+          0.25
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "err",
+    "quantity": "error",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Error",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Error",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Error",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.0,
+          0.03125,
+          0.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drive",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Drive",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.125,
+          0.25,
+          0.125
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "env",
+    "quantity": "envelope",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Envelope",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Response",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.25,
+          0.53125,
+          0.25
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.125,
+          0.375,
+          0.625,
+          0.375
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          -0.125,
+          0.125,
+          0.375,
+          0.125
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.25,
+          0.5,
+          0.75,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          7.8125e-05,
+          0.00015625,
+          0.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          -0.25,
+          0.0,
+          0.25,
+          0.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "frf",
+    "quantity": "frf",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Identification Gain",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": "g/V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Gain",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          1.0,
+          0.5,
+          0.25
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Identification Phase",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Phase",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          -10.0,
+          -20.0,
+          -30.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "coh",
+    "quantity": "coherence",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Coherence",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Coherence",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Coherence",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.99,
+          0.5,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Trust floor",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.9,
+          0.9
+         ]
+        }
+       },
+       {
+        "name": "Hold",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.8,
+          0.8
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "trust",
+    "quantity": "mask",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Trust",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Trusted",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Trusted",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          1.0,
+          0.0,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.75
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "spec",
+    "quantity": "spectra",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Spectra",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Magnitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Target",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.75
+         ]
+        }
+       },
+       {
+        "name": "Response",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.8125
+         ]
+        }
+       },
+       {
+        "name": "Drive",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.25,
+          0.5,
+          0.375
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "conv",
+    "quantity": "convergence",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Convergence",
+      "x": {
+       "label": "Play",
+       "unit": null,
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Error",
+       "unit": "%",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Error",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.0,
+          1.0,
+          2.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          25.0,
+          12.5,
+          6.25
+         ]
+        }
+       },
+       {
+        "name": "Gate",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.0,
+          2.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          10.0,
+          10.0
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Law",
+      "x": {
+       "label": "Play",
+       "unit": null,
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Value",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Corrected bins",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.0,
+          1.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          812.0,
+          812.0
+         ]
+        }
+       },
+       {
+        "name": "Bins at the rise limit",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.0,
+          1.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          3.0,
+          0.0
+         ]
+        }
+       },
+       {
+        "name": "Drive change",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.0,
+          1.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.25
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "view": "reading",
+      "title": "Law Values",
+      "rows": [
+       {
+        "label": "Corrected bins",
+        "value": 812,
+        "unit": "bins",
+        "status": "info"
+       },
+       {
+        "label": "Bins at the rise limit",
+        "value": 0,
+        "unit": "bins",
+        "status": "info"
+       },
+       {
+        "label": "Drive change",
+        "value": 0.25,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Unusable calls in a row",
+        "value": 0,
+        "unit": null,
+        "status": "pass"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "scope",
+    "quantity": "scope",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Scope",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Control",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          4.0,
+          4.000078125,
+          4.00015625,
+          4.000234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.125,
+          0.25,
+          0.125
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Level",
+        "value": 0,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Plays",
+        "value": 10,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Playback",
+        "value": "2 of 375",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Last error",
+        "value": 1.75,
+        "unit": "%",
+        "status": "pass"
+       },
+       {
+        "label": "Gate",
+        "value": 10,
+        "unit": "%",
+        "status": "info"
+       },
+       {
+        "label": "Last drive peak",
+        "value": 0.25,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Last response peak",
+        "value": 0.2539,
+        "unit": "g",
+        "status": "info"
+       },
+       {
+        "label": "Drive in force",
+        "value": 0.25,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Station time",
+        "value": 4.25,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "plays",
+    "quantity": "plays",
+    "views": [
+     {
+      "view": "table",
+      "title": "Plays",
+      "columns": [
+       "Play",
+       "Kind",
+       "Level (dB)",
+       "Iteration",
+       "Error (%)",
+       "Peak error (%)",
+       "Spectral error (dB)",
+       "Gated",
+       "Drive peak (V)",
+       "Clipped samples",
+       "Clamped bins",
+       "Lag (frames)"
+      ],
+      "rows": [
+       [
+        "1",
+        "iteration",
+        "-12",
+        "1",
+        "25",
+        "50",
+        "1.25",
+        "no",
+        "0.0625",
+        "0",
+        "3",
+        ""
+       ],
+       [
+        "2",
+        "iteration",
+        "-12",
+        "2",
+        "12.5",
+        "25",
+        "0.63",
+        "no",
+        "0.0625",
+        "0",
+        "0",
+        ""
+       ],
+       [
+        "3",
+        "iteration",
+        "-12",
+        "3",
+        "6.25",
+        "12.5",
+        "0.38",
+        "yes",
+        "0.0625",
+        "0",
+        "0",
+        ""
+       ]
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

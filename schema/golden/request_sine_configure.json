@@ -1,0 +1,229 @@
+{
+ "type": "request",
+ "id": 71,
+ "method": "sine.configure",
+ "params": {
+  "config": {
+   "title": "Sine 1 g, 20 to 2000 Hz",
+   "profile": {
+    "label": "1 g",
+    "rows": [
+     {
+      "freq_hz": 20,
+      "quantity": "disp_pp_in",
+      "value": 0.0097
+     },
+     {
+      "freq_hz": 45,
+      "quantity": "accel_g",
+      "value": 1,
+      "alarm_db": [
+       1,
+       1
+      ],
+      "abort_db": [
+       2,
+       2
+      ]
+     },
+     {
+      "freq_hz": 2000,
+      "quantity": "accel_g",
+      "value": 1
+     }
+    ],
+    "alarm_db": [
+     1.5,
+     1.5
+    ],
+    "abort_db": [
+     3,
+     3
+    ]
+   },
+   "test": {
+    "kind": "sweep",
+    "band_hz": [
+     20,
+     2000
+    ],
+    "rate": {
+     "law": "log",
+     "oct_per_min": 2
+    },
+    "start_hz": 20,
+    "direction": "up",
+    "end": {
+     "sweeps": 4,
+     "duration_s": null
+    }
+   },
+   "acquisition": {
+    "fs_hz": null,
+    "tick_ms": 10
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels_db": [
+     -12,
+     -6,
+     0
+    ],
+    "start_db": -12,
+    "per_level": {
+     "sweeps": 1
+    },
+    "full_level": {
+     "sweeps": 2
+    }
+   },
+   "identification": {
+    "level_db": -20,
+    "gate_coherence": 0.5,
+    "trust_coherence": 0.5,
+    "trust_h_floor_frac": 0.05,
+    "review": true
+   },
+   "control": {
+    "composite": "weighted_avg",
+    "weights": [
+     {
+      "channel": 1,
+      "weight": 1
+     }
+    ],
+    "tracking": {
+     "kind": "proportional",
+     "pct": 10,
+     "max_hz": 100
+    },
+    "law": {
+     "id": "servo_blend",
+     "params": {
+      "blend_w": 0.5,
+      "compression": "slow",
+      "kp": 0.3
+     }
+    },
+    "law_budget": 0.25,
+    "law_misses": 3,
+    "max_step_db": 1,
+    "max_rise_db_per_s": 240,
+    "divergence_s": 1,
+    "fault_debounce_ticks": 50
+   },
+   "limits": {
+    "drive_vpk_ceiling": 0.5,
+    "drive_vpk_abort": 0.8,
+    "kinematic_monitor": true,
+    "channels": [
+     {
+      "channel": 3,
+      "shared_name": null,
+      "profile": {
+       "label": "Fixture bound",
+       "rows": [
+        {
+         "freq_hz": 20,
+         "quantity": "accel_g",
+         "value": 3
+        },
+        {
+         "freq_hz": 2000,
+         "quantity": "accel_g",
+         "value": 3
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        3,
+        3
+       ]
+      }
+     }
+    ],
+    "notch": {
+     "drive_floor": 0.01,
+     "smoothing_ticks": 3,
+     "release_ramp_db_per_s": 20
+    }
+   },
+   "cola": {
+    "enabled": false,
+    "volts_pk": 0.1,
+    "waveform": "sine"
+   },
+   "feasibility": {
+    "shaker": {
+     "name": "Bench shaker",
+     "manufacturer": "",
+     "model": "",
+     "notes": "",
+     "force_random": null,
+     "force_sine": {
+      "value": 2000,
+      "basis": "Peak"
+     },
+     "force_shock": {
+      "value": 4000,
+      "basis": "Peak"
+     },
+     "max_velocity_ips": {
+      "value": 70,
+      "basis": "Peak"
+     },
+     "max_displacement_in_pp": {
+      "value": 1,
+      "basis": "Peak"
+     },
+     "max_accel_bare_g": {
+      "value": 100,
+      "basis": "Peak"
+     },
+     "armature_mass_lb": 45,
+     "overturning_moment_limit_lbf_in": null,
+     "custom": []
+    },
+    "moving_mass_lb": {
+     "armature": 45,
+     "slip_table": 0,
+     "drive_adapter": 3,
+     "fixturing": 10,
+     "test_article": 12
+    }
+   },
+   "capture": {
+    "rule": "off",
+    "first_s": null,
+    "level_settle_s": 1,
+    "periodic_save_s": null,
+    "run_name": "sine"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "7"
+    },
+    {
+     "key": "test_article",
+     "label": "Test Article",
+     "value": "Bracket"
+    },
+    {
+     "key": "serial_number",
+     "label": "SN",
+     "value": "0042"
+    },
+    {
+     "key": "operator",
+     "label": "Operator",
+     "value": ""
+    }
+   ]
+  }
+ }
+}

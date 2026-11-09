@@ -91,6 +91,10 @@ pub const DEFAULT_SAMPLE_RATE_HZ: f64 = 65_536.0;
 /// bounded so a test can shrink it and PROVE the retain-and-re-offer path.
 pub const DEFAULT_OUTPUT_BUFFER_FRAMES: usize = 4096;
 
+/// Default output lookahead the simulator states in its caps, frames
+/// ([`hertzforge_hal::OutputBufferContract::min_lookahead_frames`]).
+pub const DEFAULT_MIN_LOOKAHEAD_FRAMES: u32 = 4;
+
 /// Default single mode: a mid-band fixture resonance with a moderately sharp Q.
 pub const DEFAULT_RESONANCE_HZ: f64 = 250.0;
 pub const DEFAULT_Q: f64 = 20.0;
@@ -342,6 +346,13 @@ pub struct SimConfig {
     /// Depth of the simulated output (drive) FIFO, in frames. See the module docs
     /// for the buffering model. Default [`DEFAULT_OUTPUT_BUFFER_FRAMES`].
     pub output_buffer_frames: usize,
+    /// The output lookahead the caps state, frames: how far ahead of the input a
+    /// caller keeps the output queue. Stated in the caps only; the plant and the
+    /// FIFO do not change with it. A station shaped as a hardware chassis states
+    /// that chassis's lookahead here, so the caller's own lookahead arithmetic
+    /// (lead-ins, derived lags, rest pads) runs as it does on hardware. Default
+    /// [`DEFAULT_MIN_LOOKAHEAD_FRAMES`].
+    pub min_lookahead_frames: u32,
 }
 
 impl Default for SimConfig {
@@ -355,6 +366,7 @@ impl Default for SimConfig {
             max_output_channels: 2,
             shared_clock: false,
             output_buffer_frames: DEFAULT_OUTPUT_BUFFER_FRAMES,
+            min_lookahead_frames: DEFAULT_MIN_LOOKAHEAD_FRAMES,
         }
     }
 }
@@ -458,6 +470,13 @@ impl SimConfig {
     /// exercise a caller's backpressure / retain-and-re-offer path.
     pub fn output_buffer_frames(mut self, n: usize) -> Self {
         self.output_buffer_frames = n.max(1);
+        self
+    }
+
+    /// The output lookahead the caps state, frames (the field of the same name).
+    /// Stated in the caps only.
+    pub fn min_lookahead_frames(mut self, n: u32) -> Self {
+        self.min_lookahead_frames = n;
         self
     }
 
@@ -669,7 +688,7 @@ impl Backend for SimBackend {
             max_output_channels: self.cfg.max_output_channels,
             abort_latency_bound: None,
             output_buffer: Some(OutputBufferContract {
-                min_lookahead_frames: 4,
+                min_lookahead_frames: self.cfg.min_lookahead_frames,
                 underrun_policy: UnderrunPolicy::RampDownThenAbort,
             }),
             sample_rate_hz: self.cfg.sample_rate_hz,
@@ -1126,6 +1145,22 @@ mod tests {
         assert_eq!(caps.clock, ClockDomain::Unknown);
         assert_eq!(caps.sample_rate_hz, DEFAULT_SAMPLE_RATE_HZ);
         assert!(caps.output_buffer.is_some());
+    }
+
+    #[test]
+    fn the_caps_state_the_configured_output_lookahead_and_four_frames_by_default() {
+        let lookahead = |b: &SimBackend| {
+            b.caps()
+                .output_buffer
+                .expect("the simulator states an output buffer")
+                .min_lookahead_frames
+        };
+        assert_eq!(lookahead(&SimConfig::new().build()), 4);
+        assert_eq!(DEFAULT_MIN_LOOKAHEAD_FRAMES, 4);
+        let deep = SimConfig::new().min_lookahead_frames(512).build();
+        assert_eq!(lookahead(&deep), 512);
+        // Stated in the caps only: the FIFO the caller fills is unchanged.
+        assert_eq!(deep.cfg.output_buffer_frames, DEFAULT_OUTPUT_BUFFER_FRAMES);
     }
 
     #[test]

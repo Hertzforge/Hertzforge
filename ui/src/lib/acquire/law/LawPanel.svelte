@@ -4,7 +4,9 @@
 	 * first, then imported), the chosen law's identity and check record, and its parameter form,
 	 * drawn from the law's own manifest so nothing here is specific to a law or a test type. A law
 	 * file is imported by its path on the computer that runs the test. The test type's screen says
-	 * what its law is fixed for, and adds facts of its own (what shapes a MIMO law supports).
+	 * what its law is fixed for, and adds facts of its own (what shapes a MIMO law supports). A test
+	 * type whose laws may declare parameters changeable during a run (Sine) passes them as `live`,
+	 * and the form says which they are.
 	 */
 	import type { Snippet } from 'svelte';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
@@ -12,7 +14,7 @@
 	import type { LawEntry, LawParam } from '$lib/protocol/mimo';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import { CHECK_WORDS, lawParamDescriptor, lawParamError, shortHash, type LawErrors, type LawValue } from './lawForm';
+	import { CHECK_WORDS, lawParamDescriptor, lawParamError, liveParamLabels, shortHash, type LawErrors, type LawValue } from './lawForm';
 
 	interface Props {
 		/** The laws offered, in the catalog's order. */
@@ -40,13 +42,16 @@
 		facts?: Snippet<[LawEntry]>;
 		/** A notice under the law's details (the setup does not admit it). */
 		notice?: Snippet<[LawEntry]>;
+		/** The keys of the chosen law's parameters that may change during a run; absent, none is marked. */
+		live?: string[];
 	}
-	let { laws, law, chosenId, values, subtitle, locked, connected, busy, problems, errors, channelLabels = [], onchoose, onimport, facts, notice }: Props = $props();
+	let { laws, law, chosenId, values, subtitle, locked, connected, busy, problems, errors, channelLabels = [], onchoose, onimport, facts, notice, live }: Props = $props();
 
 	let importPath = $state('');
 	let importOpen = $state(false);
 
 	const descriptors = $derived((law?.params ?? []).map(lawParamDescriptor).filter((p) => p !== null));
+	const liveLabels = $derived(liveParamLabels(law, live));
 	const extras = $derived((law?.params ?? []).filter((p) => p.kind === 'per_channel' || p.kind === 'curve'));
 	const errs = (k: string) => errors[k] ?? [];
 
@@ -138,6 +143,16 @@
 			<div class="aq-group params" data-testid="law-params">
 				<h3>Parameters</h3>
 				<ParamForm params={descriptors} values={values as ParamValues} showAllErrors layout="stack" disabled={locked} idPrefix="law" testidPrefix="law-param" />
+				{#if liveLabels}
+					<p class="aq-small live" data-testid="law-live" data-live={(live ?? []).join(' ')}>
+						{#if liveLabels.length}
+							<span class="tag">Live</span>
+							{liveLabels.join(', ')} {liveLabels.length === 1 ? 'can' : 'can each'} be changed while the run runs; every other parameter is fixed once it starts.
+						{:else}
+							Every parameter is fixed once the run starts.
+						{/if}
+					</p>
+				{/if}
 				{#each extras as p (p.key)}
 					<div class="extra">
 						<span class="lbl">{p.label}{#if 'unit' in p && p.unit} ({p.unit}){/if}</span>
@@ -321,6 +336,27 @@
 
 	.extra {
 		margin-top: var(--sp-3);
+	}
+
+	.live {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+		margin: var(--sp-2) 0 0;
+		color: var(--text-2);
+	}
+
+	.live .tag {
+		padding: 1px 6px;
+		font-size: var(--text-2xs);
+		font-weight: var(--weight-strong);
+		color: var(--blue-1);
+		background: var(--blue-weak);
+		border: 1px solid var(--blue-line);
+		border-radius: 8px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.pts {
