@@ -229,9 +229,10 @@ impl EngineCaptureSink for CaptureBridge {
 /// will be given.
 pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     cfg: RecorderConfig,
-    /// Driver-programmed rate, retained from the last `configure` (None until
-    /// the backend has been up once). See [`RecorderService::actual_rate_hz`].
-    actual_rate_hz: Option<f64>,
+    /// The rate the station programmed once it is up; the rate asked until then.
+    /// Everything per frame is derived from it: the analysis grid, the pre-window,
+    /// the holdoff, a timed length, the session clock and both sidecars.
+    fs_hz: f64,
     /// The REAL user channel table (overload latches + report run on this).
     user_table: ChannelTable,
     /// The engine table clone: synthetic drive injected, abort limits stripped
@@ -436,29 +437,12 @@ impl<B: Backend> RecorderService<B> {
         // explicitly instead of retrying the spurious ComputeOverrun it produces.
         ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
 
-        let analysis = (0..n_input)
-            .map(|_| ChannelAnalysisState {
-                decim: ChannelDecimator::new(1, &cfg.acq),
-                asm: BlockAssembler::from_config(1, &cfg.acq),
-                spectrum: SpectrumPipeline::new(&cfg.acq),
-                stats: TimeStatsAccumulator::new(),
-                last_stats: empty_stats(),
-            })
-            .collect();
-
-        let frf = cfg
-            .frf_pair
-            .filter(|&(x, y)| x < n_input && y < n_input && x != y)
-            .map(|pair| FrfState {
-                pair,
-                decim: ChannelDecimator::new(2, &cfg.acq),
-                asm: BlockAssembler::from_config(2, &cfg.acq),
-                pipeline: FrfPipeline::new(&cfg.acq),
-            });
+        let (analysis, frf) = build_analysis(&cfg.acq, n_input, cfg.frf_pair);
+        let fs_hz = cfg.acq.native_rate_hz;
 
         Ok(Self {
             cfg,
-            actual_rate_hz: None,
+            fs_hz,
             user_table: table,
             engine_table,
             record_table,
@@ -536,23 +520,32 @@ impl<B: Backend> RecorderService<B> {
         self.cfg.acq.native_rate_hz
     }
 
-    /// The rate the driver ACTUALLY programmed, once the backend is up; the
-    /// configured rate until then. The distinction is the HAL rate contract: the
-    /// 9234 coerces a 65 536 Hz request to 51 200 Hz, and every wall-clock
-    /// budget derived from the REQUEST (pump pacing, the soak's segment budget)
-    /// is ~28% wrong on real hardware.
+    /// The rate the station programmed, once it is up; the rate asked until then.
+    /// A station may program another rate than asked (the 9234 programs 8533.33 Hz
+    /// for 8192); the run records at the programmed rate and states both.
     pub fn actual_rate_hz(&self) -> f64 {
-        self.actual_rate_hz.unwrap_or(self.cfg.acq.native_rate_hz)
+        self.fs_hz
+    }
+
+    /// The acquisition selection at the programmed rate.
+    fn acq_now(&self) -> crate::acq::AcquisitionConfig {
+        crate::acq::AcquisitionConfig {
+            native_rate_hz: self.fs_hz,
+            ..self.cfg.acq.clone()
+        }
     }
 
     /// A timed recording's length after its trigger, in frames, or `None` when
     /// recordings run until cut.
     pub fn timed_record_frames(&self) -> Option<u64> {
-        self.cfg.timed_record_frames()
+        self.cfg
+            .timed_record_s
+            .map(|s| (s * self.fs_hz).round().max(0.0) as u64)
     }
 
+    /// Station seconds since start: the frames read over the programmed rate.
     pub fn session_seconds(&self) -> f64 {
-        self.session_frames as f64 / self.cfg.acq.native_rate_hz
+        self.session_frames as f64 / self.fs_hz
     }
 
     /// The data root run directories land under.
@@ -598,7 +591,7 @@ impl<B: Backend> RecorderService<B> {
         self.trigger = Some(TriggerEngine::new(
             self.cfg.trigger_mode.clone(),
             self.n_input,
-            self.cfg.acq.native_rate_hz,
+            self.fs_hz,
             pretrigger_s,
             self.cfg.auto_rearm,
         ));
@@ -942,7 +935,8 @@ impl<B: Backend> RecorderService<B> {
                 data_root: self.data_root.clone(),
                 name: run_name,
                 table: self.record_table.clone(),
-                acq: self.cfg.acq.clone(),
+                acq: self.acq_now(),
+                requested_fs_hz: self.cfg.acq.native_rate_hz,
                 pretrigger,
             })
             .map_err(RecorderError::Io)?;
@@ -951,7 +945,7 @@ impl<B: Backend> RecorderService<B> {
         self.record_gap_free = self.store.gap_free();
         self.record_pretrigger_frames = pre_frames;
         self.active_run_name = Some(real_name.clone());
-        self.record_target_frames = self.cfg.timed_record_frames();
+        self.record_target_frames = self.timed_record_frames();
         let session_s = self.session_seconds();
         self.log.push(
             session_s,
@@ -1053,15 +1047,17 @@ impl<B: Backend> RecorderService<B> {
         self.backend
             .open()
             .map_err(|e| RecorderError::Backend(format!("open: {e}")))?;
-        let acq = hertzforge_hal::AcquisitionConfig::new(
-            self.backend.caps().sample_rate_hz,
-            self.block_frames,
-        );
+        // The station is asked the rate configured, and the rate it programs is
+        // adopted: a station that coerces the request (a delta-sigma device's ladder)
+        // records at its own rate, and the run says so rather than labelling the file
+        // with the rate it asked for.
+        let acq =
+            hertzforge_hal::AcquisitionConfig::new(self.cfg.acq.native_rate_hz, self.block_frames);
         let actual = self
             .backend
             .configure(&self.engine_table, &acq)
             .map_err(|e| RecorderError::Backend(format!("configure: {e}")))?;
-        self.actual_rate_hz = Some(actual.actual_rate_hz);
+        self.fs_hz = actual.actual_rate_hz;
 
         // The engine's block cadence, ring depth and scheduling-health budget all
         // come from what the backend ACTUALLY configured, not from the request.
@@ -1102,6 +1098,12 @@ impl<B: Backend> RecorderService<B> {
             actual.actual_rate_hz,
         )
         .map_err(|reason| RecorderError::Backend(format!("arm refused: {reason}")))?;
+
+        // Everything per frame is built at the programmed rate, now that the gate has
+        // said it is one.
+        let (analysis, frf) = build_analysis(&self.acq_now(), self.n_input, self.cfg.frf_pair);
+        self.analysis = analysis;
+        self.frf = frf;
 
         self.backend
             .arm()
@@ -1144,7 +1146,7 @@ impl<B: Backend> RecorderService<B> {
             recording_frames: self.record_frames,
             gap_free_so_far: self.record_gap_free,
             disk_budget_seconds: recorder_disk_budget_seconds(
-                &self.cfg.acq,
+                &self.acq_now(),
                 self.n_input,
                 free_bytes,
             ),
@@ -1158,7 +1160,7 @@ impl<B: Backend> RecorderService<B> {
             limits_disarmed: self.watchdog.disarmed_with_limits,
             watchdog_basis: self.watchdog.basis.clone(),
             requested_fs_hz: self.cfg.acq.native_rate_hz,
-            fs_hz: self.actual_rate_hz(),
+            fs_hz: self.fs_hz,
             station_frames: self.session_frames,
             batches: self.batches,
             pass_ms_last: self.pass_last.map(ms),
@@ -1332,6 +1334,33 @@ fn build_engine_table(user: &ChannelTable, watchdog_enabled: bool) -> ChannelTab
         }
     }
     clone
+}
+
+/// The analysis state for `n_input` rows at `acq`'s rate, and the FRF pair's when one
+/// is configured and in range.
+fn build_analysis(
+    acq: &crate::acq::AcquisitionConfig,
+    n_input: usize,
+    pair: Option<(usize, usize)>,
+) -> (Vec<ChannelAnalysisState>, Option<FrfState>) {
+    let analysis = (0..n_input)
+        .map(|_| ChannelAnalysisState {
+            decim: ChannelDecimator::new(1, acq),
+            asm: BlockAssembler::from_config(1, acq),
+            spectrum: SpectrumPipeline::new(acq),
+            stats: TimeStatsAccumulator::new(),
+            last_stats: empty_stats(),
+        })
+        .collect();
+    let frf = pair
+        .filter(|&(x, y)| x < n_input && y < n_input && x != y)
+        .map(|pair| FrfState {
+            pair,
+            decim: ChannelDecimator::new(2, acq),
+            asm: BlockAssembler::from_config(2, acq),
+            pipeline: FrfPipeline::new(acq),
+        });
+    (analysis, frf)
 }
 
 /// Clone an [`EngineConfig`] (it is not `Clone`).

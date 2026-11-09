@@ -73,8 +73,12 @@ pub struct RecorderSidecar {
     pub gaps: Vec<GapRecord>,
     /// Channels per interleaved frame.
     pub n_channels: usize,
-    /// The native capture rate in Hz (recording is ALWAYS native).
-    pub native_rate_hz: f64,
+    /// The rate asked of the station, Hz.
+    #[serde(default)]
+    pub requested_fs_hz: f64,
+    /// The rate the station programmed, Hz: the file is at this rate.
+    #[serde(alias = "native_rate_hz")]
+    pub fs_hz: f64,
 }
 
 /// Summary returned by [`RecordingWriter::finish`].
@@ -171,6 +175,24 @@ fn write_recorder_sidecar(run_dir: &Path, sidecar: &RecorderSidecar) -> io::Resu
     std::fs::write(run_dir.join("recorder.json"), json)
 }
 
+/// What a recording states beyond its acquisition selection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WriterFacts {
+    /// The rate asked of the station, Hz (the acquisition's rate when not given).
+    pub requested_fs_hz: Option<f64>,
+    /// The writer's ring depth, in chunks.
+    pub ring_capacity: usize,
+}
+
+impl Default for WriterFacts {
+    fn default() -> Self {
+        Self {
+            requested_fs_hz: None,
+            ring_capacity: DEFAULT_RING_CAPACITY,
+        }
+    }
+}
+
 /// A running recording: the batching bridge onto the testkit [`CaptureSink`]
 /// plus the recorder-owned sidecar lifecycle.
 ///
@@ -195,6 +217,7 @@ pub struct RecordingWriter {
     pretrigger_frames: u64,
     trigger_frame_global: Option<u64>,
     t0_convention: String,
+    requested_fs_hz: f64,
 }
 
 impl RecordingWriter {
@@ -237,6 +260,30 @@ impl RecordingWriter {
         pretrigger: Option<TriggerEvent>,
         ring_capacity: usize,
     ) -> io::Result<Self> {
+        Self::start_with(
+            data_root,
+            run_name,
+            acq,
+            table,
+            pretrigger,
+            WriterFacts {
+                ring_capacity,
+                ..WriterFacts::default()
+            },
+        )
+    }
+
+    /// [`RecordingWriter::start`] with the recording's other facts stated.
+    pub fn start_with(
+        data_root: &Path,
+        run_name: &str,
+        acq: &AcquisitionConfig,
+        table: ChannelTable,
+        pretrigger: Option<TriggerEvent>,
+        facts: WriterFacts,
+    ) -> io::Result<Self> {
+        let ring_capacity = facts.ring_capacity;
+        let requested_fs_hz = facts.requested_fs_hz.unwrap_or(acq.native_rate_hz);
         let n_channels = table.channels.len();
         if n_channels == 0 {
             return Err(io::Error::new(
@@ -275,7 +322,8 @@ impl RecordingWriter {
                 t0_convention: t0_convention.clone(),
                 gaps: Vec::new(),
                 n_channels,
-                native_rate_hz: acq.native_rate_hz,
+                requested_fs_hz,
+                fs_hz: acq.native_rate_hz,
             },
         )?;
 
@@ -303,6 +351,7 @@ impl RecordingWriter {
             pretrigger_frames,
             trigger_frame_global,
             t0_convention,
+            requested_fs_hz,
         };
         if let Some(ev) = pretrigger {
             let n = ev.pretrigger_frames as usize;
@@ -420,7 +469,8 @@ impl RecordingWriter {
                 t0_convention: self.t0_convention.clone(),
                 gaps: self.gaps.clone(),
                 n_channels: self.n_channels,
-                native_rate_hz: self.acq.native_rate_hz,
+                requested_fs_hz: self.requested_fs_hz,
+                fs_hz: self.acq.native_rate_hz,
             },
         )?;
 
@@ -517,7 +567,7 @@ impl RecordingReader {
         // Channels + rate: the recorder sidecar is authoritative when present
         // (it exists from before the first data byte); else the testkit one.
         let (n_channels, rate_hz) = match (&recorder_sidecar, &capture_sidecar) {
-            (Some(r), _) => (r.n_channels, r.native_rate_hz),
+            (Some(r), _) => (r.n_channels, r.fs_hz),
             (None, Some(c)) => (c.config.n_channels, c.config.sample_rate_hz),
             (None, None) => {
                 return Err(io::Error::new(

@@ -14,7 +14,7 @@ use hertzforge_capture::DEFAULT_FLUSH_INTERVAL;
 use hertzforge_channel_table::ChannelTable;
 
 use crate::acq::AcquisitionConfig;
-use crate::recording::{RecordingSummary, RecordingWriter};
+use crate::recording::{RecordingSummary, RecordingWriter, WriterFacts};
 use crate::trigger::TriggerEvent;
 
 /// What a recording is, given to the store when it begins.
@@ -26,8 +26,11 @@ pub struct RecordingSpec {
     pub name: String,
     /// The recorded rows, in column order.
     pub table: ChannelTable,
-    /// The acquisition and analysis selection (its rate is the rate the file is at).
+    /// The acquisition and analysis selection (its rate is the rate the station
+    /// programmed: the file is at it).
     pub acq: AcquisitionConfig,
+    /// The rate asked of the station, Hz.
+    pub requested_fs_hz: f64,
     /// The trigger that began it, if any; its pre-window is the file's first frames.
     pub pretrigger: Option<TriggerEvent>,
 }
@@ -86,12 +89,16 @@ impl RecordStore for WriterStore {
         if self.writer.is_some() {
             return Err("a recording is already in progress".into());
         }
-        let writer = RecordingWriter::start(
+        let writer = RecordingWriter::start_with(
             &spec.data_root,
             &spec.name,
             &spec.acq,
             spec.table,
             spec.pretrigger,
+            WriterFacts {
+                requested_fs_hz: Some(spec.requested_fs_hz),
+                ..WriterFacts::default()
+            },
         )
         .map_err(|e| e.to_string())?;
         let name = writer

@@ -170,7 +170,8 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
         t0_convention: "start".to_string(),
         gaps: Vec::new(),
         n_channels: 3,
-        native_rate_hz: 2048.0,
+        requested_fs_hz: 2048.0,
+        fs_hz: 2048.0,
     };
     std::fs::write(
         run_dir.join("recorder.json"),
