@@ -241,6 +241,10 @@ hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_
 # pass on a macOS runner one call took 3.2 ms against 2.5 ms (the built-in) and 8.6 ms (a law file)
 hertzforge-sine-laws  test:check_cases  the_sine_built_in_passes_every_check_case
 hertzforge-sine-laws  test:law_file_check  a_sine_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes
+# The built-in and its law file run the same: the law file's calls have the same 2.5 ms deadline on
+# the wall clock, and one missed under the parallel pass's load changed a discrete outcome
+hertzforge-sine-laws  test:same_door  the_built_in_and_its_law_file_run_the_same_at_both_parameter_sets
+hertzforge-sine-laws  test:same_door  the_limit_channel_case_is_reported
 
 # The template law file on a simulated station with the NI chassis's output queue: each run goes
 # through the law host, whose call deadline is on the wall clock, so a starved call is a miss
@@ -273,6 +277,11 @@ sds-control  test:sine_sim_run  sim_5_a_lost_controller_and_a_shutdown_each_safe
 sds-control  test:sine_sim_run  sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_held_then_ramped
 sds-control  test:sine_sim_run  sim_7_the_template_law_passes_sim_1_and_the_built_in_matches_its_law_file
 sds-control  test:sine_sim_run  sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_verbs
+# The Random and MIMO law check: each built-in and a passing law file must pass, and every seed and
+# call is judged against its budget on the wall clock; on a macOS runner in the parallel pass the
+# minimum-drive law's seed took 9.4 s and 14.0 s against 8.5 s
+sds-control  test:law_check  every_built_in_law_passes_the_check
+sds-control  test:law_check  a_passing_law_file_is_recorded_by_its_hash_and_cleared_for_hardware
 sds-control  test:sine_law_check  a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware
 sds-control  test:sine_law_check  the_built_in_sine_law_passes_every_case_and_is_not_recorded
 
