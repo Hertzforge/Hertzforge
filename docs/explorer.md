@@ -135,10 +135,12 @@ channel's rms, its velocity and displacement (peak over the last analysis pass, 
 integrators settle), the station time, and the survey's highest point.
 
 The **measured frequency** is a cross-check of the tone the service commands, read from the control
-channel's zero crossings over half a second. It reads "Not yet" until a tone at a level above 0 V has
-held its frequency long enough: the pipeline, then the half-second window, about 0.6 s after a
-change. It counts samples at the rate the service believes, so it cannot show a station running at
-another rate; a meter on the drive can.
+channel over half a second: the time between its first and last rising zero crossings, each placed
+between its two samples, against the whole periods between them. A steady tone reads to a few parts
+per million. It reads "Not yet" until a tone at a level above 0 V has held its frequency long enough:
+the pipeline, then the half-second window, about 0.6 s after a change. The reading then stays until
+the tone moves, and updates every half second. It counts samples at the rate the service believes, so
+it cannot show a station running at another rate; a meter on the drive can.
 
 ## Stop, Abort and Protections
 
