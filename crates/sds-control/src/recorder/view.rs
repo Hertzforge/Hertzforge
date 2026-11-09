@@ -453,7 +453,16 @@ pub fn run_reading(v: &RecorderView) -> Value {
             None => none("Free above floor"),
         },
     ];
-    views::reading("Run", rows)
+    let mut r = views::reading("Run", rows);
+    // Whole numbers as integers, as every other number on the wire.
+    if let Some(rows) = r.get_mut("rows").and_then(Value::as_array_mut) {
+        for row in rows {
+            if let Some(x) = row.get("value").and_then(Value::as_f64) {
+                row["value"] = num(x);
+            }
+        }
+    }
+    r
 }
 
 /// `recorder.live`: the head and the Run reading.
