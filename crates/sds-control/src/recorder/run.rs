@@ -40,6 +40,32 @@ const MAX_PACE: Duration = Duration::from_millis(50);
 pub const OVERLOAD_DEFINITION: &str = "A row's overload indicator latches the first time a \
      sample's magnitude reaches 0.9 of the row's range_max, and holds for the run.";
 
+/// How long a start waits for this service's own previous run to let the NI hardware go.
+const OWN_RUN_RELEASE: Duration = Duration::from_secs(3);
+
+/// Take the station's hardware lock; when this same service holds it, a run that has just
+/// finished is still letting it go (another module's run publishes its end before its
+/// thread releases the lock), so wait for it, up to [`OWN_RUN_RELEASE`], rather than refuse
+/// the start as if another program held the hardware (the NI bench: a Recorder start sent
+/// on an Explorer run's end).
+fn acquire_after_own_run(
+    data_root: &std::path::Path,
+    bind: &str,
+    station: &str,
+) -> Result<hertzforge_station::lock::LockGuard, hertzforge_station::lock::LockError> {
+    let t0 = Instant::now();
+    loop {
+        match hertzforge_station::lock::acquire(data_root, bind, station) {
+            Err(hertzforge_station::lock::LockError::Held(h))
+                if h.pid == std::process::id() && t0.elapsed() < OWN_RUN_RELEASE =>
+            {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            other => return other,
+        }
+    }
+}
+
 /// The most the pump waits, after a batch, for the threads waiting on the service to take it:
 /// a verb or a status read holds it for well under a millisecond.
 const HANDOFF_MAX: Duration = Duration::from_millis(20);
@@ -280,7 +306,7 @@ impl RecorderRun {
             let hardware = station.station.is_hardware();
             let guard = if hardware {
                 Some(
-                    hertzforge_station::lock::acquire(
+                    acquire_after_own_run(
                         &ctx.data_root,
                         &ctx.bind,
                         &station.provenance.station_label,
@@ -1122,6 +1148,32 @@ pub fn mark_words(m: &Mark) -> (&'static str, String) {
 #[cfg(test)]
 mod recorder_handoff_tests {
     use super::*;
+
+    /// The lock held by this same service (a run just finishing) is waited for, not refused.
+    #[test]
+    fn recorder_a_start_waits_for_this_services_own_run_to_free_the_hardware() {
+        let dir = std::env::temp_dir().join(format!("hf_recorder_lock_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let held = hertzforge_station::lock::acquire(&dir, "127.0.0.1:0", "station").unwrap();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        let t0 = Instant::now();
+        let got = acquire_after_own_run(&dir, "127.0.0.1:0", "station");
+        let waited = t0.elapsed();
+        t.join().unwrap();
+        assert!(
+            got.is_ok(),
+            "refused while this service's own run let the hardware go"
+        );
+        assert!(
+            waited >= Duration::from_millis(250),
+            "it did not wait: {waited:?}"
+        );
+        drop(got);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn recorder_handoff_gives_way_only_while_someone_waits() {
