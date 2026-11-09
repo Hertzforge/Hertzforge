@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 92,
+ "method": "explorer.start",
+ "params": {}
+}

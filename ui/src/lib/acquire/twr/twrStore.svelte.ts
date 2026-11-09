@@ -12,6 +12,7 @@
  * them when the operator says so.
  */
 
+import { regresses } from '../runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type { ChannelRow, LogEntry, View } from '$lib/protocol/types';
@@ -527,6 +528,8 @@ export class TwrStore {
 
 	private onStatus(s: TwrState) {
 		const was = this.status;
+		// A reply older than the run's own word that it finished is not applied.
+		if (regresses(was, s)) return;
 		this.status = s;
 		// The state is newer than the frame held: it is the run's word until the next frame.
 		this.liveNewer = false;

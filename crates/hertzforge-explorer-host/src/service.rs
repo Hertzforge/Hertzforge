@@ -63,6 +63,10 @@ use crate::analysis::{
 use crate::floor::{FloorProbe, NoiseFloorProbe};
 use crate::freq::WindowedFreqMeasure;
 use crate::guards::{AbortMonitor, AbortMonitorError};
+use crate::intent::{
+    Adoption, FrequencyPart, IntentKind, IntentRecord, LevelPart, Steered, StopCause,
+};
+use crate::profile_raster::ProfileRaster;
 use crate::ring::SampleRing;
 use crate::slew::SlewLimits;
 use crate::step::{
@@ -72,9 +76,10 @@ use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_engine::{AbortTrip, Engine, EngineConfig, StopReason, VecCaptureSink};
 use hertzforge_hal::{Backend, ConfiguredActual};
 use hertzforge_module_abi::StationClass;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Ticks per `run_ticks` call.
 ///
@@ -116,6 +121,19 @@ const DEFAULT_RING_BLOCKS: usize = 16;
 /// station with nothing to report.
 pub const MAX_DRIVER_WARNINGS: usize = 32;
 
+/// Intent records the service holds until they are taken, oldest dropped first. The run
+/// host takes them every pump iteration, so this only bounds a caller that never does.
+pub const MAX_INTENT_RECORDS: usize = 1024;
+
+/// Survey points held for [`ExplorerHostService::take_profile_points`] until they are
+/// taken, oldest dropped first. The survey line itself keeps every point it should.
+pub const MAX_RECENT_POINTS: usize = 4096;
+
+/// The most batches a ramped stop waits, with the drive at zero, for its zeros to reach the
+/// output (see `run_batches`): far beyond any station's pipeline (four blocks on the NI
+/// chassis), so it ends a stop only where the station has stopped acquiring.
+const STOP_ZERO_WAIT_BATCHES: u32 = 64;
+
 /// Errors from an [`ExplorerHostService`] operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServiceError {
@@ -125,6 +143,8 @@ pub enum ServiceError {
     BadState(String),
     /// The backend refused an operation, or the run faulted against it.
     Plant(String),
+    /// A dB step was asked of a level of 0 V, where no ratio means anything.
+    LevelZero,
     /// The arm gate refused.
     ///
     /// The TYPED reason travels, not a formatted string: the string is what an operator
@@ -143,6 +163,11 @@ impl std::fmt::Display for ServiceError {
             ServiceError::Config(s) => write!(f, "config error: {s}"),
             ServiceError::BadState(s) => write!(f, "bad state: {s}"),
             ServiceError::Plant(s) => write!(f, "plant error: {s}"),
+            ServiceError::LevelZero => write!(
+                f,
+                "the target level is 0 V, so a step in dB has nothing to scale: set a level \
+                 in volts first"
+            ),
             ServiceError::ArmRefused(s) => write!(f, "arm refused: {s}"),
             ServiceError::PumpPanicked(s) => write!(
                 f,
@@ -244,6 +269,20 @@ pub struct EndRecord {
     pub reason: String,
     /// The limit breach, when a monitor is what ended it.
     pub trip: Option<AbortTrip>,
+    /// Why the controlled stop that ended the run began, when one did.
+    pub stop: Option<StopCause>,
+    /// The generated sample that passed the drive ceiling, when that is what ended it.
+    pub drive: Option<DriveTrip>,
+}
+
+/// A generated drive sample past the ceiling: the sample clipped to the ceiling, and the
+/// run aborted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DriveTrip {
+    /// The sample's magnitude, volts peak, before it was clipped.
+    pub vpk: f64,
+    /// The ceiling it passed.
+    pub ceiling_vpk: f64,
 }
 
 /// The abort latch: the pump sets it, any observer reads it without the service lock.
@@ -297,7 +336,18 @@ pub struct ExplorerStatus {
     /// at zero or a window that has not filled. The window opens only once the drive in
     /// flight from before the tone settled has been acquired ([`Self::pipeline_frames`]),
     /// so the first reading after a retune is the NEW tone's, not a blend with the old.
+    ///
+    /// HELD on every status while the tone it measured holds, and cleared when the tone
+    /// moves or the drive goes to zero: the status is read by sampling, so a reading that
+    /// appeared on one pass only would be lost between two reads.
     pub measured_freq_hz: Option<f64>,
+    /// How many readings have matured this run. A reader that wants each new reading
+    /// (rather than the latest) compares this.
+    pub measured_readings: u64,
+    /// A ramped stop's first zero: the generated frame where its drive reached zero. The
+    /// stop's ramp runs from its intent's frame to this; the run then ends once this has
+    /// played.
+    pub stop_zero_frame: Option<u64>,
     /// The amplitude being generated right now, volts peak.
     pub commanded_vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -343,6 +393,28 @@ pub struct ExplorerStatus {
     /// A limit breach the SECONDARY monitor observed. See the module docs for why this
     /// is an observation and not an abort.
     pub observed_trip: Option<AbortTrip>,
+    /// Input frames the engine has acquired from the station this run: the station's own
+    /// clock, so `frames_in / actual_fs_hz` is station time since start.
+    pub frames_in: u64,
+    /// The control channel's derived `(velocity in/s, displacement mil)`, each the
+    /// largest magnitude over the samples of the last pass that consumed any. A sine's
+    /// instantaneous value read once a pass is a phase sample, not a level.
+    pub derived_peak: (f64, f64),
+    /// How long the last analysis pass took, and the longest so far this run.
+    pub pass_last: Duration,
+    pub pass_worst: Duration,
+    /// The longest time between the end of one tick batch and the start of the next this
+    /// run: how long the station's output ran on what was already written.
+    pub batch_gap_worst: Duration,
+    /// The survey line's highest point, `(frequency, level)`.
+    pub survey_peak: Option<(f64, f32)>,
+    /// Counts every change to the survey line, a clear included.
+    pub survey_revision: u64,
+    /// Why the controlled stop in progress (or that ended the run) began.
+    pub stop: Option<StopCause>,
+    /// Every driver diagnostic drained this run, however many [`Self::driver_warnings`]
+    /// still holds.
+    pub driver_warnings_total: u64,
     /// Non-fatal DRIVER diagnostics collected since the run began (DAQmx underruns,
     /// coercions, late samples), most recent last and bounded to
     /// [`MAX_DRIVER_WARNINGS`].
@@ -537,6 +609,32 @@ pub struct ExplorerHostService {
     /// sample: the drive that was already in flight when the generator last changed state.
     /// Re-armed to [`Self::pipeline_frames`] by every pass that is not measurable.
     meter_skip: usize,
+    /// The latest matured reading for the tone now held (see
+    /// [`ExplorerStatus::measured_freq_hz`]), and how many have matured this run.
+    held_measured_hz: Option<f64>,
+    measured_readings: u64,
+    /// The ramped stop's wait for its zeros to reach the output: the generated frame of the
+    /// first zero, and the batches waited for it.
+    stop_zero_at: Option<u64>,
+    stop_wait_batches: u32,
+
+    // --- read surfaces --------------------------------------------------------
+    /// The survey line: every point the profile capture recorded, folded in by frequency
+    /// on the display grid. Built at arm.
+    survey: Option<ProfileRaster>,
+    survey_revision: u64,
+    /// The points folded into the survey since the last `take_profile_points`, bounded.
+    recent_points: VecDeque<ProfilePoint>,
+    /// The intents taken since the last `take_intents`, bounded.
+    intents: VecDeque<IntentRecord>,
+    intent_seq: u64,
+    stop_cause: Option<StopCause>,
+    derived_peak: (f64, f64),
+    pass_last: Duration,
+    pass_worst: Duration,
+    last_batch_end: Option<Instant>,
+    batch_gap_worst: Duration,
+    driver_warnings_total: u64,
 
     // --- shared surfaces ------------------------------------------------------
     mailbox: Arc<CommandMailbox>,
@@ -641,6 +739,22 @@ impl ExplorerHostService {
             last_tone_hz: f64::NAN,
             ring_dropped_seen: 0,
             meter_skip: 0,
+            held_measured_hz: None,
+            measured_readings: 0,
+            stop_zero_at: None,
+            stop_wait_batches: 0,
+            survey: None,
+            survey_revision: 0,
+            recent_points: VecDeque::new(),
+            intents: VecDeque::new(),
+            intent_seq: 0,
+            stop_cause: None,
+            derived_peak: (0.0, 0.0),
+            pass_last: Duration::ZERO,
+            pass_worst: Duration::ZERO,
+            last_batch_end: None,
+            batch_gap_worst: Duration::ZERO,
+            driver_warnings_total: 0,
             mailbox: Arc::new(CommandMailbox::default()),
             status_cell: Arc::new(StatusCell::default()),
             abort_latch: Arc::new(AbortLatch::default()),
@@ -769,14 +883,81 @@ impl ExplorerHostService {
     /// level being the short-window RMS amplitude of the freshest signal at that tone
     /// (see [`crate::analysis::ProfileTracer::observe`]). At most one point per VISITED
     /// FREQUENCY, not one per pass: a dwell overwrites its own point rather than adding
-    /// to it. The consumer that remembers them is the daemon's peak-profile raster;
-    /// draining here is what keeps the tracer's vector from growing for the length of a
-    /// survey.
+    /// to it. The service's own survey line ([`Self::survey`]) remembers them; this is the
+    /// stream, for a caller that keeps its own.
+    ///
+    /// The service folds the same points into its own survey line as they are recorded
+    /// ([`Self::survey`]); this is the stream of them, for a caller that keeps its own.
+    /// Held up to [`MAX_RECENT_POINTS`], oldest dropped first.
     pub fn take_profile_points(&mut self) -> Vec<ProfilePoint> {
-        self.profile
-            .as_mut()
-            .map(|p| p.take_points())
-            .unwrap_or_default()
+        self.recent_points.drain(..).collect()
+    }
+
+    /// The survey line: the visited points on the display grid, a revisit within half a
+    /// bin overwriting and a traversal rewriting the span it crossed (see
+    /// [`crate::profile_raster`]). `None` before arm.
+    pub fn survey(&self) -> Option<&ProfileRaster> {
+        self.survey.as_ref()
+    }
+
+    /// The survey line's points, ascending by frequency (empty before arm).
+    pub fn survey_points(&self) -> &[(f64, f32)] {
+        self.survey.as_ref().map(|s| s.points()).unwrap_or(&[])
+    }
+
+    /// Counts every change to the survey line, a clear included.
+    pub fn survey_revision(&self) -> u64 {
+        self.survey_revision
+    }
+
+    /// Empty the survey line. Answers the new revision. The tone that is held is measured
+    /// again from the next pass, so a dwell repopulates its own point.
+    pub fn clear_survey(&mut self) -> u64 {
+        if let Some(s) = self.survey.as_mut() {
+            s.clear();
+        }
+        self.survey_revision += 1;
+        self.survey_revision
+    }
+
+    /// Take the intents recorded since the last call, oldest first.
+    pub fn take_intents(&mut self) -> Vec<IntentRecord> {
+        self.intents.drain(..).collect()
+    }
+
+    /// Input frames the engine has acquired from the station this run.
+    pub fn frames_in(&self) -> u64 {
+        self.engine
+            .as_ref()
+            .map(|e| e.health().frames_in)
+            .unwrap_or(0)
+    }
+
+    /// Where an intent taken now lands: the next generated frame, and the input frames
+    /// acquired so far.
+    fn intent_frames(&self) -> (u64, u64) {
+        let frame = self
+            .step
+            .as_ref()
+            .map(|s| s.frames_generated())
+            .unwrap_or(0);
+        (frame, self.frames_in())
+    }
+
+    fn record_intent(&mut self, kind: IntentKind) -> IntentRecord {
+        let (frame, input_frame) = self.intent_frames();
+        let rec = IntentRecord {
+            seq: self.intent_seq,
+            frame,
+            input_frame,
+            kind,
+        };
+        self.intent_seq += 1;
+        if self.intents.len() >= MAX_INTENT_RECORDS {
+            self.intents.pop_front();
+        }
+        self.intents.push_back(rec);
+        rec
     }
 
     /// **THE PIPELINE, in input frames**: how many further acquired frames still carry the
@@ -1084,18 +1265,11 @@ impl ExplorerHostService {
             self.cfg.display_nfft,
         ));
         self.derived = Some(DerivedTracer::new(fs, DERIVED_HP_HZ, SETTLE_HP_CONSTANTS));
-        // The profile tracer's tracking-filter bandwidth and decimation shape its
-        // per-sample / chunked entry points, neither of which this service calls: it uses
-        // `ProfileTracer::observe`, which measures the level over a short window of the
-        // freshest signal. What DOES matter here is the acquisition block, because half
-        // the post-retune transient guard is expressed in blocks.
-        let profile_bw = (self.cfg.slew.freq_oct_per_s * self.band_hz.0).max(5.0);
+        // Half the post-retune transient guard is expressed in acquisition blocks.
         self.profile = Some(
             ProfileTracer::new(
                 self.input_indices[self.control_slot.min(self.input_indices.len() - 1)],
                 fs,
-                profile_bw,
-                1,
             )
             .with_block_frames(block),
         );
@@ -1105,7 +1279,15 @@ impl ExplorerHostService {
             fs,
             WindowedFreqMeasure::DEFAULT_WINDOW,
         ));
+        self.held_measured_hz = None;
+        self.measured_readings = 0;
+        self.stop_zero_at = None;
+        self.stop_wait_batches = 0;
         self.floor = Some(NoiseFloorProbe::new(self.n_interleave));
+        // The survey line on the display spectra's own grid, at the ADOPTED rate, so it
+        // renders onto the same frequencies the spectra are drawn against.
+        let nfft = self.cfg.display_nfft.max(2);
+        self.survey = Some(ProfileRaster::new(0.0, fs / nfft as f64, nfft / 2 + 1));
         self.monitor = Some(
             AbortMonitor::new(
                 &self.table,
@@ -1127,16 +1309,14 @@ impl ExplorerHostService {
 
     /// Command an absolute frequency. Returns the CLAMPED value actually adopted.
     pub fn set_frequency(&mut self, hz: f64) -> Result<f64, ServiceError> {
-        let step = self.live_step()?;
-        Ok(step.set_target_freq(hz))
+        self.steer(Some(FrequencyPart::Hz(hz)), None).map(|s| s.hz)
     }
 
     /// Move the frequency by `delta_hz` from the current target. Returns the clamped
     /// value actually adopted.
     pub fn adjust_frequency(&mut self, delta_hz: f64) -> Result<f64, ServiceError> {
-        let step = self.live_step()?;
-        let next = step.target_freq_hz() + delta_hz;
-        Ok(step.set_target_freq(next))
+        self.steer(Some(FrequencyPart::StepHz(delta_hz)), None)
+            .map(|s| s.hz)
     }
 
     /// Command a drive amplitude in volts peak. Returns the clamped value adopted.
@@ -1144,15 +1324,59 @@ impl ExplorerHostService {
     /// Any change away from zero CONTAMINATES the noise-floor probe if it has not
     /// matured: the window it was accumulating no longer means "no drive".
     pub fn set_amplitude_vpk(&mut self, vpk: f64) -> Result<f64, ServiceError> {
+        self.steer(None, Some(LevelPart::Vpk(vpk))).map(|s| s.vpk)
+    }
+
+    /// Steer the tone: a frequency part, a level part, or both. Both are applied together
+    /// between batches, so they land in the same generated frame. A relative part is
+    /// resolved against the target in force. Answers the targets in force after the
+    /// steer, the clamp flags, and where it lands ([`Steered`]); the intent is recorded.
+    ///
+    /// A [`LevelPart::StepDb`] while the target level is 0 V is refused
+    /// ([`ServiceError::LevelZero`]) and nothing is applied.
+    pub fn steer(
+        &mut self,
+        frequency: Option<FrequencyPart>,
+        level: Option<LevelPart>,
+    ) -> Result<Steered, ServiceError> {
         let step = self.live_step()?;
+        let level_ask = match level {
+            None => None,
+            Some(LevelPart::Vpk(v)) => Some(v),
+            Some(LevelPart::StepDb(db)) => {
+                let target = step.target_drive_vpk();
+                if target <= 0.0 {
+                    return Err(ServiceError::LevelZero);
+                }
+                Some(target * 10f64.powf(db / 20.0))
+            }
+        };
+        let freq_ask = frequency.map(|f| match f {
+            FrequencyPart::Hz(hz) => hz,
+            FrequencyPart::StepHz(d) => step.target_freq_hz() + d,
+            FrequencyPart::StepOct(o) => step.target_freq_hz() * o.exp2(),
+        });
+        let freq = freq_ask.map(|a| Adoption::of(a, step.set_target_freq(a)));
         let before = step.target_drive_vpk();
-        let adopted = step.set_target_vpk(vpk);
-        if (adopted - before).abs() > f64::EPSILON {
+        let lvl = level_ask.map(|a| Adoption::of(a, step.set_target_vpk(a)));
+        let (hz, vpk) = (step.target_freq_hz(), step.target_drive_vpk());
+        if (vpk - before).abs() > f64::EPSILON {
             if let Some(f) = self.floor.as_mut() {
                 f.contaminate();
             }
         }
-        Ok(adopted)
+        let rec = self.record_intent(IntentKind::Steer {
+            frequency: freq,
+            level: lvl,
+        });
+        Ok(Steered {
+            hz,
+            vpk,
+            clamped_hz: freq.is_some_and(|a| a.clamped),
+            clamped_vpk: lvl.is_some_and(|a| a.clamped),
+            frame: rec.frame,
+            input_frame: rec.input_frame,
+        })
     }
 
     /// Start (or re-aim) a sweep between the band edges. Halt-and-dwell at the edge.
@@ -1161,21 +1385,47 @@ impl ExplorerHostService {
         direction: SweepDirection,
         rate_oct_per_min: f64,
     ) -> Result<(), ServiceError> {
+        self.sweep(direction, rate_oct_per_min).map(|_| ())
+    }
+
+    /// [`Self::start_sweep`], answering the intent record: the rate the step adopted and
+    /// where the sweep begins.
+    pub fn sweep(
+        &mut self,
+        direction: SweepDirection,
+        rate_oct_per_min: f64,
+    ) -> Result<IntentRecord, ServiceError> {
         let step = self.live_step()?;
         step.start_sweep(direction, rate_oct_per_min);
-        Ok(())
+        let adopted = step.sweep().map(|w| w.rate_oct_per_min).unwrap_or(0.0);
+        Ok(self.record_intent(IntentKind::Sweep {
+            direction,
+            rate_oct_per_min: Adoption::of(rate_oct_per_min, adopted),
+        }))
     }
 
     /// Stop the sweep. The tone holds where it is.
     pub fn stop_sweep(&mut self) -> Result<(), ServiceError> {
+        self.hold().map(|_| ())
+    }
+
+    /// [`Self::stop_sweep`], answering the intent record with the target in force.
+    pub fn hold(&mut self) -> Result<IntentRecord, ServiceError> {
         let step = self.live_step()?;
         step.stop_sweep();
-        Ok(())
+        let hz = step.target_freq_hz();
+        Ok(self.record_intent(IntentKind::Hold { hz }))
     }
 
     /// Ask for a RAMPED stop: the drive travels to zero at the operator drive slew, then
     /// the backend is stopped. Idempotent, and legal from `Armed` as well as `Running`.
     pub fn request_stop(&mut self) {
+        self.request_stop_for(StopCause::Operator);
+    }
+
+    /// [`Self::request_stop`], naming why. The first cause of a run's stop is the one
+    /// kept; a second request while the stop ramps changes nothing.
+    pub fn request_stop_for(&mut self, cause: StopCause) {
         if self.state.is_terminal() || self.state == RunState::Stopping {
             return;
         }
@@ -1184,6 +1434,8 @@ impl ExplorerHostService {
             step.set_target_vpk(0.0);
         }
         self.state = RunState::Stopping;
+        self.stop_cause = Some(cause);
+        self.record_intent(IntentKind::Stop { cause });
     }
 
     /// ABORT: `emergency_stop` immediately, with no ramp.
@@ -1210,6 +1462,15 @@ impl ExplorerHostService {
                 self.state
             )));
         }
+        // Once a stop has begun nothing raises or moves the drive: a level taken here
+        // would lift the target the ramp is walking down to, and the stop would never
+        // reach 0 V. Only the stop itself and an abort act on a stopping run.
+        if self.state == RunState::Stopping {
+            return Err(ServiceError::BadState(
+                "the run is stopping: nothing raises or moves the drive once a stop has begun"
+                    .into(),
+            ));
+        }
         self.step
             .as_mut()
             .ok_or_else(|| ServiceError::BadState("not armed".into()))
@@ -1225,12 +1486,18 @@ impl ExplorerHostService {
     }
 
     fn finish(&mut self, state: RunState, reason: String, trip: Option<AbortTrip>) {
-        self.state = state;
-        let record = EndRecord {
+        self.end_with(EndRecord {
             state,
             reason,
             trip,
-        };
+            stop: None,
+            drive: None,
+        });
+    }
+
+    fn end_with(&mut self, record: EndRecord) {
+        let state = record.state;
+        self.state = state;
         self.end = Some(record.clone());
         if state == RunState::Aborted {
             self.abort_latch.set(record);
@@ -1271,18 +1538,59 @@ impl ExplorerHostService {
             if self.state.is_terminal() {
                 return Ok(false);
             }
-            // The RAMPED stop completes here, not in the tick: the drive is at zero, so
-            // stopping the tasks can no longer put a step into anything.
-            if self.state == RunState::Stopping && self.drive_is_zero() {
+            // The RAMPED stop completes here, not in the tick, once the drive is at zero AT
+            // THE OUTPUT. The generator reaching zero is not enough: the queue still holds
+            // up to the lookahead of drive written before it, the last of the ramp's tail,
+            // and stopping the tasks then cuts it while the converter is playing it. A held
+            // converter (the 9263) keeps that sample until the backend's taper brings it
+            // down: 1.64 mV for about 0.2 s after a safe stop on the NI loopback.
+            // AI and AO share one clock, so the input frames acquired are the
+            // output frames played; the first zero has played once they pass it, plus the
+            // acquisition's group delay. Bounded, so a station that stops acquiring cannot
+            // hold the stop open.
+            if self.state == RunState::Stopping && self.drive_is_zero() && !self.zeros_played() {
+                self.stop_wait_batches += 1;
+            }
+            if self.state == RunState::Stopping
+                && self.drive_is_zero()
+                && (self.zeros_played() || self.stop_wait_batches > STOP_ZERO_WAIT_BATCHES)
+            {
                 if let Some(b) = self.backend.as_mut() {
                     b.stop()
                         .map_err(|e| ServiceError::Plant(format!("stop: {e}")))?;
                 }
-                self.finish(
-                    RunState::Stopped,
-                    "operator stop: drive ramped to zero, tasks stopped".into(),
-                    None,
-                );
+                // The end names why the stop began: the operator, nobody at the controls,
+                // the service shutting down, or the secondary monitor's breach (whose trip
+                // is the end's).
+                let cause = self.stop_cause.unwrap_or(StopCause::Operator);
+                let tail = "drive ramped to zero, tasks stopped";
+                let (reason, trip) = match cause {
+                    StopCause::Operator => (format!("operator stop: {tail}"), None),
+                    StopCause::SafeStop => {
+                        (format!("safe stop: nobody held control; {tail}"), None)
+                    }
+                    StopCause::Shutdown => (
+                        format!("shutdown: the service is shutting down; {tail}"),
+                        None,
+                    ),
+                    StopCause::Limit => match self.observed_trip {
+                        Some(t) => (
+                            format!(
+                                "limit stop: channel {} {:?} {:.4} past limit {:.4}; {tail}",
+                                t.channel_index, t.axis, t.value, t.limit
+                            ),
+                            Some(t),
+                        ),
+                        None => (format!("limit stop: {tail}"), None),
+                    },
+                };
+                self.end_with(EndRecord {
+                    state: RunState::Stopped,
+                    reason,
+                    trip,
+                    stop: Some(cause),
+                    drive: None,
+                });
                 return Ok(false);
             }
             if !self.run_one_batch()? {
@@ -1294,6 +1602,28 @@ impl ExplorerHostService {
 
     fn drive_is_zero(&self) -> bool {
         self.step.as_ref().map(|s| s.drive_vpk()).unwrap_or(0.0) == 0.0
+    }
+
+    /// Whether the first zero the generator wrote has reached the output. The frame it was
+    /// written at is taken the first time this is asked with the drive at zero.
+    fn zeros_played(&mut self) -> bool {
+        let generated = self
+            .handles
+            .as_ref()
+            .map(|h| h.frames_generated.load(Ordering::Relaxed))
+            .unwrap_or(0);
+        let zero_at = *self.stop_zero_at.get_or_insert(generated);
+        let played = self
+            .engine
+            .as_ref()
+            .map(|e| e.health().frames_in)
+            .unwrap_or(0);
+        let group = self
+            .configured
+            .as_ref()
+            .and_then(|c| c.group_delay_frames)
+            .unwrap_or(0) as u64;
+        played >= zero_at + group
     }
 
     /// Drain the mailbox and apply every intent. Between batches, never on the tick.
@@ -1334,9 +1664,16 @@ impl ExplorerHostService {
             return Err(ServiceError::BadState("not armed".into()));
         };
         let mut sink = VecCaptureSink::new();
+        let began = Instant::now();
+        if let Some(end) = self.last_batch_end {
+            self.batch_gap_worst = self
+                .batch_gap_worst
+                .max(began.saturating_duration_since(end));
+        }
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine.run_ticks(backend.as_mut(), step, &mut sink, TICKS_PER_BATCH)
         }));
+        self.last_batch_end = Some(Instant::now());
         let report = match caught {
             Ok(r) => r,
             Err(payload) => {
@@ -1351,6 +1688,34 @@ impl ExplorerHostService {
             }
         };
 
+        // A GENERATED SAMPLE PAST THE CEILING. The step clipped it, so nothing past the
+        // ceiling reached the station; the run ends here, before any further batch,
+        // whatever else the batch reports.
+        if let Some((vpk, ceiling_vpk)) = self.step.as_mut().and_then(|s| s.take_drive_trip()) {
+            let _ = self.emergency_stop_now();
+            self.end_with(EndRecord {
+                state: RunState::Aborted,
+                reason: format!(
+                    "a drive sample of {vpk:.4} V pk passed the {ceiling_vpk:.4} V pk ceiling; \
+                     it was clipped to the ceiling and emergency_stop was issued"
+                ),
+                trip: None,
+                stop: None,
+                drive: Some(DriveTrip { vpk, ceiling_vpk }),
+            });
+            if let Some(b) = self.backend.as_mut() {
+                let fresh = b.take_warnings();
+                self.driver_warnings_total += fresh.len() as u64;
+                self.driver_warnings.extend(fresh);
+                let excess = self
+                    .driver_warnings
+                    .len()
+                    .saturating_sub(MAX_DRIVER_WARNINGS);
+                self.driver_warnings.drain(..excess);
+            }
+            return Ok(false);
+        }
+
         // DRAIN the driver's own diagnostics every batch. `take_warnings` empties the
         // backend's buffer, so a caller that does not pull them is not "leaving them for
         // later" - it is discarding them. Drained here, right after the batch that produced
@@ -1359,6 +1724,7 @@ impl ExplorerHostService {
         if let Some(b) = self.backend.as_mut() {
             let fresh = b.take_warnings();
             if !fresh.is_empty() {
+                self.driver_warnings_total += fresh.len() as u64;
                 self.driver_warnings.extend(fresh);
                 let excess = self
                     .driver_warnings
@@ -1481,10 +1847,27 @@ impl ExplorerHostService {
     where
         F: FnMut(&[f32], usize),
     {
+        self.service_analysis_framed(|_, block, stride| on_block(block, stride))
+    }
+
+    /// [`Self::service_analysis_tapped`] with each block's place in station time: `on_block`
+    /// is handed `(first input frame, interleaved samples, stride)`, the first frame
+    /// counted from the start of the run on the station's own clock.
+    ///
+    /// The ring drops its OLDEST block when it is full, so the blocks a pass drains are the
+    /// most recent ones and contiguous among themselves: the last of them ends at the
+    /// frames the step has acquired, and the first starts that many frames earlier.
+    pub fn service_analysis_framed<F>(&mut self, mut on_block: F) -> ExplorerStatus
+    where
+        F: FnMut(u64, &[f32], usize),
+    {
+        let pass_began = Instant::now();
         let mut drained = std::mem::take(&mut self.drained);
         drained.clear();
+        let mut acquired: u64 = 0;
         if let Some(h) = self.handles.as_ref() {
             h.ring.drain_into(&mut drained);
+            acquired = h.frames_acquired.load(Ordering::Relaxed);
             // The ring drops the OLDEST block when it is full, so whatever it dropped since
             // the last pass sits between that pass's blocks and this pass's first one; the
             // blocks drained here are contiguous among themselves. See the measured window
@@ -1500,6 +1883,10 @@ impl ExplorerHostService {
 
         let stride = self.n_interleave.max(1);
         let control = self.control_slot.min(stride - 1);
+        let drained_frames: u64 = drained.iter().map(|b| (b.len() / stride) as u64).sum();
+        let mut next_frame = acquired.saturating_sub(drained_frames);
+        let mut peak_vel = 0.0f64;
+        let mut peak_disp = 0.0f64;
         let mut sumsq = vec![0.0f64; stride];
         let mut frames_total = 0usize;
         let mut spectra_out = Vec::new();
@@ -1518,7 +1905,7 @@ impl ExplorerHostService {
         // a window the tone SWEPT across, it is the average of everything in it and
         // belongs to no frequency at all - which is not merely imprecise, it is a number
         // the panel would print beside the commanded frequency as its cross-check.
-        // MEASURED, 2026-08-08: without this gate a retune from 100 Hz to 400 Hz read
+        // Measured: without this gate a retune from 100 Hz to 400 Hz read
         // back as 232 Hz - the mean of the traversal, indistinguishable on the panel
         // from a device that had failed to follow the command.
         let steady_now = self
@@ -1551,7 +1938,7 @@ impl ExplorerHostService {
         let measurable = driving && tone_held;
         // THE PIPELINE, applied to the measured window - the half the gate above cannot do
         // on its own, because it reads the GENERATOR and the samples are the INPUT.
-        // MEASURED, 2026-11-01 (the NI chassis gate): a retune 100 -> 400 Hz read back
+        // Measured on the NI chassis: a retune 100 -> 400 Hz read back
         // 379.41 Hz, 5.15 % low, while a meter on the jumper read the tone at 400 Hz. A
         // manual retune lands in ONE generated frame and `measurable` held from the second
         // pass after it, but that pass's samples are the response to drive written up to
@@ -1596,7 +1983,8 @@ impl ExplorerHostService {
             // THE TIME-DOMAIN TAP, first - the same ordering rule the acquisition tap in
             // `ExplorerProcessStep::process` follows: a panic anywhere below still leaves
             // the display with the data that arrived.
-            on_block(block, stride);
+            on_block(next_frame, block, stride);
+            next_frame += frames as u64;
 
             // Fail-closed floor + the secondary limit monitor, both on the RAW f32.
             if let Some(f) = self.floor.as_mut() {
@@ -1629,7 +2017,9 @@ impl ExplorerHostService {
             }
             if let Some(d) = self.derived.as_mut() {
                 for &v in control_buf.iter() {
-                    d.push(v);
+                    let (vel, disp) = d.push(v);
+                    peak_vel = peak_vel.max(vel.abs());
+                    peak_disp = peak_disp.max(disp.abs());
                 }
             }
             profile_run.extend_from_slice(&control_buf);
@@ -1637,11 +2027,11 @@ impl ExplorerHostService {
                 // CONTIGUOUS, not per chunk: these blocks are one unbroken acquisition
                 // (a ring drop is the only gap, and it breaks the stream above), so the
                 // interval between two blocks is a sample interval like any other and its
-                // crossing must be counted. Fed through `push_chunk`, every block boundary
-                // was time the window counted and a crossing it never tested - MEASURED
-                // 2026-11-01 at the chassis's 8533.33 Hz / 128-frame block: a steady
-                // 1066.67 Hz read 1033.33 Hz, every window, and 777 Hz read -0.83 %
-                // (`tests/sim_end_to_end.rs`).
+                // crossing must be counted. Fed a chunk at a time with the boundary
+                // untested, every block boundary was time the window counted and a crossing
+                // it never tested; measured at the chassis's 8533.33 Hz / 128-frame block,
+                // a steady 1066.67 Hz read 1033.33 Hz, every window, and 777 Hz read
+                // -0.83 % (`tests/sim_end_to_end.rs`).
                 //
                 // The pipeline skip first. `control_buf` is ONE channel (de-interleaved
                 // above), so its length is this block's frame count and the skip is spent
@@ -1668,6 +2058,27 @@ impl ExplorerHostService {
         // `ProfileTracer::observe_pipelined` for the capture rule.
         if let Some(p) = self.profile.as_mut() {
             p.observe_pipelined(&profile_run, inst_freq, pipeline, sweeping);
+            // THE SURVEY LINE: every point the capture recorded this pass, folded in at
+            // its commanded frequency. Drained, so the capture stays bounded and the
+            // survey is the one thing that remembers.
+            let points = p.take_points();
+            if !points.is_empty() {
+                let mut changed = false;
+                if let Some(sv) = self.survey.as_mut() {
+                    for q in &points {
+                        changed |= sv.visit(q.freq_hz, q.amplitude);
+                    }
+                }
+                if changed {
+                    self.survey_revision += 1;
+                }
+                for q in points {
+                    if self.recent_points.len() >= MAX_RECENT_POINTS {
+                        self.recent_points.pop_front();
+                    }
+                    self.recent_points.push_back(q);
+                }
+            }
         }
         self.scratch_f64 = scratch;
         self.control_scratch = control_buf;
@@ -1675,14 +2086,11 @@ impl ExplorerHostService {
 
         // THE MEASURED-FREQUENCY GATE, in two halves.
         //
-        // 1. **Are we driving at all?** The delegated path could not answer this - its drive
-        //    was an open-loop nudge-count estimate, so the only defence against measuring
-        //    the noise floor was an amplitude threshold, and a threshold needs a floor to
-        //    be measured against. THIS path commands volts natively, so it KNOWS. While
-        //    the commanded drive is zero there is nothing to measure and the window is
-        //    reset rather than accumulated: a crossing count taken off the floor is a
-        //    number with no referent (2026-07-16, a frozen-near-zero drive walked the
-        //    displayed estimate 45.9 -> 44.4 -> 42.0 while the operator touched nothing).
+        // 1. **Are we driving at all?** This path commands volts natively, so it KNOWS.
+        //    While the commanded drive is zero there is nothing to measure and the window
+        //    is reset rather than accumulated: a crossing count taken off the floor is a
+        //    number with no referent, and an estimate fed by one walks while the operator
+        //    touches nothing.
         //    This is a STRONGER gate than the amplitude one, not a replacement for it,
         //    because it cannot be defeated by a loud noise floor.
         // 2. **Is the signal above the floor?** Applied ON TOP, as soon as the floor
@@ -1712,6 +2120,17 @@ impl ExplorerHostService {
         } else {
             None
         };
+        // HELD while the tone it measured holds: the status is read by sampling, so a
+        // reading published on its one pass only is lost whenever that pass falls between
+        // two reads (the run's live frame is 100 ms, a pass 20 ms on the chassis).
+        if !measurable {
+            self.held_measured_hz = None;
+        }
+        if let Some(hz) = measured_freq_hz {
+            self.held_measured_hz = Some(hz);
+            self.measured_readings += 1;
+        }
+        let measured_freq_hz = self.held_measured_hz;
 
         if let Some(h) = self.handles.as_ref() {
             h.ring.recycle(&mut drained);
@@ -1727,7 +2146,10 @@ impl ExplorerHostService {
         // and ask for a RAMPED stop, never an abort.
         if self.observed_trip.is_some() && matches!(self.state, RunState::Running | RunState::Armed)
         {
-            self.request_stop();
+            self.request_stop_for(StopCause::Limit);
+        }
+        if frames_total > 0 {
+            self.derived_peak = (peak_vel, peak_disp);
         }
 
         let per_channel_rms: Vec<f64> = if frames_total > 0 {
@@ -1739,6 +2161,9 @@ impl ExplorerHostService {
             Vec::new()
         };
 
+        let took = pass_began.elapsed();
+        self.pass_last = took;
+        self.pass_worst = self.pass_worst.max(took);
         let status = self.snapshot(per_channel_rms, measured_freq_hz);
         self.status_cell.store(status.clone());
         status
@@ -1763,6 +2188,8 @@ impl ExplorerHostService {
                 .map(|s| s.target_freq_hz())
                 .unwrap_or(0.0),
             measured_freq_hz,
+            measured_readings: self.measured_readings,
+            stop_zero_frame: self.stop_zero_at,
             commanded_vpk: self.step.as_ref().map(|s| s.drive_vpk()).unwrap_or(0.0),
             target_vpk: self
                 .step
@@ -1794,9 +2221,35 @@ impl ExplorerHostService {
             health_faults: health.map(|h| h.health_faults).unwrap_or(0),
             ring_overruns: health.map(|h| h.ring_overruns).unwrap_or(0),
             observed_trip: self.observed_trip,
+            frames_in: health.map(|h| h.frames_in).unwrap_or(0),
+            derived_peak: self.derived_peak,
+            pass_last: self.pass_last,
+            pass_worst: self.pass_worst,
+            batch_gap_worst: self.batch_gap_worst,
+            survey_peak: self.survey.as_ref().and_then(|s| s.peak()),
+            survey_revision: self.survey_revision,
+            stop: self.stop_cause,
+            driver_warnings_total: self.driver_warnings_total,
             driver_warnings: self.driver_warnings.clone(),
             end: self.end.clone(),
         }
+    }
+
+    /// TEST ONLY: multiply every generated sample by `gain` after the amplitude clamp,
+    /// so a test can put a sample past the ceiling the clamp would never let through and
+    /// watch what the run does with it. After `arm()`; 1.0 is the run as built.
+    #[doc(hidden)]
+    pub fn bypass_amplitude_clamp_for_test(&mut self, gain: f64) {
+        if let Some(step) = self.step.as_mut() {
+            step.test_gain = gain;
+        }
+    }
+
+    /// TEST ONLY: report `trip` as the secondary limit monitor's observation, as if the
+    /// monitor had seen it in the acquisition. The next analysis pass acts on it.
+    #[doc(hidden)]
+    pub fn inject_observed_trip_for_test(&mut self, trip: AbortTrip) {
+        self.observed_trip = Some(trip);
     }
 
     /// The acquisition ring, for a caller that wants the raw tap (a capture sink, a

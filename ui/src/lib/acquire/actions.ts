@@ -151,6 +151,8 @@ export interface RunBarHost {
 	outcomeWords?: Record<string, string>;
 	stateWords?: Record<string, string>;
 	phaseWords?: Record<string, string>;
+	/** A test type with no level in dB (Explorer drives in volts): the bar shows no level readout. */
+	levelHidden?: boolean;
 	release(): unknown;
 	claim(): unknown;
 	apply(): unknown;

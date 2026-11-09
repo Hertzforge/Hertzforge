@@ -27,6 +27,8 @@
 //! - [`twr`]: time waveform replication: its references and their preview, the
 //!   configuration, the run on the transient-run rails and its views, its
 //!   subscriptions and the law check.
+//! - [`explorer`]: Explorer, the hand-steered sine: its configuration and its
+//!   subscriptions.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -36,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod codec;
+pub mod explorer;
 pub mod laws;
 pub mod mimo;
 pub mod profiles;

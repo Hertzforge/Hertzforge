@@ -2,8 +2,8 @@
 	/**
 	 * The run's state as a shape, a word and a color together. Running pulses; a finished run shows
 	 * its outcome, and every outcome but a completed schedule or the operator's stop reads as an abort.
-	 * A test type with a state of its own (TWR's coherence hold) gives its words, and the hold reads
-	 * as a pause.
+	 * A test type with a state of its own (TWR's coherence hold, Explorer's start) gives its words;
+	 * the hold reads as a pause, and a start, while the station opens, reads as armed.
 	 */
 	import type { RunHead } from './actions';
 	import { OUTCOME_WORDS, outcomeTone, STATE_WORDS } from './words';
@@ -36,7 +36,7 @@
 		{:else if shape === 'blocked'}
 			<path d="M4.8 1.5h4.4L12.5 4.8v4.4L9.2 12.5H4.8L1.5 9.2V4.8z" fill="none" stroke="currentColor" stroke-width="1.4" />
 			<path d="M4.5 7h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-		{:else if shape === 'armed'}
+		{:else if shape === 'armed' || (shape as string) === 'starting'}
 			<circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5" />
 			<path d="M7 2a5 5 0 010 10z" fill="currentColor" />
 		{:else if shape === 'running'}
@@ -76,7 +76,8 @@
 	}
 
 	.chip.configured,
-	.chip.armed {
+	.chip.armed,
+	.chip.starting {
 		color: var(--text-1);
 		border-color: var(--line-3);
 	}

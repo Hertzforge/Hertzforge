@@ -1,17 +1,5 @@
-//! Predictive guards + reactive abort, DEVICE-NEUTRAL half.
-//!
-//! ## Predictive (before a level or frequency intent is acted on)
-//!
-//! [`PredictiveGuard`] refuses a proposed frequency outside `[low, high]` or a proposed
-//! drive above either ceiling. This is the "never past the band edges; drive never above
-//! the ceiling" rule, enforced at the service level so a jump/sweep/manual step cannot
-//! overshoot.
-//!
-//! The two `StepModel`-typed helpers (`allowed_up_freq_nudges` /
-//! `allowed_down_freq_nudges`) are not here: `StepModel` is a delegated-controller nudge
-//! concept and lives with the delegated backend, as an extension trait on this type.
-//!
-//! ## Reactive (over acquired frames, against the channel-table abort limits)
+//! The secondary limit monitor, over acquired frames against the channel-table abort
+//! limits.
 //!
 //! [`AbortMonitor`] runs the SHARED tri-field checker ([`hertzforge_engine::limits`]) over
 //! interleaved frames against each channel's abort limits. On a trip the caller must
@@ -31,187 +19,6 @@
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_engine::limits::{AbortAxis, AbortTrip, ChannelLimiter};
-
-/// The DOMAIN a drive number lives in.
-///
-/// The drive has two incompatible representations and no free conversion between them:
-///
-/// * [`DriveDomain::Estimate`] - dimensionless device EU. An open-loop model counts
-///   nudges through a step model; the number is really a nudge-count proxy. ALWAYS
-///   available, on any station, in any posture.
-/// * [`DriveDomain::Volts`] - volts peak at the drive output. Only knowable when something
-///   MEASURES it (a bench loopback), when a drive calibration has fitted the EU->volts
-///   scale (`vpp_per_eu`), or when the host SYNTHESIZES the drive and therefore commands
-///   volts natively (the host-closes-loop posture). In the field on an open-loop device,
-///   with neither, volts are simply UNKNOWN.
-///
-/// This type exists because conflating the two is what froze the drive on 2026-07-16: a
-/// ceiling labelled "5.0 V" was compared against ~4.7 EU and refused every further nudge.
-/// A bare `f64` cannot say which domain it is in, so it travels with one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DriveDomain {
-    /// Volts peak at the drive output.
-    Volts,
-    /// Dimensionless open-loop model units (a nudge-count proxy). NOT volts.
-    Estimate,
-}
-
-impl DriveDomain {
-    /// The unit suffix to render after a number in this domain. NEVER returns "V" for
-    /// [`DriveDomain::Estimate`] - that label is the original bug.
-    pub fn unit_label(self) -> &'static str {
-        match self {
-            DriveDomain::Volts => "V pk",
-            DriveDomain::Estimate => "est",
-        }
-    }
-}
-
-/// A drive quantity that carries its [`DriveDomain`], so a number can never silently cross
-/// a unit boundary.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DriveValue {
-    pub value: f64,
-    pub domain: DriveDomain,
-}
-
-impl DriveValue {
-    /// A volts-peak drive value.
-    pub fn volts(value: f64) -> Self {
-        Self {
-            value,
-            domain: DriveDomain::Volts,
-        }
-    }
-
-    /// An open-loop model (device EU) drive value.
-    pub fn estimate(value: f64) -> Self {
-        Self {
-            value,
-            domain: DriveDomain::Estimate,
-        }
-    }
-
-    /// This value in VOLTS, using `vpp_per_eu` to convert an [`DriveDomain::Estimate`].
-    /// `None` when the value is EU and no conversion is available - the honest answer, and
-    /// the one that stops `est * vpp_per_eu / 2` being applied to a number that is already
-    /// volts (the 2026-07-16 double-scale readout bug).
-    pub fn to_volts(self, vpp_per_eu: Option<f64>) -> Option<f64> {
-        match self.domain {
-            DriveDomain::Volts => Some(self.value),
-            DriveDomain::Estimate => vpp_per_eu.map(|k| (self.value * k) / 2.0),
-        }
-    }
-}
-
-/// The predictive guard: refuses intents that would exceed the frequency band edges or
-/// either drive ceiling BEFORE they reach the device.
-///
-/// ## Two drive bounds, both always enforced
-///
-/// There is no single "the drive ceiling", because there is no single drive domain:
-///
-/// * [`max_drive_est`](Self::max_drive_est) bounds the OPEN-LOOP MODEL in device EU. It is
-///   always enforceable (the model always exists) and is therefore the always-on runaway
-///   backstop. It is what the pre-2026-07-16 `max_drive_v` actually bounded, despite its
-///   name.
-/// * [`max_drive_volts`](Self::max_drive_volts) bounds the real VOLTS, and is enforced only
-///   on a poll where volts are knowable (measured, converted through a drive cal, or
-///   commanded directly by a host that synthesizes the drive).
-///
-/// Both must pass. Keeping the EU bound always-on is what makes the volts bound safe to
-/// leave unenforced when volts are unknown: a broken or absent drive measurement can never
-/// open the drive up, because the model bound still clamps it.
-#[derive(Debug, Clone, Copy)]
-pub struct PredictiveGuard {
-    pub low_hz: f64,
-    pub high_hz: f64,
-    /// The OPEN-LOOP MODEL ceiling, in device EU. Always enforced. NOT volts.
-    pub max_drive_est: f64,
-    /// The VOLTS ceiling. `None` = not set. Enforced only when volts are knowable.
-    pub max_drive_volts: Option<f64>,
-}
-
-/// Why a predictive guard refused an intent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuardRefusal {
-    /// The frequency estimate would fall below the band low edge.
-    BelowBand,
-    /// The frequency estimate would rise above the band high edge.
-    AboveBand,
-    /// The open-loop DRIVE MODEL would exceed `max_drive_est` (device EU, NOT volts).
-    OverDriveEstimate,
-    /// The MEASURED / calibrated / commanded drive VOLTS would exceed `max_drive_volts`.
-    OverDriveVolts,
-}
-
-impl PredictiveGuard {
-    /// Build a guard for a `[low, high]` Hz band with an EU model ceiling and no volts
-    /// ceiling. See [`Self::with_volts_ceiling`].
-    pub fn new(low_hz: f64, high_hz: f64, max_drive_est: f64) -> Self {
-        Self {
-            low_hz,
-            high_hz,
-            max_drive_est,
-            max_drive_volts: None,
-        }
-    }
-
-    /// Attach the real VOLTS ceiling (enforced whenever volts are knowable).
-    pub fn with_volts_ceiling(mut self, max_drive_volts: Option<f64>) -> Self {
-        self.max_drive_volts = max_drive_volts.filter(|v| v.is_finite() && *v > 0.0);
-        self
-    }
-
-    /// Check a proposed FREQUENCY estimate against the band. `Ok(())` to proceed, or the
-    /// refusal reason.
-    pub fn check_freq(&self, proposed_hz: f64) -> Result<(), GuardRefusal> {
-        if proposed_hz < self.low_hz {
-            Err(GuardRefusal::BelowBand)
-        } else if proposed_hz > self.high_hz {
-            Err(GuardRefusal::AboveBand)
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Check a proposed drive against BOTH ceilings.
-    ///
-    /// * `proposed_est` - the open-loop model's next value, device EU. Always checked
-    ///   against [`Self::max_drive_est`].
-    /// * `proposed_volts` - the next value in VOLTS when knowable (measured, converted
-    ///   through a drive cal, or commanded), else `None`. Checked against
-    ///   [`Self::max_drive_volts`] only when both are present.
-    ///
-    /// `None` volts does NOT open the drive up: the EU model bound above is unconditional,
-    /// so an absent or broken drive measurement still clamps. This is why the volts bound
-    /// can be skipped safely rather than having to refuse (refusing outright would deadlock
-    /// every field run, where volts are never knowable).
-    pub fn check_drive(
-        &self,
-        proposed_est: f64,
-        proposed_volts: Option<f64>,
-    ) -> Result<(), GuardRefusal> {
-        if proposed_est > self.max_drive_est {
-            return Err(GuardRefusal::OverDriveEstimate);
-        }
-        if let (Some(max_v), Some(v)) = (self.max_drive_volts, proposed_volts) {
-            if v > max_v {
-                return Err(GuardRefusal::OverDriveVolts);
-            }
-        }
-        Ok(())
-    }
-
-    /// True when a VOLTS ceiling is set but this posture can never evaluate it - i.e. the
-    /// operator asked for a limit the station cannot enforce. The caller surfaces this
-    /// BEFORE the run rather than arming into a drive whose volts ceiling is silently
-    /// inert. `volts_knowable` is "a bench loopback measurement is expected, a drive cal
-    /// is installed, or the host commands volts directly".
-    pub fn volts_ceiling_unenforceable(&self, volts_knowable: bool) -> bool {
-        self.max_drive_volts.is_some() && !volts_knowable
-    }
-}
 
 /// Why an [`AbortMonitor`] refused to be built.
 ///
@@ -262,8 +69,7 @@ pub struct AbortMonitor {
     limiters: Vec<ChannelLimiter>,
     /// The interleaved frame slot each limiter reads: channel `index` lives at slot
     /// `index - 1`, independent of which other channels are enabled. (Position-among-
-    /// enabled slots, the pre-2026-07-15 scheme, monitored the WRONG channels whenever
-    /// any channel was disabled.)
+    /// enabled slots would monitor the WRONG channels whenever any channel is disabled.)
     slots: Vec<usize>,
     /// The interleave stride of an acquired frame, supplied by the caller.
     stride: usize,
@@ -279,9 +85,9 @@ impl AbortMonitor {
     ///
     /// `n_interleave` is the number of channels per acquired frame - the stride of the
     /// chunks that will be fed to [`feed`](Self::feed), and the bound every limited
-    /// channel's slot must fall inside. It is a PARAMETER, not a constant: a delegated
-    /// link decodes 8 physical channels every frame, an NI station decodes as many as its
-    /// configured task has, and a monitor built for one width cannot read the other.
+    /// channel's slot must fall inside. It is a PARAMETER, not a constant: a station
+    /// decodes as many channels as its configured task has, and a monitor built for one
+    /// width cannot read another.
     /// `fs_hz` is the frame rate for the integrators, `hp_hz` the high-pass corner,
     /// `sustain` the debounce, and `settle_hp_constants` how many high-pass
     /// time-constants to hold the settle flag (derived-axis trips suppressed) after
@@ -430,23 +236,8 @@ mod tests {
     use hertzforge_channel_table::{AbortLimits, Channel, ChannelRole, ChannelTable};
     use std::f64::consts::TAU;
 
-    /// The delegated controller's interleave width, used as the stride in these tests so the moved
-    /// behaviour is exercised at the width it was written against.
+    /// An eight-channel interleave, the stride these tests are written at.
     const NCH: usize = 8;
-
-    #[test]
-    fn predictive_guard_band_and_drive() {
-        let g = PredictiveGuard::new(20.0, 2000.0, 5.0);
-        assert_eq!(g.check_freq(10.0), Err(GuardRefusal::BelowBand));
-        assert_eq!(g.check_freq(3000.0), Err(GuardRefusal::AboveBand));
-        assert!(g.check_freq(500.0).is_ok());
-        // The EU MODEL ceiling: always enforced, volts irrelevant.
-        assert_eq!(
-            g.check_drive(6.0, None),
-            Err(GuardRefusal::OverDriveEstimate)
-        );
-        assert!(g.check_drive(4.9, None).is_ok());
-    }
 
     fn control_table_with_accel_limit(g_limit: f64) -> ChannelTable {
         let mut t = ChannelTable::new();
@@ -482,7 +273,7 @@ mod tests {
         assert!(mon.trip().is_some());
     }
 
-    /// The 2026-07-15 stride regression: a limited channel keeps its PHYSICAL slot
+    /// The stride regression: a limited channel keeps its PHYSICAL slot
     /// (`index - 1`) even when lower-index channels are disabled. The earlier
     /// position-among-enabled slots would have read CH1's slot for CH3 here.
     #[test]
@@ -668,8 +459,8 @@ mod tests {
     }
 
     /// A DRIVE-role row beyond the frame width must NOT refuse: outputs are never
-    /// limit-monitored, so their index never derives a slot. (The delegated and NI tables both
-    /// carry a drive row at index 9 today.)
+    /// limit-monitored, so their index never derives a slot. (A table may carry its drive
+    /// row at index 9.)
     #[test]
     fn out_of_range_drive_row_does_not_refuse() {
         let mut t = ChannelTable::new();

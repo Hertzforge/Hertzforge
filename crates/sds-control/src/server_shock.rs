@@ -460,6 +460,7 @@ impl Service {
                 || inner.srs_live()
                 || inner.sine_live()
                 || inner.twr_live()
+                || inner.explorer_live()
             {
                 inner.run_active()?;
             }

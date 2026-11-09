@@ -868,7 +868,7 @@ plain words: it never names a protocol method.
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
-| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine or TWR configuration has errors | `errors`, `warnings` |
+| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, TWR or Explorer configuration has errors (for Explorer, also at `explorer.start` when the table no longer carries the run) | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
 | `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` with reason `gate_failed` goes on anyway | `gates` |
@@ -885,13 +885,14 @@ plain words: it never names a protocol method.
 | `reference_unreadable` | `refused` | `twr.reference.import`: the file cannot be read, or its content is not a record (the message names the line or field) | `path` (null for pasted text), `line` (null when no line is at fault) |
 | `not_converged` | `refused` | `twr.play` before the present level has gated | `level_db`, `gate_pct` |
 | `coherence_hold` | `refused` | `twr.proceed`, `twr.iterate` or `twr.play` while the coherence hold holds the run; `twr.reset` alone releases it | `coherence_mean` (null when not measured), `min_mean_coherence` |
+| `level_zero` | `refused` | `explorer.steer` with `step_db` while the target level is 0 V: a step in dB has nothing to step from; set a level in volts first | |
 | `not_a_sweep` | `refused` | `sine.reverse`, `sine.jog` or `sine.goto` when the test is not a sweep | `test` |
 | `out_of_band` | `refused` | `sine.goto` to a frequency outside the test's band | `band_hz` |
 | `adjust_refused` | `refused` | `sine.adjust` of a parameter that is not one of the law's live parameters, or out of its range, or that the law refused | `key`, `why` (`unknown_key`, `not_live`, `out_of_range` or `law_refused`) |
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
 | `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm`, `sine.arm` or `twr.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared), or for `twr.arm` a passed check of an earlier check version; run `laws.check` first | `twr.arm` with an earlier check: `tool_version`, `current` |
-| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, and `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level` are refused | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level`, and `explorer.start`, `steer` and `sweep` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -912,6 +913,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 | Sine | `out_of_range`, `profile_too_short`, `frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`, `quantity_ambiguous`, `profile_not_covering`, `band_above_grid`, `levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `limit_on_control_channel`, `cola_needs_two_outputs`, `safe_stop_budget`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `profile_file` from the import | `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag`; `units_column_ignored` from the import |
 | TWR | `out_of_range`, `reference_unknown`, `reference_changed`, `units_mismatch`, `rate_mismatch`, `section_outside_reference`, `record_too_long`, `band_above_grid`, `band_outside_identification`, `highpass_above_band`, `identification_too_short`, `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `reference_resampled` |
+| Explorer | `out_of_range`, `band_above_grid`, `ceiling_over_range`, `safe_stop_budget`, `no_drive_channel`, `extra_drive_channels`, `no_input_channel` | |
 
 A refusal not listed here is a defect in the service.
 
@@ -1492,7 +1494,7 @@ specified with the run-file format, not here.
 
 Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
 reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
-single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine or TWR run)
+single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR or Explorer run)
 exclude each other exactly as two Random runs would: each is refused `run_active` while the other
 is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
@@ -1854,8 +1856,8 @@ identifies the system with band-limited random at a stated drive in volts, inver
 plant, and seeds the control law from it; after each pulse is fired, measured and judged, the law
 proposes the next full-level drive and the service checks it before it plays. The drive is in
 volts throughout. The run is one test like any other: a classical shock run, a Random run, a MIMO
-run, an SRS shock run, a Sine run, a TWR run and a `sim.start` run exclude each other, each
-refused `run_active` while another is live.
+run, an SRS shock run, a Sine run, a TWR run, an Explorer run and a `sim.start` run exclude each
+other, each refused `run_active` while another is live.
 **Any connected screen may stop or abort** (`shock.stop`, `shock.abort`); `shock.configure`
 (other than a dry run), `arm`, `start`, `proceed`, `fire`, `level`, `train`, `burst`, `reset`
 and `clear` need control; everything that only reads is open to every connection. While the
@@ -2199,8 +2201,8 @@ system with a burst of that synthesis at a stated peak in volts, and seeds the c
 the identified gain at each component; after each pulse is fired, measured and judged, the law
 proposes a gain for each component, and the service caps the gains and checks the drive before it
 plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a Sine run, a TWR run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
 `fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
@@ -2498,8 +2500,8 @@ channels' notch and the drive ceiling, and judges the response against the profi
 and abort bands at the present frequency. The frequency, the sweep and its direction, the
 tone's phase and the level schedule are the service's, never the law's. The drive is in volts
 peak on hardware. The run is one test like any other: a Sine run, an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a TWR run and a `sim.start` run exclude each
-other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`sine.stop`, `sine.abort`); `sine.configure` (other than a dry run), `arm`, `start`,
 `proceed`, `level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `adjust`, `reset` and
 `clear` need control; everything that only reads or only computes is open to every
@@ -2953,8 +2955,8 @@ the response, aligns it, judges it and gates it at its level; after a play the s
 corrected, the law proposes the next full-level drive and the service checks it before it plays.
 The level ladder, the gate, the playback schedule and every abort are the service's, never the
 law's. The drive is in volts throughout. The run is one test like any other: a TWR run, a Sine
-run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may
+run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
 stop or abort** (`twr.stop`, `twr.abort`); `twr.configure` (other than a dry run), `arm`,
 `start`, `proceed`, `iterate`, `play`, `level`, `freeze`, `reset` and `clear` need control;
 everything that only reads or only computes is open to every connection. While the service is
@@ -3433,6 +3435,382 @@ comes back as `{"id","quantity","views"}`.
 A plot of the last play is empty (`views` empty) until a play has been judged, `frf`,
 `coherence` and `mask` until identification has ended, `law` until the law has been called, and
 `scope` between plays.
+
+## Explorer
+
+An Explorer test drives one sine tone that the operator steers by hand: its frequency, its level,
+a sweep toward either edge of the band, and a stop. Nothing closes a loop: the service measures
+the response and never corrects the drive from it, so the operator is the loop. The drive is in
+volts peak at the drive output, from 0 V up to the ceiling set at configure, and the level is
+never asked for in any other unit. The run starts quiet: the tone runs at exactly 0 V until the
+operator raises the level, which is why Explorer has no review hold. While the tone moves the
+service remembers the response level at each frequency it has visited, the survey line, from
+which the operator reads a resonance. The run is one test like any other: an Explorer run, a TWR
+run, a Sine run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any
+connected screen may stop or abort** (`explorer.stop`, `explorer.abort`); `explorer.configure`
+(other than a dry run), `start`, `steer`, `sweep`, `hold`, `survey.clear`, `reset` and `clear`
+need control; everything that only reads or only computes is open to every connection. While the
+service is shutting down, `explorer.start`, `steer` and `sweep` are refused `shutting_down`;
+`explorer.hold`, `stop` and `abort` are not.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `explorer.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived"}` |
+| `explorer.config` | `{}` | any | `{"run_id","config","derived"}` |
+| `explorer.start` | `{}` | `configured` | state, once the tone runs at 0 V |
+| `explorer.steer` | a frequency part (`{"hz"}`, `{"step_hz"}` or `{"step_oct"}`), a level part (`{"vpk"}` or `{"step_db"}`), or one of each | `running` | `{"hz","vpk","clamped","frame","input_frame"}` |
+| `explorer.sweep` | `{"direction","rate_oct_per_min"}` | `running` | `{"direction","rate_oct_per_min","clamped","frame","input_frame"}` |
+| `explorer.hold` | `{}` | `running` | `{"hz","frame","input_frame"}` |
+| `explorer.stop` | `{}` | any | state |
+| `explorer.abort` | `{}` | any | state |
+| `explorer.survey` | `{"since"}` (optional) | any | `{"revision","channel","unit","points","peak"}` |
+| `explorer.survey.clear` | `{}` | `running`, `stopping` | `{"revision"}` |
+| `explorer.reset` | `{}` | any but live | state |
+| `explorer.clear` | `{}` | any but live | state |
+| `explorer.state` | `{}` | any | state |
+| `explorer.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `explorer.subscribe` | see "Explorer Display" | any | as there |
+
+"state" in the Result column is the `explorer.state` object below. A run is live while it is
+starting, running or stopping. `explorer.configure` replaces a run that is not live;
+`explorer.reset` returns an ended run to `configured` with its configuration on the present table
+and station, the survey line and the log empty; `explorer.clear` forgets it (`unconfigured`). While
+a run is live both are refused `run_active` (naming that run), and so is `explorer.reset` while
+another module's run is live, as a configure would be. `explorer.start` on a run already started
+is refused `wrong_state`.
+
+### Explorer Configuration
+
+```
+{"title":"Survey, fixture A",
+ "acquisition":{"fs_hz":12800},
+ "band_hz":[20,2000],"start_hz":250,"max_drive_vpk":0.5,
+ "slew":{"freq_oct_per_s":1,"drive_db_per_s":6},
+ "display":{"nfft":4096},
+ "capture":{"run_name":"explorer"},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"3"}]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `acquisition.fs_hz` | null: 8192 | The rate requested of the station, 1000 to 204800 Hz. A station may program another rate; the run adopts it, derives every per-frame number from it and reports both (`grid`) |
+| `band_hz` | `[10,2000]` | The band the tone may move in, `[lo, hi]` Hz, above 0 and ascending, `hi` under 0.45 times the requested rate (`band_above_grid`). Once armed it is narrowed under 0.45 times the rate the station programmed (logged) |
+| `start_hz` | 100 | Where the tone stands at start, inside the band |
+| `max_drive_vpk` | (required) | The drive ceiling, volts peak: above 0, at most 10, and at most the drive row's `range_max` (`ceiling_over_range`). Every level is clamped to it, and a generated sample over it aborts the run (`drive_vpk`) |
+| `slew.freq_oct_per_s` | 1 | The frequency slew, octaves per second (above 0, at most 10): the fastest a sweep moves the tone. A sweep is answered at no more than 60 times it, in octaves per minute |
+| `slew.drive_db_per_s` | 6 | The drive slew, dB per second (above 0, at most 1000): every level change and the stop ramp at it. A slew whose 40 dB stop would outlast the service's stop wait (`derived.stop_wait_s`, under 1.333 dB/s at 30 s) is refused (`safe_stop_budget`) |
+| `display.nfft` | 4096 | The display spectra's FFT size, a power of two from 1024 to 16384. The rate over it is the spectra's line spacing, and half of that the survey's tolerance: a finer FFT gives a finer survey line |
+| `capture.run_name` | `explorer` | The run folder's name under the local data root (see "Explorer Records"), a plain name with no path in it |
+| `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
+
+The drive is the table's one enabled `drive` row; the acquired channels are every other enabled
+row, in table order; the **control row** (the one the survey line, the measured frequency and the
+derived motion are read from) is the first enabled `control` row, else the first enabled input.
+The table must have exactly one enabled drive row and at least one enabled input
+(`no_drive_channel`, `extra_drive_channels`, `no_input_channel`). Each row's `abort` limits are the
+run's abort limits. A configuration whose shape is wrong is refused `bad_params` naming the field
+in `detail.param` as the request's own path (`config.slew.drive_db_per_s`), and so is a key the
+configuration does not have, so no level in another unit can be asked for; its content errors are
+refused `config_invalid` with the items, located by `field`, the path inside the configuration
+(`band_hz`, with no `config.` before it). `dry_run: true` checks without replacing anything and
+needs no control.
+
+Item reasons (Explorer): errors `out_of_range`, `band_above_grid`, `ceiling_over_range`,
+`safe_stop_budget`, `no_drive_channel`, `extra_drive_channels` (more than one enabled drive row:
+the extra outputs would stay silent), `no_input_channel` (nothing would measure the tone); no
+warnings.
+
+**Result.** `state` is the `explorer.state` object (`configured`). `derived`, here for an NI
+station at 12 800 Hz:
+
+```
+{"grid":{"fs_hz":12800,"block_frames":256,"lookahead_frames":512,"actual":false},
+ "band_hz":[20,2000],"pipeline_frames":1063,"pipeline_s":0.08305,
+ "rise_s":6.667,"stop_s":6.667,"stop_wait_s":30,"sweep_max_oct_per_min":60,
+ "display":{"df_hz":3.125,"window_s":0.32},
+ "survey":{"tolerance_hz":1.5625,"first_point_s":[0.383,0.125]}}
+```
+
+- `grid`: the requested rate, and the block and the output lookahead (frames) the selected station
+  works in at it; `actual` is true once the run has armed and all three are the station's. The
+  block is the power of two nearest 20 ms of the rate. Before the station is opened the lookahead
+  and the input group delay are the figures the station states: the simulator's 4 frames (or the
+  lookahead a simulated station states) with no group delay, or an NI station's two blocks and its
+  input path's documented group delay, 38.4 + 3.2e-6 times the rate in samples, rounded up (39
+  frames at 12 800 Hz). The run state carries the armed station's own.
+- `band_hz`: the band as it stands at the requested rate; a station that programs another rate
+  may narrow it at start.
+- `pipeline_frames` and `pipeline_s`: how many input frames still carry the tone from before a
+  change at the moment the change is made: the drive the start writes ahead into the station's
+  output and into the service's own queue (two lookaheads), plus the station's input group delay
+  where it states one. The survey line and the measured frequency wait it out after every change.
+  The run state carries the armed station's own figure.
+- `rise_s` and `stop_s`: how long a rise from 0 V and the stop take at the drive slew: 40 dB at
+  `slew.drive_db_per_s`, then the step to 0 V (or, rising, the step from 0 V to 1% of the level
+  first). `stop_wait_s` is how long the service waits for a stop, which the stop must fit inside.
+- `sweep_max_oct_per_min`: the fastest sweep, 60 times `slew.freq_oct_per_s`.
+- `display`: the spectra's line spacing and the length of one window, seconds.
+- `survey`: the tolerance (a visit that close to a point replaces it), and how long after a change
+  of frequency the first point at the new frequency comes, at the band's low and high edges: the
+  pipeline, the guard (two blocks, or three cycles of the new tone if longer), then three cycles.
+  The point itself can come up to one batch later than that.
+
+### Running an Explorer Test
+
+- **`explorer.start`** opens the station at `acquisition.fs_hz`, adopts the rate it programs,
+  narrows the band under 0.45 times that rate (logged), passes the arm gate, writes the station's
+  lead-in at 0 V and starts the clock and the tone in one step (`starting`, `priming`, while the
+  station opens). It answers once the tone runs at 0 V at `start_hz` (`running`, `quiet`).
+  Refusals, in the order they are checked: `shutting_down`, `not_controller`, `not_configured`,
+  `run_finished` (reset first), `wrong_state` (already started), `run_active` (another module's
+  run is live; it names that run, so a live Sine run refuses an Explorer start and a live Explorer
+  run refuses a Sine arm, each naming the other), `table_invalid`, `config_invalid` (the table, as
+  it is now, no longer carries the run: the same items as configure), then, once the station is
+  being opened, `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate
+  refused; the message is the controller's own). A refusal once the station is being opened ends
+  the run `arm_refused`, and `explorer.reset` comes before another start.
+- **`explorer.steer`** moves the tone. A frequency part is `hz` (absolute), `step_hz` (added to
+  the target frequency) or `step_oct` (the target frequency times 2 to that power); a level part
+  is `vpk` (absolute) or `step_db` (from the target level). A steer has one part or one of each,
+  never two of a kind (`bad_params`), and both parts land in the same generated frame. A frequency
+  is clamped into the band and the tone lands on it in one frame without a break in phase;
+  setting a frequency halts a sweep. A level is clamped to `[0, max_drive_vpk]` and the drive
+  ramps to it at the drive slew: from 0 V it steps once to 1% of the level (40 dB under it), then
+  ramps; down to 0 V it ramps to 1% of where it was, then steps to 0. A `step_db` while the target
+  level is 0 V is refused `level_zero` and nothing of the steer is applied: set a level in volts
+  first. The answer is what the service adopted: `hz` and `vpk` are the targets in force after
+  the steer, `clamped` is `{"hz","vpk"}`, true where a part was clamped (false for a part not
+  sent), `frame` is the first generated frame made under the change, and `input_frame` the input
+  frames acquired when the service took it (see "Time is the station's"); the sweep and hold
+  answers carry both too. A level moves the sample of `frame` itself. A retune keeps the phase, so
+  `frame` is the first at the new frequency and its sample continues the old phase: the
+  waveform's value first differs one frame later.
+  Refused `wrong_state` outside `running`: before start, while starting, once a stop has begun
+  (`state` `stopping`: nothing raises or moves the drive after that) and after the end.
+- **`explorer.sweep`** sweeps the tone from where it stands toward the band's `up` or `down` edge
+  at `rate_oct_per_min` (above 0), clamped to `derived.sweep_max_oct_per_min`; the answer is the
+  rate used and whether it was clamped. At the edge the tone parks and holds (`at_edge`); a sweep
+  never turns by itself. Another `explorer.sweep` re-aims it. Refused `wrong_state` outside
+  `running`.
+- **`explorer.hold`** ends the sweep and the tone holds where it is now (`hz` in the answer).
+  Without a sweep it changes nothing and answers the target frequency in force. Refused
+  `wrong_state` outside `running`.
+- The steering verbs are taken between the service's batches of two blocks, and each answers
+  within one batch and one analysis pass.
+- **`explorer.stop`** is the controlled stop: any sweep ends, the drive ramps to 0 V at the drive
+  slew (`stopping`, `ramping_down`), then the station's tasks stop and the run ends
+  `operator_stop`. From `starting` it takes effect once the station has opened (the drive is
+  still at 0 V, so the ramp is immediate). It answers at once, with the state as it stands.
+- **`explorer.abort`** ends the run within one batch without the ramp; the station takes the drive
+  down with its own stop. The outcome is `operator_abort`.
+- **The protections.** Every generated sample is checked against `max_drive_vpk`: a sample over it
+  is clipped and the run aborts (trip `drive_vpk`). Each enabled row's `abort` limits are checked
+  on every input sample (trip `watchdog`). A second, slower reading of the control row's derived
+  velocity and displacement against its limits, once the derived values have settled, ends the
+  run with the controlled stop (`limit_stop`). An underrun, a stalled input, a lost device, a
+  scheduling fault or a failure of the service's own loop ends the run at once (`fault`). A stall
+  of that loop shows in the state (`stall`), with Abort open.
+- **When nobody holds control** the run goes on unchanged, tone, level and any sweep (which parks
+  at its edge); after `timeout_s` it ends `safe_stop` with the controlled stop, as Random's. While
+  the service shuts down it ends the same way.
+
+**Time is the station's.** `t_s` in the state and the live frames, `end.at_s` and `end.ramp_s`
+count the station's own input frames at the rate it adopted (frames acquired since start over
+`grid.fs_hz`), never the service's clock. The output and the input run on one sample clock and
+start together, and the steering answers' `frame` (generated frames) and `input_frame`, and the
+time plots' `first_frame` (input frames), count it from the start of the run: generated frame n
+plays at the clock's n-th sample, and its response reaches the input at input frame n plus the
+station's input group delay. So a change the service takes at `input_frame` reaches the input
+`pipeline_frames` later, at `frame` plus the group delay. The safe stop's countdown (`orphan_s`) is the only number timed by the
+service's clock.
+
+### Explorer Run State
+
+```
+{"run_id":"explorer-0002","state":"running","phase":"steady","title":"Survey, fixture A",
+ "source":"HARDWARE","station":{"kind":"ni","class":"ni_real","devices":[...]},
+ "grid":{"requested_fs_hz":12800,"fs_hz":12800,"block_frames":256,"lookahead_frames":512,
+         "actual":true},"clock":"shared",
+ "band_hz":[20,2000],"max_drive_vpk":0.5,"slew":{"freq_oct_per_s":1,"drive_db_per_s":6},
+ "pipeline_frames":1063,"t_s":41.38,
+ "frequency_hz":250,"target_hz":250,"drive_vpk":0.2,"target_vpk":0.2,"sweep":null,
+ "health":{"engine_ticks":2069,"worst_tick_ms":0.41,"budget_ms":20,"health_faults":0,
+           "ring_overruns":0,"blocks_dropped":0,"driver_warnings":2,
+           "pass_ms":{"last":1.9,"worst":3.4},"batch_gap_ms":4.1},
+ "stall":null,"stop":null,"end":null}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
+| `starting` | `priming` | `explorer.start`: the station is opening and arming; nothing is driven |
+| `running` | `quiet` | The tone runs at 0 V |
+| `running` | `ramping` | The level is moving toward its target |
+| `running` | `sweeping` | A sweep is moving the tone |
+| `running` | `at_edge` | A sweep has parked at its band edge |
+| `running` | `steady` | The tone holds its frequency and its level |
+| `stopping` | `ramping_down` | The controlled stop is ramping the drive to 0 V |
+| `finished` | `stopped`, `aborted`, `faulted` | Ended; `end` says how |
+
+- One phase holds at a time: `quiet` while the target level and the drive are both 0 V; else
+  `ramping` while the drive differs from its target, whatever the frequency does; else `sweeping`
+  or `at_edge`; else `steady`. A finished run's phase is `stopped` after `operator_stop`,
+  `safe_stop` or `limit_stop`, `aborted` after `operator_abort` or `aborted`, and `faulted` after
+  `fault` or `arm_refused`.
+- `grid`: `requested_fs_hz` is the rate asked; `fs_hz` the rate the station programmed once armed
+  (the request until then); `block_frames` and `lookahead_frames` as in `derived`; `actual` true
+  once armed. `clock` as Random's.
+- `band_hz` is the band in force (narrowed once armed); `max_drive_vpk` and `slew` as configured.
+- `pipeline_frames`: as in `derived` until the run has armed, then the armed station's own figure.
+- `t_s`: station time since start; null before.
+- `frequency_hz` and `drive_vpk` are the tone now, as generated; `target_hz` and `target_vpk` where
+  it is going. All four are null until the run has started.
+- `sweep` is null, or `{"direction","rate_oct_per_min","halted"}`: `halted` is true once the sweep
+  has parked at its edge or a frequency was set by hand (the sweep no longer moves the tone).
+- `health` is null until the run has started, then: engine ticks, the worst tick's compute
+  against its budget (ms), scheduling-health faults, raw-ring overruns, display blocks the
+  analysis dropped, driver warnings so far (each is in the log), the analysis pass's last and
+  worst time and the longest gap between the end of one batch and the start of the next (ms;
+  null until two batches have run).
+- `stall` is null, or `{"stale_s","period_s","message"}` while the service's loop has missed three
+  of its periods (and at least 3 s): the run may still be driving, and Abort stays open.
+- `stop` is null until a stop begins, then its cause: `operator`, `safe_stop` (nobody held
+  control), `shutdown` or `limit` (the derived motion).
+- `end` is null until the run finishes, then
+  `{"outcome","message","at_s","at_hz","vpk","ramp_s","trip"}`: `at_s` the station time at which
+  the run finished, `at_hz` and `vpk` the tone when the end began, `ramp_s` the controlled stop's
+  length on the station's clock, from the input frame the stop was taken at (null for an abort and
+  a fault), so the stop began at `at_s - ramp_s`. The messages: `operator_stop` "Stopped by
+  <name>: the controlled stop ramped the drive to 0 V."; `safe_stop` "Nobody held control: the
+  controlled stop ramped the drive to 0 V." or, at a shutdown, "The service shut down: the
+  controlled stop ramped the drive to 0 V."; `operator_abort` "Aborted by <name>."; a trip names
+  its channel, axis, value and limit, or the drive sample and the ceiling; a fault is the
+  controller's words.
+
+| `outcome` | How the run ended |
+|---|---|
+| `operator_stop` | `explorer.stop`: the drive ramped to 0 V at the drive slew, then the station stopped |
+| `safe_stop` | Nobody held control for `timeout_s`, or the service was shut down; the controlled stop, and `message` says which |
+| `limit_stop` | The control row's derived velocity or displacement passed its limit once settled; the controlled stop. `trip` says which |
+| `operator_abort` | `explorer.abort`, from any connection |
+| `aborted` | A protection tripped; `trip` says which |
+| `fault` | The station or the service's loop failed (an underrun, a stalled input, a lost device, a scheduling fault, a loop failure); `message` is the controller's words |
+| `arm_refused` | The station or the arm gate refused the start; nothing was driven |
+
+`trip` is null unless `outcome` is `aborted` or `limit_stop`; it has `kind`, `at_hz` and its
+kind's facts:
+
+| `kind` | Facts |
+|---|---|
+| `watchdog` | `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit`, in the axis's unit (g, in/s, mil) |
+| `drive_vpk` | `vpk` (the sample's), `ceiling_vpk` |
+| `limit` | `channel`, `axis` (`velocity` or `displacement`), `value`, `limit` |
+
+### Explorer Survey
+
+`explorer.survey` gives the survey line: the response level at each frequency the tone has
+visited, `points` sorted by frequency as `[hz, level]` pairs. `level` is the control row's
+amplitude at the tone, peak, in its unit (`channel` and `unit` name the row): the rms of the
+freshest 100 ms at that frequency over whole cycles, mean removed, times the square root of 2. A
+point is taken once the tone has stood for the pipeline, the guard and three cycles, and never
+from fewer than three cycles. A visit within `derived.survey.tolerance_hz` of a point replaces
+it, and the tone passing through a span (a sweep, or a jump from one point to the next) removes
+every older point inside it, so a second pass over a band shows the second pass. `peak` is the
+highest point, `{"hz","level"}`, or null. `revision` counts every change; given `since` equal to
+it, `points` is null (nothing has changed since). A point carries no time of its own: the steering
+answers' and the records' frames say when a change was taken, and the revision moves with every
+point. A survey of one point is carried as that point, on its own points or drawn.
+`explorer.survey.clear` empties it and answers the new revision; the tone held at the clear is
+measured again from the next pass. Refused `wrong_state` outside `running` and `stopping`. The survey lives as long as the run: it is kept after the end until
+`explorer.reset`, `explorer.clear` or a new configuration.
+
+### Explorer Records
+
+Each run writes its folder `capture.run_name` under the local data root (`HERTZFORGE_DATA_ROOT`,
+else `Hertzforge_Data` in the home folder; the log names the folder at start, "records in
+<path>"); a name already taken gets the first free `<name>-<n>`, so no run writes over another:
+`explorer.json` (the
+configuration, the station, the requested and adopted rates and the derived numbers),
+`intents.jsonl` (a line for every steering verb the run took: its station time, the frame it took
+effect at, what was asked, what was adopted and whether it was clamped), `survey.json` (the
+survey's points and peak at the end) and `end.json` (the end). No samples are recorded. The files
+are written by the service's own thread, never by the thread that reads the station.
+
+### Explorer Display
+
+Event topics:
+
+- `explorer.state` (text): the state object on every change of `state`, `phase`, `sweep`,
+  `stop`, `stall` or `end`.
+- `explorer.log` (text): new log entries, as Random's: "the station programmed <fs> Hz (asked
+  <fs> Hz); the band is <lo> to <hi> Hz" and "records in <path>" at start, every driver warning
+  (`note`, "driver: " and the driver's own text), "stop began: <cause>" and "ended <outcome>:
+  <message>".
+- `explorer.live` (binary, to every connection without an Explorer subscription of its own, 10
+  times a second from start until the run has finished, then once more).
+- `explorer.data` (binary, to one subscribed connection, in place of `explorer.live`):
+  `explorer.live`'s fields but `views`, and `plots`, at `rate_hz` (default 10, so a `time` plot
+  comes ten times a second unless the subscription asks for fewer), and at once on subscribe once
+  the run has started.
+
+```
+{"run_id","source","class","state","phase","t_s","frequency_hz","target_hz","measured_hz",
+ "drive_vpk","target_vpk","max_drive_vpk","sweep",
+ "channels":[{"index":1,"description":"Control","role":"control","rms":0.1413,"unit":"g"},
+             {"index":3,"description":"Fixture","role":"monitor","rms":0.0706,"unit":"g"}],
+ "control":{"index":1,"velocity_ips":0.04916,"displacement_mil":0.0313,"settling":false},
+ "pipeline_frames":1063,"peak":{"hz":250,"level":0.1999},"blocks_dropped":0,
+ "pass_ms":{"last":1.9,"worst":3.4},
+ "views":[survey, run readings]}
+```
+
+- `t_s`, `frequency_hz`, `target_hz`, `drive_vpk`, `target_vpk`, `max_drive_vpk`, `sweep`,
+  `pipeline_frames`: as in the state.
+- `measured_hz` is the frequency measured on the control row by its zero crossings over 0.5 s
+  (and at least 12 crossings), null until a tone at a level above 0 V has held for a pass and the
+  pipeline's worth of input has passed. It is a cross-check of the tone the service commands, not
+  of the station's rate: it counts samples at the rate the service believes.
+- `channels` lists every acquired channel in table order with its rms over the last analysis
+  pass, DC included, in its unit.
+- `control` is the control row's derived velocity (in/s) and displacement (mil), each the peak
+  over the last analysis pass, with `settling` true while the integrators' start-up transient
+  lasts (five time constants of their 5 Hz high-pass); both are null when the control row's unit
+  is not `g`.
+- `peak` is the survey's highest point, or null; `blocks_dropped` and `pass_ms` as in `health`.
+- `views` are **Survey** (`spectrum`, x `Frequency` Hz log, y `Level` in the control row's unit,
+  log: `Survey` (`measured`), the survey line drawn on 256 log-spaced points across the band,
+  nothing outside the span visited; `link` `frequency`) and **Run** (a `reading`, in this order:
+  `Frequency` and `Target` Hz, `Measured` Hz (`none` while there is no measurement), `Drive` and
+  `Target drive` V, `Ceiling` V, `Sweep` (`up at 30 oct/min` while it moves the tone, `parked`
+  once at its edge, or `none`), `Control rms` in the control row's unit, `Velocity` in/s and
+  `Displacement` mil (`none` when the control row's unit is not `g`), `Peak` Hz (`none` before the
+  first point), `Pipeline` frames; all `info`). The shell marks the tone and the peak on the survey
+  from `frequency_hz` and `peak`.
+
+`explorer.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
+default 10; at most 64 plots, each `id` unique, 1 to 64 characters) or `{"default":true}` (back to
+`explorer.live`); a key a quantity does not take is `bad_params` naming it. A plot is
+`{"id","quantity","channels","points"}`: `channels` applies to `spectrum` (a list of indexes, or
+`"all"` or `"control"`; default `"all"`), `points` to `survey` (null: the survey's own points;
+64 to 8192: drawn on that many log-spaced points across the band) and to `time` (64 to 8192,
+default 1024). The result is `{"default","rate_hz","plots","quantities"}`, every default filled
+in: a `survey` plot states `points` (null for its own points), a `spectrum` plot `channels`, a
+`time` plot `points`, and a `readings` plot neither. In `explorer.data` each plot is
+`{"id","quantity","channels","first_frame","views"}`: `channels` the indexes `spectrum` resolved
+to, in table order, and null for the rest;
+`first_frame` the input frame of a `time` plot's first sample, and null for the rest.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `survey` | one `spectrum` | The live frame's **Survey**, on the survey's own points (joined by straight lines in log frequency) or drawn at `points` |
+| `spectrum` | one `spectrum` per resolved channel | Titled `Channel <index>: <description>` (the role when there is no description), x `Frequency` Hz linear from 0 to half the rate at the display line spacing, y `Amplitude` in the channel's unit, linear: `Channel <index>` (`measured`), the latest display window's magnitude (Hann, amplitude-corrected, peak); `link` `frequency` |
+| `time` | one `spectrum` | **Time**: the control row's most recent `points` samples, x `Time` s of station time (the input frame over the rate), y `Amplitude` in its unit, linear: `Channel <index>` (`measured`) |
+| `readings` | one `reading` | The live frame's **Run** reading |
+
+A plot is empty (`views` empty) until there is something to draw: `survey` until its first
+point, the others until the first analysis pass.
 
 ## Control Laws
 

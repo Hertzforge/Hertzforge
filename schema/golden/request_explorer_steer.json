@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 93,
+ "method": "explorer.steer",
+ "params": {
+  "hz": 1000,
+  "vpk": 0.9
+ }
+}

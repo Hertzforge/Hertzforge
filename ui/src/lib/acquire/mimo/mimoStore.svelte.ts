@@ -10,6 +10,7 @@
  * store keeps the operator's edits beside it and sends them when the operator says so.
  */
 
+import { regresses } from '../runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type { ChannelRow, ParamOption } from '$lib/protocol/types';
@@ -555,6 +556,8 @@ export class MimoState {
 
 	private onStatus(s: MimoStatus) {
 		const was = this.status;
+		// A reply older than the run's own word that it finished is not applied.
+		if (regresses(was, s)) return;
 		this.status = s;
 		// Identification is done and the service waits: the prediction is the next thing to read.
 		if (s.state === 'review' && was?.state !== 'review') this.step = 'predict';
@@ -820,13 +823,13 @@ export class MimoState {
 
 	async stop(): Promise<boolean> {
 		const res = await this.act<MimoStatus>('Stop', 'mimo_random.stop', {}, false);
-		if (res) this.status = res;
+		if (res && !regresses(this.status, res)) this.status = res;
 		return res !== null;
 	}
 
 	async abort(): Promise<boolean> {
 		const res = await this.act<MimoStatus>('Abort', 'mimo_random.abort', {}, false);
-		if (res) this.status = res;
+		if (res && !regresses(this.status, res)) this.status = res;
 		return res !== null;
 	}
 

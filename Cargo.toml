@@ -21,6 +21,7 @@ hertzforge-breakpoints = { path = "crates/hertzforge-breakpoints" }
 hertzforge-capture = { path = "crates/hertzforge-capture" }
 hertzforge-channel-table = { path = "crates/hertzforge-channel-table" }
 hertzforge-dsp = { path = "crates/hertzforge-dsp" }
+hertzforge-explorer-host = { path = "crates/hertzforge-explorer-host" }
 hertzforge-hal = { path = "crates/hertzforge-hal" }
 hertzforge-hal-sim = { path = "crates/hertzforge-hal-sim" }
 hertzforge-module-abi = { path = "crates/hertzforge-module-abi" }

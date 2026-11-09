@@ -3,8 +3,7 @@
 //! # Why this exists
 //!
 //! `analysis.rs` is reusable verbatim, and its reuse came with one condition
-//! attached: its FFT runs synchronously in whatever thread pushes samples. On the delegated
-//! path that thread is a telemetry drain and the cost is nobody's deadline. On a
+//! attached: its FFT runs synchronously in whatever thread pushes samples. On a
 //! host-closes-loop station the pushing thread would be [`hertzforge_engine::ProcessStep`],
 //! i.e. the tick that also has to produce the next block of drive. The measured display
 //! FFT is ~24.4 ms; the block period on the chassis is ~15 ms. Running one inside the

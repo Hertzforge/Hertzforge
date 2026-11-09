@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 94,
+ "method": "explorer.sweep",
+ "params": {
+  "direction": "up",
+  "rate_oct_per_min": 600
+ }
+}

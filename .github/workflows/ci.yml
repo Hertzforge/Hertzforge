@@ -148,7 +148,9 @@ jobs:
   # no NI software; the tests run on the Sim backend and the driverless paths.
   control:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Each module adds its tests here. On windows-latest this job took 22 minutes with
+    # Random and shock, 37 to 39.5 with Sine and TWR, and passed 40 with Explorer.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

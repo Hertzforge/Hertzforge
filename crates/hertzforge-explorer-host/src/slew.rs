@@ -1,14 +1,8 @@
 //! Operator slew ceilings for a HOST-SYNTHESIZED drive, denominated PER FRAME.
 //!
-//! ## Two types, the same name, two crates - and that is deliberate
+//! ## Why per frame
 //!
-//! The delegated Explorer pacer's `SlewLimits` carries a third field,
-//! `tick_interval`, because a delegated drive is moved by NUDGE BURSTS: the pacer wakes on a
-//! wall-clock tick, works out how many increment steps fit in the elapsed interval under
-//! the slew rate, and sends that burst. The tick interval is the denominator of that
-//! arithmetic, and it is a property of the PACER, not of the signal.
-//!
-//! A host-synthesized drive has no bursts and no pacer tick. The process step computes a
+//! A host-synthesized drive moves every frame: the process step computes a
 //! sample every frame, so the natural denominator is the FRAME, and the frame rate is the
 //! station's ACTUAL sample rate - which is not the requested one (the NI-9234 coerces a
 //! request up its 13.1072 MHz/(256n) ladder, so 8192 Hz becomes 8533.33 Hz). Baking any
@@ -17,9 +11,7 @@
 //!
 //! So this type carries the operator's INTENT only - octaves per second, dB per second -
 //! and every per-frame increment is derived at the consumer from the actual rate it
-//! adopted at configure time. Same name, because it is the same operator control; a
-//! different type, because the arithmetic underneath it is different and silently sharing
-//! one would let a tick-denominated value reach a per-frame consumer.
+//! adopted at configure time.
 
 /// Slew ceilings for a host-synthesized drive. Both limits are the natural rate for their
 /// axis: frequency in octaves/second, drive in dB/second (the standard sine-testing safety
