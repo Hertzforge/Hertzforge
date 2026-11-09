@@ -279,7 +279,7 @@ describe("the mock control service's Recorder frames have the service's form", (
 		}
 	};
 
-	it.skipIf(!has('event_recorder_data.bin') || !has('event_recorder_live.bin') || !has('request_recorder_subscribe.json'))('the Recorder live views and every quantity of a data frame', async () => {
+	it.skipIf(!has('event_recorder_data.bin') || !has('event_recorder_live.bin') || !has('request_recorder_subscribe.json'))('the Recorder subscription echo, the live views and every quantity of a data frame', async () => {
 		const server = createControlServer({ speed: 20 });
 		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
 		const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
@@ -287,16 +287,15 @@ describe("the mock control service's Recorder frames have the service's form", (
 		await client.whenOpen();
 		await acq.sync();
 		await acq.claim();
-		// the goldens' table: four recorded rows and the drive row, at a 5 g range
-		const rows = acq.rows.map((r) => ({ ...r, range_max: r.role === 'drive' ? r.range_max : 5 }));
-		for (const index of [3, 4, 5]) rows.push({ ...rows[0], index, description: `Input ${index}`, role: 'monitor', physical: null });
-		acq.rows = rows;
+		// the goldens' table: rows 1 to 4 recorded at a 5 g range, row 5 the drive
+		const [control, drive] = acq.rows;
+		const inputs = ['Fixture', 'Bracket', 'Cover'].map((description, k) => ({ ...control, index: k + 2, description, role: 'monitor' as const, physical: null, range_max: 5 }));
+		acq.rows = [{ ...control, description: 'Table', range_max: 5 }, ...inputs, { ...drive, index: 5 }];
 		expect(await acq.applyTable()).toBe(true);
 		const recorder = new RecorderStore(acq, { local: null, checkDelayMs: 0 });
 		await recorder.sync();
 		const config = testConfig();
 		recorder.setup = config ? fromRecorderConfig(config) : recorder.setup;
-		if (recorder.setup.analysis.frf === null) recorder.setup.analysis.frf = { reference: 3, response: 5 };
 		expect(await recorder.apply()).toBe(true);
 		const want = (readJson('request_recorder_subscribe.json') as Request<RecorderSubscribeParams>).params as { rate_hz: number; plots: unknown[] };
 		let data: RecorderData | null = null;
@@ -306,7 +305,8 @@ describe("the mock control service's Recorder frames have the service's form", (
 		await observer.whenOpen();
 		let observedLive: RecorderLive | null = null;
 		observer.on(RECORDER_TOPICS.live, (d) => (observedLive = d as unknown as RecorderLive));
-		await client.request('recorder.subscribe', { rate_hz: want.rate_hz, plots: want.plots });
+		const echo = await client.request('recorder.subscribe', { rate_hz: want.rate_hz, plots: want.plots });
+		if (has('response_recorder_subscribe.json')) expect(echo).toEqual((readJson('response_recorder_subscribe.json') as ResponseOk<RecorderSubscribeResult>).result);
 		expect(await recorder.start()).toBe(true);
 		await until(() => !!data && data.plots.every((p) => p.views.length > 0) && !!observedLive, 10000);
 		const theirs = (decodeFrame(readBin('event_recorder_data.bin')) as unknown as Event<RecorderData>).data;

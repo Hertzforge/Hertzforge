@@ -142,7 +142,7 @@ describe('the Recorder store', () => {
 		expect(recorderCardStatus(recorder.now, recorder.cardSetup).text).toBe('Monitoring: nothing is being saved');
 		await until(() => !!recorder.folder);
 		expect(recorder.folder).toMatch(/Hertzforge_Data\/recorder$/);
-		expect(recorder.log.map((e) => e.text)).toEqual(expect.arrayContaining(['the station programmed 12800 Hz (asked 12800 Hz)', 'outputs: none; drive row 2 not opened', 'rec_0001 began at station frame 0', 'rec_0001 saved: 25600 frames, 2 s, no gaps']));
+		expect(recorder.log.map((e) => e.text)).toEqual(expect.arrayContaining(['the station programmed 12800 Hz (asked 12800 Hz)', 'outputs: none; drive row 2 not opened', 'rec_0001 began at station frame 0 (pre-window 0 frames)', 'rec_0001 saved: 25600 frames, 2.000 s, no gaps']));
 		await recorder.stop();
 		await until(() => recorder.status?.state === 'finished');
 		expect([recorder.status?.end?.outcome, recorder.status?.end?.recordings, recorder.status?.phase]).toEqual(['operator_stop', 1, 'stopped']);

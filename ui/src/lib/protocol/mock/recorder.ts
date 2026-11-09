@@ -415,8 +415,7 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		const errors: Item[] = [];
 		const warnings: Item[] = [];
 		if (!inputs().length) errors.push(item('no_input_channel', 'The channel table has no enabled input row: there is nothing to record.'));
-		const d = drives();
-		if (d.length) warnings.push(item('drive_channel_present', `${d.length === 1 ? 'Drive row' : 'Drive rows'} ${d.map((r) => r.index).join(', ')} ${d.length === 1 ? 'is' : 'are'} not opened and not recorded: a Recorder run opens no output.`));
+		for (const r of drives()) warnings.push(item('drive_channel_present', `Row ${r.index} is a drive row; a Recorder run does not open or record it.`, undefined, r.index));
 		return { errors, warnings };
 	}
 
@@ -659,7 +658,7 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		}
 		r.armed = false;
 		r.held = 0;
-		addLog('recording', `${x.name} began at station frame ${trig}`);
+		addLog('recording', `${x.name} began at station frame ${trig} (pre-window ${pre} frames)`);
 		return x;
 	}
 
@@ -670,7 +669,7 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		x.complete = true;
 		r.rec = null;
 		r.saved += 1;
-		addLog('recording', `${x.name} saved: ${x.fed} frames, ${round(x.fed / r.fs, 3)} s, ${x.gaps.length ? `${x.gaps.length} gaps` : 'no gaps'}`);
+		addLog('recording', `${x.name} saved: ${x.fed} frames, ${(x.fed / r.fs).toFixed(3)} s, ${x.gaps.length ? `${x.gaps.length} gaps` : 'no gaps'}`);
 		if (r.state !== 'running') return;
 		// A level trigger re-arms by itself until it has saved its count; any other recording returns the run to monitoring.
 		const n = r.norm;
@@ -802,7 +801,7 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		r.stopOutcome = outcome;
 		r.state = 'stopping';
 		r.phase = 'closing';
-		addLog('state', `stop began: ${cause === 'operator' ? (outcome === 'operator_abort' ? `abort by ${by ?? 'the operator'}` : `stop by ${by ?? 'the operator'}`) : cause === 'safe_stop' ? 'nobody held control' : 'the service is shutting down'}`);
+		addLog('state', `stop began: ${cause}`);
 		stateChanged();
 	}
 
@@ -1219,15 +1218,18 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 				r.lastOver = r.rows.map(() => null);
 				r.ms = r.rows.map(() => []);
 				addLog('station', `the station programmed ${round(r.fs, 3)} Hz (asked ${r.requestedFs} Hz)`);
-				addLog('station', `records in ${r.folder}`);
+				addLog('note', `records in ${r.folder}`);
 				const d = drives();
-				addLog('station', d.length ? `outputs: none; ${d.length === 1 ? 'drive row' : 'drive rows'} ${d.map((x) => x.index).join(', ')} not opened` : 'outputs: none');
+				addLog('note', d.length ? `outputs: none; ${d.length === 1 ? 'drive row' : 'drive rows'} ${d.map((x) => x.index).join(', ')} not opened` : 'outputs: none');
 				r.state = 'running';
 				r.phase = 'monitoring';
 				r.frames = 0;
 				if (r.norm.mode === 'start') begin(r, 'start', 0, 0);
+				// The start answers once acquisition runs: after the first batch.
+				batch(r);
 				r.timer = setInterval(() => tick(r), TICK_MS);
 				rephase(r);
+				addLog('state', `running, ${r.phase}`);
 				stateChanged();
 				startLive();
 				return stateOf(r);
