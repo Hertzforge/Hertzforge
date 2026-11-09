@@ -282,6 +282,8 @@ hertzforge-twr-laws  test:law_call_timing  a_twr_law_call_at_the_bench_record_an
 # The TWR service over its socket and on its run thread: runs on the simulated station paced to the
 # wall clock, a stop or an abort inside a play, the orphan timeout and the shutdown on the real clock
 sds-control  test:twr_protocol  manual_verbs_and_their_refusals_then_the_stop_mid_play
+sds-control  test:twr_protocol  a_twr_configuration_with_errors_is_refused_with_its_items
+sds-control  test:twr_protocol  shutdown_refuses_the_twr_verbs_and_safe_stops_the_run
 sds-control  test:twr_protocol  an_observer_aborts_inside_a_play
 sds-control  test:twr_protocol  plays_hold_when_the_controller_goes_resume_on_a_reclaim_and_safe_stop_after
 sds-control  test:twr_sim_run  sim_2_manual_verbs_then_a_stop_inside_a_play

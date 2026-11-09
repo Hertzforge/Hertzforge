@@ -327,7 +327,7 @@ async fn an_auto_run_goes_from_the_import_through_review_to_completed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_configuration_with_errors_is_refused_with_its_items() {
+async fn a_twr_configuration_with_errors_is_refused_with_its_items() {
     let schema = Schema::load();
     let svc = service(0.0, Duration::from_secs(30));
     let addr = serve(svc).await;
@@ -661,7 +661,7 @@ async fn a_twr_run_and_every_other_module_exclude_each_other() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn shutdown_refuses_the_drive_verbs_and_safe_stops_the_run() {
+async fn shutdown_refuses_the_twr_verbs_and_safe_stops_the_run() {
     let svc = service(0.0, Duration::from_secs(30));
     let addr = serve(svc.clone()).await;
     let mut c = Client::connect(addr).await;
