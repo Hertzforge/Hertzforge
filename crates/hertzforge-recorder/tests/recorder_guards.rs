@@ -566,3 +566,64 @@ fn recorder_the_free_space_floor_ends_the_run_and_says_so() {
         "{bytes} bytes"
     );
 }
+
+// ---------------------------------------------------------------------------------
+// G5: a disk that falls behind ends the run, the gap recorded.
+// ---------------------------------------------------------------------------------
+
+#[test]
+fn recorder_falling_behind_the_disk_ends_the_run() {
+    // A store that writes at half the stream's rate, read in real time: the backlog
+    // grows half a second a second until the 2 s queue cannot take a batch.
+    let fs = 2048.0;
+    let station = ScriptedStation::new(2, fs, Box::new(ramp)).paced();
+    let (mut store, log) = support::StoreDouble::new(2);
+    store.slow_factor = Some((fs, 2.0));
+    let mut svc = RecorderService::with_backend(
+        manual(fs),
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g5_behind"),
+    )
+    .unwrap()
+    .with_block_frames(64)
+    .with_store(Box::new(store));
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_now().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut worst_backlog_s = 0.0f64;
+    while svc.state().is_live() && std::time::Instant::now() < deadline {
+        let _ = svc.pump();
+        let s = svc.status(u64::MAX);
+        worst_backlog_s =
+            worst_backlog_s.max(s.frames_fed.saturating_sub(s.frames_on_disk) as f64 / fs);
+    }
+    let end = svc.status(u64::MAX).run_fault;
+    svc.stop_monitor().unwrap();
+    assert!(
+        worst_backlog_s > 1.0,
+        "the backlog rose on the status before the end: {worst_backlog_s} s"
+    );
+    let end = end.expect("a disk that far behind ends the run");
+    assert_eq!(
+        end.cause,
+        hertzforge_recorder::service::EndCause::WriteBehind
+    );
+    assert!(end.message.contains("behind"), "{}", end.message);
+    let report = svc.report_data();
+    let gaps = &report.recordings[0].gaps;
+    assert_eq!(
+        gaps.len(),
+        1,
+        "the frames that could not be queued are a gap"
+    );
+    assert!(gaps[0].dropped_frames > 0);
+    assert!(log
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .any(|c| matches!(c, support::StoreCall::Finish { .. })));
+}
