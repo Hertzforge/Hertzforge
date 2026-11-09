@@ -72,6 +72,11 @@ cat > "$STAGE/tauri.stage.json" <<JSON
 JSON
 args=(build --config "$(native "$STAGE/tauri.stage.json")" ${FEATURES[@]+"${FEATURES[@]}"})
 [[ -n "$BUNDLES" ]] && args+=(--bundles "$BUNDLES")
+# The AppImage's linuxdeploy follows every library in the app to what it needs, through
+# ldd. oneMKL's kernels need its core beside them in the bundled Python's lib/, where ldd
+# does not look, so it stops there. They are already in the bundle and load from it, so
+# linuxdeploy is told to leave them alone rather than copy them a second time.
+[[ "$TRIPLE" == *linux* ]] && export LINUXDEPLOY_EXCLUDED_LIBRARIES='libmkl_*;libtbb*;libtcm*'
 # On a runner, what the bundlers print: linuxdeploy says nothing of why it failed otherwise.
 [[ -n "${CI:-}" ]] && args+=(--verbose)
 (cd "$DESKTOP" && npx --no-install tauri "${args[@]}")
