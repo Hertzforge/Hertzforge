@@ -334,6 +334,7 @@ impl Service {
                 || inner.srs_live()
                 || inner.sine_live()
                 || inner.twr_live()
+                || inner.recorder_live()
             {
                 inner.run_active()?;
             }

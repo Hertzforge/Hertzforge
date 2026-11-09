@@ -52,6 +52,8 @@ mod sine_methods;
 
 #[path = "server_explorer.rs"]
 mod explorer_methods;
+#[path = "server_recorder.rs"]
+mod recorder_methods;
 #[path = "server_twr.rs"]
 mod twr_methods;
 
@@ -76,7 +78,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 41] = [
+const DRIVE_METHODS: [&str; 44] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -118,6 +120,9 @@ const DRIVE_METHODS: [&str; 41] = [
     "explorer.start",
     "explorer.steer",
     "explorer.sweep",
+    "recorder.start",
+    "recorder.arm",
+    "recorder.record",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -145,8 +150,11 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     twr.plays, twr.record, explorer.configure, explorer.config, explorer.start, explorer.steer, \
     explorer.sweep, explorer.hold, explorer.stop, explorer.abort, explorer.survey, \
     explorer.survey.clear, explorer.reset, explorer.clear, explorer.state, explorer.log, \
-    explorer.subscribe, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
-    sim.stop and sim.state";
+    explorer.subscribe, recorder.configure, recorder.config, recorder.start, recorder.arm, \
+    recorder.disarm, recorder.record, recorder.cut, recorder.stop, recorder.abort, \
+    recorder.recordings, recorder.marks, recorder.reset, recorder.clear, recorder.state, \
+    recorder.log, recorder.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
+    sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -261,6 +269,7 @@ pub enum Feed {
     Sine,
     Twr,
     Explorer,
+    Recorder,
 }
 
 /// A frame for every connection.
@@ -382,6 +391,12 @@ struct Inner {
     explorer_runs: u64,
     explorer_state_key: String,
     explorer_log_sent: (String, u64),
+    /// The Recorder configuration and its run, beside the others, and what of it has
+    /// been sent.
+    recorder: Option<Arc<crate::recorder::run::RecorderRun>>,
+    recorder_runs: u64,
+    recorder_state_key: String,
+    recorder_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -423,6 +438,12 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
+    fn recorder_live(&self) -> bool {
+        self.recorder
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
     /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
@@ -433,6 +454,7 @@ impl Inner {
             || self.sine_live()
             || self.twr_live()
             || self.explorer_live()
+            || self.recorder_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -536,6 +558,21 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.recorder {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Recorder run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -601,6 +638,21 @@ pub struct Service {
             >,
         >,
     >,
+    /// The connections with a Recorder display subscription.
+    recorder_displays: std::sync::Mutex<HashMap<ConnId, recorder_methods::RecorderDisplay>>,
+    /// Recorder runs' publishes, in order.
+    recorder_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::recorder::view::RecorderView>>,
+    recorder_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<
+                crate::pulse::rails::Notice<crate::recorder::view::RecorderView>,
+            >,
+        >,
+    >,
+    /// The signal a Recorder run on the simulator carries (the stated source unless a
+    /// test installs another).
+    recorder_signal: recorder_methods::SignalSlot,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -638,6 +690,7 @@ impl Service {
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
+        let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -673,6 +726,10 @@ impl Service {
                 explorer_runs: 0,
                 explorer_state_key: String::new(),
                 explorer_log_sent: (String::new(), 0),
+                recorder: None,
+                recorder_runs: 0,
+                recorder_state_key: String::new(),
+                recorder_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -701,6 +758,10 @@ impl Service {
             explorer_displays: std::sync::Mutex::new(HashMap::new()),
             explorer_notify,
             explorer_notices: std::sync::Mutex::new(Some(explorer_notices)),
+            recorder_displays: std::sync::Mutex::new(HashMap::new()),
+            recorder_notify,
+            recorder_notices: std::sync::Mutex::new(Some(recorder_notices)),
+            recorder_signal: std::sync::Mutex::new(None),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -765,6 +826,7 @@ impl Service {
             Feed::Sine => self.sine_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
+            Feed::Recorder => self.recorder_displays().contains_key(&conn),
         }
     }
 
@@ -895,6 +957,15 @@ impl Service {
                 }
             });
         }
+        let recorder_notices = self.recorder_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = recorder_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.recorder_changed(&run_id, &view).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -963,8 +1034,17 @@ impl Service {
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
+            let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = recorder {
+                recorder_methods::stop_recorder(
+                    &s,
+                    false,
+                    "safe_stop",
+                    "the service (nobody held control)".into(),
+                );
+            }
             if let Some(s) = explorer {
                 explorer_methods::stop_explorer(
                     &s,
@@ -1033,7 +1113,7 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim, shock, srs, sine, twr, explorer) = {
+        let (random, sim, shock, srs, sine, twr, explorer, recorder) = {
             let inner = self.inner.lock().await;
             (
                 inner.random.clone(),
@@ -1043,7 +1123,36 @@ impl Service {
                 inner.sine.clone(),
                 inner.twr.clone(),
                 inner.explorer.clone(),
+                inner.recorder.clone(),
             )
+        };
+        // A Recorder run takes its controlled stop: acquisition ends at the next batch
+        // and every recording is finalized. Should it still be live ten seconds later,
+        // it is aborted.
+        let recorder_said = match recorder.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                recorder_methods::stop_recorder(&s, false, "shutdown", rrun::SHUTDOWN_BY.into());
+                let asked = Instant::now();
+                let mut aborted = false;
+                while s.view().state.is_live() {
+                    if !aborted && asked.elapsed() > recorder_methods::SHUTDOWN_PATIENCE {
+                        aborted = true;
+                        recorder_methods::stop_recorder(
+                            &s,
+                            true,
+                            "shutdown",
+                            rrun::SHUTDOWN_BY.into(),
+                        );
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // An Explorer run takes its controlled stop, the ramp at its drive slew.
         // Should it still be live well after (twice its stop, at least ten seconds),
@@ -1181,7 +1290,8 @@ impl Service {
                 .or(srs_said)
                 .or(sine_said)
                 .or(twr_said)
-                .or(explorer_said);
+                .or(explorer_said)
+                .or(recorder_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -1234,6 +1344,7 @@ impl Service {
         self.sine_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
         self.explorer_displays().remove(&conn.id);
+        self.recorder_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
             // Nobody holds control now: a TWR run starts no new play until control
@@ -1498,6 +1609,22 @@ impl Service {
             "explorer.state" => Ok(self.explorer_state_now().await),
             "explorer.log" => self.explorer_log(params).await,
             "explorer.subscribe" => self.explorer_subscribe(conn, params).await,
+            "recorder.configure" => self.recorder_configure(conn, params).await,
+            "recorder.config" => Ok(self.recorder_config().await),
+            "recorder.start" => self.recorder_start(conn, params).await,
+            "recorder.arm" => self.recorder_arm(conn, params).await,
+            "recorder.disarm" => self.recorder_disarm(conn, params).await,
+            "recorder.record" => self.recorder_record(conn, params).await,
+            "recorder.cut" => self.recorder_cut(conn, params).await,
+            "recorder.stop" => self.recorder_end(conn, false).await,
+            "recorder.abort" => self.recorder_end(conn, true).await,
+            "recorder.recordings" => self.recorder_recordings(params).await,
+            "recorder.marks" => self.recorder_marks(params).await,
+            "recorder.reset" => self.recorder_reset(conn).await,
+            "recorder.clear" => self.recorder_clear(conn).await,
+            "recorder.state" => Ok(self.recorder_state_now().await),
+            "recorder.log" => self.recorder_log(params).await,
+            "recorder.subscribe" => self.recorder_subscribe(conn, params).await,
             "twr.stop" => self.twr_end(conn, false).await,
             "twr.abort" => self.twr_end(conn, true).await,
             "twr.reset" => self.twr_reset(conn).await,
@@ -2001,6 +2128,7 @@ impl Service {
                 || inner.sine_live()
                 || inner.twr_live()
                 || inner.explorer_live()
+                || inner.recorder_live()
             {
                 inner.run_active()?;
             }
@@ -2280,6 +2408,7 @@ impl Service {
             || inner.sine_live()
             || inner.twr_live()
             || inner.explorer_live()
+            || inner.recorder_live()
         {
             inner.run_active()?;
         }
