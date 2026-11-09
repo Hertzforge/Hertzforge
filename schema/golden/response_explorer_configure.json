@@ -1,0 +1,85 @@
+{
+ "type": "response",
+ "id": 91,
+ "result": {
+  "state": {
+   "run_id": "explorer-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Survey, fixture A",
+   "source": "HARDWARE",
+   "station": {
+    "kind": "ni",
+    "class": "ni_real",
+    "devices": [
+     {
+      "id": "cDAQ2Mod1",
+      "serial": "01A2B3C4"
+     },
+     {
+      "id": "cDAQ2Mod2",
+      "serial": "01A2B3C5"
+     }
+    ]
+   },
+   "grid": {
+    "requested_fs_hz": 12800,
+    "fs_hz": 12800,
+    "block_frames": 256,
+    "lookahead_frames": 512,
+    "actual": false
+   },
+   "clock": null,
+   "band_hz": [
+    20,
+    2000
+   ],
+   "max_drive_vpk": 0.5,
+   "slew": {
+    "freq_oct_per_s": 1,
+    "drive_db_per_s": 6
+   },
+   "pipeline_frames": 1063,
+   "t_s": null,
+   "frequency_hz": null,
+   "target_hz": null,
+   "drive_vpk": null,
+   "target_vpk": null,
+   "sweep": null,
+   "health": null,
+   "stall": null,
+   "stop": null,
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 12800,
+    "block_frames": 256,
+    "lookahead_frames": 512,
+    "actual": false
+   },
+   "band_hz": [
+    20,
+    2000
+   ],
+   "pipeline_frames": 1063,
+   "pipeline_s": 0.08305,
+   "rise_s": 6.667,
+   "stop_s": 6.667,
+   "stop_wait_s": 30,
+   "sweep_max_oct_per_min": 60,
+   "display": {
+    "df_hz": 3.125,
+    "window_s": 0.32
+   },
+   "survey": {
+    "tolerance_hz": 1.5625,
+    "first_point_s": [
+     0.383,
+     0.125
+    ]
+   }
+  },
+  "warnings": []
+ }
+}

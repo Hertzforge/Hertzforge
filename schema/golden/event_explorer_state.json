@@ -1,0 +1,67 @@
+{
+ "type": "event",
+ "topic": "explorer.state",
+ "seq": 190,
+ "data": {
+  "run_id": "explorer-0002",
+  "state": "running",
+  "phase": "steady",
+  "title": "Survey, fixture A",
+  "source": "HARDWARE",
+  "station": {
+   "kind": "ni",
+   "class": "ni_real",
+   "devices": [
+    {
+     "id": "cDAQ2Mod1",
+     "serial": "01A2B3C4"
+    },
+    {
+     "id": "cDAQ2Mod2",
+     "serial": "01A2B3C5"
+    }
+   ]
+  },
+  "grid": {
+   "requested_fs_hz": 12800,
+   "fs_hz": 12800,
+   "block_frames": 256,
+   "lookahead_frames": 512,
+   "actual": true
+  },
+  "clock": "shared",
+  "band_hz": [
+   20,
+   2000
+  ],
+  "max_drive_vpk": 0.5,
+  "slew": {
+   "freq_oct_per_s": 1,
+   "drive_db_per_s": 6
+  },
+  "pipeline_frames": 1063,
+  "t_s": 41.38,
+  "frequency_hz": 250,
+  "target_hz": 250,
+  "drive_vpk": 0.2,
+  "target_vpk": 0.2,
+  "sweep": null,
+  "health": {
+   "engine_ticks": 2069,
+   "worst_tick_ms": 0.41,
+   "budget_ms": 20,
+   "health_faults": 0,
+   "ring_overruns": 0,
+   "blocks_dropped": 0,
+   "driver_warnings": 2,
+   "pass_ms": {
+    "last": 1.9,
+    "worst": 3.4
+   },
+   "batch_gap_ms": 4.1
+  },
+  "stall": null,
+  "stop": null,
+  "end": null
+ }
+}

@@ -1,0 +1,26 @@
+{
+ "type": "request",
+ "id": 95,
+ "method": "explorer.subscribe",
+ "params": {
+  "rate_hz": 5,
+  "plots": [
+   {
+    "id": "srv",
+    "quantity": "survey"
+   },
+   {
+    "id": "spec",
+    "quantity": "spectrum"
+   },
+   {
+    "id": "t",
+    "quantity": "time"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ]
+ }
+}

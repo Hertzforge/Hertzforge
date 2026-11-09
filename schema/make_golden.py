@@ -2670,6 +2670,246 @@ TWR_TEXT_GOLDENS = {
 }
 
 
+# --- Explorer (PROTOCOL.md, "Explorer") ---
+#
+# As the other modules': the configuration golden is the contract's example with every
+# field given, and its `derived` is what the control service computes for it on the NI
+# station at 12 800 Hz (the Rust golden test recomputes it). The run goldens are one
+# moment of one run: the tone held at 250 Hz and 0.2 V pk, 41.38 s in. The binary goldens
+# carry short records whose values are exact in binary, laid out as the service's view
+# builders lay them out (each series' x then y, every array numbered in traversal order).
+
+EXPLORER_FS = 12800.0
+
+EXPLORER_METADATA = [{'key': 'run_number', 'label': 'Run Number', 'value': '3'},
+                     {'key': 'test_article', 'label': 'Test Article', 'value': 'Fixture A'},
+                     {'key': 'serial_number', 'label': 'SN', 'value': ''},
+                     {'key': 'operator', 'label': 'Operator', 'value': ''}]
+
+EXPLORER_CONFIG = {
+    'title': 'Survey, fixture A',
+    'acquisition': {'fs_hz': 12800},
+    'band_hz': [20, 2000], 'start_hz': 250, 'max_drive_vpk': 0.5,
+    'slew': {'freq_oct_per_s': 1, 'drive_db_per_s': 6},
+    'display': {'nfft': 4096},
+    'capture': {'run_name': 'explorer'},
+    'metadata': EXPLORER_METADATA,
+}
+
+EXPLORER_STATION = {'kind': 'ni', 'class': 'ni_real',
+                    'devices': [{'id': 'cDAQ2Mod1', 'serial': '01A2B3C4'},
+                                {'id': 'cDAQ2Mod2', 'serial': '01A2B3C5'}]}
+
+EXPLORER_DERIVED = {
+    'grid': {'fs_hz': 12800, 'block_frames': 256, 'lookahead_frames': 512, 'actual': False},
+    'band_hz': [20, 2000], 'pipeline_frames': 1063, 'pipeline_s': 0.08305,
+    'rise_s': 6.667, 'stop_s': 6.667, 'stop_wait_s': 30, 'sweep_max_oct_per_min': 60,
+    'display': {'df_hz': 3.125, 'window_s': 0.32},
+    'survey': {'tolerance_hz': 1.5625, 'first_point_s': [0.383, 0.125]},
+}
+
+EXPLORER_GRID = {'requested_fs_hz': 12800, 'fs_hz': 12800, 'block_frames': 256,
+                 'lookahead_frames': 512, 'actual': False}
+EXPLORER_GRID_ACTUAL = dict(EXPLORER_GRID, actual=True)
+EXPLORER_SLEW = {'freq_oct_per_s': 1, 'drive_db_per_s': 6}
+
+
+def _explorer_health(ticks, worst_tick_ms, pass_last, pass_worst, gap):
+    return {'engine_ticks': ticks, 'worst_tick_ms': worst_tick_ms, 'budget_ms': 20,
+            'health_faults': 0, 'ring_overruns': 0, 'blocks_dropped': 0, 'driver_warnings': 2,
+            'pass_ms': {'last': pass_last, 'worst': pass_worst}, 'batch_gap_ms': gap}
+
+
+def _explorer_state(**over) -> dict:
+    s = {
+        'run_id': 'explorer-0001', 'state': 'configured', 'phase': 'idle',
+        'title': EXPLORER_CONFIG['title'], 'source': 'HARDWARE', 'station': EXPLORER_STATION,
+        'grid': EXPLORER_GRID, 'clock': None, 'band_hz': [20, 2000], 'max_drive_vpk': 0.5,
+        'slew': EXPLORER_SLEW, 'pipeline_frames': 1063, 't_s': None, 'frequency_hz': None,
+        'target_hz': None, 'drive_vpk': None, 'target_vpk': None, 'sweep': None,
+        'health': None, 'stall': None, 'stop': None, 'end': None,
+    }
+    s.update(over)
+    return s
+
+
+EXPLORER_STARTED = _explorer_state(
+    state='running', phase='quiet', grid=EXPLORER_GRID_ACTUAL, clock='shared', t_s=0.04,
+    frequency_hz=250, target_hz=250, drive_vpk=0, target_vpk=0,
+    health=_explorer_health(2, 0.38, 1.2, 1.2, None))
+
+EXPLORER_RUNNING = _explorer_state(
+    run_id='explorer-0002', state='running', phase='steady', grid=EXPLORER_GRID_ACTUAL,
+    clock='shared', t_s=41.38, frequency_hz=250, target_hz=250, drive_vpk=0.2, target_vpk=0.2,
+    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1))
+
+EXPLORER_HEAD = {
+    'run_id': 'explorer-0002', 'source': 'HARDWARE', 'class': 'ni_real', 'state': 'running',
+    'phase': 'steady', 't_s': 41.38, 'frequency_hz': 250, 'target_hz': 250,
+    'measured_hz': 250.02, 'drive_vpk': 0.2, 'target_vpk': 0.2, 'max_drive_vpk': 0.5,
+    'sweep': None,
+    'channels': [{'index': 1, 'description': 'Control', 'role': 'control', 'rms': 0.1413,
+                  'unit': 'g'},
+                 {'index': 3, 'description': 'Fixture', 'role': 'monitor', 'rms': 0.0706,
+                  'unit': 'g'}],
+    'control': {'index': 1, 'velocity_ips': 0.04916, 'displacement_mil': 0.0313,
+                'settling': False},
+    'pipeline_frames': 1063, 'peak': {'hz': 250, 'level': 0.1999}, 'blocks_dropped': 0,
+    'pass_ms': {'last': 1.9, 'worst': 3.4},
+}
+
+#: The survey line's points, and one display window of two channels, exact in binary.
+EXPLORER_SURVEY_HZ = [200.0, 250.0, 300.0, 400.0]
+EXPLORER_SURVEY_LEVEL = [0.125, 0.1999, 0.15625, 0.09375]
+EXPLORER_BINS = [0.0, 3.125, 6.25, 9.375]
+EXPLORER_SPECTRUM_1 = [0.0009765625, 0.001953125, 0.00048828125, 0.000244140625]
+EXPLORER_SPECTRUM_3 = [0.00048828125, 0.0009765625, 0.000244140625, 0.0001220703125]
+EXPLORER_FIRST_FRAME = 529408
+EXPLORER_TIME = [0.0, 0.125, 0.1875, 0.125]
+
+EXPLORER_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Frequency', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Target', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Measured', 'value': 250.02, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Drive', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Target drive', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Ceiling', 'value': 0.5, 'unit': 'V', 'status': 'info'},
+    {'label': 'Sweep', 'value': 'none', 'unit': None, 'status': 'info'},
+    {'label': 'Control rms', 'value': 0.1413, 'unit': 'g', 'status': 'info'},
+    {'label': 'Velocity', 'value': 0.04916, 'unit': 'in/s', 'status': 'info'},
+    {'label': 'Displacement', 'value': 0.0313, 'unit': 'mil', 'status': 'info'},
+    {'label': 'Peak', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Pipeline', 'value': 1063, 'unit': 'frames', 'status': 'info'},
+]}
+
+
+def _explorer_survey_view(a: _Arr) -> dict:
+    return _spectrum('Survey', _FREQ, _axis('Level', 'g', 'log'),
+                     [a.series('Survey', 'measured', EXPLORER_SURVEY_HZ, EXPLORER_SURVEY_LEVEL)],
+                     'frequency')
+
+
+def _explorer_live_build() -> tuple[dict, dict]:
+    a = _Arr()
+    data = dict(EXPLORER_HEAD)
+    data['views'] = [_explorer_survey_view(a), EXPLORER_RUN_READING]
+    return {'type': 'event', 'topic': 'explorer.live', 'seq': 191, 'data': data}, a.arrays
+
+
+EXPLORER_SUBSCRIBE_PLOTS = [
+    {'id': 'srv', 'quantity': 'survey'},
+    {'id': 'spec', 'quantity': 'spectrum'},
+    {'id': 't', 'quantity': 'time'},
+    {'id': 'run', 'quantity': 'readings'},
+]
+EXPLORER_SUBSCRIBED = [
+    {'id': 'srv', 'quantity': 'survey', 'points': None},
+    {'id': 'spec', 'quantity': 'spectrum', 'channels': 'all'},
+    {'id': 't', 'quantity': 'time', 'points': 1024},
+    {'id': 'run', 'quantity': 'readings'},
+]
+EXPLORER_QUANTITIES = ['survey', 'spectrum', 'time', 'readings']
+
+
+def _explorer_channel_view(a: _Arr, index: int, name: str, mags: list) -> dict:
+    return _spectrum(f'Channel {index}: {name}', _axis('Frequency', 'Hz', 'linear'),
+                     _axis('Amplitude', 'g', 'linear'),
+                     [a.series(f'Channel {index}', 'measured', EXPLORER_BINS, mags)],
+                     'frequency')
+
+
+def _explorer_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    t = [(EXPLORER_FIRST_FRAME + i) / EXPLORER_FS for i in range(len(EXPLORER_TIME))]
+    plots = [
+        {'id': 'srv', 'quantity': 'survey', 'channels': None, 'first_frame': None,
+         'views': [_explorer_survey_view(a)]},
+        {'id': 'spec', 'quantity': 'spectrum', 'channels': [1, 3], 'first_frame': None,
+         'views': [_explorer_channel_view(a, 1, 'Control', EXPLORER_SPECTRUM_1),
+                   _explorer_channel_view(a, 3, 'Fixture', EXPLORER_SPECTRUM_3)]},
+        {'id': 't', 'quantity': 'time', 'channels': None, 'first_frame': EXPLORER_FIRST_FRAME,
+         'views': [{'view': 'spectrum', 'title': 'Time', 'x': _TIME,
+                    'y': _axis('Amplitude', 'g', 'linear'),
+                    'series': [a.series('Channel 1', 'measured', t, EXPLORER_TIME)]}]},
+        {'id': 'run', 'quantity': 'readings', 'channels': None, 'first_frame': None,
+         'views': [EXPLORER_RUN_READING]},
+    ]
+    data = dict(EXPLORER_HEAD)
+    data['plots'] = plots
+    return {'type': 'event', 'topic': 'explorer.data', 'seq': 192, 'data': data}, a.arrays
+
+
+EXPLORER_TEXT_GOLDENS = {
+    'request_explorer_configure': {
+        'type': 'request', 'id': 91, 'method': 'explorer.configure',
+        'params': {'config': EXPLORER_CONFIG},
+    },
+    'response_explorer_configure': {
+        'type': 'response', 'id': 91,
+        'result': {'state': _explorer_state(), 'derived': EXPLORER_DERIVED, 'warnings': []},
+    },
+    'request_explorer_start': {
+        'type': 'request', 'id': 92, 'method': 'explorer.start', 'params': {},
+    },
+    'response_explorer_start': {
+        'type': 'response', 'id': 92, 'result': EXPLORER_STARTED,
+    },
+    'request_explorer_steer': {
+        'type': 'request', 'id': 93, 'method': 'explorer.steer',
+        'params': {'hz': 1000, 'vpk': 0.9},
+    },
+    'response_explorer_steer': {
+        'type': 'response', 'id': 93,
+        'result': {'hz': 1000, 'vpk': 0.5, 'clamped': {'hz': False, 'vpk': True},
+                   'frame': 530432, 'input_frame': 529408},
+    },
+    'request_explorer_sweep': {
+        'type': 'request', 'id': 94, 'method': 'explorer.sweep',
+        'params': {'direction': 'up', 'rate_oct_per_min': 600},
+    },
+    'response_explorer_sweep': {
+        'type': 'response', 'id': 94,
+        'result': {'direction': 'up', 'rate_oct_per_min': 60, 'clamped': True,
+                   'frame': 531456, 'input_frame': 530432},
+    },
+    'event_explorer_state': {
+        'type': 'event', 'topic': 'explorer.state', 'seq': 190, 'data': EXPLORER_RUNNING,
+    },
+    'request_explorer_subscribe': {
+        'type': 'request', 'id': 95, 'method': 'explorer.subscribe',
+        'params': {'rate_hz': 5, 'plots': EXPLORER_SUBSCRIBE_PLOTS},
+    },
+    'response_explorer_subscribe': {
+        'type': 'response', 'id': 95,
+        'result': {'default': False, 'rate_hz': 5, 'plots': EXPLORER_SUBSCRIBED,
+                   'quantities': EXPLORER_QUANTITIES},
+    },
+    'response_explorer_survey': {
+        'type': 'response', 'id': 96,
+        'result': {'revision': 57, 'channel': 1, 'unit': 'g',
+                   'points': [[f, v] for f, v in zip(EXPLORER_SURVEY_HZ, EXPLORER_SURVEY_LEVEL)],
+                   'peak': {'hz': 250, 'level': 0.1999}},
+    },
+    'response_error_explorer_config_invalid': {
+        'type': 'response', 'id': 99,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'band_above_grid', 'field': 'band_hz',
+                       'message': "The band's high edge is 6000 Hz, over 0.45 times the "
+                                  "requested rate (5760 Hz); raise the rate or lower the band."},
+                      {'reason': 'ceiling_over_range', 'field': 'max_drive_vpk',
+                       'message': "The drive ceiling is 1.5 V, over the drive row's range of "
+                                  "1 V; lower the ceiling or raise the row's range."},
+                      {'reason': 'safe_stop_budget', 'field': 'slew.drive_db_per_s',
+                       'message': 'At 1 dB/s the stop takes 40 s, longer than the 30 s the '
+                                  'service waits for a stop; raise the drive slew above '
+                                  '1.333 dB/s.'}],
+                      'warnings': []}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -2810,9 +3050,13 @@ def main() -> None:
     write('response_twr_reference_import', *_twr_import_build())
     write('response_twr_reference_preview', *_twr_preview_build())
 
+    # Explorer: the live frame and a subscription's data
+    write('event_explorer_live', *_explorer_live_build())
+    write('event_explorer_data', *_explorer_data_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS,
-                          **TWR_TEXT_GOLDENS}.items():
+                          **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

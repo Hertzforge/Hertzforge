@@ -1,0 +1,35 @@
+{
+ "type": "response",
+ "id": 95,
+ "result": {
+  "default": false,
+  "rate_hz": 5,
+  "plots": [
+   {
+    "id": "srv",
+    "quantity": "survey",
+    "points": null
+   },
+   {
+    "id": "spec",
+    "quantity": "spectrum",
+    "channels": "all"
+   },
+   {
+    "id": "t",
+    "quantity": "time",
+    "points": 1024
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ],
+  "quantities": [
+   "survey",
+   "spectrum",
+   "time",
+   "readings"
+  ]
+ }
+}

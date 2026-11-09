@@ -3535,7 +3535,12 @@ station at 12 800 Hz:
 ```
 
 - `grid`: the requested rate, and the block and the output lookahead (frames) the selected station
-  works in at it; `actual` is true once the run has armed and all three are the station's.
+  works in at it; `actual` is true once the run has armed and all three are the station's. The
+  block is the power of two nearest 20 ms of the rate. Before the station is opened the lookahead
+  and the input group delay are the figures the station states: the simulator's 4 frames (or the
+  lookahead a simulated station states) with no group delay, or an NI station's two blocks and its
+  input path's documented group delay, 38.4 + 3.2e-6 times the rate in samples, rounded up (39
+  frames at 12 800 Hz). The run state carries the armed station's own.
 - `band_hz`: the band as it stands at the requested rate; a station that programs another rate
   may narrow it at start.
 - `pipeline_frames` and `pipeline_s`: how many input frames still carry the tone from before a
@@ -3550,8 +3555,8 @@ station at 12 800 Hz:
 - `display`: the spectra's line spacing and the length of one window, seconds.
 - `survey`: the tolerance (a visit that close to a point replaces it), and how long after a change
   of frequency the first point at the new frequency comes, at the band's low and high edges: the
-  pipeline, the guard (two blocks, or three cycles of the new tone if longer), then three cycles,
-  plus at most one batch.
+  pipeline, the guard (two blocks, or three cycles of the new tone if longer), then three cycles.
+  The point itself can come up to one batch later than that.
 
 ### Running an Explorer Test
 
@@ -3572,11 +3577,14 @@ station at 12 800 Hz:
   setting a frequency halts a sweep. A level is clamped to `[0, max_drive_vpk]` and the drive
   ramps to it at the drive slew: from 0 V it steps once to 1% of the level (40 dB under it), then
   ramps; down to 0 V it ramps to 1% of where it was, then steps to 0. A `step_db` while the target
-  level is 0 V is refused `level_zero`: set a level in volts first. The answer is what the service
-  adopted: `hz` and `vpk` are the targets in force after the steer, `clamped` is
-  `{"hz","vpk"}`, true where a part was clamped (false for a part not sent), `frame` is the
-  generated frame the change first appears in, and `input_frame` the input frames acquired when
-  the service took it (see "Time is the station's"); the sweep and hold answers carry both too.
+  level is 0 V is refused `level_zero` and nothing of the steer is applied: set a level in volts
+  first. The answer is what the service adopted: `hz` and `vpk` are the targets in force after
+  the steer, `clamped` is `{"hz","vpk"}`, true where a part was clamped (false for a part not
+  sent), `frame` is the first generated frame made under the change, and `input_frame` the input
+  frames acquired when the service took it (see "Time is the station's"); the sweep and hold
+  answers carry both too. A level moves the sample of `frame` itself. A retune keeps the phase, so
+  `frame` is the first at the new frequency and its sample continues the old phase: the
+  waveform's value first differs one frame later.
   Refused `wrong_state` outside `running`: before start, while starting, once a stop has begun
   (`state` `stopping`: nothing raises or moves the drive after that) and after the end.
 - **`explorer.sweep`** sweeps the tone from where it stands toward the band's `up` or `down` edge
@@ -3652,16 +3660,17 @@ service's clock.
   (the request until then); `block_frames` and `lookahead_frames` as in `derived`; `actual` true
   once armed. `clock` as Random's.
 - `band_hz` is the band in force (narrowed once armed); `max_drive_vpk` and `slew` as configured.
-- `pipeline_frames`: as in `derived`, the armed station's own figure.
+- `pipeline_frames`: as in `derived` until the run has armed, then the armed station's own figure.
 - `t_s`: station time since start; null before.
 - `frequency_hz` and `drive_vpk` are the tone now, as generated; `target_hz` and `target_vpk` where
-  it is going.
+  it is going. All four are null until the run has started.
 - `sweep` is null, or `{"direction","rate_oct_per_min","halted"}`: `halted` is true once the sweep
   has parked at its edge or a frequency was set by hand (the sweep no longer moves the tone).
-- `health`: engine ticks, the worst tick's compute against its budget (ms), scheduling-health
-  faults, raw-ring overruns, display blocks the analysis dropped, driver warnings so far (each is
-  in the log), the analysis pass's last and worst time and the longest gap between two batches
-  (ms).
+- `health` is null until the run has started, then: engine ticks, the worst tick's compute
+  against its budget (ms), scheduling-health faults, raw-ring overruns, display blocks the
+  analysis dropped, driver warnings so far (each is in the log), the analysis pass's last and
+  worst time and the longest gap between the end of one batch and the start of the next (ms;
+  null until two batches have run).
 - `stall` is null, or `{"stale_s","period_s","message"}` while the service's loop has missed three
   of its periods (and at least 3 s): the run may still be driving, and Abort stays open.
 - `stop` is null until a stop begins, then its cause: `operator`, `safe_stop` (nobody held
@@ -3731,7 +3740,8 @@ Event topics:
 ```
 {"run_id","source","class","state","phase","t_s","frequency_hz","target_hz","measured_hz",
  "drive_vpk","target_vpk","max_drive_vpk","sweep",
- "channels":[{"index":1,"description":"Control","role":"control","rms":0.1413,"unit":"g"}],
+ "channels":[{"index":1,"description":"Control","role":"control","rms":0.1413,"unit":"g"},
+             {"index":3,"description":"Fixture","role":"monitor","rms":0.0706,"unit":"g"}],
  "control":{"index":1,"velocity_ips":0.04916,"displacement_mil":0.0313,"settling":false},
  "pipeline_frames":1063,"peak":{"hz":250,"level":0.1999},"blocks_dropped":0,
  "pass_ms":{"last":1.9,"worst":3.4},
@@ -3753,11 +3763,13 @@ Event topics:
 - `peak` is the survey's highest point, or null; `blocks_dropped` and `pass_ms` as in `health`.
 - `views` are **Survey** (`spectrum`, x `Frequency` Hz log, y `Level` in the control row's unit,
   log: `Survey` (`measured`), the survey line drawn on 256 log-spaced points across the band,
-  nothing outside the span visited; `link` `frequency`) and **Run** (a `reading`: `Frequency` and
-  `Target` Hz, `Measured` Hz, `Drive` and `Target drive` V, `Ceiling` V, `Sweep` (its direction
-  and rate, `parked`, or `none`), `Control rms`, `Velocity` in/s, `Displacement` mil, `Peak` Hz,
-  `Pipeline` frames; all `info`). The shell marks the tone and the peak on the survey from
-  `frequency_hz` and `peak`.
+  nothing outside the span visited; `link` `frequency`) and **Run** (a `reading`, in this order:
+  `Frequency` and `Target` Hz, `Measured` Hz (`none` while there is no measurement), `Drive` and
+  `Target drive` V, `Ceiling` V, `Sweep` (`up at 30 oct/min` while it moves the tone, `parked`
+  once at its edge, or `none`), `Control rms` in the control row's unit, `Velocity` in/s and
+  `Displacement` mil (`none` when the control row's unit is not `g`), `Peak` Hz (`none` before the
+  first point), `Pipeline` frames; all `info`). The shell marks the tone and the peak on the survey
+  from `frequency_hz` and `peak`.
 
 `explorer.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
 default 10; at most 64 plots, each `id` unique, 1 to 64 characters) or `{"default":true}` (back to
@@ -3766,15 +3778,17 @@ default 10; at most 64 plots, each `id` unique, 1 to 64 characters) or `{"defaul
 `"all"` or `"control"`; default `"all"`), `points` to `survey` (null: the survey's own points;
 64 to 8192: drawn on that many log-spaced points across the band) and to `time` (64 to 8192,
 default 1024). The result is `{"default","rate_hz","plots","quantities"}`, every default filled
-in. In `explorer.data` each plot is `{"id","quantity","channels","first_frame","views"}`:
-`channels` the indexes `spectrum` resolved to, in table order, and null for the rest;
+in: a `survey` plot states `points` (null for its own points), a `spectrum` plot `channels`, a
+`time` plot `points`, and a `readings` plot neither. In `explorer.data` each plot is
+`{"id","quantity","channels","first_frame","views"}`: `channels` the indexes `spectrum` resolved
+to, in table order, and null for the rest;
 `first_frame` the input frame of a `time` plot's first sample, and null for the rest.
 
 | `quantity` | Views | What they show |
 |---|---|---|
 | `survey` | one `spectrum` | The live frame's **Survey**, on the survey's own points (joined by straight lines in log frequency) or drawn at `points` |
-| `spectrum` | one `spectrum` per resolved channel | Titled `Channel <index>: <description>` (the role when there is no description), x `Frequency` Hz linear from 0 to half the rate at the display line spacing, y `Amplitude` in the channel's unit, linear: `Channel <index>` (`measured`), the latest display window's magnitude (Hann, amplitude-corrected, peak) |
-| `time` | one `spectrum` | **Time**: the control row's most recent `points` samples, x `Time` s of station time, y in its unit: `Channel <index>` (`measured`) |
+| `spectrum` | one `spectrum` per resolved channel | Titled `Channel <index>: <description>` (the role when there is no description), x `Frequency` Hz linear from 0 to half the rate at the display line spacing, y `Amplitude` in the channel's unit, linear: `Channel <index>` (`measured`), the latest display window's magnitude (Hann, amplitude-corrected, peak); `link` `frequency` |
+| `time` | one `spectrum` | **Time**: the control row's most recent `points` samples, x `Time` s of station time (the input frame over the rate), y `Amplitude` in its unit, linear: `Channel <index>` (`measured`) |
 | `readings` | one `reading` | The live frame's **Run** reading |
 
 A plot is empty (`views` empty) until there is something to draw: `survey` until its first
