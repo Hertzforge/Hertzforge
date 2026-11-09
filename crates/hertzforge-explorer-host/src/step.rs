@@ -291,6 +291,9 @@ pub struct ExplorerProcessStep {
     /// intermediate frequency the operator never asked for. One frame cannot straddle a
     /// pass boundary, so the intermediate state does not exist to be observed.
     jump_pending: bool,
+    /// TEST ONLY: a gain on every generated sample after the amplitude clamp (1.0 in a
+    /// run), set through `ExplorerHostService::bypass_amplitude_clamp_for_test`.
+    pub(crate) test_gain: f64,
     /// The amplitude being generated right now, volts peak.
     vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -365,6 +368,7 @@ impl ExplorerProcessStep {
             freq_hz: start,
             target_freq_hz: start,
             jump_pending: false,
+            test_gain: 1.0,
             vpk: 0.0,
             target_vpk: 0.0,
             ramp_floor_vpk: 0.0,
@@ -652,7 +656,7 @@ impl ProcessStep for ExplorerProcessStep {
             self.slew_frequency();
             self.slew_amplitude();
             let (sin, _inst_freq, _phase) = self.nco.next();
-            let sample = (sin * self.vpk) as f32;
+            let sample = (sin * self.vpk * self.test_gain) as f32;
             drive_out.push(sample);
             for _ in 1..self.out_channels {
                 drive_out.push(0.0);

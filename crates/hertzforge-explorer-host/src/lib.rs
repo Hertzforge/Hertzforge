@@ -75,7 +75,7 @@ pub use intent::{
     Adoption, FrequencyPart, IntentKind, IntentRecord, LevelPart, Steered, StopCause,
 };
 pub use service::{
-    ExplorerCommand, ExplorerHostConfig, ExplorerHostService, ExplorerStatus, RunState,
-    ServiceError,
+    DriveTrip, EndRecord, ExplorerCommand, ExplorerHostConfig, ExplorerHostService, ExplorerStatus,
+    RunState, ServiceError,
 };
 pub use step::{AmplitudeRamp, ExplorerProcessStep, SweepDirection, SweepState};

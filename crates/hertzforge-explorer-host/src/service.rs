@@ -264,6 +264,20 @@ pub struct EndRecord {
     pub reason: String,
     /// The limit breach, when a monitor is what ended it.
     pub trip: Option<AbortTrip>,
+    /// Why the controlled stop that ended the run began, when one did.
+    pub stop: Option<StopCause>,
+    /// The generated sample that passed the drive ceiling, when that is what ended it.
+    pub drive: Option<DriveTrip>,
+}
+
+/// A generated drive sample past the ceiling: the sample clipped to the ceiling, and the
+/// run aborted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DriveTrip {
+    /// The sample's magnitude, volts peak, before it was clipped.
+    pub vpk: f64,
+    /// The ceiling it passed.
+    pub ceiling_vpk: f64,
 }
 
 /// The abort latch: the pump sets it, any observer reads it without the service lock.
@@ -1444,6 +1458,8 @@ impl ExplorerHostService {
             state,
             reason,
             trip,
+            stop: None,
+            drive: None,
         };
         self.end = Some(record.clone());
         if state == RunState::Aborted {
@@ -2079,6 +2095,23 @@ impl ExplorerHostService {
             driver_warnings: self.driver_warnings.clone(),
             end: self.end.clone(),
         }
+    }
+
+    /// TEST ONLY: multiply every generated sample by `gain` after the amplitude clamp,
+    /// so a test can put a sample past the ceiling the clamp would never let through and
+    /// watch what the run does with it. After `arm()`; 1.0 is the run as built.
+    #[doc(hidden)]
+    pub fn bypass_amplitude_clamp_for_test(&mut self, gain: f64) {
+        if let Some(step) = self.step.as_mut() {
+            step.test_gain = gain;
+        }
+    }
+
+    /// TEST ONLY: report `trip` as the secondary limit monitor's observation, as if the
+    /// monitor had seen it in the acquisition. The next analysis pass acts on it.
+    #[doc(hidden)]
+    pub fn inject_observed_trip_for_test(&mut self, trip: AbortTrip) {
+        self.observed_trip = Some(trip);
     }
 
     /// The acquisition ring, for a caller that wants the raw tap (a capture sink, a
