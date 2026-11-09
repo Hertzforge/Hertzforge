@@ -513,8 +513,12 @@ export class RecorderStore {
 		this.listsFollow(l);
 	}
 
-	/** The run's log from the start, after a new run or a reconnection. */
+	/**
+	 * The run's log from the start, after a new run or a reconnection. A new run's log starts
+	 * empty: its entries are numbered from 0 again, so the last run's must not stand in for them.
+	 */
 	async loadLog(runId: string | null): Promise<void> {
+		if (runId !== this.logRun) this.log = [];
 		this.logRun = runId;
 		if (!runId) {
 			this.log = [];

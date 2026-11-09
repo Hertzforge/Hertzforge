@@ -357,8 +357,6 @@ describe('the Recorder store', () => {
 			const res = await client.request<{ default: boolean }>('recorder.subscribe', params);
 			expect(res.default).toBe(page.kind === 'recordings');
 		}
-		const noPair = new RecorderViewsState(client, { setupTitle: () => 'y', showing: () => true, storage: null, session: null, events: null, hasPair: () => false });
-		expect(noPair.pages.map((p) => p.kind)).toEqual(['time', 'spectra', 'readings', 'recordings']);
 	});
 
 	it('stops a Recorder run with every recording saved once nobody has held control for the timeout', async () => {
@@ -387,6 +385,23 @@ describe('the Recorder store', () => {
 		expect(recorder.now?.state).toBe('finished');
 		await recorder.abort();
 	});
+
+	it("reads a new Recorder run's log on its own: the second run's folder is its own, nothing of the last run's kept", async () => {
+		const { recorder } = await screen();
+		Object.assign(recorder.setup.trigger, { mode: 'start', record_s: 0.5 });
+		await running(recorder);
+		await until(() => recorder.log.some((e) => /^rec_0001 saved/.test(e.text)));
+		await recorder.stop();
+		await until(() => recorder.status?.state === 'finished');
+		expect(recorder.folder).toMatch(/\/recorder$/);
+		const first = recorder.status!.run_id;
+		expect(await recorder.reset()).toBe(true);
+		expect(await recorder.start()).toBe(true);
+		await until(() => recorder.log.some((e) => /^records in /.test(e.text)) && recorder.status?.run_id !== first);
+		await until(() => recorder.folder?.endsWith('/recorder-2') ?? false, 3000);
+		expect(recorder.log.filter((e) => /^records in /.test(e.text)).map((e) => e.text)).toEqual(['records in ~/Hertzforge_Data/recorder-2']);
+		await recorder.abort();
+	}, 15000);
 
 	it('round-trips every Recorder setup field through what the service holds', async () => {
 		const { recorder } = await screen();

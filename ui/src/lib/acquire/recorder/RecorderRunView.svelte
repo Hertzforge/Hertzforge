@@ -39,6 +39,8 @@
 	const page = $derived(views.page);
 	const fs = $derived(status?.grid?.fs_hz ?? null);
 	let width = $state(0);
+	/** The x range the Time page draws now, station seconds. */
+	let timeShown = $state<[number, number] | null>(null);
 
 	$effect(() => {
 		if (width > 0) views.setWidth(page.id, width);
@@ -96,7 +98,7 @@
 					{#if list.length}
 						{#each list as v, i (i)}
 							{@const g = guidesFor(v)}
-							<div class="plot" data-testid="recorder-time-plot" data-guides={g.length}><SpectrumPane view={v} live minHeight={300} guides={g} /></div>
+							<div class="plot" data-testid="recorder-time-plot" data-guides={g.length} data-x0={timeShown?.[0] ?? ''} data-x1={timeShown?.[1] ?? ''}><SpectrumPane view={v} live followX minHeight={300} guides={g} onRange={(lo, hi) => (timeShown = [lo, hi])} /></div>
 						{/each}
 						{#if recorder.marks.some((m) => m.kind === 'limit')}<p class="aq-small marks">The thin lines are limit marks, at the station time each was made.</p>{/if}
 					{:else}
@@ -108,7 +110,7 @@
 					{#if hasPair}
 						{@render draw(one('frf'), 180, 'The FRF is drawn once the first average is complete.')}
 					{:else}
-						<p class="aq-muted aq-small empty" data-testid="recorder-frf-none">No FRF pair is set. Choose one in the setup's Analysis section before the run.</p>
+						<p class="aq-muted aq-small empty" data-testid="recorder-frf-none">This run has no FRF pair. Choose one in the setup's Analysis section, then start a run from it.</p>
 					{/if}
 				{:else if page.kind === 'readings'}
 					{@render draw(one('readings'), 80, 'The readings are shown after the first batch.')}

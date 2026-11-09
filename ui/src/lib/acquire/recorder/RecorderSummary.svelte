@@ -27,7 +27,8 @@
 	const trigger = $derived.by(() => {
 		if (t.mode === 'start') return `From the start, ${t.record_s === null ? 'until cut' : num(t.record_s, 's')}`;
 		if (t.mode === 'manual') return `Manual, pre-window ${num(t.pre_s, 's')}, ${t.record_s === null ? 'until cut' : num(t.record_s, 's')}`;
-		return `Level, row ${t.row ?? '-'} ${t.slope} through ${num(t.level, '')}, pre-window ${num(t.pre_s, 's')}, ${num(t.record_s, 's')}, ${t.count === null ? 'until the run ends' : `${t.count} a time`}`;
+		const unit = ch.recorded.find((r) => r.index === t.row)?.units ?? '';
+		return `Level, row ${t.row ?? '-'} ${t.slope} through ${num(t.level, unit).trim()}, pre-window ${num(t.pre_s, 's')}, ${num(t.record_s, 's')}, ${t.count === null ? 'until the run ends' : `${t.count} a time`}`;
 	});
 </script>
 

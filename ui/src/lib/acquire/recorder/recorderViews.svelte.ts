@@ -10,17 +10,12 @@
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import { RECORDER_TOPICS, type RecorderData, type RecorderLiveQuantity } from '$lib/protocol/recorder';
 import { PulseViewsState, type PulseViewsOptions } from '../pulse/pulseViews.svelte';
-import { recorderPagesFor, type RecorderPageKind } from './recorderLayout';
+import { RECORDER_PAGES, type RecorderPageKind } from './recorderLayout';
 
 export const RECORDER_TEST_TYPE = 'recorder';
 
-export interface RecorderViewsOptions extends PulseViewsOptions {
-	/** The setup holds an FRF pair: a new layout then has an FRF page. */
-	hasPair?: () => boolean;
-}
-
 export class RecorderViewsState extends PulseViewsState<RecorderPageKind, RecorderLiveQuantity, RecorderData> {
-	constructor(control: ServiceClient, opts: RecorderViewsOptions) {
-		super(control, { pages: recorderPagesFor(opts.hasPair ?? (() => true)), dataTopic: RECORDER_TOPICS.data, subscribe: 'recorder.subscribe', pageKey: 'hertzforge.display.recorder.page' }, opts);
+	constructor(control: ServiceClient, opts: PulseViewsOptions) {
+		super(control, { pages: RECORDER_PAGES, dataTopic: RECORDER_TOPICS.data, subscribe: 'recorder.subscribe', pageKey: 'hertzforge.display.recorder.page' }, opts);
 	}
 }

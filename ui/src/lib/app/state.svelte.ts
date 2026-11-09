@@ -1678,8 +1678,7 @@ export class AppState {
 		this.recorderViews = new RecorderViewsState(this.control, {
 			setupTitle: () => this.recorder.status?.title ?? (config.popout ? null : this.recorder.setup.title),
 			showing: () => recorderPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'recorder' && this.recorder.step === 'run'),
-			page: recorderPopout ? config.page : null,
-			hasPair: () => !!(this.recorder.runConfig?.analysis?.frf ?? (config.popout ? null : this.recorder.setup.analysis.frf))
+			page: recorderPopout ? config.page : null
 		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}

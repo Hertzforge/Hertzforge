@@ -5,9 +5,9 @@
  * marks list.
  *
  * The pages until the operator changes them: Time (every recorded row's last seconds as an
- * envelope), Spectra (every recorded row's PSD), FRF (when the setup holds a pair: magnitude,
- * phase and coherence), Readings (the run in numbers) and Recordings (the run's recordings and
- * their facts, from the service's list; it asks for no plot).
+ * envelope), Spectra (every recorded row's PSD), FRF (the pair's magnitude, phase and coherence;
+ * the page says so when the run has no pair), Readings (the run in numbers) and Recordings (the
+ * run's recordings and their facts, from the service's list; it asks for no plot).
  */
 
 import type { RecorderLiveQuantity } from '$lib/protocol/recorder';
@@ -29,7 +29,7 @@ export type RecorderPageKind = 'time' | 'spectra' | 'frf' | 'readings' | 'record
 
 export const RECORDER_PAGE_KINDS: RecorderPageKind[] = ['time', 'spectra', 'frf', 'readings', 'recordings'];
 
-/** The pages a new layout starts with when the setup holds an FRF pair; without one, all but FRF. */
+/** The pages a new layout starts with. */
 export const RECORDER_DEFAULT_PAGES: RecorderPageKind[] = ['time', 'spectra', 'frf', 'readings', 'recordings'];
 
 export const RECORDER_PAGE_WORDS: Record<RecorderPageKind, string> = {
@@ -92,23 +92,10 @@ export const RECORDER_PAGES: PulsePageSet<RecorderPageKind, RecorderLiveQuantity
 	channels: RECORDER_PAGE_CHANNELS
 };
 
-/**
- * The page set a window works with: the Recorder's pages, a new layout's FRF page only when the
- * setup holds a pair (read each time a layout is made).
- */
-export function recorderPagesFor(hasPair: () => boolean): PulsePageSet<RecorderPageKind, RecorderLiveQuantity> {
-	return {
-		...RECORDER_PAGES,
-		get defaults() {
-			return hasPair() ? RECORDER_DEFAULT_PAGES : RECORDER_DEFAULT_PAGES.filter((k) => k !== 'frf');
-		}
-	};
-}
-
 export const recorderPlotId = pulsePlotId;
 
-export function defaultRecorderLayout(set = RECORDER_PAGES): RecorderLayout {
-	return defaultPulseLayout(set);
+export function defaultRecorderLayout(): RecorderLayout {
+	return defaultPulseLayout(RECORDER_PAGES);
 }
 
 /** Everything a page subscribes to, at its drawn width (CSS pixels). */
